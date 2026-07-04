@@ -5147,7 +5147,7 @@ test("device sync service exposes sanitized cause details for transport failures
   close();
 });
 
-test("device sync service omits unsafe free-form transport causes", async () => {
+test("device sync service masks token values in free-form transport causes", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-unsafe-transport-diagnostics");
   const { service, close } = createServiceFixture({
     secret: "secret-for-tests",
@@ -5183,6 +5183,7 @@ test("device sync service omits unsafe free-form transport causes", async () => 
     failureErrorName: "TypeError",
     failureCauseName: "ProviderTransportError",
     failureCauseCode: "UND_ERR_SOCKET",
+    failureErrorCause: "refresh token <redacted-token> leaked",
   });
 
   close();
@@ -5708,6 +5709,7 @@ test("sqlite store splits connection, credential, and observation state into exp
     "metadata_json",
     "created_at",
     "expires_at",
+    "consumed_at",
   ]);
   assert.deepEqual(readTableColumnsForTesting(store, "device_credential_state"), [
     "account_id",

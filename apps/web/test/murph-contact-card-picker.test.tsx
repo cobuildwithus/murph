@@ -20,25 +20,22 @@ test("avatar options have unique ids and headshots resolve to bundled assets", (
   for (const option of MURPH_CONTACT_AVATAR_OPTIONS) {
     if (option.kind === "headshot") {
       expect(option.src).toMatch(/^\/murph-headshots\/murph-headshot-\d+-sm\.png$/);
+    } else if (option.kind === "logo") {
+      expect(option.src).toMatch(/^\/brand-logos\/murph-logo-avatar-(dark|light)\.png$/);
     } else {
       expect(option.src).toBeUndefined();
     }
   }
 
   const kinds = MURPH_CONTACT_AVATAR_OPTIONS.map((option) => option.kind);
-  expect(kinds).toContain("logo");
+  expect(kinds.filter((kind) => kind === "logo")).toHaveLength(2);
   expect(kinds).toContain("blank");
 });
 
-test("headshot avatar assets exist for each declared option", () => {
+test("avatar assets exist for each declared option src", () => {
   for (const option of MURPH_CONTACT_AVATAR_OPTIONS) {
-    if (option.kind !== "headshot") {
-      continue;
-    }
-
-    expect(option.src).toBeDefined();
     if (!option.src) {
-      throw new Error(`Missing src for ${option.id}`);
+      continue;
     }
 
     const assetUrl = new URL(`../public${option.src}`, import.meta.url);
@@ -47,10 +44,10 @@ test("headshot avatar assets exist for each declared option", () => {
   }
 });
 
-test("findMurphContactAvatarOption falls back to the first option", () => {
+test("findMurphContactAvatarOption falls back to the default option", () => {
   expect(findMurphContactAvatarOption("gremlin").id).toBe("gremlin");
   expect(findMurphContactAvatarOption("does-not-exist").id).toBe(
-    MURPH_CONTACT_AVATAR_OPTIONS[0].id,
+    DEFAULT_MURPH_CONTACT_AVATAR_ID,
   );
 });
 
@@ -89,11 +86,11 @@ test("avatar grid radios share one group name and check the selected option", ()
   expect(checkedInput).toContain(`value="${DEFAULT_MURPH_CONTACT_AVATAR_ID}"`);
 });
 
-test("avatar art renders each kind without an image dependency for logo and blank", () => {
+test("avatar art renders each kind", () => {
   const logo = renderToStaticMarkup(
-    <MurphContactAvatarArt option={findMurphContactAvatarOption("logo")} />,
+    <MurphContactAvatarArt option={findMurphContactAvatarOption("logo-dark")} />,
   );
-  expect(logo).toContain("<svg");
+  expect(logo).toContain("murph-logo-avatar-dark.png");
 
   const blank = renderToStaticMarkup(
     <MurphContactAvatarArt option={findMurphContactAvatarOption("none")} />,

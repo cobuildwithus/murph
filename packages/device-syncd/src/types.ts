@@ -321,6 +321,16 @@ export type ConsumeOAuthStateResult =
       record: OAuthStateRecord;
     }
   | {
+      /**
+       * The state was already consumed and has not expired yet. Browsers
+       * deliver callback navigations at-least-once (refresh, tab restore,
+       * provider completion-page retries), so a redelivered state must stay
+       * distinguishable from an unknown one.
+       */
+      status: "replayed";
+      record: OAuthStateRecord;
+    }
+  | {
       status: "missing";
     }
   | {

@@ -134,6 +134,30 @@ describe("hosted runtime maintenance ops", () => {
     }));
   });
 
+  it("selects candidates with the resolver access projection in the WHERE", async () => {
+    // Sponsored members and thread containers qualify inside the query, so
+    // count, cursor, page, and batch wakes all describe the same population
+    // and a leading inactive raw row cannot starve a limit-1 batch wake.
+    mocks.hostedWorkspace.count.mockResolvedValue(1);
+    mocks.hostedWorkspace.findMany.mockResolvedValue([
+      workspaceRow("member_sponsored", "10"),
+    ]);
+
+    await expect(runtimeMaintenanceService.readHostedRuntimeMaintenanceOverview({
+      limit: 1,
+    })).resolves.toMatchObject({
+      candidates: [{ userId: "member_sponsored" }],
+      nextCursor: null,
+    });
+
+    expect(mocks.hostedWorkspace.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: activeCheckpointedWorkspaceWhere(),
+    }));
+    expect(mocks.hostedWorkspace.count).toHaveBeenCalledWith({
+      where: activeCheckpointedWorkspaceWhere(),
+    });
+  });
+
   it("caps batch wakes and returns the read cursor from the candidate page", async () => {
     mocks.hostedWorkspace.count.mockResolvedValue(4);
     mocks.hostedWorkspace.findMany.mockResolvedValue([
@@ -398,9 +422,38 @@ describe("hosted runtime maintenance ops", () => {
 });
 
 function activeCheckpointedWorkspaceWhere() {
+  const personAccess = [
+    { billingStatus: HostedBillingStatus.active },
+    {
+      accountGroupMemberships: {
+        some: {
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+          status: "active",
+        },
+      },
+    },
+  ];
   return {
     member: {
-      billingStatus: HostedBillingStatus.active,
+      OR: [
+        {
+          OR: personAccess,
+          threadContainer: null,
+        },
+        {
+          threadContainer: {
+            is: {
+              owner: {
+                OR: personAccess,
+                suspendedAt: null,
+              },
+            },
+          },
+        },
+      ],
       suspendedAt: null,
     },
     snapshotRef: {

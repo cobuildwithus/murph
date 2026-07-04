@@ -4,7 +4,9 @@ import {
 } from "@murphai/contracts";
 
 import {
+  readNullableStringValue,
   requireArray,
+  requireNumber,
   requireObject,
   requireString,
 } from "./parsers/assertions.ts";
@@ -21,9 +23,54 @@ import {
  * with the kind-specific shape isolated under `data`. Adding a kind means adding a data
  * schema and a projector, never widening the envelope.
  */
+export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS = [
+  "activity-days.v0",
+  "steps-days.v0",
+  "max-heart-rate-days.v0",
+  "distance-days.v0",
+  "active-calories-days.v0",
+  "elevation-gain-days.v0",
+  "floors-climbed-days.v0",
+  "day-strain-days.v0",
+  "workout-strain-days.v0",
+  "activity-score-days.v0",
+  "vo2-max-days.v0",
+  "resting-heart-rate-days.v0",
+  "hrv-days.v0",
+] as const;
+
+export type HostedVaultShareDailyMetricProjectionKind =
+  (typeof HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS)[number];
+
+export interface HostedVaultShareDailyMetricProjectionSpec {
+  maxValue: number;
+  metricKey: string;
+  minValue: number;
+  projectionKind: HostedVaultShareDailyMetricProjectionKind;
+}
+
+export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS = [
+  { projectionKind: "activity-days.v0", metricKey: "activity-minutes", minValue: 0, maxValue: 1_440 },
+  { projectionKind: "steps-days.v0", metricKey: "steps", minValue: 0, maxValue: 1_000_000 },
+  { projectionKind: "max-heart-rate-days.v0", metricKey: "max-heart-rate", minValue: 0, maxValue: 260 },
+  { projectionKind: "distance-days.v0", metricKey: "distance-km", minValue: 0, maxValue: 1_000 },
+  { projectionKind: "active-calories-days.v0", metricKey: "active-calories", minValue: 0, maxValue: 20_000 },
+  { projectionKind: "elevation-gain-days.v0", metricKey: "elevation-gain-meters", minValue: 0, maxValue: 100_000 },
+  { projectionKind: "floors-climbed-days.v0", metricKey: "floors-climbed", minValue: 0, maxValue: 10_000 },
+  { projectionKind: "day-strain-days.v0", metricKey: "day-strain", minValue: 0, maxValue: 30 },
+  { projectionKind: "workout-strain-days.v0", metricKey: "workout-strain", minValue: 0, maxValue: 30 },
+  { projectionKind: "activity-score-days.v0", metricKey: "activity-score", minValue: 0, maxValue: 100 },
+  { projectionKind: "vo2-max-days.v0", metricKey: "estimated-vo2-max", minValue: 0, maxValue: 100 },
+  { projectionKind: "resting-heart-rate-days.v0", metricKey: "resting-heart-rate", minValue: 20, maxValue: 250 },
+  { projectionKind: "hrv-days.v0", metricKey: "hrv-rmssd", minValue: 0, maxValue: 500 },
+] as const satisfies readonly HostedVaultShareDailyMetricProjectionSpec[];
+
 export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
   "profile-name.v0",
   "sleep-times.v0",
+  "workout-days.v0",
+  "heart-rate-zones-days.v0",
+  ...HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS,
 ] as const;
 
 /**
@@ -33,6 +80,21 @@ export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
  */
 export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "sleep-times.v0",
+  "activity-days.v0",
+  "workout-days.v0",
+  "heart-rate-zones-days.v0",
+  "steps-days.v0",
+  "max-heart-rate-days.v0",
+  "distance-days.v0",
+  "active-calories-days.v0",
+  "elevation-gain-days.v0",
+  "floors-climbed-days.v0",
+  "day-strain-days.v0",
+  "workout-strain-days.v0",
+  "activity-score-days.v0",
+  "vo2-max-days.v0",
+  "resting-heart-rate-days.v0",
+  "hrv-days.v0",
 ] as const satisfies readonly HostedVaultShareProjectionKind[];
 
 export type HostedVaultShareSelectableProjectionKind =
@@ -73,6 +135,8 @@ export const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS = 7;
 
 const HOSTED_VAULT_SHARE_RECORD_KEY_MAX_LENGTH = 128;
 const HOSTED_VAULT_SHARE_RECORD_KEY_PATTERN = /^[A-Za-z0-9._-]+$/u;
+const HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH = 96;
+const HOSTED_VAULT_SHARE_SOURCE_REVISION_PATTERN = /^[A-Za-z0-9_-]+$/u;
 
 export interface HostedVaultShareSleepTimesData {
   date: string;
@@ -80,18 +144,46 @@ export interface HostedVaultShareSleepTimesData {
   sleepStartAt: string;
 }
 
+export interface HostedVaultShareDailyMetricData {
+  date: string;
+  metricKey: string;
+  unit: string | null;
+  value: number;
+}
+
+export interface HostedVaultShareWorkoutDayData {
+  date: string;
+  workoutCount: number;
+  workoutMinutes: number;
+}
+
+export interface HostedVaultShareHeartRateZoneBucket {
+  durationMinutes: number;
+  label?: string;
+  zone?: number;
+}
+
+export interface HostedVaultShareHeartRateZoneDayData {
+  date: string;
+  zones: HostedVaultShareHeartRateZoneBucket[];
+}
+
 export interface HostedVaultShareProfileNameData {
   displayName: string;
 }
 
 export type HostedVaultShareDeliveryRecordData =
+  | HostedVaultShareDailyMetricData
+  | HostedVaultShareHeartRateZoneDayData
   | HostedVaultShareProfileNameData
-  | HostedVaultShareSleepTimesData;
+  | HostedVaultShareSleepTimesData
+  | HostedVaultShareWorkoutDayData;
 
 export interface HostedVaultShareDeliveryRecord {
   data: HostedVaultShareDeliveryRecordData;
   occurredAt: string;
   recordKey: string;
+  sourceRevision?: string;
 }
 
 export interface HostedVaultShareDeliverRequest {
@@ -106,6 +198,10 @@ export interface HostedVaultShareDeliverRequest {
  */
 export interface HostedVaultShareDeliverResponse {
   status: "delivered" | "no-active-share";
+}
+
+export interface HostedVaultShareActiveProjectionKindsResponse {
+  projectionKinds: HostedVaultShareProjectionKind[];
 }
 
 export interface HostedVaultShareDeliveryPayload {
@@ -130,6 +226,22 @@ export function isHostedVaultShareProjectionKind(
   return HOSTED_VAULT_SHARE_PROJECTION_KINDS.includes(
     value as HostedVaultShareProjectionKind,
   );
+}
+
+export function isHostedVaultShareDailyMetricProjectionKind(
+  value: HostedVaultShareProjectionKind,
+): value is HostedVaultShareDailyMetricProjectionKind {
+  return HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS.includes(
+    value as HostedVaultShareDailyMetricProjectionKind,
+  );
+}
+
+export function getHostedVaultShareDailyMetricProjectionSpec(
+  projectionKind: HostedVaultShareProjectionKind,
+): HostedVaultShareDailyMetricProjectionSpec | null {
+  return HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS.find(
+    (spec) => spec.projectionKind === projectionKind,
+  ) ?? null;
 }
 
 function parseHostedVaultShareProjectionKind(
@@ -186,7 +298,29 @@ export function parseHostedVaultShareDeliveryRecord(
     }),
     occurredAt,
     recordKey,
+    ...parseHostedVaultShareSourceRevision(record.sourceRevision),
   };
+}
+
+function parseHostedVaultShareSourceRevision(value: unknown): { sourceRevision?: string } {
+  if (value === undefined) {
+    return {};
+  }
+
+  const sourceRevision = requireString(
+    value,
+    "Vault share delivery record sourceRevision",
+  );
+  if (
+    sourceRevision.length > HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH
+    || !HOSTED_VAULT_SHARE_SOURCE_REVISION_PATTERN.test(sourceRevision)
+  ) {
+    throw new TypeError(
+      "Vault share delivery record sourceRevision must be an opaque base64url string.",
+    );
+  }
+
+  return { sourceRevision };
 }
 
 function parseHostedVaultShareDeliveryRecordData(
@@ -197,12 +331,27 @@ function parseHostedVaultShareDeliveryRecordData(
     recordKey: string;
   },
 ): HostedVaultShareDeliveryRecordData {
+  const dailyMetricSpec = getHostedVaultShareDailyMetricProjectionSpec(
+    context.projectionKind,
+  );
+  if (dailyMetricSpec) {
+    return parseHostedVaultShareDailyMetricData(value, context, dailyMetricSpec);
+  }
+
   switch (context.projectionKind) {
+    case "heart-rate-zones-days.v0":
+      return parseHostedVaultShareHeartRateZoneDayData(value, context);
     case "profile-name.v0":
       return parseHostedVaultShareProfileNameData(value, context);
     case "sleep-times.v0":
       return parseHostedVaultShareSleepTimesData(value, context);
+    case "workout-days.v0":
+      return parseHostedVaultShareWorkoutDayData(value, context);
   }
+
+  throw new TypeError(
+    `Vault share ${context.projectionKind} data parser is not implemented.`,
+  );
 }
 
 export const HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY = "profile-name";
@@ -238,6 +387,216 @@ function parseHostedVaultShareProfileNameData(
   }
 
   return { displayName };
+}
+
+const HOSTED_VAULT_SHARE_DAY_MAX_MINUTES = 24 * 60;
+
+function parseHostedVaultShareDailyMetricData(
+  value: unknown,
+  context: { occurredAt: string; recordKey: string },
+  spec: HostedVaultShareDailyMetricProjectionSpec,
+): HostedVaultShareDailyMetricData {
+  const data = requireObject(
+    value,
+    `Vault share ${spec.projectionKind} data`,
+  );
+  const date = parseHostedVaultShareDailyDate(data.date, {
+    dataLabel: `Vault share ${spec.projectionKind} data`,
+    occurredAt: context.occurredAt,
+    occurredAtDescription: `${spec.projectionKind} date at UTC midnight`,
+    recordKey: context.recordKey,
+  });
+  const metricKey = requireString(
+    data.metricKey,
+    `Vault share ${spec.projectionKind} data metricKey`,
+  );
+
+  if (metricKey !== spec.metricKey) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} metricKey must be ${spec.metricKey}.`,
+    );
+  }
+
+  const unit = readNullableStringValue(
+    data.unit,
+    `Vault share ${spec.projectionKind} data unit`,
+  );
+  if (unit !== null && (unit.length > 40 || /[\u0000-\u001f\u007f]/u.test(unit))) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} unit must be at most 40 characters with no control characters.`,
+    );
+  }
+
+  const valueNumber = requireNumber(
+    data.value,
+    `Vault share ${spec.projectionKind} data value`,
+  );
+  if (valueNumber < spec.minValue || valueNumber > spec.maxValue) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} value must be between ${spec.minValue} and ${spec.maxValue}.`,
+    );
+  }
+
+  return {
+    date,
+    metricKey,
+    unit,
+    value: valueNumber,
+  };
+}
+
+function parseHostedVaultShareWorkoutDayData(
+  value: unknown,
+  context: { occurredAt: string; recordKey: string },
+): HostedVaultShareWorkoutDayData {
+  const data = requireObject(value, "Vault share workout-days data");
+  const date = parseHostedVaultShareDailyDate(data.date, {
+    dataLabel: "Vault share workout-days data",
+    occurredAt: context.occurredAt,
+    occurredAtDescription: "workout date at UTC midnight",
+    recordKey: context.recordKey,
+  });
+  const workoutCount = requireNumber(
+    data.workoutCount,
+    "Vault share workout-days data workoutCount",
+  );
+  const workoutMinutes = requireNumber(
+    data.workoutMinutes,
+    "Vault share workout-days data workoutMinutes",
+  );
+
+  if (!Number.isInteger(workoutCount) || workoutCount < 0 || workoutCount > 100) {
+    throw new TypeError(
+      "Vault share workout-days workoutCount must be an integer between 0 and 100.",
+    );
+  }
+  if (workoutMinutes < 0 || workoutMinutes > HOSTED_VAULT_SHARE_DAY_MAX_MINUTES) {
+    throw new TypeError(
+      "Vault share workout-days workoutMinutes must be between 0 and 1440.",
+    );
+  }
+
+  return { date, workoutCount, workoutMinutes };
+}
+
+function parseHostedVaultShareHeartRateZoneDayData(
+  value: unknown,
+  context: { occurredAt: string; recordKey: string },
+): HostedVaultShareHeartRateZoneDayData {
+  const data = requireObject(value, "Vault share heart-rate-zones-days data");
+  const date = parseHostedVaultShareDailyDate(data.date, {
+    dataLabel: "Vault share heart-rate-zones-days data",
+    occurredAt: context.occurredAt,
+    occurredAtDescription: "heart-rate-zone date at UTC midnight",
+    recordKey: context.recordKey,
+  });
+  const zones = requireArray(
+    data.zones,
+    "Vault share heart-rate-zones-days data zones",
+  ).map((entry, index) => parseHostedVaultShareHeartRateZoneBucket(entry, index));
+
+  if (zones.length === 0 || zones.length > 20) {
+    throw new TypeError(
+      "Vault share heart-rate-zones-days zones must contain 1-20 entries.",
+    );
+  }
+
+  return { date, zones };
+}
+
+function parseHostedVaultShareHeartRateZoneBucket(
+  value: unknown,
+  index: number,
+): HostedVaultShareHeartRateZoneBucket {
+  const data = requireObject(
+    value,
+    `Vault share heart-rate-zones-days zones[${index}]`,
+  );
+  const zone = data.zone === undefined
+    ? undefined
+    : requireNumber(data.zone, `Vault share heart-rate-zones-days zones[${index}] zone`);
+  const label = data.label === undefined
+    ? undefined
+    : parseHostedVaultShareBoundedText(
+        data.label,
+        `Vault share heart-rate-zones-days zones[${index}] label`,
+        80,
+      );
+  const durationMinutes = requireNumber(
+    data.durationMinutes,
+    `Vault share heart-rate-zones-days zones[${index}] durationMinutes`,
+  );
+
+  if (zone !== undefined && (!Number.isInteger(zone) || zone < 0 || zone > 20)) {
+    throw new TypeError(
+      `Vault share heart-rate-zones-days zones[${index}] zone must be an integer between 0 and 20.`,
+    );
+  }
+  if (durationMinutes < 0 || durationMinutes > HOSTED_VAULT_SHARE_DAY_MAX_MINUTES) {
+    throw new TypeError(
+      `Vault share heart-rate-zones-days zones[${index}] durationMinutes must be between 0 and 1440.`,
+    );
+  }
+  if (
+    zone === undefined
+    && label === undefined
+  ) {
+    throw new TypeError(
+      `Vault share heart-rate-zones-days zones[${index}] must identify the zone.`,
+    );
+  }
+
+  return {
+    ...(label === undefined ? {} : { label }),
+    ...(zone === undefined ? {} : { zone }),
+    durationMinutes,
+  };
+}
+
+function parseHostedVaultShareDailyDate(
+  value: unknown,
+  context: {
+    dataLabel: string;
+    occurredAt: string;
+    occurredAtDescription: string;
+    recordKey: string;
+  },
+): string {
+  const date = requireString(value, `${context.dataLabel} date`);
+
+  if (!isStrictIsoDate(date)) {
+    throw new TypeError(
+      `${context.dataLabel} date must be a real calendar day formatted YYYY-MM-DD.`,
+    );
+  }
+
+  if (context.recordKey !== date) {
+    throw new TypeError(
+      `${context.dataLabel.replace(" data", "")} recordKey must equal the data date.`,
+    );
+  }
+
+  if (context.occurredAt !== `${date}T00:00:00.000Z`) {
+    throw new TypeError(
+      `${context.dataLabel.replace(" data", "")} occurredAt must be the ${context.occurredAtDescription}.`,
+    );
+  }
+
+  return date;
+}
+
+function parseHostedVaultShareBoundedText(
+  value: unknown,
+  label: string,
+  maxLength: number,
+): string {
+  const text = requireString(value, label).trim();
+  if (text.length === 0 || text.length > maxLength || /[\u0000-\u001f\u007f]/u.test(text)) {
+    throw new TypeError(
+      `${label} must be 1-${maxLength} characters with no control characters.`,
+    );
+  }
+  return text;
 }
 
 const HOSTED_VAULT_SHARE_SLEEP_MAX_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -334,6 +693,29 @@ export function parseHostedVaultShareDeliverResponse(
   }
 
   return { status };
+}
+
+export function parseHostedVaultShareActiveProjectionKindsResponse(
+  value: unknown,
+): HostedVaultShareActiveProjectionKindsResponse {
+  const record = requireObject(value, "Vault share active projection kinds response");
+  const projectionKinds = requireArray(
+    record.projectionKinds,
+    "Vault share active projection kinds response projectionKinds",
+  );
+  const uniqueProjectionKinds: HostedVaultShareProjectionKind[] = [];
+
+  for (const projectionKind of projectionKinds) {
+    const parsed = parseHostedVaultShareProjectionKind(
+      projectionKind,
+      "Vault share active projection kind",
+    );
+    if (!uniqueProjectionKinds.includes(parsed)) {
+      uniqueProjectionKinds.push(parsed);
+    }
+  }
+
+  return { projectionKinds: uniqueProjectionKinds };
 }
 
 export function parseHostedVaultShareDeliveryPayload(

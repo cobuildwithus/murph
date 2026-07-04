@@ -13,8 +13,8 @@ export type DatabaseSync = import("node:sqlite").DatabaseSync;
 export type SqliteRow = Record<string, unknown>;
 
 export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
-// 13: canonical sample-summary metric point source ids.
-export const QUERY_PROJECTION_SQLITE_VERSION = 13;
+// 14: challenge share metric rows for workout count and heart-rate zone minutes.
+export const QUERY_PROJECTION_SQLITE_VERSION = 14;
 
 export interface QueryProjectionLocation {
   absolutePath: string;

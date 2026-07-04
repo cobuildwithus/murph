@@ -147,6 +147,7 @@ function makeMetricCandidate(
     dataOrigin: overrides.dataOrigin ?? null,
     date: overrides.date,
     externalRef: overrides.externalRef ?? null,
+    heartRateZones: overrides.heartRateZones,
     metric: overrides.metric,
     occurredAt: overrides.occurredAt ?? null,
     paths: overrides.paths ?? [`/virtual/${overrides.candidateId}.jsonl`],
@@ -673,6 +674,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
         resourceType: "activity_session",
         system: "garmin",
       }),
+      heartRateZones: [{ durationMinutes: 12, label: "Zone 2", zone: 2 }],
       metric: "sessionMinutes",
       occurredAt: "2026-04-02T06:00:00Z",
       paths: ["activity-a.jsonl"],
@@ -694,6 +696,7 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
         resourceType: "activity_session",
         system: "garmin",
       }),
+      heartRateZones: [{ durationMinutes: 8, label: "Zone 2", zone: 2 }],
       metric: "sessionMinutes",
       occurredAt: "2026-04-02T08:00:00Z",
       paths: ["activity-b.jsonl"],
@@ -735,6 +738,11 @@ test("dedupe, selection, confidence, and summary helpers preserve deterministic 
   assert.equal(activityAggregates[0]?.sessionCount, 2);
   assert.equal(activityAggregates[0]?.sessionMinutes, 35);
   assert.deepEqual(activityAggregates[0]?.activityTypes, ["Cycling", "Running"]);
+  assert.deepEqual(activityAggregates[0]?.heartRateZones, [{
+    durationMinutes: 20,
+    label: "Zone 2",
+    zone: 2,
+  }]);
   assert.equal(
     buildActivitySessionMetricCandidate(activityAggregates[0]!, "sessionCount").value,
     2,

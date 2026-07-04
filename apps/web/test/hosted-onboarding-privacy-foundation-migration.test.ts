@@ -488,6 +488,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const deviceOauthSessionConsumedAtMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260703160000_device_oauth_session_consumed_at/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -565,6 +572,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260701040000_hosted_groups",
       "20260701050000_hosted_vault_share_drop_source",
       "20260701153000_hosted_vault_share_active_indexes",
+      "20260703160000_device_oauth_session_consumed_at",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -1026,6 +1034,9 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(deviceOauthSessionMetadataMigrationSql).toContain(
       'ADD COLUMN "metadata_json" JSONB',
+    );
+    expect(deviceOauthSessionConsumedAtMigrationSql).toContain(
+      'ALTER TABLE "device_oauth_session" ADD COLUMN "consumed_at" TIMESTAMP(3);',
     );
     expect(linqPendingParticipantContactMigrationSql).toContain(
       'ALTER TABLE "hosted_member_routing"',

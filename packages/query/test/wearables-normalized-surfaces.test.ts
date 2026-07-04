@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { test } from "vitest";
 
-import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+import { CURRENT_VAULT_FORMAT_VERSION, deviceDataOriginSchema, type DeviceDataOrigin } from "@murphai/contracts";
 import { normalizeJunctionSnapshot } from "@murphai/importers";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
@@ -90,6 +90,14 @@ function makeActivitySession(input: {
   occurredAt: string;
   recordedAt: string;
   provider?: string;
+  dataOrigin?: DeviceDataOrigin;
+  heartRateZones?: Array<{
+    durationMinutes: number;
+    label?: string;
+    maxHeartRate?: number;
+    minHeartRate?: number;
+    zone?: number;
+  }>;
   path?: string;
   title?: string;
 }): CanonicalEntity {
@@ -111,6 +119,14 @@ function makeActivitySession(input: {
         resourceType: "activity_session",
         resourceId: `${input.entityId}-resource`,
       },
+      ...(input.dataOrigin ? { dataOrigin: input.dataOrigin } : {}),
+      ...(input.heartRateZones
+        ? {
+            workout: {
+              heartRateZones: input.heartRateZones,
+            },
+          }
+        : {}),
     },
   });
 }
@@ -283,6 +299,119 @@ test("Junction Oura explicit resting heart rate takes precedence over lowest sle
   assert.equal(latestRecovery?.restingHeartRate.selection.resolution, "direct");
   assert.equal(latestRecovery?.restingHeartRate.selection.fallbackFromMetric, null);
   assert.deepEqual(restingHeartRatePoints.map((point) => point.value), [52]);
+});
+
+test("wearable activity projection emits workout count and zone-minute metric points", () => {
+  const vault = makeVault([
+    makeEntity({
+      entityId: "evt_hr_zone_workout_01",
+      family: "event",
+      kind: "activity_session",
+      recordClass: "ledger",
+      occurredAt: "2026-04-08T12:00:00Z",
+      date: "2026-04-08",
+      title: "Garmin interval session",
+      attributes: {
+        dayKey: "2026-04-08",
+        durationMinutes: 35,
+        recordedAt: "2026-04-08T12:45:00Z",
+        externalRef: {
+          system: "garmin",
+          resourceType: "activity_session",
+          resourceId: "evt_hr_zone_workout_01-resource",
+        },
+        workout: {
+          heartRateZones: [{
+            durationMinutes: 20,
+            label: "Zone 2",
+            maxHeartRate: 140,
+            minHeartRate: 120,
+            zone: 2,
+          }],
+        },
+      },
+    }),
+  ]);
+
+  const projection = buildMetricProjection(vault);
+  const workoutCount = projection.metricPoints.find((point) =>
+    point.metricKey === "workout-count"
+  );
+  const zoneMinutes = projection.metricPoints.find((point) =>
+    point.metricKey === "heart-rate-zone-2-minutes"
+  );
+
+  assert.equal(workoutCount?.value, 1);
+  assert.equal(zoneMinutes?.value, 20);
+  assert.equal(zoneMinutes?.context.zone, 2);
+  assert.equal(zoneMinutes?.context.zoneLabel, "Zone 2");
+  assert.equal("maxHeartRate" in (zoneMinutes?.context ?? {}), false);
+  assert.equal("minHeartRate" in (zoneMinutes?.context ?? {}), false);
+});
+
+test("heart-rate-zone projection follows the selected activity aggregate identity", () => {
+  const vault = makeVault([
+    makeActivitySession({
+      entityId: "evt_junction_garmin_activity_01",
+      dayKey: "2026-04-08",
+      durationMinutes: 30,
+      occurredAt: "2026-04-08T12:00:00Z",
+      recordedAt: "2026-04-08T12:35:00Z",
+      provider: "junction",
+      title: "Junction Garmin run",
+      dataOrigin: {
+        version: 1,
+        aggregatorProvider: "junction",
+        sourceProviderSlug: "garmin",
+        originConfidence: "high",
+      },
+      heartRateZones: [{
+        durationMinutes: 11,
+        label: "Garmin Zone 2",
+        zone: 2,
+      }],
+    }),
+    makeActivitySession({
+      entityId: "evt_junction_apple_activity_01",
+      dayKey: "2026-04-08",
+      durationMinutes: 45,
+      occurredAt: "2026-04-08T13:00:00Z",
+      recordedAt: "2026-04-08T13:50:00Z",
+      provider: "junction",
+      title: "Junction Apple workout",
+      dataOrigin: {
+        version: 1,
+        aggregatorProvider: "junction",
+        sourceProviderSlug: "apple-health",
+        originConfidence: "high",
+      },
+      heartRateZones: [{
+        durationMinutes: 23,
+        label: "Apple Zone 2",
+        zone: 2,
+      }],
+    }),
+  ]);
+
+  const latest = summarizeWearableLatest(vault);
+  const projection = buildMetricProjection(vault);
+  const zoneRow = projection.wearableMetricRows.find((row) =>
+    row.metricKey === "heart-rate-zone-2-minutes"
+  );
+  const zoneDataOrigin = deviceDataOriginSchema.parse(zoneRow?.dataOrigin);
+
+  assert.equal(latest?.activity?.sessionMinutes.selection.value, 45);
+  assert.deepEqual(latest?.activity?.heartRateZones, [{
+    durationMinutes: 23,
+    label: "Apple Zone 2",
+    zone: 2,
+  }]);
+  assert.ok(zoneRow);
+  assert.ok(zoneRow.context);
+  assert.equal(zoneRow?.value, 23);
+  assert.deepEqual(zoneRow?.recordIds, ["evt_junction_apple_activity_01"]);
+  assert.equal(zoneDataOrigin.sourceProviderSlug, "apple-health");
+  assert.deepEqual(zoneRow.context.contributingRecordIds, ["evt_junction_apple_activity_01"]);
 });
 
 test("Junction raw-only timeseries stay out of default query/search and wearable summaries", async () => {
@@ -812,7 +941,7 @@ test("metric latest and trend surfaces keep derived sleep and aggregate-backed p
   assert.equal(sessionCount?.provider, "garmin");
 });
 
-test("workout session metrics stay out of wearable summary projection without an explicit projector", () => {
+test("allowlisted workout session metrics project without raw workout details", () => {
   const vault = makeVault([
     makeEntity({
       entityId: "evt_workout_metrics_01",
@@ -824,6 +953,7 @@ test("workout session metrics stay out of wearable summary projection without an
       title: "Garmin trail run",
       attributes: {
         dayKey: "2026-04-08",
+        distanceKm: 8.2,
         durationMinutes: 42,
         recordedAt: "2026-04-08T12:50:00Z",
         externalRef: {
@@ -866,23 +996,32 @@ test("workout session metrics stay out of wearable summary projection without an
   const latest = summarizeWearableLatest(vault, { providers: ["garmin"] });
   const activeCalories = summarizeWearableMetricLatest(vault, "active-calories", { providers: ["garmin"] });
   const maxHeartRate = summarizeWearableMetricLatest(vault, "max-heart-rate", { providers: ["garmin"] });
+  const projection = buildMetricProjection(vault);
   const sourceHealth = summarizeWearableSourceHealth(vault, { providers: ["garmin"] });
   const workoutDetailNote = sourceHealth[0]?.notes.find((note) =>
     note.includes("workout detail metrics on activity sessions")
   );
+  const pointValue = (metricKey: string) =>
+    projection.metricPoints.find((point) => point.metricKey === metricKey)?.value ?? null;
 
   assert.equal(latest?.activity?.sessionMinutes.selection.value, 42);
   assert.equal(latest?.activity?.sessionCount.selection.value, 1);
-  assert.equal(latest?.activity?.activeCalories.selection.value, null);
+  assert.equal(latest?.activity?.activeCalories.selection.value, 320);
+  assert.equal(latest?.activity?.distanceKm.selection.value, 8.2);
   assert.equal(latest?.activity?.totalCalories.selection.value, null);
-  assert.equal(latest?.activity?.maxHeartRate.selection.value, null);
-  assert.equal(latest?.activity?.workoutStrain.selection.value, null);
+  assert.equal(latest?.activity?.maxHeartRate.selection.value, 175);
+  assert.equal(latest?.activity?.workoutStrain.selection.value, 12.4);
   assert.equal(latest?.activity?.percentRecorded.selection.value, null);
-  assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, null);
+  assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, 88);
   assert.equal(latest?.activity?.altitudeChangeMeters.selection.value, null);
-  assert.equal(activeCalories?.value, null);
-  assert.equal(maxHeartRate?.value, null);
-  assert.equal(sourceHealth[0]?.metricsContributed.includes("activeCalories"), false);
+  assert.equal(activeCalories?.value, 320);
+  assert.equal(maxHeartRate?.value, 175);
+  assert.equal(pointValue("active-calories"), 320);
+  assert.equal(pointValue("distance-km"), 8.2);
+  assert.equal(pointValue("elevation-gain-meters"), 88);
+  assert.equal(pointValue("max-heart-rate"), 175);
+  assert.equal(pointValue("workout-strain"), 12.4);
+  assert.equal(pointValue("total-calories"), null);
   assert.equal(sourceHealth[0]?.metricsContributed.includes("averagePowerWatts"), false);
   assert.ok(workoutDetailNote);
   assert.match(workoutDetailNote, /averagePowerWatts/u);

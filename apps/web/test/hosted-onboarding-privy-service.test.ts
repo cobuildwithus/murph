@@ -144,6 +144,7 @@ function baseIdentity(): BaseHostedPrivyIdentity {
 
 function makeMember(overrides: Record<string, unknown> = {}) {
   return {
+    accountGroupMemberships: [],
     billingStatus: HostedBillingStatus.not_started,
     createdAt: NOW,
     id: "member_123",
@@ -156,6 +157,7 @@ function makeMember(overrides: Record<string, unknown> = {}) {
     suspendedAt: null,
     stripeCustomerId: null,
     stripeSubscriptionId: null,
+    threadContainer: null,
     updatedAt: NOW,
     walletAddress: null,
     walletChainType: null,
@@ -1406,6 +1408,15 @@ describe("completeHostedPrivyVerification", () => {
 
   it("treats active Family sponsorship as post-verification access", async () => {
     const sponsoredMember = makeMember({
+      accountGroupMemberships: [
+        {
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+          status: "active",
+        },
+      ],
       billingStatus: HostedBillingStatus.not_started,
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
       privyUserId: "did:privy:user_123",
@@ -1416,29 +1427,6 @@ describe("completeHostedPrivyVerification", () => {
     });
     const invite = makeInvite(sponsoredMember);
     const prisma = asCompleteHostedPrivyVerificationPrisma({
-      hostedAccountGroupBillingRef: {
-        findUnique: vi.fn(async () => ({
-          billedSeatCount: 2,
-        })),
-      },
-      hostedAccountGroupMembership: {
-        count: vi.fn(async () => 2),
-        findFirst: vi.fn(async () => ({
-          group: {
-            billingStatus: HostedBillingStatus.active,
-            id: "hbag_family",
-            ownerMemberId: "member_owner",
-            suspendedAt: null,
-          },
-          groupId: "hbag_family",
-          memberId: sponsoredMember.id,
-          role: "member",
-          status: "active",
-        })),
-      },
-      hostedAccountGroupInvite: {
-        count: vi.fn(async () => 0),
-      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
         update: vi.fn().mockResolvedValue({}),
@@ -1459,12 +1447,6 @@ describe("completeHostedPrivyVerification", () => {
     });
 
     expect(result.stage).toBe("active");
-    expect(prisma.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        memberId: sponsoredMember.id,
-        status: "active",
-      }),
-    }));
   });
 
   it("preserves suspension for a suspended invited member", async () => {

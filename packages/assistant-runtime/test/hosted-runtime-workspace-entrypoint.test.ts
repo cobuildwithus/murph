@@ -7485,6 +7485,9 @@ describe("hosted workspace runtime entrypoint", () => {
               items: mailboxItems,
             }),
             vaultSharePort: {
+              async listActiveProjectionKinds() {
+                return ["sleep-times.v0"];
+              },
               async deliver() {
                 events.push("vault-share.deliver:start");
                 mailboxItems.push(createMailboxItem({
@@ -7630,6 +7633,9 @@ describe("hosted workspace runtime entrypoint", () => {
               ],
             }),
             vaultSharePort: {
+              async listActiveProjectionKinds() {
+                return ["sleep-times.v0"];
+              },
               async deliver() {
                 vaultShareDeliverCalls += 1;
                 events.push("vault-share.deliver:start");

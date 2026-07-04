@@ -977,8 +977,8 @@ function parseHostedRuntimeGroupProjectionKindArray<
 ): K[] | null {
   if (value === undefined || value === null) return null;
   const requested = requireArray(value, label);
-  if (requested.length > 8) {
-    throw new TypeError(`${label} must contain at most 8 entries.`);
+  if (requested.length > allowedKinds.length) {
+    throw new TypeError(`${label} must contain at most ${allowedKinds.length} entries.`);
   }
   const seen = new Set<K>();
   for (const entry of requested) {

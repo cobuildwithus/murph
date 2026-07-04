@@ -16,6 +16,7 @@ import {
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import {
   isHostedRuntimeInactiveAccessError,
   requireHostedRuntimeActiveAccessForUpdateTx,
@@ -66,6 +67,33 @@ export async function findActiveHostedVaultShares(input: {
   });
 }
 
+export async function readDeliverableHostedVaultShareProjectionKinds(input: {
+  grantorMemberId: string;
+  prisma?: PrismaClient;
+}): Promise<HostedVaultShareProjectionKind[]> {
+  const prisma = input.prisma ?? getPrisma();
+  const rows = await prisma.hostedVaultShare.findMany({
+    distinct: ["projectionKind"],
+    orderBy: { projectionKind: "asc" },
+    select: {
+      projectionKind: true,
+    },
+    where: {
+      destination: activeHostedMemberAccessWhere(),
+      grantorMemberId: input.grantorMemberId,
+      status: "granted",
+    },
+  });
+
+  return rows.flatMap((row) => {
+    if (!isHostedVaultShareProjectionKind(row.projectionKind)) {
+      return [];
+    }
+
+    return [row.projectionKind];
+  });
+}
+
 export interface DeliverHostedVaultShareRecordsResult {
   lastAppendedMailboxItemId: string | null;
 }
@@ -81,11 +109,11 @@ type HostedVaultShareAuthorityRow = {
 /**
  * Appends one typed `vault-share.delivery` wake envelope per shared record into the
  * destination mailbox, all in a single transaction per share. The envelope eventId doubles
- * as the mailbox dedupe key — derived from (shareId, recordKey, payload revision) — while
- * destination replacement remains keyed by recordKey. Exact replays dedupe, but corrected
- * payloads for the same logical record append a new mailbox item and replace the destination
- * record during import. Payload data rides the standard encrypted mailbox path; only the
- * dedupe key and night-date occurredAt are plaintext mailbox metadata.
+ * as the mailbox dedupe key — derived from (shareId, recordKey, payload/source revision) —
+ * while destination replacement remains keyed by recordKey. Exact replays dedupe, but
+ * corrected payloads for the same logical record append a new mailbox item and replace the
+ * destination record during import. Payload data rides the standard encrypted mailbox path;
+ * only the dedupe key and night-date occurredAt are plaintext mailbox metadata.
  */
 export async function deliverHostedVaultShareRecords(input: {
   prisma?: PrismaClient;
@@ -215,6 +243,7 @@ function deriveHostedVaultShareRecordRevision(input: {
     projectionKind: input.projectionKind,
     recordKey: input.record.recordKey,
     schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
+    sourceRevision: input.record.sourceRevision ?? null,
   });
   return createHash("sha256")
     .update(canonicalRecord)

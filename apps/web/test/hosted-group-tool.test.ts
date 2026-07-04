@@ -6,13 +6,13 @@ const mocks = vi.hoisted(() => ({
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
-  hasHostedMemberActiveAccess: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   isHostedMemberSuspended: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  readActiveHostedMemberAccess: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
@@ -26,8 +26,11 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
-  hasHostedMemberActiveAccess: mocks.hasHostedMemberActiveAccess,
   isHostedMemberSuspended: mocks.isHostedMemberSuspended,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -89,6 +92,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 import { handleHostedRuntimeGroupTool } from "@/src/lib/hosted-groups/group-tool";
+import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
 import {
   mergeHostedGroupJoinPolicy,
   projectHostedVaultShareProjectionDisplays,
@@ -281,10 +285,10 @@ describe("handleHostedRuntimeGroupTool", () => {
 describe("hosted group join policy", () => {
   it("keeps optional health sharing on the closed projection registry", () => {
     expect(readHostedGroupJoinPolicy({
-      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
       schema: "murph.hosted-group.join-policy.v1",
     })).toEqual({
-      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
       schema: "murph.hosted-group.join-policy.v1",
     });
 
@@ -293,20 +297,47 @@ describe("hosted group join policy", () => {
         requestedVaultShareProjectionKinds: ["sleep-times.v0"],
         schema: "murph.hosted-group.join-policy.v1",
       },
-      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
-    }).requestedVaultShareProjectionKinds).toEqual(["sleep-times.v0"]);
+      requestedVaultShareProjectionKinds: ["activity-days.v0", "sleep-times.v0"],
+    }).requestedVaultShareProjectionKinds).toEqual([
+      "sleep-times.v0",
+      "activity-days.v0",
+    ]);
 
     expect(readHostedGroupJoinPolicy({
       requestedVaultShareProjectionKinds: ["all-health-data"],
       schema: "murph.hosted-group.join-policy.v1",
     }).requestedVaultShareProjectionKinds).toEqual([]);
 
-    expect(projectHostedVaultShareProjectionDisplays(["sleep-times.v0"])).toEqual([{
-      description:
-        "Allows this group to receive your recent sleep start and end times as bounded shared records.",
-      label: "Recent sleep timing",
-      projectionKind: "sleep-times.v0",
-    }]);
+    expect(projectHostedVaultShareProjectionDisplays([
+      "sleep-times.v0",
+      "activity-days.v0",
+      "heart-rate-zones-days.v0",
+    ])).toEqual([
+      {
+        description:
+          "Allows this group to receive your recent sleep start and end times as bounded shared records.",
+        label: "Recent sleep timing",
+        projectionKind: "sleep-times.v0",
+      },
+      {
+        description:
+          "Allows this group to receive your recent daily active-minute totals as bounded shared records.",
+        label: "Recent activity minutes",
+        projectionKind: "activity-days.v0",
+      },
+      {
+        description:
+          "Allows this group to receive your recent daily workout heart-rate zone minutes as bounded shared records.",
+        label: "Recent heart-rate zones",
+        projectionKind: "heart-rate-zones-days.v0",
+      },
+    ]);
+
+    expect(projectHostedVaultShareProjectionDisplays(
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    ).map((entry) => entry.projectionKind)).toEqual([
+      ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    ]);
   });
 });
 
@@ -332,11 +363,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       { handle: "person@example.com", isMe: false, status: null },
       { handle: "+15550000002", isMe: false, status: "left" },
     ]);
-    mocks.hasHostedMemberActiveAccess.mockReturnValue(true);
     mocks.isHostedMemberSuspended.mockReturnValue(false);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
-      core: { suspendedAt: null },
+      core: { id: "member_participant", suspendedAt: null },
     });
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
     mocks.releaseHostedLinqContactCardShareAttempt.mockResolvedValue(undefined);
     mocks.reserveHostedLinqContactCardShareAttempt.mockResolvedValue({

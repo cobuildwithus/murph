@@ -3,12 +3,15 @@ import { resolveWearableCanonicalMetricKey } from "@murphai/health-metrics";
 
 import {
   buildActivitySessionMetricCandidate,
+  buildActivitySessionWorkoutMetricCandidates,
   buildSleepWindowMetricCandidate,
   collectWearableDataset,
   groupActivitySessionAggregatesByDate,
   groupMetricCandidatesByDate,
   groupSleepWindowsByDate,
+  resolveSelectedActivitySessionAggregate,
   resolveSelectedActivityTypes,
+  resolveSelectedHeartRateZones,
   selectMetricCandidates,
 } from "./wearables/candidates.ts";
 import {
@@ -166,14 +169,18 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
   return dates.map((date) => {
     const dateCandidates = metricCandidatesByDate.get(date) ?? [];
     const aggregates = activitySessionAggregatesByDate.get(date) ?? [];
+    const activityMetricCandidates = [
+      ...dateCandidates,
+      ...aggregates.flatMap(buildActivitySessionWorkoutMetricCandidates),
+    ];
     const steps = resolveMetric("steps", selectMetricCandidates(dateCandidates, "steps"), { metricFamily: "activity" });
-    const activeCalories = resolveMetric("activeCalories", selectMetricCandidates(dateCandidates, "activeCalories"), {
+    const activeCalories = resolveMetric("activeCalories", selectMetricCandidates(activityMetricCandidates, "activeCalories"), {
       metricFamily: "activity",
     });
     const totalCalories = resolveMetric("totalCalories", selectMetricCandidates(dateCandidates, "totalCalories"), {
       metricFamily: "activity",
     });
-    const distanceKm = resolveMetric("distanceKm", selectMetricCandidates(dateCandidates, "distanceKm"), {
+    const distanceKm = resolveMetric("distanceKm", selectMetricCandidates(activityMetricCandidates, "distanceKm"), {
       metricFamily: "activity",
     });
     const floorsClimbed = resolveMetric("floorsClimbed", selectMetricCandidates(dateCandidates, "floorsClimbed"), {
@@ -181,7 +188,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     });
     const totalElevationGainMeters = resolveMetric(
       "totalElevationGainMeters",
-      selectMetricCandidates(dateCandidates, "totalElevationGainMeters"),
+      selectMetricCandidates(activityMetricCandidates, "totalElevationGainMeters"),
       { metricFamily: "activity" },
     );
     const altitudeChangeMeters = resolveMetric(
@@ -198,10 +205,10 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const dayStrain = resolveMetric("dayStrain", selectMetricCandidates(dateCandidates, "dayStrain"), {
       metricFamily: "activity",
     });
-    const workoutStrain = resolveMetric("workoutStrain", selectMetricCandidates(dateCandidates, "workoutStrain"), {
+    const workoutStrain = resolveMetric("workoutStrain", selectMetricCandidates(activityMetricCandidates, "workoutStrain"), {
       metricFamily: "activity",
     });
-    const maxHeartRate = resolveMetric("maxHeartRate", selectMetricCandidates(dateCandidates, "maxHeartRate"), {
+    const maxHeartRate = resolveMetric("maxHeartRate", selectMetricCandidates(activityMetricCandidates, "maxHeartRate"), {
       metricFamily: "activity",
     });
     const percentRecorded = resolveMetric("percentRecorded", selectMetricCandidates(dateCandidates, "percentRecorded"), {
@@ -212,12 +219,19 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       aggregates.map((aggregate) => buildActivitySessionMetricCandidate(aggregate, "sessionMinutes")),
       { metricFamily: "activity" },
     );
+    const selectedActivitySessionAggregate = resolveSelectedActivitySessionAggregate(
+      aggregates,
+      sessionMinutes.selection,
+    );
     const sessionCount = resolveMetric(
       "sessionCount",
-      aggregates.map((aggregate) => buildActivitySessionMetricCandidate(aggregate, "sessionCount")),
+      selectedActivitySessionAggregate
+        ? [buildActivitySessionMetricCandidate(selectedActivitySessionAggregate, "sessionCount")]
+        : [],
       { metricFamily: "activity" },
     );
-    const activityTypes = resolveSelectedActivityTypes(aggregates, sessionMinutes.selection.provider);
+    const activityTypes = resolveSelectedActivityTypes(aggregates, sessionMinutes.selection);
+    const heartRateZones = resolveSelectedHeartRateZones(aggregates, sessionMinutes.selection);
     const summaryConfidence = summarizeMetricsConfidence([
       ["steps", steps],
       ["activeCalories", activeCalories],
@@ -254,6 +268,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       distanceKm,
       estimatedVo2Max,
       floorsClimbed,
+      heartRateZones,
       maxHeartRate,
       notes,
       percentRecorded,

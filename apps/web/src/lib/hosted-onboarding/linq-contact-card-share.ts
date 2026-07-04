@@ -3,8 +3,10 @@ import { Prisma } from "@prisma/client";
 import { createHostedLinqChatLookupKey, createHostedLinqChatLookupKeyReadCandidates } from "./contact-privacy";
 import {
   hasHostedMemberGeneralAccess,
+  isHostedMemberSuspended,
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
+import { readActiveHostedMemberAccess } from "./member-access";
 import { shareHostedLinqContactCard } from "./linq-client";
 import {
   sanitizeHostedOnboardingStructuredLogDetails,
@@ -189,11 +191,21 @@ async function assertHostedLinqContactCardShareMemberChat(input: {
   // First-contact members are not_started until they accept the invite, but we
   // still want them to receive Murph's contact card so they can save the
   // number during onboarding. Gate on general access (blocks suspended and
-  // canceled/paused/unpaid) rather than active-only access, while still
+  // canceled/paused/unpaid own billing) OR resolver access, so a sponsored
+  // member with a stale blocked own status keeps the side effect, while still
   // requiring the chat to match the member's own bound route below.
   if (
     !routing
-    || !hasHostedMemberGeneralAccess(routing.member)
+    || !(
+      hasHostedMemberGeneralAccess(routing.member)
+      || (
+        !isHostedMemberSuspended(routing.member.suspendedAt)
+        && await readActiveHostedMemberAccess({
+          memberId: input.boundUserId,
+          prisma: input.prisma,
+        })
+      )
+    )
     || !(
       (routing.linqChatLookupKey && readCandidates.has(routing.linqChatLookupKey))
       || (

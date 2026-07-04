@@ -31,6 +31,7 @@ import {
 import { type HostedMemberCoreState } from "./hosted-member-store";
 import { isHostedMemberMessagingSetupRequired } from "./messaging-state";
 import { deriveHostedOnboardingStage } from "./lifecycle";
+import { readActiveHostedMemberAccess } from "./member-access";
 import {
   projectHostedMemberIdentityState,
   type HostedMemberIdentityState,
@@ -133,6 +134,12 @@ export async function getHostedInviteStatus(input: {
     expiresAt: invite.expiresAt,
     now,
     sessionMatchesInvite,
+    sponsoredAccessActive: sessionMatchesInvite
+      ? await readActiveHostedMemberAccess({
+          memberId: invite.memberId,
+          prisma,
+        })
+      : false,
     suspendedAt: invite.member.suspendedAt,
   });
   const messagingSetupRequired = isHostedMemberMessagingSetupRequired({

@@ -10,6 +10,7 @@ interface MockDeviceOauthSessionRow {
   metadataJson: Record<string, unknown> | null;
   createdAt: Date;
   expiresAt: Date;
+  consumedAt: Date | null;
 }
 
 describe("PrismaHostedOAuthSessionStore.createOAuthState", () => {
@@ -53,25 +54,72 @@ describe("PrismaHostedOAuthSessionStore.createOAuthState", () => {
 });
 
 describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
-  it("fails closed when another callback already consumed the same state", async () => {
+  it("reports an already-consumed unexpired state as a replay with its stored record", async () => {
+    const record = buildOAuthSessionRow({
+      consumedAt: new Date("2026-04-13T12:01:00.000Z"),
+    });
+    const tx = createTransaction({ record });
+    const store = createStore(tx);
+
+    await expect(
+      store.consumeOAuthState(record.state, record.createdAt.toISOString(), record.provider),
+    ).resolves.toMatchObject({
+      status: "replayed",
+      record: {
+        state: record.state,
+        provider: record.provider,
+        returnTo: record.returnTo,
+      },
+    });
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("resolves a lost consume race as a replay instead of doing the work twice", async () => {
     const record = buildOAuthSessionRow();
     const tx = createTransaction({
-      deleteManyCount: 0,
       record,
+      updateManyCount: 0,
     });
     const store = createStore(tx);
 
     await expect(
       store.consumeOAuthState(record.state, record.createdAt.toISOString(), record.provider),
+    ).resolves.toMatchObject({
+      status: "replayed",
+    });
+  });
+
+  it("deletes an expired state and reports it missing", async () => {
+    const record = buildOAuthSessionRow();
+    const tx = createTransaction({ record });
+    const store = createStore(tx);
+
+    await expect(
+      store.consumeOAuthState(record.state, "2026-04-13T12:30:00.000Z", record.provider),
     ).resolves.toEqual({
       status: "missing",
     });
     expect(tx.deviceOauthSession.deleteMany).toHaveBeenCalledWith({
       where: {
         state: record.state,
-        provider: record.provider,
       },
     });
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unexpired state available when the expected owner does not match", async () => {
+    const record = buildOAuthSessionRow({ userId: "user_123" });
+    const tx = createTransaction({ record });
+    const store = createStore(tx);
+
+    await expect(
+      store.consumeOAuthState(record.state, record.createdAt.toISOString(), record.provider, "user_456"),
+    ).resolves.toEqual({
+      status: "owner_mismatch",
+    });
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 
   it("keeps a mismatched provider state available for the correct callback path", async () => {
@@ -85,10 +133,11 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
       status: "provider_mismatch",
       provider: record.provider,
     });
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("returns the stored state after a successful single consumer delete", async () => {
+  it("returns the stored state after a successful single consumer mark", async () => {
     const record = buildOAuthSessionRow({
       metadataJson: {
         __murphConnectSourceId: "garmin",
@@ -117,12 +166,16 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
         expiresAt: record.expiresAt.toISOString(),
       },
     });
-    expect(tx.deviceOauthSession.deleteMany).toHaveBeenCalledWith({
+    expect(tx.deviceOauthSession.updateMany).toHaveBeenCalledWith({
+      data: {
+        consumedAt: record.createdAt,
+      },
       where: {
         state: record.state,
-        provider: record.provider,
+        consumedAt: null,
       },
     });
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 });
 
@@ -137,17 +190,20 @@ function buildOAuthSessionRow(
     metadataJson: overrides.metadataJson ?? null,
     createdAt: overrides.createdAt ?? new Date("2026-04-13T12:00:00.000Z"),
     expiresAt: overrides.expiresAt ?? new Date("2026-04-13T12:15:00.000Z"),
+    consumedAt: overrides.consumedAt ?? null,
   };
 }
 
 function createTransaction(input: {
   record?: MockDeviceOauthSessionRow | null;
   deleteManyCount?: number;
+  updateManyCount?: number;
 }) {
   return {
     deviceOauthSession: {
       deleteMany: vi.fn().mockResolvedValue({ count: input.deleteManyCount ?? 1 }),
       findUnique: vi.fn().mockResolvedValue(input.record ?? null),
+      updateMany: vi.fn().mockResolvedValue({ count: input.updateManyCount ?? 1 }),
     },
   };
 }

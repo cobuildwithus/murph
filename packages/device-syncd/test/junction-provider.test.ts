@@ -4005,10 +4005,65 @@ test("Junction completeConnection preserves the sanitized Link failure reason", 
   );
 });
 
-test("Junction completeConnection drops secret-bearing Link failure reason values entirely", async () => {
-  // sanitizeHostedRuntimeDiagnosticText fails closed: a value that still looks
-  // unsafe after redaction is dropped from the reason instead of partially
-  // surfaced.
+test("Junction completeConnection drops JSON-array Link failure descriptions", async () => {
+  // A provider-controlled error_description carrying a structured dump must
+  // fail closed out of the reason instead of surfacing its entries.
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        error: "provider_connection_error",
+        error_description: '["junction-user-1"]',
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.ok(error.message.includes("error=provider_connection_error"));
+      assert.ok(!error.message.includes("junction-user-1"));
+      assert.ok(!error.message.includes("error_description="));
+      return true;
+    },
+  );
+});
+
+test("Junction completeConnection drops bracketed comma-list Link failure descriptions", async () => {
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        error: "provider_connection_error",
+        error_description: "[junction-user-1, Jane Doe]",
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.ok(error.message.includes("error=provider_connection_error"));
+      assert.ok(!error.message.includes("junction-user-1"));
+      assert.ok(!error.message.includes("Jane"));
+      assert.ok(!error.message.includes("Doe"));
+      assert.ok(!error.message.includes("error_description="));
+      return true;
+    },
+  );
+});
+
+test("Junction completeConnection masks secret-bearing Link failure reason values", async () => {
+  // sanitizeHostedRuntimeDiagnosticText masks the secret span so the rest of
+  // the provider's explanation stays available for debugging.
   const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
 
   await assert.rejects(
@@ -4028,7 +4083,34 @@ test("Junction completeConnection drops secret-bearing Link failure reason value
       assert.equal(error.code, "JUNCTION_LINK_FAILED");
       assert.ok(error.message.includes("error=provider_connection_error"));
       assert.ok(!error.message.includes("secret-value-1"));
-      assert.ok(!error.message.includes("error_description="));
+      assert.ok(error.message.includes("error_description=User denied access"));
+      assert.ok(!error.message.includes("access_token"));
+      return true;
+    },
+  );
+});
+
+test("Junction completeConnection masks colon-form token Link failure reasons", async () => {
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        error: "provider_connection_error",
+        error_description: "refresh token: abcdefghijklmnopqrst expired",
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.ok(error.message.includes("error=provider_connection_error"));
+      assert.ok(error.message.includes("error_description=refresh token: <redacted-token> expired"));
+      assert.ok(!error.message.includes("abcdefghijklmnopqrst"));
       return true;
     },
   );
@@ -4059,10 +4141,9 @@ test("Junction completeConnection rejects non-truthy success callbacks with the 
   );
 });
 
-test("Junction completeConnection omits token-shaped Link callback values from failure reasons", async () => {
-  // JWT-shaped values are redacted then dropped by the fail-closed check, and
-  // long opaque tokens are dropped outright, so neither can leak into the
-  // persisted/logged failure message.
+test("Junction completeConnection masks token-shaped Link callback values in failure reasons", async () => {
+  // JWT-shaped and long opaque token values are masked in place, so the
+  // failure reason keeps its shape without leaking either value.
   const jwtDescription = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJlLXBhcnQ";
   const opaqueState = "a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8";
   const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
@@ -4082,9 +4163,10 @@ test("Junction completeConnection omits token-shaped Link callback values from f
     (error) => {
       assert.ok(error instanceof DeviceSyncError);
       assert.equal(error.code, "JUNCTION_LINK_FAILED");
-      assert.equal(error.message, "Junction Link callback reported a failed link outcome.");
       assert.ok(!error.message.includes(jwtDescription));
       assert.ok(!error.message.includes(opaqueState));
+      assert.ok(error.message.includes("error_description=[redacted.jwt]"));
+      assert.ok(error.message.includes("state=<redacted-token>"));
       return true;
     },
   );
@@ -6336,14 +6418,767 @@ test("Junction ambiguous skip detail redacts the account id from provider error 
   assert.equal(warnings.length, 1);
   assert.equal(
     warnings[0]?.responseDetail,
-    "invalid_request: User <redacted-account> cannot access this summary.",
+    "invalid_request: User <redacted-id> cannot access this summary.",
   );
   assert.equal(
     result.metadataPatch?.junctionSkippedResourceLastDetail,
-    "invalid_request: User <redacted-account> cannot access this summary.",
+    "invalid_request: User <redacted-id> cannot access this summary.",
   );
   assert.equal(JSON.stringify(warnings).toLowerCase().includes("junction-user-1"), false);
   assert.equal(JSON.stringify(result.metadataPatch).toLowerCase().includes("junction-user-1"), false);
+});
+
+test("Junction ambiguous skip detail truncates unknown assignment tails after user_id prose", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "request rejected for user_id: hbm_abc123, display_name=Jane Doe upstream",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "invalid_request: request rejected for user_id: <redacted-id>";
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  for (const sensitive of ["display_name", "hbm_abc123", "Jane", "Doe"]) {
+    assert.equal(serializedWarnings.includes(sensitive), false);
+    assert.equal(serializedMetadata.includes(sensitive), false);
+  }
+});
+
+test("Junction ambiguous skip detail drops object-shaped display-name diagnostics", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: {
+          type: "resource_misconfigured",
+          msg: "display_name: Jane Doe cannot access sleep_cycle",
+        },
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, "resource_misconfigured");
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "resource_misconfigured");
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  for (const sensitive of ["display_name", "Jane", "Doe"]) {
+    assert.equal(serializedWarnings.includes(sensitive), false);
+    assert.equal(serializedMetadata.includes(sensitive), false);
+  }
+});
+
+test("Junction ambiguous skip detail drops object-shaped unlabeled user diagnostics", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: {
+          type: "resource_misconfigured",
+          msg: "Patient Jane Doe not found",
+        },
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "resource_misconfigured";
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  for (const sensitive of ["Jane", "Doe"]) {
+    assert.equal(serializedWarnings.includes(sensitive), false);
+    assert.equal(serializedMetadata.includes(sensitive), false);
+  }
+});
+
+test("Junction ambiguous skip detail masks object-shaped credential-label diagnostics", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: {
+          type: "resource_misconfigured",
+          msg: "api key secretvalue leaked",
+        },
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "resource_misconfigured: api key <redacted-token> leaked";
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  assert.equal(serializedWarnings.includes("secretvalue"), false);
+  assert.equal(serializedMetadata.includes("secretvalue"), false);
+});
+
+test("Junction ambiguous skip detail masks slash-bearing identifier phrases", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "user hbm_abc123/Jane-Doe is blocked upstream",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "invalid_request: user <redacted-id> is blocked upstream";
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  for (const sensitive of ["hbm_abc123", "Jane", "Doe"]) {
+    assert.equal(serializedWarnings.includes(sensitive), false);
+    assert.equal(serializedMetadata.includes(sensitive), false);
+  }
+});
+
+test("Junction ambiguous skip detail masks embedded ids from provider prose", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: "Team 11649ed4-27e2-4718-959f-d68de1d1a120 is not configured for sleep_cycle.",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(
+    result.metadataPatch?.junctionSkippedResourceLastDetail,
+    "Team <redacted-id> is not configured for sleep_cycle.",
+  );
+  assert.equal(
+    warnings[0]?.responseDetail,
+    "Team <redacted-id> is not configured for sleep_cycle.",
+  );
+  assert.equal(JSON.stringify(result.metadataPatch).includes("11649ed4"), false);
+});
+
+test("Junction ambiguous skip detail drops id-shaped provider error codes", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        code: "11649ed4-27e2-4718-959f-d68de1d1a120",
+        message: "sleep_cycle disabled",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "sleep_cycle disabled");
+  assert.equal(warnings[0]?.responseDetail, "sleep_cycle disabled");
+  assert.equal(JSON.stringify(warnings).includes("11649ed4"), false);
+  assert.equal(JSON.stringify(result.metadataPatch).includes("11649ed4"), false);
+});
+
+test("Junction ambiguous skip detail reads FastAPI-shaped sleep_cycle validation arrays", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse([
+        {
+          type: "value_error.date",
+          msg: "start_date must be before end_date",
+        },
+      ], 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "value_error.date: start_date must be before end_date";
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+});
+
+test("Junction ambiguous skip detail keeps safe date validation prose before bracket suffixes", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: "Datetimes provided to dates should have zero time [type=date_from_datetime_inexact]",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const storedDetail = result.metadataPatch?.junctionSkippedResourceLastDetail;
+  const warningDetail = warnings[0]?.responseDetail;
+
+  assert.equal(storedDetail, "Datetimes provided to dates should have zero time");
+  assert.equal(warningDetail, "Datetimes provided to dates should have zero time");
+  assert.equal(storedDetail?.endsWith("zero time"), true);
+  assert.equal(warningDetail?.includes("Datetimes provided to dates should have zero time"), true);
+
+  for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
+    assert.equal(exposed.includes("date_from_datetime_inexact"), false);
+    assert.equal(exposed.includes("type="), false);
+  }
+});
+
+test("Junction ambiguous skip detail ignores top-level primitive arrays", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse(["Jane Doe"], 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, undefined);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, null);
+
+  for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
+    assert.equal(exposed.includes("Jane"), false);
+    assert.equal(exposed.includes("Doe"), false);
+  }
+});
+
+test("Junction ambiguous skip detail truncates bracketed diagnostics with unknown keys", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "Validation failed [user_id=1234, display_name=Jane Doe]",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, "invalid_request: Validation failed");
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "invalid_request: Validation failed");
+
+  for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
+    assert.equal(exposed.includes("Jane"), false);
+    assert.equal(exposed.includes("Doe"), false);
+    assert.equal(exposed.includes("1234"), false);
+  }
+});
+
+test("Junction ambiguous skip detail keeps safe prefix before nested bracketed diagnostics", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        message: "Validation failed [context [field] display_name=Jane]",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, "Validation failed");
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "Validation failed");
+
+  for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
+    assert.equal(exposed.includes("Jane"), false);
+    assert.equal(exposed.includes("display_name"), false);
+  }
+});
+
+test("Junction ambiguous skip detail reads object-shaped provider error bodies", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: { type: "resource_misconfigured", msg: "user hbm_abc123xyz sleep_cycle summaries are disabled." },
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext(),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(
+    result.metadataPatch?.junctionSkippedResourceLastDetail,
+    "resource_misconfigured: user <redacted-id> sleep_cycle summaries are disabled.",
+  );
 });
 
 test("Junction ambiguous skip detail is clamped to the stored-metadata string cap", async () => {

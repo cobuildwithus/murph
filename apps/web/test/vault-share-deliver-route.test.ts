@@ -4,7 +4,6 @@ const mocks = vi.hoisted(() => ({
 	deliverHostedVaultShareRecords: vi.fn(),
 	findActiveHostedVaultShares: vi.fn(),
 	getPrisma: vi.fn(),
-	hasHostedMemberEffectiveActiveAccessForMember: vi.fn(),
 	isHostedRuntimeInactiveAccessError: vi.fn((error: unknown) => (
 		typeof error === "object"
 		&& error !== null
@@ -31,10 +30,7 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 	requireHostedRuntimeActiveAccess: mocks.requireHostedRuntimeActiveAccess,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
-	hasHostedMemberEffectiveActiveAccessForMember:
-		mocks.hasHostedMemberEffectiveActiveAccessForMember,
-}));
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({}));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
@@ -72,6 +68,26 @@ function recentRecord(daysAgo: number): {
     },
     // occurredAt is parser-pinned to the night-date midnight: it becomes plaintext mailbox
     // metadata, so it must disclose nothing beyond the night date.
+    occurredAt: `${date}T00:00:00.000Z`,
+    recordKey: date,
+  };
+}
+
+function recentActivityRecord(daysAgo: number): {
+  data: { date: string; metricKey: string; unit: string; value: number };
+  occurredAt: string;
+  recordKey: string;
+} {
+  const day = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+  const date = day.toISOString().slice(0, 10);
+
+  return {
+    data: {
+      date,
+      metricKey: "activity-minutes",
+      unit: "minutes",
+      value: 37,
+    },
     occurredAt: `${date}T00:00:00.000Z`,
     recordKey: date,
   };
@@ -127,7 +143,6 @@ describe("vault-share deliver route", () => {
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
 		mocks.getPrisma.mockReturnValue({ kind: "prisma" });
 		mocks.readHostedMemberCoreState.mockResolvedValue({ id: "member_referee" });
-		mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(true);
 		mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
 		mocks.deliverHostedVaultShareRecords.mockResolvedValue({
 			lastAppendedMailboxItemId: "mailbox_item_1",
@@ -162,6 +177,28 @@ describe("vault-share deliver route", () => {
 		});
   });
 
+  it("delivers recent activity-day records through the closed projection kind", async () => {
+    const activityShare = { ...ACTIVE_SHARE, projectionKind: "activity-days.v0" };
+    const record = recentActivityRecord(1);
+    mocks.findActiveHostedVaultShares.mockResolvedValue([activityShare]);
+
+    const response = await deliverRoute.POST(buildRequest({
+      projectionKind: "activity-days.v0",
+      records: [record],
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "delivered" });
+    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
+      grantorMemberId: "member_grantor",
+      projectionKind: "activity-days.v0",
+    });
+    expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledWith({
+      records: [record],
+      share: activityShare,
+    });
+  });
+
   it("returns no-active-share and appends nothing when no grant exists", async () => {
     mocks.findActiveHostedVaultShares.mockResolvedValue([]);
 
@@ -172,16 +209,6 @@ describe("vault-share deliver route", () => {
     expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
-
-  it("treats an inactive destination exactly like a missing grant", async () => {
-    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(false);
-
-    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "no-active-share" });
-		expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
-	});
 
 	it("treats an inactive destination runtime exactly like a missing grant", async () => {
 		mocks.requireHostedRuntimeActiveAccess.mockImplementation(async (memberId: string) => {
@@ -235,7 +262,15 @@ describe("vault-share deliver route", () => {
   it("keeps an all-stale offer indistinguishable when the destination is inactive", async () => {
     // The status must be a function of share configuration alone: a grantor probing with
     // stale records learns nothing finer than the normal active/no-active-share split.
-    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(false);
+    mocks.requireHostedRuntimeActiveAccess.mockImplementation(async (memberId: string) => {
+      if (memberId === "member_referee") {
+        throw hostedOnboardingError({
+          code: "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
+          httpStatus: 403,
+          message: "Hosted runtime mailbox access is not active.",
+        });
+      }
+    });
 
     const response = await deliverRoute.POST(
       buildRequest({
