@@ -1842,9 +1842,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           ?? (checkpointWakePassCanServiceProjectedWake ? projectedWakeKeyBeforePass : null);
         const replaceWakeRequested =
           shouldReplaceHostedWorkspaceInvocationWake(result);
+        const foregroundConversationCanReplaceCheckpointGatedWake =
+          foregroundConversationWorkObserved
+          && replaceWakeRequested
+          && pendingDurableCheckpointEffects.length === 0
+          && accumulatedProjection.nextWakeReason === "assistant"
+          && !hostedRuntimeWakeIsDue(accumulatedProjection.nextWakeAt);
         const preservePreviousWake =
           effectiveServicedProjectedWakeKey === null
           && accumulatedProjection.nextWakeAt !== null
+          && !foregroundConversationCanReplaceCheckpointGatedWake
           && (
             pendingDurableCheckpointEffects.length > 0
             || accumulatedProjection.projectedWakeRequiresCheckpoint

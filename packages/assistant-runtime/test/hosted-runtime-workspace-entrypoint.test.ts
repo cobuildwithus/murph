@@ -1843,7 +1843,24 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("source-blind future competing wake does not replace a checkpoint-gated wake", async () => {
+  test.each([
+    {
+      expectedNextWakeAt: "2099-04-27T00:05:00.000Z",
+      expectedStatus: "scheduled" as const,
+      freshNextWakeAt: "2099-04-27T00:05:00.000Z",
+      name: "replacement wake",
+    },
+    {
+      expectedNextWakeAt: null,
+      expectedStatus: "idle" as const,
+      freshNextWakeAt: null,
+      name: "explicit clear",
+    },
+  ])("foreground $name replaces a checkpoint-gated future assistant wake", async ({
+    expectedNextWakeAt,
+    expectedStatus,
+    freshNextWakeAt,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1853,7 +1870,6 @@ describe("hosted workspace runtime entrypoint", () => {
         laneSeq: "1",
       }),
     ];
-    const competingWakeAt = "2099-04-27T00:05:00.000Z";
     const gatedWakeAt = "2099-04-27T00:10:00.000Z";
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     let assistantPass = 0;
@@ -1941,8 +1957,8 @@ describe("hosted workspace runtime entrypoint", () => {
                 );
                 return {
                   checkpointReason: "assistant_runtime_commit",
-                  nextWakeAt: competingWakeAt,
-                  nextWakeReason: "assistant",
+                  nextWakeAt: freshNextWakeAt,
+                  nextWakeReason: freshNextWakeAt === null ? null : "assistant",
                   progressed: true,
                 };
               }
@@ -1965,15 +1981,20 @@ describe("hosted workspace runtime entrypoint", () => {
           request.nextWakeReason,
         ]),
         [
-          ["idle_shutdown", "0", gatedWakeAt, "assistant"],
+          [
+            "idle_shutdown",
+            "0",
+            expectedNextWakeAt,
+            expectedNextWakeAt === null ? null : "assistant",
+          ],
         ],
       );
       assert.ok(
         requireEventIndex(events, "assistant:2")
           < requireEventIndex(events, "snapshot:idle_shutdown:1"),
       );
-      assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, gatedWakeAt);
+      assert.equal(result.status, expectedStatus);
+      assert.equal(result.nextWakeAt, expectedNextWakeAt);
     } finally {
       await removeTempRoot(vaultRoot);
     }
