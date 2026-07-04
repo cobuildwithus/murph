@@ -3022,6 +3022,19 @@ function mergeHostedWorkspaceInvocationProjection(
     )
   ) {
     deferredAfterSelectedWake = nextSelectedWake;
+  } else if (
+    previousWakeWasServiced
+    && selectedProjectedWake.nextWakeAt !== null
+    && hostedWorkspaceInvocationProjectionWakeMatches(
+      selectedProjectedWake,
+      nextSelectedWake,
+    )
+    && !hostedWorkspaceInvocationProjectionWakeMatches(
+      selectedProjectedWake,
+      previousDeferredWake,
+    )
+  ) {
+    deferredAfterSelectedWake = previousDeferredWake;
   }
 
   const baseStatus = options.replaceWake && !preserveCheckpointGatedWake
