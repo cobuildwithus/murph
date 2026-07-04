@@ -93,6 +93,46 @@ describe('assistant auto-reply answered coverage', () => {
     })
   })
 
+  it('advances through pending terminal seqs when a gap closes', async () => {
+    await withCoverageVault(async (vault) => {
+      const first = await stageHostedMailboxInput({
+        laneSeq: '1',
+        source: 'linq',
+        text: 'first terminal',
+        vault,
+      })
+      const second = await stageHostedMailboxInput({
+        laneSeq: '2',
+        source: 'telegram',
+        text: 'gap closer',
+        vault,
+      })
+      const third = await stageHostedMailboxInput({
+        laneSeq: '3',
+        source: 'linq',
+        text: 'already terminal tail',
+        vault,
+      })
+      await writeReplyEvidence({
+        inputIds: [first.inputId],
+        vault,
+      })
+      await writeReplyEvidence({
+        inputIds: [third.inputId],
+        vault,
+      })
+
+      await expect(computeAssistantAutoReplyAnsweredCoverage({
+        context: coverageContext(),
+        terminalInputIds: [second.inputId],
+        vault,
+      })).resolves.toEqual({
+        lane: 'conversation',
+        laneSeq: '3',
+      })
+    })
+  })
+
   it('holds back below a pending group thread-route item in the shared conversation lane', async () => {
     await withCoverageVault(async (vault) => {
       const first = await stageHostedMailboxInput({

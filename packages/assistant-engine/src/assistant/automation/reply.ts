@@ -48,7 +48,6 @@ import type {
 } from '../input-source.js'
 import {
   compareAssistantInputCursors,
-  readAssistantInputEvent,
   type AssistantInputConversationRef,
 } from '../input-store.js'
 import type { AssistantAutoReplyChannelState } from '../automation-state.js'
@@ -60,7 +59,7 @@ import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
 import {
-  readAssistantAutoReplyAnsweredCoverage,
+  computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   hasCompleteAssistantAutoReplyTerminalEvidence,
   type AssistantAutoReplyTerminalEvidence,
@@ -1468,11 +1467,6 @@ export async function computeAssistantAutoReplyAnsweredCoverage(input: {
   terminalInputIds?: readonly string[] | null
   vault: string
 }): Promise<AssistantOutboxIntent['answeredCoverage']> {
-  const terminalInputIds = new Set(
-    (input.terminalInputIds ?? [])
-      .map((inputId) => normalizeNullableString(inputId))
-      .filter((inputId): inputId is string => inputId !== null),
-  )
   const context = input.context ?? null
   if (!context) {
     return null
@@ -1481,20 +1475,9 @@ export async function computeAssistantAutoReplyAnsweredCoverage(input: {
   const scanStart = resolveAssistantAutoReplyAnsweredCoverageScanStart(
     context.autoReply,
   )
-  const storedCoverage = await readAssistantAutoReplyAnsweredCoverage({
-    vault: input.vault,
-  })
-  const baseCoverage = selectHighestAssistantAutoReplyAnsweredCoverage(
-    scanStart.coverage,
-    storedCoverage,
-  )
-  if (terminalInputIds.size === 0) {
-    return baseCoverage
-  }
-
-  return await advanceAssistantAutoReplyAnsweredCoverageWithTerminalInputs({
-    coverage: baseCoverage,
-    terminalInputIds: [...terminalInputIds],
+  return await computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs({
+    baseCoverage: scanStart.coverage,
+    terminalInputIds: input.terminalInputIds ?? [],
     vault: input.vault,
   })
 }
@@ -1578,73 +1561,6 @@ function compareHostedMailboxLaneSeq(left: string, right: string): number {
     return leftSeq < rightSeq ? -1 : leftSeq > rightSeq ? 1 : 0
   } catch {
     return left.localeCompare(right)
-  }
-}
-
-function selectHighestAssistantAutoReplyAnsweredCoverage(
-  left: AssistantOutboxIntent['answeredCoverage'],
-  right: AssistantOutboxIntent['answeredCoverage'],
-): AssistantOutboxIntent['answeredCoverage'] {
-  if (!left) {
-    return right
-  }
-  if (!right) {
-    return left
-  }
-  return compareHostedMailboxLaneSeq(left.laneSeq, right.laneSeq) >= 0
-    ? left
-    : right
-}
-
-async function advanceAssistantAutoReplyAnsweredCoverageWithTerminalInputs(input: {
-  coverage: AssistantOutboxIntent['answeredCoverage']
-  terminalInputIds: readonly string[]
-  vault: string
-}): Promise<AssistantOutboxIntent['answeredCoverage']> {
-  let coveredSeq = input.coverage
-    ? parseNumericHostedMailboxLaneSeq(input.coverage.laneSeq)
-    : 0n
-  if (coveredSeq === null) {
-    return input.coverage
-  }
-
-  const terminalSeqs = new Set<bigint>()
-  for (const inputId of input.terminalInputIds) {
-    const event = await readAssistantInputEvent({
-      inputId,
-      vault: input.vault,
-    })
-    if (
-      event?.sourceRef.kind !== 'hosted-mailbox' ||
-      event.sourceRef.lane !== 'conversation'
-    ) {
-      continue
-    }
-    const laneSeq = parseNumericHostedMailboxLaneSeq(event.sourceRef.laneSeq)
-    if (laneSeq !== null && laneSeq > coveredSeq) {
-      terminalSeqs.add(laneSeq)
-    }
-  }
-
-  let nextSeq = coveredSeq + 1n
-  while (terminalSeqs.delete(nextSeq)) {
-    coveredSeq = nextSeq
-    nextSeq += 1n
-  }
-
-  return coveredSeq > 0n
-    ? {
-        lane: 'conversation',
-        laneSeq: coveredSeq.toString(),
-      }
-    : null
-}
-
-function parseNumericHostedMailboxLaneSeq(laneSeq: string): bigint | null {
-  try {
-    return /^\d+$/u.test(laneSeq) ? BigInt(laneSeq) : null
-  } catch {
-    return null
   }
 }
 

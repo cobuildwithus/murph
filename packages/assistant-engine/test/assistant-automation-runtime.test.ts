@@ -105,8 +105,8 @@ const replyMocks = vi.hoisted(() => ({
 
 const evidenceMocks = vi.hoisted(() => ({
   assistantAutoReplyTerminalEvidenceExists: vi.fn(),
+  computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs: vi.fn(),
   hasCompleteAssistantAutoReplyTerminalEvidence: vi.fn(),
-  readAssistantAutoReplyAnsweredCoverage: vi.fn(),
   readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
   writeAssistantAutoReplyReplyTerminalEvidence: vi.fn(),
@@ -122,10 +122,10 @@ vi.mock('../src/assistant/automation/artifacts.ts', () => ({
 vi.mock('../src/assistant/automation/evidence.ts', () => ({
   assistantAutoReplyTerminalEvidenceExists:
     evidenceMocks.assistantAutoReplyTerminalEvidenceExists,
+  computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs:
+    evidenceMocks.computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs,
   hasCompleteAssistantAutoReplyTerminalEvidence:
     evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence,
-  readAssistantAutoReplyAnsweredCoverage:
-    evidenceMocks.readAssistantAutoReplyAnsweredCoverage,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId:
     evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplyReplyIntentEvidence:
@@ -1277,7 +1277,7 @@ beforeEach(() => {
       )
       return groupEvidence.every((entry) => entry !== null)
     })
-  evidenceMocks.readAssistantAutoReplyAnsweredCoverage
+  evidenceMocks.computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs
     .mockReset()
     .mockResolvedValue(null)
   evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId

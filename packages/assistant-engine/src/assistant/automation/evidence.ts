@@ -159,11 +159,26 @@ export async function findAssistantAutoReplyDeliveryIntentIds(input: {
   return matched
 }
 
-export async function readAssistantAutoReplyAnsweredCoverage(input: {
+export async function computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs(input: {
+  baseCoverage?: AssistantOutboxIntent['answeredCoverage'] | null
+  terminalInputIds?: readonly string[] | null
   vault: string
 }): Promise<AssistantOutboxIntent['answeredCoverage']> {
-  return (await readAssistantAutoReplyAnsweredCoverageState(input.vault))
-    .coverage
+  const current = await readAssistantAutoReplyAnsweredCoverageState(input.vault)
+  const laneSeqs = await readAssistantAutoReplyAnsweredCoverageLaneSeqs({
+    inputIds: input.terminalInputIds ?? [],
+    vault: input.vault,
+  })
+  return advanceAssistantAutoReplyAnsweredCoverageState({
+    current: {
+      ...current,
+      coverage: selectHighestAssistantAutoReplyAnsweredCoverage(
+        input.baseCoverage ?? null,
+        current.coverage,
+      ),
+    },
+    laneSeqs,
+  }).coverage
 }
 
 async function assistantAutoReplyTerminalEvidenceGroupComplete(input: {
@@ -466,27 +481,15 @@ async function recordAssistantAutoReplyAnsweredCoverage(input: {
     return
   }
 
-  const laneSeqs = new Set<string>()
-  for (const inputId of input.inputIds) {
-    const event = await readAssistantInputEventForAnsweredCoverage({
-      inputId,
-      vault: input.vault,
-    })
-    if (
-      event?.sourceRef.kind === 'hosted-mailbox' &&
-      event.sourceRef.lane === 'conversation'
-    ) {
-      laneSeqs.add(event.sourceRef.laneSeq)
-    }
-  }
-  if (laneSeqs.size === 0) {
+  const laneSeqs = await readAssistantAutoReplyAnsweredCoverageLaneSeqs(input)
+  if (laneSeqs.length === 0) {
     return
   }
 
   const current = await readAssistantAutoReplyAnsweredCoverageState(input.vault)
   const next = advanceAssistantAutoReplyAnsweredCoverageState({
     current,
-    laneSeqs: [...laneSeqs],
+    laneSeqs,
   })
   if (
     next.coverage?.laneSeq === current.coverage?.laneSeq &&
@@ -498,6 +501,30 @@ async function recordAssistantAutoReplyAnsweredCoverage(input: {
   const statePath = resolveAssistantAutoReplyAnsweredCoveragePath(input.vault)
   await ensureAssistantStateDir(path.dirname(statePath))
   await writeAssistantStateJson(statePath, next)
+}
+
+async function readAssistantAutoReplyAnsweredCoverageLaneSeqs(input: {
+  inputIds: readonly string[]
+  vault: string
+}): Promise<string[]> {
+  const laneSeqs = new Set<string>()
+  for (const inputId of input.inputIds) {
+    const normalizedInputId = normalizeNullableString(inputId)
+    if (!normalizedInputId) {
+      continue
+    }
+    const event = await readAssistantInputEventForAnsweredCoverage({
+      inputId: normalizedInputId,
+      vault: input.vault,
+    })
+    if (
+      event?.sourceRef.kind === 'hosted-mailbox' &&
+      event.sourceRef.lane === 'conversation'
+    ) {
+      laneSeqs.add(event.sourceRef.laneSeq)
+    }
+  }
+  return [...laneSeqs]
 }
 
 async function readAssistantInputEventForAnsweredCoverage(input: {
@@ -630,6 +657,24 @@ function advanceAssistantAutoReplyAnsweredCoverageState(input: {
     pendingLaneSeqs,
     schema: ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA,
   }
+}
+
+function selectHighestAssistantAutoReplyAnsweredCoverage(
+  left: AssistantOutboxIntent['answeredCoverage'],
+  right: AssistantOutboxIntent['answeredCoverage'],
+): AssistantOutboxIntent['answeredCoverage'] {
+  if (!left) {
+    return right
+  }
+  if (!right) {
+    return left
+  }
+  const leftSeq = parseNumericLaneSeq(left.laneSeq)
+  const rightSeq = parseNumericLaneSeq(right.laneSeq)
+  if (leftSeq === null || rightSeq === null) {
+    return left.laneSeq.localeCompare(right.laneSeq) >= 0 ? left : right
+  }
+  return leftSeq >= rightSeq ? left : right
 }
 
 function parseNumericLaneSeq(laneSeq: string): bigint | null {
