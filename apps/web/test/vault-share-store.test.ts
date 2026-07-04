@@ -252,6 +252,55 @@ describe("deliverHostedVaultShareRecords", () => {
     expect(eventIds[2]).toMatch(/^vault-share:share_1:2026-06-07:[A-Za-z0-9_-]{32}$/u);
   });
 
+  it("appends a later source revision even when a corrected metric returns to an earlier value", async () => {
+    const metricShare = { ...SHARE, projectionKind: "active-calories-days.v0" as const };
+    const prisma = fakePrisma([shareAuthorityRow(metricShare, "granted")]);
+    const seenEventIds = new Set<string>();
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input) => {
+      const eventId = input.envelope.eventId;
+      if (seenEventIds.has(eventId)) {
+        return { duplicate: true, inserted: false };
+      }
+      seenEventIds.add(eventId);
+      return {
+        inserted: true,
+        item: { id: `mailbox_item_${seenEventIds.size}` },
+      };
+    });
+    const record = (value: number, sourceRevision: string) => ({
+      data: {
+        date: "2026-07-01",
+        metricKey: "active-calories",
+        unit: "kcal",
+        value,
+      },
+      occurredAt: "2026-07-01T00:00:00.000Z",
+      recordKey: "2026-07-01",
+      sourceRevision,
+    });
+
+    const result = await deliverHostedVaultShareRecords({
+      prisma,
+      records: [
+        record(500, "sourceRevisionA0000000000000001"),
+        record(500, "sourceRevisionA0000000000000001"),
+        record(650, "sourceRevisionB0000000000000002"),
+        record(500, "sourceRevisionC0000000000000003"),
+      ],
+      share: metricShare,
+    });
+
+    const eventIds = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
+      (call) => call[0].envelope.eventId,
+    );
+    expect(result).toEqual({ lastAppendedMailboxItemId: "mailbox_item_3" });
+    expect(eventIds[0]).toBe(eventIds[1]);
+    expect(eventIds[2]).not.toBe(eventIds[0]);
+    expect(eventIds[3]).not.toBe(eventIds[0]);
+    expect(eventIds[3]).not.toBe(eventIds[2]);
+    expect(eventIds[3]).toMatch(/^vault-share:share_1:2026-07-01:[A-Za-z0-9_-]{32}$/u);
+  });
+
   it("derives profile-name revision identity from content alone, ignoring occurredAt drift", async () => {
     // Current-state kind: the same unchanged name re-offered with a different
     // occurredAt must dedupe instead of minting a fresh mailbox dedupe key, while a

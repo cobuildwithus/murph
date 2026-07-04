@@ -143,6 +143,30 @@ describe("vault-share contracts", () => {
     expect(parsed.projectionKind).toBe("sleep-times.v0");
   });
 
+  it("parses an optional opaque source revision", () => {
+    const parsed = parseHostedVaultShareDeliverRequest({
+      projectionKind: "sleep-times.v0",
+      records: [{
+        ...VALID_RECORD,
+        sourceRevision: "abcdEFGH0123_-",
+      }],
+    });
+
+    expect(parsed.records[0]?.sourceRevision).toBe("abcdEFGH0123_-");
+  });
+
+  it("rejects a non-opaque source revision", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "sleep-times.v0",
+        records: [{
+          ...VALID_RECORD,
+          sourceRevision: "record/id",
+        }],
+      })
+    ).toThrow(/sourceRevision/u);
+  });
+
   it("rejects an empty records array", () => {
     expect(() =>
       parseHostedVaultShareDeliverRequest({ projectionKind: "sleep-times.v0", records: [] }),

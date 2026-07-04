@@ -135,6 +135,8 @@ export const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS = 7;
 
 const HOSTED_VAULT_SHARE_RECORD_KEY_MAX_LENGTH = 128;
 const HOSTED_VAULT_SHARE_RECORD_KEY_PATTERN = /^[A-Za-z0-9._-]+$/u;
+const HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH = 96;
+const HOSTED_VAULT_SHARE_SOURCE_REVISION_PATTERN = /^[A-Za-z0-9_-]+$/u;
 
 export interface HostedVaultShareSleepTimesData {
   date: string;
@@ -181,6 +183,7 @@ export interface HostedVaultShareDeliveryRecord {
   data: HostedVaultShareDeliveryRecordData;
   occurredAt: string;
   recordKey: string;
+  sourceRevision?: string;
 }
 
 export interface HostedVaultShareDeliverRequest {
@@ -295,7 +298,29 @@ export function parseHostedVaultShareDeliveryRecord(
     }),
     occurredAt,
     recordKey,
+    ...parseHostedVaultShareSourceRevision(record.sourceRevision),
   };
+}
+
+function parseHostedVaultShareSourceRevision(value: unknown): { sourceRevision?: string } {
+  if (value === undefined) {
+    return {};
+  }
+
+  const sourceRevision = requireString(
+    value,
+    "Vault share delivery record sourceRevision",
+  );
+  if (
+    sourceRevision.length > HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH
+    || !HOSTED_VAULT_SHARE_SOURCE_REVISION_PATTERN.test(sourceRevision)
+  ) {
+    throw new TypeError(
+      "Vault share delivery record sourceRevision must be an opaque base64url string.",
+    );
+  }
+
+  return { sourceRevision };
 }
 
 function parseHostedVaultShareDeliveryRecordData(

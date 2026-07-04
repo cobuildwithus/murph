@@ -10,7 +10,7 @@ import {
 import {
   selectMetricSeries,
   type MetricPoint,
-  type WearableResolvedMetric,
+  type MetricSeriesPoint,
 } from "@murphai/query";
 import { describe, expect, it, vi } from "vitest";
 
@@ -60,67 +60,69 @@ const ACTIVITY_RECORD = {
   recordKey: ACTIVITY_DAY.date,
 };
 
-function activitySummaryMetric(
-  metric: string,
-  input: {
-    provider: string | null;
-    recordIds: string[];
-    unit: string | null;
-    value: number | null;
-  },
-): WearableResolvedMetric {
+const SOURCE_REVISION_PATTERN = /^[A-Za-z0-9_-]{32}$/u;
+
+type WorkoutMetricRow = Pick<
+  MetricSeriesPoint,
+  | "date"
+  | "grain"
+  | "metricKey"
+  | "observedAt"
+  | "pointIds"
+  | "recordIds"
+  | "sourceFamily"
+  | "sourceKind"
+  | "statistic"
+  | "value"
+>;
+
+function workoutMetricRow(input: {
+  date: string;
+  metricKey: "activity-minutes" | "workout-count";
+  recordIds?: string[];
+  value: number;
+}): WorkoutMetricRow {
+  const recordIds = input.recordIds ?? [`evt_activity_${input.date}`];
   return {
-    candidates: [],
-    confidence: {
-      candidateCount: input.value === null ? 0 : 1,
-      conflictingProviders: [],
-      exactDuplicateCount: 0,
-      level: input.value === null ? "none" : "high",
-      reasons: [],
-    },
-    metric,
-    selection: {
-      fallbackFromMetric: null,
-      fallbackReason: null,
-      occurredAt: null,
-      paths: [],
-      provider: input.provider,
-      recordedAt: null,
-      recordIds: input.recordIds,
-      resolution: input.value === null ? "none" : "direct",
-      sourceFamily: input.value === null ? null : "derived",
-      sourceKind: input.value === null ? null : "activity-session-aggregate",
-      title: null,
-      unit: input.unit,
-      value: input.value,
-    },
+    date: input.date,
+    grain: "day",
+    metricKey: input.metricKey,
+    observedAt: `${input.date}T00:00:00.000Z`,
+    pointIds: [`point_${input.metricKey}_${input.value}_${recordIds.join("_")}`],
+    recordIds,
+    sourceFamily: "derived",
+    sourceKind: "activity-summary",
+    statistic: "value",
+    value: input.value,
   };
 }
 
-function activitySummary(input: {
+function workoutRows(input: {
   countRecordIds?: string[];
   date: string;
   minuteRecordIds?: string[];
-  provider?: string;
   workoutCount: number;
   workoutMinutes: number;
-}): { date: string; sessionCount: WearableResolvedMetric; sessionMinutes: WearableResolvedMetric } {
-  const provider = input.provider ?? "garmin";
-  const recordIds = [`evt_${provider}_${input.date}`];
+}): {
+  countRows: WorkoutMetricRow[];
+  minuteRows: WorkoutMetricRow[];
+  nowMs: number;
+} {
+  const recordIds = [`evt_activity_${input.date}`];
   return {
-    date: input.date,
-    sessionCount: activitySummaryMetric("sessionCount", {
-      provider,
+    countRows: [workoutMetricRow({
+      date: input.date,
+      metricKey: "workout-count",
       recordIds: input.countRecordIds ?? recordIds,
-      unit: "count",
       value: input.workoutCount,
-    }),
-    sessionMinutes: activitySummaryMetric("sessionMinutes", {
-      provider,
+    })],
+    minuteRows: [workoutMetricRow({
+      date: input.date,
+      metricKey: "activity-minutes",
       recordIds: input.minuteRecordIds ?? recordIds,
-      unit: "minutes",
       value: input.workoutMinutes,
-    }),
+    })],
+    nowMs: Date.parse("2026-07-04T00:00:00.000Z"),
   };
 }
 
@@ -174,6 +176,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
         data: { displayName: "Theo" },
         occurredAt: "2026-07-01T00:00:00.000Z",
         recordKey: "profile-name",
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }],
     });
   });
@@ -311,13 +314,17 @@ describe("selectProjectableDailyMetricDays", () => {
       unit: "minutes",
       value: 45,
     }], activitySpec, nowMs)).toEqual([]);
-    expect(selectProjectableDailyMetricDays(series.rows, activitySpec, nowMs)).toEqual([ACTIVITY_RECORD]);
+    const selected = selectProjectableDailyMetricDays(series.rows, activitySpec, nowMs);
+    expect(selected).toEqual([{
+      ...ACTIVITY_RECORD,
+      sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+    }]);
     expect(
       parseHostedVaultShareDeliverRequest({
         projectionKind: "activity-days.v0",
-        records: [ACTIVITY_RECORD],
+        records: selected,
       }).records,
-    ).toEqual([ACTIVITY_RECORD]);
+    ).toEqual(selected);
   });
 
   it("reads allowlisted activity-session workout metrics as scalar share records", async () => {
@@ -390,6 +397,7 @@ describe("selectProjectableDailyMetricDays", () => {
           },
           occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
           recordKey: ACTIVITY_DAY.date,
+          sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
         }]);
         expect(JSON.stringify(selected)).not.toContain("strava");
         expect(JSON.stringify(selected)).not.toContain("averagePowerWatts");
@@ -405,13 +413,14 @@ describe("selectProjectableWorkoutDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
 
   it("maps selected workout session summaries without raw workout details", () => {
-    const selected = selectProjectableWorkoutDays([
-      activitySummary({
+    const selected = selectProjectableWorkoutDays({
+      ...workoutRows({
         date: ACTIVITY_DAY.date,
         workoutCount: 2,
         workoutMinutes: 85,
       }),
-    ], nowMs);
+      nowMs,
+    });
 
     expect(selected).toEqual([
       {
@@ -422,6 +431,7 @@ describe("selectProjectableWorkoutDays", () => {
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
         recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(/^[A-Za-z0-9_-]{32}$/u),
       },
     ]);
     expect(
@@ -433,15 +443,16 @@ describe("selectProjectableWorkoutDays", () => {
   });
 
   it("drops split-provider workout tuples instead of joining count and minutes by date", () => {
-    const selected = selectProjectableWorkoutDays([
-      activitySummary({
+    const selected = selectProjectableWorkoutDays({
+      ...workoutRows({
         countRecordIds: ["evt_garmin_count"],
         date: ACTIVITY_DAY.date,
         minuteRecordIds: ["evt_oura_minutes"],
         workoutCount: 1,
         workoutMinutes: 85,
       }),
-    ], nowMs);
+      nowMs,
+    });
 
     expect(selected).toEqual([]);
   });
@@ -461,6 +472,11 @@ describe("selectProjectableHeartRateZoneDays", () => {
         date: ACTIVITY_DAY.date,
         grain: "day",
         metricKey: "heart-rate-zone-2-minutes",
+        observedAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        pointIds: ["point_zone_2"],
+        recordIds: ["evt_activity_2026-07-03"],
+        sourceFamily: "derived",
+        sourceKind: "activity-summary",
         statistic: "value",
         value: 24,
       },
@@ -480,6 +496,7 @@ describe("selectProjectableHeartRateZoneDays", () => {
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
         recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(/^[A-Za-z0-9_-]{32}$/u),
       },
     ]);
     expect(
@@ -970,6 +987,7 @@ describe("readProjectableProfileName", () => {
         data: { displayName: "Theo" },
         occurredAt: "2026-07-01T00:00:00.000Z",
         recordKey: "profile-name",
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       },
     ]);
     expect(() =>
