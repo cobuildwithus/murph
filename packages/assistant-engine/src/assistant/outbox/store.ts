@@ -175,15 +175,41 @@ export async function findAssistantOutboxIntentByDedupeIdentity(input: {
     }
   }
 
-  return (
-    activeIntents.find((intent) => {
-      const legacyDedupeKey = hashAssistantOutboxLegacyMediaDedupeIdentity({
-        dedupeToken,
-        media: intent.media,
-      })
-      return legacyDedupeKey !== null && intent.dedupeKey === legacyDedupeKey
-    }) ?? null
+  const legacyMatch = activeIntents.find((intent) => {
+    const legacyDedupeKey = hashAssistantOutboxLegacyMediaDedupeIdentity({
+      dedupeToken,
+      media: intent.media,
+    })
+    return legacyDedupeKey !== null && intent.dedupeKey === legacyDedupeKey
+  })
+  if (legacyMatch) {
+    return legacyMatch
+  }
+
+  const abandonedReplayGuardIntents = intents.filter(
+    (intent) =>
+      intent.status === 'abandoned' &&
+      intent.delivery &&
+      intent.lastError?.code === 'ASSISTANT_DELIVERY_AMBIGUOUS',
   )
+  const abandonedExactMatch = abandonedReplayGuardIntents.find(
+    (intent) => intent.dedupeKey === input.dedupeKey,
+  )
+  if (abandonedExactMatch) {
+    return abandonedExactMatch
+  }
+
+  if (dedupeToken && dedupeToken === deliveryIdempotencyKey) {
+    return (
+      abandonedReplayGuardIntents.find(
+        (intent) =>
+          normalizeNullableString(intent.deliveryIdempotencyKey) ===
+          deliveryIdempotencyKey,
+      ) ?? null
+    )
+  }
+
+  return null
 }
 
 export async function readAssistantOutboxIntentAtPath(

@@ -1123,6 +1123,19 @@ export async function deliverAssistantOutboxMessage(input: {
       session: null,
     }
   }
+  if (
+    intent.status === 'abandoned' &&
+    intent.delivery &&
+    intent.lastError?.code === 'ASSISTANT_DELIVERY_AMBIGUOUS'
+  ) {
+    return {
+      kind: 'sent',
+      intent,
+      delivery: intent.delivery,
+      deliveryError: null,
+      session: null,
+    }
+  }
 
   if ((input.dispatchMode ?? 'immediate') === 'queue-only') {
     return {

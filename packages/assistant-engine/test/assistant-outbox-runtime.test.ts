@@ -2853,14 +2853,6 @@ describe('assistant outbox runtime', () => {
     )
     await useActualOutboundDeliveryImplementation()
 
-    const seeded = await createIntent(vaultRoot, {
-      channel: 'linq',
-      explicitTarget: 'thread-linq-voice',
-      media: [createVoiceMemoMedia()],
-      message: '',
-      sessionId: 'session-linq-voice-outcome',
-      turnId: 'turn-linq-voice-outcome',
-    })
     const sendLinqVoiceMemo = vi.fn(async () => {
       throw Object.assign(new Error('accepted outcome could not be recorded'), {
         code: 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY',
@@ -2872,21 +2864,29 @@ describe('assistant outbox runtime', () => {
         targetKind: 'thread',
       })
     })
+    const deliveryIdempotencyKey = 'hosted-linq-voice:mailbox-item-1'
 
-    const dispatched = await dispatchAssistantOutboxIntent({
+    const firstDelivery = await deliverAssistantOutboxMessage({
+      channel: 'linq',
       dependencies: {
         sendLinqVoiceMemo,
       },
-      force: true,
-      intentId: seeded.intentId,
-      now: new Date('2026-04-08T04:26:00.000Z'),
+      dedupeToken: deliveryIdempotencyKey,
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent: false,
+      explicitTarget: 'thread-linq-voice',
+      media: [createVoiceMemoMedia()],
+      message: '',
+      sessionId: 'session-linq-voice-outcome',
+      turnId: 'turn-linq-voice-outcome-1',
       vault: vaultRoot,
     })
 
-    expect(dispatched.intent.status).toBe('abandoned')
-    expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
-    expect(dispatched.intent.nextAttemptAt).toBeNull()
-    expect(dispatched.intent.delivery).toMatchObject({
+    expect(firstDelivery.kind).toBe('failed')
+    expect(firstDelivery.intent.status).toBe('abandoned')
+    expect(firstDelivery.intent.deliveryConfirmationPending).toBe(false)
+    expect(firstDelivery.intent.nextAttemptAt).toBeNull()
+    expect(firstDelivery.intent.delivery).toMatchObject({
       channel: 'linq',
       messageLength: 0,
       providerMessageId: 'linq-voice-message',
@@ -2895,20 +2895,35 @@ describe('assistant outbox runtime', () => {
       target: 'thread-linq-voice',
       targetKind: 'thread',
     })
-    expect(dispatched.deliveryError).toMatchObject({
+    expect(firstDelivery.deliveryError).toMatchObject({
       code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
     })
 
-    const secondDispatch = await dispatchAssistantOutboxIntent({
+    const replayDelivery = await deliverAssistantOutboxMessage({
+      channel: 'linq',
       dependencies: {
         sendLinqVoiceMemo,
       },
-      intentId: seeded.intentId,
-      now: new Date('2026-04-08T04:27:00.000Z'),
+      dedupeToken: deliveryIdempotencyKey,
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent: false,
+      explicitTarget: 'thread-linq-voice',
+      media: [createVoiceMemoMedia()],
+      message: '',
+      sessionId: 'session-linq-voice-outcome',
+      turnId: 'turn-linq-voice-outcome-2',
       vault: vaultRoot,
     })
 
-    expect(secondDispatch.intent.status).toBe('abandoned')
+    expect(replayDelivery.kind).toBe('sent')
+    expect(replayDelivery.delivery).toMatchObject({
+      channel: 'linq',
+      providerMessageId: 'linq-voice-message',
+      providerMessageIds: ['linq-voice-message'],
+      providerThreadId: 'thread-linq-voice',
+    })
+    expect(replayDelivery.intent.intentId).toBe(firstDelivery.intent.intentId)
+    expect(replayDelivery.intent.status).toBe('abandoned')
     expect(sendLinqVoiceMemo).toHaveBeenCalledTimes(1)
   })
 
