@@ -2040,9 +2040,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               pendingDurableCheckpointEffects.length > 0
               || accumulatedProjection.projectedWakeRequiresCheckpoint
             );
-          // A checkpoint-blocked wake pulls the idle checkpoint forward. Only
-          // checkpoint-gated assistant wakes that stay inside the attempt
-          // budget are serviced by the post-checkpoint branch below.
           if (!forceCheckpointBeforeWake) {
             if (idleCheckpointStartByMs === null) {
               throw new Error("Dirty hosted runtime is missing an idle checkpoint timer.");
@@ -2052,14 +2049,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 && projectedWakeIsUnserviced
                 ? accumulatedProjection.nextWakeAt
                 : null;
-            const dirtyCheckpointStartByMs = projectedWakeBlockedByCheckpoint
-              ? clampHostedRuntimeDirtyCheckpointStartByProjectedWake({
-                  idleCheckpointStartByMs,
-                  projectedWakeAt: accumulatedProjection.nextWakeAt,
-                })
-              : idleCheckpointStartByMs;
             const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
-              idleCheckpointStartByMs: dirtyCheckpointStartByMs,
+              idleCheckpointStartByMs,
               projectedRuntimeWakeAt,
               runtimeAbortSignal: runtimeAbortController.signal,
               runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -3549,22 +3540,6 @@ function buildHostedRuntimeWakeKey(input: {
   }
 
   return JSON.stringify([input.nextWakeAt, input.nextWakeReason]);
-}
-
-function clampHostedRuntimeDirtyCheckpointStartByProjectedWake(input: {
-  idleCheckpointStartByMs: number;
-  projectedWakeAt: string | null;
-}): number {
-  if (input.projectedWakeAt === null) {
-    return input.idleCheckpointStartByMs;
-  }
-
-  const projectedWakeMs = Date.parse(input.projectedWakeAt);
-  if (!Number.isFinite(projectedWakeMs)) {
-    return input.idleCheckpointStartByMs;
-  }
-
-  return Math.min(input.idleCheckpointStartByMs, projectedWakeMs);
 }
 
 async function waitForHostedRuntimeDirtyWindow(input: {

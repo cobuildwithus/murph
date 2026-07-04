@@ -875,12 +875,13 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("checkpoint-gates projected wakes while durable effects remain pending after an external wake", async () => {
+  test("checkpoint-gates projected wakes without bypassing the idle checkpoint delay", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const runtimeTransitionTimeoutMs = 15_000;
+    const assistantTwoObserved = createDeferred<void>();
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
       return {
@@ -895,7 +896,7 @@ describe("hosted workspace runtime entrypoint", () => {
       vi.setSystemTime(new Date(TEST_NOW));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const result = await withRealTimeout(
+      const resultPromise = withRealTimeout(
         runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
@@ -955,6 +956,7 @@ describe("hosted workspace runtime entrypoint", () => {
               }
 
               if (assistantPass === 2) {
+                assistantTwoObserved.resolve();
                 return {
                   checkpointReason: "canonical_runtime_commit",
                   nextWakeAt: TEST_NOW,
@@ -971,6 +973,15 @@ describe("hosted workspace runtime entrypoint", () => {
         runtimeTransitionTimeoutMs,
         () => events.join(","),
       );
+      await withRealTimeout(assistantTwoObserved.promise, runtimeTransitionTimeoutMs, () =>
+        events.join(",")
+      );
+      await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
+      assert.equal(checkpointRequests.length, 0);
+      assert.equal(durableEffect.mock.calls.length, 0);
+
+      await vi.advanceTimersByTimeAsync(180_000);
+      const result = await resultPromise;
 
       assert.equal(assistantPass, 2);
       assert.equal(durableEffect.mock.calls.length, 1);
