@@ -5458,7 +5458,7 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("marks non-idempotent coverage-bearing Linq voice memos confirmation-pending when outcome recording fails", async () => {
+  it("abandons non-idempotent coverage-bearing Linq voice memos when accepted outcome recording fails", async () => {
     const answeredCoverage = {
       lane: "conversation" as const,
       laneSeq: "42",
@@ -5487,20 +5487,36 @@ describe("hosted runtime callbacks", () => {
           target: "linq_chat_123",
         });
       } catch (error) {
-        expect((error as { deliveryMayHaveSucceeded?: boolean }).deliveryMayHaveSucceeded)
-          .toBe(true);
+        expect(error).toMatchObject({
+          code: "ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY",
+          deliveryMayHaveSucceeded: true,
+          providerMessageId: "linq_voice_sent",
+          providerMessageIds: ["linq_voice_sent"],
+          providerThreadId: "linq_chat_123",
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
         return createDispatchResult(
           {
-            delivery: null,
+            delivery: createDelivery({
+              channel: "linq",
+              providerMessageId: "linq_voice_sent",
+              providerMessageIds: ["linq_voice_sent"],
+              providerThreadId: "linq_chat_123",
+              target: "linq_chat_123",
+              targetKind: "thread",
+            }),
+            deliveryConfirmationPending: false,
             lastError: {
-              code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
-              message: "Accepted Linq delivery outcome could not be recorded.",
+              code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+              message: "Accepted Linq voice memo outcome could not be recorded.",
             },
-            status: "retryable",
+            nextAttemptAt: null,
+            status: "abandoned",
           },
           {
-            code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
-            message: "Accepted Linq delivery outcome could not be recorded.",
+            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
+            message: "Accepted Linq voice memo outcome could not be recorded.",
           },
         );
       }
@@ -5524,10 +5540,12 @@ describe("hosted runtime callbacks", () => {
 
     expect(outcomes).toEqual([
       expect.objectContaining({
-        deliveryErrorCode: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
-        deliveryStatus: "retryable",
+        deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+        deliveryStatus: "failed_ambiguous",
+        retryable: false,
       }),
     ]);
+    expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledTimes(1);
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: expect.stringMatching(/Z$/u),

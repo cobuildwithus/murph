@@ -2847,6 +2847,71 @@ describe('assistant outbox runtime', () => {
     })
   })
 
+  it('does not resend accepted Linq voice memos when outcome recording fails', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-voice-outcome-',
+    )
+    await useActualOutboundDeliveryImplementation()
+
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'thread-linq-voice',
+      media: [createVoiceMemoMedia()],
+      message: '',
+      sessionId: 'session-linq-voice-outcome',
+      turnId: 'turn-linq-voice-outcome',
+    })
+    const sendLinqVoiceMemo = vi.fn(async () => {
+      throw Object.assign(new Error('accepted outcome could not be recorded'), {
+        code: 'ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY',
+        deliveryMayHaveSucceeded: true,
+        providerMessageId: 'linq-voice-message',
+        providerMessageIds: ['linq-voice-message'],
+        providerThreadId: 'thread-linq-voice',
+        target: 'thread-linq-voice',
+        targetKind: 'thread',
+      })
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinqVoiceMemo,
+      },
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:26:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('abandoned')
+    expect(dispatched.intent.deliveryConfirmationPending).toBe(false)
+    expect(dispatched.intent.nextAttemptAt).toBeNull()
+    expect(dispatched.intent.delivery).toMatchObject({
+      channel: 'linq',
+      messageLength: 0,
+      providerMessageId: 'linq-voice-message',
+      providerMessageIds: ['linq-voice-message'],
+      providerThreadId: 'thread-linq-voice',
+      target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+    expect(dispatched.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+    })
+
+    const secondDispatch = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinqVoiceMemo,
+      },
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:27:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(secondDispatch.intent.status).toBe('abandoned')
+    expect(sendLinqVoiceMemo).toHaveBeenCalledTimes(1)
+  })
+
   it('abandons Telegram transport ambiguity without retrying when no provider ids are known', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-telegram-transport-')
 

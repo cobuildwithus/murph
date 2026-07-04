@@ -2648,10 +2648,18 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       targetKind: "thread",
     });
     if (shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(input)) {
-      await recordHostedAssistantLinqDeliveryOutcomeRequired({
-        effectsPort: input.effectsPort ?? null,
-        outcome: acceptedOutcome,
-      });
+      try {
+        await recordHostedAssistantLinqDeliveryOutcomeRequired({
+          effectsPort: input.effectsPort ?? null,
+          outcome: acceptedOutcome,
+        });
+      } catch {
+        throw createHostedLinqVoiceMemoAcceptedOutcomeRecordFailure({
+          idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
+          providerTarget,
+          result,
+        });
+      }
     } else {
       queueHostedAssistantLinqDeliveryOutcomeWrite({
         effectsPort: input.effectsPort ?? null,
@@ -2660,6 +2668,60 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     }
     return result;
   };
+}
+
+function createHostedLinqVoiceMemoAcceptedOutcomeRecordFailure(input: {
+  idempotencyKey: string | null;
+  providerTarget: string;
+  result: HostedRuntimeLinqSendResponse;
+}): VaultCliError & {
+  deliveryMayHaveSucceeded: true;
+  providerMessageId: string | null;
+  providerMessageIds: string[];
+  providerThreadId: string | null;
+  target: string;
+  targetKind: HostedRuntimeProviderTargetKind;
+} {
+  const providerMessageIds = normalizeHostedLinqProviderMessageIds(input.result);
+  const providerMessageId = input.result.providerMessageId?.trim() || null;
+  const providerThreadId = input.result.providerThreadId ?? null;
+  const target = input.result.target ?? input.providerTarget;
+  const targetKind = input.result.targetKind ?? "thread";
+  const error = new VaultCliError(
+    "ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY",
+    "iMessage voice memo delivery was accepted, but recording the delivery outcome failed; automatic retry is disabled to avoid a duplicate voice memo.",
+    {
+      idempotencyKey: input.idempotencyKey,
+      providerMessageId,
+      providerMessageIds,
+      providerThreadId,
+      target,
+      targetKind,
+    },
+  );
+
+  return Object.assign(error, {
+    deliveryMayHaveSucceeded: true as const,
+    providerMessageId,
+    providerMessageIds,
+    providerThreadId,
+    target,
+    targetKind,
+  });
+}
+
+function normalizeHostedLinqProviderMessageIds(
+  result: HostedRuntimeLinqSendResponse,
+): string[] {
+  const providerMessageIds = Array.isArray(result.providerMessageIds)
+    ? result.providerMessageIds.filter((id) => id.trim().length > 0)
+    : [];
+  const providerMessageId = result.providerMessageId?.trim() ?? "";
+  return providerMessageIds.length > 0
+    ? providerMessageIds
+    : providerMessageId
+      ? [providerMessageId]
+      : [];
 }
 
 function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
