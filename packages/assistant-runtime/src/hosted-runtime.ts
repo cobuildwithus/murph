@@ -1525,7 +1525,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     let durableCheckpointWakeReason: string | null = null;
     let idleCheckpointStartByMs: number | null = null;
     let forceIdleCheckpointBeforeWake = false;
-    let forcedCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
+    let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
     let idleWakeOrdinal = 0;
     const markIdleCheckpointTimerAfterDirtyWork = () => {
       idleCheckpointStartByMs = Date.now() + idleCheckpointDelayMs;
@@ -1798,6 +1798,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
       const runIdleWakeForegroundPass = async (wakeInput: {
         includeProjectedWakeInWorkspace?: boolean;
+        initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
+        initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
         latencySeed?: HostedRuntimeWakeLatencySeed | null;
         projectedWakeKeyBeingServiced: string | null;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
@@ -1821,10 +1823,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               workspace: basePassWorkspace,
             });
         result = await runForegroundPass({
-          initialMailboxImport: null,
-          initialMailboxImportContext: createHostedRuntimeWakeInitialImportContext(
-            wakeInput.latencySeed ?? null,
-          ),
+          initialMailboxImport: wakeInput.initialMailboxImport ?? null,
+          initialMailboxImportContext: wakeInput.initialMailboxImportContext
+            ?? createHostedRuntimeWakeInitialImportContext(wakeInput.latencySeed ?? null),
           requestId: `${requestId}:${wakeInput.requestIdKind}:${idleWakeOrdinal}`,
           workspace: passWorkspace,
         });
@@ -1982,12 +1983,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           );
       };
       const runCheckpointInterruptForegroundPass = async (input: {
+        initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
+        initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
         latencySeed: HostedRuntimeWakeLatencySeed | null;
       }): Promise<void> => {
         const checkpointBlockedWakeInterrupted = hasCheckpointBlockedProjectedWake();
         await runIdleWakeForegroundPass({
           includeProjectedWakeInWorkspace:
             checkpointBlockedWakeInterrupted ? false : undefined,
+          initialMailboxImport: input.initialMailboxImport,
+          initialMailboxImportContext: input.initialMailboxImportContext,
           latencySeed: input.latencySeed,
           projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
           requestIdKind: "checkpoint-interrupt",
@@ -2107,11 +2112,35 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             });
             continue;
           }
-          forcedCheckpointWakeLatencySeed ??=
+          const pendingWakeLatencySeed =
             consumePendingHostedRuntimeWake(
               options.runtimeWakeSignal ?? null,
               options.shutdownSignal ?? null,
             );
+          if (pendingWakeLatencySeed) {
+            const pendingWakeImportContext = createHostedRuntimeWakeInitialImportContext(
+              pendingWakeLatencySeed,
+            );
+            const pendingWakeMailboxImport = await importHostedMailboxForWorkspaceRunner({
+              checkpointRequestBuilder,
+              checkpointReason: "import",
+              deferCheckpoint: true,
+              importItemContext: pendingWakeImportContext,
+              input: baseRunnerInput,
+              lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
+              requestId: `${requestId}:checkpoint-interrupt-import:${idleWakeOrdinal + 1}`,
+              signal: runtimeAbortController.signal,
+            });
+            if (hostedMailboxImportHasForegroundConversationWork(pendingWakeMailboxImport)) {
+              await runCheckpointInterruptForegroundPass({
+                initialMailboxImport: pendingWakeMailboxImport,
+                initialMailboxImportContext: pendingWakeImportContext,
+                latencySeed: pendingWakeLatencySeed,
+              });
+              continue;
+            }
+            pendingCheckpointWakeLatencySeed = pendingWakeLatencySeed;
+          }
           idleCheckpointWake = {
             inboxMediaRetentionWakeAt: accumulatedProjection.inboxMediaRetentionWakeAt,
             nextWakeAt: accumulatedProjection.nextWakeAt,
@@ -2361,12 +2390,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         };
         runtimeStateDirty = false;
         const checkpointWakeLatencySeed =
-          forcedCheckpointWakeLatencySeed
+          pendingCheckpointWakeLatencySeed
           ?? consumePendingHostedRuntimeWake(
             options.runtimeWakeSignal ?? null,
             options.shutdownSignal ?? null,
           );
-        forcedCheckpointWakeLatencySeed = null;
+        pendingCheckpointWakeLatencySeed = null;
         if (checkpointWakeLatencySeed) {
           await runIdleWakeForegroundPass({
             latencySeed: checkpointWakeLatencySeed,

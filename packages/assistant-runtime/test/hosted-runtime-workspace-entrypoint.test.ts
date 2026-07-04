@@ -8367,6 +8367,7 @@ describe("hosted workspace runtime entrypoint", () => {
         id: "mailbox_item_entrypoint_forced_checkpoint_pending_001",
         laneSeq: "1",
       }));
+      runtimeWakeSignal.notify();
       return {
         nextWakeAt: dueWakeAt,
         nextWakeReason: "assistant",
@@ -8374,7 +8375,6 @@ describe("hosted workspace runtime entrypoint", () => {
       };
     });
     let assistantPass = 0;
-    let checkpointInterrupted = false;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     try {
@@ -8391,7 +8391,10 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         {
           async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.reason}`);
+            events.push(
+              `snapshot:${snapshotInput.reason}:`
+              + `${snapshotInput.expectedWorkspaceVersion ?? "unknown"}`,
+            );
             return {
               snapshotRef: createBundleRef({
                 hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
@@ -8437,7 +8440,9 @@ describe("hosted workspace runtime entrypoint", () => {
                 const checkpointAttemptKind =
                   request.expectedWorkspaceVersion === "1"
                   && request.reason === "idle_shutdown"
-                  && !checkpointInterrupted
+                  && !events.includes(
+                    "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_001",
+                  )
                     ? "interrupt"
                     : "accept";
                 events.push(
@@ -8446,7 +8451,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 );
                 checkpointRequests.push(request);
                 if (checkpointAttemptKind === "interrupt") {
-                  checkpointInterrupted = true;
                   return {
                     checkpointConflictReason: "foreground_pending",
                     checkpointed: false,
@@ -8594,11 +8598,18 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(assistantPass, 5);
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.ok(
-        requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:interrupt")
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_001",
+        )
           < requireEventIndex(
             events,
-            "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_001",
+            "snapshot:idle_shutdown:1",
           ),
+      );
+      assert.ok(
+        !events.includes("workspace.checkpoint:1:idle_shutdown:interrupt"),
+        events.join(","),
       );
       assert.ok(
         requireEventIndex(events, "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_001")
@@ -8641,7 +8652,6 @@ describe("hosted workspace runtime entrypoint", () => {
         request.nextWakeReason,
       ]), [
         ["0", "idle_shutdown", null, null],
-        ["1", "idle_shutdown", dueWakeAt, "assistant"],
         ["1", "idle_shutdown", dueWakeAt, "assistant"],
         ["2", "idle_shutdown", freshFutureWakeAt, "assistant"],
       ]);
