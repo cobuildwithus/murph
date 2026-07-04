@@ -599,6 +599,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       once: true,
     });
   }
+  const runnerStartedAtEpochMs = Date.now();
   let foregroundConversationWorkObserved = false;
   const foregroundMailboxImportLoop =
     startHostedForegroundConversationMailboxImportLoop({
@@ -626,7 +627,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       return false;
     }
 
-    if (!input.runtimeWakeSignal?.consumePending()) {
+    const pendingRuntimeWake = input.runtimeWakeSignal?.consumePending() ?? null;
+    if (!pendingRuntimeWake) {
+      return false;
+    }
+
+    if (pendingRuntimeWake.notifiedAtEpochMs < runnerStartedAtEpochMs) {
       return false;
     }
 

@@ -875,7 +875,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("checkpoint-gates projected wakes without bypassing the idle checkpoint delay", async () => {
+  test("checkpoint-gates due projected wakes before servicing them", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -976,10 +976,6 @@ describe("hosted workspace runtime entrypoint", () => {
         events.join(",")
       );
       await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
-      assert.equal(checkpointRequests.length, 0);
-      assert.equal(durableEffect.mock.calls.length, 0);
-
-      await vi.advanceTimersByTimeAsync(180_000);
       await withRealTimeout(assistantTwoObserved.promise, runtimeTransitionTimeoutMs, () =>
         events.join(",")
       );
@@ -10991,6 +10987,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const idleCheckpointDelayMs = 250;
     const projectedWakeAt = new Date(Date.now()).toISOString();
     let assistantPhaseCalls = 0;
+    let firstCheckpointStartedAtMs: number | null = null;
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -11007,6 +11004,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         {
           async createCheckpointSnapshot(snapshotInput) {
+            firstCheckpointStartedAtMs ??= performance.now();
             events.push(`snapshot:${snapshotInput.reason}`);
             return {
               snapshotRef: createBundleRef({
@@ -11060,8 +11058,9 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       const elapsedMs = performance.now() - startedAt;
-      assert.ok(elapsedMs >= idleCheckpointDelayMs - 50);
       assert.ok(elapsedMs < 2_000);
+      assert.ok(firstCheckpointStartedAtMs !== null);
+      assert.ok(firstCheckpointStartedAtMs - startedAt < idleCheckpointDelayMs);
       assert.equal(assistantPhaseCalls, 2);
       const secondAssistantPhaseIndex = events.indexOf("assistant.phase:2");
       const snapshotIndex = events.findIndex((event) => event === "snapshot:idle_shutdown");
@@ -11075,6 +11074,119 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, null);
       assert.equal(result.status, "idle");
     } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("future projected runtime wake checkpoints at its deadline before the idle delay", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 180_000;
+    const projectedWakeAt = new Date(Date.parse(TEST_NOW) + 60_000).toISOString();
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+    let firstCheckpointStartedAtMs: number | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_runtime_projected_wake_deadline_checkpoint",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              firstCheckpointStartedAtMs ??= Date.now();
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "9".repeat(64),
+                  key: "users/bundles/member-synthetic/runtime-projected-wake-deadline.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              events.push(
+                `assistant.phase:${assistantPhaseCalls}:${input.workspace?.nextWakeAt ?? "none"}`,
+              );
+              if (assistantPhaseCalls === 1) {
+                assistantOneObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: projectedWakeAt,
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantNextWakeAt: projectedWakeAt,
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              assistantTwoObserved.resolve();
+              const redactedStatus: HostedRuntimeRedactedJson = {
+                hostedAssistantProgressed: false,
+              };
+              return {
+                progressed: false,
+                redactedStatus,
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await vi.advanceTimersByTimeAsync(59_000);
+      assert.equal(checkpointRequests.length, 0);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      const result = await resultPromise;
+
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(projectedWakeAt));
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, projectedWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(events, `assistant.phase:2:${projectedWakeAt}`),
+      );
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, projectedWakeAt);
+    } finally {
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });

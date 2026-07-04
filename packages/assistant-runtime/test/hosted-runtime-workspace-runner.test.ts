@@ -152,6 +152,61 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("stale pending runtime wakes do not yield background maintenance after foreground stop", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-stale-runtime-wake-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const yieldStates: boolean[] = [];
+
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_stale_runtime_wake",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_stale_runtime_wake",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          await input.prepareAutoReplyDelivery?.();
+
+          runtimeWakeSignal.notify(Date.parse(TEST_NOW) - 1);
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+
+          runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(yieldStates, [false, false, true]);
+    } finally {
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("preserves explicit null browser-vault replica refs in checkpoint builders", async () => {
     const state = createEmptyHostedMailboxImportState();
     const requestInput = {
