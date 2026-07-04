@@ -282,6 +282,20 @@ export async function startHostedLocalDevHarness(input: {
           }
 
           const now = Date.now();
+          const hasDueWorkspaceWake = hostedStatusHasDueWorkspaceWake(status, now);
+          if (
+            hasDueWorkspaceWake
+            && !status.inFlight
+            && !status.lastErrorCode
+            && now >= nextCompletionRetryAt
+          ) {
+            nextCompletionRetryAt = now + hostedLocalCompletionRetryMs;
+            await maybeRunHostedManualRecovery(userId)
+              .catch(() => nudgeHostedUserBestEffort(userId));
+            await sleep(pollIntervalMs);
+            continue;
+          }
+
           const hasMailboxLag = hostedStatusHasMailboxLag(status);
           mailboxLagFirstObservedAt = hasMailboxLag
             ? mailboxLagFirstObservedAt ?? now
@@ -607,11 +621,28 @@ function resolveHostedCompletionStatus(
     return null;
   }
 
+  if (hostedStatusHasDueWorkspaceWake(status)) {
+    return null;
+  }
+
   if (status.mailboxLag.every((lane) => lane.lag === "0")) {
     return status.workspace !== null ? status : null;
   }
 
   return null;
+}
+
+function hostedStatusHasDueWorkspaceWake(
+  status: HostedRunnerStatusResponse,
+  now = Date.now(),
+): boolean {
+  const rawNextWakeAt = status.workspace?.nextWakeAt ?? null;
+  if (rawNextWakeAt === null) {
+    return false;
+  }
+
+  const nextWakeAt = Date.parse(rawNextWakeAt);
+  return Number.isFinite(nextWakeAt) && nextWakeAt <= now;
 }
 
 function hasLocalMailboxDrainEvidence(

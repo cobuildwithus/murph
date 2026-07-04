@@ -1832,7 +1832,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (result.runtimeStateDirty) {
           markIdleCheckpointTimerAfterDirtyWork();
         }
-        const nextProjection = buildHostedWorkspaceInvocationProjection({
+        let nextProjection = buildHostedWorkspaceInvocationProjection({
           mailboxBudgetExhausted: mailboxBudgetExhausted(),
           result,
           workspace: passWorkspace,
@@ -1899,15 +1899,47 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             pendingDurableCheckpointEffects.length > 0
             || accumulatedProjection.projectedWakeRequiresCheckpoint
           );
+        let deferredPreviousWakeCheckpointGateFresh: boolean | undefined;
+        if (previousWakeHiddenByCheckpointBoundary) {
+          deferredPreviousWakeCheckpointGateFresh =
+            accumulatedProjection.projectedWakeRequiresCheckpoint
+              ? accumulatedProjection.projectedWakeCheckpointGateFresh
+              : true;
+        }
+        const checkpointInterruptedFutureNonAssistantWake =
+          checkpointInterruptedForegroundWork
+          && accumulatedProjection.nextWakeReason !== "assistant"
+          && !hostedRuntimeWakeIsDue(accumulatedProjection.nextWakeAt)
+          && nextProjection.nextWakeAt === null;
+        const checkpointInterruptedPendingAssistantInputWake =
+          checkpointInterruptedFutureNonAssistantWake
+          && accumulatedProjection.projectedWakeRequiresCheckpoint
+          && result.latestMailboxImport !== result.initialMailboxImport
+          && (result.latestMailboxImport.importResult.assistantInputIds?.length ?? 0) > 0;
+        if (checkpointInterruptedPendingAssistantInputWake) {
+          nextProjection = {
+            ...nextProjection,
+            nextWakeAt: new Date().toISOString(),
+            nextWakeReason: "assistant",
+            projectedWakeCheckpointGateFresh: false,
+            projectedWakeRequiresCheckpoint: false,
+            status: nextProjection.status === "budget_exhausted"
+              ? "budget_exhausted"
+              : "scheduled",
+          };
+        }
         const replaceWake =
           replaceWakeRequested
-          && !checkpointInterruptedForegroundWork
+          && (
+            !checkpointInterruptedForegroundWork
+            || checkpointInterruptedFutureNonAssistantWake
+          )
           && !protectedCheckpointBlockedWake;
         accumulatedProjection = mergeHostedWorkspaceInvocationProjection(
           accumulatedProjection,
           nextProjection,
           {
-            preserveDisplacedPreviousWake: previousWakeHiddenByCheckpointBoundary,
+            deferredPreviousWakeCheckpointGateFresh,
             replaceWake,
             servicedProjectedWakeKey: effectiveServicedProjectedWakeKey,
           },
@@ -2908,8 +2940,7 @@ export async function drainHostedRuntimeDeferredUsageCompletionsBestEffort(input
 
 interface HostedWorkspaceInvocationProjection {
   committedWorkspace: HostedWorkspaceState | null;
-  deferredAfterSelectedWakeAt: string | null;
-  deferredAfterSelectedWakeReason: string | null;
+  deferredAfterSelectedWake: HostedWorkspaceInvocationProjectedWake;
   inboxMediaRetentionWakeAt: string | null;
   projectedWakeCheckpointGateFresh: boolean;
   nextWakeAt: string | null;
@@ -2976,6 +3007,12 @@ function buildHostedWorkspaceInvocationProjection(input: {
     mailboxImportRetryAt,
     nowMs: projectionNowMs,
   });
+  const projectedAssistantWakeIsStaleAfterForeground =
+    input.result.projectedWakeRequiresCheckpoint
+    && nextWake.nextWakeReason === "assistant"
+    && input.result.assistantPhaseResult?.browserVaultReplicaRefreshRequested !== true
+    && input.result.assistantPhaseResult?.checkpointReason !== "system_mailbox_receipt"
+    && hostedMailboxImportHasForegroundConversationWork(effectiveMailboxImport);
   const mailboxRedactedStatus = buildHostedMailboxImportRedactedStatus(
     effectiveMailboxImport.importResult,
   );
@@ -2992,12 +3029,13 @@ function buildHostedWorkspaceInvocationProjection(input: {
 
   return {
     committedWorkspace,
-    deferredAfterSelectedWakeAt: null,
-    deferredAfterSelectedWakeReason: null,
+    deferredAfterSelectedWake: emptyHostedWorkspaceInvocationProjectedWake(),
     inboxMediaRetentionWakeAt: committedWorkspace?.inboxMediaRetentionWakeAt ?? null,
     nextWakeAt: nextWake.nextWakeAt,
     nextWakeReason: nextWake.nextWakeReason,
-    projectedWakeCheckpointGateFresh: input.result.projectedWakeRequiresCheckpoint,
+    projectedWakeCheckpointGateFresh:
+      input.result.projectedWakeRequiresCheckpoint
+      && !projectedAssistantWakeIsStaleAfterForeground,
     projectedWakeRequiresCheckpoint: input.result.projectedWakeRequiresCheckpoint,
     redactedStatus,
     status: resolveHostedWorkspaceInvocationStatus({
@@ -3011,7 +3049,7 @@ function mergeHostedWorkspaceInvocationProjection(
   previous: HostedWorkspaceInvocationProjection,
   next: HostedWorkspaceInvocationProjection,
   options: {
-    preserveDisplacedPreviousWake?: boolean;
+    deferredPreviousWakeCheckpointGateFresh?: boolean;
     replaceWake?: boolean;
     servicedProjectedWakeKey?: string | null;
   } = {},
@@ -3077,7 +3115,7 @@ function mergeHostedWorkspaceInvocationProjection(
   }
 
   const previousWakeShouldBeDeferredIfDisplaced =
-    options.preserveDisplacedPreviousWake === true
+    options.deferredPreviousWakeCheckpointGateFresh !== undefined
     || previous.projectedWakeRequiresCheckpoint;
   const previousWakeWasDisplaced =
     !previousWakeWasServiced
@@ -3090,10 +3128,17 @@ function mergeHostedWorkspaceInvocationProjection(
     );
   let deferredAfterSelectedWake = emptyHostedWorkspaceInvocationProjectedWake();
   if (previousWakeWasDisplaced) {
+    const displacedPreviousWake =
+      options.deferredPreviousWakeCheckpointGateFresh !== undefined
+        ? gateDeferredWakeBehindCheckpointBoundary(
+            previousSelectedWake,
+            options.deferredPreviousWakeCheckpointGateFresh,
+          )
+        : previousSelectedWake;
     deferredAfterSelectedWake =
       selectEarliestHostedWorkspaceInvocationProjectedWake([
         previousDeferredWake,
-        previousSelectedWake,
+        displacedPreviousWake,
       ]);
   } else if (
     !previousWakeWasServiced
@@ -3110,10 +3155,14 @@ function mergeHostedWorkspaceInvocationProjection(
       )
         ? emptyHostedWorkspaceInvocationProjectedWake()
         : nextSelectedWake;
+    const checkpointDeferredNextWake =
+      previousSelectedWake.projectedWakeRequiresCheckpoint
+        ? gateDeferredWakeBehindCheckpointBoundary(nextDeferredWake)
+        : nextDeferredWake;
     deferredAfterSelectedWake =
       selectEarliestHostedWorkspaceInvocationProjectedWake([
         previousDeferredWake,
-        nextDeferredWake,
+        checkpointDeferredNextWake,
       ]);
   } else if (
     previousWakeWasServiced
@@ -3154,8 +3203,7 @@ function mergeHostedWorkspaceInvocationProjection(
 
   return {
     committedWorkspace: next.committedWorkspace ?? previous.committedWorkspace,
-    deferredAfterSelectedWakeAt: deferredAfterSelectedWake.nextWakeAt,
-    deferredAfterSelectedWakeReason: deferredAfterSelectedWake.nextWakeReason,
+    deferredAfterSelectedWake,
     inboxMediaRetentionWakeAt: next.committedWorkspace
       ? next.inboxMediaRetentionWakeAt
       : previous.inboxMediaRetentionWakeAt,
@@ -3170,6 +3218,26 @@ function mergeHostedWorkspaceInvocationProjection(
       ...next.redactedStatus,
     },
     status,
+  };
+}
+
+function gateDeferredWakeBehindCheckpointBoundary(
+  wake: HostedWorkspaceInvocationProjectedWake,
+  checkpointGateFresh?: boolean,
+): HostedWorkspaceInvocationProjectedWake {
+  if (wake.nextWakeAt === null) {
+    return wake;
+  }
+
+  return {
+    ...wake,
+    projectedWakeCheckpointGateFresh:
+      checkpointGateFresh
+      ?? (
+        wake.projectedWakeCheckpointGateFresh
+        || !wake.projectedWakeRequiresCheckpoint
+      ),
+    projectedWakeRequiresCheckpoint: true,
   };
 }
 
@@ -3204,14 +3272,7 @@ function readSelectedHostedWorkspaceInvocationProjectedWake(
 function readDeferredHostedWorkspaceInvocationProjectedWake(
   projection: HostedWorkspaceInvocationProjection,
 ): HostedWorkspaceInvocationProjectedWake {
-  return {
-    nextWakeAt: projection.deferredAfterSelectedWakeAt,
-    nextWakeReason: projection.deferredAfterSelectedWakeReason,
-    projectedWakeCheckpointGateFresh:
-      projection.deferredAfterSelectedWakeAt !== null,
-    projectedWakeRequiresCheckpoint:
-      projection.deferredAfterSelectedWakeAt !== null,
-  };
+  return projection.deferredAfterSelectedWake;
 }
 
 function selectEarliestHostedWorkspaceInvocationProjectedWake(

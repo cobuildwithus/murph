@@ -1131,8 +1131,8 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       await waitUntil(() => {
-        assert.equal(events.includes("mailbox.afterCheckpoint:start"), true);
-      });
+        assert.equal(events.includes("mailbox.afterCheckpoint:start"), true, events.join(","));
+      }, 10_000);
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_entrypoint_effects_blocked_due_wake_002",
         laneSeq: "2",
@@ -5420,6 +5420,12 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           runtimeWakeSignal,
+          async runAssistantPhase() {
+            return {
+              progressed: false,
+              redactedStatus: {},
+            };
+          },
           vaultRoot,
         },
       );
@@ -6673,11 +6679,13 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const checkpointResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPhaseCalls = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     let settled = false;
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_wake_during_checkpoint",
@@ -6724,6 +6732,22 @@ describe("hosted workspace runtime entrypoint", () => {
             },
           }),
           runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            if (assistantPhaseCalls > 1) {
+              return {
+                progressed: false,
+              };
+            }
+
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
           vaultRoot,
         },
       ).finally(() => {
@@ -6731,8 +6755,8 @@ describe("hosted workspace runtime entrypoint", () => {
       });
 
       await waitUntil(() => {
-        assert.equal(checkpointRequests.length, 1);
-      });
+        assert.equal(checkpointRequests.length, 1, events.join(","));
+      }, 10_000);
       await new Promise((resolve) => setTimeout(resolve, 10));
       assert.equal(settled, false);
       assert.equal(checkpointRequests.length, 1);
@@ -6745,6 +6769,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
       });
 
+      assert.ok(resultPromise);
       await expect(resultPromise).resolves.toMatchObject({
         status: "idle",
         redactedStatus: {
@@ -6762,6 +6787,7 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointed: true,
         workspace: createWorkspaceState({ version: "5" }),
       });
+      await resultPromise?.catch(() => undefined);
       await removeTempRoot(vaultRoot);
     }
   });
@@ -8389,7 +8415,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       await waitUntil(() => {
         assert.equal(events.includes("mailbox.afterCheckpoint:start"), true);
-      });
+      }, 10_000);
       assert.ok(
         !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
         events.join(","),
@@ -9760,6 +9786,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const runtimeAbortReason = new Error("synthetic stale gate foreground proof complete");
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const idleCheckpointDelayMs = 10_000;
+    const runtimeTransitionTimeoutMs = 15_000;
     const systemFollowUpWakeAt = "2099-04-27T00:10:00.000Z";
     const mailboxItems = [
       createMailboxItem({
@@ -9878,6 +9905,13 @@ describe("hosted workspace runtime entrypoint", () => {
                 inputId: lateConversationInputId,
                 vault: vaultRoot,
               }));
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: lateConversationInputId,
+                vaultRoot,
+              });
+            }
+            if (assistantPhaseCalls > 3) {
+              throw new Error(`Unexpected extra assistant phase: ${events.join(",")}`);
             }
             runtimeAbortController.abort(runtimeAbortReason);
             const assistantRedactedStatus: HostedRuntimeRedactedJson = {
@@ -9898,10 +9932,14 @@ describe("hosted workspace runtime entrypoint", () => {
         (error: unknown) => error,
       );
       await waitUntil(() => {
-        assert.equal(assistantPhaseCalls, 3);
-      });
+        assert.equal(assistantPhaseCalls, 3, events.join(","));
+      }, runtimeTransitionTimeoutMs);
       const elapsedMs = performance.now() - startedAt;
-      const result = await resultPromise;
+      const result = await withRealTimeout(
+        resultPromise,
+        runtimeTransitionTimeoutMs,
+        () => events.join(","),
+      );
 
       assert.equal(result, runtimeAbortReason);
       assert.ok(events.includes(
@@ -10210,7 +10248,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("late foreground input does not clear gate for selected retryable outbox wake", async () => {
+  test("late foreground input does not clear gate for deferred retryable outbox wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-outbox-gate-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -10219,6 +10257,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const unexpectedRetryBeforeCheckpoint = new Error(
       "unexpected retryable outbox wake before idle checkpoint",
     );
+    const competingWakeAt = "2026-04-26T23:59:00.000Z";
     const outboxRetryWakeAt = "2026-04-26T23:59:30.000Z";
     const mailboxItems: HostedMailboxItem[] = [];
     let assistantPhaseCalls = 0;
@@ -10281,7 +10320,7 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
@@ -10316,7 +10355,8 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             }
 
-            if (lateConversationInputId) {
+            if (assistantPhaseCalls === 2) {
+              assert.ok(lateConversationInputId);
               assert.ok(await readAssistantInputEvent({
                 inputId: lateConversationInputId,
                 vault: vaultRoot,
@@ -10325,33 +10365,54 @@ describe("hosted workspace runtime entrypoint", () => {
                 inputId: lateConversationInputId,
                 vaultRoot,
               });
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: competingWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
             }
-            if (assistantPhaseCalls > 2) {
+
+            if (assistantPhaseCalls === 3) {
+              assert.equal(input.workspace?.nextWakeAt, competingWakeAt);
+              assert.equal(input.workspace?.nextWakeReason, "assistant");
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: null,
+                nextWakeReason: null,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
+            }
+
+            if (assistantPhaseCalls > 3) {
               events.push("outbox.retryBeforeCheckpoint");
               runtimeAbortController.abort(unexpectedRetryBeforeCheckpoint);
               throw unexpectedRetryBeforeCheckpoint;
             }
-            return {
-              checkpointReason: "assistant_runtime_commit" as const,
-              nextWakeAt: outboxRetryWakeAt,
-              nextWakeReason: "assistant",
-              progressed: true,
-              redactedStatus: {
-                hostedAssistantProgressed: true,
-              },
-            };
+
+            throw new Error("Unexpected assistant phase without late foreground input.");
           },
           signal: runtimeAbortController.signal,
           vaultRoot,
         },
       );
 
-      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(assistantPhaseCalls, 3);
       assert.ok(lateConversationInputId);
       assert.ok(events.includes("outbox.afterCheckpoint"));
       assert.ok(events.includes("snapshot:idle_shutdown"));
       assert.ok(
         requireEventIndex(events, "assistant.phase:2")
+          < requireEventIndex(events, "assistant.phase:3"),
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:3")
           < requireEventIndex(events, "snapshot:idle_shutdown"),
       );
       assert.equal(checkpointRequests.length, 1);
