@@ -1891,6 +1891,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             || replaceWakeEchoesHiddenServiceableWake
             || replaceWakeCompetesWithHiddenCheckpointWake
           );
+        const previousWakeHiddenByCheckpointBoundary =
+          wakeInput.includeProjectedWakeInWorkspace === false
+          && effectiveServicedProjectedWakeKey === null
+          && accumulatedProjection.nextWakeAt !== null
+          && (
+            pendingDurableCheckpointEffects.length > 0
+            || accumulatedProjection.projectedWakeRequiresCheckpoint
+          );
         const replaceWake =
           replaceWakeRequested
           && !checkpointInterruptedForegroundWork
@@ -1899,6 +1907,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           accumulatedProjection,
           nextProjection,
           {
+            preserveDisplacedPreviousWake: previousWakeHiddenByCheckpointBoundary,
             replaceWake,
             servicedProjectedWakeKey: effectiveServicedProjectedWakeKey,
           },
@@ -3002,6 +3011,7 @@ function mergeHostedWorkspaceInvocationProjection(
   previous: HostedWorkspaceInvocationProjection,
   next: HostedWorkspaceInvocationProjection,
   options: {
+    preserveDisplacedPreviousWake?: boolean;
     replaceWake?: boolean;
     servicedProjectedWakeKey?: string | null;
   } = {},
@@ -3066,17 +3076,20 @@ function mergeHostedWorkspaceInvocationProjection(
     ]);
   }
 
-  const previousCheckpointRequiredWakeWasDisplaced =
+  const previousWakeShouldBeDeferredIfDisplaced =
+    options.preserveDisplacedPreviousWake === true
+    || previous.projectedWakeRequiresCheckpoint;
+  const previousWakeWasDisplaced =
     !previousWakeWasServiced
     && options.replaceWake !== true
-    && previous.projectedWakeRequiresCheckpoint
+    && previousWakeShouldBeDeferredIfDisplaced
     && previousSelectedWake.nextWakeAt !== null
     && !hostedWorkspaceInvocationProjectionWakeMatches(
       selectedProjectedWake,
       previousSelectedWake,
     );
   let deferredAfterSelectedWake = emptyHostedWorkspaceInvocationProjectedWake();
-  if (previousCheckpointRequiredWakeWasDisplaced) {
+  if (previousWakeWasDisplaced) {
     deferredAfterSelectedWake =
       selectEarliestHostedWorkspaceInvocationProjectedWake([
         previousDeferredWake,
