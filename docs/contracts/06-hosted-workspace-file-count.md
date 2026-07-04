@@ -162,3 +162,13 @@ landing; record the chosen posture here so the decision is reviewable.
   snapshot-bridge pruning guard once production vaults have all written the
   marker. The steady-state file bound for the provider-cleanup family is
   asserted by the provider-cleanup unit tests.
+
+- `assistant-state/auto-reply/answered-coverage.json`
+  (`murph.assistant-auto-reply-answered-coverage.v1`) is compact durable
+  operational-continuity state included in hosted snapshots. It is one
+  overwritten projection per workspace, not one file per input, turn, delivery,
+  or retry. Auto-reply terminal evidence advances the contiguous hosted mailbox
+  conversation coverage in place and keeps at most 500 future lane sequence
+  numbers while waiting for gaps to close. The file is absent until hosted
+  mailbox auto-reply terminal evidence exists, and steady state remains zero or
+  one small file regardless of message volume.

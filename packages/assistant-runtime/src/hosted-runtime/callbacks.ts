@@ -2000,6 +2000,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           actionApprovalPort: input.actionApprovalPort,
           answeredCoverage: input.assistantDeliveryEffect.payload.answeredCoverage,
           assertLiveness: input.assertLiveness,
+          deliveryTransportIdempotent:
+            input.assistantDeliveryEffect.payload.transportIdempotent,
           effectsPort: input.effectsPort,
           expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
           intentId: input.assistantDeliveryEffect.effectId,
@@ -2017,6 +2019,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
           answeredCoverage: input.assistantDeliveryEffect.payload.answeredCoverage,
           assertLiveness: input.assertLiveness,
+          deliveryTransportIdempotent:
+            input.assistantDeliveryEffect.payload.transportIdempotent,
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
@@ -2318,6 +2322,7 @@ function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   answeredCoverage?: HostedAssistantAnsweredCoverage | null;
   assertLiveness?: () => Promise<void>;
+  deliveryTransportIdempotent?: boolean | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome"
@@ -2443,7 +2448,7 @@ function createHostedAssistantLinqSendDependency(input: {
       target: request.target,
       targetKind: request.targetKind ?? null,
     });
-    if (input.answeredCoverage) {
+    if (shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(input)) {
       await recordHostedAssistantLinqDeliveryOutcomeRequired({
         effectsPort: input.effectsPort ?? null,
         outcome: acceptedOutcome,
@@ -2579,6 +2584,7 @@ function buildHostedVaultFileMediaIdentity(input: {
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   answeredCoverage?: HostedAssistantAnsweredCoverage | null;
   assertLiveness?: () => Promise<void>;
+  deliveryTransportIdempotent?: boolean | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
     "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome"
@@ -2665,7 +2671,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       target: providerTarget,
       targetKind: "thread",
     });
-    if (input.answeredCoverage) {
+    if (shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(input)) {
       await recordHostedAssistantLinqDeliveryOutcomeRequired({
         effectsPort: input.effectsPort ?? null,
         outcome: acceptedOutcome,
@@ -2718,6 +2724,16 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
 }
 
 const pendingHostedAssistantLinqDeliveryOutcomeWrites = new Set<Promise<void>>();
+
+function shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(input: {
+  answeredCoverage?: HostedAssistantAnsweredCoverage | null;
+  deliveryTransportIdempotent?: boolean | null;
+}): boolean {
+  return Boolean(
+    input.answeredCoverage &&
+    input.deliveryTransportIdempotent !== false,
+  );
+}
 
 async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
   effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
