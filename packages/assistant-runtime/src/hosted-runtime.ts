@@ -1914,33 +1914,56 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           requestIdKind: "checkpoint-interrupt",
         });
       };
+      const importRuntimeWakeForegroundMailbox = async (input: {
+        latencySeed: HostedRuntimeWakeLatencySeed | null;
+        requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
+      }): Promise<{
+        initialMailboxImport: HostedMailboxImportCheckpointResult;
+        initialMailboxImportContext: HostedWorkspaceRunnerMailboxImportContext | null;
+      }> => {
+        const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
+          input.latencySeed,
+        );
+        const initialMailboxImport = await importHostedMailboxForWorkspaceRunner({
+          checkpointRequestBuilder,
+          checkpointReason: "active_turn_input",
+          deferCheckpoint: true,
+          importItem: importForegroundMailboxItem,
+          importItemContext: initialMailboxImportContext,
+          input: baseRunnerInput,
+          lanes: ["system", "conversation"],
+          limitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
+          requestId:
+            `${requestId}:${input.requestIdKind}-foreground-import:${idleWakeOrdinal + 1}`,
+          signal: runtimeAbortController.signal,
+        });
+        return {
+          initialMailboxImport,
+          initialMailboxImportContext,
+        };
+      };
       const runPreCheckpointRuntimeWakeForegroundPass = async (input: {
         latencySeed: HostedRuntimeWakeLatencySeed | null;
       }): Promise<void> => {
+        const foregroundImport = await importRuntimeWakeForegroundMailbox({
+          latencySeed: input.latencySeed,
+          requestIdKind: "checkpoint-interrupt",
+        });
         if (hasCheckpointBlockedProjectedWake()) {
-          const pendingWakeImportContext = createHostedRuntimeWakeInitialImportContext(
-            input.latencySeed,
-          );
-          const pendingWakeMailboxImport = await importHostedMailboxForWorkspaceRunner({
-            checkpointRequestBuilder,
-            checkpointReason: "import",
-            deferCheckpoint: true,
-            importItemContext: pendingWakeImportContext,
-            input: baseRunnerInput,
-            lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
-            requestId: `${requestId}:checkpoint-interrupt-import:${idleWakeOrdinal + 1}`,
-            signal: runtimeAbortController.signal,
-          });
-          if (hostedMailboxImportHasForegroundConversationWork(pendingWakeMailboxImport)) {
+          if (hostedMailboxImportHasForegroundConversationWork(
+            foregroundImport.initialMailboxImport,
+          )) {
             await runCheckpointInterruptForegroundPass({
-              initialMailboxImport: pendingWakeMailboxImport,
-              initialMailboxImportContext: pendingWakeImportContext,
+              initialMailboxImport: foregroundImport.initialMailboxImport,
+              initialMailboxImportContext: foregroundImport.initialMailboxImportContext,
               latencySeed: input.latencySeed,
             });
           }
           return;
         }
         await runIdleWakeForegroundPass({
+          initialMailboxImport: foregroundImport.initialMailboxImport,
+          initialMailboxImportContext: foregroundImport.initialMailboxImportContext,
           latencySeed: input.latencySeed,
           projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
           requestIdKind: "idle-wake",
@@ -2054,7 +2077,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             if (checkpointProjectedWakeBeforeService) {
               await runPreCheckpointRuntimeWakeForegroundPass({ latencySeed });
             } else {
-              await runCheckpointInterruptForegroundPass({ latencySeed });
+              const foregroundImport = await importRuntimeWakeForegroundMailbox({
+                latencySeed,
+                requestIdKind: "checkpoint-interrupt",
+              });
+              await runCheckpointInterruptForegroundPass({
+                initialMailboxImport: foregroundImport.initialMailboxImport,
+                initialMailboxImportContext: foregroundImport.initialMailboxImportContext,
+                latencySeed,
+              });
             }
             continue;
           }
@@ -2070,23 +2101,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               });
               continue;
             }
-            const pendingWakeImportContext = createHostedRuntimeWakeInitialImportContext(
-              pendingWakeLatencySeed,
-            );
-            const pendingWakeMailboxImport = await importHostedMailboxForWorkspaceRunner({
-              checkpointRequestBuilder,
-              checkpointReason: "import",
-              deferCheckpoint: true,
-              importItemContext: pendingWakeImportContext,
-              input: baseRunnerInput,
-              lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
-              requestId: `${requestId}:checkpoint-interrupt-import:${idleWakeOrdinal + 1}`,
-              signal: runtimeAbortController.signal,
+            const foregroundImport = await importRuntimeWakeForegroundMailbox({
+              latencySeed: pendingWakeLatencySeed,
+              requestIdKind: "checkpoint-interrupt",
             });
-            if (hostedMailboxImportHasForegroundConversationWork(pendingWakeMailboxImport)) {
+            if (hostedMailboxImportHasForegroundConversationWork(
+              foregroundImport.initialMailboxImport,
+            )) {
               await runCheckpointInterruptForegroundPass({
-                initialMailboxImport: pendingWakeMailboxImport,
-                initialMailboxImportContext: pendingWakeImportContext,
+                initialMailboxImport: foregroundImport.initialMailboxImport,
+                initialMailboxImportContext: foregroundImport.initialMailboxImportContext,
                 latencySeed: pendingWakeLatencySeed,
               });
               continue;
@@ -2113,7 +2137,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             consumePendingHostedRuntimeWake(
               options.runtimeWakeSignal ?? null,
               options.shutdownSignal ?? null,
-          );
+            );
           if (pendingWakeLatencySeed) {
             await runPreCheckpointRuntimeWakeForegroundPass({
               latencySeed: pendingWakeLatencySeed,
@@ -2214,8 +2238,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
         } catch (error) {
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
+            const latencySeed = createHostedRuntimeWakeLatencySeed(error.notification);
+            const foregroundImport = await importRuntimeWakeForegroundMailbox({
+              latencySeed,
+              requestIdKind: "checkpoint-interrupt",
+            });
             await runCheckpointInterruptForegroundPass({
-              latencySeed: createHostedRuntimeWakeLatencySeed(error.notification),
+              initialMailboxImport: foregroundImport.initialMailboxImport,
+              initialMailboxImportContext: foregroundImport.initialMailboxImportContext,
+              latencySeed,
             });
             continue;
           }
@@ -2297,7 +2328,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           );
         pendingCheckpointWakeLatencySeed = null;
         if (checkpointWakeLatencySeed) {
+          const foregroundImport = await importRuntimeWakeForegroundMailbox({
+            latencySeed: checkpointWakeLatencySeed,
+            requestIdKind: "checkpoint-wake",
+          });
           await runIdleWakeForegroundPass({
+            initialMailboxImport: foregroundImport.initialMailboxImport,
+            initialMailboxImportContext: foregroundImport.initialMailboxImportContext,
             latencySeed: checkpointWakeLatencySeed,
             projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
             requestIdKind: "checkpoint-wake",

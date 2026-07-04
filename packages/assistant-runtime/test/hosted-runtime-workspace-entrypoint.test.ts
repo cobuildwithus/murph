@@ -6212,6 +6212,119 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("late runtime wake imports conversation input with the foreground budget after foreground loop stop", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runtime-late-foreground-budget-"),
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const importedSeqs: string[] = [];
+    const mailboxItems = Array.from({ length: 13 }, (_, index) => {
+      const seq = String(index + 1);
+      return createMailboxItem({
+        id: `mailbox_item_entrypoint_late_foreground_budget_${seq.padStart(3, "0")}`,
+        laneSeq: seq,
+      });
+    });
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_late_foreground_budget",
+            budget: {
+              maxMailboxItems: 12,
+            },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            const conversationWatermark = await readCheckpointConversationWatermark(
+              snapshotInput,
+              vaultRoot,
+            );
+            events.push(`snapshot:${snapshotInput.reason}:${conversationWatermark}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/late-foreground-budget.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            importedSeqs.push(item.item.laneSeq);
+            events.push(`import:${item.item.laneSeq}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push(
+              `assistant:${assistantPhaseCalls}:${input.initialMailboxImport.state.watermarks.conversation}`,
+            );
+            if (assistantPhaseCalls === 1) {
+              await input.prepareAutoReplyDelivery?.();
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_late_foreground_budget_014",
+                laneSeq: "14",
+                occurredAt: "2026-04-27T00:00:14.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              return {
+                checkpointReason: "canonical_runtime_commit",
+                progressed: true,
+              };
+            }
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(
+        importedSeqs,
+        Array.from({ length: 14 }, (_, index) => String(index + 1)),
+      );
+      assert.ok(
+        fetchRequests.some((request) =>
+          readConversationImportedSeq(request) === "12"
+          && request.limitPerLane === 11
+        ),
+      );
+      assert.ok(events.includes("assistant:2:14"));
+      assert.ok(events.includes("snapshot:idle_shutdown:14"));
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "14",
+      );
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "14");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("foreground mailbox budget admits rapid follow-ups after the initial import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-replay-budget-"));
     const events: string[] = [];
