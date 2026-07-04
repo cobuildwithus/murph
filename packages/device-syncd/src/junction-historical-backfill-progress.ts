@@ -1,6 +1,8 @@
 export type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
 
 export interface JunctionHistoricalBackfillProgress {
+  emptyAttempts: number;
+  lastEmptyAt: string | null;
   status: JunctionHistoricalBackfillStatus;
   windowEnd: string;
   windowStart: string;
@@ -36,13 +38,15 @@ export function readJunctionHistoricalBackfillProgress(
   }
 
   return {
+    emptyAttempts: readMetadataNumber(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts]),
+    lastEmptyAt: readMetadataString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt]),
     status,
     windowEnd,
     windowStart,
   };
 }
 
-export function shouldPreserveLocalJunctionHistoricalBackfillTerminalProgress(input: {
+export function shouldPreserveLocalJunctionHistoricalBackfillProgress(input: {
   hostedMetadata: Record<string, unknown>;
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown>;
@@ -53,10 +57,6 @@ export function shouldPreserveLocalJunctionHistoricalBackfillTerminalProgress(in
 
   const localProgress = readJunctionHistoricalBackfillProgress(input.localMetadata);
   if (!localProgress) {
-    return false;
-  }
-
-  if (localProgress.status === "retrying") {
     return false;
   }
 
@@ -72,6 +72,14 @@ export function shouldPreserveLocalJunctionHistoricalBackfillTerminalProgress(in
     return false;
   }
 
+  if (localProgress.status === "retrying") {
+    if (hostedProgress.status !== "retrying") {
+      return false;
+    }
+
+    return compareJunctionRetryProgress(localProgress, hostedProgress) > 0;
+  }
+
   if (localProgress.status === "complete") {
     return hostedProgress.status !== "complete";
   }
@@ -84,7 +92,7 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown>;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
-  const preservedLocalProgress = shouldPreserveLocalJunctionHistoricalBackfillTerminalProgress(input);
+  const preservedLocalProgress = shouldPreserveLocalJunctionHistoricalBackfillProgress(input);
 
   if (!preservedLocalProgress) {
     return { metadata: { ...input.hostedMetadata }, preservedLocalProgress };
@@ -109,6 +117,27 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
 
 function readJunctionHistoricalBackfillStatus(value: unknown): JunctionHistoricalBackfillStatus | null {
   return value === "complete" || value === "exhausted" || value === "retrying" ? value : null;
+}
+
+function compareJunctionRetryProgress(
+  left: JunctionHistoricalBackfillProgress,
+  right: JunctionHistoricalBackfillProgress,
+): number {
+  if (left.emptyAttempts !== right.emptyAttempts) {
+    return left.emptyAttempts - right.emptyAttempts;
+  }
+
+  const leftLastEmptyAtMs = left.lastEmptyAt ? Date.parse(left.lastEmptyAt) : NaN;
+  const rightLastEmptyAtMs = right.lastEmptyAt ? Date.parse(right.lastEmptyAt) : NaN;
+  if (!Number.isFinite(leftLastEmptyAtMs) || !Number.isFinite(rightLastEmptyAtMs)) {
+    return 0;
+  }
+
+  return leftLastEmptyAtMs - rightLastEmptyAtMs;
+}
+
+function readMetadataNumber(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 function readMetadataString(value: unknown): string | null {

@@ -5,6 +5,7 @@ import path from "node:path";
 import { beforeEach, describe, test, vi } from "vitest";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
+import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
@@ -147,6 +148,19 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
     ...baseProvider,
     ...overrides,
   };
+}
+
+function createTestJsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+}
+
+function readTestUrl(input: RequestInfo | URL): string {
+  return typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 }
 
 function createDeviceSyncServiceForVault(
@@ -4668,7 +4682,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("sync preserves unpublished empty-backfill retry progress after hosted version mismatch", async () => {
+  test("sync preserves unpublished Junction retry progress after hosted version mismatch", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -4678,78 +4692,68 @@ describe("hosted device-sync runtime", () => {
     const retryDueAt = "2026-04-04T00:15:00.000Z";
     const laterBaselineAt = "2026-04-04T01:00:00.000Z";
     const connectionId = "hosted_conn_empty_backfill_retry_race";
+    const externalAccountId = "junction-empty-backfill-retry-race";
     const initialHostedUpdatedAt = "2026-04-04T00:00:10.000Z";
     const concurrentHostedUpdatedAt = "2026-04-04T00:00:25.000Z";
     const backfillPayload = {
-      windowEnd: "2026-04-03",
-      windowStart: "2026-04-01",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
     };
-    const scheduledInputs: Array<{ nextReconcileAt: string | null; now: string }> = [];
-    const provider = createFakeProvider({
-      jobExecutor: {
-        createScheduledJobs(account, now) {
-          scheduledInputs.push({
-            nextReconcileAt: account.nextReconcileAt,
-            now,
-          });
-          return {
-            jobs: [
-              {
-                availableAt: now,
-                dedupeKey: "empty-backfill-race-retry",
-                kind: "backfill",
-                payload: backfillPayload,
-                priority: 30,
-              },
-            ],
-            nextReconcileAt: laterBaselineAt,
-          };
-        },
-        async executeJob(context) {
-          return {
-            metadataPatch: {
-              junctionHistoricalBackfillEmptyAttempts: 1,
-              junctionHistoricalBackfillLastEmptyAt: context.now,
-              junctionHistoricalBackfillStatus: "retrying",
-              junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-              junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-            },
-            nextReconcileAt: laterBaselineAt,
-            scheduledJobs: [
-              {
-                availableAt: retryDueAt,
-                dedupeKey: "empty-backfill-race-retry",
-                kind: "backfill",
-                payload: {
-                  ...backfillPayload,
-                  emptyBackfillAttempts: 1,
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          const url = readTestUrl(input);
+
+          if (url === `https://api.sandbox.us.junction.com/v2/user/providers/${externalAccountId}`) {
+            return createTestJsonResponse({
+              providers: [
+                {
+                  id: "provider-garmin-1",
+                  slug: "garmin",
+                  name: "Garmin",
+                  status: "connected",
+                  resource_availability: {
+                    activity: true,
+                  },
                 },
-                priority: 50,
-              },
-            ],
-          };
+              ],
+            });
+          }
+
+          if (url.includes("/v2/summary/") && url.includes(`/${externalAccountId}`)) {
+            return createTestJsonResponse({ data: [] });
+          }
+
+          throw new Error(`Unexpected Junction request: ${url}`);
         },
       },
     });
+    assert.ok(provider);
     const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
     let fakeTimersEnabled = false;
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
-        code: "empty-backfill-retry-race",
-        provider: "demo",
-        state: begin.state,
-      });
       let hostedSnapshot = buildRuntimeSnapshot({
+        connectedAt: "2026-04-03T00:00:00.000Z",
         connectionId,
-        externalAccountId: connected.account.externalAccountId,
+        credential: {
+          kind: "provider_config",
+          credentialMetadata: {},
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
         hostedUpdatedAt: initialHostedUpdatedAt,
         localState: {
           nextReconcileAt: laterBaselineAt,
         },
+        provider: "junction",
       });
       let appliedRequest: ApplyUpdatesRequest | null = null;
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
@@ -4818,7 +4822,7 @@ describe("hosted device-sync runtime", () => {
         kind: "backfill",
         payload: backfillPayload,
         priority: 30,
-        provider: "demo",
+        provider: "junction",
       });
 
       vi.useFakeTimers();
@@ -4828,12 +4832,11 @@ describe("hosted device-sync runtime", () => {
       const processed = await service.runWorkerOnce();
       assert.equal(processed?.kind, "backfill");
       const afterEmptyBackfill = getStore(service).getAccountById(localAccountId);
-      assert.equal(afterEmptyBackfill?.nextReconcileAt, laterBaselineAt);
+      assert.equal(afterEmptyBackfill?.nextReconcileAt, retryDueAt);
       const retryJobsAfterEmptyBackfill = readJobsForAccount(service, localAccountId).filter(
-        (job) => job.status === "queued" && job.dedupeKey === "empty-backfill-race-retry",
+        (job) => job.status === "queued" && job.kind === "backfill",
       );
-      assert.equal(retryJobsAfterEmptyBackfill.length, 1);
-      assert.equal(retryJobsAfterEmptyBackfill[0]?.availableAt, retryDueAt);
+      assert.equal(retryJobsAfterEmptyBackfill.length, 0);
       assert.deepEqual(
         {
           junctionHistoricalBackfillEmptyAttempts:
@@ -4857,8 +4860,14 @@ describe("hosted device-sync runtime", () => {
       );
 
       hostedSnapshot = buildRuntimeSnapshot({
+        connectedAt: "2026-04-03T00:00:00.000Z",
         connectionId,
-        externalAccountId: connected.account.externalAccountId,
+        credential: {
+          kind: "provider_config",
+          credentialMetadata: {},
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
         hostedUpdatedAt: concurrentHostedUpdatedAt,
         localState: {
           nextReconcileAt: laterBaselineAt,
@@ -4866,6 +4875,7 @@ describe("hosted device-sync runtime", () => {
         metadata: {
           hosted: true,
         },
+        provider: "junction",
       });
 
       await reconcileHostedDeviceSyncControlPlaneState({
@@ -4880,6 +4890,14 @@ describe("hosted device-sync runtime", () => {
       assert.equal(request.updates.length, 1);
       assert.equal(request.updates[0]?.observedUpdatedAt, initialHostedUpdatedAt);
       assert.equal(request.updates[0]?.localState?.nextReconcileAt, retryDueAt);
+      assert.deepEqual(request.updates[0]?.connection?.metadata, {
+        hosted: true,
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: executedAt,
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      });
 
       vi.setSystemTime(new Date(retryDueAt));
       await syncHostedDeviceSyncControlPlaneState({
@@ -4890,20 +4908,27 @@ describe("hosted device-sync runtime", () => {
       });
 
       const afterConcurrentHydration = getStore(service).getAccountById(localAccountId);
-      assert.equal(afterConcurrentHydration?.nextReconcileAt, laterBaselineAt);
+      assert.equal(afterConcurrentHydration?.nextReconcileAt, retryDueAt);
       assert.deepEqual(afterConcurrentHydration?.metadata, {
         hosted: true,
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: executedAt,
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       });
-      assert.equal(
+      assert.notEqual(
         afterConcurrentHydration?.localConnectionRevision,
         afterConcurrentHydration?.hostedObservedConnectionRevision,
       );
 
-      const queuedRetryJobs = readJobsForAccount(service, localAccountId).filter(
-        (job) => job.status === "queued" && job.dedupeKey === "empty-backfill-race-retry",
-      );
+      await service.runSchedulerOnce();
+      const queuedRetryJobs = readJobsForAccount(service, localAccountId)
+        .filter((job) => job.status === "queued" && job.kind === "backfill");
       assert.equal(queuedRetryJobs.length, 1);
       assert.equal(queuedRetryJobs[0]?.availableAt, retryDueAt);
+      assert.equal(queuedRetryJobs[0]?.priority, 50);
+      assert.deepEqual(JSON.parse(queuedRetryJobs[0]?.payloadJson ?? "{}"), backfillPayload);
     } finally {
       if (fakeTimersEnabled) {
         vi.useRealTimers();
@@ -4914,7 +4939,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("sync accepts full hosted metadata over unpublished retry metadata", async () => {
+  test("sync preserves unpublished retry metadata alongside capped hosted metadata", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -4933,6 +4958,13 @@ describe("hosted device-sync runtime", () => {
       junctionHistoricalBackfillStatus: "retrying",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    };
+    const expectedCappedHostedMetadata = Object.fromEntries(
+      Array.from({ length: 11 }, (_, index) => [`hostedKey${index}`, `hosted-value-${index}`]),
+    );
+    const expectedMergedMetadata = {
+      ...localRetryMetadata,
+      ...expectedCappedHostedMetadata,
     };
     const provider = createFakeProvider();
     const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
@@ -5007,13 +5039,23 @@ describe("hosted device-sync runtime", () => {
 
       const hydratedAccount = getStore(service).getAccountById(localAccountId);
       assert.ok(hydratedAccount);
-      assert.deepEqual(hydratedAccount.metadata, hostedMetadata);
-      assert.equal(Object.keys(hydratedAccount.metadata).length, 16);
-      assert.equal(hydratedAccount.metadata.hostedKey0, "hosted-value-0");
-      assert.equal(hydratedAccount.metadata.hostedKey10, "hosted-value-10");
-      assert.equal(hydratedAccount.metadata.hostedKey15, "hosted-value-15");
-      assert.equal(hydratedAccount.nextReconcileAt, "2026-04-04T01:00:00.000Z");
-      assert.equal(
+      const hydratedMetadata = hydratedAccount.metadata;
+      assert.deepEqual(hydratedMetadata, expectedMergedMetadata);
+      assert.equal(Object.keys(hydratedMetadata).length, 16);
+      assert.deepEqual(
+        Object.fromEntries(
+          Object.entries(hydratedMetadata).filter(([key]) =>
+            key === "hostedKey0" || key === "hostedKey10"
+          ),
+        ),
+        {
+          hostedKey0: "hosted-value-0",
+          hostedKey10: "hosted-value-10",
+        },
+      );
+      assert.equal(Object.hasOwn(hydratedMetadata, "hostedKey11"), false);
+      assert.equal(hydratedAccount.nextReconcileAt, retryDueAt);
+      assert.notEqual(
         hydratedAccount.localConnectionRevision,
         hydratedAccount.hostedObservedConnectionRevision,
       );

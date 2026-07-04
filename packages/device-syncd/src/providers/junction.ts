@@ -673,9 +673,9 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
-  // Retry execution is owned by the durable device job row. Retry metadata is
-  // terminal/diagnostic state, with this narrow scheduled-pass repair to
-  // materialize existing retrying windows that predate retry jobs.
+  // Connect-time retry state is owned by metadata. The scheduler materializes
+  // one due backfill job from that state instead of storing a second retry
+  // identity in the job queue.
   function buildScheduledHistoricalBackfillJobs(
     account: StoredDeviceSyncAccount,
     now: string,

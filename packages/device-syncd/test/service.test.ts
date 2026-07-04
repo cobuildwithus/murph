@@ -3346,7 +3346,7 @@ test("manual reconcile boosts Junction reconcile priority without promoting hist
   }
 });
 
-test("manual reconcile preserves delayed Junction retry repair timing", async () => {
+test("manual reconcile preserves delayed Junction retry metadata timing", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-junction-retry-timing");
   const queuedAt = "2026-04-04T00:05:00.000Z";
   const retryDueAt = "2026-04-04T00:15:00.000Z";
@@ -3565,7 +3565,7 @@ test("device sync service wakes Junction retrying historical backfill at the ret
   }
 });
 
-test("device sync scheduler materializes legacy Junction retry repair when it is due", async () => {
+test("device sync scheduler materializes Junction metadata retry when it is due", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-legacy-retry-priority");
   const scheduledAt = "2026-04-04T00:05:00.000Z";
   const retryDueAt = "2026-04-04T00:15:00.000Z";
@@ -3620,7 +3620,7 @@ test("device sync scheduler materializes legacy Junction retry repair when it is
             return createJsonResponse({ data: [] });
           }
 
-          throw new Error(`Unexpected Junction request during legacy retry priority test: ${url}`);
+          throw new Error(`Unexpected Junction request during metadata retry priority test: ${url}`);
         },
       }),
     ],
@@ -3701,8 +3701,8 @@ test("device sync scheduler materializes legacy Junction retry repair when it is
   }
 });
 
-test("device sync scheduler rematerializes dead Junction retry repairs from metadata", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-dead-retry-repair");
+test("device sync scheduler rematerializes dead Junction metadata retries", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-dead-metadata-retry");
   const retryDueAt = "2026-04-04T00:15:00.000Z";
   const scheduledAt = "2026-04-04T01:00:00.000Z";
   const ownerWindowStart = "2026-04-01T00:00:00.000Z";
@@ -3729,7 +3729,7 @@ test("device sync scheduler rematerializes dead Junction retry repairs from meta
         summaryResources: ["activity"],
         timeseriesResources: [],
         fetchImpl: async (input) => {
-          throw new Error(`Unexpected Junction request during dead retry repair test: ${readUrl(input)}`);
+          throw new Error(`Unexpected Junction request during dead metadata retry test: ${readUrl(input)}`);
         },
       }),
     ],
