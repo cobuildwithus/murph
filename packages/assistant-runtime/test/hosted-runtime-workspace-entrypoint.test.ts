@@ -10107,7 +10107,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const deviceSyncWakeAt = "2026-04-27T00:00:00.000Z";
+    const deviceSyncWakeAt = "2099-04-27T00:00:00.000Z";
     const mailboxItems = [
       createMailboxItem({
         id: "mailbox_item_entrypoint_foreground_device_gate_system",
