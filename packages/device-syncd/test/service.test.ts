@@ -3352,6 +3352,31 @@ test("device sync service wakes Junction retrying historical backfill at the ret
     );
 
     now = new Date(retryDueAt);
+    const dueRaceReconcile = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+      },
+      availableAt: retryDueAt,
+      priority: 40,
+      dedupeKey: "junction-due-backfill-race-reconcile",
+    });
+    const dueRaceJob = await service.runWorkerOnce();
+    const afterDueRaceReconcile = store.getAccountById(account.id);
+
+    assert.equal(dueRaceJob?.id, dueRaceReconcile.id);
+    assert.equal(afterDueRaceReconcile?.nextReconcileAt, retryDueAt);
+    assert.equal(
+      readJobsForAccountForTesting(store, account.id).filter((job) =>
+        job.kind === "backfill" && job.status === "queued"
+      ).length,
+      0,
+    );
+
+    now = new Date(retryDueAt);
     await service.runSchedulerOnce();
     const queuedBackfills = readJobsForAccountForTesting(store, account.id).filter((job) =>
       job.kind === "backfill" && job.status === "queued"

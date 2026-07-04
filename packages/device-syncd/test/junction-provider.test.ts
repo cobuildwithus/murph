@@ -620,7 +620,7 @@ test("Junction empty historical backfill records a retrying window the scheduled
   );
 });
 
-test("Junction due historical backfill retry does not clamp reconcile to the past retry time", async () => {
+test("Junction due historical backfill retry preserves retry gate for ordinary reconcile", async () => {
   const provider = createJunctionProvider(
     async (input) => {
       const url = readUrl(input);
@@ -675,6 +675,67 @@ test("Junction due historical backfill retry does not clamp reconcile to the pas
     }),
   );
 
+  assert.equal(result.nextReconcileAt, "2026-04-04T00:15:00.000Z");
+});
+
+test("Junction materialized due historical backfill retry advances normal reconcile after completion", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-1",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                activity: true,
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+        return createJsonResponse({
+          data: [{ id: "activity-1", connectionId: "provider-garmin-1", steps: 1234 }],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+    {
+      reconcileIntervalMs: 60 * 60_000,
+    },
+  );
+  const context = createJunctionJobContext({
+    now: "2026-04-04T00:15:00.000Z",
+    account: createAccount({
+      connectedAt: "2026-04-03T00:00:00.000Z",
+      metadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+      },
+      nextReconcileAt: "2026-04-04T00:15:00.000Z",
+    }),
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "complete");
   assert.equal(result.nextReconcileAt, "2026-04-04T01:15:00.000Z");
 });
 

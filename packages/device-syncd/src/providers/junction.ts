@@ -652,7 +652,7 @@ export function createJunctionDeviceSyncProvider(
     const scheduledNextReconcileAt = addMilliseconds(now, reconcileIntervalMs);
     const nextReconcileAt = dueHistoricalBackfillJobs.length > 0
       ? scheduledNextReconcileAt
-      : clampConnectHistoricalBackfillRetryNextReconcileAt(account, scheduledNextReconcileAt, now);
+      : clampConnectHistoricalBackfillRetryNextReconcileAt(account, scheduledNextReconcileAt);
 
     return {
       jobs: [
@@ -718,14 +718,27 @@ export function createJunctionDeviceSyncProvider(
   function clampConnectHistoricalBackfillRetryNextReconcileAt(
     account: Pick<DeviceSyncAccount, "connectedAt" | "metadata">,
     nextReconcileAt: string,
-    now: string,
   ): string {
     const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
-    if (!retryAt || Date.parse(retryAt) <= Date.parse(now)) {
+    if (!retryAt) {
       return nextReconcileAt;
     }
 
     return minIsoTimestamp(nextReconcileAt, retryAt);
+  }
+
+  function isConnectHistoricalBackfillWindow(
+    account: Pick<DeviceSyncAccount, "connectedAt">,
+    window: { windowEnd: string; windowStart: string },
+  ): boolean {
+    const connectHistoricalWindow = buildConnectHistoricalBackfillWindow(
+      account,
+      summaryBackfillDays,
+    );
+    return (
+      window.windowStart === connectHistoricalWindow.windowStart
+      && window.windowEnd === connectHistoricalWindow.windowEnd
+    );
   }
 
   function readPendingConnectHistoricalBackfillRetryAt(
@@ -855,13 +868,7 @@ export function createJunctionDeviceSyncProvider(
       }
     }
 
-    const connectHistoricalWindow = buildConnectHistoricalBackfillWindow(
-      context.account,
-      summaryBackfillDays,
-    );
-    const isConnectHistoricalBackfill =
-      window.windowStart === connectHistoricalWindow.windowStart
-      && window.windowEnd === connectHistoricalWindow.windowEnd;
+    const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
     const backfillFollowUp = job.kind === "backfill"
       ? isConnectHistoricalBackfill
         ? buildHistoricalBackfillFollowUp({
@@ -880,13 +887,15 @@ export function createJunctionDeviceSyncProvider(
           })
       : {};
     const { nextRetryAt, ...backfillFollowUpResult } = backfillFollowUp;
+    const scheduledNextReconcileAt = addMilliseconds(context.now, reconcileIntervalMs);
     const nextReconcileAt = nextRetryAt
-      ? minIsoTimestamp(addMilliseconds(context.now, reconcileIntervalMs), nextRetryAt)
-      : clampConnectHistoricalBackfillRetryNextReconcileAt(
-          context.account,
-          addMilliseconds(context.now, reconcileIntervalMs),
-          context.now,
-        );
+      ? minIsoTimestamp(scheduledNextReconcileAt, nextRetryAt)
+      : job.kind === "backfill" && isConnectHistoricalBackfill
+        ? scheduledNextReconcileAt
+        : clampConnectHistoricalBackfillRetryNextReconcileAt(
+            context.account,
+            scheduledNextReconcileAt,
+          );
 
     return withJunctionSkippedResourceMetadata(
       context,
@@ -1868,15 +1877,23 @@ export function createJunctionDeviceSyncProvider(
     windowStart: string;
   }): ProviderJobResult {
     const followUp = buildYieldedJunctionFollowUpJob(input);
+    const scheduledNextReconcileAt = addMilliseconds(input.context.now, reconcileIntervalMs);
+    const shouldPreserveConnectRetryGate =
+      input.job.kind !== "backfill"
+      || !isConnectHistoricalBackfillWindow(input.context.account, {
+        windowEnd: input.windowEnd,
+        windowStart: input.windowStart,
+      });
     return {
       ...(followUp ? { scheduledJobs: [followUp] } : {}),
       nextReconcileAt: input.job.kind === "resource"
         ? clampWebhookJobNextReconcileAt(input.context)
-        : clampConnectHistoricalBackfillRetryNextReconcileAt(
-            input.context.account,
-            addMilliseconds(input.context.now, reconcileIntervalMs),
-            input.context.now,
-          ),
+        : shouldPreserveConnectRetryGate
+          ? clampConnectHistoricalBackfillRetryNextReconcileAt(
+              input.context.account,
+              scheduledNextReconcileAt,
+            )
+          : scheduledNextReconcileAt,
     };
   }
 
