@@ -5381,6 +5381,83 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("keeps coverage-bearing Linq sends sent when liveness is lost after accepted outcome recording", async () => {
+    const answeredCoverage = {
+      lane: "conversation" as const,
+      laneSeq: "42",
+    };
+    const effect = createEffect({
+      answeredCoverage,
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: true,
+    });
+    const assertLiveness = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("lost liveness after accepted outcome"));
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "reply",
+        replyToMessageId: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      assertLiveness,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        providerMessageId: "linq_message_sent",
+      }),
+    ]);
+    expect(assertLiveness).toHaveBeenCalledTimes(2);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: expect.stringMatching(/Z$/u),
+        answeredCoverage,
+        providerMessageId: "linq_message_sent",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
   it("marks non-idempotent coverage-bearing Linq voice memos confirmation-pending when outcome recording fails", async () => {
     const answeredCoverage = {
       lane: "conversation" as const,
@@ -5451,6 +5528,81 @@ describe("hosted runtime callbacks", () => {
         deliveryStatus: "retryable",
       }),
     ]);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: expect.stringMatching(/Z$/u),
+        answeredCoverage,
+        providerMessageId: "linq_voice_sent",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it("keeps coverage-bearing Linq voice memos sent when liveness is lost after accepted outcome recording", async () => {
+    const answeredCoverage = {
+      lane: "conversation" as const,
+      laneSeq: "42",
+    };
+    const effect = createEffect({
+      answeredCoverage,
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      media: [createHostedVoiceMemoMedia()],
+      transportIdempotent: false,
+    });
+    const assertLiveness = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("lost liveness after accepted voice memo outcome"));
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.sendLinqVoiceMemoMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_voice_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinqVoiceMemo({
+        attachmentId: "attachment_voice_1",
+        target: "linq_chat_123",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      assertLiveness,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        providerMessageId: "linq_voice_sent",
+      }),
+    ]);
+    expect(assertLiveness).toHaveBeenCalledTimes(2);
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: expect.stringMatching(/Z$/u),

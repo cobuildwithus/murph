@@ -252,6 +252,41 @@ describe('assistant auto-reply answered coverage', () => {
       })
     })
   })
+
+  it('ignores idle channels when using a valid hosted mailbox cursor as coverage floor', async () => {
+    await withCoverageVault(async (vault) => {
+      const linqCursor = await stageHostedMailboxInput({
+        laneSeq: '10',
+        source: 'linq',
+        text: 'linq cursor',
+        vault,
+      })
+      const linqReply = await stageHostedMailboxInput({
+        laneSeq: '11',
+        source: 'linq',
+        text: 'linq answered after idle telegram',
+        vault,
+      })
+
+      await expect(computeAssistantAutoReplyAnsweredCoverage({
+        context: coverageContext({
+          autoReply: [
+            autoReplyCursor('linq', linqCursor),
+            {
+              channel: 'telegram',
+              eligibleAfter: null,
+              enabledAt: '2026-04-26T00:00:00.000Z',
+            },
+          ],
+        }),
+        terminalInputIds: [linqReply.inputId],
+        vault,
+      })).resolves.toEqual({
+        lane: 'conversation',
+        laneSeq: '11',
+      })
+    })
+  })
 })
 
 async function withCoverageVault<T>(
@@ -309,7 +344,11 @@ async function stageHostedMailboxInput(input: {
 }
 
 function coverageContext(input: {
-  autoReply?: readonly ReturnType<typeof autoReplyCursor>[]
+  autoReply?: readonly {
+    channel: string
+    eligibleAfter: ReturnType<typeof autoReplyCursor>['eligibleAfter'] | null
+    enabledAt: string
+  }[]
 } = {}) {
   return {
     autoReply: input.autoReply ?? [

@@ -1500,25 +1500,17 @@ function resolveAssistantAutoReplyAnsweredCoverageScanStart(
     coverage: NonNullable<AssistantOutboxIntent['answeredCoverage']>
   } | null = null
   for (const entry of autoReply) {
-    const laneSeq = readHostedConversationLaneSeqFromCursor(entry.eligibleAfter)
-    if (laneSeq === null) {
-      return {
-        afterCursor: null,
-        coverage: null,
-      }
-    }
-    if (!entry.eligibleAfter) {
-      return {
-        afterCursor: null,
-        coverage: null,
-      }
+    const cursor = entry.eligibleAfter
+    const laneSeq = readHostedConversationLaneSeqFromCursor(cursor)
+    if (laneSeq === null || !cursor) {
+      continue
     }
     if (
       !floor ||
       compareHostedMailboxLaneSeq(laneSeq, floor.coverage.laneSeq) < 0
     ) {
       floor = {
-        cursor: entry.eligibleAfter,
+        cursor,
         coverage: {
           lane: 'conversation',
           laneSeq,

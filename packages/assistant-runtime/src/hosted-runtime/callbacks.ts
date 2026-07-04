@@ -2436,7 +2436,6 @@ function createHostedAssistantLinqSendDependency(input: {
         outcome: acceptedOutcome,
       });
     }
-    await assertHostedDeliveryLiveNow(input);
     return result;
   };
 }
@@ -2659,7 +2658,6 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         outcome: acceptedOutcome,
       });
     }
-    await assertHostedDeliveryLiveNow(input);
     return result;
   };
 }
