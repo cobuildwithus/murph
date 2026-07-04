@@ -21,10 +21,6 @@ import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   type AssistantAutoReplyTerminalEvidence,
 } from './automation/evidence.js'
-import {
-  readAssistantAutoReplyIntentProvenance,
-  type AssistantAutoReplyIntentProvenance,
-} from './automation/intent-provenance.js'
 import { assistantInputIdFromInboxCaptureId } from './input-source.js'
 import {
   readAssistantInputEvent,
@@ -44,7 +40,6 @@ export interface AssistantRuntimeResiduePruneResult {
   acceptedTurnInputJournalsPruned: number
   autoReplyEvidenceFilesPruned: number
   autoReplyEvidenceGroupsPruned: number
-  autoReplyIntentProvenancePruned: number
   inputEventsPruned: number
   receiptsPruned: number
 }
@@ -77,7 +72,6 @@ interface AssistantRuntimeResidueInventory {
   inputEvents: Inventory<PersistedRecord<AssistantInputEventRecord>>
   journals: Inventory<PersistedRecord<AssistantAcceptedTurnInputJournal>>
   outbox: Inventory<PersistedRecord<AssistantOutboxIntent>>
-  provenance: Inventory<PersistedRecord<AssistantAutoReplyIntentProvenance>>
   receipts: Inventory<PersistedRecord<AssistantTurnReceipt>>
 }
 
@@ -85,7 +79,6 @@ interface AssistantRuntimeResiduePrunePlan {
   evidenceGroups: EvidenceGroup[]
   inputEventPaths: string[]
   journalPaths: string[]
-  provenancePaths: string[]
   receiptPaths: string[]
 }
 
@@ -146,22 +139,16 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
       evidenceFilesPruned += 1
     }
   }
-  for (const filePath of plan.provenancePaths) {
-    await removeAssistantStateFile(filePath)
-  }
-
   await Promise.all([
     removeAssistantStateDirectoryIfEmpty(directories.acceptedTurnInputs),
     removeAssistantStateDirectoryIfEmpty(directories.evidence),
     removeAssistantStateDirectoryIfEmpty(directories.inputEvents),
-    removeAssistantStateDirectoryIfEmpty(directories.provenance),
   ])
 
   return {
     acceptedTurnInputJournalsPruned: plan.journalPaths.length,
     autoReplyEvidenceFilesPruned: evidenceFilesPruned,
     autoReplyEvidenceGroupsPruned: plan.evidenceGroups.length,
-    autoReplyIntentProvenancePruned: plan.provenancePaths.length,
     inputEventsPruned: plan.inputEventPaths.length,
     receiptsPruned: plan.receiptPaths.length,
   }
@@ -354,18 +341,10 @@ function planAssistantRuntimeResiduePrune(input: {
     }
   }
 
-  const provenancePaths =
-    input.inventory.outbox.trusted && input.inventory.provenance.trusted
-      ? input.inventory.provenance.records
-          .filter(({ record }) => !allOutboxIntentIds.has(record.intentId))
-          .map(({ filePath }) => filePath)
-      : []
-
   return {
     evidenceGroups: prunableEvidenceGroups,
     inputEventPaths: [...inputEventPaths],
     journalPaths,
-    provenancePaths,
     receiptPaths,
   }
 }
@@ -549,7 +528,7 @@ async function readAssistantRuntimeResidueInventory(input: {
   paths: AssistantStatePaths
   vault: string
 }): Promise<AssistantRuntimeResidueInventory> {
-  const [evidence, inputEvents, journals, outbox, provenance, receipts] =
+  const [evidence, inputEvents, journals, outbox, receipts] =
     await Promise.all([
       readEvidenceInventory(input.directories.evidence, input.vault),
       readInputEventInventory(input.directories.inputEvents, input.paths),
@@ -558,7 +537,6 @@ async function readAssistantRuntimeResidueInventory(input: {
         (value) => assistantAcceptedTurnInputJournalSchema.parse(value),
       ),
       readOutboxInventory(input.paths.outboxDirectory, input.vault),
-      readProvenanceInventory(input.directories.provenance, input.vault),
       readJsonInventory(
         input.paths.turnsDirectory,
         (value) => assistantTurnReceiptSchema.parse(value),
@@ -570,7 +548,6 @@ async function readAssistantRuntimeResidueInventory(input: {
     inputEvents,
     journals,
     outbox,
-    provenance,
     receipts,
   }
 }
@@ -691,51 +668,6 @@ async function readOutboxInventory(
   return { records, trusted }
 }
 
-async function readProvenanceInventory(
-  directory: string,
-  vault: string,
-): Promise<Inventory<PersistedRecord<AssistantAutoReplyIntentProvenance>>> {
-  const records: Array<PersistedRecord<AssistantAutoReplyIntentProvenance>> = []
-  let trusted = true
-
-  for (const entry of await readDirectoryEntries(directory)) {
-    if (!entry.name.endsWith('.json')) {
-      continue
-    }
-    if (!entry.isFile()) {
-      trusted = false
-      continue
-    }
-
-    let intentId: string
-    try {
-      intentId = decodeURIComponent(entry.name.slice(0, -'.json'.length))
-    } catch {
-      trusted = false
-      continue
-    }
-
-    try {
-      const record = await readAssistantAutoReplyIntentProvenance({
-        intentId,
-        vault,
-      })
-      if (!record) {
-        trusted = false
-        continue
-      }
-      records.push({
-        filePath: path.join(directory, entry.name),
-        record,
-      })
-    } catch {
-      trusted = false
-    }
-  }
-
-  return { records, trusted }
-}
-
 async function readJsonInventory<T>(
   directory: string,
   parse: (value: unknown) => T,
@@ -771,11 +703,6 @@ function resolveAssistantRuntimeResidueDirectories(paths: AssistantStatePaths) {
     acceptedTurnInputs: path.join(paths.stateDirectory, 'accepted-turn-inputs'),
     evidence: path.join(paths.assistantStateRoot, 'auto-reply', 'evidence'),
     inputEvents: resolveAssistantInputEventsDirectory(paths),
-    provenance: path.join(
-      paths.assistantStateRoot,
-      'auto-reply',
-      'intent-provenance',
-    ),
   }
 }
 

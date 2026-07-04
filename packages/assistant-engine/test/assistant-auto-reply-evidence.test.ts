@@ -11,9 +11,6 @@ import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.js'
-import {
-  writeAssistantAutoReplyIntentProvenance,
-} from '../src/assistant/automation/intent-provenance.js'
 import { createAssistantTurnReceipt } from '../src/assistant/turns.js'
 
 test('auto-reply terminal evidence readers ignore malformed evidence files', async () => {
@@ -214,14 +211,17 @@ test('auto-reply delivery intent lookup uses bounded turn receipts', async () =>
       await findAssistantAutoReplyDeliveryIntentIds({
         intents: [
           {
+            answeredCoverage: null,
             intentId: 'intent_legacy_segment',
             turnId: 'turn_auto_reply',
           },
           {
+            answeredCoverage: null,
             intentId: 'intent_legacy_final',
             turnId: 'turn_auto_reply',
           },
           {
+            answeredCoverage: null,
             intentId: 'intent_other',
             turnId: 'turn_other',
           },
@@ -238,35 +238,23 @@ test('auto-reply delivery intent lookup uses bounded turn receipts', async () =>
   }
 })
 
-test('auto-reply delivery intent lookup uses intent provenance without receipts', async () => {
+test('auto-reply delivery intent lookup uses intent answered coverage without receipts', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
   try {
-    await writeAssistantAutoReplyIntentProvenance({
-      intentId: 'intent_current_auto_reply',
-      recordedAt: '2026-04-08T00:00:00.000Z',
-      turnId: 'turn_current_auto_reply',
-      vault: vaultRoot,
-    })
-    await writeAssistantAutoReplyIntentProvenance({
-      intentId: 'intent_wrong_turn',
-      recordedAt: '2026-04-08T00:00:00.000Z',
-      turnId: 'turn_other',
-      vault: vaultRoot,
-    })
-
     assert.deepEqual(
       await findAssistantAutoReplyDeliveryIntentIds({
         intents: [
           {
+            answeredCoverage: {
+              lane: 'conversation',
+              laneSeq: '42',
+            },
             intentId: 'intent_current_auto_reply',
             turnId: 'turn_current_auto_reply',
           },
           {
-            intentId: 'intent_wrong_turn',
-            turnId: 'turn_current_auto_reply',
-          },
-          {
-            intentId: 'intent_missing',
+            answeredCoverage: null,
+            intentId: 'intent_missing_coverage',
             turnId: 'turn_current_auto_reply',
           },
         ],

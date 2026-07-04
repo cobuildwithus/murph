@@ -21,7 +21,6 @@ import {
 import { resolveAssistantStatePaths } from '../store/paths.js'
 import { readAssistantTurnReceipt } from '../turns.js'
 import { readAssistantAutoReplyReceiptMetadata } from './auto-reply-retry.js'
-import { readAssistantAutoReplyIntentProvenance } from './intent-provenance.js'
 
 const ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA =
   'murph.assistant-auto-reply-terminal-evidence.v1'
@@ -125,22 +124,17 @@ export async function readAssistantAutoReplyTerminalEvidenceByEvidenceId(
 }
 
 export async function findAssistantAutoReplyDeliveryIntentIds(input: {
-  intents: readonly Pick<AssistantOutboxIntent, 'intentId' | 'turnId'>[]
+  intents: readonly Pick<
+    AssistantOutboxIntent,
+    'answeredCoverage' | 'intentId' | 'turnId'
+  >[]
   vault: string
 }): Promise<Set<string>> {
   const matched = new Set<string>()
   const unresolvedByTurnId = new Map<string, string[]>()
 
   for (const intent of input.intents) {
-    const provenance = await readAssistantAutoReplyIntentProvenance({
-      intentId: intent.intentId,
-      vault: input.vault,
-    })
-    if (
-      provenance &&
-      provenance.intentId === intent.intentId &&
-      provenance.turnId === intent.turnId
-    ) {
+    if (intent.answeredCoverage) {
       matched.add(intent.intentId)
       continue
     }

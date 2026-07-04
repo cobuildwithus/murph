@@ -32,7 +32,6 @@ import {
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
-  readAssistantAutoReplyIntentProvenance,
   readAssistantAutomationState,
   readAssistantOutboxIntent,
   readAssistantVaultFileMedia,
@@ -303,26 +302,6 @@ export async function collectHostedAssistantDeliverySideEffects(
   return effects;
 }
 
-async function buildHostedAssistantDeliveryPayloadFromIntentForDispatch(input: {
-  intent: AssistantOutboxIntent;
-  vaultRoot: string;
-}): Promise<HostedAssistantDeliveryPayload> {
-  const provenance = await readAssistantAutoReplyIntentProvenance({
-    intentId: input.intent.intentId,
-    vault: input.vaultRoot,
-  });
-  const payload = buildHostedAssistantDeliveryPayloadFromIntent({
-    ...input.intent,
-    answeredCoverage: selectHighestHostedAssistantAnsweredCoverage(
-      input.intent.answeredCoverage ?? null,
-      provenance?.turnId === input.intent.turnId
-        ? provenance.answeredCoverage
-        : null,
-    ),
-  });
-  return payload;
-}
-
 /**
  * Bounds the set of intents reconciled per collect. The dispatch preflight
  * gate is the security invariant; this pass exists only so freshly-decided
@@ -560,10 +539,7 @@ async function abandonSupersededHostedAutoReplyForegroundCandidates(input: {
   }
 
   const autoReplyIntentIds = await findAssistantAutoReplyDeliveryIntentIds({
-    intents: input.candidates.map((intent) => ({
-      intentId: intent.intentId,
-      turnId: intent.turnId,
-    })),
+    intents: input.candidates,
     vault: input.vaultRoot,
   });
   if (autoReplyIntentIds.size === 0) {
@@ -684,10 +660,7 @@ async function buildHostedAssistantDeliveryEffectFromIntent(input: {
   intent: AssistantOutboxIntent;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryEffect> {
-  const payload = await buildHostedAssistantDeliveryPayloadFromIntentForDispatch({
-    intent: input.intent,
-    vaultRoot: input.vaultRoot,
-  });
+  const payload = buildHostedAssistantDeliveryPayloadFromIntent(input.intent);
   return buildHostedAssistantDeliveryEffect({
     dedupeKey: input.intent.dedupeKey,
     deliveryPhase: input.deliveryPhase,
@@ -2727,12 +2700,8 @@ const pendingHostedAssistantLinqDeliveryOutcomeWrites = new Set<Promise<void>>()
 
 function shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(input: {
   answeredCoverage?: HostedAssistantAnsweredCoverage | null;
-  deliveryTransportIdempotent?: boolean | null;
 }): boolean {
-  return Boolean(
-    input.answeredCoverage &&
-    input.deliveryTransportIdempotent !== false,
-  );
+  return Boolean(input.answeredCoverage);
 }
 
 async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
@@ -3275,7 +3244,7 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
 }
 
 async function hostedAssistantDeliveryIntentIsAutoReply(input: {
-  intent: Pick<AssistantOutboxIntent, "intentId" | "turnId">;
+  intent: Pick<AssistantOutboxIntent, "answeredCoverage" | "intentId" | "turnId">;
   vaultRoot: string;
 }): Promise<boolean> {
   const matched = await findAssistantAutoReplyDeliveryIntentIds({
@@ -3570,34 +3539,6 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
 
   assertSupportedHostedAssistantDeliveryPayload(payload);
   return payload;
-}
-
-function selectHighestHostedAssistantAnsweredCoverage(
-  left: HostedAssistantAnsweredCoverage | null,
-  right: HostedAssistantAnsweredCoverage | null,
-): HostedAssistantAnsweredCoverage | null {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-  return compareHostedAssistantAnsweredCoverageLaneSeq(left.laneSeq, right.laneSeq) >= 0
-    ? left
-    : right;
-}
-
-function compareHostedAssistantAnsweredCoverageLaneSeq(
-  left: string,
-  right: string,
-): number {
-  try {
-    const leftSeq = BigInt(left);
-    const rightSeq = BigInt(right);
-    return leftSeq < rightSeq ? -1 : leftSeq > rightSeq ? 1 : 0;
-  } catch {
-    return left.localeCompare(right);
-  }
 }
 
 function normalizeHostedAssistantDeliveryMedia(

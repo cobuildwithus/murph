@@ -85,7 +85,6 @@ import { sanitizeAssistantOutboxIntentForPersistence } from './redaction.js'
 import {
   normalizeAssistantResponseMediaList,
 } from './response-media.js'
-import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
 import {
   assistantDeviceActivityAuthorityKeyMatches,
   readAssistantDeviceActivityDeliveryIdempotencyMetadata,
@@ -308,7 +307,6 @@ export async function createAssistantOutboxIntent(
       dedupeToken: input.dedupeToken,
       vault: input.vault,
     })
-    const isAutoReplyIntent = input.turnTrigger === 'automation-auto-reply'
     if (existing) {
       const idempotencyUpgradedExisting = maybeUpgradeAssistantOutboxIntentDeliveryIdempotency({
         deliveryIdempotencyKey,
@@ -330,29 +328,29 @@ export async function createAssistantOutboxIntent(
             rawTargetIdentity,
             updatedAt: createdAt,
           })
-      if (isAutoReplyIntent) {
-        await writeAssistantAutoReplyIntentProvenance({
+      const coverageUpgradedExisting =
+        maybeUpgradeAssistantOutboxIntentAnsweredCoverage({
           answeredCoverage: input.answeredCoverage ?? null,
-          intentId: upgradedExisting.intentId,
-          recordedAt: upgradedExisting.updatedAt,
-          turnId: upgradedExisting.turnId,
-          vault: input.vault,
+          intent: upgradedExisting,
+          updatedAt: createdAt,
         })
-      }
-      if (upgradedExisting !== existing) {
+      if (coverageUpgradedExisting !== existing) {
         const persistedUpgradedExisting =
-          sanitizeAssistantOutboxIntentForPersistence(upgradedExisting)
+          sanitizeAssistantOutboxIntentForPersistence(coverageUpgradedExisting)
         await writeJsonFileAtomic(
-          resolveAssistantOutboxIntentPath(paths.outboxDirectory, upgradedExisting.intentId),
+          resolveAssistantOutboxIntentPath(
+            paths.outboxDirectory,
+            coverageUpgradedExisting.intentId,
+          ),
           persistedUpgradedExisting,
         )
       }
       await repairAssistantOutboxReceiptForIntent({
-        at: upgradedExisting.updatedAt,
-        intent: upgradedExisting,
+        at: coverageUpgradedExisting.updatedAt,
+        intent: coverageUpgradedExisting,
         vault: input.vault,
       })
-      return upgradedExisting
+      return coverageUpgradedExisting
     }
 
     const intent = assistantOutboxIntentSchema.parse({
@@ -381,20 +379,9 @@ export async function createAssistantOutboxIntent(
       answeredCoverage: input.answeredCoverage ?? null,
       lastError: null,
     })
-    const persistedIntent = assistantOutboxIntentSchema.parse(
-      sanitizeAssistantOutboxIntentForPersistence(intent),
-    )
     const persistedIntentValue =
-      sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
-    if (isAutoReplyIntent) {
-      await writeAssistantAutoReplyIntentProvenance({
-        answeredCoverage: input.answeredCoverage ?? null,
-        intentId: intent.intentId,
-        recordedAt: createdAt,
-        turnId: intent.turnId,
-        vault: input.vault,
-      })
-    }
+      sanitizeAssistantOutboxIntentForPersistence(intent)
+    const persistedIntent = assistantOutboxIntentSchema.parse(persistedIntentValue)
     await writeJsonFileAtomic(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
       persistedIntentValue,
@@ -1981,6 +1968,66 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
       deliveryTransportIdempotent,
     }),
   )
+}
+
+function maybeUpgradeAssistantOutboxIntentAnsweredCoverage(input: {
+  answeredCoverage: AssistantOutboxIntent['answeredCoverage']
+  intent: AssistantOutboxIntent
+  updatedAt: string
+}): AssistantOutboxIntent {
+  const answeredCoverage = selectHighestAssistantOutboxAnsweredCoverage(
+    input.intent.answeredCoverage ?? null,
+    input.answeredCoverage ?? null,
+  )
+  if (
+    sameAssistantOutboxAnsweredCoverage(
+      answeredCoverage,
+      input.intent.answeredCoverage ?? null,
+    )
+  ) {
+    return input.intent
+  }
+
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      answeredCoverage,
+      updatedAt: input.updatedAt,
+    }),
+  )
+}
+
+function selectHighestAssistantOutboxAnsweredCoverage(
+  left: AssistantOutboxIntent['answeredCoverage'],
+  right: AssistantOutboxIntent['answeredCoverage'],
+): AssistantOutboxIntent['answeredCoverage'] {
+  if (!left) {
+    return right
+  }
+  if (!right) {
+    return left
+  }
+  return compareAssistantOutboxLaneSeq(left.laneSeq, right.laneSeq) >= 0
+    ? left
+    : right
+}
+
+function sameAssistantOutboxAnsweredCoverage(
+  left: AssistantOutboxIntent['answeredCoverage'],
+  right: AssistantOutboxIntent['answeredCoverage'],
+): boolean {
+  return (left?.lane ?? null) === (right?.lane ?? null) &&
+    (left?.laneSeq ?? null) === (right?.laneSeq ?? null)
+}
+
+function compareAssistantOutboxLaneSeq(left: string, right: string): number {
+  try {
+    const leftSeq = BigInt(left)
+    const rightSeq = BigInt(right)
+    return leftSeq < rightSeq ? -1 : leftSeq > rightSeq ? 1 : 0
+  } catch {
+    return left.localeCompare(right)
+  }
 }
 
 function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
