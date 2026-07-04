@@ -35,6 +35,7 @@ import {
   readAssistantOutboxIntentAnsweredCoverage,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
+  shouldDispatchAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
@@ -45,9 +46,6 @@ import {
   resolveAssistantTurnReceiptPath,
   updateAssistantTurnReceipt,
 } from '../src/assistant/turns.ts'
-import {
-  findAssistantAutoReplyDeliveryIntentIds,
-} from '../src/assistant/automation/evidence.ts'
 import {
   deliverAssistantProgressUpdate,
 } from '../src/assistant/delivery-service.ts'
@@ -152,41 +150,30 @@ describe('assistant outbox runtime', () => {
     ).rejects.toThrow('Assistant outbox messages must include text or response media.')
   })
 
-  it('uses in-memory auto-reply answered coverage when receipt repair has no receipt', async () => {
+  it('does not write a covered auto-reply intent when receipt repair has no receipt', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-coverage-')
     const answeredCoverage = {
       lane: 'conversation' as const,
       laneSeq: '42',
     }
 
-    const intent = await createAssistantOutboxIntent({
-      answeredCoverage,
-      actorId: 'telegram-user-1',
-      channel: 'telegram',
-      message: 'auto reply',
-      sessionId: 'session_auto_reply_coverage',
-      threadId: 'telegram-thread-1',
-      threadIsDirect: true,
-      turnId: 'turn_auto_reply_coverage',
-      turnTrigger: 'automation-auto-reply',
-      vault: vaultRoot,
-    })
-
-    await rm(
-      resolveAssistantTurnReceiptPath(
-        resolveAssistantStatePaths(vaultRoot),
-        intent.turnId,
-      ),
-      { force: true },
-    )
-    expect(await readAssistantTurnReceipt(vaultRoot, intent.turnId)).toBeNull()
-
     await expect(
-      findAssistantAutoReplyDeliveryIntentIds({
-        intents: [intent],
+      createAssistantOutboxIntent({
+        answeredCoverage,
+        actorId: 'telegram-user-1',
+        channel: 'telegram',
+        message: 'auto reply',
+        sessionId: 'session_auto_reply_coverage',
+        threadId: 'telegram-thread-1',
+        threadIsDirect: true,
+        turnId: 'turn_auto_reply_coverage',
+        turnTrigger: 'automation-auto-reply',
         vault: vaultRoot,
       }),
-    ).resolves.toEqual(new Set([intent.intentId]))
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_ANSWERED_COVERAGE_RECEIPT_REQUIRED',
+    })
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
   })
 
   it('records auto-reply answered coverage without writing it into outbox JSON', async () => {
@@ -261,32 +248,48 @@ describe('assistant outbox runtime', () => {
       'utf8',
     )
 
-    const dedupedIntent = await createAssistantOutboxIntent({
-      answeredCoverage,
-      actorId: 'telegram-user-1',
-      channel: 'telegram',
-      createdAt: '2026-04-08T00:01:00.000Z',
-      dedupeToken: 'stable-auto-reply-token',
-      message: 'auto reply',
-      sessionId: 'session_auto_reply_dedupe_provenance',
-      threadId: 'telegram-thread-1',
-      threadIsDirect: true,
-      turnId: 'turn_auto_reply_dedupe_provenance',
-      turnTrigger: 'automation-auto-reply',
-      vault: vaultRoot,
-    })
-
-    expect(dedupedIntent.intentId).toBe(legacyIntent.intentId)
-    expect(dedupedIntent.answeredCoverage).toEqual(answeredCoverage)
-    const rawIntent = await readRawOutboxIntent(vaultRoot, dedupedIntent.intentId)
-    expect(rawIntent).not.toHaveProperty('answeredCoverage')
-    expect(await readAssistantTurnReceipt(vaultRoot, legacyIntent.turnId)).toBeNull()
     await expect(
-      findAssistantAutoReplyDeliveryIntentIds({
-        intents: [dedupedIntent],
+      createAssistantOutboxIntent({
+        answeredCoverage,
+        actorId: 'telegram-user-1',
+        channel: 'telegram',
+        createdAt: '2026-04-08T00:01:00.000Z',
+        dedupeToken: 'stable-auto-reply-token',
+        message: 'auto reply',
+        sessionId: 'session_auto_reply_dedupe_provenance',
+        threadId: 'telegram-thread-1',
+        threadIsDirect: true,
+        turnId: 'turn_auto_reply_dedupe_provenance',
+        turnTrigger: 'automation-auto-reply',
         vault: vaultRoot,
       }),
-    ).resolves.toEqual(new Set([legacyIntent.intentId]))
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_ANSWERED_COVERAGE_RECEIPT_REQUIRED',
+    })
+
+    const rawIntent = await readRawOutboxIntent(vaultRoot, legacyIntent.intentId)
+    expect(rawIntent).toHaveProperty('status', 'failed')
+    expect(rawIntent).toHaveProperty(
+      'lastError',
+      expect.objectContaining({
+        code: 'ASSISTANT_OUTBOX_ANSWERED_COVERAGE_RECEIPT_REQUIRED',
+      }),
+    )
+    expect(rawIntent).not.toHaveProperty('answeredCoverage')
+    expect(await readAssistantTurnReceipt(vaultRoot, legacyIntent.turnId)).toBeNull()
+    const persistedIntents = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(persistedIntents).toEqual([
+      expect.objectContaining({
+        intentId: legacyIntent.intentId,
+        status: 'failed',
+      }),
+    ])
+    expect(
+      shouldDispatchAssistantOutboxIntent(
+        persistedIntents[0]!,
+        new Date('2026-04-08T00:02:00.000Z'),
+      ),
+    ).toBe(false)
   })
 
   it('repairs a targetless queued dedupe hit before the first dispatch attempt', async () => {

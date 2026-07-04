@@ -17,13 +17,13 @@ export async function repairAssistantOutboxReceiptForIntent(input: {
   at?: string
   intent: AssistantOutboxIntent
   vault: string
-}): Promise<void> {
+}): Promise<AssistantTurnReceipt | null> {
   const repair = buildAssistantOutboxReceiptRepair(input.intent, input.at)
   if (!repair) {
-    return
+    return null
   }
 
-  await updateAssistantTurnReceipt({
+  return await updateAssistantTurnReceipt({
     vault: input.vault,
     turnId: input.intent.turnId,
     mutate(receipt) {

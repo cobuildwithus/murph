@@ -11,6 +11,7 @@ import {
   type AssistantResponseMedia,
   type AssistantSession,
   type AssistantStatusOutboxSummary,
+  type AssistantTurnReceipt,
   type AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -340,6 +341,36 @@ export async function createAssistantOutboxIntent(
           intent: upgradedExisting,
           updatedAt: createdAt,
         })
+      const requiresDurableAnsweredCoverage =
+        assistantOutboxIntentRequiresDurableAnsweredCoverage(
+          coverageUpgradedExisting,
+        )
+      if (requiresDurableAnsweredCoverage) {
+        const repairedReceipt = await repairAssistantOutboxReceiptForIntent({
+          at: coverageUpgradedExisting.updatedAt,
+          intent: coverageUpgradedExisting,
+          vault: input.vault,
+        })
+        if (
+          !assistantOutboxIntentAnsweredCoverageIsDurablyRecorded({
+            intent: coverageUpgradedExisting,
+            receipt: repairedReceipt,
+          })
+        ) {
+          await failAssistantOutboxIntentWithoutDurableAnsweredCoverage({
+            intent: coverageUpgradedExisting,
+            intentPath: resolveAssistantOutboxIntentPath(
+              paths.outboxDirectory,
+              coverageUpgradedExisting.intentId,
+            ),
+            updatedAt: createdAt,
+            vault: input.vault,
+          })
+          throw createAssistantOutboxAnsweredCoverageReceiptRequiredError(
+            coverageUpgradedExisting,
+          )
+        }
+      }
       if (coverageUpgradedExisting !== existing) {
         const persistedUpgradedExisting =
           sanitizeAssistantOutboxIntentForPersistence(coverageUpgradedExisting)
@@ -351,11 +382,13 @@ export async function createAssistantOutboxIntent(
           persistedUpgradedExisting,
         )
       }
-      await repairAssistantOutboxReceiptForIntent({
-        at: coverageUpgradedExisting.updatedAt,
-        intent: coverageUpgradedExisting,
-        vault: input.vault,
-      })
+      if (!requiresDurableAnsweredCoverage) {
+        await repairAssistantOutboxReceiptForIntent({
+          at: coverageUpgradedExisting.updatedAt,
+          intent: coverageUpgradedExisting,
+          vault: input.vault,
+        })
+      }
       return coverageUpgradedExisting
     }
 
@@ -387,15 +420,34 @@ export async function createAssistantOutboxIntent(
     })
     const persistedIntentValue =
       sanitizeAssistantOutboxIntentForPersistence(intent)
+    const requiresDurableAnsweredCoverage =
+      assistantOutboxIntentRequiresDurableAnsweredCoverage(intent)
+    if (requiresDurableAnsweredCoverage) {
+      const repairedReceipt = await repairAssistantOutboxReceiptForIntent({
+        at: createdAt,
+        intent,
+        vault: input.vault,
+      })
+      if (
+        !assistantOutboxIntentAnsweredCoverageIsDurablyRecorded({
+          intent,
+          receipt: repairedReceipt,
+        })
+      ) {
+        throw createAssistantOutboxAnsweredCoverageReceiptRequiredError(intent)
+      }
+    }
     await writeJsonFileAtomic(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
       persistedIntentValue,
     )
-    await repairAssistantOutboxReceiptForIntent({
-      at: createdAt,
-      intent,
-      vault: input.vault,
-    })
+    if (!requiresDurableAnsweredCoverage) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: createdAt,
+        intent,
+        vault: input.vault,
+      })
+    }
     await recordAssistantDiagnosticEvent({
       vault: input.vault,
       component: 'outbox',
@@ -1971,6 +2023,88 @@ function resolveAssistantOutboxDeliveryTransportIdempotentForCreation(input: {
     media,
     message: input.message ?? '',
   })
+}
+
+async function failAssistantOutboxIntentWithoutDurableAnsweredCoverage(input: {
+  intent: AssistantOutboxIntent
+  intentPath: string
+  updatedAt: string
+  vault: string
+}): Promise<AssistantOutboxIntent> {
+  const error = createAssistantOutboxAnsweredCoverageReceiptRequiredError(
+    input.intent,
+  )
+  const failed = assistantOutboxIntentSchema.parse({
+    ...input.intent,
+    deliveryConfirmationPending: false,
+    lastError: normalizeAssistantDeliveryError(error),
+    nextAttemptAt: null,
+    preparedDispatchToken: null,
+    status: 'failed',
+    updatedAt: input.updatedAt,
+  })
+  await writeJsonFileAtomic(
+    input.intentPath,
+    sanitizeAssistantOutboxIntentForPersistence(failed),
+  )
+  await repairAssistantOutboxReceiptForIntent({
+    at: failed.updatedAt,
+    intent: failed,
+    vault: input.vault,
+  })
+  return failed
+}
+
+function assistantOutboxIntentAnsweredCoverageIsDurablyRecorded(input: {
+  intent: AssistantOutboxIntent
+  receipt: AssistantTurnReceipt | null
+}): boolean {
+  if (!assistantOutboxIntentRequiresDurableAnsweredCoverage(input.intent)) {
+    return true
+  }
+  if (!input.receipt) {
+    return false
+  }
+
+  for (let index = input.receipt.timeline.length - 1; index >= 0; index -= 1) {
+    const event = input.receipt.timeline[index]
+    if (!event || event.metadata.intentId !== input.intent.intentId) {
+      continue
+    }
+    const coverage = readAssistantOutboxAnsweredCoverageFromReceiptMetadata(
+      event.metadata,
+    )
+    if (
+      sameAssistantOutboxAnsweredCoverage(
+        coverage,
+        input.intent.answeredCoverage,
+      )
+    ) {
+      return true
+    }
+  }
+
+  return false
+}
+
+function assistantOutboxIntentRequiresDurableAnsweredCoverage(
+  intent: AssistantOutboxIntent,
+): boolean {
+  return intent.answeredCoverage !== null && (
+    intent.status === 'awaiting_approval' ||
+    intent.status === 'pending' ||
+    intent.status === 'retryable' ||
+    intent.status === 'sending'
+  )
+}
+
+function createAssistantOutboxAnsweredCoverageReceiptRequiredError(
+  intent: Pick<AssistantOutboxIntent, 'intentId' | 'turnId'>,
+): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_OUTBOX_ANSWERED_COVERAGE_RECEIPT_REQUIRED',
+    `Covered assistant delivery ${intent.intentId} requires durable turn receipt coverage before dispatch for turn ${intent.turnId}.`,
+  )
 }
 
 function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
