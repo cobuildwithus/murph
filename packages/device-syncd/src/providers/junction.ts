@@ -706,7 +706,6 @@ export function createJunctionDeviceSyncProvider(
         availableAt,
         priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
         ...(emptyBackfillAttempts > 0 ? { payload: { emptyBackfillAttempts } } : {}),
-        skipIfDedupeKeyPayloadKeySeen: "emptyBackfillAttempts",
       })];
     }
 
@@ -4544,7 +4543,6 @@ function buildExactWindowJob(input: {
   windowStart: string;
   windowEnd: string;
   priority: number;
-  skipIfDedupeKeyPayloadKeySeen?: string;
 }): DeviceSyncJobInput {
   return {
     kind: input.kind,
@@ -4555,9 +4553,6 @@ function buildExactWindowJob(input: {
     },
     priority: input.priority,
     ...(input.availableAt ? { availableAt: input.availableAt } : {}),
-    ...(input.skipIfDedupeKeyPayloadKeySeen
-      ? { skipIfDedupeKeyPayloadKeySeen: input.skipIfDedupeKeyPayloadKeySeen }
-      : {}),
     dedupeKey: sha256Text(JSON.stringify(["junction", input.kind, input.windowStart, input.windowEnd])),
   };
 }

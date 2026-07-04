@@ -3597,7 +3597,7 @@ test("device sync scheduler materializes legacy Junction retry repair before it 
   }
 });
 
-test("device sync scheduler does not rematerialize dead Junction retry repairs", async () => {
+test("device sync scheduler rematerializes dead Junction retry repairs from metadata", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-dead-retry-repair");
   const retryDueAt = "2026-04-04T00:15:00.000Z";
   const scheduledAt = "2026-04-04T01:00:00.000Z";
@@ -3698,14 +3698,16 @@ test("device sync scheduler does not rematerialize dead Junction retry repairs",
         const storedJob = store.getJobById(job.id);
         return storedJob ? [storedJob] : [];
       });
-    assert.equal(
-      backfillJobs.filter((job) => job.status !== "dead").length,
-      0,
-    );
-    assert.equal(
-      backfillJobs.filter((job) => job.dedupeKey === expectedDedupeKey).length,
-      1,
-    );
+    const activeBackfillJobs = backfillJobs.filter((job) => job.status !== "dead");
+    assert.equal(activeBackfillJobs.length, 1);
+    assert.equal(activeBackfillJobs[0]?.availableAt, scheduledAt);
+    assert.equal(activeBackfillJobs[0]?.dedupeKey, expectedDedupeKey);
+    assert.deepEqual(activeBackfillJobs[0]?.payload, {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+      emptyBackfillAttempts: 1,
+    });
+    assert.equal(backfillJobs.filter((job) => job.dedupeKey === expectedDedupeKey).length, 2);
     assert.equal(
       jobs.filter((job) => job.kind === "reconcile" && job.status === "queued").length,
       1,
