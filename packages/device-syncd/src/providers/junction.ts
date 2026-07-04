@@ -739,36 +739,12 @@ export function createJunctionDeviceSyncProvider(
   function readPendingConnectHistoricalBackfillRetryAt(
     account: Pick<DeviceSyncAccount, "connectedAt" | "metadata">,
   ): string | null {
-    const metadata = account.metadata;
-    const status = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]);
-
-    if (status !== "retrying") {
-      return null;
-    }
-
     const connectWindow = buildConnectHistoricalBackfillWindow(account, summaryBackfillDays);
-    const metadataWindowStart = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]);
-    const metadataWindowEnd = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]);
-
-    if (
-      metadataWindowStart !== connectWindow.windowStart
-      || metadataWindowEnd !== connectWindow.windowEnd
-    ) {
-      return null;
-    }
-
-    const emptyAttempts = Math.max(
-      1,
-      readHistoricalBackfillEmptyAttempts(metadata, connectWindow.windowStart, connectWindow.windowEnd),
+    return readPendingHistoricalBackfillRetryAt(
+      account.metadata,
+      connectWindow.windowStart,
+      connectWindow.windowEnd,
     );
-    const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
-    const lastEmptyAt = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt]);
-
-    if (retryDelayMs === null || !lastEmptyAt || !Number.isFinite(Date.parse(lastEmptyAt))) {
-      return null;
-    }
-
-    return addMilliseconds(lastEmptyAt, retryDelayMs);
   }
 
   function resolveJunctionNextReconcileAt(
@@ -4397,6 +4373,16 @@ function buildHistoricalBackfillFollowUp(input: {
     return {};
   }
 
+  const pendingRetryAt = readPendingHistoricalBackfillRetryAt(
+    input.metadata,
+    input.windowStart,
+    input.windowEnd,
+  );
+  const pendingRetryAtMs = pendingRetryAt ? Date.parse(pendingRetryAt) : NaN;
+  if (pendingRetryAt && Number.isFinite(pendingRetryAtMs) && Date.parse(input.now) < pendingRetryAtMs) {
+    return { nextReconcileAt: pendingRetryAt };
+  }
+
   const previousEmptyAttempts = readHistoricalBackfillEmptyAttempts(
     input.metadata,
     input.windowStart,
@@ -4423,6 +4409,38 @@ function buildHistoricalBackfillFollowUp(input: {
     metadataPatch,
     nextReconcileAt: retryAt,
   };
+}
+
+function readPendingHistoricalBackfillRetryAt(
+  metadata: Record<string, unknown>,
+  windowStart: string,
+  windowEnd: string,
+): string | null {
+  const status = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]);
+
+  if (status !== "retrying") {
+    return null;
+  }
+
+  const metadataWindowStart = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]);
+  const metadataWindowEnd = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]);
+
+  if (metadataWindowStart !== windowStart || metadataWindowEnd !== windowEnd) {
+    return null;
+  }
+
+  const emptyAttempts = Math.max(
+    1,
+    readHistoricalBackfillEmptyAttempts(metadata, windowStart, windowEnd),
+  );
+  const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
+  const lastEmptyAt = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt]);
+
+  if (retryDelayMs === null || !lastEmptyAt || !Number.isFinite(Date.parse(lastEmptyAt))) {
+    return null;
+  }
+
+  return addMilliseconds(lastEmptyAt, retryDelayMs);
 }
 
 function buildNonConnectHistoricalBackfillFollowUp(input: {

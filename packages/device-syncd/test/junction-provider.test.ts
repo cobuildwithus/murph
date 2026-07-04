@@ -755,6 +755,37 @@ test("Junction materialized due historical backfill retry advances normal reconc
   assert.equal(result.nextReconcileAt, "2026-04-04T01:15:00.000Z");
 });
 
+test("Junction exact-window backfill preserves a pending metadata retry before it is due", async () => {
+  const provider = createEmptyJunctionBackfillProvider({
+    reconcileIntervalMs: 60 * 60_000,
+  });
+  const metadata = {
+    junctionHistoricalBackfillStatus: "retrying",
+    junctionHistoricalBackfillEmptyAttempts: 1,
+    junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+  };
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-04T00:05:00.000Z",
+      account: createAccount({
+        connectedAt: "2026-04-03T00:00:00.000Z",
+        metadata,
+        nextReconcileAt: "2026-04-04T00:15:00.000Z",
+      }),
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.metadataPatch, undefined);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
+});
+
 test("Junction retrying historical backfill without attempts uses the first retry delay", () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);
