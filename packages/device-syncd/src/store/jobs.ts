@@ -142,6 +142,25 @@ export function readNextDeviceSyncJobWakeAtForAccount(database: DatabaseSync, ac
   return row?.wake_at ?? null;
 }
 
+export function hasDeviceSyncJobDedupeKeyPayloadKey(database: DatabaseSync, input: {
+  accountId: string;
+  dedupeKey: string;
+  payloadKey: string;
+  provider: string;
+}): boolean {
+  const rows = database.prepare(`
+    select payload_json
+    from device_job
+    where account_id = ?
+      and provider = ?
+      and dedupe_key = ?
+  `).all(input.accountId, input.provider, input.dedupeKey) as Array<Pick<StoredJobRow, "payload_json">>;
+
+  return rows.some((row) =>
+    Object.prototype.hasOwnProperty.call(maybeParseJsonObject(row.payload_json), input.payloadKey)
+  );
+}
+
 export function claimDueDeviceSyncJob(
   database: DatabaseSync,
   workerId: string,

@@ -378,6 +378,9 @@ export interface DeviceSyncJobInput {
   availableAt?: string;
   maxAttempts?: number;
   dedupeKey?: string;
+  // Narrow one-time repair guard: skip enqueue when this dedupe key already
+  // has a prior job carrying the named payload key.
+  skipIfDedupeKeyPayloadKeySeen?: string;
 }
 
 export interface ProviderCallbackContext {

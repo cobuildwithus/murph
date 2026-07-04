@@ -3597,6 +3597,124 @@ test("device sync scheduler materializes legacy Junction retry repair before it 
   }
 });
 
+test("device sync scheduler does not rematerialize dead Junction retry repairs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-dead-retry-repair");
+  const retryDueAt = "2026-04-04T00:15:00.000Z";
+  const scheduledAt = "2026-04-04T01:00:00.000Z";
+  const ownerWindowStart = "2026-04-01T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  let now = new Date(scheduledAt);
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60 * 60_000,
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          throw new Error(`Unexpected Junction request during dead retry repair test: ${readUrl(input)}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: ownerWindowEnd,
+      metadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: ownerWindowStart,
+        junctionHistoricalBackfillWindowEnd: ownerWindowEnd,
+      },
+      nextReconcileAt: scheduledAt,
+    });
+    const expectedDedupeKey = createHash("sha256")
+      .update(JSON.stringify(["junction", "backfill", ownerWindowStart, ownerWindowEnd]))
+      .digest("hex");
+    const retryJob = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "backfill",
+      payload: {
+        windowStart: ownerWindowStart,
+        windowEnd: ownerWindowEnd,
+        emptyBackfillAttempts: 1,
+      },
+      availableAt: retryDueAt,
+      priority: 50,
+      maxAttempts: 1,
+      dedupeKey: expectedDedupeKey,
+    });
+
+    now = new Date(retryDueAt);
+    const claimedRetry = store.claimDueJob("worker-dead-junction-retry", retryDueAt, 60_000);
+    assert.equal(claimedRetry?.id, retryJob.id);
+    assert.equal(
+      store.failJobIfOwned(
+        retryJob.id,
+        "worker-dead-junction-retry",
+        retryDueAt,
+        "JUNCTION_API_REQUEST_FAILED",
+        "Junction retry unavailable.",
+        null,
+        true,
+      ),
+      true,
+    );
+    assert.equal(store.getJobById(retryJob.id)?.status, "dead");
+
+    now = new Date(scheduledAt);
+    await service.runSchedulerOnce();
+
+    const jobs = readJobsForAccountForTesting(store, account.id);
+    const backfillJobs = jobs
+      .filter((job) => job.kind === "backfill")
+      .flatMap((job) => {
+        const storedJob = store.getJobById(job.id);
+        return storedJob ? [storedJob] : [];
+      });
+    assert.equal(
+      backfillJobs.filter((job) => job.status !== "dead").length,
+      0,
+    );
+    assert.equal(
+      backfillJobs.filter((job) => job.dedupeKey === expectedDedupeKey).length,
+      1,
+    );
+    assert.equal(
+      jobs.filter((job) => job.kind === "reconcile" && job.status === "queued").length,
+      1,
+    );
+  } finally {
+    close();
+  }
+});
+
 test("device sync service stores Junction non-connect empty backfill retry attempts", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-non-connect-empty-retry");
   const executedAt = "2026-04-04T00:00:00.000Z";

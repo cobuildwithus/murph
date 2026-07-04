@@ -38,6 +38,7 @@ import {
   failDeviceSyncJob,
   failDeviceSyncJobIfOwned,
   getDeviceSyncJobById,
+  hasDeviceSyncJobDedupeKeyPayloadKey,
   listDueDeviceSyncJobBatchCandidates,
   markPendingDeviceSyncJobsDeadForAccount,
   readNextDeviceSyncJobWakeAt,
@@ -340,6 +341,15 @@ export class SqliteDeviceSyncStore {
 
   readNextJobWakeAtForAccount(accountId: string): string | null {
     return readNextDeviceSyncJobWakeAtForAccount(this.database, accountId);
+  }
+
+  hasJobDedupeKeyPayloadKey(accountId: string, provider: string, dedupeKey: string, payloadKey: string): boolean {
+    return hasDeviceSyncJobDedupeKeyPayloadKey(this.database, {
+      accountId,
+      provider,
+      dedupeKey,
+      payloadKey,
+    });
   }
 
   claimDueJob(workerId: string, now: string, leaseMs: number): DeviceSyncJobRecord | null {

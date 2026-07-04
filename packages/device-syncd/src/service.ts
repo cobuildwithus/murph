@@ -1319,17 +1319,31 @@ class DeviceSyncServiceController {
     account: Pick<PublicDeviceSyncAccount, "id" | "provider">,
     jobs: readonly DeviceSyncJobInput[],
   ): DeviceSyncJobRecord[] {
-    return this.normalizeJobsForEnqueue(account, jobs).map((job) =>
-      this.store.enqueueJob({
-        provider: account.provider,
-        accountId: account.id,
-        kind: job.kind,
-        payload: job.payload ?? {},
-        priority: job.priority ?? 0,
-        availableAt: job.availableAt,
-        maxAttempts: job.maxAttempts,
-        dedupeKey: job.dedupeKey,
-      })
+    return this.normalizeJobsForEnqueue(account, jobs)
+      .filter((job) => !this.shouldSkipJobForDedupeHistory(account, job))
+      .map((job) =>
+        this.store.enqueueJob({
+          provider: account.provider,
+          accountId: account.id,
+          kind: job.kind,
+          payload: job.payload ?? {},
+          priority: job.priority ?? 0,
+          availableAt: job.availableAt,
+          maxAttempts: job.maxAttempts,
+          dedupeKey: job.dedupeKey,
+        })
+      );
+  }
+
+  private shouldSkipJobForDedupeHistory(
+    account: Pick<PublicDeviceSyncAccount, "id" | "provider">,
+    job: DeviceSyncJobInput,
+  ): boolean {
+    const payloadKey = job.skipIfDedupeKeyPayloadKeySeen;
+    return Boolean(
+      payloadKey
+        && job.dedupeKey
+        && this.store.hasJobDedupeKeyPayloadKey(account.id, account.provider, job.dedupeKey, payloadKey),
     );
   }
 
