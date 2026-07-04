@@ -997,18 +997,27 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_effects_blocked_due_wake_001",
+        laneSeq: "1",
+      }),
+    ];
     const dueWakeAt = new Date(Date.now() - 1_000).toISOString();
+    const foregroundAfterCheckpointGate = createDeferred<void>();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
       return {};
     });
     let assistantPass = 0;
     let snapshotCount = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_effects_blocked_due_wake",
@@ -1030,13 +1039,32 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem() {
-            return { status: "imported" };
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id !== "mailbox_item_entrypoint_effects_blocked_due_wake_001") {
+              return { status: "imported" };
+            }
+
+            return {
+              afterCheckpoint: async () => {
+                events.push("mailbox.afterCheckpoint:start");
+                await foregroundAfterCheckpointGate.promise;
+                events.push("mailbox.afterCheckpoint:done");
+                return {
+                  attachmentEvidenceUpdated: true,
+                  kind: "inbox_projection",
+                  projectionUpdated: true,
+                  reasonCode: null,
+                  status: "succeeded",
+                };
+              },
+              status: "imported",
+            };
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
-              items: [],
+              items: mailboxItems,
             }),
             workspacePort: createWorkspacePort({
               checkpointRequests,
@@ -1044,7 +1072,7 @@ describe("hosted workspace runtime entrypoint", () => {
               workspace: createWorkspaceState({ version: "0" }),
             }),
           }),
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             assistantPass += 1;
             events.push(`assistant:${assistantPass}`);
 
@@ -1062,9 +1090,31 @@ describe("hosted workspace runtime entrypoint", () => {
             }
 
             if (assistantPass === 2) {
+              assert.ok(
+                events.includes(
+                  "mailbox.importItem:mailbox_item_entrypoint_effects_blocked_due_wake_002",
+                ),
+                events.join(","),
+              );
+              assert.notEqual(input.workspace?.nextWakeAt, dueWakeAt);
+              assert.ok(
+                !events.includes("workspace.checkpoint"),
+                events.join(","),
+              );
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: null,
+                nextWakeReason: null,
+                progressed: true,
+              };
+            }
+
+            if (assistantPass === 3) {
               // The service pass runs only after the checkpoint committed the
               // pending durable effects.
               assert.ok(events.includes("durable-effect"), events.join(","));
+              assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
+              assert.equal(input.workspace?.nextWakeReason, "assistant");
               return {
                 checkpointReason: "assistant_runtime_commit",
                 nextWakeAt: null,
@@ -1075,22 +1125,64 @@ describe("hosted workspace runtime entrypoint", () => {
 
             throw new Error("Effects-blocked due wake should be serviced exactly once.");
           },
+          runtimeWakeSignal,
           vaultRoot,
         },
       );
 
-      assert.equal(assistantPass, 2, events.join(","));
+      await waitUntil(() => {
+        assert.equal(events.includes("mailbox.afterCheckpoint:start"), true);
+      });
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_entrypoint_effects_blocked_due_wake_002",
+        laneSeq: "2",
+      }));
+      runtimeWakeSignal.notify();
+      await waitUntil(() => {
+        assert.equal(events.includes("assistant:2"), true);
+      });
+      assert.ok(
+        !events.includes("workspace.checkpoint"),
+        events.join(","),
+      );
+      foregroundAfterCheckpointGate.resolve();
+
+      const result = await withRealTimeout(
+        resultPromise,
+        15_000,
+        () => events.join(","),
+      );
+
+      assert.equal(assistantPass, 3, events.join(","));
       assert.equal(durableEffect.mock.calls.length, 1);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "idle_shutdown",
-        "idle_shutdown",
-      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.reason,
+          request.expectedWorkspaceVersion,
+          request.nextWakeAt,
+          request.nextWakeReason,
+        ]),
+        [
+          ["idle_shutdown", "0", dueWakeAt, "assistant"],
+          ["idle_shutdown", "1", null, null],
+        ],
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant:2")
+          < requireEventIndex(events, "mailbox.afterCheckpoint:done"),
+      );
+      assert.ok(
+        requireEventIndex(events, "mailbox.afterCheckpoint:done")
+          < requireEventIndex(events, "snapshot:idle_shutdown:1"),
+      );
       assert.ok(events.indexOf("snapshot:idle_shutdown:1") < events.indexOf("durable-effect"));
-      assert.ok(events.indexOf("durable-effect") < events.indexOf("assistant:2"));
-      assert.ok(events.indexOf("assistant:2") < events.indexOf("snapshot:idle_shutdown:2"));
+      assert.ok(events.indexOf("durable-effect") < events.indexOf("assistant:3"));
+      assert.ok(events.indexOf("assistant:3") < events.indexOf("snapshot:idle_shutdown:2"));
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
     } finally {
+      foregroundAfterCheckpointGate.resolve();
+      await resultPromise?.catch(() => undefined);
       await removeTempRoot(vaultRoot);
     }
   });
