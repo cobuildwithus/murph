@@ -3114,14 +3114,39 @@ function mergeHostedWorkspaceInvocationProjection(
     ]);
   }
 
+  const baseStatus = options.replaceWake && !preserveCheckpointGatedWake
+    ? next.status
+    : mergeHostedWorkspaceInvocationStatus(previous.status, next.status);
+  const projectedWakeCanDrainDeferredBeforeReturn = (
+    wake: HostedWorkspaceInvocationProjectedWake,
+  ): boolean => projectedRuntimeWakeCanRunAfterCheckpoint({
+    projection: { ...wake, status: baseStatus },
+    requireDue: true,
+    servicedProjectedRuntimeWakeKey: options.servicedProjectedWakeKey ?? null,
+  });
   const previousWakeShouldBeDeferredIfDisplaced =
     options.deferredPreviousWakeCheckpointGateFresh !== undefined
     || previous.projectedWakeRequiresCheckpoint;
-  const previousWakeWasDisplaced =
+  const previousWakeWouldBeDisplaced =
     !previousWakeWasServiced
     && options.replaceWake !== true
     && previousWakeShouldBeDeferredIfDisplaced
     && previousSelectedWake.nextWakeAt !== null
+    && !hostedWorkspaceInvocationProjectionWakeMatches(
+      selectedProjectedWake,
+      previousSelectedWake,
+    );
+  if (
+    previousWakeWouldBeDisplaced
+    && !projectedWakeCanDrainDeferredBeforeReturn(selectedProjectedWake)
+  ) {
+    selectedProjectedWake = previousSelectedWake;
+  }
+  const selectedProjectedWakeCanDrainDeferred =
+    projectedWakeCanDrainDeferredBeforeReturn(selectedProjectedWake);
+  const previousWakeWasDisplaced =
+    selectedProjectedWakeCanDrainDeferred
+    && previousWakeWouldBeDisplaced
     && !hostedWorkspaceInvocationProjectionWakeMatches(
       selectedProjectedWake,
       previousSelectedWake,
@@ -3142,7 +3167,7 @@ function mergeHostedWorkspaceInvocationProjection(
       ]);
   } else if (
     !previousWakeWasServiced
-    && selectedProjectedWake.nextWakeAt !== null
+    && selectedProjectedWakeCanDrainDeferred
     && hostedWorkspaceInvocationProjectionWakeMatches(
       selectedProjectedWake,
       previousSelectedWake,
@@ -3166,7 +3191,7 @@ function mergeHostedWorkspaceInvocationProjection(
       ]);
   } else if (
     previousWakeWasServiced
-    && selectedProjectedWake.nextWakeAt !== null
+    && selectedProjectedWakeCanDrainDeferred
     && hostedWorkspaceInvocationProjectionWakeMatches(
       selectedProjectedWake,
       previousDeferredWake,
@@ -3179,7 +3204,7 @@ function mergeHostedWorkspaceInvocationProjection(
     deferredAfterSelectedWake = nextSelectedWake;
   } else if (
     previousWakeWasServiced
-    && selectedProjectedWake.nextWakeAt !== null
+    && selectedProjectedWakeCanDrainDeferred
     && hostedWorkspaceInvocationProjectionWakeMatches(
       selectedProjectedWake,
       nextSelectedWake,
@@ -3192,9 +3217,6 @@ function mergeHostedWorkspaceInvocationProjection(
     deferredAfterSelectedWake = previousDeferredWake;
   }
 
-  const baseStatus = options.replaceWake && !preserveCheckpointGatedWake
-    ? next.status
-    : mergeHostedWorkspaceInvocationStatus(previous.status, next.status);
   const status = baseStatus === "budget_exhausted"
     ? baseStatus
     : selectedProjectedWake.nextWakeAt !== null

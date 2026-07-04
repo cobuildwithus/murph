@@ -1860,6 +1860,142 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("source-blind future competing wake does not hide checkpoint-gated assistant wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_future_competing_checkpoint_wake_001",
+        laneSeq: "1",
+      }),
+    ];
+    const competingWakeAt = "2099-04-27T00:05:00.000Z";
+    const gatedWakeAt = "2099-04-27T00:10:00.000Z";
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPass = 0;
+    let snapshotCount = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_future_competing_checkpoint_wake",
+              idleCheckpointDelayMs: 25,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              snapshotCount += 1;
+              events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: String(snapshotCount).repeat(64),
+                  key:
+                    `users/bundles/member-synthetic/future-competing-checkpoint-wake-`
+                    + `${snapshotCount}.bundle.json`,
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPass += 1;
+              events.push(`assistant:${assistantPass}`);
+
+              if (assistantPass === 1) {
+                return {
+                  afterCheckpoint: async () => {
+                    events.push("assistant.afterCheckpoint:1");
+                    mailboxItems.push(createMailboxItem({
+                      id: "mailbox_item_entrypoint_future_competing_checkpoint_wake_002",
+                      laneSeq: "2",
+                    }));
+                    runtimeWakeSignal.notify();
+                    return {
+                      checkpointReason: "system_mailbox_receipt",
+                      nextWakeAt: gatedWakeAt,
+                      nextWakeReason: "assistant",
+                    };
+                  },
+                  checkpointReason: "system_mailbox_receipt",
+                  progressed: true,
+                };
+              }
+
+              if (assistantPass === 2) {
+                assert.ok(
+                  events.includes(
+                    "mailbox.importItem:mailbox_item_entrypoint_future_competing_checkpoint_wake_002",
+                  ),
+                  events.join(","),
+                );
+                assert.notEqual(input.workspace?.nextWakeAt, gatedWakeAt);
+                assert.ok(
+                  !events.includes("workspace.checkpoint"),
+                  events.join(","),
+                );
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: competingWakeAt,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                };
+              }
+
+              throw new Error("Future competing wake should not drain before checkpoint.");
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      assert.equal(assistantPass, 2, events.join(","));
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.reason,
+          request.expectedWorkspaceVersion,
+          request.nextWakeAt,
+          request.nextWakeReason,
+        ]),
+        [
+          ["idle_shutdown", "0", gatedWakeAt, "assistant"],
+        ],
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown:1"),
+      );
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, gatedWakeAt);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("services a durable-effect due assistant wake after forced follow-up checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
