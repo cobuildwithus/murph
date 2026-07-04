@@ -1910,6 +1910,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             || accumulatedProjection.projectedWakeRequiresCheckpoint
           );
       };
+      const hasPlainDurableEffectsBlockedProjectedWake = (): boolean => {
+        const projectedRuntimeWakeKey = buildHostedRuntimeWakeKey({
+          nextWakeAt: accumulatedProjection.nextWakeAt,
+          nextWakeReason: accumulatedProjection.nextWakeReason,
+        });
+        return projectedRuntimeWakeKey !== null
+          && projectedRuntimeWakeKey !== servicedProjectedRuntimeWakeKey
+          && pendingDurableCheckpointEffects.length > 0
+          && !accumulatedProjection.projectedWakeRequiresCheckpoint;
+      };
       const runCheckpointInterruptForegroundPass = async (input: {
         latencySeed: HostedRuntimeWakeLatencySeed | null;
       }): Promise<void> => {
@@ -1921,6 +1931,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           protectProjectedWakeFromReplacement: checkpointBlockedWakeInterrupted,
           projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
           requestIdKind: "checkpoint-interrupt",
+        });
+      };
+      const runPreCheckpointRuntimeWakeForegroundPass = async (input: {
+        latencySeed: HostedRuntimeWakeLatencySeed | null;
+      }): Promise<void> => {
+        if (hasPlainDurableEffectsBlockedProjectedWake()) {
+          await runCheckpointInterruptForegroundPass(input);
+          return;
+        }
+        await runIdleWakeForegroundPass({
+          latencySeed: input.latencySeed,
+          projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+          requestIdKind: "idle-wake",
         });
       };
       if (!runtimeStateDirty) {
@@ -1977,21 +2000,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               runtimeWakeSignal: options.runtimeWakeSignal ?? null,
               shutdownSignal: options.shutdownSignal ?? null,
             });
-            const dirtyWakeLatencySeed =
-              dirtyWaitResult.kind === "external_wake"
-                ? createHostedRuntimeWakeLatencySeed(dirtyWaitResult.notification)
-                : null;
-            if (
-              dirtyWaitResult.kind === "external_wake"
-              || dirtyWaitResult.kind === "projected_runtime_wake"
-            ) {
-              const projectedWakeKeyBeingServiced: string | null =
-                dirtyWaitResult.kind === "projected_runtime_wake"
-                  ? projectedRuntimeWakeKey
-                  : servicedProjectedRuntimeWakeKey;
+            if (dirtyWaitResult.kind === "external_wake") {
+              await runPreCheckpointRuntimeWakeForegroundPass({
+                latencySeed: createHostedRuntimeWakeLatencySeed(
+                  dirtyWaitResult.notification,
+                ),
+              });
+              continue;
+            }
+            if (dirtyWaitResult.kind === "projected_runtime_wake") {
               await runIdleWakeForegroundPass({
-                latencySeed: dirtyWakeLatencySeed,
-                projectedWakeKeyBeingServiced,
+                latencySeed: null,
+                projectedWakeKeyBeingServiced: projectedRuntimeWakeKey,
                 requestIdKind: "idle-wake",
               });
               continue;
@@ -2059,12 +2079,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             consumePendingHostedRuntimeWake(
               options.runtimeWakeSignal ?? null,
               options.shutdownSignal ?? null,
-            );
+          );
           if (pendingWakeLatencySeed) {
-            await runIdleWakeForegroundPass({
+            await runPreCheckpointRuntimeWakeForegroundPass({
               latencySeed: pendingWakeLatencySeed,
-              projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
-              requestIdKind: "idle-wake",
             });
             continue;
           }
@@ -2129,12 +2147,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             consumePendingHostedRuntimeWake(
               options.runtimeWakeSignal ?? null,
               options.shutdownSignal ?? null,
-            );
+          );
           if (idleMaintenanceWakeLatencySeed) {
-            await runIdleWakeForegroundPass({
+            await runPreCheckpointRuntimeWakeForegroundPass({
               latencySeed: idleMaintenanceWakeLatencySeed,
-              projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
-              requestIdKind: "idle-wake",
             });
             continue;
           }
