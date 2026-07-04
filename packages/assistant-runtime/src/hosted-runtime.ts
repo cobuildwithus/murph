@@ -3136,12 +3136,6 @@ function mergeHostedWorkspaceInvocationProjection(
       selectedProjectedWake,
       previousSelectedWake,
     );
-  if (
-    previousWakeWouldBeDisplaced
-    && !projectedWakeCanDrainDeferredBeforeReturn(selectedProjectedWake)
-  ) {
-    selectedProjectedWake = previousSelectedWake;
-  }
   const selectedProjectedWakeCanDrainDeferred =
     projectedWakeCanDrainDeferredBeforeReturn(selectedProjectedWake);
   const previousWakeWasDisplaced =

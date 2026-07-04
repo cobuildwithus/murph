@@ -1860,7 +1860,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("source-blind future competing wake does not hide checkpoint-gated assistant wake", async () => {
+  test("source-blind future competing wake stays durable over later checkpoint-gated wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1982,7 +1982,7 @@ describe("hosted workspace runtime entrypoint", () => {
           request.nextWakeReason,
         ]),
         [
-          ["idle_shutdown", "0", gatedWakeAt, "assistant"],
+          ["idle_shutdown", "0", competingWakeAt, "assistant"],
         ],
       );
       assert.ok(
@@ -1990,7 +1990,7 @@ describe("hosted workspace runtime entrypoint", () => {
           < requireEventIndex(events, "snapshot:idle_shutdown:1"),
       );
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, gatedWakeAt);
+      assert.equal(result.nextWakeAt, competingWakeAt);
     } finally {
       await removeTempRoot(vaultRoot);
     }
