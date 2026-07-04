@@ -3232,6 +3232,78 @@ test("manual reconcile boosts Junction reconcile priority without promoting hist
   }
 });
 
+test("manual reconcile preserves delayed Junction retry repair timing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-junction-retry-timing");
+  const queuedAt = "2026-04-04T00:05:00.000Z";
+  const retryDueAt = "2026-04-04T00:15:00.000Z";
+  const ownerWindowStart = "2026-04-01T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => new Date(queuedAt),
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          throw new Error(`Unexpected Junction request during manual retry timing test: ${readUrl(input)}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: ownerWindowEnd,
+      metadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: ownerWindowStart,
+        junctionHistoricalBackfillWindowEnd: ownerWindowEnd,
+      },
+      nextReconcileAt: queuedAt,
+    });
+
+    const reconcile = service.queueManualReconcile(account.id);
+    const queuedByKind = new Map(reconcile.jobs.map((job) => [job.kind, job]));
+
+    assert.equal(queuedByKind.get("reconcile")?.availableAt, queuedAt);
+    assert.equal(queuedByKind.get("reconcile")?.priority, 80);
+    assert.equal(queuedByKind.get("backfill")?.availableAt, retryDueAt);
+    assert.equal(queuedByKind.get("backfill")?.priority, 50);
+    assert.deepEqual(queuedByKind.get("backfill")?.payload, {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+      emptyBackfillAttempts: 1,
+    });
+  } finally {
+    close();
+  }
+});
+
 test("device sync service wakes Junction retrying historical backfill at the retry due time", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-empty-backfill-wake");
   const executedAt = "2026-04-04T00:00:00.000Z";

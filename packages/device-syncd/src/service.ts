@@ -434,7 +434,7 @@ class DeviceSyncServiceController {
       jobs.map((job) => ({
         ...job,
         priority: job.kind === "reconcile" ? Math.max(job.priority ?? 0, 80) : job.priority,
-        availableAt: now,
+        availableAt: job.kind === "reconcile" ? now : job.availableAt ?? now,
         dedupeKey:
           job.dedupeKey ??
           `manual-reconcile:${job.kind}:${sha256Text(stringifyJson(job.payload ?? {}))}`,
