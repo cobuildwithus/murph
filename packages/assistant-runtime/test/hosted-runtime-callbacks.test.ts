@@ -5542,6 +5542,101 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("uses persisted outbox Linq current inbound proof for non-prepared text sends", async () => {
+    const currentInbound = {
+      dedupeKey: "evt_linq_current",
+      eventId: "evt_linq_current",
+      mailboxItemId: "mailbox_item_linq_current",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      replyToMessageId: "linq_message_a",
+      target: "linq_chat_a",
+    };
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_a",
+      channel: "linq",
+      explicitTarget: "linq_chat_a",
+      inboundMailboxItemIds: ["mailbox_item_linq_current"],
+      replyToMessageId: "linq_message_a",
+      transportIdempotent: false,
+    });
+    const assertRecentInbound = vi.fn(async () => undefined);
+    const recordDeliveryOutcome = vi.fn<RecordLinqDeliveryOutcomeStub>(
+      async () => undefined,
+    );
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        delivery: null,
+        intentId: "intent_123",
+        lastError: null,
+        linqCurrentInbound: currentInbound,
+        status: "pending",
+      }),
+    );
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_a",
+      target: "linq_chat_a",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "reply",
+        replyToMessageId: "linq_message_a",
+        target: "linq_chat_a",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+      }),
+    ]);
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentInbound,
+      }),
+      { signal: null },
+    );
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds: ["mailbox_item_linq_current"],
+        consumeRequired: true,
+        currentInbound,
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
   it("does not mark current inbound answered from Linq progress delivery outcomes", async () => {
     const currentInbound = {
       dedupeKey: "evt_linq_current",

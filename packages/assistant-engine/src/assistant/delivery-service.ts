@@ -1,4 +1,5 @@
 import type {
+  AssistantOutboxIntent,
   AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -85,6 +86,7 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
 }): {
   deliveryIdempotencyKey: string | null
   hostedDeliveryInboundMailboxItemIds: readonly string[]
+  linqCurrentInbound: AssistantOutboxIntent['linqCurrentInbound'] | null
   deliveryTransportIdempotent: boolean | undefined
 } {
   const explicitKey = normalizeNullableString(input.input.deliveryIdempotencyKey)
@@ -99,6 +101,7 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
     return {
       deliveryIdempotencyKey: explicitKey,
       hostedDeliveryInboundMailboxItemIds: [],
+      linqCurrentInbound: null,
       deliveryTransportIdempotent: undefined,
     }
   }
@@ -124,6 +127,7 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
   return {
     deliveryIdempotencyKey,
     hostedDeliveryInboundMailboxItemIds,
+    linqCurrentInbound: input.input.hostedDeliveryIdempotency?.linqCurrentInbound ?? null,
     deliveryTransportIdempotent:
       resolveHostedAssistantDeliveryTransportIdempotentOverride({
         channel,
@@ -132,6 +136,31 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
         media: input.media ?? [],
       }),
   }
+}
+
+function resolveAssistantHostedDeliveryLinqCurrentInbound(input: {
+  channel: string | null
+  hostedDeliveryInboundMailboxItemIds: readonly string[]
+  linqCurrentInbound: AssistantOutboxIntent['linqCurrentInbound'] | null
+  replyToMessageId: string | null
+}): AssistantOutboxIntent['linqCurrentInbound'] | null {
+  const channel = normalizeNullableString(input.channel)?.toLowerCase() ?? null
+  if (channel !== 'linq' || !input.linqCurrentInbound) {
+    return null
+  }
+
+  const replyToMessageId = normalizeNullableString(input.replyToMessageId)
+  if (
+    !replyToMessageId ||
+    input.linqCurrentInbound.replyToMessageId !== replyToMessageId ||
+    !input.hostedDeliveryInboundMailboxItemIds.includes(
+      input.linqCurrentInbound.mailboxItemId,
+    )
+  ) {
+    return null
+  }
+
+  return input.linqCurrentInbound
 }
 
 export function dropUnsupportedAssistantResponseMediaForChannel(input: {
@@ -189,6 +218,7 @@ export async function deliverAssistantReply(input: {
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     hostedDeliveryInboundMailboxItemIds:
       hostedDelivery.hostedDeliveryInboundMailboxItemIds,
+    linqCurrentInbound: hostedDelivery.linqCurrentInbound,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     input: input.input,
     media: deliveryMedia,
@@ -752,6 +782,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   dedupeToken: string | null
   deliveryIdempotencyKey: string | null
   hostedDeliveryInboundMailboxItemIds: readonly string[]
+  linqCurrentInbound: AssistantOutboxIntent['linqCurrentInbound'] | null
   deliveryTransportIdempotent: boolean | undefined
   input: AssistantMessageInput
   media: AssistantResponseMedia[]
@@ -770,6 +801,13 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     deliveryFields,
     input: input.input,
   })
+  const linqCurrentInbound = resolveAssistantHostedDeliveryLinqCurrentInbound({
+    channel: messageDeliveryFields.channel,
+    hostedDeliveryInboundMailboxItemIds:
+      input.hostedDeliveryInboundMailboxItemIds,
+    linqCurrentInbound: input.linqCurrentInbound,
+    replyToMessageId: messageDeliveryFields.replyToMessageId,
+  })
   const outcome = await state.outbox.deliverMessage({
     ...messageDeliveryFields,
     dedupeToken: input.dedupeToken,
@@ -778,6 +816,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     hostedDeliveryInboundMailboxItemIds:
       input.hostedDeliveryInboundMailboxItemIds,
+    ...(linqCurrentInbound ? { linqCurrentInbound } : {}),
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     turnId: input.turnId,
     turnTrigger: input.input.turnTrigger ?? null,

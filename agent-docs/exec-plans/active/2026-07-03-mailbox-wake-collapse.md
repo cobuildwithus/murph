@@ -113,9 +113,9 @@ Exact accepted-item computation (verified design, hardened by adversarial review
   legacy runtime-side high-water coverage path has been removed
   from outbox intents, receipt repair, auto-reply evidence, hosted delivery
   side effects, and runtime-to-web delivery outcomes.
-- Persist the full `currentInbound` proof alongside the prepared Linq
-  route/service authority so post-checkpoint prepared retries restore the
-  same exact consume authority before provider send.
+- Persist the full `currentInbound` proof on the existing outbox intent
+  authority so prepared retries and non-prepared foreground text sends restore
+  the same exact consume authority before provider send.
 - The answered item set comes from the existing assistant input
   `hostedDeliveryIdempotency.inboundMailboxItemIds`; it covers the proven
   same-turn multi-input case without adding a web-owned group table or second
@@ -345,6 +345,14 @@ Touch: `webhook-service-types.ts:17-26`;
   assistant-engine focused runtime tests, assistant-runtime hosted callback
   tests, assistantd HTTP tests, assistant-cli doctor/daemon coverage tests,
   and full workspace typecheck passed.
+- PR 1 CI follow-up (2026-07-05): non-prepared Linq foreground text replies
+  now carry exact current-inbound proof through the existing outbox intent
+  instead of requiring a prepared dispatch. Untouched pending deduped intents
+  can fill a missing proof before any send attempt; attempted/sent intents are
+  not rewritten. Focused local proof: assistant-engine outbox and service
+  runtime tests, assistant-runtime hosted callback tests, full workspace
+  typecheck, docs drift, and the hosted-local Linq scheduled-reminder plus
+  idle-checkpoint deferred-progress E2Es passed.
 - PR 2: workflow replay tests per the patch procedure + Temporal
   orchestration E2E; full webhook owner suites for the wake-field
   collapse.

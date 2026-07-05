@@ -5,6 +5,7 @@ import type {
   AssistantBindingDeliveryKind,
   AssistantDeliveryError,
   AssistantDeliverySource,
+  AssistantOutboxIntent,
   AssistantProviderSessionOptions,
   AssistantSandbox,
   AssistantSession,
@@ -76,6 +77,7 @@ export interface AssistantHostedDeliveryIdempotencyContext {
   conversationId?: string | null
   consumeMailboxItemIds?: readonly string[] | null
   inboundMailboxItemIds?: readonly string[] | null
+  linqCurrentInbound?: AssistantOutboxIntent['linqCurrentInbound']
   recipientKey?: string | null
 }
 

@@ -2379,6 +2379,47 @@ describe('assistant outbox runtime', () => {
       })
   })
 
+  it('adds Linq current inbound proof to untouched pending deduped intents', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-current-create-')
+    const baseInput = {
+      channel: 'linq',
+      dedupeToken: 'dedupe-linq-current-create',
+      explicitTarget: 'linq-chat-123',
+      hostedDeliveryInboundMailboxItemIds: ['mailbox-item-linq-current'],
+      identityId: 'identity-linq-current-create',
+      message: 'hello from Linq',
+      replyToMessageId: 'linq-message-123',
+      sessionId: 'session-linq-current-create',
+      threadId: 'linq-chat-123',
+      threadIsDirect: true,
+      turnId: 'turn-linq-current-create',
+      vault: vaultRoot,
+    }
+    const linqCurrentInbound = {
+      dedupeKey: 'evt-linq-current',
+      eventId: 'evt-linq-current',
+      mailboxItemId: 'mailbox-item-linq-current',
+      occurredAt: '2026-04-08T05:00:00.000Z',
+      replyToMessageId: 'linq-message-123',
+      target: 'linq-chat-123',
+    }
+
+    const first = await createAssistantOutboxIntent(baseInput)
+    expect(first.linqCurrentInbound).toBeUndefined()
+
+    const upgraded = await createAssistantOutboxIntent({
+      ...baseInput,
+      linqCurrentInbound,
+    })
+
+    expect(upgraded.intentId).toBe(first.intentId)
+    expect(upgraded.linqCurrentInbound).toEqual(linqCurrentInbound)
+    await expect(readAssistantOutboxIntent(vaultRoot, first.intentId)).resolves
+      .toMatchObject({
+        linqCurrentInbound,
+      })
+  })
+
   it('ignores stale tokenless provider success after a newer retry reclaims the intent', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-tokenless-success-race-')
     const seeded = await createIntent(vaultRoot, {

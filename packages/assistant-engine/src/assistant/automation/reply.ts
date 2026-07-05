@@ -1367,6 +1367,10 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
 
   const deliveryKeyMailboxItemIds: string[] = []
   const hostedMailboxItemIds: string[] = []
+  const linqCurrentInbound = createHostedAutoReplyLinqCurrentInbound({
+    candidates,
+    deliveryTarget: input.deliveryTarget,
+  })
   for (const candidate of candidates) {
     if (candidate.event.sourceRef.kind !== 'hosted-mailbox') {
       return {
@@ -1412,6 +1416,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
         consumeMailboxItemIds: hostedMailboxItemIds,
         conversationId,
         inboundMailboxItemIds: hostedMailboxItemIds,
+        ...(linqCurrentInbound ? { linqCurrentInbound } : {}),
         recipientKey,
       }
     : null
@@ -1427,6 +1432,54 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
     }),
     hostedDeliveryIdempotency,
   }
+}
+
+function createHostedAutoReplyLinqCurrentInbound(input: {
+  candidates: readonly AssistantInputCandidate[]
+  deliveryTarget: string | null
+}): AssistantHostedDeliveryIdempotencyContext['linqCurrentInbound'] | null {
+  const target = normalizeNullableString(input.deliveryTarget)
+  if (!target) {
+    return null
+  }
+
+  for (let index = input.candidates.length - 1; index >= 0; index -= 1) {
+    const candidate = input.candidates[index]
+    if (!candidate || candidate.event.sourceRef.kind !== 'hosted-mailbox') {
+      continue
+    }
+    const candidateTarget = normalizeNullableString(
+      candidate.event.replyTarget?.threadId,
+    )
+    if (candidateTarget !== target) {
+      continue
+    }
+    const metadata = candidate.event.sourceMetadata
+    const replyToMessageId =
+      metadata?.kind === 'linq'
+        ? normalizeNullableString(metadata.replyToMessageId)
+        : null
+    const mailboxItemId = normalizeNullableString(
+      candidate.event.hostedMailboxItemId ?? null,
+    )
+    const dedupeKey = normalizeNullableString(
+      candidate.event.sourceRef.dedupeKey,
+    )
+    if (!replyToMessageId || !mailboxItemId || !dedupeKey) {
+      continue
+    }
+
+    return {
+      dedupeKey,
+      eventId: candidate.event.sourceRef.eventId,
+      mailboxItemId,
+      occurredAt: candidate.event.occurredAt,
+      replyToMessageId,
+      target,
+    }
+  }
+
+  return null
 }
 
 function stringifyHostedAutoReplyDeliveryKeyParts(

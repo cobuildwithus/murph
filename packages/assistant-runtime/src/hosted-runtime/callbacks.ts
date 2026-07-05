@@ -1912,9 +1912,19 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     if (disabledAutoReplyOutcome) {
       return disabledAutoReplyOutcome;
     }
-    const linqDeliveryContexts = input.preparedDispatch?.linqDeliveryContext
-      ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
-      : input.linqDeliveryContexts;
+    const mirrorLinqDeliveryContext = mirrorState.intent
+      ? buildHostedAssistantLinqDeliveryContextFromPreparedIntent({
+          effect: input.assistantDeliveryEffect,
+          intent: mirrorState.intent,
+        })
+      : null;
+    const linqDeliveryContexts = [
+      ...(input.preparedDispatch?.linqDeliveryContext
+        ? [input.preparedDispatch.linqDeliveryContext]
+        : []),
+      ...(mirrorLinqDeliveryContext ? [mirrorLinqDeliveryContext] : []),
+      ...input.linqDeliveryContexts,
+    ];
     assertHostedBackgroundDeliveryNotYielded(input);
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {

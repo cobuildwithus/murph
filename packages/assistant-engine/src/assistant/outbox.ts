@@ -125,6 +125,7 @@ export interface AssistantOutboxDispatchMessage {
   explicitTarget?: string | null
   hostedDeliveryInboundMailboxItemIds?: readonly string[] | null
   identityId?: string | null
+  linqCurrentInbound?: AssistantOutboxIntent['linqCurrentInbound']
   media?: readonly AssistantResponseMedia[] | null
   message: string
   replyToMessageId?: string | null
@@ -235,6 +236,7 @@ export type AssistantOutboxCreateIntentInput = {
   explicitTarget?: string | null
   hostedDeliveryInboundMailboxItemIds?: readonly string[] | null
   identityId?: string | null
+  linqCurrentInbound?: AssistantOutboxIntent['linqCurrentInbound']
   media?: readonly AssistantResponseMedia[] | null
   message: string
   operation?: AssistantOutboxOperation | null
@@ -327,17 +329,23 @@ export async function createAssistantOutboxIntent(
           intent: idempotencyUpgradedExisting,
           updatedAt: createdAt,
         })
+      const linqInboundUpgradedExisting =
+        maybeUpgradeAssistantOutboxIntentLinqCurrentInbound({
+          intent: hostedInputUpgradedExisting,
+          linqCurrentInbound: input.linqCurrentInbound ?? null,
+          updatedAt: createdAt,
+        })
       const upgradedExisting = operation
         ? maybeUpgradeAssistantOutboxIntentReactionOperation({
             deliveryTransportIdempotent,
-            intent: hostedInputUpgradedExisting,
+            intent: linqInboundUpgradedExisting,
             operation,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
           })
         : maybeUpgradeAssistantOutboxIntentPreDispatchTarget({
-            intent: hostedInputUpgradedExisting,
+            intent: linqInboundUpgradedExisting,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
@@ -384,6 +392,9 @@ export async function createAssistantOutboxIntent(
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
       hostedDeliveryInboundMailboxItemIds,
+      ...(input.linqCurrentInbound
+        ? { linqCurrentInbound: input.linqCurrentInbound }
+        : {}),
       deliveryTransportIdempotent,
       lastError: null,
     })
@@ -1002,6 +1013,7 @@ export async function deliverAssistantOutboxMessage(input: {
   explicitTarget?: string | null
   hostedDeliveryInboundMailboxItemIds?: readonly string[] | null
   identityId?: string | null
+  linqCurrentInbound?: AssistantOutboxIntent['linqCurrentInbound']
   media?: readonly AssistantResponseMedia[] | null
   message: string
   subject?: string | null
@@ -1027,6 +1039,7 @@ export async function deliverAssistantOutboxMessage(input: {
     hostedDeliveryInboundMailboxItemIds:
       input.hostedDeliveryInboundMailboxItemIds,
     identityId: input.identityId,
+    linqCurrentInbound: input.linqCurrentInbound,
     media: input.media,
     message: input.message,
     replyToMessageId: input.replyToMessageId ?? null,
@@ -2024,6 +2037,36 @@ function maybeUpgradeAssistantOutboxIntentHostedDeliveryInboundMailboxItemIds(in
       ...input.intent,
       hostedDeliveryInboundMailboxItemIds:
         [...input.hostedDeliveryInboundMailboxItemIds],
+      updatedAt: input.updatedAt,
+    }),
+  )
+}
+
+function maybeUpgradeAssistantOutboxIntentLinqCurrentInbound(input: {
+  intent: AssistantOutboxIntent
+  linqCurrentInbound: AssistantOutboxIntent['linqCurrentInbound'] | null
+  updatedAt: string
+}): AssistantOutboxIntent {
+  if (!input.linqCurrentInbound || input.intent.linqCurrentInbound) {
+    return input.intent
+  }
+  if (input.intent.status !== 'pending') {
+    return input.intent
+  }
+  if (input.intent.attemptCount !== 0) {
+    return input.intent
+  }
+  if (input.intent.lastAttemptAt !== null || input.intent.sentAt !== null) {
+    return input.intent
+  }
+  if (input.intent.delivery !== null || input.intent.deliveryConfirmationPending) {
+    return input.intent
+  }
+
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      linqCurrentInbound: input.linqCurrentInbound,
       updatedAt: input.updatedAt,
     }),
   )
