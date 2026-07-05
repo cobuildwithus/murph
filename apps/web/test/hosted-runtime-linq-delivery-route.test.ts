@@ -167,6 +167,16 @@ describe("hosted runtime Linq delivery route", () => {
   });
 
   it("validates answered current inbound against the original target after recovered delivery changes provider thread", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq",
+      containerMemberId: "member_123",
+      threadId: "linq_chat_old",
+    };
+    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValueOnce({
+      accountLookupKey: "hbidx:phone:v1:account",
+    });
+
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
       attemptedAt: "2026-04-26T00:00:03.000Z",
@@ -183,13 +193,19 @@ describe("hosted runtime Linq delivery route", () => {
       providerMessageId: "linq_message_sent",
       providerTarget: "linq_chat_old",
       providerThreadId: "linq_chat_recovered",
+      routeAuthority,
       target: "linq_chat_old",
       targetKind: "thread",
     }));
 
     expect(response.status).toBe(200);
+    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
+      authority: routeAuthority,
+      prisma,
+    });
     expect(mocks.resolveHostedLinqAnsweredMailboxItemIdsForRuntime)
       .toHaveBeenCalledWith(expect.objectContaining({
+        routeAuthority,
         target: "linq_chat_old",
       }));
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx)
@@ -197,6 +213,7 @@ describe("hosted runtime Linq delivery route", () => {
         answeredMailboxItemIds: ["mailbox_item_answered_42"],
         linqChatId: "linq_chat_recovered",
         messageId: "linq_message_sent",
+        phoneNumberLookupKey: "hbidx:phone:v1:account",
       }));
   });
 
@@ -355,9 +372,8 @@ describe("hosted runtime Linq delivery route", () => {
       acceptedAt: "2026-04-26T00:00:04.000Z",
       attemptedAt: "2026-04-26T00:00:03.000Z",
       idempotencyKey: "assistant-outbox:intent_456",
-      providerThreadId: "linq_chat_other",
       routeAuthority,
-      target: "linq_chat_123",
+      target: "linq_chat_other",
       targetKind: "thread",
     }));
 

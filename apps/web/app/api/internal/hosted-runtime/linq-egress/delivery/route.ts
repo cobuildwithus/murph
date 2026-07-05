@@ -77,12 +77,16 @@ export const POST = withJsonError(async (request: Request) => {
   const providerThreadId = readOptionalBodyString(body.providerThreadId);
   const target = readOptionalBodyString(body.target);
   const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
+  const requestedLinqChatId = targetKind === "participant"
+    ? null
+    : providerTarget ?? target;
   const linqChatId = providerThreadId
-    ?? (targetKind === "participant" ? null : providerTarget ?? target);
-  const answeredLinqChatId = currentInbound?.target ?? linqChatId;
+    ?? requestedLinqChatId;
+  const authorizedLinqChatId = currentInbound?.target ?? requestedLinqChatId;
+  const answeredLinqChatId = currentInbound?.target ?? authorizedLinqChatId;
   const validatedRouteAuthority = routeAuthority
     ? assertHostedLinqRouteAuthorityMatchesTarget({
-        chatId: linqChatId,
+        chatId: authorizedLinqChatId,
         memberId: userId,
         routeAuthority,
       })

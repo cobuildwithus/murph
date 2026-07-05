@@ -137,6 +137,10 @@ Exact accepted-item computation (verified design, hardened by adversarial review
   arrays are omitted from persisted JSON; non-empty Linq consume authority is a
   runner rollback boundary unless pending outbox is drained or scrubbed before
   old code starts.
+- Deploy care: exact-only accepted Linq consume authority is a hard-cut
+  protocol change, not a web-first compatible change. Do not let old runners
+  record accepted Linq outcomes against the new web route; drain/stop old
+  Cloudflare runners before the new route handles terminal Linq outcomes.
 
 Riders (independent deletions, separate commits):
 - Mailbox-fetch AI-usage gate: KEEP (rider withdrawn by adversarial
@@ -175,14 +179,14 @@ unconditional Temporal mailbox-append signal as the wake authority; Cloudflare
   regression proof.
 
 Deploy-window analysis for the merged PR (replaces the old staged gate):
-- Web deploys first. The delivery route starts recording exact accepted item
-  sets once runner payloads include current inbound proof and answered item ids;
-  old-runner accepted rows without item rows can be repaired by a later
-  accepted replay carrying validated proof. This path does not advance
-  `consumed_seq`.
-- Cloudflare deploys second (worker route + runner bundle ship together in
-  the hosted-execution deploy), with `container_rollout=immediate` so old
-  runner containers are recycled into the exact-item context behavior.
+- Apply the additive web DB migration first or with the cutover.
+- Drain/stop old Cloudflare runners before the new web delivery route handles
+  terminal Linq outcomes; old-runner accepted outcomes lack exact item proof
+  and are not a safe source of exact consume authority.
+- Deploy the web route and Cloudflare worker/runner bundle as one hard cutover
+  for Linq delivery outcome recording. The new route records exact accepted
+  item sets once runner payloads include current inbound proof and answered item
+  ids; this path does not advance `consumed_seq`.
 - Avoid rolling the runner back to a build that predates
   `hostedDeliveryInboundMailboxItemIds` after the new runner has written
   non-empty Linq outbox intents, unless pending outbox is drained or scrubbed
