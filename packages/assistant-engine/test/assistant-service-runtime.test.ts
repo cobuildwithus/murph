@@ -130,6 +130,7 @@ import {
   deliverAssistantReply,
   deliverAssistantProgressUpdate,
   finalizeAssistantTurnFromDeliveryOutcome,
+  resolveAssistantHostedDeliveryIdempotency,
 } from "../src/assistant/delivery-service.ts";
 import {
   normalizeAssistantExecutionContext,
@@ -1348,6 +1349,69 @@ describe("assistant delivery orchestration seam", () => {
       .toEqual(expect.objectContaining({
         deliveryIdempotencyKey: firstProgressKey,
       }));
+  });
+
+  it("keeps hosted idempotency inputs separate from mailbox consume authority", () => {
+    const session = createAssistantSession();
+    const sharedPlan = createSharedPlan();
+    const deliveryFields = {
+      actorId: null,
+      bindingDelivery: null,
+      explicitTarget: "linq_chat_123",
+      identityId: null,
+      threadId: "thread_123",
+      threadIsDirect: true,
+    };
+    const baseInput = {
+      executionContext: {
+        hosted: {
+          memberId: "member-hosted",
+          userEnvKeys: [],
+        },
+      },
+      prompt: "hosted delivery",
+      vault: "/vault",
+    };
+
+    const cronResolved = resolveAssistantHostedDeliveryIdempotency({
+      audience: sharedPlan.conversationPolicy.audience,
+      channel: "linq",
+      deliveryFields,
+      input: {
+        ...baseInput,
+        hostedDeliveryIdempotency: {
+          assistantTurnOrdinal: "assistant-cron:1",
+          conversationId: "cron-conversation",
+          inboundMailboxItemIds: ["synthetic-cron-occurrence"],
+          recipientKey: "cron-recipient",
+        },
+      },
+      session,
+    });
+    const replyResolved = resolveAssistantHostedDeliveryIdempotency({
+      audience: sharedPlan.conversationPolicy.audience,
+      channel: "linq",
+      deliveryFields,
+      input: {
+        ...baseInput,
+        hostedDeliveryIdempotency: {
+          assistantTurnOrdinal: "assistant-reply:1",
+          consumeMailboxItemIds: ["mailbox_item_real"],
+          conversationId: "reply-conversation",
+          inboundMailboxItemIds: ["idempotency-input"],
+          recipientKey: "reply-recipient",
+        },
+      },
+      session,
+    });
+
+    expect(cronResolved.deliveryIdempotencyKey)
+      .toEqual(expect.stringMatching(/^sha256:[0-9a-f]{64}$/u));
+    expect(cronResolved.hostedDeliveryInboundMailboxItemIds).toEqual([]);
+    expect(cronResolved.deliveryTransportIdempotent).toBe(true);
+    expect(replyResolved.hostedDeliveryInboundMailboxItemIds).toEqual([
+      "mailbox_item_real",
+    ]);
   });
 
   it("fails closed for hosted progress without a deterministic Linq key", async () => {

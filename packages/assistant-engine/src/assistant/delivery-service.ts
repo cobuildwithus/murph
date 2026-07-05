@@ -92,7 +92,7 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
   const channel = normalizeNullableString(input.channel)?.toLowerCase() ?? null
   const hostedDeliveryInboundMailboxItemIds =
     normalizeAssistantHostedDeliveryInboundMailboxItemIds(
-      input.input.hostedDeliveryIdempotency?.inboundMailboxItemIds,
+      input.input.hostedDeliveryIdempotency?.consumeMailboxItemIds,
     )
 
   if (!hosted) {

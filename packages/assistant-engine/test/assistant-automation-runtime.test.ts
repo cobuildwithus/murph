@@ -7382,7 +7382,13 @@ describe('assistant auto-reply runtime', () => {
     expect(firstSend?.hostedDeliveryIdempotency?.inboundMailboxItemIds).toEqual([
       'raw_mailbox_item_replay',
     ])
+    expect(firstSend?.hostedDeliveryIdempotency?.consumeMailboxItemIds).toEqual([
+      'raw_mailbox_item_replay',
+    ])
     expect(replaySend?.hostedDeliveryIdempotency?.inboundMailboxItemIds).toEqual([
+      'raw_mailbox_item_replay',
+    ])
+    expect(replaySend?.hostedDeliveryIdempotency?.consumeMailboxItemIds).toEqual([
       'raw_mailbox_item_replay',
     ])
     expect(hostedInput.event.sourceRef).toMatchObject({

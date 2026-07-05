@@ -74,6 +74,7 @@ export interface AssistantSessionResolutionFields {
 export interface AssistantHostedDeliveryIdempotencyContext {
   assistantTurnOrdinal: number | string
   conversationId?: string | null
+  consumeMailboxItemIds?: readonly string[] | null
   inboundMailboxItemIds?: readonly string[] | null
   recipientKey?: string | null
 }

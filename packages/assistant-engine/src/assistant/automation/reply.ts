@@ -1409,6 +1409,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
   const hostedDeliveryIdempotency = hostedMailboxItemIds.length === candidates.length
     ? {
         assistantTurnOrdinal,
+        consumeMailboxItemIds: hostedMailboxItemIds,
         conversationId,
         inboundMailboxItemIds: hostedMailboxItemIds,
         recipientKey,
