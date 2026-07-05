@@ -39,9 +39,6 @@ export const POST = withJsonError(async (request: Request) => {
   const body = await readOptionalJsonObject(request);
   const prisma = getPrisma();
   const routeAuthority = parseHostedLinqDeliveryRouteAuthority(body.routeAuthority);
-  const answeredCoverage = parseHostedLinqDeliveryAnsweredCoverage(
-    body.answeredCoverage,
-  );
   const currentInbound = parseHostedLinqDeliveryCurrentInbound(body.currentInbound);
   const targetKind = parseHostedLinqDeliveryTargetKind(body.targetKind);
   const acceptedAt = parseOptionalHostedLinqDeliveryDate(
@@ -100,12 +97,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
   const result = await recordHostedLinqRuntimeDeliveryOutcomeTx({
     acceptedAt,
-    answeredCoverage: answeredCoverage
-      ? {
-          ...answeredCoverage,
-          mailboxItemId: currentInbound?.mailboxItemId ?? null,
-        }
-      : null,
+    answeredMailboxItemId: currentInbound?.mailboxItemId ?? null,
     attemptedAt,
     failedAt,
     failureCode: readOptionalBodyString(body.failureCode),
@@ -230,45 +222,6 @@ function parseHostedLinqDeliveryTargetKind(
     message: "Hosted Linq delivery target kind is invalid.",
     retryable: false,
   });
-}
-
-function parseHostedLinqDeliveryAnsweredCoverage(value: unknown): {
-  lane: "conversation";
-  laneSeq: string;
-} | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (typeof value !== "object" || Array.isArray(value)) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_DELIVERY_ANSWERED_COVERAGE_INVALID",
-      httpStatus: 400,
-      message: "Hosted Linq delivery answered coverage is invalid.",
-      retryable: false,
-    });
-  }
-  const record = value as Record<string, unknown>;
-  if (record.lane !== "conversation") {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_DELIVERY_ANSWERED_COVERAGE_INVALID",
-      httpStatus: 400,
-      message: "Hosted Linq delivery answered coverage lane is invalid.",
-      retryable: false,
-    });
-  }
-  const laneSeq = readOptionalBodyString(record.laneSeq);
-  if (!laneSeq) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_DELIVERY_ANSWERED_COVERAGE_INVALID",
-      httpStatus: 400,
-      message: "Hosted Linq delivery answered coverage laneSeq is invalid.",
-      retryable: false,
-    });
-  }
-  return {
-    lane: "conversation",
-    laneSeq,
-  };
 }
 
 function parseHostedLinqDeliveryCurrentInbound(value: unknown): {

@@ -1,7 +1,7 @@
 # Mailbox Wake Latency + Complexity Collapse
 
 Status: active
-Updated: 2026-07-03
+Updated: 2026-07-05
 
 ## Why
 
@@ -26,56 +26,35 @@ concepts, and branches. Each PR carries a deletion ledger.
 
 ## PR sequence (two PRs)
 
-### PR 1 — consume authority at delivery + Linq direct wake
+### PR 1 — exact accepted item suppression + direct wake deletion
 
-One PR, two commits-worth of shape: the consume-authority foundation and
-the direct wake it makes safe. They deploy as one unit; the deploy-window
+One PR, two pieces of shape: exact accepted item suppression and deletion
+of the unsafe direct wake path. They deploy as one unit; the deploy-window
 analysis below replaces the earlier staged four-PR gate.
 
-#### Part 1a — delivery-report-as-consume-authority (net deletion)
+#### Part 1a — delivery-report-as-exact-consumed-item (net deletion)
 
 The runtime already reports every Linq delivery outcome to
 `POST /api/internal/hosted-runtime/linq-egress/delivery`
 (`apps/web/app/api/internal/hosted-runtime/linq-egress/delivery/route.ts`),
-with `acceptedAt`/`failedAt`, intent id, idempotency key. Sent and consumed
-become one fact on one callback:
+with `acceptedAt`/`failedAt`, intent id, idempotency key, and the current
+inbound mailbox item id selected by the delivery context. Sent and consumed
+become one exact item fact on one callback:
 
-1. Stamp answered-conversation coverage (lane → highest contiguous
-   terminally-handled seq) on the outbox reply intent at creation, where
-   the turn already knows its answered inputs' `laneSeq`
-   (`AssistantInputSourceRef`).
-2. Forward the stamp on the existing delivery report.
-3. The delivery route advances `consumed_seq` via the existing
-   `advanceHostedMailboxConsumedSeqByLane` (monotonic-max, clamped) in the
-   same transaction that records the outcome — on `acceptedAt` only.
-4. Net the watermark into the lag the orchestrator reads:
-   `computeHostedMailboxLaneLag` (`apps/web/src/lib/hosted-mailbox/lag.ts:7-27`)
-   becomes `lag = maxSeq − max(importedSeq, consumedSeq)`. Today
-   `importedSeq` publishes only at checkpoint and `consumedSeqByLane` in the
-   reconciliation facts feeds only usage-gate freshness — the workflow's
-   `hasAnyMailboxLag` never sees delivery-time handling. This one change is
-   what makes the Temporal backstop stand down when the direct wake has
-   already handled a message, and it is semantically true: consumed input
-   needs no wake. It removes the need for any workflow-side coordination,
-   delay timer, new patch marker, or replay fixture (see Part 2a — the recheck-only redesign this
-   finding collapsed).
-   Implementation care: `computeHostedMailboxLaneLag` gains an optional
-   `consumedSeq` input rather than netting implicitly, and BOTH callers
-   are updated deliberately: the reconciliation-facts route (netted — the
-   workflow backstop must stand down at delivery) and
-   `/api/internal/hosted-runtime/status` (`status/route.ts:35`, consumed
-   by runner status + transport-failure recovery in
-   `runtime-invocation.ts:471` / `hosted-user-runner.ts:157`) which must
-   either also net (fetch consumedSeq there too) or be explicitly
-   documented imported-only after auditing its Cloudflare consumers.
-   Decide during implementation with those consumers read first; do not
-   leave the two surfaces silently divergent. The usage-gate freshness
-   path already reads `consumedSeqByLane` separately and must not
-   double-net. A crashed-after-delivery container
-   is the key scenario: `consumedSeq` (durable at delivery) > `importedSeq`
-   (stale checkpoint) is the normal state, and the next invocation
-   re-serves the consumed prefix as context-only - no wake owed, no reply
-   lost.
+1. Forward the current inbound mailbox item id on the existing delivery
+   report.
+2. On `acceptedAt`, the delivery route validates that exact item belongs to
+   the user and is a `conversation.message`, then stores the item id on the
+   accepted delivery row.
+3. Mailbox fetch/import treats that exact stored item as context-only on
+   replay, including when a lower lane gap keeps the contiguous
+   `consumed_seq` behind it.
+
+The route does **not** advance `consumed_seq` from a runner-supplied lane
+high-water. Normal mailbox import/checkpoint remains the owner of contiguous
+lane progress. This keeps the fix exact, avoids a second high-water authority,
+and preserves the lower-gap case without adding workflow-side coordination,
+delay timers, or patch markers.
 
 Deletion ledger:
 - `stageHostedConversationMailboxConsumedAckBestEffort` + 4 skip gates +
@@ -89,85 +68,52 @@ Deletion ledger:
   optionality that caused the June `consume_port_missing` incident.
 - `isHostedMailboxLaneCheckpointed` (`apps/web/src/lib/hosted-mailbox/lag.ts:29-42`)
   - dead export, zero callers repo-wide.
-- Added: one intent field, one forwarded body field, one store call in an
-  existing route transaction.
+- Added: one delivery-row exact mailbox item id, forwarded from the existing
+  current-inbound proof and validated in the existing route transaction.
 
-Verified against source (2026-07-03):
-- `computeHostedMailboxLaneLag` has exactly one production caller
-  (`runtime-reconciliation-facts.ts:127`), and `consumedSeqByLane` is
-  already fetched in the same Promise.all (`:115-122`) - the netting is a
-  one-seam change with no other lag consumers to audit.
+Verified against source (2026-07-05):
 - `recordHostedLinqRuntimeDeliveryOutcomeTx` runs inside
   `runHostedLinqDeliveryStoreTransaction` (`linq-delivery-store.ts:494`),
-  so the watermark advance joins an existing transaction atomically. It
-  early-exits `recorded: false` without an idempotency key; coverage
-  therefore rides only outbox-managed replies (which always mint a key) -
-  reaction/keyless sends never advance the watermark, which is correct
-  (a reaction is not reply coverage).
+  so accepted delivery rows and their exact mailbox item id are recorded
+  atomically. It early-exits `recorded: false` without an idempotency key;
+  reaction/keyless sends never create an accepted-item fact, which is
+  correct (a reaction is not a reply).
 
 Design constraints (pinned by docs/contracts/00-invariants.md §42–45 and
 hosted-runtime-protocol.md §519–526):
-- Coverage = contiguous prefix of conversation-lane inputs with terminal
-  evidence. The lane interleaves channels; coverage must never exceed a
-  pending input from another channel (a Linq reply covering seq 7 must not
-  ack a pending Telegram seq 6 — that would durably orphan it).
-- Never advance on `failedAt`; retryable-not-terminal semantics unchanged.
+- The accepted delivery fact is exact-item only. It must never claim a
+  contiguous lane prefix or advance through lower gaps from runner-supplied
+  metadata.
+- Never record exact consumed items on `failedAt`; retryable-not-terminal
+  semantics are unchanged.
 - No-reply turns (`finish_without_reply`) intentionally get no ack: a
   re-run re-suppresses (compute waste, never a user-visible duplicate).
-  Add coverage only if churn data ever proves the cost (measured-bottleneck
-  rule).
+  Add no-reply exact-item coverage only if churn data ever proves the cost
+  (measured-bottleneck rule).
 - VERIFIED channel inventory: ONLY Linq reports delivery outcomes to web
   (`HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH` is the sole egress-delivery
   route; Telegram sends via providerFetch with no outcome callback, email
   send returns only `{target}`, WhatsApp has send types but no egress
-  path). Consequence: the watermark advances only for Linq-answered turns.
-  Channels without a callback keep exactly today's behavior; the checkpoint
+  path). Consequence: exact accepted-item suppression exists only for
+  Linq-answered turns. Channels without a callback keep exactly today's behavior; the checkpoint
   ack they nominally had never fired anyway (~0 acks/week), so deleting it
-  regresses nothing. This constraint GATES the direct wake in Part 1b (see below).
+  regresses nothing.
 
-Coverage computation (verified design, hardened by adversarial review):
-- Compute in the auto-reply frame (`automation/reply.ts:1453-1520`), but
-  the scan input is the PERSISTED input store's conversation-lane staged
-  inputs ordered by laneSeq — NOT the current reply context or candidate
-  set (which is per-channel and context-bound and can over-claim past a
-  pending input from another channel, another Linq conversation, or a
-  thread-route/group item). Walk the lane-ordered prefix, stop at the
-  first input lacking terminal evidence, stamp that high water.
-- Suppression IS valid terminal evidence for the scan
-  (`hasCompleteAssistantAutoReplyTerminalEvidence` includes it, correctly):
-  a suppressed input re-suppresses on re-run, so covering it is safe and
-  desirable. The "no-reply turns get no ack" rule means only that a
-  suppressed turn produces no ack VEHICLE of its own — its inputs are
-  covered by the next delivered reply's scan.
-- Reaction-only sends (`setLinqMessageReaction`) do not emit the delivery
-  callback and are not reply coverage; a reaction-only turn's inputs are
-  likewise covered by the next delivered reply. No callback added for
-  them (measured-need rule).
-- Required tests: telegram-pending-below-linq-answered hold-back;
-  suppressed-prefix advance; group/thread-route item interleave; steered
-  multi-final turn; input staged mid-turn (arrives after scan snapshot —
-  must not be covered).
-- Thread as one optional field: intent schema
-  (`assistant-cli-contracts.ts:816`) → create input (`outbox.ts:245`) →
-  turn receipt metadata (durable pre-provider carrier; outbox JSON omits the
-  field) → delivery payload (`side-effects.ts:107`) →
-  `buildHostedAssistantDeliveryPayloadFromIntent` (`callbacks.ts:3313`) →
-  send dependency (`callbacks.ts:2190-2216`) → outcome request
-  (`platform.ts:217`, `callbacks.ts:2535-2567`) → web route/store.
-  The full intent is NOT in scope at report-build time (only intentId is
-  captured); dispatch reloads coverage from the receipt before building the
-  payload/effect.
-- Stamped-at-create + advance-on-accept is provably safe: idempotency keys
-  are minted once and reused across retries; only the provider-accept path
-  emits `acceptedAt`; the web route enforces accepted/failed XOR; the
-  store's advance is monotonic so out-of-order accepts cannot regress.
-- Persist coverage on the existing `HostedLinqDelivery` row when the row
-  first records an accepted outcome. Accepted replays may advance the
-  monotonic `consumed_seq` watermark from that stored row coverage, but
-  never from mutable replay request bodies. This deliberately rejects
-  broader compatibility machinery for pre-persistence accepted rows: if web
-  did not store coverage when the accepted fact was recorded, there is no
-  durable authority left to consume from later.
+Exact accepted-item computation (verified design, hardened by adversarial review):
+- Select the current inbound item in the delivery context before provider
+  send; prefer an exact `replyToMessageId` match before same-target
+  fallback.
+- Forward only `currentInbound.mailboxItemId` to web as consume authority.
+  Legacy `answeredCoverage` lane high-water may still exist in runner
+  payloads as runtime-local receipt metadata, but web ignores it.
+- The web route validates the exact item id by user, `conversation` lane,
+  and `conversation.message` kind before persisting it.
+- Mailbox fetch/import turns matching accepted delivery rows into
+  `consumedItems` so the exact accepted item is context-only even when the
+  contiguous `consumed_seq` floor is held back by a lower gap.
+- Accepted replays never recompute from mutable replay request bodies. If
+  web did not store the exact item id when the accepted fact was recorded,
+  there is no durable authority left to consume from later.
 - Rollback care: `assistantOutboxIntentSchema` is `.strict()`. A new
   runner writing the field then rolling back to an old runner must not
   brick outbox-state parsing. Follow the repo's outbox schema-evolution
@@ -176,15 +122,10 @@ Coverage computation (verified design, hardened by adversarial review):
 
 Riders (independent deletions, separate commits):
 - Mailbox-fetch AI-usage gate: KEEP (rider withdrawn by adversarial
-  review). The original safe-to-delete verdict assumed every wake
-  traverses turn admission in reconciliation facts — true only for
-  Temporal-orchestrated wakes. A direct-woken container (Part 1b, or the
-  legacy workflow branch until PR 2) fetches the mailbox WITHOUT ever
-  reading reconciliation facts, so the read-first fetch gate is the only
-  usage check on the fast path. It is cheap (fires only when the batch
-  contains gated work) and becomes load-bearing under the direct wake. Deleting it
-  would require runtime-local admission — complexity in the wrong
-  direction.
+  review). With direct wake deleted, this PR no longer needs to touch that
+  gate. Deleting it would need a separate proof that every mailbox fetch
+  has already crossed equivalent admission; absent that proof, keeping the
+  cheap read-first gate is the simpler safe choice.
 - Relocate (NOT delete) `readRecordedHostedLinqFirstContactAdmissionDecision`:
   keyed by unique `eventId` (schema:951-961) so fresh events always read
   null; it is load-bearing only for retried deliveries (idempotent
@@ -204,32 +145,27 @@ durable fix is deletion, not minting a new receipt protocol. Web now keeps the
 unconditional Temporal mailbox-append signal as the wake authority; Cloudflare
 `runtime/ensure-processing` is back to Temporal web-callback-signature only.
 
-- No workflow-side coordination, no new flags, no deploy-order dance
-  between web and worker beyond web-first for the trace leaf. The protocol
-  doc's withdrawal constraint ("any future direct wake must carry pointer
-  awareness into the workflow") is satisfied by Part 1a's lag netting instead
-  of a signal flag — update `hosted-runtime-protocol.md:268-274` to record
-  that resolution in this PR.
-- Failure-mode ledger with Part 1a live: duplicate reply → impossible (consumed
-  items re-stage with null reply target); redundant ensure racing an active
-  invocation → `already_running` on the DO fence; ensure landing in an
-  inter-invocation gap → starts an invocation that imports, finds nothing
-  replyable, exits (bounded compute waste, shrinking to ~zero once the
-  delivery ack lands within seconds).
+- No workflow-side coordination, no new flags, no deploy-order dance beyond
+  web-first for the trace leaf. The protocol doc's withdrawal constraint
+  ("any future direct wake must carry pointer awareness into the workflow")
+  remains in force; this PR does not reland direct wake.
+- Failure-mode ledger with Part 1a live: duplicate reply from accepted
+  Linq delivery replay is suppressed by exact consumed items; lower mailbox
+  gaps still keep contiguous `consumed_seq` honest; Temporal remains the
+  only wake authority.
 - The instrumented rapid-double-webhook E2E that killed #362 becomes the
   regression proof.
 
 Deploy-window analysis for the merged PR (replaces the old staged gate):
-- Web deploys first. The wake helper fires at a Cloudflare route that does
-  not exist yet → fire-and-forget 404, harmless no-op. The delivery route
-  accepts-but-never-receives coverage; lag netting is live but inert
-  (consumed_seq still 0 everywhere). Net: behavior identical to today.
+- Web deploys first. The delivery route starts recording exact accepted item
+  ids once runner payloads include current inbound proof; it does not
+  advance `consumed_seq`.
 - Cloudflare deploys second (worker route + runner bundle ship together in
   the hosted-execution deploy), with `container_rollout=immediate` so old
-  runner containers — which do not post coverage — are recycled rather
-  than left delivering coverage-less replies.
-- Post-deploy verification before calling it done: one prod observation of
-  `consumed_seq` advancing at delivery time.
+  runner containers are recycled into the exact-item context behavior.
+- Post-deploy verification before calling it done: one prod accepted Linq
+  delivery row with `answered_mailbox_item_id`, followed by a
+  replay/fetch where that item is context-only and not replyable.
 
 ### PR 2 — retire the legacy workflow patch branch + collapse the wake fields
 
@@ -242,12 +178,9 @@ of two PRs instead of four, accepted).
 Exploration collapsed the original "demote to recheck-only" design: the
 patched workflow already IS recheck-shaped — on `mailbox_appended` it only
 bumps a signal version, re-reads reconciliation facts, and ensures on lag
-(`hosted-user-runtime.ts:308-379`). With Part 1a's lag netting, that loop
-becomes the correct deferred backstop with zero workflow changes: the one
-ensure it fires while a direct-woken invocation is running no-ops against
-the DO fence, and post-delivery rechecks see lag 0. Adding a delay timer +
-a second `patched()` marker + a replay fixture to avoid one no-op RPC per
-message fails the measured-bottleneck rule — deleted from the plan.
+(`hosted-user-runtime.ts:308-379`). Since direct wake is not relanding in
+PR 1, adding a delay timer + a second `patched()` marker + a replay fixture
+fails the measured-bottleneck rule — deleted from the plan.
 
 What remains is retiring the one legacy branch: the unpatched direct-ensure
 path (`hosted-user-runtime.ts:294-306`, gated by
@@ -294,26 +227,24 @@ Touch: `webhook-service-types.ts:17-26`;
 
 - PR 1: web first, then Cloudflare (worker + runner bundle) with
   `container_rollout=immediate` — full analysis in Part 1b. Old runner +
-  new web = today's behavior; new runner + old web = coverage field
-  ignored (the monotonic advance-on-any-accepted rule makes later retries
-  converge). Delete the `/consume` route in this PR only if the optional
-  port wiring provably tolerates its absence during the window (the port
-  is optional and the old runner's post-checkpoint call is caught
-  best-effort with a retry wake — verify the 404 path in the E2E);
-  otherwise route deletion trails in PR 2.
+  new web = today's behavior; new runner + old web = legacy
+  `currentInbound` ignored by the old delivery route, so exact consumed item
+  suppression starts only after web deploys. The deleted `/consume` route is
+  tolerated because the old runner's post-checkpoint call was optional
+  best-effort and already had retry-wake fallback behavior.
 - PR 2: Render worker deploy (Temporal patch retirement, two-phase per the
   repo's patch procedure: `deprecatePatch` intermediate after drain, then
   branch deletion) + web (wake-field collapse, no deploy coupling).
 
 ## Verification
 
-- PR 1: focused runtime tests for coverage stamping (multi-message turn,
-  cross-channel interleave hold-back, failed-reply hold-back, suppressed
-  prefix, mid-turn staging); web route test for advance-on-any-accepted
-  with coverage; the restored #362 E2E suite including the
-  rapid-double-webhook scenario and the Linq delivery E2E that was the
-  original failure signal, 2 consecutive green runs; prod readback of
-  `consumed_seq` advancing at delivery.
+- PR 1: focused runtime tests for exact Linq delivery context selection and
+  exact accepted mailbox item replay/import; web route test proving legacy
+  `answeredCoverage.laneSeq` is ignored; the restored #362 E2E suite
+  including the rapid-double-webhook scenario and the Linq delivery E2E
+  that was the original failure signal, 2 consecutive green runs; prod
+  readback of accepted delivery rows with
+  `answered_mailbox_item_id`.
 - PR 1 CI follow-up (2026-07-03): scheduled-reminder overlap coverage
   additionally proves foreground Linq sends are observed before due
   background reminders without the wait helper advancing hosted-local
@@ -332,8 +263,8 @@ Touch: `webhook-service-types.ts:17-26`;
   proof: `CI=true pnpm hosted-local e2e linq-webhook --no-bundle` passed.
 - PR 1 CI follow-up (2026-07-03): CI then exposed the real duplicate-send
   window underneath that fixture: Linq provider acceptance returned before
-  the background delivery-outcome write advanced mailbox consume authority,
-  so a fresh auto-reply pass could prepare another send. The runner's
+  the background delivery-outcome write durably recorded the accepted
+  delivery item, so a fresh auto-reply pass could prepare another send. The runner's
   pre-auto-reply delivery barrier now drains pending Linq outcome writes
   before importing fresh pre-dispatch work. Focused local proof:
   `pnpm --dir packages/assistant-runtime test -- hosted-runtime-workspace-runner.test.ts -t "pre-auto-reply delivery preparation drains pending Linq outcomes before fresh imports"`
@@ -357,20 +288,18 @@ Touch: `webhook-service-types.ts:17-26`;
 
 | PR | Deleted | Added |
 | --- | --- | --- |
-| 1 | ~220-line checkpoint ack block, consume route+port+compat wiring, dead lag export, every-message admission pre-read (relocated), re-landed web direct-wake fast path after authorization review | intent field, report field, delivery-row coverage fields, 1 store call, lag netting (explicit param, both callers audited) |
+| 1 | ~220-line checkpoint ack block, consume route+port+compat wiring, dead lag export, every-message admission pre-read (relocated), re-landed web direct-wake fast path after authorization review, high-water consume helper and delivery-row lane coverage fields | exact current-inbound item field on the existing delivery report, one delivery-row mailbox item id |
 | 2 | legacy patch branch, runtime seam, patch constant, direct-summary recorder, replay fixture+test, four legacy wake plan fields + parallel consumers | `deprecatePatch` intermediate (itself later deleted) |
 
 Plan-level collapse already banked: the original PR C ("demote workflow to
 recheck-only": delay timer, second patch marker, new replay fixture) was
-deleted from this plan — PR A's lag netting makes the existing patched
-reconcile loop the correct backstop as-is.
+deleted from this plan — direct wake was removed and the existing patched
+reconcile loop remains the only wake authority.
 
 Adversarial review (c1 gpt-5.5 xhigh, 2026-07-03) resolutions: fetch-gate
 deletion withdrawn before direct-wake deletion made that path obsolete;
-coverage scan pinned to the persisted lane prefix, not context candidates;
-suppression counts as terminal for coverage; lag netting made an explicit
-parameter with the status route audited alongside; accepted replays consume
-only from coverage stored on the delivery row; mailbox fetch exposes accepted
-delivery-row item coverage for gap suppression; dispatch reads pre-provider
-coverage from receipt metadata; reaction-only sends excluded from callback
+high-water consume authority rejected in favor of exact accepted mailbox
+item facts; mailbox fetch exposes accepted delivery-row item ids for gap
+suppression; dispatch reads pre-provider receipt metadata only for runtime
+delivery-outcome durability; reaction-only sends excluded from callback
 assumptions.

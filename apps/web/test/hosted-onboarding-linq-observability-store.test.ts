@@ -1329,7 +1329,7 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("advances conversation consumed coverage when an accepted runtime outcome first records", async () => {
+  it("stores an exact accepted mailbox item id when an accepted runtime outcome first records", async () => {
     const fixture = createObservabilityPrismaFixture();
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
     fixture.hostedMailboxItemFindFirst.mockResolvedValueOnce({
@@ -1338,11 +1338,7 @@ describe("hosted Linq observability stores", () => {
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
-      answeredCoverage: {
-        lane: "conversation",
-        laneSeq: "42",
-        mailboxItemId: "mailbox_item_answered_42",
-      },
+      answeredMailboxItemId: "mailbox_item_answered_42",
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       idempotencyKey: "assistant-outbox:intent_first_accept",
       linqChatId: "linq_chat_123",
@@ -1359,9 +1355,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          answeredCoverageLane: "conversation",
-          answeredCoverageLaneSeq: "42",
-          answeredCoverageMailboxItemId: "mailbox_item_answered_42",
+          answeredMailboxItemId: "mailbox_item_answered_42",
         }),
       }),
     );
@@ -1376,21 +1370,11 @@ describe("hosted Linq observability stores", () => {
         userId: "member_123",
       },
     });
-    expect(fixture.hostedMailboxLaneCounterUpdateMany).toHaveBeenCalledWith({
-      data: {
-        consumedSeq: 42n,
-      },
-      where: {
-        consumedSeq: {
-          lt: 42n,
-        },
-        lane: "conversation",
-        userId: "member_123",
-      },
-    });
+    expect(fixture.hostedMailboxLaneCounterFindUnique).not.toHaveBeenCalled();
+    expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("stores exact accepted mailbox item coverage independently from the consumed floor", async () => {
+  it("stores a gap exact item without advancing the consumed floor", async () => {
     const fixture = createObservabilityPrismaFixture();
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
     fixture.hostedMailboxItemFindFirst.mockResolvedValueOnce({
@@ -1399,11 +1383,7 @@ describe("hosted Linq observability stores", () => {
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
-      answeredCoverage: {
-        lane: "conversation",
-        laneSeq: "1",
-        mailboxItemId: "mailbox_item_answered_3",
-      },
+      answeredMailboxItemId: "mailbox_item_answered_3",
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       idempotencyKey: "assistant-outbox:intent_gap_accept",
       linqChatId: "linq_chat_123",
@@ -1420,9 +1400,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          answeredCoverageLane: "conversation",
-          answeredCoverageLaneSeq: "1",
-          answeredCoverageMailboxItemId: "mailbox_item_answered_3",
+          answeredMailboxItemId: "mailbox_item_answered_3",
         }),
       }),
     );
@@ -1437,28 +1415,16 @@ describe("hosted Linq observability stores", () => {
         userId: "member_123",
       },
     });
-    expect(fixture.hostedMailboxLaneCounterUpdateMany).toHaveBeenCalledWith({
-      data: {
-        consumedSeq: 1n,
-      },
-      where: {
-        consumedSeq: {
-          lt: 1n,
-        },
-        lane: "conversation",
-        userId: "member_123",
-      },
-    });
+    expect(fixture.hostedMailboxLaneCounterFindUnique).not.toHaveBeenCalled();
+    expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("advances accepted runtime outcome replays from stored coverage only", async () => {
+  it("leaves accepted runtime outcome replays on the stored exact item fact only", async () => {
     const fixture = createObservabilityPrismaFixture();
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
       acceptedAt: new Date("2026-03-26T12:00:00.000Z"),
-      answeredCoverageLane: "conversation",
-      answeredCoverageLaneSeq: "12",
-      answeredCoverageMailboxItemId: "mailbox_item_stored_12",
+      answeredMailboxItemId: "mailbox_item_stored_12",
       deliveredAt: null,
       failedAt: null,
       id: "hld_replayed_accepted",
@@ -1472,10 +1438,7 @@ describe("hosted Linq observability stores", () => {
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
-      answeredCoverage: {
-        lane: "conversation",
-        laneSeq: "42",
-      },
+      answeredMailboxItemId: "mailbox_item_replayed_42",
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       idempotencyKey: "assistant-outbox:intent_replay",
       linqChatId: "linq_chat_123",
@@ -1489,23 +1452,13 @@ describe("hosted Linq observability stores", () => {
       recorded: true,
     });
 
-    expect(fixture.hostedMailboxLaneCounterUpdateMany).toHaveBeenCalledWith({
-      data: {
-        consumedSeq: 12n,
-      },
-      where: {
-        consumedSeq: {
-          lt: 12n,
-        },
-        lane: "conversation",
-        userId: "member_123",
-      },
-    });
-    expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalledWith(
+    expect(fixture.hostedMailboxLaneCounterFindUnique).not.toHaveBeenCalled();
+    expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        data: {
-          consumedSeq: 42n,
-        },
+        data: expect.objectContaining({
+          answeredMailboxItemId: "mailbox_item_replayed_42",
+        }),
       }),
     );
   });
@@ -1514,12 +1467,10 @@ describe("hosted Linq observability stores", () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
       {
-        answeredCoverageLane: "conversation",
-        answeredCoverageMailboxItemId: "mailbox_item_answered_3",
+        answeredMailboxItemId: "mailbox_item_answered_3",
       },
       {
-        answeredCoverageLane: "conversation",
-        answeredCoverageMailboxItemId: "mailbox_item_other",
+        answeredMailboxItemId: "mailbox_item_other",
       },
     ]);
 
@@ -1545,28 +1496,24 @@ describe("hosted Linq observability stores", () => {
 
     expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
       select: {
-        answeredCoverageLane: true,
-        answeredCoverageMailboxItemId: true,
+        answeredMailboxItemId: true,
       },
       where: {
         acceptedAt: {
           not: null,
         },
-        answeredCoverageMailboxItemId: {
+        answeredMailboxItemId: {
           in: ["mailbox_item_pending_2", "mailbox_item_answered_3"],
         },
       },
     });
   });
 
-  it("does not advance answered coverage for failed runtime outcomes", async () => {
+  it("does not validate or store answered mailbox items for failed runtime outcomes", async () => {
     const fixture = createObservabilityPrismaFixture();
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
-      answeredCoverage: {
-        lane: "conversation",
-        laneSeq: "42",
-      },
+      answeredMailboxItemId: "mailbox_item_failed_42",
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       failedAt: new Date("2026-03-26T12:00:01.000Z"),
       failureCode: "provider_unavailable",
@@ -1581,11 +1528,12 @@ describe("hosted Linq observability stores", () => {
       recorded: true,
     });
 
+    expect(fixture.hostedMailboxItemFindFirst).not.toHaveBeenCalled();
     expect(fixture.hostedMailboxLaneCounterFindUnique).not.toHaveBeenCalled();
     expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("does not advance answered coverage for accepted runtime outcomes without coverage", async () => {
+  it("does not store an answered mailbox item for accepted runtime outcomes without one", async () => {
     const fixture = createObservabilityPrismaFixture();
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({

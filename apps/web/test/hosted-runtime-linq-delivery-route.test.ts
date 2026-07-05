@@ -65,7 +65,7 @@ describe("hosted runtime Linq delivery route", () => {
       acceptedAt: "2026-04-26T00:00:04.000Z",
       answeredCoverage: {
         lane: "conversation",
-        laneSeq: "42",
+        laneSeq: "999999999999999999999",
       },
       attemptedAt: "2026-04-26T00:00:03.000Z",
       currentInbound: {
@@ -89,11 +89,7 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: new Date("2026-04-26T00:00:04.000Z"),
-        answeredCoverage: {
-          lane: "conversation",
-          laneSeq: "42",
-          mailboxItemId: "mailbox_item_answered_42",
-        },
+        answeredMailboxItemId: "mailbox_item_answered_42",
         attemptedAt: new Date("2026-04-26T00:00:03.000Z"),
         failedAt: null,
         idempotencyKey: "assistant-outbox:intent_123",
@@ -106,6 +102,8 @@ describe("hosted runtime Linq delivery route", () => {
         userId: "member_123",
       }),
     );
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx.mock.calls[0]?.[0])
+      .not.toHaveProperty("answeredCoverage");
     await expect(response.json()).resolves.toEqual({
       ok: true,
       recorded: true,
