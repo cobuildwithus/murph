@@ -8269,6 +8269,141 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("records accepted non-Linq auto-reply coverage after hosted email delivery", async () => {
+    const answeredCoverage = {
+      lane: "conversation" as const,
+      laneSeq: "42",
+    };
+    const hostedEmailThreadTarget = serializeHostedEmailThreadTarget({
+      lastMessageId: "<message_parent_123@example.test>",
+      references: ["<message_root_123@example.test>"],
+      subject: "Hosted subject",
+      to: ["sender@example.test"],
+    });
+    const effect = createEffect({
+      answeredCoverage,
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: hostedEmailThreadTarget,
+      channel: "email",
+      explicitTarget: hostedEmailThreadTarget,
+      idempotencyKey: "assistant-outbox:intent_123",
+      replyToMessageId: "<message_parent_123@example.test>",
+      subject: "Hosted subject",
+    });
+    const recordAssistantDeliveryCoverage = vi.fn(async () => undefined);
+    const sendEmail = vi.fn(async (request: HostedEmailSendRequest) =>
+      createDelivery({
+        channel: "email",
+        ...request,
+      })
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendEmail({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: "<message_parent_123@example.test>",
+        subject: "Hosted subject",
+        target: hostedEmailThreadTarget,
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery,
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordAssistantDeliveryCoverage,
+        sendEmail,
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "email",
+        deliveryStatus: "sent",
+      }),
+    ]);
+    expect(recordAssistantDeliveryCoverage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: "2026-04-08T00:01:00.000Z",
+        answeredCoverage,
+        deliveryChannel: "email",
+        idempotencyKey: "assistant-outbox:intent_123",
+        intentId: "intent_123",
+        providerMessageId: "provider_123",
+        providerThreadId: "thread_123",
+        target: hostedEmailThreadTarget,
+        targetKind: "thread",
+      }),
+      { signal: null },
+    );
+  });
+
+  it("does not record non-Linq coverage when hosted email delivery fails", async () => {
+    const answeredCoverage = {
+      lane: "conversation" as const,
+      laneSeq: "42",
+    };
+    const effect = createEffect({
+      answeredCoverage,
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "thread_123",
+      channel: "email",
+      explicitTarget: "thread_123",
+      idempotencyKey: "assistant-outbox:intent_123",
+    });
+    const recordAssistantDeliveryCoverage = vi.fn(async () => undefined);
+    const sendEmail = vi.fn(async (_request: HostedEmailSendRequest) => {
+      throw new Error("email provider unavailable");
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendEmail({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "hello from hosted",
+          replyToMessageId: null,
+          subject: null,
+          target: "thread_123",
+          targetKind: "thread",
+        });
+      } catch {
+        return createDispatchResult(
+          {
+            status: "retryable",
+          },
+          {
+            code: "EMAIL_PROVIDER_UNAVAILABLE",
+            message: "email provider unavailable",
+          },
+        );
+      }
+      throw new Error("Expected hosted email delivery to fail.");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordAssistantDeliveryCoverage,
+        sendEmail,
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "EMAIL_PROVIDER_UNAVAILABLE",
+        deliveryStatus: "retryable",
+      }),
+    ]);
+    expect(recordAssistantDeliveryCoverage).not.toHaveBeenCalled();
+  });
+
   it("rejects hosted email participant routes before dispatching", async () => {
     const effect = createEffect({
       bindingDeliveryKind: "participant",

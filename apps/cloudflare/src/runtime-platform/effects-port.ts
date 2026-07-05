@@ -1,5 +1,6 @@
 import type { HostedRuntimeEffectsPort } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_COVERAGE_PATH,
   HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
@@ -171,6 +172,22 @@ export function createCloudflareEffectsPort(input: {
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
               path: HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+          },
+          async recordAssistantDeliveryCoverage(request, context) {
+            await fetchHostedWebControlPlaneJson({
+              body: request,
+              boundUserId: input.boundUserId,
+              description: "Hosted assistant delivery coverage recording",
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted assistant delivery coverage recording",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_ASSISTANT_DELIVERY_COVERAGE_PATH,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,

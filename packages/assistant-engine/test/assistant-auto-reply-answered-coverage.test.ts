@@ -133,6 +133,37 @@ describe('assistant auto-reply answered coverage', () => {
     })
   })
 
+  it('keeps future terminal seqs lossless beyond the old pending list cap', async () => {
+    await withCoverageVault(async (vault) => {
+      const staged: AssistantInputEventRecord[] = []
+      for (let seq = 1; seq <= 1002; seq += 1) {
+        staged.push(await stageHostedMailboxInput({
+          laneSeq: seq.toString(),
+          source: 'linq',
+          text: `terminal ${seq}`,
+          vault,
+        }))
+      }
+
+      await writeReplyEvidence({
+        inputIds: staged.slice(501).map((event) => event.inputId),
+        vault,
+      })
+      await writeReplyEvidence({
+        inputIds: staged.slice(0, 501).map((event) => event.inputId),
+        vault,
+      })
+
+      await expect(computeAssistantAutoReplyAnsweredCoverage({
+        context: coverageContext(),
+        vault,
+      })).resolves.toEqual({
+        lane: 'conversation',
+        laneSeq: '1002',
+      })
+    })
+  })
+
   it('holds back below a pending group thread-route item in the shared conversation lane', async () => {
     await withCoverageVault(async (vault) => {
       const first = await stageHostedMailboxInput({
@@ -311,6 +342,7 @@ async function stageHostedMailboxInput(input: {
   threadIsDirect?: boolean
   vault: string
 }) {
+  const timestamp = coverageTimestamp(input.laneSeq)
   return await upsertAssistantInputEvent({
     event: {
       content: {
@@ -324,8 +356,8 @@ async function stageHostedMailboxInput(input: {
         threadId: input.threadId ?? `${input.source}_thread_1`,
         threadIsDirect: input.threadIsDirect ?? true,
       },
-      occurredAt: `2026-04-26T00:00:${input.laneSeq.padStart(2, '0')}.000Z`,
-      receivedAt: `2026-04-26T00:00:${input.laneSeq.padStart(2, '0')}.000Z`,
+      occurredAt: timestamp,
+      receivedAt: timestamp,
       sourceRef: {
         dedupeKey: `dedupe_${input.laneSeq}`,
         eventId: `evt_${input.laneSeq}`,
@@ -341,6 +373,12 @@ async function stageHostedMailboxInput(input: {
     },
     vault: input.vault,
   })
+}
+
+function coverageTimestamp(laneSeq: string): string {
+  const offsetSeconds = Number.parseInt(laneSeq, 10)
+  const safeOffsetSeconds = Number.isFinite(offsetSeconds) ? offsetSeconds : 0
+  return new Date(Date.UTC(2026, 3, 26, 0, 0, safeOffsetSeconds)).toISOString()
 }
 
 function coverageContext(input: {

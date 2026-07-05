@@ -39,6 +39,8 @@ export const HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH =
   "/api/internal/hosted-runtime/linq-egress/engagement";
 export const HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH =
   "/api/internal/hosted-runtime/linq-egress/delivery";
+export const HOSTED_RUNTIME_ASSISTANT_DELIVERY_COVERAGE_PATH =
+  "/api/internal/hosted-runtime/assistant-delivery/coverage-record";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =
   "/api/internal/device-sync/recovery-sweep";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID =

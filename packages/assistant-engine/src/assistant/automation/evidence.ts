@@ -26,7 +26,6 @@ const ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA =
   'murph.assistant-auto-reply-terminal-evidence.v1'
 const ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA =
   'murph.assistant-auto-reply-answered-coverage.v1'
-const AUTO_REPLY_ANSWERED_COVERAGE_PENDING_SEQ_LIMIT = 500
 
 export type AssistantAutoReplyTerminalKind =
   | 'deferred'
@@ -69,8 +68,14 @@ export interface AssistantAutoReplyTerminalEvidence {
 
 interface AssistantAutoReplyAnsweredCoverageState {
   coverage: AssistantOutboxIntent['answeredCoverage']
+  pendingLaneRanges: AssistantAutoReplyAnsweredCoverageRange[]
   pendingLaneSeqs: string[]
   schema: typeof ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA
+}
+
+interface AssistantAutoReplyAnsweredCoverageRange {
+  endSeq: string
+  startSeq: string
 }
 
 export async function assistantAutoReplyTerminalEvidenceExists(
@@ -491,10 +496,7 @@ async function recordAssistantAutoReplyAnsweredCoverage(input: {
     current,
     laneSeqs,
   })
-  if (
-    next.coverage?.laneSeq === current.coverage?.laneSeq &&
-    next.pendingLaneSeqs.join('\u0000') === current.pendingLaneSeqs.join('\u0000')
-  ) {
+  if (sameAssistantAutoReplyAnsweredCoverageState(next, current)) {
     return
   }
 
@@ -578,6 +580,7 @@ function resolveAssistantAutoReplyAnsweredCoveragePath(vault: string): string {
 function createEmptyAssistantAutoReplyAnsweredCoverageState(): AssistantAutoReplyAnsweredCoverageState {
   return {
     coverage: null,
+    pendingLaneRanges: [],
     pendingLaneSeqs: [],
     schema: ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA,
   }
@@ -591,6 +594,7 @@ function parseAssistantAutoReplyAnsweredCoverageState(
   }
   const record = value as {
     coverage?: unknown
+    pendingLaneRanges?: unknown
     pendingLaneSeqs?: unknown
     schema?: unknown
   }
@@ -600,15 +604,23 @@ function parseAssistantAutoReplyAnsweredCoverageState(
   const coverage = assistantOutboxAnsweredCoverageSchema
     .nullable()
     .safeParse(record.coverage ?? null)
+  const legacySeqRanges = Array.isArray(record.pendingLaneSeqs)
+    ? record.pendingLaneSeqs
+        .map((item) => normalizeUnknownNullableString(item))
+        .filter((item): item is string => item !== null)
+        .map((item) => parseNumericLaneSeq(item))
+        .filter((item): item is bigint => item !== null)
+        .map((seq) => ({ end: seq, start: seq }))
+    : []
   return {
     coverage: coverage.success ? coverage.data : null,
-    pendingLaneSeqs: Array.isArray(record.pendingLaneSeqs)
-      ? record.pendingLaneSeqs
-          .map((item) => normalizeUnknownNullableString(item))
-          .filter((item): item is string => item !== null)
-          .filter((item) => parseNumericLaneSeq(item) !== null)
-          .slice(0, AUTO_REPLY_ANSWERED_COVERAGE_PENDING_SEQ_LIMIT)
-      : [],
+    pendingLaneRanges: serializeAssistantAutoReplyAnsweredCoverageRanges(
+      mergeAssistantAutoReplyAnsweredCoverageRanges([
+        ...legacySeqRanges,
+        ...parseAssistantAutoReplyAnsweredCoverageRanges(record.pendingLaneRanges),
+      ]),
+    ),
+    pendingLaneSeqs: [],
     schema: ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA,
   }
 }
@@ -617,35 +629,44 @@ function advanceAssistantAutoReplyAnsweredCoverageState(input: {
   current: AssistantAutoReplyAnsweredCoverageState
   laneSeqs: readonly string[]
 }): AssistantAutoReplyAnsweredCoverageState {
-  let coveredSeq = input.current.coverage
+  const initialCoveredSeq = input.current.coverage
     ? parseNumericLaneSeq(input.current.coverage.laneSeq)
     : 0n
-  if (coveredSeq === null) {
+  if (initialCoveredSeq === null) {
     return input.current
   }
+  let coveredSeq = initialCoveredSeq
 
   const pending = new Set<bigint>()
-  for (const laneSeq of [
-    ...input.current.pendingLaneSeqs,
-    ...input.laneSeqs,
-  ]) {
+  for (const laneSeq of input.laneSeqs) {
     const numeric = parseNumericLaneSeq(laneSeq)
     if (numeric !== null && numeric > coveredSeq) {
       pending.add(numeric)
     }
   }
 
-  let nextSeq = coveredSeq + 1n
-  while (pending.delete(nextSeq)) {
-    coveredSeq = nextSeq
-    nextSeq += 1n
+  let pendingRanges = mergeAssistantAutoReplyAnsweredCoverageRanges([
+    ...parseAssistantAutoReplyAnsweredCoverageRanges(input.current.pendingLaneRanges),
+    ...input.current.pendingLaneSeqs
+      .map((laneSeq) => parseNumericLaneSeq(laneSeq))
+      .filter((seq): seq is bigint => seq !== null)
+      .map((seq) => ({ end: seq, start: seq })),
+    ...[...pending].map((seq) => ({ end: seq, start: seq })),
+  ]).filter((range) => range.end > coveredSeq)
+
+  for (;;) {
+    const nextSeq = coveredSeq + 1n
+    const nextRange = pendingRanges[0]
+    if (!nextRange || nextRange.start > nextSeq) {
+      break
+    }
+    coveredSeq = nextRange.end > coveredSeq ? nextRange.end : coveredSeq
+    pendingRanges = pendingRanges.slice(1)
   }
 
-  const pendingLaneSeqs = [...pending]
-    .filter((seq) => seq > coveredSeq)
-    .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
-    .slice(0, AUTO_REPLY_ANSWERED_COVERAGE_PENDING_SEQ_LIMIT)
-    .map((seq) => seq.toString())
+  const pendingLaneRanges = serializeAssistantAutoReplyAnsweredCoverageRanges(
+    pendingRanges.filter((range) => range.end > coveredSeq),
+  )
 
   return {
     coverage: coveredSeq > 0n
@@ -654,9 +675,84 @@ function advanceAssistantAutoReplyAnsweredCoverageState(input: {
           laneSeq: coveredSeq.toString(),
         }
       : null,
-    pendingLaneSeqs,
+    pendingLaneRanges,
+    pendingLaneSeqs: [],
     schema: ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA,
   }
+}
+
+function parseAssistantAutoReplyAnsweredCoverageRanges(
+  value: unknown,
+): Array<{ end: bigint; start: bigint }> {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const ranges: Array<{ end: bigint; start: bigint }> = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue
+    }
+    const record = item as {
+      endSeq?: unknown
+      startSeq?: unknown
+    }
+    const startSeq = normalizeUnknownNullableString(record.startSeq)
+    const endSeq = normalizeUnknownNullableString(record.endSeq)
+    if (!startSeq || !endSeq) {
+      continue
+    }
+    const start = parseNumericLaneSeq(startSeq)
+    const end = parseNumericLaneSeq(endSeq)
+    if (start === null || end === null || end < start) {
+      continue
+    }
+    ranges.push({ end, start })
+  }
+  return ranges
+}
+
+function mergeAssistantAutoReplyAnsweredCoverageRanges(
+  ranges: readonly { end: bigint; start: bigint }[],
+): Array<{ end: bigint; start: bigint }> {
+  const sorted = ranges
+    .filter((range) => range.end >= range.start)
+    .sort((left, right) => left.start < right.start ? -1 : left.start > right.start ? 1 : 0)
+  const merged: Array<{ end: bigint; start: bigint }> = []
+  for (const range of sorted) {
+    const previous = merged.at(-1)
+    if (!previous || range.start > previous.end + 1n) {
+      merged.push({ ...range })
+      continue
+    }
+    if (range.end > previous.end) {
+      previous.end = range.end
+    }
+  }
+  return merged
+}
+
+function serializeAssistantAutoReplyAnsweredCoverageRanges(
+  ranges: readonly { end: bigint; start: bigint }[],
+): AssistantAutoReplyAnsweredCoverageRange[] {
+  return ranges.map((range) => ({
+    endSeq: range.end.toString(),
+    startSeq: range.start.toString(),
+  }))
+}
+
+function sameAssistantAutoReplyAnsweredCoverageState(
+  left: AssistantAutoReplyAnsweredCoverageState,
+  right: AssistantAutoReplyAnsweredCoverageState,
+): boolean {
+  const leftRanges = left.pendingLaneRanges
+    .map((range) => `${range.startSeq}-${range.endSeq}`)
+    .join('\u0000')
+  const rightRanges = right.pendingLaneRanges
+    .map((range) => `${range.startSeq}-${range.endSeq}`)
+    .join('\u0000')
+  return left.coverage?.laneSeq === right.coverage?.laneSeq &&
+    left.pendingLaneSeqs.join('\u0000') === right.pendingLaneSeqs.join('\u0000') &&
+    leftRanges === rightRanges
 }
 
 function selectHighestAssistantAutoReplyAnsweredCoverage(
