@@ -3146,6 +3146,127 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("preserves committed inbox media retention wake through durable follow-up checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const dayMs = 24 * 60 * 60 * 1000;
+    const recordedAt = new Date(Date.now() - 13 * dayMs).toISOString();
+    const expectedRetentionWakeAt = new Date(Date.parse(recordedAt) + 14 * dayMs).toISOString();
+    const durableWakeAt = new Date(Date.parse(expectedRetentionWakeAt) + dayMs).toISOString();
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      return {
+        nextWakeAt: durableWakeAt,
+        nextWakeReason: "system-mailbox",
+        requiresFollowUpCheckpoint: true,
+      };
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_retention_follow_up_wake",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "3".repeat(64),
+                key: "users/bundles/member-synthetic/retention-follow-up-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+            await persistCanonicalInboxCapture({
+              vaultRoot,
+              captureId: "cap_workspace_retention_follow_up",
+              eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41V2",
+              storedAt: recordedAt,
+              input: {
+                source: "telegram",
+                externalId: "msg-workspace-retention-follow-up",
+                accountId: "self",
+                thread: {
+                  id: "thread-workspace-retention-follow-up",
+                  isDirect: true,
+                },
+                actor: {
+                  isSelf: false,
+                },
+                occurredAt: recordedAt,
+                receivedAt: recordedAt,
+                text: "fresh media",
+                attachments: [
+                  {
+                    kind: "audio",
+                    mime: "audio/mp4",
+                    fileName: "voice.m4a",
+                    data: Buffer.from("audio-bytes"),
+                  },
+                ],
+                raw: {},
+              },
+            });
+            return {
+              afterCheckpoint: async () => ({
+                afterDurableCheckpoint: durableEffect,
+                checkpointReason: "assistant_runtime_commit",
+              }),
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.nextWakeAt,
+          request.nextWakeReason,
+          request.inboxMediaRetentionWakeAt,
+        ]),
+        [
+          [null, null, expectedRetentionWakeAt],
+          [durableWakeAt, "system-mailbox", expectedRetentionWakeAt],
+        ],
+      );
+      assert.ok(
+        events.indexOf("workspace.checkpoint") < events.indexOf("durable-effect"),
+      );
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, expectedRetentionWakeAt);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("services a due inbox media retention wake without mailbox or assistant progress", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

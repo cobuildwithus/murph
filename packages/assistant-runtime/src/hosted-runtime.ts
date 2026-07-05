@@ -1674,13 +1674,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         workspace: workspaceRead.workspace,
       });
       let servicedProjectedRuntimeWakeKey: string | null = null;
+      const rebaseProjectionFromCommittedWorkspace = (
+        workspace: HostedWorkspaceState,
+      ): void => {
+        accumulatedProjection = {
+          ...accumulatedProjection,
+          committedWorkspace: workspace,
+          inboxMediaRetentionWakeAt: workspace.inboxMediaRetentionWakeAt ?? null,
+          nextWakeAt: workspace.nextWakeAt ?? null,
+          nextWakeReason: workspace.nextWakeReason ?? null,
+          projectedWakeRequiresCheckpoint: false,
+          redactedStatus: workspace.redactedStatus ?? accumulatedProjection.redactedStatus,
+        };
+      };
       const stageDurableCheckpointFollowUp = (
         workspace: HostedWorkspaceState | null,
       ): void => {
+        if (workspace) {
+          rebaseProjectionFromCommittedWorkspace(workspace);
+        }
         const followUpCheckpointWake = selectEarliestHostedRuntimeWake([
           {
-            at: workspace?.nextWakeAt ?? accumulatedProjection.nextWakeAt,
-            reason: workspace?.nextWakeReason ?? accumulatedProjection.nextWakeReason,
+            at: accumulatedProjection.nextWakeAt,
+            reason: accumulatedProjection.nextWakeReason,
           },
           {
             at: durableCheckpointWakeAt,
@@ -2383,15 +2399,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           stageDurableCheckpointFollowUp(checkpoint.workspace);
           continue;
         }
-        accumulatedProjection = {
-          ...accumulatedProjection,
-          committedWorkspace: checkpoint.workspace,
-          inboxMediaRetentionWakeAt: checkpoint.workspace.inboxMediaRetentionWakeAt ?? null,
-          nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
-          nextWakeReason: checkpoint.workspace.nextWakeReason ?? null,
-          projectedWakeRequiresCheckpoint: false,
-          redactedStatus: checkpoint.workspace.redactedStatus ?? accumulatedProjection.redactedStatus,
-        };
+        rebaseProjectionFromCommittedWorkspace(checkpoint.workspace);
         runtimeStateDirty = false;
         const checkpointWakeLatencySeed =
           pendingCheckpointWakeLatencySeed
