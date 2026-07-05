@@ -6,9 +6,8 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 
 ## What This App Owns
 
-- ensure-processing requests (callback-signed from the Temporal orchestrator or
-  Vercel OIDC-authenticated direct Linq ingress wakes from `apps/web`) plus Vercel
-  OIDC-authenticated browser/session/status/deletion control requests from
+- ensure-processing requests callback-signed from the Temporal orchestrator, plus
+  Vercel OIDC-authenticated browser/session/status/deletion control requests from
   `apps/web`
 - per-user execution coordination in `USER_RUNNER`
 - native runner-container lifecycle in `RUNNER_CONTAINER`

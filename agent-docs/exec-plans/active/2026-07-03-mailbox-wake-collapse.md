@@ -17,9 +17,8 @@ reply, June incident class).
 Root principle of this plan: the mailbox row in Postgres is the durable
 truth; a wake is an idempotent notification. Temporal remains the only
 owner of orchestration state (retries, schedules, reconciliation). Making
-"answered" durable at reply delivery removes the only correctness coupling
-between wake latency and orchestration, after which the fast path and the
-backstop compose instead of racing.
+"answered" durable at reply delivery removes the replay hazard without
+reintroducing a second wake authority.
 
 Organizing constraint: the series must land net-negative in code,
 concepts, and branches. Each PR carries a deletion ledger.
@@ -105,7 +104,7 @@ Exact accepted-item computation (verified design, hardened by adversarial review
 - Select the current inbound item in the delivery context before provider
   send; prefer an exact `replyToMessageId` match before same-target
   fallback.
-- Forward only `currentInbound.mailboxItemId` to web as consume authority.
+- Forward the full `currentInbound` proof to web as consume authority.
   Legacy `answeredCoverage` lane high-water may still exist in runner
   payloads as runtime-local receipt metadata, but web ignores it.
 - The runtime must synchronously record accepted delivery outcomes whenever
