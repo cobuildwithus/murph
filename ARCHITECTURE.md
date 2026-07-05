@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-06-28
+Last verified: 2026-07-05
 
 ## Hosted Connected Apps
 
@@ -145,7 +145,10 @@ signal remains the only durable wake authority for hosted runtime work. Web
 does not call Cloudflare `ensure-processing` directly after Linq ingress; it
 appends the mailbox row and signals Temporal. Accepted Linq delivery outcomes
 may store the exact answered mailbox item set, which mailbox fetch/import treats
-as context-only on replay without advancing the contiguous lane `consumed_seq`.
+as context-only on replay without mutating the contiguous lane `consumed_seq`;
+status and reconciliation derive lag from the same contiguous exact accepted
+rows. Accepted proofless outcomes must explicitly declare that they are
+non-consuming before web records them.
 There is no other web-to-Cloudflare prewarm or nudge path.
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on

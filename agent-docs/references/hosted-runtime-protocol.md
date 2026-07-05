@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-06-23
+Last verified: 2026-07-05
 
 ## Decision
 
@@ -241,15 +241,19 @@ without adding a web-owned group table. Accepted Linq delivery outcomes carry th
 `currentInbound` proof plus `answeredMailboxItemIds`; web validates every item
 against the stored mailbox payload, target chat, runtime user, expiry, and route
 authority, then stores one `hosted_linq_delivery_answered_mailbox_item` row per
-validated item for accepted delivery rows. This insert is idempotent, so
-duplicate accepted callbacks with validated proof are safe, but deploys must not
-rely on an old runner accepted outcome being repaired later; a successful old
-runner has no guaranteed second callback carrying exact proof. Failed outcomes
-store no answered items. Mailbox fetch/import
+validated item for accepted delivery rows. Accepted outcomes without exact proof
+must explicitly declare `consumeRequired: false`; missing proof plus a missing
+non-consuming declaration fails closed at the web boundary. This insert is
+idempotent, so duplicate accepted callbacks with validated proof are safe, but
+deploys must not rely on an old runner accepted outcome being repaired later; a
+successful old runner has no guaranteed second callback carrying exact proof.
+Failed outcomes store no answered items. Mailbox fetch/import
 treats exactly those accepted items as conversation context with a null reply
 target, never as fresh reply candidates, so a workspace restore from a stale
 snapshot cannot re-reply to an already-handled message even when a lower gap
-keeps contiguous `consumed_seq` behind. A container rollout SIGTERM additionally
+keeps persisted contiguous `consumed_seq` behind. Status and reconciliation
+derive their effective conversation work floor from the same contiguous exact
+accepted rows without mutating the lane counter. A container rollout SIGTERM additionally
 makes the runtime treat the idle window as elapsed and run its normal
 `idle_shutdown` checkpoint inside the termination grace period.
 Hosted Linq and Telegram conversation webhook routes read the raw body and

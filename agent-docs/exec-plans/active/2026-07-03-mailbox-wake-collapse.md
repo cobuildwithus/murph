@@ -131,6 +131,13 @@ Exact accepted-item computation (verified design, hardened by adversarial review
 - Mailbox fetch/import turns matching accepted delivery rows into
   `consumedItems` so the exact accepted items are context-only even when the
   contiguous `consumed_seq` floor is held back by a lower gap.
+- Status and reconciliation use the same accepted rows as a derived effective
+  conversation work floor for contiguous exact answers, without mutating the
+  stored lane counter or advancing across gaps.
+- Accepted proofless Linq delivery outcomes must explicitly declare
+  `consumeRequired: false`; missing proof plus no non-consuming declaration
+  fails closed at the web route instead of recording success with no consume
+  authority.
 - Accepted replays may only add exact item rows after web validates current
   inbound and answered-item proof against stored mailbox payloads and route
   authority; they never advance contiguous `consumed_seq` or trust raw replay

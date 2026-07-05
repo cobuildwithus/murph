@@ -5278,6 +5278,7 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({
         acceptedAt: expect.stringMatching(/Z$/u),
         attemptedAt: expect.stringMatching(/Z$/u),
+        consumeRequired: false,
         failureCode: null,
         failureReason: null,
         fromPhoneNumber: "+15550100099",
@@ -5534,6 +5535,7 @@ describe("hosted runtime callbacks", () => {
           "mailbox_item_linq_current",
           "mailbox_item_linq_followup",
         ],
+        consumeRequired: true,
         currentInbound,
       }),
       { signal: expect.any(AbortSignal) },
@@ -5605,6 +5607,7 @@ describe("hosted runtime callbacks", () => {
     );
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
+        consumeRequired: false,
         currentInbound: null,
         idempotencyKey: "assistant-progress:intent_123",
       }),

@@ -268,6 +268,7 @@ describe("hosted runtime Linq delivery route", () => {
     if (!chatLookupKey) {
       throw new Error("Expected test Linq chat lookup key.");
     }
+    mocks.resolveHostedLinqAnsweredMailboxItemIdsForRuntime.mockResolvedValueOnce([]);
     prisma.hostedMemberRouting.findUnique.mockResolvedValueOnce({
       linqChatLookupKey: chatLookupKey,
       linqRecipientPhoneLookupKey: "hbidx:phone:v1:home-line",
@@ -278,6 +279,7 @@ describe("hosted runtime Linq delivery route", () => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
       attemptedAt: "2026-04-26T00:00:03.000Z",
+      consumeRequired: false,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
       providerMessageId: "linq_message_sent",
@@ -298,11 +300,30 @@ describe("hosted runtime Linq delivery route", () => {
     });
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
+        answeredMailboxItemIds: [],
         linqChatId: "linq_chat_123",
         phoneNumber: null,
         phoneNumberLookupKey: "hbidx:phone:v1:home-line",
       }),
     );
+  });
+
+  it("rejects proofless accepted outcomes unless they are explicitly non-consuming", async () => {
+    mocks.resolveHostedLinqAnsweredMailboxItemIdsForRuntime.mockResolvedValueOnce([]);
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      intentId: "intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "explicit",
+    }));
+
+    expect(response.status).toBe(409);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
   });
 
   it("uses route authority for routed sends and rejects authority for a different user", async () => {

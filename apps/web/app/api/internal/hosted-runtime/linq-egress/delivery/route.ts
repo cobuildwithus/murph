@@ -44,6 +44,7 @@ export const POST = withJsonError(async (request: Request) => {
   const answeredMailboxItemIds = parseHostedLinqDeliveryAnsweredMailboxItemIds(
     body.answeredMailboxItemIds,
   );
+  const consumeRequired = parseHostedLinqDeliveryConsumeRequired(body.consumeRequired);
   const currentInbound = parseHostedLinqDeliveryCurrentInbound(body.currentInbound);
   const targetKind = parseHostedLinqDeliveryTargetKind(body.targetKind);
   const acceptedAt = parseOptionalHostedLinqDeliveryDate(
@@ -109,6 +110,7 @@ export const POST = withJsonError(async (request: Request) => {
     ? await resolveHostedLinqDeliveryAnsweredMailboxItemIds({
         answeredMailboxItemIds,
         acceptedAt,
+        consumeRequired,
         currentInbound,
         linqChatId: answeredLinqChatId,
         memberId: userId,
@@ -146,6 +148,7 @@ async function resolveHostedLinqDeliveryAnsweredMailboxItemIds(input: {
   acceptedAt: Date;
   answeredMailboxItemIds: readonly string[];
   currentInbound: HostedLinqCurrentInboundProof | null;
+  consumeRequired: boolean | null;
   linqChatId: string | null;
   memberId: string;
   prisma: ReturnType<typeof getPrisma>;
@@ -163,6 +166,14 @@ async function resolveHostedLinqDeliveryAnsweredMailboxItemIds(input: {
     targetKind: input.targetKind,
   });
   if (mailboxItemIds) {
+    if (mailboxItemIds.length === 0 && input.consumeRequired !== false) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_DELIVERY_CONSUME_AUTHORITY_REQUIRED",
+        httpStatus: 409,
+        message: "Accepted Linq delivery without exact consume proof must explicitly declare it is non-consuming.",
+        retryable: false,
+      });
+    }
     return mailboxItemIds;
   }
 
@@ -170,6 +181,22 @@ async function resolveHostedLinqDeliveryAnsweredMailboxItemIds(input: {
     code: "HOSTED_LINQ_DELIVERY_CURRENT_INBOUND_INVALID",
     httpStatus: 403,
     message: "Hosted Linq delivery current inbound proof is invalid.",
+    retryable: false,
+  });
+}
+
+function parseHostedLinqDeliveryConsumeRequired(value: unknown): boolean | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_DELIVERY_CONSUME_REQUIRED_INVALID",
+    httpStatus: 400,
+    message: "Hosted Linq delivery consumeRequired flag is invalid.",
     retryable: false,
   });
 }

@@ -1300,7 +1300,63 @@ async function resolveHostedMailboxEffectiveConsumedSeq(input: {
   }
 
   const retainedFloor = oldestRetained.laneSeq - 1n;
-  return input.consumedSeq > retainedFloor ? input.consumedSeq : retainedFloor;
+  const retainedConsumedSeq = input.consumedSeq > retainedFloor
+    ? input.consumedSeq
+    : retainedFloor;
+
+  if (input.lane !== "conversation") {
+    return retainedConsumedSeq;
+  }
+
+  return resolveHostedMailboxAcceptedLinqConversationConsumedSeq({
+    afterSeq: retainedConsumedSeq,
+    now,
+    prisma: input.prisma,
+    userId: input.userId,
+  });
+}
+
+async function resolveHostedMailboxAcceptedLinqConversationConsumedSeq(input: {
+  afterSeq: bigint;
+  now: Date;
+  prisma: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<bigint> {
+  const rows = await input.prisma.$queryRaw<Array<{
+    consumedSeq: bigint | number | string | null;
+  }>>`
+    WITH answered AS (
+      SELECT
+        mailbox_item.lane_seq,
+        mailbox_item.lane_seq - row_number() OVER (ORDER BY mailbox_item.lane_seq)::bigint AS contiguous_floor
+      FROM hosted_mailbox_item mailbox_item
+      WHERE mailbox_item.user_id = ${input.userId}
+        AND mailbox_item.lane = 'conversation'
+        AND mailbox_item.kind = 'conversation.message'
+        AND mailbox_item.lane_seq > ${input.afterSeq}
+        AND mailbox_item.created_at >= ${new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS)}
+        AND (mailbox_item.expires_at IS NULL OR mailbox_item.expires_at > ${input.now})
+        AND EXISTS (
+          SELECT 1
+          FROM hosted_linq_delivery_answered_mailbox_item answered_item
+          JOIN hosted_linq_delivery delivery
+            ON delivery.id = answered_item.delivery_id
+           AND delivery.status IN ('accepted', 'delivered')
+          WHERE answered_item.mailbox_item_id = mailbox_item.id
+        )
+    )
+    SELECT max(lane_seq) AS "consumedSeq"
+    FROM answered
+    WHERE contiguous_floor = ${input.afterSeq}
+  `;
+  const consumedSeq = rows[0]?.consumedSeq ?? null;
+
+  return consumedSeq === null
+    ? input.afterSeq
+    : normalizeHostedMailboxSeq(
+      consumedSeq,
+      "Hosted mailbox accepted Linq conversation consumed seq",
+    );
 }
 
 function isHostedMailboxItemExpired(

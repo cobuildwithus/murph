@@ -2792,6 +2792,11 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   target: string | null;
   targetKind: HostedRuntimeProviderTargetKind | null;
 }): HostedRuntimeLinqDeliveryOutcomeRequest {
+  const consumeRequired = shouldRequireHostedAssistantLinqConsumeProof({
+    answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+    currentInbound: input.deliveryContext?.currentInbound ?? null,
+    recordCurrentInboundAnswer: input.recordCurrentInboundAnswer,
+  });
   return {
     ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
     answeredMailboxItemIds: input.recordCurrentInboundAnswer
@@ -2801,6 +2806,7 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
         })
       : [],
     attemptedAt: input.attemptedAt.toISOString(),
+    consumeRequired,
     currentInbound: input.recordCurrentInboundAnswer
       ? input.deliveryContext?.currentInbound ?? null
       : null,
@@ -2817,6 +2823,20 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     target: input.targetKind === "participant" ? null : input.target,
     targetKind: input.targetKind,
   };
+}
+
+function shouldRequireHostedAssistantLinqConsumeProof(input: {
+  answeredMailboxItemIds: readonly string[];
+  currentInbound: HostedRuntimeLinqCurrentInboundProof | null;
+  recordCurrentInboundAnswer: boolean;
+}): boolean {
+  return Boolean(
+    input.recordCurrentInboundAnswer
+      && (
+        input.currentInbound?.mailboxItemId
+        || input.answeredMailboxItemIds.length > 0
+      ),
+  );
 }
 
 function normalizeHostedAssistantLinqAnsweredMailboxItemIds(input: {

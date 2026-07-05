@@ -1731,6 +1731,7 @@ describe("readHostedMailboxConsumedSeqByLane", () => {
         : null
     );
     const prisma = Object.assign(Object.create(null), {
+      $queryRaw: vi.fn(async () => [{ consumedSeq: null }]),
       hostedMailboxItem: {
         findFirst: vi.fn(async () => buildHostedMailboxItemRow({
           lane: "conversation",
@@ -1770,6 +1771,7 @@ describe("readHostedMailboxConsumedSeqByLane", () => {
       laneSeq: 15n,
     }));
     const prisma = Object.assign(Object.create(null), {
+      $queryRaw: vi.fn(async () => [{ consumedSeq: null }]),
       hostedMailboxItem: { findFirst },
       hostedMailboxLaneCounter: { findUnique },
     }) as Parameters<typeof readHostedMailboxConsumedSeqByLane>[0]["prisma"];
@@ -1802,5 +1804,42 @@ describe("readHostedMailboxConsumedSeqByLane", () => {
         userId: "member_mailbox_1",
       }),
     });
+  });
+
+  it("folds contiguous exact accepted Linq conversation answers into the effective floor", async () => {
+    const findUnique = vi.fn(async () => ({
+      consumedSeq: 0n,
+      lane: "conversation",
+      nextSeq: 4n,
+      updatedAt: new Date("2026-06-10T00:00:00.000Z"),
+      userId: "member_mailbox_1",
+    }));
+    const queryRaw = vi.fn(async () => [{ consumedSeq: 2n }]);
+    const prisma = Object.assign(Object.create(null), {
+      $queryRaw: queryRaw,
+      hostedMailboxItem: {
+        findFirst: vi.fn(async () => buildHostedMailboxItemRow({
+          id: "mailbox_conversation_1",
+          lane: "conversation",
+          laneSeq: 1n,
+        })),
+      },
+      hostedMailboxLaneCounter: { findUnique },
+    }) as Parameters<typeof readHostedMailboxConsumedSeqByLane>[0]["prisma"];
+
+    const result = await readHostedMailboxConsumedSeqByLane({
+      lanes: ["conversation"],
+      prisma,
+      userId: "member_mailbox_1",
+    });
+
+    expect(result).toEqual([
+      { consumedSeq: "2", lane: "conversation" },
+    ]);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    const sql = readHostedMailboxRawSql(queryRaw.mock.calls[0]);
+    expect(sql).toContain("hosted_linq_delivery_answered_mailbox_item");
+    expect(sql).toContain("delivery.status IN ('accepted', 'delivered')");
+    expect(sql).toContain("contiguous_floor = ?");
   });
 });
