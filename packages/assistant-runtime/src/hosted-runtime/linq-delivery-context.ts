@@ -103,10 +103,28 @@ export function resolveHostedAssistantLinqDeliveryContextFromCandidatesForReques
   target: string;
   targetKind: string | null;
 }): HostedAssistantLinqDeliveryContext | null {
+  const replyToMessageId = normalizeHostedLinqDeliveryContextText(input.replyToMessageId);
+  if (replyToMessageId) {
+    for (const context of input.contexts) {
+      if (context.replyToMessageId !== replyToMessageId) {
+        continue;
+      }
+      const resolved = resolveHostedAssistantLinqDeliveryContextForRequest({
+        context,
+        replyToMessageId,
+        target: input.target,
+        targetKind: input.targetKind,
+      });
+      if (resolved) {
+        return resolved;
+      }
+    }
+  }
+
   for (const context of input.contexts) {
     const resolved = resolveHostedAssistantLinqDeliveryContextForRequest({
       context,
-      replyToMessageId: input.replyToMessageId,
+      replyToMessageId,
       target: input.target,
       targetKind: input.targetKind,
     });

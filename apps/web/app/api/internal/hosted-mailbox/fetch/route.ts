@@ -2,6 +2,9 @@ import {
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
 } from "@murphai/hosted-execution/parsers";
+import type {
+  HostedMailboxConsumedItem,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -34,6 +37,7 @@ import { getPrisma } from "@/src/lib/prisma";
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
 type HostedRuntimeMailboxAiUsageItem = {
+  id: string;
   kind: string;
   lane: string;
   laneSeq: string;
@@ -67,15 +71,16 @@ export const POST = withJsonError(async (request: Request) => {
     now: fetchedAt,
     userId,
   });
+  const consumedItems = await readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems({
+    items: itemsResult.items,
+    prisma: getPrisma(),
+  });
   await requireHostedRuntimeMailboxAiUsageAccess({
+    consumedItems,
     consumedSeqByLane,
     items: itemsResult.items,
     lanes: body.lanes,
     userId,
-  });
-  const consumedItems = await readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems({
-    items: itemsResult.items,
-    prisma: getPrisma(),
   });
   const maxSeqByLane = await readHostedMailboxMaxSeqByLane({
     lanes: requestedLanes,
@@ -93,6 +98,7 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 async function requireHostedRuntimeMailboxAiUsageAccess(input: {
+  consumedItems: readonly HostedMailboxConsumedItem[];
   consumedSeqByLane: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["consumedSeqByLane"];
   items: readonly HostedRuntimeMailboxAiUsageItem[];
   lanes: Parameters<typeof hostedMailboxItemsRequireAiUsageAccess>[0]["lanes"];
@@ -102,13 +108,15 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
   // watermarks are simpler than returning partial lane output around denied AI work.
   if (!hostedMailboxItemsRequireAiUsageAccess({
     consumedSeqByLane: input.consumedSeqByLane,
-    items: input.items.map((item) => ({
-      kind: item.kind,
-      lane: item.lane,
-      laneSeq: item.laneSeq,
-      payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
-      payloadRef: item.payloadRef ?? null,
-    })),
+    items: input.items
+      .filter((item) => !hostedMailboxExactConsumedItemSetHas(input.consumedItems, item))
+      .map((item) => ({
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+        payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
+        payloadRef: item.payloadRef ?? null,
+      })),
     lanes: input.lanes,
   })) {
     return;
@@ -140,4 +148,15 @@ async function requireHostedRuntimeMailboxAiUsageAccess(input: {
     httpStatus: 403,
     message: "Hosted runtime mailbox AI usage is denied.",
   });
+}
+
+function hostedMailboxExactConsumedItemSetHas(
+  consumedItems: readonly HostedMailboxConsumedItem[],
+  item: HostedRuntimeMailboxAiUsageItem,
+): boolean {
+  return consumedItems.some((consumedItem) =>
+    consumedItem.itemId === item.id
+    && consumedItem.lane === item.lane
+    && consumedItem.laneSeq === item.laneSeq
+  );
 }

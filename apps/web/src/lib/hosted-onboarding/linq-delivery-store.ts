@@ -1022,29 +1022,21 @@ export async function readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems
     },
     select: {
       answeredCoverageLane: true,
-      answeredCoverageLaneSeq: true,
       answeredCoverageMailboxItemId: true,
     },
   });
-  const consumedKeys = new Set<string>();
+  const consumedItemIds = new Set<string>();
   for (const row of rows) {
-    const coverage = readHostedLinqDeliveryAnsweredCoverage(row);
-    if (!coverage?.mailboxItemId) {
+    const lane = normalizeNullable(row.answeredCoverageLane ?? null);
+    const mailboxItemId = normalizeNullable(row.answeredCoverageMailboxItemId ?? null);
+    if (lane !== "conversation" || !mailboxItemId) {
       continue;
     }
-    consumedKeys.add(buildHostedLinqDeliveryConsumedItemKey({
-      itemId: coverage.mailboxItemId,
-      lane: coverage.lane,
-      laneSeq: coverage.laneSeq,
-    }));
+    consumedItemIds.add(mailboxItemId);
   }
 
   return candidates
-    .filter((item) => consumedKeys.has(buildHostedLinqDeliveryConsumedItemKey({
-      itemId: item.id,
-      lane: "conversation",
-      laneSeq: item.laneSeq,
-    })))
+    .filter((item) => consumedItemIds.has(item.id))
     .map((item) => ({
       itemId: item.id,
       lane: "conversation",
@@ -1352,20 +1344,11 @@ async function resolveHostedLinqDeliveryAnsweredCoverageTx(input: {
       mailboxItemId: null,
     };
   }
-  const laneSeq = parseHostedLinqDeliveryCoverageLaneSeq(input.coverage.laneSeq);
-  if (laneSeq === null) {
-    return {
-      lane: input.coverage.lane,
-      laneSeq: input.coverage.laneSeq,
-      mailboxItemId: null,
-    };
-  }
   const item = await input.prisma.hostedMailboxItem.findFirst({
     where: {
       id: mailboxItemId,
       kind: "conversation.message",
       lane: input.coverage.lane,
-      laneSeq,
       userId: input.userId,
     },
     select: {
@@ -1378,26 +1361,6 @@ async function resolveHostedLinqDeliveryAnsweredCoverageTx(input: {
     laneSeq: input.coverage.laneSeq,
     mailboxItemId: item?.id ?? null,
   };
-}
-
-function parseHostedLinqDeliveryCoverageLaneSeq(value: string): bigint | null {
-  const normalized = normalizeNullable(value);
-  if (!normalized || !/^(0|[1-9]\d*)$/u.test(normalized)) {
-    return null;
-  }
-  try {
-    return BigInt(normalized);
-  } catch {
-    return null;
-  }
-}
-
-function buildHostedLinqDeliveryConsumedItemKey(input: {
-  itemId: string;
-  lane: "conversation";
-  laneSeq: string;
-}): string {
-  return `${input.lane}:${input.laneSeq}:${input.itemId}`;
 }
 
 const hostedLinqDeliveryLifecycleSelect = {

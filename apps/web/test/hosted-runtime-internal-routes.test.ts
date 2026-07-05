@@ -885,6 +885,82 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it("does not AI-gate exact consumed conversation items above the consumed floor", async () => {
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      status: "denied",
+    });
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "1",
+        lane: "conversation",
+      },
+    ]);
+    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
+      items: [
+        {
+          createdAt: FIXED_NOW,
+          dedupeKey: "conversation-dedupe-answered-gap",
+          expiresAt: null,
+          id: "mailbox_item_answered_gap",
+          kind: "conversation.message",
+          lane: "conversation",
+          laneSeq: "3",
+          occurredAt: FIXED_NOW,
+          payloadBytes: 64,
+          payloadInlineCiphertext: "cipher_inline_answered_gap",
+          payloadRef: null,
+          payloadSchema: "murph.hosted-mailbox-item.v1",
+          updatedAt: FIXED_NOW,
+          userId: "member_routes_1",
+        },
+      ],
+    });
+    mocks.readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems.mockResolvedValueOnce([
+      {
+        itemId: "mailbox_item_answered_gap",
+        lane: "conversation",
+        laneSeq: "3",
+      },
+    ]);
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+    ]);
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          {
+            importedSeq: "2",
+            lane: "conversation",
+          },
+        ],
+        limitPerLane: 10,
+        requestId: "request_mailbox_fetch_exact_consumed_gap",
+      },
+    ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(payload.consumedSeqByLane).toEqual([
+      {
+        consumedSeq: "1",
+        lane: "conversation",
+      },
+    ]);
+    expect(payload.consumedItems).toEqual([
+      {
+        itemId: "mailbox_item_answered_gap",
+        lane: "conversation",
+        laneSeq: "3",
+      },
+    ]);
+  });
+
   it("rejects manual runtime-control mailbox items when the AI usage gate denies runtime consumption", async () => {
     mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
       items: [
@@ -1251,6 +1327,68 @@ describe("hosted runtime internal web routes", () => {
       mailboxItemId: "mailbox_item_2",
       payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
       requestId: "request_payload_fetch_replay_denied",
+      userId: "member_routes_1",
+    });
+  });
+
+  it("does not AI-gate exact consumed conversation mailbox payload fetches above the consumed floor", async () => {
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      status: "denied",
+    });
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "1",
+        lane: "conversation",
+      },
+    ]);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      id: "mailbox_item_payload_answered_gap",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "3",
+      payloadInlineCiphertext: null,
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+      userId: "member_routes_1",
+    });
+    mocks.readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems.mockResolvedValueOnce([
+      {
+        itemId: "mailbox_item_payload_answered_gap",
+        lane: "conversation",
+        laneSeq: "3",
+      },
+    ]);
+    mocks.fetchHostedMailboxPayload.mockResolvedValue({
+      fetchedAt: FIXED_NOW,
+      payload: {
+        createdAt: FIXED_NOW,
+        mailboxItemId: "mailbox_item_payload_answered_gap",
+        payloadCiphertext: "payload_cipher_answered_gap",
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        userId: "member_routes_1",
+      },
+    });
+
+    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/payload/fetch",
+      {
+        dedupeKey: "dedupe_item_answered_gap",
+        mailboxItemId: "mailbox_item_payload_answered_gap",
+        payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+        requestId: "request_payload_fetch_exact_consumed_gap",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedMailboxConsumedSeqByLane).toHaveBeenCalledWith({
+      lanes: ["conversation"],
+      userId: "member_routes_1",
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
+      dedupeKey: "dedupe_item_answered_gap",
+      mailboxItemId: "mailbox_item_payload_answered_gap",
+      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
+      requestId: "request_payload_fetch_exact_consumed_gap",
       userId: "member_routes_1",
     });
   });

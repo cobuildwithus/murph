@@ -2,6 +2,9 @@ import {
   parseHostedMailboxPayloadFetchRequest,
   parseHostedMailboxPayloadFetchResponse,
 } from "@murphai/hosted-execution/parsers";
+import type {
+  HostedMailboxItem,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -18,6 +21,9 @@ import {
   requireHostedRuntimeMailboxActiveAccess,
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
+  readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems,
+} from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import {
   resolveHostedRuntimeAiUsageGate,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -25,17 +31,9 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
+import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_MAILBOX_PAYLOAD_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
-
-type HostedRuntimeMailboxPayloadAiUsageItem = {
-  kind: string;
-  lane: string;
-  laneSeq: string;
-  payloadInlineCiphertext?: string | null;
-  payloadRef?: string | null;
-  userId: string;
-};
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
@@ -66,7 +64,7 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
-  item: HostedRuntimeMailboxPayloadAiUsageItem | null;
+  item: HostedMailboxItem | null;
   userId: string;
 }): Promise<void> {
   if (
@@ -98,6 +96,9 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
   })) {
     return;
   }
+  if (await hostedRuntimeMailboxPayloadItemIsExactConsumed(input.item)) {
+    return;
+  }
 
   const gate = await resolveHostedRuntimeAiUsageGate({
     mode: "read_first",
@@ -125,4 +126,22 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
     httpStatus: 403,
     message: "Hosted runtime mailbox payload AI usage is denied.",
   });
+}
+
+async function hostedRuntimeMailboxPayloadItemIsExactConsumed(
+  item: HostedMailboxItem,
+): Promise<boolean> {
+  if (item.kind !== "conversation.message" || item.lane !== "conversation") {
+    return false;
+  }
+  const consumedItems = await readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems({
+    items: [item],
+    prisma: getPrisma(),
+  });
+
+  return consumedItems.some((consumedItem) =>
+    consumedItem.itemId === item.id
+    && consumedItem.lane === item.lane
+    && consumedItem.laneSeq === item.laneSeq
+  );
 }

@@ -1373,7 +1373,6 @@ describe("hosted Linq observability stores", () => {
         id: "mailbox_item_answered_42",
         kind: "conversation.message",
         lane: "conversation",
-        laneSeq: 42n,
         userId: "member_123",
       },
     });
@@ -1384,6 +1383,67 @@ describe("hosted Linq observability stores", () => {
       where: {
         consumedSeq: {
           lt: 42n,
+        },
+        lane: "conversation",
+        userId: "member_123",
+      },
+    });
+  });
+
+  it("stores exact accepted mailbox item coverage independently from the consumed floor", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+    fixture.hostedMailboxItemFindFirst.mockResolvedValueOnce({
+      id: "mailbox_item_answered_3",
+    });
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      answeredCoverage: {
+        lane: "conversation",
+        laneSeq: "1",
+        mailboxItemId: "mailbox_item_answered_3",
+      },
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_gap_accept",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_gap",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_gap_accept",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          answeredCoverageLane: "conversation",
+          answeredCoverageLaneSeq: "1",
+          answeredCoverageMailboxItemId: "mailbox_item_answered_3",
+        }),
+      }),
+    );
+    expect(fixture.hostedMailboxItemFindFirst).toHaveBeenCalledWith({
+      select: {
+        id: true,
+      },
+      where: {
+        id: "mailbox_item_answered_3",
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_123",
+      },
+    });
+    expect(fixture.hostedMailboxLaneCounterUpdateMany).toHaveBeenCalledWith({
+      data: {
+        consumedSeq: 1n,
+      },
+      where: {
+        consumedSeq: {
+          lt: 1n,
         },
         lane: "conversation",
         userId: "member_123",
@@ -1455,12 +1515,10 @@ describe("hosted Linq observability stores", () => {
     fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
       {
         answeredCoverageLane: "conversation",
-        answeredCoverageLaneSeq: "3",
         answeredCoverageMailboxItemId: "mailbox_item_answered_3",
       },
       {
         answeredCoverageLane: "conversation",
-        answeredCoverageLaneSeq: "5",
         answeredCoverageMailboxItemId: "mailbox_item_other",
       },
     ]);
@@ -1488,7 +1546,6 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
       select: {
         answeredCoverageLane: true,
-        answeredCoverageLaneSeq: true,
         answeredCoverageMailboxItemId: true,
       },
       where: {
