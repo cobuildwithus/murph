@@ -237,7 +237,10 @@ uses `HostedMailboxLaneCounter`.
 watermark, but accepted Linq reply consume authority is exact-item based. The
 assistant outbox intent carries `hostedDeliveryInboundMailboxItemIds` from the
 accepted input set so same-turn multi-input replies keep one source of truth
-without adding a web-owned group table. Accepted Linq delivery outcomes carry the existing
+without adding a web-owned group table. Runtime same-target Linq context
+fallback may route provider egress, but it is not answer-consume authority:
+outgoing replies with a `replyToMessageId` need matching `currentInbound` proof
+before provider dispatch. Accepted Linq delivery outcomes carry the existing
 `currentInbound` proof plus `answeredMailboxItemIds`; web validates every item
 against the stored mailbox payload, target chat, runtime user, expiry, and route
 authority, then stores one `hosted_linq_delivery_answered_mailbox_item` row per

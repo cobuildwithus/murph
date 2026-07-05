@@ -7409,6 +7409,84 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("does not use same-target Linq fallback as consume proof for vault-file replies", async () => {
+    const vaultFile = {
+      approvalGeneration: "b".repeat(64),
+      approvalId: `haa_${"a".repeat(32)}`,
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      inboundMailboxItemIds: ["mailbox_item_linq_a"],
+      media: [vaultFile],
+      replyToMessageId: "linq_message_a",
+      transportIdempotent: true,
+    });
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      request: vi.fn(),
+    };
+    const assertRecentInbound = vi.fn(async () => undefined);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        media: [vaultFile],
+        message: "Attached.",
+        replyToMessageId: "linq_message_a",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      });
+
+      throw new Error("unreachable after consume-proof mismatch");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      actionApprovalPort,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      linqDeliveryContexts: [{
+        currentInbound: {
+          dedupeKey: "evt_linq_b",
+          eventId: "evt_linq_b",
+          mailboxItemId: "mailbox_item_linq_b",
+          occurredAt: "2026-04-08T00:00:05.000Z",
+          replyToMessageId: "linq_message_b",
+          target: "linq_chat_current",
+        },
+        directRecipientPhoneNumber: "+15550000001",
+        fromPhoneNumber: "+15559990000",
+        replyToMessageId: "linq_message_b",
+        routeAuthority: null,
+        service: "iMessage",
+        target: "linq_chat_current",
+        threadIsDirect: true,
+      }],
+      providerFetch: vi.fn<typeof fetch>(
+        async () => new Response(null, { status: 204 }),
+      ),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_CONSUME_PROOF_REPLY_MISMATCH",
+    });
+
+    expect(assertRecentInbound).not.toHaveBeenCalled();
+    expect(actionApprovalPort.consume).not.toHaveBeenCalled();
+    expect(actionApprovalPort.request).not.toHaveBeenCalled();
+    expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
   it("uses providerFetch for hosted Linq voice memo deliveries when the runtime can intercept egress", async () => {
     const effect = createEffect({
       bindingDeliveryKind: "thread",

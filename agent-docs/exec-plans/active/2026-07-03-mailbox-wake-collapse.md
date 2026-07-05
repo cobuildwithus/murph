@@ -106,6 +106,9 @@ Exact accepted-item computation (verified design, hardened by adversarial review
 - Select the current inbound item in the delivery context before provider
   send; prefer an exact `replyToMessageId` match before same-target
   fallback.
+- Same-target fallback may authorize route/provider egress, but it must not
+  feed accepted answer-consume proof; an outgoing reply with a `replyToMessageId`
+  and only fallback proof fails before provider dispatch.
 - Forward the full `currentInbound` proof to web as consume authority. The
   legacy runtime-side high-water coverage path has been removed
   from outbox intents, receipt repair, auto-reply evidence, hosted delivery

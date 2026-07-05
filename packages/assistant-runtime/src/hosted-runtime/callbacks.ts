@@ -2376,6 +2376,12 @@ function createHostedAssistantLinqSendDependency(input: {
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const providerTarget = deliveryContext?.target ?? request.target;
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
+    assertHostedAssistantLinqConsumeProofMatchesReplyBeforeDispatch({
+      answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+      deliveryContext,
+      recordCurrentInboundAnswer: input.recordCurrentInboundAnswer ?? false,
+      replyToMessageId: request.replyToMessageId ?? null,
+    });
     await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
       deliveryContext,
       directRecipientPhoneNumber,
@@ -2450,6 +2456,7 @@ function createHostedAssistantLinqSendDependency(input: {
           providerTarget,
           providerThreadId: null,
           recordCurrentInboundAnswer: input.recordCurrentInboundAnswer ?? false,
+          replyToMessageId: request.replyToMessageId ?? null,
           result: null,
           target: request.target,
           targetKind: request.targetKind ?? null,
@@ -2468,6 +2475,7 @@ function createHostedAssistantLinqSendDependency(input: {
       providerTarget,
       providerThreadId: result.providerThreadId ?? null,
       recordCurrentInboundAnswer: input.recordCurrentInboundAnswer ?? false,
+      replyToMessageId: request.replyToMessageId ?? null,
       result,
       target: request.target,
       targetKind: request.targetKind ?? null,
@@ -2632,6 +2640,12 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     });
     const providerTarget = deliveryContext?.target ?? request.target;
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
+    assertHostedAssistantLinqConsumeProofMatchesReplyBeforeDispatch({
+      answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+      deliveryContext,
+      recordCurrentInboundAnswer: input.recordCurrentInboundAnswer ?? false,
+      replyToMessageId: request.replyToMessageId ?? null,
+    });
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
       fetchImplementation: input.providerFetch,
@@ -2675,6 +2689,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
           providerTarget,
           providerThreadId: null,
           recordCurrentInboundAnswer: input.recordCurrentInboundAnswer ?? false,
+          replyToMessageId: request.replyToMessageId ?? null,
           result: null,
           target: providerTarget,
           targetKind: "thread",
@@ -2693,6 +2708,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       providerTarget,
       providerThreadId: result.providerThreadId ?? null,
       recordCurrentInboundAnswer: input.recordCurrentInboundAnswer ?? false,
+      replyToMessageId: request.replyToMessageId ?? null,
       result,
       target: providerTarget,
       targetKind: "thread",
@@ -2788,28 +2804,32 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   providerTarget: string | null;
   providerThreadId: string | null;
   recordCurrentInboundAnswer: boolean;
+  replyToMessageId: string | null;
   result: HostedRuntimeLinqSendResponse | null;
   target: string | null;
   targetKind: HostedRuntimeProviderTargetKind | null;
 }): HostedRuntimeLinqDeliveryOutcomeRequest {
+  const currentInbound = resolveHostedAssistantLinqOutcomeCurrentInbound({
+    deliveryContext: input.deliveryContext,
+    recordCurrentInboundAnswer: input.recordCurrentInboundAnswer,
+    replyToMessageId: input.replyToMessageId,
+  });
   const consumeRequired = shouldRequireHostedAssistantLinqConsumeProof({
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
-    currentInbound: input.deliveryContext?.currentInbound ?? null,
+    currentInbound,
     recordCurrentInboundAnswer: input.recordCurrentInboundAnswer,
   });
   return {
     ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
     answeredMailboxItemIds: input.recordCurrentInboundAnswer
       ? normalizeHostedAssistantLinqAnsweredMailboxItemIds({
-          currentInbound: input.deliveryContext?.currentInbound ?? null,
+          currentInbound,
           itemIds: input.answeredMailboxItemIds ?? [],
         })
       : [],
     attemptedAt: input.attemptedAt.toISOString(),
     consumeRequired,
-    currentInbound: input.recordCurrentInboundAnswer
-      ? input.deliveryContext?.currentInbound ?? null
-      : null,
+    currentInbound,
     ...(input.failedAt ? { failedAt: input.failedAt.toISOString() } : {}),
     failureCode: input.failureCode ?? null,
     failureReason: input.failureReason ?? null,
@@ -2823,6 +2843,75 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     target: input.targetKind === "participant" ? null : input.target,
     targetKind: input.targetKind,
   };
+}
+
+function assertHostedAssistantLinqConsumeProofMatchesReplyBeforeDispatch(input: {
+  answeredMailboxItemIds: readonly string[];
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  recordCurrentInboundAnswer: boolean;
+  replyToMessageId: string | null;
+}): void {
+  if (
+    !input.recordCurrentInboundAnswer
+    || !normalizeHostedAssistantLinqOutcomeReplyToMessageId(input.replyToMessageId)
+  ) {
+    return;
+  }
+
+  const currentInbound = resolveHostedAssistantLinqOutcomeCurrentInbound(input);
+  if (currentInbound) {
+    return;
+  }
+
+  const answeredMailboxItemIds = normalizeHostedAssistantLinqAnsweredMailboxItemIds({
+    currentInbound: null,
+    itemIds: input.answeredMailboxItemIds,
+  });
+  if (
+    answeredMailboxItemIds.length === 0
+    && !input.deliveryContext?.currentInbound
+  ) {
+    return;
+  }
+
+  throw new VaultCliError(
+    "ASSISTANT_LINQ_CONSUME_PROOF_REPLY_MISMATCH",
+    "Hosted Linq reply delivery requires exact current-inbound proof before provider dispatch.",
+    { retryable: true },
+  );
+}
+
+function resolveHostedAssistantLinqOutcomeCurrentInbound(input: {
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  recordCurrentInboundAnswer: boolean;
+  replyToMessageId: string | null;
+}): HostedRuntimeLinqCurrentInboundProof | null {
+  if (!input.recordCurrentInboundAnswer) {
+    return null;
+  }
+
+  const currentInbound = input.deliveryContext?.currentInbound ?? null;
+  if (!currentInbound) {
+    return null;
+  }
+
+  const replyToMessageId = normalizeHostedAssistantLinqOutcomeReplyToMessageId(
+    input.replyToMessageId,
+  );
+  if (!replyToMessageId) {
+    return currentInbound;
+  }
+
+  return currentInbound.replyToMessageId === replyToMessageId
+    ? currentInbound
+    : null;
+}
+
+function normalizeHostedAssistantLinqOutcomeReplyToMessageId(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized ? normalized : null;
 }
 
 function shouldRequireHostedAssistantLinqConsumeProof(input: {
