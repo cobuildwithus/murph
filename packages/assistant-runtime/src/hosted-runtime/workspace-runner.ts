@@ -632,7 +632,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       return false;
     }
 
-    if (pendingRuntimeWake.notifiedAtEpochMs < runnerStartedAtEpochMs) {
+    const latestRuntimeWakeAtEpochMs =
+      pendingRuntimeWake.latestNotifiedAtEpochMs
+      ?? pendingRuntimeWake.notifiedAtEpochMs;
+    if (latestRuntimeWakeAtEpochMs < runnerStartedAtEpochMs) {
       return false;
     }
 
