@@ -160,6 +160,7 @@ import {
   normalizeHostedFutureWakeAt,
 } from "./hosted-runtime/wake-time.ts";
 import {
+  HOSTED_ASSISTANT_WAKE_REASON,
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   selectHostedRuntimeWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
@@ -1886,7 +1887,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const foregroundConversationCanReplaceCheckpointGatedWake =
           foregroundConversationWorkObserved
           && replaceWakeRequested
-          && accumulatedProjection.nextWakeReason === "assistant"
+          && hostedRuntimeWakeReasonIsAssistant(accumulatedProjection.nextWakeReason)
           && (
             !hostedRuntimeWakeIsDue(accumulatedProjection.nextWakeAt)
             || result.afterDurableCheckpoint.length > 0
@@ -1969,8 +1970,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         const committedAssistantWakeCanReplayBeforeCheckpoint =
           runtimeStateDirty
-          && checkpointedWorkspace?.nextWakeReason === "assistant"
-          && hostedRuntimeWakeIsDue(checkpointedWorkspace.nextWakeAt ?? null);
+          && hostedRuntimeWakeReasonIsAssistant(checkpointedWorkspace?.nextWakeReason ?? null)
+          && hostedRuntimeWakeIsDue(checkpointedWorkspace?.nextWakeAt ?? null);
         const unservicedProjectedWake =
           projectedRuntimeWakeKey !== null
           && projectedRuntimeWakeKey !== servicedProjectedRuntimeWakeKey;
@@ -3034,7 +3035,7 @@ function projectedRuntimeWakeCanRunAfterCheckpoint(input: {
     return false;
   }
 
-  return input.projection.nextWakeReason === "assistant"
+  return hostedRuntimeWakeReasonIsAssistant(input.projection.nextWakeReason)
     && !input.projection.projectedWakeRequiresCheckpoint;
 }
 
@@ -3105,7 +3106,7 @@ function mergeHostedWorkspaceInvocationProjection(
         || (
           previous.projectedWakeRequiresCheckpoint
           && next.nextWakeAt !== null
-          && next.nextWakeReason !== "assistant"
+          && !hostedRuntimeWakeReasonIsAssistant(next.nextWakeReason)
         );
     selectedProjectedWake = {
       ...nextSelectedWake,
@@ -3365,7 +3366,18 @@ function buildHostedRuntimeWakeKey(input: {
     return null;
   }
 
-  return JSON.stringify([input.nextWakeAt, input.nextWakeReason]);
+  return JSON.stringify([
+    input.nextWakeAt,
+    normalizeHostedRuntimeWakeReason(input.nextWakeReason),
+  ]);
+}
+
+function normalizeHostedRuntimeWakeReason(nextWakeReason: string | null): string {
+  return nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON;
+}
+
+function hostedRuntimeWakeReasonIsAssistant(nextWakeReason: string | null): boolean {
+  return normalizeHostedRuntimeWakeReason(nextWakeReason) === HOSTED_ASSISTANT_WAKE_REASON;
 }
 
 async function waitForHostedRuntimeDirtyWindow(input: {

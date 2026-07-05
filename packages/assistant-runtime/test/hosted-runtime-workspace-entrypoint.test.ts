@@ -6285,12 +6285,14 @@ describe("hosted workspace runtime entrypoint", () => {
     const staleWakeAt = "2000-04-27T00:05:00.000Z";
     const cases: {
       name: string;
+      initialWakeReason: "assistant" | null;
       nextWakeAt: string | null;
       nextWakeReason: "assistant" | null;
       status: "idle" | "scheduled";
       systemItemId: string | null;
     }[] = [
       {
+        initialWakeReason: "assistant",
         name: "replacement",
         nextWakeAt: new Date(Date.now() + 60_000).toISOString(),
         nextWakeReason: "assistant",
@@ -6298,11 +6300,20 @@ describe("hosted workspace runtime entrypoint", () => {
         systemItemId: null,
       },
       {
+        initialWakeReason: "assistant",
         name: "clear",
         nextWakeAt: null,
         nextWakeReason: null,
         status: "idle",
         systemItemId: "mailbox_item_entrypoint_source_blind_clear_system",
+      },
+      {
+        initialWakeReason: null,
+        name: "clear-null-reason",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        status: "idle",
+        systemItemId: "mailbox_item_entrypoint_source_blind_null_reason_system",
       },
     ];
 
@@ -6356,7 +6367,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 events,
                 workspace: createWorkspaceState({
                   nextWakeAt: staleWakeAt,
-                  nextWakeReason: "assistant",
+                  nextWakeReason: scenario.initialWakeReason,
                   version: "4",
                 }),
               }),
