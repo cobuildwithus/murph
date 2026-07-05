@@ -467,6 +467,71 @@ describe("hosted runtime callbacks", () => {
     }));
   });
 
+  it("uses the exact Linq reply context instead of the latest same-chat context when preparing delivery", async () => {
+    const currentInbound = {
+      dedupeKey: "evt_linq_current",
+      eventId: "evt_linq_current",
+      mailboxItemId: "mailbox_item_linq_current",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      replyToMessageId: "linq_message_current",
+      target: "linq_chat_123",
+    };
+    const laterCurrentInbound = {
+      dedupeKey: "evt_linq_later",
+      eventId: "evt_linq_later",
+      mailboxItemId: "mailbox_item_linq_later",
+      occurredAt: "2026-04-08T00:01:00.000Z",
+      replyToMessageId: "linq_message_later",
+      target: "linq_chat_123",
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      replyToMessageId: "linq_message_current",
+      transportIdempotent: true,
+    });
+
+    await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [effect],
+      linqDeliveryContexts: [
+        {
+          currentInbound: laterCurrentInbound,
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: null,
+          replyToMessageId: "linq_message_later",
+          routeAuthority: null,
+          service: "iMessage",
+          target: "linq_chat_123",
+          threadIsDirect: true,
+        },
+        {
+          currentInbound,
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: null,
+          replyToMessageId: "linq_message_current",
+          routeAuthority: null,
+          service: "iMessage",
+          target: "linq_chat_123",
+          threadIsDirect: true,
+        },
+      ],
+      now: () => "2026-04-08T00:00:05.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: true,
+      externalThreadService: "iMessage",
+      linqCurrentInbound: currentInbound,
+      intentId: "intent_123",
+      startedAt: "2026-04-08T00:00:05.000Z",
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+  });
+
   it("restores Linq route authority and current inbound from a prepared retry intent", async () => {
     const currentInbound = {
       dedupeKey: "evt_linq_current",
@@ -526,6 +591,65 @@ describe("hosted runtime callbacks", () => {
         fromPhoneNumber: null,
         replyToMessageId: "linq_message_1",
         routeAuthority,
+        service: "iMessage",
+        target: "linq_chat_123",
+        threadIsDirect: true,
+      },
+    }));
+  });
+
+  it("restores Linq current inbound from a prepared retry intent without route authority", async () => {
+    const currentInbound = {
+      dedupeKey: "evt_linq_current",
+      eventId: "evt_linq_current",
+      mailboxItemId: "mailbox_item_linq_current",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      replyToMessageId: "linq_message_1",
+      target: "linq_chat_123",
+    };
+    mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValueOnce({
+      intent: {
+        attemptCount: 2,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: "assistant-outbox:intent_123",
+        deliveryTransportIdempotent: true,
+        externalThreadService: "iMessage",
+        linqCurrentInbound: currentInbound,
+        lastAttemptAt: "2026-04-08T00:05:00.000Z",
+        lastError: null,
+        nextAttemptAt: null,
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+        status: "sending",
+      },
+      ownsDispatch: true,
+      preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+      previousDispatchState: createPreparedPreviousDispatchState({
+        deliveryTransportIdempotent: true,
+        status: "retryable",
+      }),
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      replyToMessageId: "linq_message_1",
+      threadIsDirect: true,
+      transportIdempotent: true,
+    });
+
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [effect],
+      now: () => "2026-04-08T00:05:00.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(preparation.preparedDispatches[0]).toEqual(expect.objectContaining({
+      linqDeliveryContext: {
+        currentInbound,
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        replyToMessageId: "linq_message_1",
+        routeAuthority: null,
         service: "iMessage",
         target: "linq_chat_123",
         threadIsDirect: true,

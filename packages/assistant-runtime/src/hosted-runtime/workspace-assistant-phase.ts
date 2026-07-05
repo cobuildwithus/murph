@@ -768,9 +768,7 @@ export async function runHostedWorkspaceAssistantPhase(
     });
     const deliveryEffectsPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: deliveryEffects,
-      ...(input.initialMailboxImport.importResult.latestLinqDeliveryContext
-        ? { linqDeliveryContext: input.initialMailboxImport.importResult.latestLinqDeliveryContext }
-        : {}),
+      linqDeliveryContexts: initialLinqDeliveryContexts,
       vaultRoot: input.restored.vaultRoot,
     });
 
@@ -3157,9 +3155,9 @@ function resolveHostedSystemMailboxMetricsWakeAt(input: {
 
 async function collectForegroundDeliveryEffects(input: {
   actionApprovalPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"];
-  linqDeliveryContext?: Parameters<
+  linqDeliveryContexts?: Parameters<
     typeof prepareHostedAssistantDeliveryEffectsForDispatch
-  >[0]["linqDeliveryContext"];
+  >[0]["linqDeliveryContexts"];
   preferredIntentIds: readonly string[];
   vaultRoot: string;
 }): Promise<HostedPreparedAssistantDeliveryEffects> {
@@ -3171,8 +3169,8 @@ async function collectForegroundDeliveryEffects(input: {
   });
   const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
     assistantDeliveryEffects: deliveryEffects,
-    ...(input.linqDeliveryContext
-      ? { linqDeliveryContext: input.linqDeliveryContext }
+    ...(input.linqDeliveryContexts
+      ? { linqDeliveryContexts: input.linqDeliveryContexts }
       : {}),
     vaultRoot: input.vaultRoot,
   });
@@ -3197,8 +3195,7 @@ async function runForegroundAssistantReplyPhase(input: {
   const foregroundReplyFailed = input.assistantMetrics.assistantAutomationReplyFailed ?? 0;
   const preparedDeliveryEffects = await collectForegroundDeliveryEffects({
     actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
-    linqDeliveryContext:
-      input.input.initialMailboxImport.importResult.latestLinqDeliveryContext ?? null,
+    linqDeliveryContexts: input.linqDeliveryContexts,
     preferredIntentIds: input.currentTurnDeliveryIntentIds,
     vaultRoot: input.input.restored.vaultRoot,
   });

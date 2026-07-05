@@ -301,6 +301,11 @@ Touch: `webhook-service-types.ts:17-26`;
   outcomes no longer include or synchronously depend on `answeredCoverage`.
   Focused local proof: hosted-runtime callback suite and assistant-engine
   outbox runtime suite passed.
+- PR 1 ReviewGPT round 25 follow-up: foreground prepare now receives the
+  full imported Linq context list, persists exact reply-id current-inbound
+  proof instead of latest same-chat proof, and restores no-route prepared
+  current-inbound proof into a minimal Linq context. Focused local proof:
+  hosted-runtime callback suite and full workspace typecheck passed.
 - PR 2: workflow replay tests per the patch procedure + Temporal
   orchestration E2E; full webhook owner suites for the wake-field
   collapse.

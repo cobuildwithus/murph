@@ -1103,17 +1103,22 @@ function resolveHostedAssistantOutboxIntentWakeAt(
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryPreparation> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
+  const linqDeliveryContexts = [
+    ...(input.linqDeliveryContext ? [input.linqDeliveryContext] : []),
+    ...(input.linqDeliveryContexts ?? []),
+  ];
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
   for (const effect of input.assistantDeliveryEffects) {
     if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
       continue;
     }
     const linqDeliveryContext = resolveHostedAssistantLinqDeliveryContextForEffect({
-      context: input.linqDeliveryContext ?? null,
+      contexts: linqDeliveryContexts,
       effect,
     });
     const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
@@ -1176,18 +1181,43 @@ function hasHostedAssistantVaultFileMedia(
 }
 
 function resolveHostedAssistantLinqDeliveryContextForEffect(input: {
-  context: HostedAssistantLinqDeliveryContext | null;
+  contexts: readonly HostedAssistantLinqDeliveryContext[];
   effect: HostedAssistantDeliveryEffect;
 }): HostedAssistantLinqDeliveryContext | null {
+  const replyToMessageId = input.effect.payload.replyToMessageId?.trim() ?? "";
+  if (replyToMessageId) {
+    for (const context of input.contexts) {
+      if (context.replyToMessageId !== replyToMessageId) {
+        continue;
+      }
+      for (const target of readHostedAssistantDeliveryPayloadTargets(input.effect.payload)) {
+        const resolved = resolveHostedAssistantLinqDeliveryContextForRequest({
+          context,
+          replyToMessageId,
+          target: target.target,
+          targetKind: target.targetKind,
+        });
+        if (resolved) {
+          return resolved;
+        }
+      }
+    }
+  }
+
   for (const target of readHostedAssistantDeliveryPayloadTargets(input.effect.payload)) {
-    const context = resolveHostedAssistantLinqDeliveryContextForRequest({
-      context: input.context,
-      replyToMessageId: input.effect.payload.replyToMessageId,
-      target: target.target,
-      targetKind: target.targetKind,
-    });
-    if (context) {
-      return context;
+    for (const context of input.contexts) {
+      const resolved = resolveHostedAssistantLinqDeliveryContextForRequest({
+        context,
+        replyToMessageId: input.effect.payload.replyToMessageId,
+        target: target.target,
+        targetKind: target.targetKind,
+      });
+      if (resolved) {
+        return {
+          ...resolved,
+          currentInbound: null,
+        };
+      }
     }
   }
 
@@ -1202,24 +1232,30 @@ function buildHostedAssistantLinqDeliveryContextFromPreparedIntent(input: {
   >;
 }): HostedAssistantLinqDeliveryContext | null {
   const authority = input.intent.externalThreadRouteAuthority ?? null;
-  if (!authority || authority.channel !== "linq") {
+  const currentInbound = input.intent.linqCurrentInbound ?? null;
+  if (authority && authority.channel !== "linq") {
     return null;
   }
-  const routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority = {
-    accountLookupKey: authority.accountLookupKey,
-    channel: "linq",
-    containerMemberId: authority.containerMemberId,
-    threadId: authority.threadId,
-  };
+  const routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null = authority
+    ? {
+        accountLookupKey: authority.accountLookupKey,
+        channel: "linq",
+        containerMemberId: authority.containerMemberId,
+        threadId: authority.threadId,
+      }
+    : null;
+  if (!routeAuthority && !currentInbound) {
+    return null;
+  }
 
   return {
-    currentInbound: input.intent.linqCurrentInbound ?? null,
+    currentInbound,
     directRecipientPhoneNumber: null,
     fromPhoneNumber: null,
-    replyToMessageId: input.effect.payload.replyToMessageId,
+    replyToMessageId: currentInbound?.replyToMessageId ?? input.effect.payload.replyToMessageId,
     routeAuthority,
     service: input.intent.externalThreadService ?? null,
-    target: routeAuthority.threadId,
+    target: routeAuthority?.threadId ?? currentInbound?.target ?? null,
     threadIsDirect: input.effect.payload.threadIsDirect,
   };
 }
