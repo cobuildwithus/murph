@@ -476,6 +476,10 @@ async function readHostedLinqCurrentInboundDecision(input: {
     || wake.message.linqMessage.isFromMe
     || normalizeNullable(wake.message.linqMessage.chatId) !== proof.target
     || normalizeNullable(wake.message.linqMessage.messageId) !== proof.replyToMessageId
+    || !hostedLinqRouteAuthoritiesMatch(
+      wake.message.routeAuthority ?? null,
+      input.routeAuthority,
+    )
   ) {
     return null;
   }
@@ -521,6 +525,23 @@ function parseHostedLinqCurrentInboundWake(value: unknown) {
   } catch {
     return null;
   }
+}
+
+function hostedLinqRouteAuthoritiesMatch(
+  left: HostedExecutionLinqExternalThreadRouteAuthority | null,
+  right: HostedExecutionLinqExternalThreadRouteAuthority | null,
+): boolean {
+  if (!left && !right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return left.channel === "linq"
+    && right.channel === "linq"
+    && left.accountLookupKey === right.accountLookupKey
+    && left.containerMemberId === right.containerMemberId
+    && left.threadId === right.threadId;
 }
 
 function normalizeHostedLinqCurrentInboundProof(

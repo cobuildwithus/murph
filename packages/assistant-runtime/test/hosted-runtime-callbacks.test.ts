@@ -125,6 +125,7 @@ import {
   collectHostedAssistantDeliverySideEffects,
   drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedPreparedAssistantDeliveries,
+  createHostedAssistantProgressDeliveryDependencies,
   prepareHostedAssistantDeliveryEffectsForDispatch,
   resolveHostedAssistantOutboxNextWakeAt,
 } from "../src/hosted-runtime/callbacks.ts";
@@ -5482,6 +5483,77 @@ describe("hosted runtime callbacks", () => {
       expect.objectContaining({
         answeredCoverage: null,
         currentInbound,
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it("does not mark current inbound answered from Linq progress delivery outcomes", async () => {
+    const currentInbound = {
+      dedupeKey: "evt_linq_current",
+      eventId: "evt_linq_current",
+      mailboxItemId: "mailbox_item_linq_current",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      replyToMessageId: "linq_message_a",
+      target: "linq_chat_a",
+    };
+    const assertRecentInbound = vi.fn(async () => undefined);
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_progress_message",
+      providerThreadId: "linq_chat_a",
+      target: "linq_chat_a",
+      targetKind: "thread" as const,
+    });
+
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      linqDeliveryContexts: [{
+        currentInbound,
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: "+15559990000",
+        replyToMessageId: "linq_message_a",
+        routeAuthority: null,
+        service: "iMessage",
+        target: "linq_chat_a",
+        threadIsDirect: true,
+      }],
+      providerFetch: vi.fn<typeof fetch>(),
+      wake: HOSTED_WAKE.wake,
+    });
+    const sendLinq = dependencies.sendLinq;
+    if (!sendLinq) {
+      throw new Error("Expected Linq progress delivery dependency.");
+    }
+
+    await expect(sendLinq({
+      idempotencyKey: "assistant-progress:intent_123",
+      message: "Still working on this.",
+      replyToMessageId: "linq_message_a",
+      target: "linq_chat_a",
+      targetKind: "thread",
+    })).resolves.toEqual(expect.objectContaining({
+      providerMessageId: "linq_progress_message",
+    }));
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentInbound,
+      }),
+      { signal: null },
+    );
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredCoverage: null,
+        currentInbound: null,
+        idempotencyKey: "assistant-progress:intent_123",
       }),
       { signal: expect.any(AbortSignal) },
     );

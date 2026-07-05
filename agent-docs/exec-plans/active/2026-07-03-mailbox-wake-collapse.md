@@ -46,8 +46,8 @@ become one exact item fact on one callback:
 2. On `acceptedAt`, the delivery route validates the full current-inbound
    proof against the mailbox item payload (item id, dedupe key, event id,
    occurred-at, reply-to message id, target chat, user, lane/kind,
-   non-self inbound, and expiry), then stores the item id on the accepted
-   delivery row.
+   non-self inbound, expiry, and routed account authority), then stores
+   the item id on the accepted delivery row.
 3. Mailbox fetch/import treats that exact stored item as context-only on
    replay, including when a lower lane gap keeps the contiguous
    `consumed_seq` behind it.
@@ -112,8 +112,13 @@ Exact accepted-item computation (verified design, hardened by adversarial review
   the accepted outcome carries a `currentInbound.mailboxItemId`, even when
   legacy `answeredCoverage` is null because a lower lane gap blocks any
   contiguous prefix.
+- Progress Linq delivery may use `currentInbound` for the egress guard, but
+  must not include it in delivery-outcome recording; progress is not
+  terminal answer evidence.
 - The web route validates the full current-inbound proof against the
-  mailbox item payload before persisting the exact item id.
+  mailbox item payload before persisting the exact item id. Routed inbound
+  proof and outbound delivery authority must match on channel,
+  container member, account lookup key, and thread id.
 - Mailbox fetch/import turns matching accepted delivery rows into
   `consumedItems` so the exact accepted item is context-only even when the
   contiguous `consumed_seq` floor is held back by a lower gap.
@@ -172,7 +177,8 @@ Deploy-window analysis for the merged PR (replaces the old staged gate):
 - Post-deploy verification before calling it done: one prod accepted Linq
   delivery row with `answered_mailbox_item_id`, followed by a replay/fetch
   where that item is context-only and not replyable; mismatched
-  current-inbound proof must fail closed and not store an item id.
+  current-inbound proof, including mismatched route authority, must fail
+  closed and not store an item id.
 
 ### PR 2 — retire the legacy workflow patch branch + collapse the wake fields
 

@@ -1993,6 +1993,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             providerDispatchEntered = true;
           },
           providerFetch: input.providerFetch,
+          recordCurrentInboundAnswer: true,
           signal: input.signal,
           vaultRoot: input.vaultRoot,
         }),
@@ -2011,6 +2012,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           },
           intentId: input.assistantDeliveryEffect.effectId,
           providerFetch: input.providerFetch,
+          recordCurrentInboundAnswer: true,
           signal: input.signal,
         }),
         setLinqMessageReaction: async (request) => {
@@ -2316,6 +2318,7 @@ function createHostedAssistantLinqSendDependency(input: {
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
+  recordCurrentInboundAnswer?: boolean | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
   vaultRoot?: string | null;
@@ -2409,6 +2412,7 @@ function createHostedAssistantLinqSendDependency(input: {
           intentId: input.intentId ?? null,
           providerTarget,
           providerThreadId: null,
+          recordCurrentInboundAnswer: input.recordCurrentInboundAnswer ?? false,
           result: null,
           target: request.target,
           targetKind: request.targetKind ?? null,
@@ -2426,6 +2430,7 @@ function createHostedAssistantLinqSendDependency(input: {
       intentId: input.intentId ?? null,
       providerTarget,
       providerThreadId: result.providerThreadId ?? null,
+      recordCurrentInboundAnswer: input.recordCurrentInboundAnswer ?? false,
       result,
       target: request.target,
       targetKind: request.targetKind ?? null,
@@ -2576,6 +2581,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
+  recordCurrentInboundAnswer?: boolean | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
@@ -2631,6 +2637,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
           intentId: input.intentId ?? null,
           providerTarget,
           providerThreadId: null,
+          recordCurrentInboundAnswer: input.recordCurrentInboundAnswer ?? false,
           result: null,
           target: providerTarget,
           targetKind: "thread",
@@ -2648,6 +2655,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       intentId: input.intentId ?? null,
       providerTarget,
       providerThreadId: result.providerThreadId ?? null,
+      recordCurrentInboundAnswer: input.recordCurrentInboundAnswer ?? false,
       result,
       target: providerTarget,
       targetKind: "thread",
@@ -2742,6 +2750,7 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   intentId: string | null;
   providerTarget: string | null;
   providerThreadId: string | null;
+  recordCurrentInboundAnswer: boolean;
   result: HostedRuntimeLinqSendResponse | null;
   target: string | null;
   targetKind: HostedRuntimeProviderTargetKind | null;
@@ -2750,7 +2759,9 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
     answeredCoverage: input.answeredCoverage ?? null,
     attemptedAt: input.attemptedAt.toISOString(),
-    currentInbound: input.deliveryContext?.currentInbound ?? null,
+    currentInbound: input.recordCurrentInboundAnswer
+      ? input.deliveryContext?.currentInbound ?? null
+      : null,
     ...(input.failedAt ? { failedAt: input.failedAt.toISOString() } : {}),
     failureCode: input.failureCode ?? null,
     failureReason: input.failureReason ?? null,

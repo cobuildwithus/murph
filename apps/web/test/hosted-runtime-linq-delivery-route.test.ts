@@ -227,6 +227,14 @@ describe("hosted runtime Linq delivery route", () => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
       attemptedAt: "2026-04-26T00:00:03.000Z",
+      currentInbound: {
+        dedupeKey: "evt_linq_current",
+        eventId: "evt_linq_current",
+        mailboxItemId: "mailbox_item_answered_42",
+        occurredAt: "2026-04-26T00:00:02.000Z",
+        replyToMessageId: "linq_message_inbound",
+        target: "linq_chat_123",
+      },
       idempotencyKey: "assistant-outbox:intent_123",
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_123",
@@ -246,6 +254,12 @@ describe("hosted runtime Linq delivery route", () => {
         phoneNumberLookupKey: "hbidx:phone:v1:account",
       }),
     );
+    expect(mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        routeAuthority,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      }));
 
     const mismatch = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
