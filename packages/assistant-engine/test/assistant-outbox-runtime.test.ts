@@ -2561,6 +2561,56 @@ describe('assistant outbox runtime', () => {
     )
   })
 
+  it('persists Linq current inbound proof with prepared dispatch authority', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-prepared-linq-current-')
+    const seeded = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'linq-chat-123',
+      replyToMessageId: 'linq-message-123',
+      sessionId: 'session-prepared-linq-current',
+      threadId: 'linq-chat-123',
+      turnId: 'turn-prepared-linq-current',
+    })
+    const routeAuthority = {
+      accountLookupKey: 'hbidx:phone:v1:account',
+      channel: 'linq' as const,
+      containerMemberId: 'member-123',
+      threadId: 'linq-chat-123',
+    }
+    const linqCurrentInbound = {
+      dedupeKey: 'evt-linq-current',
+      eventId: 'evt-linq-current',
+      mailboxItemId: 'mailbox-item-linq-current',
+      occurredAt: '2026-04-08T05:00:00.000Z',
+      replyToMessageId: 'linq-message-123',
+      target: 'linq-chat-123',
+    }
+
+    const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+      deliveryIdempotencyKey: `assistant-outbox:${seeded.intentId}`,
+      deliveryTransportIdempotent: true,
+      externalThreadRouteAuthority: routeAuthority,
+      externalThreadService: 'iMessage',
+      intentId: seeded.intentId,
+      linqCurrentInbound,
+      startedAt: '2026-04-08T05:00:00.000Z',
+      vault: vaultRoot,
+    })
+
+    expect(prepared?.intent).toMatchObject({
+      externalThreadRouteAuthority: routeAuthority,
+      externalThreadService: 'iMessage',
+      linqCurrentInbound,
+      status: 'sending',
+    })
+    await expect(readAssistantOutboxIntent(vaultRoot, seeded.intentId)).resolves
+      .toMatchObject({
+        externalThreadRouteAuthority: routeAuthority,
+        externalThreadService: 'iMessage',
+        linqCurrentInbound,
+      })
+  })
+
   it('ignores stale tokenless provider success after a newer retry reclaims the intent', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-tokenless-success-race-')
     const seeded = await createIntent(vaultRoot, {

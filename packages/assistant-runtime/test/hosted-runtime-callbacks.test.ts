@@ -136,6 +136,10 @@ import {
   createHostedRuntimeEffectsPortStub,
 } from "./hosted-runtime-test-helpers.ts";
 
+type RecordLinqDeliveryOutcomeStub = NonNullable<
+  ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]
+>;
+
 const HOSTED_WAKE = {
   wake: buildHostedExecutionRuntimeTimerWake({
     eventId: "evt_123",
@@ -404,7 +408,15 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("persists Linq route authority when preparing a route-scoped delivery", async () => {
+  it("persists Linq route authority and current inbound when preparing a route-scoped delivery", async () => {
+    const currentInbound = {
+      dedupeKey: "evt_linq_current",
+      eventId: "evt_linq_current",
+      mailboxItemId: "mailbox_item_linq_current",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      replyToMessageId: "linq_message_1",
+      target: "linq_chat_123",
+    };
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
       channel: "linq" as const,
@@ -423,6 +435,7 @@ describe("hosted runtime callbacks", () => {
     const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: [effect],
       linqDeliveryContext: {
+        currentInbound,
         directRecipientPhoneNumber: "+15550001",
         fromPhoneNumber: null,
         replyToMessageId: "linq_message_1",
@@ -440,19 +453,29 @@ describe("hosted runtime callbacks", () => {
       deliveryTransportIdempotent: true,
       externalThreadRouteAuthority: routeAuthority,
       externalThreadService: "iMessage",
+      linqCurrentInbound: currentInbound,
       intentId: "intent_123",
       startedAt: "2026-04-08T00:00:05.000Z",
       vault: HOSTED_WAKE.vaultRoot,
     });
     expect(preparation.preparedDispatches[0]).toEqual(expect.objectContaining({
       linqDeliveryContext: expect.objectContaining({
+        currentInbound,
         routeAuthority,
         service: "iMessage",
       }),
     }));
   });
 
-  it("restores Linq route authority from a prepared retry intent", async () => {
+  it("restores Linq route authority and current inbound from a prepared retry intent", async () => {
+    const currentInbound = {
+      dedupeKey: "evt_linq_current",
+      eventId: "evt_linq_current",
+      mailboxItemId: "mailbox_item_linq_current",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      replyToMessageId: "linq_message_1",
+      target: "linq_chat_123",
+    };
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
       channel: "linq" as const,
@@ -467,6 +490,7 @@ describe("hosted runtime callbacks", () => {
         deliveryTransportIdempotent: true,
         externalThreadRouteAuthority: routeAuthority,
         externalThreadService: "iMessage",
+        linqCurrentInbound: currentInbound,
         lastAttemptAt: "2026-04-08T00:05:00.000Z",
         lastError: null,
         nextAttemptAt: null,
@@ -497,6 +521,7 @@ describe("hosted runtime callbacks", () => {
 
     expect(preparation.preparedDispatches[0]).toEqual(expect.objectContaining({
       linqDeliveryContext: {
+        currentInbound,
         directRecipientPhoneNumber: null,
         fromPhoneNumber: null,
         replyToMessageId: "linq_message_1",
@@ -5176,7 +5201,9 @@ describe("hosted runtime callbacks", () => {
       message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
       transportIdempotent: false,
     });
-    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    const recordDeliveryOutcome = vi.fn<RecordLinqDeliveryOutcomeStub>(
+      async () => undefined,
+    );
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_123",
@@ -5250,7 +5277,7 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: false,
     });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const recordDeliveryOutcome = vi.fn(async () => {
+    const recordDeliveryOutcome = vi.fn<RecordLinqDeliveryOutcomeStub>(async () => {
       throw new Error("web callback unavailable");
     });
     mocks.sendLinqMessage.mockResolvedValueOnce({
@@ -5310,7 +5337,7 @@ describe("hosted runtime callbacks", () => {
     warnSpy.mockRestore();
   });
 
-  it("keeps transport-idempotent coverage-bearing Linq sends retryable until accepted outcomes record", async () => {
+  it("keeps coverage-only Linq sends successful when delivery outcome recording fails", async () => {
     const answeredCoverage = {
       lane: "conversation" as const,
       laneSeq: "42",
@@ -5322,7 +5349,7 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_123",
       transportIdempotent: true,
     });
-    const recordDeliveryOutcome = vi.fn(async () => {
+    const recordDeliveryOutcome = vi.fn<RecordLinqDeliveryOutcomeStub>(async () => {
       throw new Error("web callback unavailable");
     });
     mocks.sendLinqMessage.mockResolvedValueOnce({
@@ -5332,36 +5359,27 @@ describe("hosted runtime callbacks", () => {
       targetKind: "thread" as const,
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      try {
-        await dependencies.sendLinq({
-          idempotencyKey: "assistant-outbox:intent_123",
-          message: "reply",
-          replyToMessageId: null,
-          target: "linq_chat_123",
-          targetKind: "thread",
-        });
-      } catch (error) {
-        expect((error as { deliveryMayHaveSucceeded?: boolean }).deliveryMayHaveSucceeded)
-          .toBe(true);
-        return createDispatchResult(
-          {
-            delivery: null,
-            lastError: {
-              code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
-              message: "Accepted Linq delivery outcome could not be recorded.",
-            },
-            status: "retryable",
-          },
-          {
-            code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
-            message: "Accepted Linq delivery outcome could not be recorded.",
-          },
-        );
-      }
+      const delivery = await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "reply",
+        replyToMessageId: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
 
-      throw new Error("Expected coverage-bearing Linq send to await outcome recording.");
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
     });
 
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
@@ -5375,21 +5393,28 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(outcomes).toEqual([
       expect.objectContaining({
-        deliveryErrorCode: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
-        deliveryStatus: "retryable",
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        providerMessageId: "linq_message_sent",
       }),
     ]);
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: expect.stringMatching(/Z$/u),
-        answeredCoverage,
         providerMessageId: "linq_message_sent",
       }),
       { signal: expect.any(AbortSignal) },
     );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0]).not.toHaveProperty("answeredCoverage");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted Linq delivery outcome recording failed.",
+      { errorName: "Error" },
+    );
+    warnSpy.mockRestore();
   });
 
   it("keeps current-inbound Linq sends retryable until accepted outcomes record", async () => {
@@ -5408,7 +5433,7 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: true,
     });
     const assertRecentInbound = vi.fn(async () => undefined);
-    const recordDeliveryOutcome = vi.fn(async () => {
+    const recordDeliveryOutcome = vi.fn<RecordLinqDeliveryOutcomeStub>(async () => {
       throw new Error("web callback unavailable");
     });
     mocks.sendLinqMessage.mockResolvedValueOnce({
@@ -5472,6 +5497,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(outcomes).toEqual([
       expect.objectContaining({
@@ -5481,11 +5507,11 @@ describe("hosted runtime callbacks", () => {
     ]);
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
-        answeredCoverage: null,
         currentInbound,
       }),
       { signal: expect.any(AbortSignal) },
     );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0]).not.toHaveProperty("answeredCoverage");
   });
 
   it("does not mark current inbound answered from Linq progress delivery outcomes", async () => {
@@ -5498,7 +5524,9 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_a",
     };
     const assertRecentInbound = vi.fn(async () => undefined);
-    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    const recordDeliveryOutcome = vi.fn<RecordLinqDeliveryOutcomeStub>(
+      async () => undefined,
+    );
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_progress_message",
       providerThreadId: "linq_chat_a",
@@ -5551,15 +5579,15 @@ describe("hosted runtime callbacks", () => {
     );
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
-        answeredCoverage: null,
         currentInbound: null,
         idempotencyKey: "assistant-progress:intent_123",
       }),
       { signal: expect.any(AbortSignal) },
     );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0]).not.toHaveProperty("answeredCoverage");
   });
 
-  it("keeps coverage-bearing Linq sends sent when liveness is lost after accepted outcome recording", async () => {
+  it("keeps coverage-only Linq sends sent when liveness is lost after provider acceptance", async () => {
     const answeredCoverage = {
       lane: "conversation" as const,
       laneSeq: "42",
@@ -5575,7 +5603,9 @@ describe("hosted runtime callbacks", () => {
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("lost liveness after accepted outcome"));
-    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    const recordDeliveryOutcome = vi.fn<RecordLinqDeliveryOutcomeStub>(
+      async () => undefined,
+    );
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_123",
@@ -5617,6 +5647,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(outcomes).toEqual([
       expect.objectContaining({
@@ -5629,14 +5660,14 @@ describe("hosted runtime callbacks", () => {
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: expect.stringMatching(/Z$/u),
-        answeredCoverage,
         providerMessageId: "linq_message_sent",
       }),
       { signal: expect.any(AbortSignal) },
     );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0]).not.toHaveProperty("answeredCoverage");
   });
 
-  it("abandons non-idempotent coverage-bearing Linq voice memos when accepted outcome recording fails", async () => {
+  it("keeps coverage-only Linq voice memos sent when delivery outcome recording fails", async () => {
     const answeredCoverage = {
       lane: "conversation" as const,
       laneSeq: "42",
@@ -5649,7 +5680,7 @@ describe("hosted runtime callbacks", () => {
       media: [createHostedVoiceMemoMedia()],
       transportIdempotent: false,
     });
-    const recordDeliveryOutcome = vi.fn(async () => {
+    const recordDeliveryOutcome = vi.fn<RecordLinqDeliveryOutcomeStub>(async () => {
       throw new Error("web callback unavailable");
     });
     mocks.sendLinqVoiceMemoMessage.mockResolvedValueOnce({
@@ -5659,49 +5690,24 @@ describe("hosted runtime callbacks", () => {
       targetKind: "thread" as const,
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      try {
-        await dependencies.sendLinqVoiceMemo({
-          attachmentId: "attachment_voice_1",
-          target: "linq_chat_123",
-        });
-      } catch (error) {
-        expect(error).toMatchObject({
-          code: "ASSISTANT_LINQ_VOICE_MEMO_PARTIAL_DELIVERY",
-          deliveryMayHaveSucceeded: true,
-          providerMessageId: "linq_voice_sent",
-          providerMessageIds: ["linq_voice_sent"],
-          providerThreadId: "linq_chat_123",
-          target: "linq_chat_123",
-          targetKind: "thread",
-        });
-        return createDispatchResult(
-          {
-            delivery: createDelivery({
-              channel: "linq",
-              providerMessageId: "linq_voice_sent",
-              providerMessageIds: ["linq_voice_sent"],
-              providerThreadId: "linq_chat_123",
-              target: "linq_chat_123",
-              targetKind: "thread",
-            }),
-            deliveryConfirmationPending: false,
-            lastError: {
-              code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-              message: "Accepted Linq voice memo outcome could not be recorded.",
-            },
-            nextAttemptAt: null,
-            status: "abandoned",
-          },
-          {
-            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-            message: "Accepted Linq voice memo outcome could not be recorded.",
-          },
-        );
-      }
+      const delivery = await dependencies.sendLinqVoiceMemo({
+        attachmentId: "attachment_voice_1",
+        target: "linq_chat_123",
+      });
 
-      throw new Error("Expected coverage-bearing Linq voice memo to await outcome recording.");
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
     });
 
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
@@ -5715,26 +5721,32 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(outcomes).toEqual([
       expect.objectContaining({
-        deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
-        deliveryStatus: "failed_ambiguous",
-        retryable: false,
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        providerMessageId: "linq_voice_sent",
       }),
     ]);
     expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledTimes(1);
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: expect.stringMatching(/Z$/u),
-        answeredCoverage,
         providerMessageId: "linq_voice_sent",
       }),
       { signal: expect.any(AbortSignal) },
     );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0]).not.toHaveProperty("answeredCoverage");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted Linq delivery outcome recording failed.",
+      { errorName: "Error" },
+    );
+    warnSpy.mockRestore();
   });
 
-  it("keeps coverage-bearing Linq voice memos sent when liveness is lost after accepted outcome recording", async () => {
+  it("keeps coverage-only Linq voice memos sent when liveness is lost after provider acceptance", async () => {
     const answeredCoverage = {
       lane: "conversation" as const,
       laneSeq: "42",
@@ -5751,7 +5763,9 @@ describe("hosted runtime callbacks", () => {
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("lost liveness after accepted voice memo outcome"));
-    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    const recordDeliveryOutcome = vi.fn<RecordLinqDeliveryOutcomeStub>(
+      async () => undefined,
+    );
     mocks.sendLinqVoiceMemoMessage.mockResolvedValueOnce({
       providerMessageId: "linq_voice_sent",
       providerThreadId: "linq_chat_123",
@@ -5802,11 +5816,11 @@ describe("hosted runtime callbacks", () => {
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: expect.stringMatching(/Z$/u),
-        answeredCoverage,
         providerMessageId: "linq_voice_sent",
       }),
       { signal: expect.any(AbortSignal) },
     );
+    expect(recordDeliveryOutcome.mock.calls[0]?.[0]).not.toHaveProperty("answeredCoverage");
   });
 
   it("does not let one hung Linq outcome write block later outcome writes", async () => {

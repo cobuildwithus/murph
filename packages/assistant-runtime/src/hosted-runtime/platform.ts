@@ -7,7 +7,6 @@ import type {
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
 import type {
-  HostedAssistantAnsweredCoverage,
   HostedAssistantDeliveryRecord,
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
@@ -215,7 +214,6 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
 
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   acceptedAt?: string | null;
-  answeredCoverage?: HostedAssistantAnsweredCoverage | null;
   attemptedAt: string;
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   failedAt?: string | null;

@@ -821,6 +821,7 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
   deliveryTransportIdempotent: boolean
   externalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
   externalThreadService?: AssistantOutboxIntent['externalThreadService']
+  linqCurrentInbound?: AssistantOutboxIntent['linqCurrentInbound']
   intent: AssistantOutboxIntent
   intentPath: string
   preparedDispatchToken?: string | null
@@ -909,6 +910,9 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
         ...(input.externalThreadService === undefined
           ? {}
           : { externalThreadService: input.externalThreadService }),
+        ...(input.linqCurrentInbound === undefined
+          ? {}
+          : { linqCurrentInbound: input.linqCurrentInbound }),
         updatedAt: input.startedAt,
         lastAttemptAt: input.startedAt,
         nextAttemptAt: null,

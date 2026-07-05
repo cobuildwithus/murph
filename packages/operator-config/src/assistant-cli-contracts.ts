@@ -320,6 +320,17 @@ export const assistantExternalThreadRouteAuthoritySchema = z
   })
   .strict()
 
+export const assistantLinqCurrentInboundProofSchema = z
+  .object({
+    dedupeKey: z.string().min(1),
+    eventId: z.string().min(1),
+    mailboxItemId: z.string().min(1),
+    occurredAt: isoTimestampSchema,
+    replyToMessageId: z.string().min(1),
+    target: z.string().min(1),
+  })
+  .strict()
+
 export const assistantSessionBindingSchema = z.object({
   conversationKey: z.string().min(1).nullable(),
   channel: z.string().min(1).nullable(),
@@ -811,6 +822,9 @@ export const assistantOutboxIntentSchema = z
       .nullable()
       .optional(),
     externalThreadService: z.string().trim().min(1).nullable().optional(),
+    linqCurrentInbound: assistantLinqCurrentInboundProofSchema
+      .nullable()
+      .optional(),
     explicitTarget: z.string().min(1).nullable(),
     delivery: assistantChannelDeliverySchema.nullable(),
     deliveryConfirmationPending: z.boolean().default(false),

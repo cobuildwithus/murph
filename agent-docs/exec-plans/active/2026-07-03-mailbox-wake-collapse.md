@@ -106,11 +106,16 @@ Exact accepted-item computation (verified design, hardened by adversarial review
   fallback.
 - Forward the full `currentInbound` proof to web as consume authority.
   Legacy `answeredCoverage` lane high-water may still exist in runner
-  payloads as runtime-local receipt metadata, but web ignores it.
+  payloads as runtime-local receipt metadata, but runtime-to-web delivery
+  outcomes omit it and web ignores legacy callers that still send it.
+- Persist the full `currentInbound` proof alongside the prepared Linq
+  route/service authority so post-checkpoint prepared retries restore the
+  same exact consume authority before provider send.
 - The runtime must synchronously record accepted delivery outcomes whenever
   the accepted outcome carries a `currentInbound.mailboxItemId`, even when
   legacy `answeredCoverage` is null because a lower lane gap blocks any
   contiguous prefix.
+  Coverage-only outcomes are best-effort telemetry, not consume authority.
 - Progress Linq delivery may use `currentInbound` for the egress guard, but
   must not include it in delivery-outcome recording; progress is not
   terminal answer evidence.
@@ -291,6 +296,11 @@ Touch: `webhook-service-types.ts:17-26`;
   text replies from dispatching in one drain. Focused local proof:
   `pnpm --dir packages/assistant-runtime test -- hosted-runtime-callbacks.test.ts -t "abandons superseded hosted auto-reply same-boundary foreground replies"`
   and `CI=true pnpm hosted-local e2e linq-webhook --no-bundle` passed.
+- PR 1 ReviewGPT round 24 follow-up: prepared Linq retries now persist and
+  restore the full `currentInbound` proof, and runtime-to-web Linq delivery
+  outcomes no longer include or synchronously depend on `answeredCoverage`.
+  Focused local proof: hosted-runtime callback suite and assistant-engine
+  outbox runtime suite passed.
 - PR 2: workflow replay tests per the patch procedure + Temporal
   orchestration E2E; full webhook owner suites for the wake-field
   collapse.

@@ -1658,6 +1658,7 @@ export async function beginAssistantOutboxIntentMirrorPreparedDispatch(input: {
   deliveryTransportIdempotent: boolean
   externalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
   externalThreadService?: AssistantOutboxIntent['externalThreadService']
+  linqCurrentInbound?: AssistantOutboxIntent['linqCurrentInbound']
   intentId: string
   startedAt?: string
   vault: string
@@ -1681,6 +1682,9 @@ export async function beginAssistantOutboxIntentMirrorPreparedDispatch(input: {
     ...(input.externalThreadService === undefined
       ? {}
       : { externalThreadService: input.externalThreadService }),
+    ...(input.linqCurrentInbound === undefined
+      ? {}
+      : { linqCurrentInbound: input.linqCurrentInbound }),
     intent,
     intentPath,
     preparedDispatchToken: randomUUID(),

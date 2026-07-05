@@ -12,7 +12,6 @@ import {
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
-  type HostedAssistantAnsweredCoverage,
   type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
   type HostedAssistantDeliveryEffect,
@@ -1126,6 +1125,9 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
       ...(linqDeliveryContext?.service
         ? { externalThreadService: linqDeliveryContext.service }
         : {}),
+      ...(linqDeliveryContext?.currentInbound
+        ? { linqCurrentInbound: linqDeliveryContext.currentInbound }
+        : {}),
       intentId: effect.effectId,
       startedAt,
       vault: input.vaultRoot,
@@ -1196,7 +1198,7 @@ function buildHostedAssistantLinqDeliveryContextFromPreparedIntent(input: {
   effect: HostedAssistantDeliveryEffect;
   intent: Pick<
     AssistantOutboxIntent,
-    "externalThreadRouteAuthority" | "externalThreadService"
+    "externalThreadRouteAuthority" | "externalThreadService" | "linqCurrentInbound"
   >;
 }): HostedAssistantLinqDeliveryContext | null {
   const authority = input.intent.externalThreadRouteAuthority ?? null;
@@ -1211,6 +1213,7 @@ function buildHostedAssistantLinqDeliveryContextFromPreparedIntent(input: {
   };
 
   return {
+    currentInbound: input.intent.linqCurrentInbound ?? null,
     directRecipientPhoneNumber: null,
     fromPhoneNumber: null,
     replyToMessageId: input.effect.payload.replyToMessageId,
@@ -1978,7 +1981,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
-          answeredCoverage: input.assistantDeliveryEffect.payload.answeredCoverage,
           assertLiveness: input.assertLiveness,
           deliveryTransportIdempotent:
             input.assistantDeliveryEffect.payload.transportIdempotent,
@@ -1998,7 +2000,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           vaultRoot: input.vaultRoot,
         }),
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
-          answeredCoverage: input.assistantDeliveryEffect.payload.answeredCoverage,
           assertLiveness: input.assertLiveness,
           deliveryTransportIdempotent:
             input.assistantDeliveryEffect.payload.transportIdempotent,
@@ -2304,7 +2305,6 @@ function resolveHostedAssistantLinqDeliveryContexts(input: {
 
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
-  answeredCoverage?: HostedAssistantAnsweredCoverage | null;
   assertLiveness?: () => Promise<void>;
   deliveryTransportIdempotent?: boolean | null;
   effectsPort?: Pick<
@@ -2401,7 +2401,6 @@ function createHostedAssistantLinqSendDependency(input: {
       queueHostedAssistantLinqDeliveryOutcomeWrite({
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
-          answeredCoverage: input.answeredCoverage ?? null,
           attemptedAt,
           deliveryContext,
           failedAt: new Date(),
@@ -2422,7 +2421,6 @@ function createHostedAssistantLinqSendDependency(input: {
     }
     const acceptedOutcome = buildHostedAssistantLinqDeliveryOutcomeRequest({
       acceptedAt: new Date(),
-      answeredCoverage: input.answeredCoverage ?? null,
       attemptedAt,
       deliveryContext,
       fromPhoneNumber,
@@ -2568,7 +2566,6 @@ function buildHostedVaultFileMediaIdentity(input: {
 }
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
-  answeredCoverage?: HostedAssistantAnsweredCoverage | null;
   assertLiveness?: () => Promise<void>;
   deliveryTransportIdempotent?: boolean | null;
   effectsPort?: Pick<
@@ -2626,7 +2623,6 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       queueHostedAssistantLinqDeliveryOutcomeWrite({
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
-          answeredCoverage: input.answeredCoverage ?? null,
           attemptedAt,
           deliveryContext,
           failedAt: new Date(),
@@ -2647,7 +2643,6 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     }
     const acceptedOutcome = buildHostedAssistantLinqDeliveryOutcomeRequest({
       acceptedAt: new Date(),
-      answeredCoverage: input.answeredCoverage ?? null,
       attemptedAt,
       deliveryContext,
       fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
@@ -2739,7 +2734,6 @@ function normalizeHostedLinqProviderMessageIds(
 
 function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   acceptedAt?: Date | null;
-  answeredCoverage?: HostedAssistantAnsweredCoverage | null;
   attemptedAt: Date;
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   failedAt?: Date | null;
@@ -2757,7 +2751,6 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
 }): HostedRuntimeLinqDeliveryOutcomeRequest {
   return {
     ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
-    answeredCoverage: input.answeredCoverage ?? null,
     attemptedAt: input.attemptedAt.toISOString(),
     currentInbound: input.recordCurrentInboundAnswer
       ? input.deliveryContext?.currentInbound ?? null
@@ -2780,10 +2773,9 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
 const pendingHostedAssistantLinqDeliveryOutcomeWrites = new Set<Promise<void>>();
 
 function shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(input: {
-  answeredCoverage?: HostedAssistantAnsweredCoverage | null;
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
 }): boolean {
-  return Boolean(input.currentInbound?.mailboxItemId || input.answeredCoverage);
+  return Boolean(input.currentInbound?.mailboxItemId);
 }
 
 async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
