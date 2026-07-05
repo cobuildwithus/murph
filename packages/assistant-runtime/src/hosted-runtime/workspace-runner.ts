@@ -639,6 +639,18 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       return false;
     }
 
+    input.runtimeWakeSignal?.notify({
+      ...(pendingRuntimeWake.orchestration
+        ? { orchestration: pendingRuntimeWake.orchestration }
+        : {}),
+      notifiedAtEpochMs: pendingRuntimeWake.notifiedAtEpochMs,
+    });
+    if (
+      pendingRuntimeWake.latestNotifiedAtEpochMs !== undefined
+      && pendingRuntimeWake.latestNotifiedAtEpochMs !== pendingRuntimeWake.notifiedAtEpochMs
+    ) {
+      input.runtimeWakeSignal?.notify(pendingRuntimeWake.latestNotifiedAtEpochMs);
+    }
     foregroundRuntimeWakeObservedAfterStop = true;
     return true;
   };

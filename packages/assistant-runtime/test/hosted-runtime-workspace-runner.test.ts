@@ -204,6 +204,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.deepEqual(yieldStates, [false, false, true]);
+      assert.deepEqual(runtimeWakeSignal.consumePending(), {
+        notifiedAtEpochMs: Date.parse(TEST_NOW) + 1,
+      });
     } finally {
       vi.useRealTimers();
       await rm(vaultRoot, { force: true, recursive: true });
@@ -257,6 +260,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.deepEqual(yieldStates, [false, true]);
+      assert.deepEqual(runtimeWakeSignal.consumePending(), {
+        latestNotifiedAtEpochMs: Date.parse(TEST_NOW) + 1,
+        notifiedAtEpochMs: Date.parse(TEST_NOW) - 1,
+      });
     } finally {
       vi.useRealTimers();
       await rm(vaultRoot, { force: true, recursive: true });
