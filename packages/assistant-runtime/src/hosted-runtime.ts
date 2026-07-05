@@ -1811,6 +1811,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         const basePassWorkspace =
           checkpointedWorkspace;
+        const hadDurableCheckpointEffectsBeforePass =
+          pendingDurableCheckpointEffects.length > 0;
         result = await runForegroundPass({
           initialMailboxImport: wakeInput.initialMailboxImport ?? null,
           initialMailboxImportContext: wakeInput.initialMailboxImportContext
@@ -1845,7 +1847,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const foregroundConversationCanReplaceCheckpointGatedWake =
           foregroundConversationWorkObserved
           && replaceWakeRequested
-          && pendingDurableCheckpointEffects.length === 0
+          && !hadDurableCheckpointEffectsBeforePass
           && accumulatedProjection.nextWakeReason === "assistant"
           && !hostedRuntimeWakeIsDue(accumulatedProjection.nextWakeAt);
         const preservePreviousWake =
@@ -1853,7 +1855,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           && accumulatedProjection.nextWakeAt !== null
           && !foregroundConversationCanReplaceCheckpointGatedWake
           && (
-            pendingDurableCheckpointEffects.length > 0
+            hadDurableCheckpointEffectsBeforePass
             || accumulatedProjection.projectedWakeRequiresCheckpoint
           );
         accumulatedProjection = mergeHostedWorkspaceInvocationProjection(

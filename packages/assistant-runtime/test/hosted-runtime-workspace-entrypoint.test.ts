@@ -1860,14 +1860,18 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const consumeRequests: HostedMailboxConsumeRequest[] = [];
     const mailboxItems = [
       createMailboxItem({
         id: "mailbox_item_entrypoint_future_competing_checkpoint_wake_001",
+        kind: "device-sync.wake",
+        lane: "system",
         laneSeq: "1",
       }),
     ];
     const gatedWakeAt = "2099-04-27T00:10:00.000Z";
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const importedInputIds: string[] = [];
     let assistantPass = 0;
     let snapshotCount = 0;
 
@@ -1901,10 +1905,27 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             async importItem(item) {
               events.push(`mailbox.importItem:${item.item.id}`);
-              return { status: "imported" };
+              if (
+                item.item.id
+                  !== "mailbox_item_entrypoint_future_competing_checkpoint_wake_002"
+              ) {
+                return { status: "imported" };
+              }
+
+              const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              });
+              importedInputIds.push(inputId);
+              return {
+                assistantInputId: inputId,
+                status: "imported",
+              };
             },
             platform: createPlatform({
               mailboxPort: createMailboxPort({
+                consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+                consumeRequests,
                 events,
                 items: mailboxItems,
               }),
@@ -1925,7 +1946,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     events.push("assistant.afterCheckpoint:1");
                     mailboxItems.push(createMailboxItem({
                       id: "mailbox_item_entrypoint_future_competing_checkpoint_wake_002",
-                      laneSeq: "2",
+                      laneSeq: "1",
                     }));
                     runtimeWakeSignal.notify();
                     return {
@@ -1940,6 +1961,12 @@ describe("hosted workspace runtime entrypoint", () => {
               }
 
               if (assistantPass === 2) {
+                const inputId = importedInputIds.shift();
+                assert.ok(inputId);
+                await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                  inputId,
+                  vaultRoot,
+                });
                 assert.ok(
                   events.includes(
                     "mailbox.importItem:mailbox_item_entrypoint_future_competing_checkpoint_wake_002",
@@ -1953,6 +1980,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 );
                 return {
                   checkpointReason: "assistant_runtime_commit",
+                  foregroundReplyFailed: 0,
                   nextWakeAt: freshNextWakeAt,
                   nextWakeReason: freshNextWakeAt === null ? null : "assistant",
                   progressed: true,
@@ -1988,6 +2016,14 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(
         requireEventIndex(events, "assistant:2")
           < requireEventIndex(events, "snapshot:idle_shutdown:1"),
+      );
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown:1")
+          < requireEventIndex(events, "mailbox.consume"),
+      );
+      assert.deepEqual(
+        consumeRequests.map((request) => request.lanes),
+        [[{ consumedSeq: "1", lane: "conversation" }]],
       );
       assert.equal(result.status, expectedStatus);
       assert.equal(result.nextWakeAt, expectedNextWakeAt);
