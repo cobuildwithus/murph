@@ -983,13 +983,22 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(assistantPass, 2);
       assert.equal(durableEffect.mock.calls.length, 1);
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "idle_shutdown",
-      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.reason,
+          request.nextWakeAt,
+          request.nextWakeReason,
+        ]),
+        [
+          ["idle_shutdown", TEST_NOW, "assistant"],
+          ["idle_shutdown", TEST_NOW, "assistant"],
+          ["idle_shutdown", "2026-04-27T00:02:00.000Z", "system-mailbox"],
+        ],
+      );
       assert.ok(events.indexOf("workspace.checkpoint") < events.indexOf("durable-effect"));
       assert.ok(events.indexOf("durable-effect") < events.indexOf("assistant:2"));
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeAt, "2026-04-27T00:02:00.000Z");
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -3773,7 +3782,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("preserves a deferred durable checkpoint effect wake after draining a checkpoint wake", async () => {
+  test("checkpoints a deferred durable checkpoint effect wake after draining a checkpoint wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -3850,14 +3859,21 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.equal(assistantPhaseCalls, 2);
       assert.ok(
-        events.indexOf("durable-effect") < events.indexOf("assistant.phase:2"),
+        events.indexOf("durable-effect") < events.lastIndexOf("workspace.checkpoint"),
       );
-      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "idle_shutdown",
-      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.reason,
+          request.nextWakeAt,
+          request.nextWakeReason,
+        ]),
+        [
+          ["idle_shutdown", null, null],
+          ["idle_shutdown", durableWakeAt, "device-sync.reconcile"],
+        ],
+      );
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, durableWakeAt);
-      assert.equal(result.nextWakeReason, "device-sync.reconcile");
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -3940,8 +3956,20 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(events.slice(events.indexOf("workspace.checkpoint") + 1), [
         "durable-effect:failing",
         "durable-effect:follow-up",
+        "snapshot:idle_shutdown",
+        "workspace.checkpoint",
       ]);
-      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.reason,
+          request.nextWakeAt,
+          request.nextWakeReason,
+        ]),
+        [
+          ["idle_shutdown", null, null],
+          ["idle_shutdown", "2026-04-27T00:03:00.000Z", "device-sync.reconcile"],
+        ],
+      );
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, "2026-04-27T00:03:00.000Z");
     } finally {
@@ -4736,6 +4764,91 @@ describe("hosted workspace runtime entrypoint", () => {
           mailboxSeqEnd: "1",
         }],
       );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("failed foreground consume ack checkpoints mailbox retry wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const consumeRequests: HostedMailboxConsumeRequest[] = [];
+    const baseMailboxPort = createMailboxPort({
+      consumedSeqByLane: [
+        {
+          consumedSeq: "0",
+          lane: "conversation",
+        },
+      ],
+      events,
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_entrypoint_consume_ack_retry",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const mailboxPort: HostedRuntimeMailboxPort = {
+      ...baseMailboxPort,
+      async consume(request): Promise<HostedMailboxConsumeResponse> {
+        events.push("mailbox.consume");
+        consumeRequests.push(request);
+        throw new Error("synthetic consume failure");
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: createBundleRef({
+              hash: "c".repeat(64),
+              key: "users/bundles/member-synthetic/workspace-entrypoint-consume-ack-retry.bundle.json",
+              size: 512,
+            }),
+          };
+        },
+        async importItem(item) {
+          return {
+            assistantInputId: await stageAssistantInputEventForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            }),
+            status: "imported",
+          };
+        },
+        platform: createPlatform({
+          events,
+          mailboxPort,
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace: createWorkspaceState({ version: "0" }),
+          }),
+        }),
+        async runAssistantPhase() {
+          return { foregroundReplyFailed: 0, progressed: false };
+        },
+        vaultRoot,
+      });
+
+      assert.deepEqual(
+        consumeRequests.map((request) => request.lanes),
+        [[{ consumedSeq: "1", lane: "conversation" }]],
+      );
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.nextWakeAt === null ? null : "present",
+          request.nextWakeReason,
+        ]),
+        [
+          [null, null],
+          ["present", "mailbox"],
+        ],
+      );
+      assert.equal(result.status, "scheduled");
     } finally {
       await removeTempRoot(vaultRoot);
     }

@@ -1542,6 +1542,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           requiresFollowUpCheckpoint ||= effectResult?.requiresFollowUpCheckpoint === true;
           const effectWake = readHostedWorkspaceDurableCheckpointEffectWake(effectResult);
           if (effectWake.nextWakeAt) {
+            requiresFollowUpCheckpoint = true;
             const selectedWake = selectEarliestHostedRuntimeWake([
               {
                 at: durableCheckpointWakeAt,
@@ -1887,6 +1888,36 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ) {
           durableCheckpointWakeAt = null;
           durableCheckpointWakeReason = null;
+        }
+        if (durableCheckpointWakeAt !== null) {
+          const accumulatedWakeKey = buildHostedRuntimeWakeKey({
+            nextWakeAt: accumulatedProjection.nextWakeAt,
+            nextWakeReason: accumulatedProjection.nextWakeReason,
+          });
+          const includeAccumulatedWake =
+            accumulatedWakeKey !== null
+            && accumulatedWakeKey !== servicedProjectedRuntimeWakeKey;
+          const durableFollowUpWake = selectEarliestHostedRuntimeWake([
+            ...(includeAccumulatedWake
+              ? [{
+                  at: accumulatedProjection.nextWakeAt,
+                  reason: accumulatedProjection.nextWakeReason,
+                }]
+              : []),
+            {
+              at: durableCheckpointWakeAt,
+              reason: durableCheckpointWakeReason,
+            },
+          ]);
+          accumulatedProjection = {
+            ...accumulatedProjection,
+            nextWakeAt: durableFollowUpWake.nextWakeAt,
+            nextWakeReason: durableFollowUpWake.nextWakeReason,
+            projectedWakeRequiresCheckpoint: true,
+          };
+          runtimeStateDirty = true;
+          idleCheckpointStartByMs = Date.now();
+          forceIdleCheckpointBeforeWake = true;
         }
         runtimeStateDirty ||= result.runtimeStateDirty;
         return result;
@@ -2283,6 +2314,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const durableCheckpointEffectCount = pendingDurableCheckpointEffects.length;
         const durableCheckpointEffects = await runDurableCheckpointEffectsBestEffort();
         checkpointedWorkspace = checkpoint.workspace;
+        const checkpointedWakeKey = buildHostedRuntimeWakeKey({
+          nextWakeAt: checkpoint.workspace.nextWakeAt ?? null,
+          nextWakeReason: checkpoint.workspace.nextWakeReason ?? null,
+        });
+        const persistedDurableWakeKey = buildHostedRuntimeWakeKey({
+          nextWakeAt: durableCheckpointWakeAt,
+          nextWakeReason: durableCheckpointWakeReason,
+        });
+        if (
+          persistedDurableWakeKey !== null
+          && checkpointedWakeKey === persistedDurableWakeKey
+        ) {
+          durableCheckpointWakeAt = null;
+          durableCheckpointWakeReason = null;
+        }
         if (
           latestCheckpointSnapshotCleanForWarmReuse
           && durableCheckpointEffectCount === 0
