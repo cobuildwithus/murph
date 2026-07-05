@@ -875,7 +875,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("checkpoint-gates due projected wakes before servicing them", async () => {
+  test("checkpoint-gated due projected wakes wait for the idle delay before service", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -883,6 +883,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const runtimeTransitionTimeoutMs = 15_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
+    let firstCheckpointStartedAtMs: number | null = null;
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
       return {
@@ -910,6 +911,7 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
           {
             async createCheckpointSnapshot(snapshotInput) {
+              firstCheckpointStartedAtMs ??= Date.now();
               events.push(`snapshot:${snapshotInput.reason}`);
               return {
                 snapshotRef: createBundleRef({
@@ -975,12 +977,19 @@ describe("hosted workspace runtime entrypoint", () => {
       await withRealTimeout(assistantOneObserved.promise, runtimeTransitionTimeoutMs, () =>
         events.join(",")
       );
-      await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      assert.equal(checkpointRequests.length, 0);
+      assert.equal(assistantPass, 1);
+      await vi.advanceTimersByTimeAsync(179_000);
+      assert.equal(checkpointRequests.length, 0);
+      assert.equal(assistantPass, 1);
+      await vi.advanceTimersByTimeAsync(1_000);
       await withRealTimeout(assistantTwoObserved.promise, runtimeTransitionTimeoutMs, () =>
         events.join(",")
       );
       const result = await resultPromise;
 
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + 180_000);
       assert.equal(assistantPass, 2);
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.deepEqual(
@@ -1008,10 +1017,10 @@ describe("hosted workspace runtime entrypoint", () => {
   test("services a due wake blocked only by durable effects instead of exiting the attempt", async () => {
     // Incident shape (2026-07-03): a reply turn leaves a plain due assistant
     // wake (starved system-lane work) plus pending durable effects (consume
-    // acks). The attempt must checkpoint promptly, run the effects, service
-    // the still-due wake in-attempt, and finish with a non-due return —
-    // never hand a due wake to the orchestrator, which has no prompt
-    // transport for it.
+    // acks). After the idle delay, the attempt must checkpoint, run the
+    // effects, service the still-due wake in-attempt, and finish with a
+    // non-due return instead of handing a due wake to the orchestrator, which
+    // has no prompt transport for it.
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -3719,7 +3728,13 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const durableWakeAt = new Date(Date.now() + 120_000).toISOString();
+    const idleCheckpointDelayMs = 180_000;
+    const durableWakeAt = new Date(
+      Date.parse(TEST_NOW) + idleCheckpointDelayMs + 120_000,
+    ).toISOString();
+    const assistantObserved = createDeferred<void>();
+    let firstCheckpointStartedAtMs: number | null = null;
+    let secondCheckpointStartedAtMs: number | null = null;
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
       return {
@@ -3729,57 +3744,77 @@ describe("hosted workspace runtime entrypoint", () => {
       };
     });
 
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
+      vi.setSystemTime(new Date(TEST_NOW));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_durable_effect_follow_up_checkpoint",
-            idleCheckpointDelayMs: 1,
-            leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
-          },
-        }),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.reason}`);
-            return {
-              snapshotRef: createBundleRef({
-                hash: "8".repeat(64),
-                key: "users/bundles/member-synthetic/durable-effect-follow-up.bundle.json",
-                size: 512,
-              }),
-            };
-          },
-          async importItem() {
-            return { status: "imported" };
-          },
-          platform: createPlatform({
-            mailboxPort: createMailboxPort({
-              events,
-              items: [createMailboxItem({ laneSeq: "1" })],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_durable_effect_follow_up_checkpoint",
+              idleCheckpointDelayMs,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
           }),
-          async runAssistantPhase() {
-            return {
-              afterCheckpoint: async () => ({
-                afterDurableCheckpoint: durableEffect,
-                checkpointReason: "system_mailbox_receipt",
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              if (firstCheckpointStartedAtMs === null) {
+                firstCheckpointStartedAtMs = Date.now();
+              } else {
+                secondCheckpointStartedAtMs ??= Date.now();
+              }
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "8".repeat(64),
+                  key: "users/bundles/member-synthetic/durable-effect-follow-up.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [createMailboxItem({ laneSeq: "1" })],
               }),
-              checkpointReason: "system_mailbox_receipt",
-              progressed: true,
-            };
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            async runAssistantPhase() {
+              assistantObserved.resolve();
+              return {
+                afterCheckpoint: async () => ({
+                  afterDurableCheckpoint: durableEffect,
+                  checkpointReason: "system_mailbox_receipt",
+                }),
+                checkpointReason: "system_mailbox_receipt",
+                progressed: true,
+              };
+            },
+            vaultRoot,
           },
-          vaultRoot,
-        },
+        ),
+        15_000,
+        () => events.join(","),
       );
+
+      await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      assert.equal(checkpointRequests.length, 0);
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1_000);
+      assert.equal(checkpointRequests.length, 0);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const result = await resultPromise;
 
       const checkpointEventIndexes = events
         .map((event, index) => event === "workspace.checkpoint" ? index : -1)
@@ -3793,6 +3828,8 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
         ["0", "1"],
       );
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.equal(secondCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
       assert.equal(checkpointRequests[1]?.nextWakeAt, durableWakeAt);
       assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
       assert.ok(checkpointEventIndexes[0] < events.indexOf("durable-effect"));
@@ -3800,6 +3837,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, durableWakeAt);
     } finally {
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
@@ -9007,7 +9045,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("forced durable follow-up checkpoints yield to foreground-pending idle conflicts", async () => {
+  test("durable follow-up checkpoints yield to foreground-pending idle conflicts", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -9160,20 +9198,6 @@ describe("hosted workspace runtime entrypoint", () => {
             }
             if (assistantPass === 3) {
               assert.ok(
-                !events.includes(
-                  "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_002",
-                ),
-                events.join(","),
-              );
-              assert.notEqual(input.workspace?.nextWakeAt, dueWakeAt);
-              assert.ok(
-                !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
-                events.join(","),
-              );
-              return { progressed: false };
-            }
-            if (assistantPass === 4) {
-              assert.ok(
                 events.includes(
                   "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_002",
                 ),
@@ -9191,7 +9215,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 progressed: true,
               };
             }
-            if (assistantPass === 5) {
+            if (assistantPass === 4) {
               assert.ok(
                 events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
                 events.join(","),
@@ -9227,9 +9251,6 @@ describe("hosted workspace runtime entrypoint", () => {
             > fetchCountBeforeSourceBlindWake,
         );
       });
-      await waitUntil(() => {
-        assert.equal(events.includes("assistant:3"), true);
-      });
       assert.ok(
         !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
         events.join(","),
@@ -9240,7 +9261,7 @@ describe("hosted workspace runtime entrypoint", () => {
       }));
       runtimeWakeSignal.notify();
       await waitUntil(() => {
-        assert.equal(events.includes("assistant:4"), true);
+        assert.equal(events.includes("assistant:3"), true);
       });
       assert.ok(
         !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
@@ -9253,7 +9274,7 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       );
 
-      assert.equal(assistantPass, 5);
+      assert.equal(assistantPass, 4);
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.ok(
         requireEventIndex(
@@ -9275,10 +9296,6 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.ok(
         requireEventIndex(events, "assistant:2")
-          < requireEventIndex(events, "assistant:3"),
-      );
-      assert.ok(
-        requireEventIndex(events, "assistant:3")
           < requireEventIndex(
             events,
             "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_002",
@@ -9289,10 +9306,10 @@ describe("hosted workspace runtime entrypoint", () => {
           events,
           "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_002",
         )
-          < requireEventIndex(events, "assistant:4"),
+          < requireEventIndex(events, "assistant:3"),
       );
       assert.ok(
-        requireEventIndex(events, "assistant:4")
+        requireEventIndex(events, "assistant:3")
           < requireEventIndex(events, "mailbox.afterCheckpoint:done"),
       );
       assert.ok(
@@ -9301,10 +9318,10 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.ok(
         requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:accept")
-          < requireEventIndex(events, "assistant:5"),
+          < requireEventIndex(events, "assistant:4"),
       );
       assert.ok(
-        requireEventIndex(events, "assistant:5")
+        requireEventIndex(events, "assistant:4")
           < requireEventIndex(events, "snapshot:idle_shutdown:2"),
       );
       assert.deepEqual(checkpointRequests.map((request) => [
@@ -11653,7 +11670,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("due projected runtime wake checkpoints before the hot pass", async () => {
+  test("due projected runtime wake waits for the idle checkpoint before the hot pass", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -11733,7 +11750,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const elapsedMs = performance.now() - startedAt;
       assert.ok(elapsedMs < 2_000);
       assert.ok(firstCheckpointStartedAtMs !== null);
-      assert.ok(firstCheckpointStartedAtMs - startedAt < idleCheckpointDelayMs);
+      assert.ok(firstCheckpointStartedAtMs - startedAt >= idleCheckpointDelayMs - 50);
       assert.equal(assistantPhaseCalls, 2);
       const secondAssistantPhaseIndex = events.indexOf("assistant.phase:2");
       const snapshotIndex = events.findIndex((event) => event === "snapshot:idle_shutdown");
@@ -11751,7 +11768,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("future projected runtime wake checkpoints at its deadline before the idle delay", async () => {
+  test("future projected runtime wake waits for the idle delay before checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -11838,14 +11855,21 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
       await vi.advanceTimersByTimeAsync(59_000);
       assert.equal(checkpointRequests.length, 0);
 
       await vi.advanceTimersByTimeAsync(1_000);
+      assert.equal(checkpointRequests.length, 0);
+      assert.equal(assistantPhaseCalls, 1);
+      await vi.advanceTimersByTimeAsync(119_000);
+      assert.equal(checkpointRequests.length, 0);
+      assert.equal(assistantPhaseCalls, 1);
+      await vi.advanceTimersByTimeAsync(1_000);
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
       const result = await resultPromise;
 
-      assert.equal(firstCheckpointStartedAtMs, Date.parse(projectedWakeAt));
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
       assert.equal(assistantPhaseCalls, 2);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
@@ -15132,60 +15156,79 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const imported: string[] = [];
+    const importObserved = createDeferred<void>();
+    const idleCheckpointDelayMs = 180_000;
 
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
-      const startedAt = performance.now();
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            budget: {
-              maxMailboxItems: 1,
+      vi.setSystemTime(new Date(TEST_NOW));
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              budget: {
+                maxMailboxItems: 1,
+              },
+              idleCheckpointDelayMs,
             },
-            idleCheckpointDelayMs: 10_000,
-          },
-        }),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
-            return {
-              snapshotRef: createBundleRef({
-                hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/workspace-budget.bundle.json",
-                size: 512,
-              }),
-            };
-          },
-          async importItem(item) {
-            imported.push(item.item.id);
-            return { status: "imported" };
-          },
-          platform: createPlatform({
-            mailboxPort: createMailboxPort({
-              events,
-              items: [
-                createMailboxItem({
-                  id: "mailbox_item_entrypoint_budget_001",
-                  laneSeq: "1",
-                }),
-                createMailboxItem({
-                  createdAt: "9999-01-01T00:00:00.000Z",
-                  id: "mailbox_item_entrypoint_budget_002",
-                  laneSeq: "2",
-                }),
-              ],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
           }),
-          vaultRoot,
-        },
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "b".repeat(64),
+                  key: "users/bundles/member-synthetic/workspace-budget.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              imported.push(item.item.id);
+              importObserved.resolve();
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [
+                  createMailboxItem({
+                    id: "mailbox_item_entrypoint_budget_001",
+                    laneSeq: "1",
+                  }),
+                  createMailboxItem({
+                    createdAt: "9999-01-01T00:00:00.000Z",
+                    id: "mailbox_item_entrypoint_budget_002",
+                    laneSeq: "2",
+                  }),
+                ],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
       );
 
-      assert.ok(performance.now() - startedAt < 2_000);
+      await withRealTimeout(importObserved.promise, 15_000, () => events.join(","));
       assert.deepEqual(imported, ["mailbox_item_entrypoint_budget_001"]);
+      await waitForFakeTimerScheduled(() => events.join(","));
+      assert.equal(checkpointRequests.length, 0);
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+      ]);
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1_000);
+      assert.equal(checkpointRequests.length, 0);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const result = await resultPromise;
+
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
@@ -15213,6 +15256,7 @@ describe("hosted workspace runtime entrypoint", () => {
         status: "budget_exhausted",
       });
     } finally {
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
@@ -15222,75 +15266,97 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const imported: string[] = [];
-    const dueAssistantWakeAt = new Date(Date.now() - 1_000).toISOString();
+    const dueAssistantWakeAt = new Date(Date.parse(TEST_NOW) - 1_000).toISOString();
+    const assistantObserved = createDeferred<void>();
+    const idleCheckpointDelayMs = 180_000;
     let assistantPhaseCalls = 0;
 
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            budget: {
-              maxMailboxItems: 1,
+      vi.setSystemTime(new Date(TEST_NOW));
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              budget: {
+                maxMailboxItems: 1,
+              },
+              idleCheckpointDelayMs,
             },
-            idleCheckpointDelayMs: 10_000,
-          },
-        }),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
-            return {
-              snapshotRef: createBundleRef({
-                hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/workspace-budget-due-assistant-wake.bundle.json",
-                size: 512,
-              }),
-            };
-          },
-          async importItem(item) {
-            imported.push(item.item.id);
-            return { status: "imported" };
-          },
-          platform: createPlatform({
-            mailboxPort: createMailboxPort({
-              events,
-              items: [
-                createMailboxItem({
-                  id: "mailbox_item_entrypoint_budget_due_wake_001",
-                  laneSeq: "1",
-                }),
-                createMailboxItem({
-                  createdAt: "9999-01-01T00:00:00.000Z",
-                  id: "mailbox_item_entrypoint_budget_due_wake_002",
-                  laneSeq: "2",
-                }),
-              ],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
           }),
-          async runAssistantPhase() {
-            assistantPhaseCalls += 1;
-            events.push(`assistant:${assistantPhaseCalls}`);
-            if (assistantPhaseCalls > 1) {
-              throw new Error("Budget-exhausted attempt should hand off the checkpoint-gated wake.");
-            }
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "d".repeat(64),
+                  key: "users/bundles/member-synthetic/workspace-budget-due-assistant-wake.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              imported.push(item.item.id);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [
+                  createMailboxItem({
+                    id: "mailbox_item_entrypoint_budget_due_wake_001",
+                    laneSeq: "1",
+                  }),
+                  createMailboxItem({
+                    createdAt: "9999-01-01T00:00:00.000Z",
+                    id: "mailbox_item_entrypoint_budget_due_wake_002",
+                    laneSeq: "2",
+                  }),
+                ],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            async runAssistantPhase() {
+              assistantPhaseCalls += 1;
+              events.push(`assistant:${assistantPhaseCalls}`);
+              assistantObserved.resolve();
+              if (assistantPhaseCalls > 1) {
+                throw new Error("Budget-exhausted attempt should hand off the checkpoint-gated wake.");
+              }
 
-            return {
-              checkpointReason: "assistant_runtime_commit",
-              nextWakeAt: dueAssistantWakeAt,
-              nextWakeReason: "assistant",
-              progressed: true,
-            };
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: dueAssistantWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            },
+            vaultRoot,
           },
-          vaultRoot,
-        },
+        ),
+        15_000,
+        () => events.join(","),
       );
 
+      await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
       assert.deepEqual(imported, ["mailbox_item_entrypoint_budget_due_wake_001"]);
       assert.equal(assistantPhaseCalls, 1);
+      assert.equal(checkpointRequests.length, 0);
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+        "assistant:1",
+      ]);
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1_000);
+      assert.equal(checkpointRequests.length, 0);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const result = await resultPromise;
+
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
@@ -15306,6 +15372,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, dueAssistantWakeAt);
       assert.equal(result.status, "budget_exhausted");
     } finally {
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
@@ -17489,6 +17556,18 @@ function withRealTimeout<T>(
       },
     );
   });
+}
+
+async function waitForFakeTimerScheduled(describeFailure: () => string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (vi.getTimerCount() > 0) {
+      return;
+    }
+    await Promise.resolve();
+    await new Promise((resolve) => REAL_SET_TIMEOUT(resolve, 0));
+  }
+
+  throw new Error(describeFailure());
 }
 
 async function waitUntil(assertion: () => void, timeoutMs = 1_000): Promise<void> {
