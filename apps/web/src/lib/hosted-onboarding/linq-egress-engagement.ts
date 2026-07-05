@@ -361,6 +361,53 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   });
 }
 
+export async function resolveHostedLinqCurrentInboundMailboxItemIdForRuntime(input: {
+  currentInbound?: HostedLinqCurrentInboundProof | null;
+  memberId: string;
+  now?: Date;
+  prisma: PrismaClient;
+  routeAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
+  target: string | null;
+  targetKind?: string | null;
+}): Promise<string | null> {
+  const proof = normalizeHostedLinqCurrentInboundProof(input.currentInbound ?? null);
+  if (!proof) {
+    return null;
+  }
+  const now = input.now ?? new Date();
+  const routeAuthority = normalizeHostedLinqRouteAuthorityForEgress({
+    memberId: input.memberId,
+    routeAuthority: input.routeAuthority ?? null,
+    target: input.target,
+    targetKind: input.targetKind,
+  });
+  if (routeAuthority && routeAuthority.containerMemberId !== input.memberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_BOUND_USER_MISMATCH",
+      httpStatus: 403,
+      message: "Linq egress engagement authority does not match the runtime user.",
+      retryable: false,
+    });
+  }
+  const route = routeAuthority
+    ? await assertHostedThreadRouteEgressAuthority({
+        authority: routeAuthority,
+        prisma: input.prisma,
+      })
+    : null;
+  const decision = await readHostedLinqCurrentInboundDecision({
+    currentInbound: proof,
+    memberId: input.memberId,
+    now,
+    prisma: input.prisma,
+    route,
+    routeAuthority,
+    target: input.target,
+  });
+
+  return decision?.allowed ? proof.mailboxItemId : null;
+}
+
 async function readHostedLinqCurrentInboundDecision(input: {
   currentInbound: HostedLinqCurrentInboundProof | null;
   memberId: string;

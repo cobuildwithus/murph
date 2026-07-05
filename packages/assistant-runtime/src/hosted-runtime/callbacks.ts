@@ -74,6 +74,7 @@ import type {
 import type {
   HostedRuntimeActionApprovalPort,
   HostedRuntimeEffectsPort,
+  HostedRuntimeLinqCurrentInboundProof,
   HostedRuntimeLinqDeliveryOutcomeRequest,
   HostedRuntimeLinqEngagementKind,
   HostedRuntimeLinqSendResponse,
@@ -2429,7 +2430,7 @@ function createHostedAssistantLinqSendDependency(input: {
       target: request.target,
       targetKind: request.targetKind ?? null,
     });
-    if (shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(input)) {
+    if (shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(acceptedOutcome)) {
       await recordHostedAssistantLinqDeliveryOutcomeRequired({
         effectsPort: input.effectsPort ?? null,
         outcome: acceptedOutcome,
@@ -2651,7 +2652,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       target: providerTarget,
       targetKind: "thread",
     });
-    if (shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(input)) {
+    if (shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(acceptedOutcome)) {
       try {
         await recordHostedAssistantLinqDeliveryOutcomeRequired({
           effectsPort: input.effectsPort ?? null,
@@ -2769,8 +2770,9 @@ const pendingHostedAssistantLinqDeliveryOutcomeWrites = new Set<Promise<void>>()
 
 function shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(input: {
   answeredCoverage?: HostedAssistantAnsweredCoverage | null;
+  currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
 }): boolean {
-  return Boolean(input.answeredCoverage);
+  return Boolean(input.currentInbound?.mailboxItemId || input.answeredCoverage);
 }
 
 async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {

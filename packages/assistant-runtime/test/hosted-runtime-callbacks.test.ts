@@ -5391,6 +5391,102 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("keeps current-inbound Linq sends retryable until accepted outcomes record", async () => {
+    const currentInbound = {
+      dedupeKey: "evt_linq_current",
+      eventId: "evt_linq_current",
+      mailboxItemId: "mailbox_item_linq_current",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      replyToMessageId: "linq_message_a",
+      target: "linq_chat_a",
+    };
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_a",
+      channel: "linq",
+      explicitTarget: "linq_chat_a",
+      transportIdempotent: true,
+    });
+    const assertRecentInbound = vi.fn(async () => undefined);
+    const recordDeliveryOutcome = vi.fn(async () => {
+      throw new Error("web callback unavailable");
+    });
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_a",
+      target: "linq_chat_a",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "reply",
+          replyToMessageId: "linq_message_a",
+          target: "linq_chat_a",
+          targetKind: "thread",
+        });
+      } catch (error) {
+        expect((error as { deliveryMayHaveSucceeded?: boolean }).deliveryMayHaveSucceeded)
+          .toBe(true);
+        return createDispatchResult(
+          {
+            delivery: null,
+            lastError: {
+              code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+              message: "Accepted Linq delivery outcome could not be recorded.",
+            },
+            status: "retryable",
+          },
+          {
+            code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+            message: "Accepted Linq delivery outcome could not be recorded.",
+          },
+        );
+      }
+
+      throw new Error("Expected current-inbound Linq send to await outcome recording.");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      linqDeliveryContexts: [{
+        currentInbound,
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: "+15559990000",
+        replyToMessageId: "linq_message_a",
+        routeAuthority: null,
+        service: "iMessage",
+        target: "linq_chat_a",
+        threadIsDirect: true,
+      }],
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        deliveryStatus: "retryable",
+      }),
+    ]);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredCoverage: null,
+        currentInbound,
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
   it("keeps coverage-bearing Linq sends sent when liveness is lost after accepted outcome recording", async () => {
     const answeredCoverage = {
       lane: "conversation" as const,

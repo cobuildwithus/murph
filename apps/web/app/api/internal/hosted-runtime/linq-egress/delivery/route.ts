@@ -19,6 +19,8 @@ import {
 } from "@/src/lib/hosted-onboarding/errors";
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
+  type HostedLinqCurrentInboundProof,
+  resolveHostedLinqCurrentInboundMailboxItemIdForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   jsonOk,
@@ -95,9 +97,20 @@ export const POST = withJsonError(async (request: Request) => {
       prisma,
     });
   }
+  const answeredMailboxItemId = acceptedAt
+    ? await resolveHostedLinqDeliveryAnsweredMailboxItemId({
+        acceptedAt,
+        currentInbound,
+        linqChatId,
+        memberId: userId,
+        prisma,
+        routeAuthority: validatedRouteAuthority,
+        targetKind,
+      })
+    : null;
   const result = await recordHostedLinqRuntimeDeliveryOutcomeTx({
     acceptedAt,
-    answeredMailboxItemId: currentInbound?.mailboxItemId ?? null,
+    answeredMailboxItemId,
     attemptedAt,
     failedAt,
     failureCode: readOptionalBodyString(body.failureCode),
@@ -119,6 +132,39 @@ export const POST = withJsonError(async (request: Request) => {
     recorded: result.recorded,
   });
 });
+
+async function resolveHostedLinqDeliveryAnsweredMailboxItemId(input: {
+  acceptedAt: Date;
+  currentInbound: HostedLinqCurrentInboundProof | null;
+  linqChatId: string | null;
+  memberId: string;
+  prisma: ReturnType<typeof getPrisma>;
+  routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  targetKind: "explicit" | "participant" | "thread" | null;
+}): Promise<string | null> {
+  if (!input.currentInbound) {
+    return null;
+  }
+  const mailboxItemId = await resolveHostedLinqCurrentInboundMailboxItemIdForRuntime({
+    currentInbound: input.currentInbound,
+    memberId: input.memberId,
+    now: input.acceptedAt,
+    prisma: input.prisma,
+    routeAuthority: input.routeAuthority,
+    target: input.linqChatId,
+    targetKind: input.targetKind,
+  });
+  if (mailboxItemId) {
+    return mailboxItemId;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_DELIVERY_CURRENT_INBOUND_INVALID",
+    httpStatus: 403,
+    message: "Hosted Linq delivery current inbound proof is invalid.",
+    retryable: false,
+  });
+}
 
 async function readHostedLinqDeliveryRouteLineLookupKey(input: {
   memberId: string;
@@ -224,9 +270,7 @@ function parseHostedLinqDeliveryTargetKind(
   });
 }
 
-function parseHostedLinqDeliveryCurrentInbound(value: unknown): {
-  mailboxItemId: string;
-} | null {
+function parseHostedLinqDeliveryCurrentInbound(value: unknown): HostedLinqCurrentInboundProof | null {
   if (value === undefined || value === null) {
     return null;
   }
@@ -239,16 +283,35 @@ function parseHostedLinqDeliveryCurrentInbound(value: unknown): {
     });
   }
   const record = value as Record<string, unknown>;
+  const dedupeKey = readOptionalBodyString(record.dedupeKey);
+  const eventId = readOptionalBodyString(record.eventId);
   const mailboxItemId = readOptionalBodyString(record.mailboxItemId);
-  if (!mailboxItemId) {
+  const occurredAt = readOptionalBodyString(record.occurredAt);
+  const replyToMessageId = readOptionalBodyString(record.replyToMessageId);
+  const target = readOptionalBodyString(record.target);
+  if (
+    !dedupeKey
+    || !eventId
+    || !mailboxItemId
+    || !occurredAt
+    || !replyToMessageId
+    || !target
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_DELIVERY_CURRENT_INBOUND_INVALID",
       httpStatus: 400,
-      message: "Hosted Linq delivery current inbound mailbox item is invalid.",
+      message: "Hosted Linq delivery current inbound proof is invalid.",
       retryable: false,
     });
   }
-  return { mailboxItemId };
+  return {
+    dedupeKey,
+    eventId,
+    mailboxItemId,
+    occurredAt,
+    replyToMessageId,
+    target,
+  };
 }
 
 function parseRequiredHostedLinqDeliveryDate(value: unknown, field: string): Date {

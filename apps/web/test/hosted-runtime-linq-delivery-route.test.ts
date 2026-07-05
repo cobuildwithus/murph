@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   recordHostedLinqRuntimeDeliveryOutcomeTx: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  resolveHostedLinqCurrentInboundMailboxItemIdForRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -18,6 +19,17 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   recordHostedLinqRuntimeDeliveryOutcomeTx: mocks.recordHostedLinqRuntimeDeliveryOutcomeTx,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-egress-engagement", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/linq-egress-engagement")
+  >();
+  return {
+    ...actual,
+    resolveHostedLinqCurrentInboundMailboxItemIdForRuntime:
+      mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime,
+  };
+});
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
   assertHostedThreadRouteEgressAuthority: mocks.assertHostedThreadRouteEgressAuthority,
@@ -58,6 +70,8 @@ describe("hosted runtime Linq delivery route", () => {
       deliveryId: "hld_123",
       recorded: true,
     });
+    mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime
+      .mockResolvedValue("mailbox_item_answered_42");
   });
 
   it("records an accepted runtime delivery outcome without raw recipient fallback for participant sends", async () => {
@@ -69,7 +83,12 @@ describe("hosted runtime Linq delivery route", () => {
       },
       attemptedAt: "2026-04-26T00:00:03.000Z",
       currentInbound: {
+        dedupeKey: "evt_linq_current",
+        eventId: "evt_linq_current",
         mailboxItemId: "mailbox_item_answered_42",
+        occurredAt: "2026-04-26T00:00:02.000Z",
+        replyToMessageId: "linq_message_inbound",
+        target: "linq_chat_123",
       },
       fromPhoneNumber: "+15550100099",
       idempotencyKey: "assistant-outbox:intent_123",
@@ -102,12 +121,54 @@ describe("hosted runtime Linq delivery route", () => {
         userId: "member_123",
       }),
     );
+    expect(mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime)
+      .toHaveBeenCalledWith({
+        currentInbound: {
+          dedupeKey: "evt_linq_current",
+          eventId: "evt_linq_current",
+          mailboxItemId: "mailbox_item_answered_42",
+          occurredAt: "2026-04-26T00:00:02.000Z",
+          replyToMessageId: "linq_message_inbound",
+          target: "linq_chat_123",
+        },
+        memberId: "member_123",
+        now: new Date("2026-04-26T00:00:04.000Z"),
+        prisma,
+        routeAuthority: null,
+        target: "linq_chat_123",
+        targetKind: "participant",
+      });
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx.mock.calls[0]?.[0])
       .not.toHaveProperty("answeredCoverage");
     await expect(response.json()).resolves.toEqual({
       ok: true,
       recorded: true,
     });
+  });
+
+  it("fails closed when an accepted delivery current inbound proof does not validate", async () => {
+    mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime.mockResolvedValueOnce(null);
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      currentInbound: {
+        dedupeKey: "evt_linq_current",
+        eventId: "evt_linq_current",
+        mailboxItemId: "mailbox_item_wrong_chat",
+        occurredAt: "2026-04-26T00:00:02.000Z",
+        replyToMessageId: "linq_message_inbound",
+        target: "linq_chat_other",
+      },
+      idempotencyKey: "assistant-outbox:intent_123",
+      intentId: "intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      targetKind: "thread",
+    }));
+
+    expect(response.status).toBe(403);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
   });
 
   it("derives the active member Linq line from durable home routing for chat sends without route authority", async () => {
