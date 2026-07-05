@@ -44,6 +44,7 @@ function createHostedAssistantDeliveryPayload(
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent_123",
     identityId: "identity_123",
+    inboundMailboxItemIds: [],
     media: [],
     message: "hello from hosted execution",
     subject: null,

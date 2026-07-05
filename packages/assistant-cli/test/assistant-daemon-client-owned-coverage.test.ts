@@ -147,6 +147,7 @@ const TEST_OUTBOX_INTENT = {
   deliveryIdempotencyKey: null,
   deliverySource: null,
   deliveryTransportIdempotent: false,
+  hostedDeliveryInboundMailboxItemIds: [],
   preparedDispatchToken: null,
   lastError: null,
 }

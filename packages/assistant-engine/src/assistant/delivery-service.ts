@@ -84,15 +84,21 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
   session: AssistantSession
 }): {
   deliveryIdempotencyKey: string | null
+  hostedDeliveryInboundMailboxItemIds: readonly string[]
   deliveryTransportIdempotent: boolean | undefined
 } {
   const explicitKey = normalizeNullableString(input.input.deliveryIdempotencyKey)
   const hosted = input.input.executionContext?.hosted ?? null
   const channel = normalizeNullableString(input.channel)?.toLowerCase() ?? null
+  const hostedDeliveryInboundMailboxItemIds =
+    normalizeAssistantHostedDeliveryInboundMailboxItemIds(
+      input.input.hostedDeliveryIdempotency?.inboundMailboxItemIds,
+    )
 
   if (!hosted) {
     return {
       deliveryIdempotencyKey: explicitKey,
+      hostedDeliveryInboundMailboxItemIds: [],
       deliveryTransportIdempotent: undefined,
     }
   }
@@ -117,6 +123,7 @@ export function resolveAssistantHostedDeliveryIdempotency(input: {
 
   return {
     deliveryIdempotencyKey,
+    hostedDeliveryInboundMailboxItemIds,
     deliveryTransportIdempotent:
       resolveHostedAssistantDeliveryTransportIdempotentOverride({
         channel,
@@ -180,6 +187,8 @@ export async function deliverAssistantReply(input: {
     dedupeToken:
       input.dedupeToken ?? hostedDelivery.deliveryIdempotencyKey ?? null,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+    hostedDeliveryInboundMailboxItemIds:
+      hostedDelivery.hostedDeliveryInboundMailboxItemIds,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     input: input.input,
     media: deliveryMedia,
@@ -742,6 +751,7 @@ function resolveAssistantInputRouteBindingDelivery(input: {
 async function deliverAssistantCurrentAudienceMessage(input: {
   dedupeToken: string | null
   deliveryIdempotencyKey: string | null
+  hostedDeliveryInboundMailboxItemIds: readonly string[]
   deliveryTransportIdempotent: boolean | undefined
   input: AssistantMessageInput
   media: AssistantResponseMedia[]
@@ -766,6 +776,8 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     media: input.media,
     message: input.message,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+    hostedDeliveryInboundMailboxItemIds:
+      input.hostedDeliveryInboundMailboxItemIds,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     turnId: input.turnId,
     turnTrigger: input.input.turnTrigger ?? null,
@@ -832,9 +844,9 @@ function createHostedDeliveryIdempotencyKeyFromContext(input: {
   const channel = normalizeNullableString(input.channel)
   const memberId = normalizeNullableString(input.memberId)
   const inboundMailboxItemIds =
-    context?.inboundMailboxItemIds
-      ?.map((itemId) => normalizeNullableString(itemId))
-      .filter((itemId): itemId is string => itemId !== null) ?? []
+    normalizeAssistantHostedDeliveryInboundMailboxItemIds(
+      context?.inboundMailboxItemIds,
+    )
   const assistantTurnOrdinal =
     typeof context?.assistantTurnOrdinal === 'number' ||
     typeof context?.assistantTurnOrdinal === 'string'
@@ -876,6 +888,22 @@ function createHostedDeliveryIdempotencyKeyFromContext(input: {
       ]),
     userId: memberId,
   })
+}
+
+function normalizeAssistantHostedDeliveryInboundMailboxItemIds(
+  value: readonly string[] | null | undefined,
+): string[] {
+  const seen = new Set<string>()
+  const itemIds: string[] = []
+  for (const candidate of value ?? []) {
+    const itemId = normalizeNullableString(candidate)
+    if (!itemId || seen.has(itemId)) {
+      continue
+    }
+    seen.add(itemId)
+    itemIds.push(itemId)
+  }
+  return itemIds
 }
 
 function hostedDeliveryChannelRequiresIdempotencyKey(channel: string | null): boolean {

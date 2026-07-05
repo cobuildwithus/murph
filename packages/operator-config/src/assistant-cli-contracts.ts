@@ -331,6 +331,11 @@ export const assistantLinqCurrentInboundProofSchema = z
   })
   .strict()
 
+export const assistantHostedDeliveryInboundMailboxItemIdsSchema = z
+  .array(z.string().min(1))
+  .max(40)
+  .default([])
+
 export const assistantSessionBindingSchema = z.object({
   conversationKey: z.string().min(1).nullable(),
   channel: z.string().min(1).nullable(),
@@ -819,6 +824,8 @@ export const assistantOutboxIntentSchema = z
     linqCurrentInbound: assistantLinqCurrentInboundProofSchema
       .nullable()
       .optional(),
+    hostedDeliveryInboundMailboxItemIds:
+      assistantHostedDeliveryInboundMailboxItemIdsSchema,
     explicitTarget: z.string().min(1).nullable(),
     delivery: assistantChannelDeliverySchema.nullable(),
     deliveryConfirmationPending: z.boolean().default(false),

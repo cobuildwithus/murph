@@ -408,6 +408,85 @@ export async function resolveHostedLinqCurrentInboundMailboxItemIdForRuntime(inp
   return decision?.allowed ? proof.mailboxItemId : null;
 }
 
+export async function resolveHostedLinqAnsweredMailboxItemIdsForRuntime(input: {
+  currentInbound?: HostedLinqCurrentInboundProof | null;
+  mailboxItemIds?: readonly string[] | null;
+  memberId: string;
+  now?: Date;
+  prisma: PrismaClient;
+  routeAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
+  target: string | null;
+  targetKind?: string | null;
+}): Promise<string[] | null> {
+  const requestedItemIds = normalizeHostedLinqAnsweredMailboxItemIds(
+    input.mailboxItemIds ?? [],
+  );
+  const currentInbound = normalizeHostedLinqCurrentInboundProof(
+    input.currentInbound ?? null,
+  );
+  if (!currentInbound && requestedItemIds.length > 0) {
+    return null;
+  }
+
+  const now = input.now ?? new Date();
+  const itemIds: string[] = [];
+  const seen = new Set<string>();
+  const append = (itemId: string | null) => {
+    const normalized = normalizeNullable(itemId);
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    itemIds.push(normalized);
+  };
+
+  if (currentInbound) {
+    const currentItemId = await resolveHostedLinqCurrentInboundMailboxItemIdForRuntime({
+      currentInbound,
+      memberId: input.memberId,
+      now,
+      prisma: input.prisma,
+      routeAuthority: input.routeAuthority ?? null,
+      target: input.target,
+      targetKind: input.targetKind,
+    });
+    if (!currentItemId) {
+      return null;
+    }
+    append(currentItemId);
+  }
+  if (requestedItemIds.length === 0) {
+    return itemIds;
+  }
+
+  const routeAuthority = normalizeHostedLinqRouteAuthorityForEgress({
+    memberId: input.memberId,
+    routeAuthority: input.routeAuthority ?? null,
+    target: input.target,
+    targetKind: input.targetKind,
+  });
+
+  for (const requestedItemId of requestedItemIds) {
+    if (seen.has(requestedItemId)) {
+      continue;
+    }
+    const itemId = await resolveHostedLinqAnsweredMailboxItemIdForRuntime({
+      mailboxItemId: requestedItemId,
+      memberId: input.memberId,
+      now,
+      prisma: input.prisma,
+      routeAuthority,
+      target: input.target,
+    });
+    if (!itemId) {
+      return null;
+    }
+    append(itemId);
+  }
+
+  return itemIds;
+}
+
 async function readHostedLinqCurrentInboundDecision(input: {
   currentInbound: HostedLinqCurrentInboundProof | null;
   memberId: string;
@@ -518,6 +597,82 @@ async function readHostedLinqCurrentInboundDecision(input: {
   return decision;
 }
 
+async function resolveHostedLinqAnsweredMailboxItemIdForRuntime(input: {
+  mailboxItemId: string;
+  memberId: string;
+  now: Date;
+  prisma: PrismaClient;
+  routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  target: string | null;
+}): Promise<string | null> {
+  const target = normalizeNullable(input.target);
+  if (!target) {
+    return null;
+  }
+  const item = await readHostedMailboxItemById({
+    mailboxItemId: input.mailboxItemId,
+    prisma: input.prisma,
+  });
+  if (
+    !item
+    || item.id !== input.mailboxItemId
+    || item.userId !== input.memberId
+    || item.kind !== "conversation.message"
+    || item.lane !== "conversation"
+    || isHostedLinqMailboxItemExpired(item.expiresAt ?? null, input.now)
+  ) {
+    return null;
+  }
+
+  const sidecarPayload = item.payloadInlineCiphertext
+    ? null
+    : await readHostedMailboxPayload({
+        dedupeKey: item.dedupeKey,
+        mailboxItemId: item.id,
+        payloadRef: item.payloadRef ?? null,
+        prisma: input.prisma,
+        userId: item.userId,
+      });
+  const decodedPayload = await decodeHostedMailboxStoredPayload({
+    dedupeKey: item.dedupeKey,
+    kind: item.kind,
+    lane: item.lane,
+    laneSeq: item.laneSeq,
+    mailboxItemId: item.id,
+    occurredAt: item.occurredAt,
+    payloadCiphertext: sidecarPayload?.payloadCiphertext ?? null,
+    payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
+    payloadSchema: item.payloadSchema,
+    prisma: input.prisma,
+    userId: item.userId,
+  }).catch(() => null);
+  if (!decodedPayload) {
+    return null;
+  }
+
+  const wake = parseHostedLinqCurrentInboundWake(decodedPayload);
+  if (
+    !wake
+    || wake.userId !== input.memberId
+    || !hostedLinqIsoStringsRepresentSameInstant(wake.occurredAt, item.occurredAt)
+    || wake.message.linqMessage.isFromMe
+    || normalizeNullable(wake.message.linqMessage.chatId) !== target
+    || !hostedLinqRouteAuthoritiesMatch(
+      wake.message.routeAuthority ?? null,
+      input.routeAuthority,
+    )
+  ) {
+    return null;
+  }
+  const occurredAt = parseHostedLinqCurrentInboundDate(wake.occurredAt);
+  if (!occurredAt) {
+    return null;
+  }
+  return decideHostedLinqRecentInbound({ lastInboundAt: occurredAt, now: input.now }).allowed
+    ? item.id
+    : null;
+}
+
 function parseHostedLinqCurrentInboundWake(value: unknown) {
   try {
     const wake = parseHostedExecutionWake(value);
@@ -575,6 +730,22 @@ function normalizeHostedLinqCurrentInboundProof(
     replyToMessageId,
     target,
   };
+}
+
+function normalizeHostedLinqAnsweredMailboxItemIds(
+  value: readonly string[],
+): string[] {
+  const seen = new Set<string>();
+  const itemIds: string[] = [];
+  for (const candidate of value) {
+    const itemId = normalizeNullable(candidate);
+    if (!itemId || seen.has(itemId)) {
+      continue;
+    }
+    seen.add(itemId);
+    itemIds.push(itemId);
+  }
+  return itemIds;
 }
 
 function parseHostedLinqCurrentInboundDate(value: string): Date | null {

@@ -1788,6 +1788,7 @@ describe("assistant delivery orchestration seam", () => {
       dependencies: undefined,
       dispatchMode: "immediate",
       explicitTarget: "explicit-input-target",
+      hostedDeliveryInboundMailboxItemIds: [],
       identityId: "audience-identity",
       media: [],
       message: "reply body",

@@ -10568,6 +10568,7 @@ function createDeliveryEffect(): HostedAssistantDeliverySideEffect {
       explicitTarget: null,
       identityId: null,
       idempotencyKey: "assistant-outbox:intent_synthetic",
+      inboundMailboxItemIds: [],
       media: [],
       message: "Synthetic delivery",
       replyToMessageId: null,

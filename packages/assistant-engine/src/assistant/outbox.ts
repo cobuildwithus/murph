@@ -123,6 +123,7 @@ export interface AssistantOutboxDispatchMessage {
   deliverySource?: AssistantDeliverySource | null
   dedupeToken?: string | null
   explicitTarget?: string | null
+  hostedDeliveryInboundMailboxItemIds?: readonly string[] | null
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
@@ -232,6 +233,7 @@ export type AssistantOutboxCreateIntentInput = {
   deliverySource?: AssistantDeliverySource | null
   deliveryTransportIdempotent?: boolean
   explicitTarget?: string | null
+  hostedDeliveryInboundMailboxItemIds?: readonly string[] | null
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
@@ -291,6 +293,10 @@ export async function createAssistantOutboxIntent(
       ...rawTargetIdentity,
     })
     const deliveryIdempotencyKey = normalizeNullableString(input.deliveryIdempotencyKey)
+    const hostedDeliveryInboundMailboxItemIds =
+      normalizeAssistantOutboxHostedDeliveryInboundMailboxItemIds(
+        input.hostedDeliveryInboundMailboxItemIds,
+      )
     const deliveryTransportIdempotent =
       operation
         ? resolveAssistantOutboxReactionTransportIdempotent({
@@ -315,17 +321,23 @@ export async function createAssistantOutboxIntent(
         deliveryTransportIdempotent,
         intent: existing,
       })
+      const hostedInputUpgradedExisting =
+        maybeUpgradeAssistantOutboxIntentHostedDeliveryInboundMailboxItemIds({
+          hostedDeliveryInboundMailboxItemIds,
+          intent: idempotencyUpgradedExisting,
+          updatedAt: createdAt,
+        })
       const upgradedExisting = operation
         ? maybeUpgradeAssistantOutboxIntentReactionOperation({
             deliveryTransportIdempotent,
-            intent: idempotencyUpgradedExisting,
+            intent: hostedInputUpgradedExisting,
             operation,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
           })
         : maybeUpgradeAssistantOutboxIntentPreDispatchTarget({
-            intent: idempotencyUpgradedExisting,
+            intent: hostedInputUpgradedExisting,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
@@ -371,6 +383,7 @@ export async function createAssistantOutboxIntent(
       delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
+      hostedDeliveryInboundMailboxItemIds,
       deliveryTransportIdempotent,
       lastError: null,
     })
@@ -987,6 +1000,7 @@ export async function deliverAssistantOutboxMessage(input: {
   dispatchHooks?: AssistantOutboxDispatchHooks
   dispatchMode?: AssistantOutboxDispatchMode
   explicitTarget?: string | null
+  hostedDeliveryInboundMailboxItemIds?: readonly string[] | null
   identityId?: string | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
@@ -1010,6 +1024,8 @@ export async function deliverAssistantOutboxMessage(input: {
     deliverySource: input.deliverySource ?? null,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
     explicitTarget: input.explicitTarget,
+    hostedDeliveryInboundMailboxItemIds:
+      input.hostedDeliveryInboundMailboxItemIds,
     identityId: input.identityId,
     media: input.media,
     message: input.message,
@@ -1977,6 +1993,62 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
       deliveryTransportIdempotent,
     }),
   )
+}
+
+function maybeUpgradeAssistantOutboxIntentHostedDeliveryInboundMailboxItemIds(input: {
+  hostedDeliveryInboundMailboxItemIds: readonly string[]
+  intent: AssistantOutboxIntent
+  updatedAt: string
+}): AssistantOutboxIntent {
+  if (input.hostedDeliveryInboundMailboxItemIds.length === 0) {
+    return input.intent
+  }
+  if ((input.intent.hostedDeliveryInboundMailboxItemIds ?? []).length > 0) {
+    return input.intent
+  }
+  if (input.intent.status !== 'pending') {
+    return input.intent
+  }
+  if (input.intent.attemptCount !== 0) {
+    return input.intent
+  }
+  if (input.intent.lastAttemptAt !== null || input.intent.sentAt !== null) {
+    return input.intent
+  }
+  if (input.intent.delivery !== null || input.intent.deliveryConfirmationPending) {
+    return input.intent
+  }
+
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      hostedDeliveryInboundMailboxItemIds:
+        [...input.hostedDeliveryInboundMailboxItemIds],
+      updatedAt: input.updatedAt,
+    }),
+  )
+}
+
+function normalizeAssistantOutboxHostedDeliveryInboundMailboxItemIds(
+  value: readonly string[] | null | undefined,
+): string[] {
+  const seen = new Set<string>()
+  const itemIds: string[] = []
+  for (const candidate of value ?? []) {
+    const itemId = normalizeNullableString(candidate)
+    if (!itemId || seen.has(itemId)) {
+      continue
+    }
+    seen.add(itemId)
+    itemIds.push(itemId)
+  }
+  if (itemIds.length > 40) {
+    throw new VaultCliError(
+      'ASSISTANT_OUTBOX_HOSTED_DELIVERY_INPUT_LIMIT_EXCEEDED',
+      'Hosted delivery consume authority can reference at most 40 mailbox items.',
+    )
+  }
+  return itemIds
 }
 
 function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {

@@ -1047,12 +1047,16 @@ describe("hosted Prisma baseline migration", () => {
       'ALTER TABLE "device_oauth_session" ADD COLUMN "consumed_at" TIMESTAMP(3);',
     );
     expect(hostedLinqDeliveryAnsweredMailboxItemMigrationSql).toContain(
-      'ADD COLUMN "answered_mailbox_item_id" TEXT',
+      'CREATE TABLE "hosted_linq_delivery_answered_mailbox_item"',
     );
     expect(hostedLinqDeliveryAnsweredMailboxItemMigrationSql).toContain(
-      'CREATE INDEX "hosted_linq_delivery_answered_mailbox_item_id_idx"',
+      'PRIMARY KEY ("delivery_id", "mailbox_item_id")',
     );
-    expect(hostedLinqDeliveryAnsweredMailboxItemMigrationSql).not.toContain("NOT NULL");
+    expect(hostedLinqDeliveryAnsweredMailboxItemMigrationSql).toContain(
+      'CREATE INDEX "hosted_linq_delivery_answered_mailbox_item_mailbox_item_id_idx"',
+    );
+    expect(hostedLinqDeliveryAnsweredMailboxItemMigrationSql)
+      .not.toContain("answered_mailbox_item_id");
     expect(hostedLinqDeliveryAnsweredMailboxItemMigrationSql).not.toContain("raw_payload");
     expect(linqPendingParticipantContactMigrationSql).toContain(
       'ALTER TABLE "hosted_member_routing"',

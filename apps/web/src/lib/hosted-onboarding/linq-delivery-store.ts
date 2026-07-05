@@ -430,7 +430,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
 
 export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
   acceptedAt?: Date | null;
-  answeredMailboxItemId?: string | null;
+  answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt?: Date | null;
   failedAt?: Date | null;
   failureCode?: string | null;
@@ -497,13 +497,13 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
 
   return await runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
     let acceptedAdvanced = false;
-    const answeredMailboxItemId = acceptedAt
-      ? await resolveHostedLinqDeliveryAnsweredMailboxItemIdTx({
-          mailboxItemId: input.answeredMailboxItemId ?? null,
+    const answeredMailboxItemIds = acceptedAt
+      ? await resolveHostedLinqDeliveryAnsweredMailboxItemIdsTx({
+          mailboxItemIds: input.answeredMailboxItemIds ?? [],
           prisma,
           userId: input.userId,
         })
-      : null;
+      : [];
     const existing = await prisma.hostedLinqDelivery.findUnique({
       where: { idempotencyKey },
       select: hostedLinqDeliveryLifecycleSelect,
@@ -516,7 +516,6 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
             ? {
                 ...baseData,
                 acceptedAt,
-                answeredMailboxItemId: answeredMailboxItemId,
                 messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
                 messageLookupKey,
                 status: "accepted",
@@ -547,7 +546,6 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         }
         acceptedAdvanced = await updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx({
           acceptedAt,
-          answeredMailboxItemId,
           attemptedAt,
           failedAt,
           failureCode: input.failureCode ?? null,
@@ -565,7 +563,6 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
     } else if (acceptedAt) {
       acceptedAdvanced = await updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx({
         acceptedAt,
-        answeredMailboxItemId,
         attemptedAt,
         failedAt: null,
         failureCode: input.failureCode ?? null,
@@ -582,7 +579,6 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
     } else if (failedAt) {
       await updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx({
         acceptedAt: null,
-        answeredMailboxItemId: null,
         attemptedAt,
         failedAt,
         failureCode: input.failureCode ?? null,
@@ -595,6 +591,14 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         prisma,
         sourceRef: input.sourceRef ?? null,
         targetKind: input.targetKind ?? null,
+      });
+    }
+
+    if (acceptedAdvanced && acceptedAt) {
+      await insertHostedLinqDeliveryAnsweredMailboxItemsTx({
+        deliveryId,
+        mailboxItemIds: answeredMailboxItemIds,
+        prisma,
       });
     }
 
@@ -644,7 +648,6 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
 
 async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
   acceptedAt: Date | null;
-  answeredMailboxItemId: string | null;
   attemptedAt: Date;
   failedAt: Date | null;
   failureCode: string | null;
@@ -681,7 +684,6 @@ async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
       },
       data: {
         acceptedAt: input.acceptedAt,
-        answeredMailboxItemId: input.answeredMailboxItemId,
         attemptedAt: input.attemptedAt,
         failedAt: null,
         failureCode: null,
@@ -980,22 +982,19 @@ export async function readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems
     return [];
   }
   const itemIds = candidates.map((item) => item.id);
-  const rows = await input.prisma.hostedLinqDelivery.findMany({
+  const rows = await input.prisma.hostedLinqDeliveryAnsweredMailboxItem.findMany({
     where: {
-      acceptedAt: {
-        not: null,
-      },
-      answeredMailboxItemId: {
+      mailboxItemId: {
         in: itemIds,
       },
     },
     select: {
-      answeredMailboxItemId: true,
+      mailboxItemId: true,
     },
   });
   const consumedItemIds = new Set<string>();
   for (const row of rows) {
-    const mailboxItemId = normalizeNullable(row.answeredMailboxItemId ?? null);
+    const mailboxItemId = normalizeNullable(row.mailboxItemId ?? null);
     if (!mailboxItemId) {
       continue;
     }
@@ -1264,18 +1263,20 @@ function isHostedLinqDeliveryProviderCorrelated(input: {
   );
 }
 
-async function resolveHostedLinqDeliveryAnsweredMailboxItemIdTx(input: {
-  mailboxItemId: string | null;
+async function resolveHostedLinqDeliveryAnsweredMailboxItemIdsTx(input: {
+  mailboxItemIds: readonly string[];
   prisma: HostedLinqDeliveryClient;
   userId: string;
-}): Promise<string | null> {
-  const mailboxItemId = normalizeNullable(input.mailboxItemId);
-  if (!mailboxItemId) {
-    return null;
+}): Promise<string[]> {
+  const itemIds = normalizeHostedLinqDeliveryAnsweredMailboxItemIds(
+    input.mailboxItemIds,
+  );
+  if (itemIds.length === 0) {
+    return [];
   }
-  const item = await input.prisma.hostedMailboxItem.findFirst({
+  const rows = await input.prisma.hostedMailboxItem.findMany({
     where: {
-      id: mailboxItemId,
+      id: { in: itemIds },
       kind: "conversation.message",
       lane: "conversation",
       userId: input.userId,
@@ -1285,12 +1286,48 @@ async function resolveHostedLinqDeliveryAnsweredMailboxItemIdTx(input: {
     },
   });
 
-  return item?.id ?? null;
+  const foundItemIds = new Set(rows.map((item) => item.id));
+  return itemIds.filter((itemId) => foundItemIds.has(itemId));
+}
+
+async function insertHostedLinqDeliveryAnsweredMailboxItemsTx(input: {
+  deliveryId: string;
+  mailboxItemIds: readonly string[];
+  prisma: HostedLinqDeliveryClient;
+}): Promise<void> {
+  const itemIds = normalizeHostedLinqDeliveryAnsweredMailboxItemIds(
+    input.mailboxItemIds,
+  );
+  if (itemIds.length === 0) {
+    return;
+  }
+  await input.prisma.hostedLinqDeliveryAnsweredMailboxItem.createMany({
+    data: itemIds.map((mailboxItemId) => ({
+      deliveryId: input.deliveryId,
+      mailboxItemId,
+    })),
+    skipDuplicates: true,
+  });
+}
+
+function normalizeHostedLinqDeliveryAnsweredMailboxItemIds(
+  value: readonly string[],
+): string[] {
+  const seen = new Set<string>();
+  const itemIds: string[] = [];
+  for (const candidate of value) {
+    const itemId = normalizeNullable(candidate);
+    if (!itemId || seen.has(itemId)) {
+      continue;
+    }
+    seen.add(itemId);
+    itemIds.push(itemId);
+  }
+  return itemIds;
 }
 
 const hostedLinqDeliveryLifecycleSelect = {
   acceptedAt: true,
-  answeredMailboxItemId: true,
   attemptedAt: true,
   deliveredAt: true,
   failedAt: true,

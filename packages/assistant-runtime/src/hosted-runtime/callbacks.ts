@@ -2014,6 +2014,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
           assertLiveness: input.assertLiveness,
+          answeredMailboxItemIds:
+            input.assistantDeliveryEffect.payload.inboundMailboxItemIds,
           deliveryTransportIdempotent:
             input.assistantDeliveryEffect.payload.transportIdempotent,
           effectsPort: input.effectsPort,
@@ -2033,6 +2035,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         }),
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
           assertLiveness: input.assertLiveness,
+          answeredMailboxItemIds:
+            input.assistantDeliveryEffect.payload.inboundMailboxItemIds,
           deliveryTransportIdempotent:
             input.assistantDeliveryEffect.payload.transportIdempotent,
           effectsPort: input.effectsPort,
@@ -2338,6 +2342,7 @@ function resolveHostedAssistantLinqDeliveryContexts(input: {
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   assertLiveness?: () => Promise<void>;
+  answeredMailboxItemIds?: readonly string[] | null;
   deliveryTransportIdempotent?: boolean | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
@@ -2434,6 +2439,7 @@ function createHostedAssistantLinqSendDependency(input: {
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
           attemptedAt,
+          answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
           deliveryContext,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
@@ -2453,6 +2459,7 @@ function createHostedAssistantLinqSendDependency(input: {
     }
     const acceptedOutcome = buildHostedAssistantLinqDeliveryOutcomeRequest({
       acceptedAt: new Date(),
+      answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
       attemptedAt,
       deliveryContext,
       fromPhoneNumber,
@@ -2599,6 +2606,7 @@ function buildHostedVaultFileMediaIdentity(input: {
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   assertLiveness?: () => Promise<void>;
+  answeredMailboxItemIds?: readonly string[] | null;
   deliveryTransportIdempotent?: boolean | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
@@ -2656,6 +2664,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
           attemptedAt,
+          answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
           deliveryContext,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
@@ -2675,6 +2684,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     }
     const acceptedOutcome = buildHostedAssistantLinqDeliveryOutcomeRequest({
       acceptedAt: new Date(),
+      answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
       attemptedAt,
       deliveryContext,
       fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
@@ -2766,6 +2776,7 @@ function normalizeHostedLinqProviderMessageIds(
 
 function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   acceptedAt?: Date | null;
+  answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt: Date;
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   failedAt?: Date | null;
@@ -2783,6 +2794,12 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
 }): HostedRuntimeLinqDeliveryOutcomeRequest {
   return {
     ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
+    answeredMailboxItemIds: input.recordCurrentInboundAnswer
+      ? normalizeHostedAssistantLinqAnsweredMailboxItemIds({
+          currentInbound: input.deliveryContext?.currentInbound ?? null,
+          itemIds: input.answeredMailboxItemIds ?? [],
+        })
+      : [],
     attemptedAt: input.attemptedAt.toISOString(),
     currentInbound: input.recordCurrentInboundAnswer
       ? input.deliveryContext?.currentInbound ?? null
@@ -2802,12 +2819,38 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   };
 }
 
+function normalizeHostedAssistantLinqAnsweredMailboxItemIds(input: {
+  currentInbound: HostedRuntimeLinqCurrentInboundProof | null;
+  itemIds: readonly string[];
+}): string[] {
+  const seen = new Set<string>();
+  const itemIds: string[] = [];
+  const append = (candidate: string | null | undefined) => {
+    const itemId = candidate?.trim() ?? "";
+    if (!itemId || seen.has(itemId)) {
+      return;
+    }
+    seen.add(itemId);
+    itemIds.push(itemId);
+  };
+
+  append(input.currentInbound?.mailboxItemId);
+  for (const itemId of input.itemIds) {
+    append(itemId);
+  }
+  return itemIds;
+}
+
 const pendingHostedAssistantLinqDeliveryOutcomeWrites = new Set<Promise<void>>();
 
 function shouldRequireHostedAssistantLinqDeliveryOutcomeRecord(input: {
+  answeredMailboxItemIds?: readonly string[] | null;
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
 }): boolean {
-  return Boolean(input.currentInbound?.mailboxItemId);
+  return Boolean(
+    input.currentInbound?.mailboxItemId
+      || (input.answeredMailboxItemIds?.length ?? 0) > 0,
+  );
 }
 
 async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
@@ -3613,6 +3656,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "deliverySource"
     | "deliveryTransportIdempotent"
     | "explicitTarget"
+    | "hostedDeliveryInboundMailboxItemIds"
     | "identityId"
     | "intentId"
     | "media"
@@ -3634,6 +3678,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     explicitTarget: intent.explicitTarget ?? null,
     idempotencyKey: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
     identityId: intent.identityId ?? null,
+    inboundMailboxItemIds: intent.hostedDeliveryInboundMailboxItemIds ?? [],
     media: normalizeHostedAssistantDeliveryMedia(intent.media),
     message: intent.message,
     subject: intent.subject ?? null,

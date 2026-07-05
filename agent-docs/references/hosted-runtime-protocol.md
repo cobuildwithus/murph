@@ -234,25 +234,21 @@ the same transaction as the product/control-plane mutation that made work
 necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
 uses `HostedMailboxLaneCounter`.
 `HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
-watermark. The runtime computes answered coverage by scanning the persisted
-conversation-lane input store in lane-sequence order and stopping before the
-first input without terminal auto-reply evidence. Before dispatch, that coverage
-is recorded in the turn receipt metadata for the outbox intent; outbox intent
-JSON omits it, and dispatch reloads it from the receipt. Linq delivery outcomes
-carry that coverage back to web, and web persists it on the existing
-`HostedLinqDelivery` row when that row first records an accepted outcome.
-Accepted replays advance `consumed_seq` only from coverage already stored on
-that delivery row, not from mutable replay payloads; failed outcomes do not
-advance coverage. The advance remains a monotonic max clamped by the lane owner.
-The
-mailbox fetch response returns `consumedSeqByLane`; replayed items at or below
-the watermark are re-staged as conversation context with a null reply target,
-never as fresh reply candidates, so a workspace restore from a stale snapshot
-cannot re-reply to an already-handled message. Reconciliation and status lag
-net imported checkpoints against consumed coverage so delivery-time authority
-can prove work complete before a later checkpoint import. A container rollout
-SIGTERM additionally makes the runtime treat the idle window as elapsed and run
-its normal `idle_shutdown` checkpoint inside the termination grace period.
+watermark, but accepted Linq reply consume authority is exact-item based. The
+assistant outbox intent carries `hostedDeliveryInboundMailboxItemIds` from the
+accepted input set. Accepted Linq delivery outcomes carry the existing
+`currentInbound` proof plus `answeredMailboxItemIds`; web validates every item
+against the stored mailbox payload, target chat, runtime user, expiry, and route
+authority, then stores one `hosted_linq_delivery_answered_mailbox_item` row per
+validated item when the `HostedLinqDelivery` first records an accepted outcome.
+Failed outcomes store no answered items, and accepted replays rely only on the
+stored child rows rather than mutable replay payloads. Mailbox fetch/import
+treats exactly those accepted items as conversation context with a null reply
+target, never as fresh reply candidates, so a workspace restore from a stale
+snapshot cannot re-reply to an already-handled message even when a lower gap
+keeps contiguous `consumed_seq` behind. A container rollout SIGTERM additionally
+makes the runtime treat the idle window as elapsed and run its normal
+`idle_shutdown` checkpoint inside the termination grace period.
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,

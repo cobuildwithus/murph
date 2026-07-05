@@ -164,6 +164,7 @@ function createPayload(
     explicitTarget: null,
     idempotencyKey: "assistant-outbox:intent_123",
     identityId: "identity_123",
+    inboundMailboxItemIds: [],
     media: [],
     message: "hello from hosted",
     subject: null,
@@ -872,6 +873,7 @@ describe("hosted runtime callbacks", () => {
           explicitTarget: null,
           idempotencyKey: "assistant-outbox:intent_reaction",
           identityId: "identity_1",
+          inboundMailboxItemIds: [],
           media: [],
           message: "",
           subject: null,
@@ -896,6 +898,7 @@ describe("hosted runtime callbacks", () => {
           explicitTarget: null,
           idempotencyKey: "assistant-segment:turn_1:0",
           identityId: "identity_1",
+          inboundMailboxItemIds: [],
           media: [
             {
               kind: "image",
@@ -5446,6 +5449,10 @@ describe("hosted runtime callbacks", () => {
       bindingDeliveryTarget: "linq_chat_a",
       channel: "linq",
       explicitTarget: "linq_chat_a",
+      inboundMailboxItemIds: [
+        "mailbox_item_linq_current",
+        "mailbox_item_linq_followup",
+      ],
       transportIdempotent: true,
     });
     const assertRecentInbound = vi.fn(async () => undefined);
@@ -5523,6 +5530,10 @@ describe("hosted runtime callbacks", () => {
     ]);
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
+        answeredMailboxItemIds: [
+          "mailbox_item_linq_current",
+          "mailbox_item_linq_followup",
+        ],
         currentInbound,
       }),
       { signal: expect.any(AbortSignal) },

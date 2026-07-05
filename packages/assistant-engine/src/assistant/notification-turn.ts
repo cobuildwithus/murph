@@ -1135,6 +1135,8 @@ async function deliverAssistantNotificationMessage(input: {
     message: input.message,
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+    hostedDeliveryInboundMailboxItemIds:
+      hostedDelivery.hostedDeliveryInboundMailboxItemIds,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     signal: input.input.abortSignal,
     ...deliveryFields,

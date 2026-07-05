@@ -113,6 +113,7 @@ export interface HostedAssistantDeliveryPayload {
   explicitTarget: string | null;
   idempotencyKey: string;
   identityId: string | null;
+  inboundMailboxItemIds: readonly string[];
   media: readonly HostedAssistantDeliveryMedia[];
   message: string;
   subject: string | null;
@@ -665,6 +666,10 @@ function parseHostedAssistantDeliveryPayload(
     ),
     idempotencyKey: requireString(record.idempotencyKey, `${label}.idempotencyKey`),
     identityId: requireNullableString(record.identityId ?? null, `${label}.identityId`),
+    inboundMailboxItemIds: parseHostedAssistantDeliveryInboundMailboxItemIds(
+      record.inboundMailboxItemIds ?? [],
+      `${label}.inboundMailboxItemIds`,
+    ),
     media: parseHostedAssistantDeliveryMediaList(record.media ?? [], `${label}.media`),
     message: requireStringValue(record.message, `${label}.message`),
     subject: requireNullableString(record.subject ?? null, `${label}.subject`),
@@ -684,6 +689,31 @@ function parseHostedAssistantDeliveryPayload(
     ),
     turnId: requireString(record.turnId, `${label}.turnId`),
   };
+}
+
+function parseHostedAssistantDeliveryInboundMailboxItemIds(
+  value: unknown,
+  label: string,
+): string[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  if (value.length > 40) {
+    throw new TypeError(`${label} must contain at most 40 entries.`);
+  }
+
+  const seen = new Set<string>();
+  const itemIds: string[] = [];
+  for (const [index, entry] of value.entries()) {
+    const itemId = requireString(entry, `${label}[${index}]`).trim();
+    if (!itemId || seen.has(itemId)) {
+      continue;
+    }
+    seen.add(itemId);
+    itemIds.push(itemId);
+  }
+  return itemIds;
 }
 
 function parseHostedAssistantDeliveryMediaList(

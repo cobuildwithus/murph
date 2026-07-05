@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   recordHostedLinqRuntimeDeliveryOutcomeTx: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
-  resolveHostedLinqCurrentInboundMailboxItemIdForRuntime: vi.fn(),
+  resolveHostedLinqAnsweredMailboxItemIdsForRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -26,8 +26,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-egress-engagement", async (importOrigi
   >();
   return {
     ...actual,
-    resolveHostedLinqCurrentInboundMailboxItemIdForRuntime:
-      mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime,
+    resolveHostedLinqAnsweredMailboxItemIdsForRuntime:
+      mocks.resolveHostedLinqAnsweredMailboxItemIdsForRuntime,
   };
 });
 
@@ -70,8 +70,8 @@ describe("hosted runtime Linq delivery route", () => {
       deliveryId: "hld_123",
       recorded: true,
     });
-    mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime
-      .mockResolvedValue("mailbox_item_answered_42");
+    mocks.resolveHostedLinqAnsweredMailboxItemIdsForRuntime
+      .mockResolvedValue(["mailbox_item_answered_42"]);
   });
 
   it("records an accepted runtime delivery outcome without raw recipient fallback for participant sends", async () => {
@@ -104,7 +104,7 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: new Date("2026-04-26T00:00:04.000Z"),
-        answeredMailboxItemId: "mailbox_item_answered_42",
+        answeredMailboxItemIds: ["mailbox_item_answered_42"],
         attemptedAt: new Date("2026-04-26T00:00:03.000Z"),
         failedAt: null,
         idempotencyKey: "assistant-outbox:intent_123",
@@ -117,7 +117,7 @@ describe("hosted runtime Linq delivery route", () => {
         userId: "member_123",
       }),
     );
-    expect(mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime)
+    expect(mocks.resolveHostedLinqAnsweredMailboxItemIdsForRuntime)
       .toHaveBeenCalledWith({
         currentInbound: {
           dedupeKey: "evt_linq_current",
@@ -127,6 +127,7 @@ describe("hosted runtime Linq delivery route", () => {
           replyToMessageId: "linq_message_inbound",
           target: "linq_chat_123",
         },
+        mailboxItemIds: [],
         memberId: "member_123",
         now: new Date("2026-04-26T00:00:04.000Z"),
         prisma,
@@ -141,7 +142,7 @@ describe("hosted runtime Linq delivery route", () => {
   });
 
   it("fails closed when an accepted delivery current inbound proof does not validate", async () => {
-    mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime.mockResolvedValueOnce(null);
+    mocks.resolveHostedLinqAnsweredMailboxItemIdsForRuntime.mockResolvedValueOnce(null);
 
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
@@ -187,15 +188,61 @@ describe("hosted runtime Linq delivery route", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime)
+    expect(mocks.resolveHostedLinqAnsweredMailboxItemIdsForRuntime)
       .toHaveBeenCalledWith(expect.objectContaining({
         target: "linq_chat_old",
       }));
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx)
       .toHaveBeenCalledWith(expect.objectContaining({
-        answeredMailboxItemId: "mailbox_item_answered_42",
+        answeredMailboxItemIds: ["mailbox_item_answered_42"],
         linqChatId: "linq_chat_recovered",
         messageId: "linq_message_sent",
+      }));
+  });
+
+  it("records every validated mailbox item answered by the accepted delivery", async () => {
+    mocks.resolveHostedLinqAnsweredMailboxItemIdsForRuntime.mockResolvedValueOnce([
+      "mailbox_item_answered_42",
+      "mailbox_item_answered_43",
+    ]);
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds: [
+        "mailbox_item_answered_42",
+        "mailbox_item_answered_43",
+      ],
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      currentInbound: {
+        dedupeKey: "evt_linq_current",
+        eventId: "evt_linq_current",
+        mailboxItemId: "mailbox_item_answered_42",
+        occurredAt: "2026-04-26T00:00:02.000Z",
+        replyToMessageId: "linq_message_inbound",
+        target: "linq_chat_123",
+      },
+      idempotencyKey: "assistant-outbox:intent_123",
+      intentId: "intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedLinqAnsweredMailboxItemIdsForRuntime)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        mailboxItemIds: [
+          "mailbox_item_answered_42",
+          "mailbox_item_answered_43",
+        ],
+      }));
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        answeredMailboxItemIds: [
+          "mailbox_item_answered_42",
+          "mailbox_item_answered_43",
+        ],
       }));
   });
 
@@ -282,7 +329,7 @@ describe("hosted runtime Linq delivery route", () => {
         phoneNumberLookupKey: "hbidx:phone:v1:account",
       }),
     );
-    expect(mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime)
+    expect(mocks.resolveHostedLinqAnsweredMailboxItemIdsForRuntime)
       .toHaveBeenCalledWith(expect.objectContaining({
         routeAuthority,
         target: "linq_chat_123",

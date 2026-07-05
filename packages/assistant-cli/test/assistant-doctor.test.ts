@@ -193,6 +193,7 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   bindingDelivery: null,
   deliverySource: null,
   explicitTarget: null,
+  hostedDeliveryInboundMailboxItemIds: [],
   delivery: null,
   deliveryConfirmationPending: false,
   deliveryIdempotencyKey: null,

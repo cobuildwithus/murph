@@ -214,6 +214,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
 
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   acceptedAt?: string | null;
+  answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt: string;
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   failedAt?: string | null;

@@ -1214,7 +1214,6 @@ model HostedLinqDelivery {
   linqChatLookupKey    String?  @map("linq_chat_lookup_key")
   messageLookupKey     String?  @unique @map("message_lookup_key")
   messageIdSuffix      String?  @map("message_id_suffix")
-  answeredMailboxItemId String?  @map("answered_mailbox_item_id")
   service              String?
   status               String   @default("attempted")
   attemptedAt          DateTime @map("attempted_at")
@@ -1231,13 +1230,24 @@ model HostedLinqDelivery {
   updatedAt            DateTime @updatedAt @map("updated_at")
   line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
   alerts               HostedLinqAlert[]
+  answeredMailboxItems HostedLinqDeliveryAnsweredMailboxItem[]
 
   @@index([phoneNumberLookupKey, attemptedAt])
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])
   @@index([lastReceiptAt])
-  @@index([answeredMailboxItemId])
   @@map("hosted_linq_delivery")
+}
+
+model HostedLinqDeliveryAnsweredMailboxItem {
+  deliveryId    String             @map("delivery_id")
+  mailboxItemId String             @map("mailbox_item_id")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  delivery      HostedLinqDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@id([deliveryId, mailboxItemId])
+  @@index([mailboxItemId])
+  @@map("hosted_linq_delivery_answered_mailbox_item")
 }
 
 model HostedLinqAlert {

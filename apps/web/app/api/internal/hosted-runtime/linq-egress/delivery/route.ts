@@ -20,7 +20,7 @@ import {
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
   type HostedLinqCurrentInboundProof,
-  resolveHostedLinqCurrentInboundMailboxItemIdForRuntime,
+  resolveHostedLinqAnsweredMailboxItemIdsForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   jsonOk,
@@ -41,6 +41,9 @@ export const POST = withJsonError(async (request: Request) => {
   const body = await readOptionalJsonObject(request);
   const prisma = getPrisma();
   const routeAuthority = parseHostedLinqDeliveryRouteAuthority(body.routeAuthority);
+  const answeredMailboxItemIds = parseHostedLinqDeliveryAnsweredMailboxItemIds(
+    body.answeredMailboxItemIds,
+  );
   const currentInbound = parseHostedLinqDeliveryCurrentInbound(body.currentInbound);
   const targetKind = parseHostedLinqDeliveryTargetKind(body.targetKind);
   const acceptedAt = parseOptionalHostedLinqDeliveryDate(
@@ -98,8 +101,9 @@ export const POST = withJsonError(async (request: Request) => {
       prisma,
     });
   }
-  const answeredMailboxItemId = acceptedAt
-    ? await resolveHostedLinqDeliveryAnsweredMailboxItemId({
+  const resolvedAnsweredMailboxItemIds = acceptedAt
+    ? await resolveHostedLinqDeliveryAnsweredMailboxItemIds({
+        answeredMailboxItemIds,
         acceptedAt,
         currentInbound,
         linqChatId: answeredLinqChatId,
@@ -111,7 +115,7 @@ export const POST = withJsonError(async (request: Request) => {
     : null;
   const result = await recordHostedLinqRuntimeDeliveryOutcomeTx({
     acceptedAt,
-    answeredMailboxItemId,
+    answeredMailboxItemIds: resolvedAnsweredMailboxItemIds,
     attemptedAt,
     failedAt,
     failureCode: readOptionalBodyString(body.failureCode),
@@ -134,20 +138,19 @@ export const POST = withJsonError(async (request: Request) => {
   });
 });
 
-async function resolveHostedLinqDeliveryAnsweredMailboxItemId(input: {
+async function resolveHostedLinqDeliveryAnsweredMailboxItemIds(input: {
   acceptedAt: Date;
+  answeredMailboxItemIds: readonly string[];
   currentInbound: HostedLinqCurrentInboundProof | null;
   linqChatId: string | null;
   memberId: string;
   prisma: ReturnType<typeof getPrisma>;
   routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null;
   targetKind: "explicit" | "participant" | "thread" | null;
-}): Promise<string | null> {
-  if (!input.currentInbound) {
-    return null;
-  }
-  const mailboxItemId = await resolveHostedLinqCurrentInboundMailboxItemIdForRuntime({
+}): Promise<string[]> {
+  const mailboxItemIds = await resolveHostedLinqAnsweredMailboxItemIdsForRuntime({
     currentInbound: input.currentInbound,
+    mailboxItemIds: input.answeredMailboxItemIds,
     memberId: input.memberId,
     now: input.acceptedAt,
     prisma: input.prisma,
@@ -155,8 +158,8 @@ async function resolveHostedLinqDeliveryAnsweredMailboxItemId(input: {
     target: input.linqChatId,
     targetKind: input.targetKind,
   });
-  if (mailboxItemId) {
-    return mailboxItemId;
+  if (mailboxItemIds) {
+    return mailboxItemIds;
   }
 
   throw hostedOnboardingError({
@@ -165,6 +168,39 @@ async function resolveHostedLinqDeliveryAnsweredMailboxItemId(input: {
     message: "Hosted Linq delivery current inbound proof is invalid.",
     retryable: false,
   });
+}
+
+function parseHostedLinqDeliveryAnsweredMailboxItemIds(value: unknown): string[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEMS_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq delivery answered mailbox item ids are invalid.",
+      retryable: false,
+    });
+  }
+  if (value.length > 40) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEMS_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq delivery answered mailbox item ids are invalid.",
+      retryable: false,
+    });
+  }
+  const seen = new Set<string>();
+  const itemIds: string[] = [];
+  for (const entry of value) {
+    const itemId = readOptionalBodyString(entry);
+    if (!itemId || seen.has(itemId)) {
+      continue;
+    }
+    seen.add(itemId);
+    itemIds.push(itemId);
+  }
+  return itemIds;
 }
 
 async function readHostedLinqDeliveryRouteLineLookupKey(input: {

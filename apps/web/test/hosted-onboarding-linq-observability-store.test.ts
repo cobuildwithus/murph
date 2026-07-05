@@ -1329,16 +1329,20 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("stores an exact accepted mailbox item id when an accepted runtime outcome first records", async () => {
+  it("stores exact accepted mailbox item ids when an accepted runtime outcome first records", async () => {
     const fixture = createObservabilityPrismaFixture();
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
-    fixture.hostedMailboxItemFindFirst.mockResolvedValueOnce({
-      id: "mailbox_item_answered_42",
-    });
+    fixture.hostedMailboxItemFindMany.mockResolvedValueOnce([
+      { id: "mailbox_item_answered_42" },
+      { id: "mailbox_item_answered_43" },
+    ]);
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
-      answeredMailboxItemId: "mailbox_item_answered_42",
+      answeredMailboxItemIds: [
+        "mailbox_item_answered_42",
+        "mailbox_item_answered_43",
+      ],
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       idempotencyKey: "assistant-outbox:intent_first_accept",
       linqChatId: "linq_chat_123",
@@ -1354,22 +1358,38 @@ describe("hosted Linq observability stores", () => {
 
     expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          answeredMailboxItemId: "mailbox_item_answered_42",
+        data: expect.not.objectContaining({
+          answeredMailboxItemId: expect.anything(),
         }),
       }),
     );
-    expect(fixture.hostedMailboxItemFindFirst).toHaveBeenCalledWith({
+    expect(fixture.hostedMailboxItemFindMany).toHaveBeenCalledWith({
       select: {
         id: true,
       },
       where: {
-        id: "mailbox_item_answered_42",
+        id: {
+          in: ["mailbox_item_answered_42", "mailbox_item_answered_43"],
+        },
         kind: "conversation.message",
         lane: "conversation",
         userId: "member_123",
       },
     });
+    expect(fixture.hostedLinqDeliveryAnsweredMailboxItemCreateMany)
+      .toHaveBeenCalledWith({
+        data: [
+          {
+            deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+            mailboxItemId: "mailbox_item_answered_42",
+          },
+          {
+            deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+            mailboxItemId: "mailbox_item_answered_43",
+          },
+        ],
+        skipDuplicates: true,
+      });
     expect(fixture.hostedMailboxLaneCounterFindUnique).not.toHaveBeenCalled();
     expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
   });
@@ -1377,13 +1397,13 @@ describe("hosted Linq observability stores", () => {
   it("stores a gap exact item without advancing the consumed floor", async () => {
     const fixture = createObservabilityPrismaFixture();
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
-    fixture.hostedMailboxItemFindFirst.mockResolvedValueOnce({
+    fixture.hostedMailboxItemFindMany.mockResolvedValueOnce([{
       id: "mailbox_item_answered_3",
-    });
+    }]);
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
-      answeredMailboxItemId: "mailbox_item_answered_3",
+      answeredMailboxItemIds: ["mailbox_item_answered_3"],
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       idempotencyKey: "assistant-outbox:intent_gap_accept",
       linqChatId: "linq_chat_123",
@@ -1397,19 +1417,22 @@ describe("hosted Linq observability stores", () => {
       recorded: true,
     });
 
-    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          answeredMailboxItemId: "mailbox_item_answered_3",
-        }),
-      }),
-    );
-    expect(fixture.hostedMailboxItemFindFirst).toHaveBeenCalledWith({
+    expect(fixture.hostedLinqDeliveryAnsweredMailboxItemCreateMany)
+      .toHaveBeenCalledWith({
+        data: [
+          {
+            deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+            mailboxItemId: "mailbox_item_answered_3",
+          },
+        ],
+        skipDuplicates: true,
+      });
+    expect(fixture.hostedMailboxItemFindMany).toHaveBeenCalledWith({
       select: {
         id: true,
       },
       where: {
-        id: "mailbox_item_answered_3",
+        id: { in: ["mailbox_item_answered_3"] },
         kind: "conversation.message",
         lane: "conversation",
         userId: "member_123",
@@ -1424,7 +1447,6 @@ describe("hosted Linq observability stores", () => {
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
       acceptedAt: new Date("2026-03-26T12:00:00.000Z"),
-      answeredMailboxItemId: "mailbox_item_stored_12",
       deliveredAt: null,
       failedAt: null,
       id: "hld_replayed_accepted",
@@ -1438,7 +1460,7 @@ describe("hosted Linq observability stores", () => {
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
-      answeredMailboxItemId: "mailbox_item_replayed_42",
+      answeredMailboxItemIds: ["mailbox_item_replayed_42"],
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       idempotencyKey: "assistant-outbox:intent_replay",
       linqChatId: "linq_chat_123",
@@ -1454,23 +1476,18 @@ describe("hosted Linq observability stores", () => {
 
     expect(fixture.hostedMailboxLaneCounterFindUnique).not.toHaveBeenCalled();
     expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          answeredMailboxItemId: "mailbox_item_replayed_42",
-        }),
-      }),
-    );
+    expect(fixture.hostedLinqDeliveryAnsweredMailboxItemCreateMany)
+      .not.toHaveBeenCalled();
   });
 
   it("reads exact accepted delivery consumed mailbox items from stored coverage", async () => {
     const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+    fixture.hostedLinqDeliveryAnsweredMailboxItemFindMany.mockResolvedValueOnce([
       {
-        answeredMailboxItemId: "mailbox_item_answered_3",
+        mailboxItemId: "mailbox_item_answered_3",
       },
       {
-        answeredMailboxItemId: "mailbox_item_other",
+        mailboxItemId: "mailbox_item_other",
       },
     ]);
 
@@ -1494,15 +1511,13 @@ describe("hosted Linq observability stores", () => {
       },
     ]);
 
-    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
+    expect(fixture.hostedLinqDeliveryAnsweredMailboxItemFindMany)
+      .toHaveBeenCalledWith({
       select: {
-        answeredMailboxItemId: true,
+        mailboxItemId: true,
       },
       where: {
-        acceptedAt: {
-          not: null,
-        },
-        answeredMailboxItemId: {
+        mailboxItemId: {
           in: ["mailbox_item_pending_2", "mailbox_item_answered_3"],
         },
       },
@@ -1513,7 +1528,7 @@ describe("hosted Linq observability stores", () => {
     const fixture = createObservabilityPrismaFixture();
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
-      answeredMailboxItemId: "mailbox_item_failed_42",
+      answeredMailboxItemIds: ["mailbox_item_failed_42"],
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       failedAt: new Date("2026-03-26T12:00:01.000Z"),
       failureCode: "provider_unavailable",
@@ -1528,7 +1543,9 @@ describe("hosted Linq observability stores", () => {
       recorded: true,
     });
 
-    expect(fixture.hostedMailboxItemFindFirst).not.toHaveBeenCalled();
+    expect(fixture.hostedMailboxItemFindMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryAnsweredMailboxItemCreateMany)
+      .not.toHaveBeenCalled();
     expect(fixture.hostedMailboxLaneCounterFindUnique).not.toHaveBeenCalled();
     expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
   });
@@ -2418,6 +2435,10 @@ function createObservabilityPrismaFixture() {
   const hostedLinqDeliveryUpdate = vi.fn().mockResolvedValue(undefined);
   const hostedLinqDeliveryUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryUpsert = vi.fn().mockResolvedValue({ id: "hld_123" });
+  const hostedLinqDeliveryAnsweredMailboxItemCreateMany =
+    vi.fn().mockResolvedValue({ count: 1 });
+  const hostedLinqDeliveryAnsweredMailboxItemFindMany =
+    vi.fn().mockResolvedValue([]);
   const hostedMailboxLaneCounterFindUnique = vi.fn().mockResolvedValue({
     consumedSeq: 0n,
     lane: "conversation",
@@ -2425,7 +2446,7 @@ function createObservabilityPrismaFixture() {
     userId: "member_123",
   });
   const hostedMailboxLaneCounterUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
-  const hostedMailboxItemFindFirst = vi.fn().mockResolvedValue(null);
+  const hostedMailboxItemFindMany = vi.fn().mockResolvedValue([]);
   const hostedLinqLineFindMany = vi.fn().mockResolvedValue([]);
   const hostedLinqLineFindUnique = vi.fn().mockResolvedValue(null);
   const hostedLinqLineUpdate = vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
@@ -2457,12 +2478,16 @@ function createObservabilityPrismaFixture() {
       updateMany: hostedLinqDeliveryUpdateMany,
       upsert: hostedLinqDeliveryUpsert,
     },
+    hostedLinqDeliveryAnsweredMailboxItem: {
+      createMany: hostedLinqDeliveryAnsweredMailboxItemCreateMany,
+      findMany: hostedLinqDeliveryAnsweredMailboxItemFindMany,
+    },
     hostedMailboxLaneCounter: {
       findUnique: hostedMailboxLaneCounterFindUnique,
       updateMany: hostedMailboxLaneCounterUpdateMany,
     },
     hostedMailboxItem: {
-      findFirst: hostedMailboxItemFindFirst,
+      findMany: hostedMailboxItemFindMany,
     },
     hostedLinqLine: {
       findMany: hostedLinqLineFindMany,
@@ -2489,9 +2514,11 @@ function createObservabilityPrismaFixture() {
     hostedLinqDeliveryUpdate,
     hostedLinqDeliveryUpdateMany,
     hostedLinqDeliveryUpsert,
+    hostedLinqDeliveryAnsweredMailboxItemCreateMany,
+    hostedLinqDeliveryAnsweredMailboxItemFindMany,
     hostedMailboxLaneCounterFindUnique,
     hostedMailboxLaneCounterUpdateMany,
-    hostedMailboxItemFindFirst,
+    hostedMailboxItemFindMany,
     hostedLinqLineFindMany,
     hostedLinqLineFindUnique,
     hostedLinqLineUpdate,

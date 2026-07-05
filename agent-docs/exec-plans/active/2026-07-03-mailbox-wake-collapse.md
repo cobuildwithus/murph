@@ -37,17 +37,18 @@ The runtime already reports every Linq delivery outcome to
 `POST /api/internal/hosted-runtime/linq-egress/delivery`
 (`apps/web/app/api/internal/hosted-runtime/linq-egress/delivery/route.ts`),
 with `acceptedAt`/`failedAt`, intent id, idempotency key, and the current
-inbound mailbox item id selected by the delivery context. Sent and consumed
-become one exact item fact on one callback:
+inbound mailbox item set selected by the delivery context. Sent and consumed
+become one exact item-set fact on one callback:
 
-1. Forward the current inbound mailbox item id on the existing delivery
+1. Forward the answered inbound mailbox item ids on the existing delivery
    report.
 2. On `acceptedAt`, the delivery route validates the full current-inbound
-   proof against the mailbox item payload (item id, dedupe key, event id,
-   occurred-at, reply-to message id, target chat, user, lane/kind,
+   proof plus each answered mailbox item against mailbox payloads (item id,
+   dedupe key for the proof item, event id for the proof item, occurred-at,
+   reply-to message id for the proof item, target chat, user, lane/kind,
    non-self inbound, expiry, and routed account authority), then stores
-   the item id on the accepted delivery row.
-3. Mailbox fetch/import treats that exact stored item as context-only on
+   one child row per item for the accepted delivery.
+3. Mailbox fetch/import treats those exact stored items as context-only on
    replay, including when a lower lane gap keeps the contiguous
    `consumed_seq` behind it.
 
@@ -69,13 +70,14 @@ Deletion ledger:
   optionality that caused the June `consume_port_missing` incident.
 - `isHostedMailboxLaneCheckpointed` (`apps/web/src/lib/hosted-mailbox/lag.ts:29-42`)
   - dead export, zero callers repo-wide.
-- Added: one delivery-row exact mailbox item id, forwarded from the existing
-  current-inbound proof and validated in the existing route transaction.
+- Added: one accepted-delivery exact mailbox item set, forwarded from the
+  existing current-inbound proof/input ids and validated in the existing route
+  transaction.
 
 Verified against source (2026-07-05):
 - `recordHostedLinqRuntimeDeliveryOutcomeTx` runs inside
   `runHostedLinqDeliveryStoreTransaction` (`linq-delivery-store.ts:494`),
-  so accepted delivery rows and their exact mailbox item id are recorded
+  so accepted delivery rows and their exact mailbox item set are recorded
   atomically. It early-exits `recorded: false` without an idempotency key;
   reaction/keyless sends never create an accepted-item fact, which is
   correct (a reaction is not a reply).
@@ -112,20 +114,21 @@ Exact accepted-item computation (verified design, hardened by adversarial review
   route/service authority so post-checkpoint prepared retries restore the
   same exact consume authority before provider send.
 - The runtime must synchronously record accepted delivery outcomes whenever
-  the accepted outcome carries a `currentInbound.mailboxItemId`; exact
-  current-inbound proof is the only answer-consume authority.
+  the accepted outcome carries `currentInbound.mailboxItemId` or
+  `answeredMailboxItemIds`; the validated accepted item set is the only
+  answer-consume authority.
 - Progress Linq delivery may use `currentInbound` for the egress guard, but
   must not include it in delivery-outcome recording; progress is not
   terminal answer evidence.
-- The web route validates the full current-inbound proof against the
-  mailbox item payload before persisting the exact item id. Routed inbound
+- The web route validates the full current-inbound proof and answered item
+  set against mailbox item payloads before persisting child rows. Routed inbound
   proof and outbound delivery authority must match on channel,
   container member, account lookup key, and thread id.
 - Mailbox fetch/import turns matching accepted delivery rows into
-  `consumedItems` so the exact accepted item is context-only even when the
+  `consumedItems` so the exact accepted items are context-only even when the
   contiguous `consumed_seq` floor is held back by a lower gap.
 - Accepted replays never recompute from mutable replay request bodies. If
-  web did not store the exact item id when the accepted fact was recorded,
+  web did not store the exact item rows when the accepted fact was recorded,
   there is no durable authority left to consume from later.
 - Rollback care: `assistantOutboxIntentSchema` is `.strict()`. A new
   runner writing the field then rolling back to an old runner must not
@@ -171,16 +174,16 @@ unconditional Temporal mailbox-append signal as the wake authority; Cloudflare
 
 Deploy-window analysis for the merged PR (replaces the old staged gate):
 - Web deploys first. The delivery route starts recording exact accepted item
-  ids once runner payloads include current inbound proof; it does not
+  sets once runner payloads include current inbound proof and answered item ids; it does not
   advance `consumed_seq`.
 - Cloudflare deploys second (worker route + runner bundle ship together in
   the hosted-execution deploy), with `container_rollout=immediate` so old
   runner containers are recycled into the exact-item context behavior.
 - Post-deploy verification before calling it done: one prod accepted Linq
-  delivery row with `answered_mailbox_item_id`, followed by a replay/fetch
-  where that item is context-only and not replyable; mismatched
+  delivery with rows in `hosted_linq_delivery_answered_mailbox_item`,
+  followed by a replay/fetch where those items are context-only and not replyable; mismatched
   current-inbound proof, including mismatched route authority, must fail
-  closed and not store an item id.
+  closed and not store item rows.
 
 ### PR 2 — retire the legacy workflow patch branch + collapse the wake fields
 
@@ -258,8 +261,8 @@ Touch: `webhook-service-types.ts:17-26`;
   current-inbound proof; the restored #362 E2E suite
   including the rapid-double-webhook scenario and the Linq delivery E2E
   that was the original failure signal, 2 consecutive green runs; prod
-  readback of accepted delivery rows with
-  `answered_mailbox_item_id`.
+  readback of accepted delivery item rows in
+  `hosted_linq_delivery_answered_mailbox_item`.
 - PR 1 CI follow-up (2026-07-03): scheduled-reminder overlap coverage
   additionally proves foreground Linq sends are observed before due
   background reminders without the wait helper advancing hosted-local
@@ -322,7 +325,7 @@ Touch: `webhook-service-types.ts:17-26`;
 
 | PR | Deleted | Added |
 | --- | --- | --- |
-| 1 | ~220-line checkpoint ack block, consume route+port+compat wiring, dead lag export, every-message admission pre-read (relocated), re-landed web direct-wake fast path after authorization review, high-water consume helper and delivery-row lane coverage fields | exact current-inbound item field on the existing delivery report, one delivery-row mailbox item id |
+| 1 | ~220-line checkpoint ack block, consume route+port+compat wiring, dead lag export, every-message admission pre-read (relocated), re-landed web direct-wake fast path after authorization review, high-water consume helper and delivery-row lane coverage fields | exact answered item ids on the existing delivery report, accepted-delivery child rows |
 | 2 | legacy patch branch, runtime seam, patch constant, direct-summary recorder, replay fixture+test, four legacy wake plan fields + parallel consumers | `deprecatePatch` intermediate (itself later deleted) |
 
 Plan-level collapse already banked: the original PR C ("demote workflow to
@@ -333,7 +336,7 @@ reconcile loop remains the only wake authority.
 Adversarial review (c1 gpt-5.5 xhigh, 2026-07-03) resolutions: fetch-gate
 deletion withdrawn before direct-wake deletion made that path obsolete;
 high-water consume authority rejected in favor of exact accepted mailbox
-item facts; mailbox fetch exposes accepted delivery-row item ids for gap
+item facts; mailbox fetch exposes accepted delivery item ids for gap
 suppression; dispatch reads pre-provider receipt metadata only for runtime
 delivery-outcome durability; reaction-only sends excluded from callback
 assumptions.
