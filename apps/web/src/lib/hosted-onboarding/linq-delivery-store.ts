@@ -994,7 +994,7 @@ export async function readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems
   const rows = await input.prisma.hostedLinqDeliveryAnsweredMailboxItem.findMany({
     where: {
       delivery: {
-        status: { in: ["accepted", "delivered"] },
+        acceptedAt: { not: null },
       },
       mailboxItemId: {
         in: itemIds,

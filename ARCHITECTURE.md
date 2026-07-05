@@ -147,8 +147,10 @@ appends the mailbox row and signals Temporal. Accepted Linq delivery outcomes
 may store the exact answered mailbox item set, which mailbox fetch/import treats
 as context-only on replay without mutating the contiguous lane `consumed_seq`;
 status and reconciliation derive lag from the same contiguous exact accepted
-rows. Accepted proofless outcomes must explicitly declare that they are
-non-consuming before web records them.
+rows. Consume authority is bound to immutable accepted proof, not mutable
+provider receipt status, so a later failed receipt cannot revoke already
+validated accepted-item coverage. Accepted proofless outcomes must explicitly
+declare that they are non-consuming before web records them.
 There is no other web-to-Cloudflare prewarm or nudge path.
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on

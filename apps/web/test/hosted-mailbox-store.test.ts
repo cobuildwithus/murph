@@ -1839,7 +1839,8 @@ describe("readHostedMailboxConsumedSeqByLane", () => {
     expect(queryRaw).toHaveBeenCalledTimes(1);
     const sql = readHostedMailboxRawSql(queryRaw.mock.calls[0]);
     expect(sql).toContain("hosted_linq_delivery_answered_mailbox_item");
-    expect(sql).toContain("delivery.status IN ('accepted', 'delivered')");
+    expect(sql).toContain("delivery.accepted_at IS NOT NULL");
+    expect(sql).not.toContain("delivery.status");
     expect(sql).toContain("contiguous_floor = ?");
   });
 });

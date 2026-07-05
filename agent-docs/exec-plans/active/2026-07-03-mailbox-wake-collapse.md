@@ -134,6 +134,9 @@ Exact accepted-item computation (verified design, hardened by adversarial review
 - Status and reconciliation use the same accepted rows as a derived effective
   conversation work floor for contiguous exact answers, without mutating the
   stored lane counter or advancing across gaps.
+- Accepted-item consume authority comes from immutable `acceptedAt` proof plus
+  validated answered rows, not mutable provider receipt status; a later failed
+  receipt stays observability and must not revoke already-validated coverage.
 - Accepted proofless Linq delivery outcomes must explicitly declare
   `consumeRequired: false`; missing proof plus no non-consuming declaration
   fails closed at the web route instead of recording success with no consume

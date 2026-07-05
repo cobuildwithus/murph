@@ -253,9 +253,12 @@ target, never as fresh reply candidates, so a workspace restore from a stale
 snapshot cannot re-reply to an already-handled message even when a lower gap
 keeps persisted contiguous `consumed_seq` behind. Status and reconciliation
 derive their effective conversation work floor from the same contiguous exact
-accepted rows without mutating the lane counter. A container rollout SIGTERM additionally
-makes the runtime treat the idle window as elapsed and run its normal
-`idle_shutdown` checkpoint inside the termination grace period.
+accepted rows without mutating the lane counter. That derivation keys off
+immutable accepted proof, not mutable provider receipt status, so a late failed
+receipt cannot erase already-validated answer-consume coverage. A container
+rollout SIGTERM additionally makes the runtime treat the idle window as elapsed
+and run its normal `idle_shutdown` checkpoint inside the termination grace
+period.
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,

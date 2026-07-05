@@ -1582,21 +1582,25 @@ describe("hosted Linq observability stores", () => {
 
     expect(fixture.hostedLinqDeliveryAnsweredMailboxItemFindMany)
       .toHaveBeenCalledWith({
-      select: {
-        mailboxItemId: true,
-      },
-      where: {
-        delivery: {
-          status: { in: ["accepted", "delivered"] },
+        select: {
+          mailboxItemId: true,
         },
-        mailboxItemId: {
-          in: ["mailbox_item_pending_2", "mailbox_item_answered_3"],
+        where: {
+          delivery: {
+            acceptedAt: { not: null },
+          },
+          mailboxItemId: {
+            in: ["mailbox_item_pending_2", "mailbox_item_answered_3"],
+          },
         },
-      },
-    });
+      });
+    expect(
+      fixture.hostedLinqDeliveryAnsweredMailboxItemFindMany.mock.calls[0]?.[0]?.where
+        ?.delivery,
+    ).not.toHaveProperty("status");
   });
 
-  it("does not read exact accepted consumed mailbox items from failed delivery rows", async () => {
+  it("does not read exact accepted consumed mailbox items from never-accepted delivery rows", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryAnsweredMailboxItemFindMany.mockResolvedValueOnce([]);
 
@@ -1617,7 +1621,7 @@ describe("hosted Linq observability stores", () => {
         },
         where: {
           delivery: {
-            status: { in: ["accepted", "delivered"] },
+            acceptedAt: { not: null },
           },
           mailboxItemId: {
             in: ["mailbox_item_failed_delivery"],

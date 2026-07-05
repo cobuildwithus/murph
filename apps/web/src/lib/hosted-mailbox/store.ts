@@ -1341,7 +1341,7 @@ async function resolveHostedMailboxAcceptedLinqConversationConsumedSeq(input: {
           FROM hosted_linq_delivery_answered_mailbox_item answered_item
           JOIN hosted_linq_delivery delivery
             ON delivery.id = answered_item.delivery_id
-           AND delivery.status IN ('accepted', 'delivered')
+           AND delivery.accepted_at IS NOT NULL
           WHERE answered_item.mailbox_item_id = mailbox_item.id
         )
     )
