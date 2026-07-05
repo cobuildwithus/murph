@@ -1971,12 +1971,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           runtimeStateDirty
           && checkpointedWorkspace?.nextWakeReason === "assistant"
           && hostedRuntimeWakeIsDue(checkpointedWorkspace.nextWakeAt ?? null);
-        return projectedRuntimeWakeKey !== null
-          && projectedRuntimeWakeKey !== servicedProjectedRuntimeWakeKey
-          && (
-            committedAssistantWakeCanReplayBeforeCheckpoint
-            || pendingDurableCheckpointEffects.length > 0
-            || accumulatedProjection.projectedWakeRequiresCheckpoint
+        const unservicedProjectedWake =
+          projectedRuntimeWakeKey !== null
+          && projectedRuntimeWakeKey !== servicedProjectedRuntimeWakeKey;
+        return committedAssistantWakeCanReplayBeforeCheckpoint
+          || (
+            unservicedProjectedWake
+            && (
+              pendingDurableCheckpointEffects.length > 0
+              || accumulatedProjection.projectedWakeRequiresCheckpoint
+            )
           );
       };
       const runCheckpointInterruptForegroundPass = async (input: {
