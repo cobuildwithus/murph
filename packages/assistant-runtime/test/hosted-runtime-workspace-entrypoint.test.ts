@@ -1864,8 +1864,6 @@ describe("hosted workspace runtime entrypoint", () => {
     const mailboxItems = [
       createMailboxItem({
         id: "mailbox_item_entrypoint_future_competing_checkpoint_wake_001",
-        kind: "device-sync.wake",
-        lane: "system",
         laneSeq: "1",
       }),
     ];
@@ -1905,10 +1903,7 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             async importItem(item) {
               events.push(`mailbox.importItem:${item.item.id}`);
-              if (
-                item.item.id
-                  !== "mailbox_item_entrypoint_future_competing_checkpoint_wake_002"
-              ) {
+              if (item.item.lane !== "conversation") {
                 return { status: "imported" };
               }
 
@@ -1939,6 +1934,12 @@ describe("hosted workspace runtime entrypoint", () => {
             async runAssistantPhase(input) {
               assistantPass += 1;
               events.push(`assistant:${assistantPass}`);
+              const inputId = importedInputIds.shift();
+              assert.ok(inputId);
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId,
+                vaultRoot,
+              });
 
               if (assistantPass === 1) {
                 return {
@@ -1946,7 +1947,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     events.push("assistant.afterCheckpoint:1");
                     mailboxItems.push(createMailboxItem({
                       id: "mailbox_item_entrypoint_future_competing_checkpoint_wake_002",
-                      laneSeq: "1",
+                      laneSeq: "2",
                     }));
                     runtimeWakeSignal.notify();
                     return {
@@ -1956,17 +1957,12 @@ describe("hosted workspace runtime entrypoint", () => {
                     };
                   },
                   checkpointReason: "system_mailbox_receipt",
+                  foregroundReplyFailed: 0,
                   progressed: true,
                 };
               }
 
               if (assistantPass === 2) {
-                const inputId = importedInputIds.shift();
-                assert.ok(inputId);
-                await writeSyntheticAssistantAutoReplyTerminalEvidence({
-                  inputId,
-                  vaultRoot,
-                });
                 assert.ok(
                   events.includes(
                     "mailbox.importItem:mailbox_item_entrypoint_future_competing_checkpoint_wake_002",
@@ -2023,7 +2019,10 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.deepEqual(
         consumeRequests.map((request) => request.lanes),
-        [[{ consumedSeq: "1", lane: "conversation" }]],
+        [
+          [{ consumedSeq: "1", lane: "conversation" }],
+          [{ consumedSeq: "2", lane: "conversation" }],
+        ],
       );
       assert.equal(result.status, expectedStatus);
       assert.equal(result.nextWakeAt, expectedNextWakeAt);
