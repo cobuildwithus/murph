@@ -169,6 +169,8 @@ landing; record the chosen posture here so the decision is reviewable.
   overwritten projection per workspace, not one file per input, turn, delivery,
   or retry. Auto-reply terminal evidence advances the contiguous hosted mailbox
   conversation coverage in place and keeps at most 500 future lane sequence
-  numbers while waiting for gaps to close. The file is absent until hosted
+  intervals while waiting for gaps to close. Contiguous future tails remain one
+  interval; fragmented overflow holds at the safe contiguous prefix instead of
+  scanning historical evidence. The file is absent until hosted
   mailbox auto-reply terminal evidence exists, and steady state remains zero or
   one small file regardless of message volume.

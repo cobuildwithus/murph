@@ -25,7 +25,6 @@ import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
-  HOSTED_RUNTIME_ASSISTANT_DELIVERY_COVERAGE_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
@@ -3892,78 +3891,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         attemptedAt: "2026-04-26T00:00:03.000Z",
         idempotencyKey: "assistant-outbox:intent_123",
         providerMessageId: "linq_message_sent",
-      }),
-    );
-  });
-
-  it("write-fences assistant delivery coverage through direct web-control", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = input instanceof Request ? input : new Request(input, init);
-      expect(new URL(request.url).pathname)
-        .toBe(HOSTED_RUNTIME_ASSISTANT_DELIVERY_COVERAGE_PATH);
-      return new Response(JSON.stringify({
-        consumedSeqByLane: [{
-          consumedSeq: "42",
-          lane: "conversation",
-        }],
-        ok: true,
-      }), {
-        headers: { "content-type": "application/json; charset=utf-8" },
-        status: 200,
-      });
-    });
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    }));
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: "https://web.example.test",
-    });
-
-    const recordAssistantDeliveryCoverage =
-      platform.effectsPort.recordAssistantDeliveryCoverage;
-    if (!recordAssistantDeliveryCoverage) {
-      throw new Error("Expected hosted assistant delivery coverage effect.");
-    }
-
-    await recordAssistantDeliveryCoverage({
-      acceptedAt: "2026-04-26T00:00:04.000Z",
-      answeredCoverage: {
-        lane: "conversation",
-        laneSeq: "42",
-      },
-      deliveryChannel: "email",
-      idempotencyKey: "assistant-outbox:intent_123",
-      intentId: "intent_123",
-      providerMessageId: "email_message_sent",
-      providerThreadId: "thread_email_123",
-      target: "thread_email_123",
-      targetKind: "thread",
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = requireFetchRequest(
-      fetchMock.mock.calls[0],
-      "direct assistant delivery coverage request",
-    );
-    expect(request.url)
-      .toBe(`https://web.example.test${HOSTED_RUNTIME_ASSISTANT_DELIVERY_COVERAGE_PATH}`);
-    expectDefaultRuntimeWriteFenceHeaders(request);
-    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
-    expect(request.headers.get("x-hosted-execution-signature"))
-      .toMatch(/^[A-Za-z0-9\-_]+$/u);
-    await expect(request.clone().json()).resolves.toEqual(
-      expect.objectContaining({
-        acceptedAt: "2026-04-26T00:00:04.000Z",
-        answeredCoverage: {
-          lane: "conversation",
-          laneSeq: "42",
-        },
-        deliveryChannel: "email",
-        idempotencyKey: "assistant-outbox:intent_123",
-        providerMessageId: "email_message_sent",
       }),
     );
   });

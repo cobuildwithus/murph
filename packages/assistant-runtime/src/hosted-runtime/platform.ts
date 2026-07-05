@@ -231,18 +231,6 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
-export interface HostedRuntimeAssistantDeliveryCoverageRequest {
-  acceptedAt: string;
-  answeredCoverage: HostedAssistantAnsweredCoverage;
-  deliveryChannel?: string | null;
-  idempotencyKey?: string | null;
-  intentId?: string | null;
-  providerMessageId?: string | null;
-  providerThreadId?: string | null;
-  target?: string | null;
-  targetKind?: string | null;
-}
-
 export interface HostedRuntimeWhatsAppSendRequest {
   message: string;
   replyToMessageId?: string | null;
@@ -303,10 +291,6 @@ type HostedRuntimeEffectsPortBase = {
   ): Promise<void>;
   recordLinqDeliveryOutcome?(
     request: HostedRuntimeLinqDeliveryOutcomeRequest,
-    context?: { signal?: AbortSignal | null },
-  ): Promise<void>;
-  recordAssistantDeliveryCoverage?(
-    request: HostedRuntimeAssistantDeliveryCoverageRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;

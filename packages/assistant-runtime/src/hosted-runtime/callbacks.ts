@@ -73,7 +73,6 @@ import type {
 } from "./models.ts";
 import type {
   HostedRuntimeActionApprovalPort,
-  HostedRuntimeAssistantDeliveryCoverageRequest,
   HostedRuntimeEffectsPort,
   HostedRuntimeLinqDeliveryOutcomeRequest,
   HostedRuntimeLinqEngagementKind,
@@ -1853,7 +1852,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     const mirrorOutcome = await maybeResolveHostedAssistantDeliveryFromMirror({
       allowPreparedSending: input.allowPreparedSending,
       assistantDeliveryEffect: input.assistantDeliveryEffect,
-      effectsPort: input.effectsPort,
       mirrorState,
       now,
       signal: input.signal,
@@ -1869,7 +1867,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     assertSupportedHostedAssistantDeliveryPayload(input.assistantDeliveryEffect.payload);
     const disabledAutoReplyOutcome = await maybeFailHostedDisabledAutoReplyDelivery({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
-      effectsPort: input.effectsPort,
       mirrorState,
       signal: input.signal,
       userId: input.userId,
@@ -2109,7 +2106,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       return await buildHostedAssistantDeliveryDispatchResult({
         assistantDeliveryEffect: input.assistantDeliveryEffect,
         dispatchResult: resetDispatchResult,
-        effectsPort: input.effectsPort,
         signal: input.signal,
         userId: input.userId,
         vaultRoot: input.vaultRoot,
@@ -2130,7 +2126,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     return await buildHostedAssistantDeliveryDispatchResult({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       dispatchResult: dispatched,
-      effectsPort: input.effectsPort,
       signal: input.signal,
       userId: input.userId,
       vaultRoot: input.vaultRoot,
@@ -3062,7 +3057,6 @@ function assertHostedDeliveryLiveness(signal: AbortSignal | null | undefined): v
 async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
   allowPreparedSending?: boolean;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
-  effectsPort: HostedRuntimeEffectsPort;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
   now: Date;
   signal: AbortSignal | null;
@@ -3104,12 +3098,6 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
           retryable: false,
         });
       }
-      await recordHostedAssistantDeliveryCoverageForAcceptedDelivery({
-        delivery: intent.delivery,
-        effect: input.assistantDeliveryEffect,
-        effectsPort: input.effectsPort,
-        signal: input.signal,
-      });
       emitHostedAssistantDeliveryDispatchSuccess({
         delivery: intent.delivery,
         wake: input.wake,
@@ -3262,7 +3250,6 @@ async function maybeResolveHostedAssistantDeliveryFromMirror(input: {
 
 async function maybeFailHostedDisabledAutoReplyDelivery(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
-  effectsPort: HostedRuntimeEffectsPort;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
   signal: AbortSignal | null;
   userId: string;
@@ -3320,7 +3307,6 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
       intent: failedIntent,
       session: null,
     },
-    effectsPort: input.effectsPort,
     signal: input.signal,
     userId: input.userId,
     vaultRoot: input.vaultRoot,
@@ -3342,57 +3328,6 @@ async function hostedAssistantDeliveryIntentIsAutoReply(input: {
 function normalizeHostedAssistantDeliveryChannel(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
-}
-
-async function recordHostedAssistantDeliveryCoverageForAcceptedDelivery(input: {
-  delivery: AssistantChannelDelivery;
-  effect: HostedAssistantDeliveryEffect;
-  effectsPort: HostedRuntimeEffectsPort;
-  signal: AbortSignal | null;
-}): Promise<void> {
-  const answeredCoverage = input.effect.payload.answeredCoverage;
-  if (!answeredCoverage) {
-    return;
-  }
-  const deliveryChannel = normalizeHostedAssistantDeliveryChannel(
-    input.delivery.channel ?? input.effect.payload.channel,
-  );
-  if (deliveryChannel === "linq") {
-    return;
-  }
-  const recordCoverage = input.effectsPort.recordAssistantDeliveryCoverage;
-  if (!recordCoverage) {
-    throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
-      "HOSTED_ASSISTANT_DELIVERY_COVERAGE_RECORDER_MISSING",
-      "Hosted assistant delivery was accepted, but coverage recording was unavailable.",
-      { assistantDeliveryFailureClass: "transient" },
-    ));
-  }
-
-  const request: HostedRuntimeAssistantDeliveryCoverageRequest = {
-    acceptedAt: input.delivery.sentAt,
-    answeredCoverage,
-    deliveryChannel,
-    idempotencyKey:
-      input.delivery.idempotencyKey ?? input.effect.payload.idempotencyKey,
-    intentId: input.effect.effectId,
-    providerMessageId: input.delivery.kind === "message-reaction"
-      ? null
-      : input.delivery.providerMessageId ?? null,
-    providerThreadId: input.delivery.kind === "message-reaction"
-      ? null
-      : input.delivery.providerThreadId ?? null,
-    target: input.delivery.target,
-    targetKind: input.delivery.targetKind,
-  };
-
-  try {
-    await recordCoverage(request, {
-      signal: input.signal,
-    });
-  } catch (error) {
-    throw markHostedDeliveryMayHaveSucceeded(error);
-  }
 }
 
 function emitHostedAssistantDeliveryDispatchSuccess(input: {
@@ -3468,7 +3403,6 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
 async function buildHostedAssistantDeliveryDispatchResult(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   dispatchResult: Awaited<ReturnType<typeof dispatchAssistantOutboxIntent>>;
-  effectsPort: HostedRuntimeEffectsPort;
   signal: AbortSignal | null;
   userId: string;
   vaultRoot: string;
@@ -3480,12 +3414,6 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
     : null;
 
   if (dispatchResult.intent.status === "sent" && delivery) {
-    await recordHostedAssistantDeliveryCoverageForAcceptedDelivery({
-      delivery,
-      effect: assistantDeliveryEffect,
-      effectsPort: input.effectsPort,
-      signal: input.signal,
-    });
     emitHostedAssistantDeliveryDispatchSuccess({
       delivery,
       wake: input.wake,

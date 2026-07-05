@@ -136,7 +136,7 @@ describe('assistant auto-reply answered coverage', () => {
     })
   })
 
-  it('rebuilds terminal seqs beyond the bounded pending projection when a gap closes', async () => {
+  it('keeps a compact future interval until a gap closes', async () => {
     await withCoverageVault(async (vault) => {
       const staged: AssistantInputEventRecord[] = []
       for (let seq = 1; seq <= 1002; seq += 1) {
@@ -152,7 +152,10 @@ describe('assistant auto-reply answered coverage', () => {
         inputIds: staged.slice(501).map((event) => event.inputId),
         vault,
       })
-      await expect(readAnsweredCoveragePendingSeqCount(vault)).resolves.toBe(500)
+      await expect(readAnsweredCoveragePendingRanges(vault)).resolves.toEqual([{
+        endSeq: '1002',
+        startSeq: '502',
+      }])
 
       await writeReplyEvidence({
         inputIds: staged.slice(0, 500).map((event) => event.inputId),
@@ -177,6 +180,54 @@ describe('assistant auto-reply answered coverage', () => {
       })).resolves.toEqual({
         lane: 'conversation',
         laneSeq: '1002',
+      })
+    })
+  })
+
+  it('caps disjoint future intervals without advancing across gaps', async () => {
+    await withCoverageVault(async (vault) => {
+      const first = await stageHostedMailboxInput({
+        laneSeq: '1',
+        source: 'linq',
+        text: 'gap closer',
+        vault,
+      })
+      const evenTail: AssistantInputEventRecord[] = []
+      for (let seq = 2; seq <= 1202; seq += 2) {
+        evenTail.push(await stageHostedMailboxInput({
+          laneSeq: seq.toString(),
+          source: 'linq',
+          text: `terminal ${seq}`,
+          vault,
+        }))
+      }
+
+      await writeReplyEvidence({
+        inputIds: evenTail.map((event) => event.inputId),
+        vault,
+      })
+      const pendingRanges = await readAnsweredCoveragePendingRanges(vault)
+      expect(pendingRanges).toHaveLength(500)
+      expect(pendingRanges[0]).toEqual({
+        endSeq: '2',
+        startSeq: '2',
+      })
+      expect(pendingRanges[pendingRanges.length - 1]).toEqual({
+        endSeq: '1000',
+        startSeq: '1000',
+      })
+
+      await writeReplyEvidence({
+        inputIds: [first.inputId],
+        vault,
+      })
+
+      await expect(computeAssistantAutoReplyAnsweredCoverage({
+        context: coverageContext(),
+        vault,
+      })).resolves.toEqual({
+        lane: 'conversation',
+        laneSeq: '2',
       })
     })
   })
@@ -392,7 +443,9 @@ async function stageHostedMailboxInput(input: {
   })
 }
 
-async function readAnsweredCoveragePendingSeqCount(vault: string): Promise<number> {
+async function readAnsweredCoveragePendingRanges(
+  vault: string,
+): Promise<Array<{ endSeq: string; startSeq: string }>> {
   const statePath = path.join(
     resolveAssistantStatePaths(vault).assistantStateRoot,
     'auto-reply',
@@ -401,17 +454,15 @@ async function readAnsweredCoveragePendingSeqCount(vault: string): Promise<numbe
   const parsed = JSON.parse(await readFile(statePath, 'utf8')) as {
     pendingLaneRanges?: Array<{ endSeq?: unknown; startSeq?: unknown }>
   }
-  return (parsed.pendingLaneRanges ?? []).reduce((count, range) => {
+  return (parsed.pendingLaneRanges ?? []).flatMap((range) => {
     if (typeof range.startSeq !== 'string' || typeof range.endSeq !== 'string') {
-      return count
+      return []
     }
-    const start = Number.parseInt(range.startSeq, 10)
-    const end = Number.parseInt(range.endSeq, 10)
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
-      return count
-    }
-    return count + end - start + 1
-  }, 0)
+    return [{
+      endSeq: range.endSeq,
+      startSeq: range.startSeq,
+    }]
+  })
 }
 
 function coverageTimestamp(laneSeq: string): string {
