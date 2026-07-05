@@ -488,6 +488,7 @@ export function resolveAssistantInputEventPath(input: {
 }
 
 export async function upsertAssistantInputEvent(input: {
+  allowReplyTargetDowngrade?: boolean
   event: UpsertAssistantInputEventInput
   now?: Date
   paths?: AssistantStatePaths
@@ -507,6 +508,29 @@ export async function upsertAssistantInputEvent(input: {
     })
 
     if (existing) {
+      if (
+        input.allowReplyTargetDowngrade === true &&
+        shouldDowngradeAssistantInputEventReplyTarget({
+          existing,
+          next,
+        })
+      ) {
+        const updated = assistantInputEventRecordSchema.parse({
+          ...existing,
+          replyTarget: null,
+          updatedAt: next.updatedAt,
+        })
+        await writeAssistantStateVersionedJson({
+          filePath: resolveAssistantInputEventPath({
+            inputId: updated.inputId,
+            paths,
+          }),
+          schema: ASSISTANT_INPUT_EVENT_SCHEMA,
+          schemaVersion: ASSISTANT_INPUT_EVENT_SCHEMA_VERSION,
+          value: updated,
+        })
+        return updated
+      }
       assertAssistantInputEventReplayCompatible({
         existing,
         next,
@@ -925,6 +949,21 @@ function assertAssistantInputEventReplayCompatible(input: {
       inputId: input.existing.inputId,
     },
   )
+}
+
+function shouldDowngradeAssistantInputEventReplyTarget(input: {
+  existing: AssistantInputEventRecord
+  next: AssistantInputEventRecord
+}): boolean {
+  if (input.existing.replyTarget === null || input.next.replyTarget !== null) {
+    return false
+  }
+  const existingContextOnlyIdentity = {
+    ...assistantInputEventImmutableIdentity(input.existing),
+    replyTarget: null,
+  }
+  return stableStringify(existingContextOnlyIdentity) ===
+    stableStringify(assistantInputEventImmutableIdentity(input.next))
 }
 
 function assistantInputEventReplayCompatibilityIdentity(input: {

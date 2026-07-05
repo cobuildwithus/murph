@@ -55,6 +55,7 @@ import {
   importHostedConversationMessageWakeIntoLocalInbox,
 } from "./events/conversation.ts";
 import {
+  compactHostedPendingAssistantInputIds,
   ensureHostedPendingAssistantInputIndex,
   enqueueHostedPendingAssistantInputId,
 } from "./pending-input-index.ts";
@@ -719,6 +720,7 @@ async function stageHostedConversationAssistantInputEvent(input: {
   wake: HostedExecutionConversationMessageWake;
 }): Promise<HostedConversationMailboxAssistantInputStageResult> {
   const event = await upsertAssistantInputEvent({
+    allowReplyTargetDowngrade: input.item.durablyConsumed === true,
     event: createHostedConversationAssistantInputEvent({
       item: input.item,
       wake: input.wake,
@@ -737,6 +739,11 @@ async function stageHostedConversationAssistantInputEvent(input: {
         status: "pending",
       },
       vault: input.vaultRoot,
+    });
+  }
+  if (input.item.durablyConsumed === true) {
+    await compactHostedPendingAssistantInputIds({
+      vaultRoot: input.vaultRoot,
     });
   }
   if (input.pendingReplyEligible && event.replyTarget) {

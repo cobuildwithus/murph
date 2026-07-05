@@ -328,6 +328,88 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(latencyTraceRequests.length, 0);
   });
 
+  test("downgrades an already-staged exact consumed conversation item to context-only", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-consumed-existing-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      eventId: "evt_consumed_existing_replay",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_consumed_existing",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_consumed_existing",
+          parts: [
+            {
+              type: "text",
+              value: "stale staged message",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const item = createResolvedConversationMailboxItem({
+      dedupeKey: decodedWake.eventId,
+      id: "mailbox_item_consumed_existing",
+    });
+
+    const firstOutcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+    assert.equal(firstOutcome.status, "imported");
+
+    const firstListed = await listAssistantInputEvents({ vault: vaultRoot });
+    const inputId = firstListed.events[0]?.inputId;
+    assert.ok(inputId);
+    assert.ok(firstListed.events[0]?.replyTarget);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      inputId,
+    ]);
+
+    const replayOutcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item: {
+        ...item,
+        durablyConsumed: true,
+      },
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+    assert.equal(replayOutcome.status, "imported");
+
+    const replayed = await listAssistantInputEvents({ vault: vaultRoot });
+    assert.equal(replayed.events.length, 1);
+    assert.equal(replayed.events[0]?.inputId, inputId);
+    assert.equal(replayed.events[0]?.replyTarget, null);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+  });
+
   test("keeps the reply target for a fresh conversation item", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-fresh-"));
     tempRoots.push(parentRoot);
