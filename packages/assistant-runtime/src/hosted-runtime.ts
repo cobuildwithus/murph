@@ -1967,10 +1967,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           nextWakeAt: accumulatedProjection.nextWakeAt,
           nextWakeReason: accumulatedProjection.nextWakeReason,
         });
+        const committedAssistantWakeCanReplayBeforeCheckpoint =
+          runtimeStateDirty
+          && checkpointedWorkspace?.nextWakeReason === "assistant"
+          && hostedRuntimeWakeIsDue(checkpointedWorkspace.nextWakeAt ?? null);
         return projectedRuntimeWakeKey !== null
           && projectedRuntimeWakeKey !== servicedProjectedRuntimeWakeKey
           && (
-            pendingDurableCheckpointEffects.length > 0
+            committedAssistantWakeCanReplayBeforeCheckpoint
+            || pendingDurableCheckpointEffects.length > 0
             || accumulatedProjection.projectedWakeRequiresCheckpoint
           );
       };
