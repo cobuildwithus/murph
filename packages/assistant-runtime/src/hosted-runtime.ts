@@ -1849,8 +1849,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           nextWakeAt: accumulatedProjection.nextWakeAt,
           nextWakeReason: accumulatedProjection.nextWakeReason,
         });
-        const basePassWorkspace =
-          checkpointedWorkspace;
+        const committedPassWorkspace = checkpointedWorkspace;
+        const committedWakeCanReplayBeforeCheckpoint =
+          committedPassWorkspace !== null
+          && wakeInput.requestIdKind !== "checkpoint-wake"
+          && runtimeStateDirty
+          && hostedRuntimeWakeReasonIsAssistant(committedPassWorkspace.nextWakeReason ?? null)
+          && hostedRuntimeWakeIsDue(committedPassWorkspace.nextWakeAt ?? null)
+          && buildHostedRuntimeWakeKey({
+            nextWakeAt: committedPassWorkspace.nextWakeAt ?? null,
+            nextWakeReason: committedPassWorkspace.nextWakeReason ?? null,
+          }) !== projectedWakeKeyBeforePass;
+        const basePassWorkspace = committedWakeCanReplayBeforeCheckpoint
+          ? {
+              ...committedPassWorkspace,
+              nextWakeAt: accumulatedProjection.nextWakeAt,
+              nextWakeReason: accumulatedProjection.nextWakeReason,
+            }
+          : committedPassWorkspace;
         result = await runForegroundPass({
           initialMailboxImport: wakeInput.initialMailboxImport ?? null,
           initialMailboxImportContext: wakeInput.initialMailboxImportContext
