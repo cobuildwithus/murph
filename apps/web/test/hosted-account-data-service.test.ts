@@ -95,6 +95,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_account_group_invite",
   "prisma.hosted_account_group_billing_ref",
   "prisma.hosted_mailbox_item",
+  "prisma.hosted_linq_delivery_answered_mailbox_item",
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
   "prisma.hosted_workspace",
@@ -259,6 +260,15 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
     expect(dirtyPayload?.note).toContain("before dirty-state and connection rows");
     expect(dirtyPayload?.note).toContain("raw provider payload retention is bounded");
   });
+
+  it("documents Linq answered mailbox item links as mailbox-item-owned state", () => {
+    const linkStore = HOSTED_ACCOUNT_DATA_STORE_COVERAGE.find((entry) =>
+      entry.slug === "prisma.hosted_linq_delivery_answered_mailbox_item");
+
+    expect(linkStore?.deletion).toBe("live-delete");
+    expect(linkStore?.note).toContain("mailbox item");
+    expect(linkStore?.note).toContain("cascade");
+  });
 });
 
 
@@ -390,6 +400,28 @@ describe("deleteHostedAccountData", () => {
         },
       },
     ]));
+  });
+
+  it("counts Linq answered mailbox item links before mailbox item deletion cascades them", async () => {
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      countResults: {
+        hostedLinqDeliveryAnsweredMailboxItem: 2,
+      },
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_linq_delivery_answered_mailbox_item"])
+      .toBe(2);
+    expect(operationOrder.indexOf("count:hostedLinqDeliveryAnsweredMailboxItem"))
+      .toBeLessThan(operationOrder.indexOf("delete:hostedMailboxItem"));
   });
 
   it("revokes outgoing vault shares before member rows cascade and wakes surviving destinations", async () => {

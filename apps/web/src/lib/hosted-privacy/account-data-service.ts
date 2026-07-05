@@ -151,6 +151,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes lane items, inline ciphertext, payload refs, dedupe keys, and sequence counters. Export includes mailbox envelope metadata and omits decoded payload bodies.",
   },
   {
+    slug: "prisma.hosted_linq_delivery_answered_mailbox_item",
+    label: "Hosted Linq answered mailbox item links",
+    deletion: "live-delete",
+    note: "Counts accepted-answer links owned by hosted mailbox items; mailbox item deletion removes them through the mailbox-item FK cascade.",
+  },
+  {
     slug: "prisma.hosted_mailbox_payload",
     label: "Hosted mailbox payload ciphertext",
     deletion: "live-delete",
@@ -1092,6 +1098,7 @@ async function countHostedAccountData(input: {
     hostedConnectedAppsSession,
     hostedConnectedAppConnectIntent,
     hostedMailboxItem,
+    hostedLinqDeliveryAnsweredMailboxItem,
     hostedMailboxPayload,
     hostedMailboxLaneCounter,
     hostedIngressLatencyTrace,
@@ -1172,6 +1179,9 @@ async function countHostedAccountData(input: {
     input.prisma.hostedConnectedAppsSession.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedConnectedAppConnectIntent.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedMailboxItem.count({ where: { userId: memberIdFilter } }),
+    input.prisma.hostedLinqDeliveryAnsweredMailboxItem.count({
+      where: { mailboxItem: { userId: memberIdFilter } },
+    }),
     input.prisma.hostedMailboxPayload.count({ where: { userId: memberIdFilter } }),
     input.prisma.hostedMailboxLaneCounter.count({ where: { userId: memberIdFilter } }),
     input.prisma.hostedIngressLatencyTrace.count({ where: { userId: memberIdFilter } }),
@@ -1245,6 +1255,7 @@ async function countHostedAccountData(input: {
     "prisma.hosted_invite": hostedInvite,
     "prisma.hosted_ingress_latency_trace": hostedIngressLatencyTrace,
     "prisma.hosted_linq_daily_state": hostedLinqDailyState,
+    "prisma.hosted_linq_delivery_answered_mailbox_item": hostedLinqDeliveryAnsweredMailboxItem,
     "prisma.hosted_mailbox_item": hostedMailboxItem,
     "prisma.hosted_mailbox_lane_counter": hostedMailboxLaneCounter,
     "prisma.hosted_mailbox_payload": hostedMailboxPayload,
@@ -1291,6 +1302,12 @@ async function deleteHostedAccountPrismaRows(input: {
       ],
     },
   }));
+  recordCount(
+    "prisma.hosted_linq_delivery_answered_mailbox_item",
+    await input.prisma.hostedLinqDeliveryAnsweredMailboxItem.count({
+      where: { mailboxItem: { userId: memberIdFilter } },
+    }),
+  );
 
   record("prisma.hosted_mailbox_payload", await input.prisma.hostedMailboxPayload.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_ingress_latency_trace", await input.prisma.hostedIngressLatencyTrace.deleteMany({ where: { userId: memberIdFilter } }));

@@ -1055,6 +1055,12 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedLinqDeliveryAnsweredMailboxItemMigrationSql).toContain(
       'CREATE INDEX "hosted_linq_delivery_answered_mailbox_item_mailbox_item_id_idx"',
     );
+    expect(hostedLinqDeliveryAnsweredMailboxItemMigrationSql).toContain(
+      'CONSTRAINT "hosted_linq_delivery_answered_mailbox_item_mailbox_item_id_fkey"',
+    );
+    expect(hostedLinqDeliveryAnsweredMailboxItemMigrationSql).toContain(
+      'REFERENCES "hosted_mailbox_item"("id")',
+    );
     expect(hostedLinqDeliveryAnsweredMailboxItemMigrationSql)
       .not.toContain("answered_mailbox_item_id");
     expect(hostedLinqDeliveryAnsweredMailboxItemMigrationSql).not.toContain("raw_payload");

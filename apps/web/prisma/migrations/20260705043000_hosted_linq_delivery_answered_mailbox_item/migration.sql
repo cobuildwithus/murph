@@ -9,6 +9,11 @@ CREATE TABLE "hosted_linq_delivery_answered_mailbox_item" (
     FOREIGN KEY ("delivery_id")
     REFERENCES "hosted_linq_delivery"("id")
     ON DELETE CASCADE
+    ON UPDATE CASCADE,
+  CONSTRAINT "hosted_linq_delivery_answered_mailbox_item_mailbox_item_id_fkey"
+    FOREIGN KEY ("mailbox_item_id")
+    REFERENCES "hosted_mailbox_item"("id")
+    ON DELETE CASCADE
     ON UPDATE CASCADE
 );
 

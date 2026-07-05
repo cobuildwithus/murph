@@ -684,6 +684,7 @@ model HostedMailboxItem {
   createdAt               DateTime              @default(now()) @map("created_at")
   updatedAt               DateTime              @updatedAt @map("updated_at")
   member                  HostedMember          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answeredLinqDeliveries  HostedLinqDeliveryAnsweredMailboxItem[]
   payload                 HostedMailboxPayload?
   latencyTrace            HostedIngressLatencyTrace?
 
@@ -1244,6 +1245,7 @@ model HostedLinqDeliveryAnsweredMailboxItem {
   mailboxItemId String             @map("mailbox_item_id")
   createdAt     DateTime           @default(now()) @map("created_at")
   delivery      HostedLinqDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  mailboxItem   HostedMailboxItem  @relation(fields: [mailboxItemId], references: [id], onDelete: Cascade)
 
   @@id([deliveryId, mailboxItemId])
   @@index([mailboxItemId])

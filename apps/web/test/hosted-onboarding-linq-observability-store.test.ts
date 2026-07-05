@@ -1586,11 +1586,44 @@ describe("hosted Linq observability stores", () => {
         mailboxItemId: true,
       },
       where: {
+        delivery: {
+          status: { in: ["accepted", "delivered"] },
+        },
         mailboxItemId: {
           in: ["mailbox_item_pending_2", "mailbox_item_answered_3"],
         },
       },
     });
+  });
+
+  it("does not read exact accepted consumed mailbox items from failed delivery rows", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryAnsweredMailboxItemFindMany.mockResolvedValueOnce([]);
+
+    await expect(readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems({
+      items: [
+        buildMailboxItem({
+          id: "mailbox_item_failed_delivery",
+          laneSeq: "4",
+        }),
+      ],
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual([]);
+
+    expect(fixture.hostedLinqDeliveryAnsweredMailboxItemFindMany)
+      .toHaveBeenCalledWith({
+        select: {
+          mailboxItemId: true,
+        },
+        where: {
+          delivery: {
+            status: { in: ["accepted", "delivered"] },
+          },
+          mailboxItemId: {
+            in: ["mailbox_item_failed_delivery"],
+          },
+        },
+      });
   });
 
   it("does not validate or store answered mailbox items for failed runtime outcomes", async () => {
