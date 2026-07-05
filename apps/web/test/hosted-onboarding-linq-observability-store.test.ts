@@ -1325,7 +1325,44 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("advances conversation consumed coverage on any accepted runtime outcome carrying coverage", async () => {
+  it("advances conversation consumed coverage when an accepted runtime outcome first records", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      answeredCoverage: {
+        lane: "conversation",
+        laneSeq: "42",
+      },
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_first_accept",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_first_accept",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedMailboxLaneCounterUpdateMany).toHaveBeenCalledWith({
+      data: {
+        consumedSeq: 42n,
+      },
+      where: {
+        consumedSeq: {
+          lt: 42n,
+        },
+        lane: "conversation",
+        userId: "member_123",
+      },
+    });
+  });
+
+  it("does not advance conversation consumed coverage from an accepted runtime outcome replay", async () => {
     const fixture = createObservabilityPrismaFixture();
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
@@ -1339,19 +1376,7 @@ describe("hosted Linq observability stores", () => {
       skippedAt: null,
       status: "accepted",
     });
-    fixture.hostedMailboxLaneCounterFindUnique
-      .mockResolvedValueOnce({
-        consumedSeq: 12n,
-        lane: "conversation",
-        nextSeq: 101n,
-        userId: "member_123",
-      })
-      .mockResolvedValueOnce({
-        consumedSeq: 42n,
-        lane: "conversation",
-        nextSeq: 101n,
-        userId: "member_123",
-      });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
@@ -1372,18 +1397,8 @@ describe("hosted Linq observability stores", () => {
       recorded: true,
     });
 
-    expect(fixture.hostedMailboxLaneCounterUpdateMany).toHaveBeenCalledWith({
-      data: {
-        consumedSeq: 42n,
-      },
-      where: {
-        consumedSeq: {
-          lt: 42n,
-        },
-        lane: "conversation",
-        userId: "member_123",
-      },
-    });
+    expect(fixture.hostedMailboxLaneCounterFindUnique).not.toHaveBeenCalled();
+    expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
   });
 
   it("does not advance answered coverage for failed runtime outcomes", async () => {

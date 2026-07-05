@@ -590,7 +590,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
       });
     }
 
-    if (acceptedAt && input.answeredCoverage) {
+    if (acceptedAdvanced && acceptedAt && input.answeredCoverage) {
       await advanceHostedMailboxConsumedSeqByLane({
         lanes: [{
           consumedSeq: input.answeredCoverage.laneSeq,
