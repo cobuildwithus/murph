@@ -251,6 +251,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
     if (
       lane === "conversation"
+      && !itemIsDurablyConsumedReplay
       && (systemLaneFetched || hasHostedMailboxSidecarPayload(item))
       && input.deferConversationUntil
       && !input.deferConversationUntil.ready()

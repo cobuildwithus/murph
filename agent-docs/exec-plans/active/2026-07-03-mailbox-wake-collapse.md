@@ -149,12 +149,14 @@ Coverage computation (verified design, hardened by adversarial review):
   must not be covered).
 - Thread as one optional field: intent schema
   (`assistant-cli-contracts.ts:816`) → create input (`outbox.ts:245`) →
-  delivery payload (`side-effects.ts:107`) →
+  turn receipt metadata (durable pre-provider carrier; outbox JSON omits the
+  field) → delivery payload (`side-effects.ts:107`) →
   `buildHostedAssistantDeliveryPayloadFromIntent` (`callbacks.ts:3313`) →
   send dependency (`callbacks.ts:2190-2216`) → outcome request
   (`platform.ts:217`, `callbacks.ts:2535-2567`) → web route/store.
   The full intent is NOT in scope at report-build time (only intentId is
-  captured); the payload/effect carrier is the path.
+  captured); dispatch reloads coverage from the receipt before building the
+  payload/effect.
 - Stamped-at-create + advance-on-accept is provably safe: idempotency keys
   are minted once and reused across retries; only the provider-accept path
   emits `acceptedAt`; the web route enforces accepted/failed XOR; the
@@ -394,5 +396,6 @@ deletion withdrawn (it is the only usage check on the direct-wake path);
 coverage scan pinned to the persisted lane prefix, not context candidates;
 suppression counts as terminal for coverage; lag netting made an explicit
 parameter with the status route audited alongside; accepted replays consume
-only from coverage stored on the delivery row; reaction-only sends excluded
-from callback assumptions.
+only from coverage stored on the delivery row; dispatch reads pre-provider
+coverage from receipt metadata; reaction-only sends excluded from callback
+assumptions.

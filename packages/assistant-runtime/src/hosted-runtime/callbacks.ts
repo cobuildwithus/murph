@@ -3617,13 +3617,11 @@ async function buildHostedAssistantDeliveryPayloadFromIntentForDispatch(input: {
   intent: AssistantOutboxIntent;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryPayload> {
-  const answeredCoverage =
-    input.intent.answeredCoverage ??
-    (await readAssistantOutboxIntentAnsweredCoverage({
-      intentId: input.intent.intentId,
-      turnId: input.intent.turnId,
-      vault: input.vaultRoot,
-    }));
+  const answeredCoverage = await readAssistantOutboxIntentAnsweredCoverage({
+    intentId: input.intent.intentId,
+    turnId: input.intent.turnId,
+    vault: input.vaultRoot,
+  });
 
   return buildHostedAssistantDeliveryPayloadFromIntent({
     ...input.intent,

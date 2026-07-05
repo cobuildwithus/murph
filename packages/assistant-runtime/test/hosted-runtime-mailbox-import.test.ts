@@ -195,6 +195,62 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "2");
   });
 
+  test("does not let bootstrap deferral block a durably consumed conversation replay", async () => {
+    const consumedReplay = createMailboxItem({
+      id: "mailbox_item_consumed_sidecar_001",
+      laneSeq: "1",
+      payloadInlineCiphertext: null,
+      payloadRef: "hosted-mailbox-payload:mailbox_item_consumed_sidecar_001",
+    });
+    const freshTail = createMailboxItem({
+      id: "mailbox_item_conversation_fresh_002",
+      laneSeq: "2",
+    });
+    const { mailboxPort, payloadFetchRequests } = createMailboxPort({
+      consumedSeqByLane: [
+        { consumedSeq: "1", lane: "conversation" },
+      ],
+      items: [consumedReplay, freshTail],
+    });
+    const imported = new Map<string, boolean | undefined>();
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      deferConversationUntil: {
+        ready: () => false,
+        reasonCode: "bootstrap.metadata_unavailable",
+      },
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.set(input.item.id, input.durablyConsumed);
+        return {
+          assistantInputId: `assistant_input_${input.item.laneSeq}`,
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_consumed_replay_deferral",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual([...imported.entries()], [
+      ["mailbox_item_consumed_sidecar_001", true],
+      ["mailbox_item_conversation_fresh_002", false],
+    ]);
+    assert.equal(payloadFetchRequests.length, 1);
+    assert.equal(payloadFetchRequests[0]?.mailboxItemId, "mailbox_item_consumed_sidecar_001");
+    assert.equal(
+      payloadFetchRequests[0]?.requestId,
+      "request_synthetic_consumed_replay_deferral:mailbox_item_consumed_sidecar_001:payload",
+    );
+    assert.deepEqual(result.assistantInputIds, ["assistant_input_2"]);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.equal(result.importedCount, 2);
+    assert.equal(result.state.watermarks.conversation, "2");
+  });
+
   test("imports a fresh conversation tail when the consumed watermark lags local import", async () => {
     const nextItem = createMailboxItem({
       id: "mailbox_item_conversation_new_after_replay",

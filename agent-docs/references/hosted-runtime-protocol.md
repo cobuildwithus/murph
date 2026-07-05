@@ -234,15 +234,17 @@ the same transaction as the product/control-plane mutation that made work
 necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
 uses `HostedMailboxLaneCounter`.
 `HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
-watermark. The runtime stamps answered coverage on delivery intents after
-scanning the persisted conversation-lane input store in lane-sequence order and
-stopping before the first input without terminal auto-reply evidence. Linq
-delivery outcomes carry that coverage back to web, and web persists it on the
-existing `HostedLinqDelivery` row when that row first records an accepted
-outcome. Accepted replays advance `consumed_seq` only from coverage already
-stored on that delivery row, not from mutable replay payloads; failed outcomes
-do not advance coverage. The advance remains a monotonic max clamped by the lane
-owner. The
+watermark. The runtime computes answered coverage by scanning the persisted
+conversation-lane input store in lane-sequence order and stopping before the
+first input without terminal auto-reply evidence. Before dispatch, that coverage
+is recorded in the turn receipt metadata for the outbox intent; outbox intent
+JSON omits it, and dispatch reloads it from the receipt. Linq delivery outcomes
+carry that coverage back to web, and web persists it on the existing
+`HostedLinqDelivery` row when that row first records an accepted outcome.
+Accepted replays advance `consumed_seq` only from coverage already stored on
+that delivery row, not from mutable replay payloads; failed outcomes do not
+advance coverage. The advance remains a monotonic max clamped by the lane owner.
+The
 mailbox fetch response returns `consumedSeqByLane`; replayed items at or below
 the watermark are re-staged as conversation context with a null reply target,
 never as fresh reply candidates, so a workspace restore from a stale snapshot

@@ -837,15 +837,21 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("hydrates answered coverage from the outbox intent", async () => {
+  it("hydrates answered coverage from receipt metadata before dispatch", async () => {
     const answeredCoverage = {
       lane: "conversation" as const,
       laneSeq: "42",
     };
+    mocks.readAssistantOutboxIntentAnsweredCoverage.mockResolvedValueOnce(
+      answeredCoverage,
+    );
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
         actorId: "actor_1",
-        answeredCoverage,
+        answeredCoverage: {
+          lane: "conversation" as const,
+          laneSeq: "99",
+        },
         bindingDelivery: { kind: "thread", target: "linq_chat_1" },
         channel: "linq",
         dedupeKey: "dedupe_reply",
@@ -872,7 +878,11 @@ describe("hosted runtime callbacks", () => {
 
     expect(sideEffects).toHaveLength(1);
     expect(sideEffects[0]?.payload.answeredCoverage).toEqual(answeredCoverage);
-    expect(mocks.readAssistantOutboxIntentAnsweredCoverage).not.toHaveBeenCalled();
+    expect(mocks.readAssistantOutboxIntentAnsweredCoverage).toHaveBeenCalledWith({
+      intentId: "intent_reply",
+      turnId: "turn_1",
+      vault: "/tmp/vault",
+    });
   });
 
   it("hydrates answered coverage from the outbox receipt metadata", async () => {
