@@ -2045,6 +2045,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               initialMailboxImportContext: foregroundImport.initialMailboxImportContext,
               latencySeed: input.latencySeed,
             });
+          } else if (input.latencySeed) {
+            pendingCheckpointWakeLatencySeed ??= input.latencySeed;
           }
           return;
         }

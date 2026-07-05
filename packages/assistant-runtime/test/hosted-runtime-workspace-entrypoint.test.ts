@@ -6288,18 +6288,21 @@ describe("hosted workspace runtime entrypoint", () => {
       nextWakeAt: string | null;
       nextWakeReason: "assistant" | null;
       status: "idle" | "scheduled";
+      systemItemId: string | null;
     }[] = [
       {
         name: "replacement",
         nextWakeAt: new Date(Date.now() + 60_000).toISOString(),
         nextWakeReason: "assistant",
         status: "scheduled",
+        systemItemId: null,
       },
       {
         name: "clear",
         nextWakeAt: null,
         nextWakeReason: null,
         status: "idle",
+        systemItemId: "mailbox_item_entrypoint_source_blind_clear_system",
       },
     ];
 
@@ -6308,6 +6311,7 @@ describe("hosted workspace runtime entrypoint", () => {
       const events: string[] = [];
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
       const fetchRequests: HostedMailboxFetchRequest[] = [];
+      const mailboxItems: HostedMailboxItem[] = [];
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
       let assistantPhaseCalls = 0;
 
@@ -6345,7 +6349,7 @@ describe("hosted workspace runtime entrypoint", () => {
               mailboxPort: createMailboxPort({
                 events,
                 fetchRequests,
-                items: [],
+                items: mailboxItems,
               }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
@@ -6366,6 +6370,15 @@ describe("hosted workspace runtime entrypoint", () => {
               if (input.workspace?.nextWakeAt === staleWakeAt) {
                 if (assistantPhaseCalls > 1) {
                   throw new Error("Stale committed assistant wake replayed before checkpoint.");
+                }
+                if (scenario.systemItemId) {
+                  mailboxItems.push(createMailboxItem({
+                    id: scenario.systemItemId,
+                    kind: "member.activated",
+                    lane: "system",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:01.000Z",
+                  }));
                 }
                 setTimeout(() => runtimeWakeSignal.notify(), 0);
                 return {
@@ -6392,16 +6405,36 @@ describe("hosted workspace runtime entrypoint", () => {
 
         assert.equal(result.status, scenario.status);
         assert.ok(fetchRequests.length > 1);
+        assert.ok(checkpointRequests.length >= 1);
+        const assistantEvents = events.filter((event) =>
+          event.startsWith("assistant.phase:")
+        );
         assert.deepEqual(
-          events.filter((event) => event.startsWith("assistant.phase:")),
+          assistantEvents.filter((event) => event.includes(staleWakeAt)),
           [`assistant.phase:1:${staleWakeAt}`],
         );
-        assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-          "idle_shutdown",
-        ]);
+        assert.equal(assistantEvents.length, 2);
+        assert.ok(
+          requireEventIndex(events, "snapshot:idle_shutdown")
+            < requireEventIndex(events, assistantEvents[1] ?? ""),
+        );
+        if (scenario.nextWakeAt) {
+          assert.equal(assistantEvents[1], `assistant.phase:2:${scenario.nextWakeAt}`);
+        }
+        assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
         assert.equal(checkpointRequests[0]?.nextWakeAt, scenario.nextWakeAt);
         assert.equal(checkpointRequests[0]?.nextWakeReason, scenario.nextWakeReason);
         assert.equal(result.nextWakeAt, scenario.nextWakeAt);
+        if (scenario.systemItemId) {
+          const systemImportEvent = `mailbox.importItem:${scenario.systemItemId}`;
+          assert.ok(events.includes(systemImportEvent), events.join(","));
+          assert.ok(
+            requireEventIndex(events, "snapshot:idle_shutdown")
+              < requireEventIndex(events, systemImportEvent),
+          );
+        } else {
+          assert.equal(checkpointRequests.length, 1);
+        }
       } finally {
         await removeTempRoot(vaultRoot);
       }
@@ -10633,7 +10666,13 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             }
 
-            throw new Error("Source-blind system wake should not run before checkpoint.");
+            assert.ok(events.includes("snapshot:idle_shutdown"), events.join(","));
+            return {
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantProgressed: false,
+              },
+            };
           },
           signal: runtimeAbortController.signal,
           vaultRoot,
@@ -10648,16 +10687,27 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       );
       assert.equal(result, "resolved");
-      assert.equal(assistantPhaseCalls, 1, events.join(","));
+      assert.equal(assistantPhaseCalls, 2, events.join(","));
       assert.ok(events.includes("snapshot:idle_shutdown"));
+      assert.ok(events.includes(
+        "mailbox.importItem:mailbox_item_entrypoint_foreground_stale_gate_system_late",
+      ));
       assert.ok(
-        !events.includes(
-          "mailbox.importItem:mailbox_item_entrypoint_foreground_stale_gate_system_late",
-        ),
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(
+            events,
+            "mailbox.importItem:mailbox_item_entrypoint_foreground_stale_gate_system_late",
+          ),
       );
-      assert.equal(checkpointRequests.length, 1);
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(events, "assistant.phase:2"),
+      );
+      assert.ok(checkpointRequests.length >= 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, systemFollowUpWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, systemFollowUpWakeAt);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "device-sync.reconcile");
     } finally {
       runtimeAbortController.abort(runtimeAbortReason);
       await removeTempRoot(vaultRoot);
@@ -11215,8 +11265,12 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(assistantPhaseCalls, 2);
       assert.ok(events.includes("snapshot:idle_shutdown"));
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(events, "assistant.phase:2"),
+      );
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, deviceSyncWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
@@ -11332,13 +11386,19 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.equal(assistantPhaseCalls, 1);
-      assert.equal(replacementDeviceSyncWakeAt, null);
+      assert.equal(assistantPhaseCalls, 2);
+      assert.ok(replacementDeviceSyncWakeAt);
       assert.ok(events.includes("snapshot:idle_shutdown"));
-      assert.equal(checkpointRequests.length, 1);
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(events, "assistant.phase:2"),
+      );
+      assert.ok(checkpointRequests.length >= 2);
       assert.equal(checkpointRequests[0]?.nextWakeAt, initialDeviceSyncWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
-      assert.equal(result.nextWakeAt, initialDeviceSyncWakeAt);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, replacementDeviceSyncWakeAt);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.nextWakeAt, replacementDeviceSyncWakeAt);
     } finally {
       runtimeAbortController.abort(runtimeAbortReason);
       await removeTempRoot(vaultRoot);
