@@ -762,7 +762,6 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   })
   const outcome = await state.outbox.deliverMessage({
     ...messageDeliveryFields,
-    answeredCoverage: input.input.deliveryAnsweredCoverage ?? null,
     dedupeToken: input.dedupeToken,
     media: input.media,
     message: input.message,

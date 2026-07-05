@@ -26,7 +26,6 @@ function createHostedAssistantDeliveryPayload(
 ): HostedAssistantDeliveryPayload {
   return {
     actorId: "actor-1",
-    answeredCoverage: null,
     bindingDeliveryKind: "participant",
     bindingDeliveryTarget: "chat-1",
     channel: "telegram",

@@ -98,7 +98,6 @@ const TEST_SESSION: AssistantSession = {
 
 const TEST_OUTBOX_INTENT: AssistantOutboxIntent = {
   schema: 'murph.assistant-outbox-intent.v1',
-  answeredCoverage: null,
   intentId: 'outbox_http_test',
   sessionId: TEST_SESSION.sessionId,
   turnId: 'turn_http_test',
@@ -142,7 +141,6 @@ type LegacyMessageOutboxIntentWire = {
 
 const LEGACY_MESSAGE_OUTBOX_INTENT_KEYS = [
   'actorId',
-  'answeredCoverage',
   'attemptCount',
   'bindingDelivery',
   'channel',

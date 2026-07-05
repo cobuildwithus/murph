@@ -168,7 +168,6 @@ const BASE_RECEIPT: AssistantTurnReceipt = {
 
 const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   schema: 'murph.assistant-outbox-intent.v1',
-  answeredCoverage: null,
   intentId: 'intent_demo',
   sessionId: BASE_SESSION.sessionId,
   turnId: BASE_RECEIPT.turnId,

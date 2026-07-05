@@ -3,7 +3,6 @@ import {
   readAssistantDeliveryFailureClass,
 } from '@murphai/operator-config/assistant/delivery-failure'
 import type {
-  AssistantOutboxIntent,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
@@ -50,7 +49,6 @@ import {
   compareAssistantInputCursors,
   type AssistantInputConversationRef,
 } from '../input-store.js'
-import type { AssistantAutoReplyChannelState } from '../automation-state.js'
 import {
   listAssistantTranscriptEntries,
   resolveAssistantSession,
@@ -59,7 +57,6 @@ import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
 import {
-  computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   hasCompleteAssistantAutoReplyTerminalEvidence,
   type AssistantAutoReplyTerminalEvidence,
@@ -140,10 +137,6 @@ export interface AssistantAutoReplyGroupContext {
   items: readonly AssistantAutoReplyGroupItem[]
   lastInputCursor: AssistantInputCandidate['event']['cursor']
   optionalInboxCaptureIds: string[]
-}
-
-export interface AssistantAutoReplyAnsweredCoverageContext {
-  autoReply: readonly AssistantAutoReplyChannelState[]
 }
 
 interface AssistantAutoReplyReplyDecision {
@@ -347,7 +340,6 @@ export function createAssistantAutoReplyGroupContext(
 
 export async function processAssistantAutoReplyGroup(input: {
   allowSelfAuthored: boolean
-  answeredCoverageContext?: AssistantAutoReplyAnsweredCoverageContext | null
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
@@ -441,7 +433,6 @@ export async function processAssistantAutoReplyGroup(input: {
 
 async function resolveAssistantAutoReplyGroupOutcome(input: {
   allowSelfAuthored: boolean
-  answeredCoverageContext?: AssistantAutoReplyAnsweredCoverageContext | null
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
@@ -512,7 +503,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   })
   const activeTurnHooks = input.inputSource
     ? createAssistantAutoReplyActiveTurnInputHooks({
-        answeredCoverageContext: input.answeredCoverageContext ?? null,
         context,
         deliveryTarget: decision.deliveryTarget,
         executionContext: input.executionContext,
@@ -536,7 +526,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       inputSummaries: context.items.map((item) => item.summary),
       inputCandidates: context.items.map((item) => item.inputCandidate ?? null),
     }),
-    answeredCoverageContext: input.answeredCoverageContext ?? null,
     bindingDeliveryTarget: decision.deliveryTarget,
     captureIds: context.optionalInboxCaptureIds,
     inputIds: context.inputIds,
@@ -1462,105 +1451,10 @@ async function prepareAssistantAutoReplyInputWithContext(input: {
     : await prepareAssistantAutoReplyInput(input.inputs, input.vault)
 }
 
-export async function computeAssistantAutoReplyAnsweredCoverage(input: {
-  context?: AssistantAutoReplyAnsweredCoverageContext | null
-  terminalInputIds?: readonly string[] | null
-  vault: string
-}): Promise<AssistantOutboxIntent['answeredCoverage']> {
-  const context = input.context ?? null
-  if (!context) {
-    return null
-  }
-
-  const scanStart = resolveAssistantAutoReplyAnsweredCoverageScanStart(
-    context.autoReply,
-  )
-  return await computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs({
-    baseCoverage: scanStart.coverage,
-    terminalInputIds: input.terminalInputIds ?? [],
-    vault: input.vault,
-  })
-}
-
-function resolveAssistantAutoReplyAnsweredCoverageScanStart(
-  autoReply: readonly AssistantAutoReplyChannelState[],
-): {
-  afterCursor: AssistantAutoReplyChannelState['eligibleAfter']
-  coverage: AssistantOutboxIntent['answeredCoverage']
-} {
-  if (autoReply.length === 0) {
-    return {
-      afterCursor: null,
-      coverage: null,
-    }
-  }
-
-  let floor: {
-    cursor: NonNullable<AssistantAutoReplyChannelState['eligibleAfter']>
-    coverage: NonNullable<AssistantOutboxIntent['answeredCoverage']>
-  } | null = null
-  for (const entry of autoReply) {
-    const cursor = entry.eligibleAfter
-    const laneSeq = readHostedConversationLaneSeqFromCursor(cursor)
-    if (laneSeq === null || !cursor) {
-      continue
-    }
-    if (
-      !floor ||
-      compareHostedMailboxLaneSeq(laneSeq, floor.coverage.laneSeq) < 0
-    ) {
-      floor = {
-        cursor,
-        coverage: {
-          lane: 'conversation',
-          laneSeq,
-        },
-      }
-    }
-  }
-
-  return {
-    afterCursor: floor?.cursor ?? null,
-    coverage: floor?.coverage ?? null,
-  }
-}
-
-function readHostedConversationLaneSeqFromCursor(
-  cursor: AssistantAutoReplyChannelState['eligibleAfter'],
-): string | null {
-  if (
-    cursor?.sourceKind !== 'hosted-mailbox' ||
-    !cursor.sourcePosition
-  ) {
-    return null
-  }
-
-  const [source, lane, laneSeq] = cursor.sourcePosition.split(':', 4)
-  if (source !== 'hosted-mailbox' || lane !== 'conversation' || !laneSeq) {
-    return null
-  }
-  return denormalizeHostedMailboxLaneSeqForCoverage(laneSeq)
-}
-
-function denormalizeHostedMailboxLaneSeqForCoverage(laneSeq: string): string {
-  return /^\d+$/u.test(laneSeq) ? BigInt(laneSeq).toString() : laneSeq
-}
-
-function compareHostedMailboxLaneSeq(left: string, right: string): number {
-  try {
-    const leftSeq = BigInt(left)
-    const rightSeq = BigInt(right)
-    return leftSeq < rightSeq ? -1 : leftSeq > rightSeq ? 1 : 0
-  } catch {
-    return left.localeCompare(right)
-  }
-}
-
 async function executeAssistantAutoReply(input: {
   acceptedTurnInputInitialInputs?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
-  answeredCoverageContext?: AssistantAutoReplyAnsweredCoverageContext | null
   bindingDeliveryTarget: string | null
   captureIds: readonly string[]
   inputIds: readonly string[]
@@ -1608,12 +1502,6 @@ async function executeAssistantAutoReply(input: {
       turnEnvironment: input.turnEnvironment ?? null,
       turnTrigger: 'automation-auto-reply',
     })
-    const deliveryAnsweredCoverage =
-      await computeAssistantAutoReplyAnsweredCoverage({
-        context: input.answeredCoverageContext ?? null,
-        terminalInputIds: input.inputIds,
-        vault: input.vault,
-      })
     const result = await sendAssistantMessage({
       vault: input.vault,
       ...automationTurn,
@@ -1633,7 +1521,6 @@ async function executeAssistantAutoReply(input: {
       userMessageContent: input.userMessageContent,
       includeEarlySessionOnboarding: true,
       deliverResponse: true,
-      deliveryAnsweredCoverage,
       onFinishWithoutReplyAccepted:
         input.onFinishWithoutReplyAccepted ?? null,
       bindingDeliveryTarget: input.bindingDeliveryTarget,
@@ -1727,7 +1614,6 @@ interface AssistantAutoReplyActiveTurnPendingAcceptance {
 }
 
 function createAssistantAutoReplyActiveTurnInputHooks(input: {
-  answeredCoverageContext?: AssistantAutoReplyAnsweredCoverageContext | null
   context: AssistantAutoReplyGroupContext
   deliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
@@ -1797,7 +1683,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     )
     if (lateCaptureCandidates.length === 0) {
       return admitCapturelessAssistantInputs({
-        answeredCoverageContext: input.answeredCoverageContext ?? null,
         deliveryTarget: input.deliveryTarget,
         executionContext: input.executionContext,
         getContext: () => context,
@@ -1918,12 +1803,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         acceptedInputDeliveryTargetForIdempotency ?? input.deliveryTarget,
       executionContext: input.executionContext,
     })
-    const deliveryAnsweredCoverage =
-      await computeAssistantAutoReplyAnsweredCoverage({
-        context: input.answeredCoverageContext ?? null,
-        terminalInputIds: finalContext.inputIds,
-        vault: input.vault,
-      })
     input.onEvent?.({
       type: 'input.reply-progress',
       inputId: primaryAutoReplyInputId(context),
@@ -1957,7 +1836,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     })
     const result: AssistantActiveTurnInputAdmissionResult = {
       acceptedInputs,
-      deliveryAnsweredCoverage,
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
       hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
       ...(acceptedInputDeliveryTarget !== null
@@ -2225,7 +2103,6 @@ function assistantAutoReplyGroupItemFromInputCandidate(
 }
 
 async function admitCapturelessAssistantInputs(input: {
-  answeredCoverageContext?: AssistantAutoReplyAnsweredCoverageContext | null
   deliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
   getContext(): AssistantAutoReplyGroupContext
@@ -2273,12 +2150,6 @@ async function admitCapturelessAssistantInputs(input: {
     deliveryTarget: deliveryTarget ?? input.deliveryTarget,
     executionContext: input.executionContext,
   })
-  const deliveryAnsweredCoverage =
-    await computeAssistantAutoReplyAnsweredCoverage({
-      context: input.answeredCoverageContext ?? null,
-      terminalInputIds: nextContext.inputIds,
-      vault: input.vault,
-    })
   input.onEvent?.({
     type: 'input.reply-progress',
     inputId: primaryAutoReplyInputId(queuedContext),
@@ -2310,7 +2181,6 @@ async function admitCapturelessAssistantInputs(input: {
 
   return {
     acceptedInputs,
-    deliveryAnsweredCoverage,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
     ...(deliveryReplyToMessageId !== undefined

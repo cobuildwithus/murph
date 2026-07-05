@@ -105,7 +105,6 @@ const replyMocks = vi.hoisted(() => ({
 
 const evidenceMocks = vi.hoisted(() => ({
   assistantAutoReplyTerminalEvidenceExists: vi.fn(),
-  computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs: vi.fn(),
   hasCompleteAssistantAutoReplyTerminalEvidence: vi.fn(),
   readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
@@ -122,8 +121,6 @@ vi.mock('../src/assistant/automation/artifacts.ts', () => ({
 vi.mock('../src/assistant/automation/evidence.ts', () => ({
   assistantAutoReplyTerminalEvidenceExists:
     evidenceMocks.assistantAutoReplyTerminalEvidenceExists,
-  computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs:
-    evidenceMocks.computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs,
   hasCompleteAssistantAutoReplyTerminalEvidence:
     evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId:
@@ -1277,9 +1274,6 @@ beforeEach(() => {
       )
       return groupEvidence.every((entry) => entry !== null)
     })
-  evidenceMocks.computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs
-    .mockReset()
-    .mockResolvedValue(null)
   evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
     .mockReset()
     .mockResolvedValue(null)
@@ -7708,16 +7702,6 @@ describe('assistant auto-reply runtime', () => {
       candidate: lateInput,
       vault: context.vaultRoot,
     })
-    const answeredCoverageContext = {
-      autoReply: createAutoReplyEntries([
-        'linq',
-      ], createAssistantInputCursor({
-        inputId: 'ain_11111111111111111111111111111111',
-        occurredAt: '2026-04-08T00:08:59.000Z',
-        sourceKind: 'hosted-mailbox',
-        sourcePosition: 'hosted-mailbox:conversation:41',
-      })),
-    }
     const executionContext = {
       hosted: {
         memberId: 'member_active_replay',
@@ -7737,7 +7721,6 @@ describe('assistant auto-reply runtime', () => {
 
     await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
-      answeredCoverageContext,
       context: activeTurnContext,
       enabledChannels: ['linq'],
       executionContext,
@@ -7764,10 +7747,6 @@ describe('assistant auto-reply runtime', () => {
         ) => Promise<
           | { kind: 'no-new-input' }
           | {
-              deliveryAnsweredCoverage?: {
-                lane: 'conversation'
-                laneSeq: string
-              } | null
               deliveryIdempotencyKey?: string | null
               hostedDeliveryIdempotency?: {
                 inboundMailboxItemIds?: readonly string[] | null
@@ -7775,10 +7754,6 @@ describe('assistant auto-reply runtime', () => {
               kind: 'accepted'
           }
         >
-        deliveryAnsweredCoverage?: {
-          lane: 'conversation'
-          laneSeq: string
-        } | null
         deliveryIdempotencyKey?: string | null
         hostedDeliveryIdempotency?: {
           inboundMailboxItemIds?: readonly string[] | null
@@ -7789,10 +7764,6 @@ describe('assistant auto-reply runtime', () => {
         expect(input.hostedDeliveryIdempotency?.inboundMailboxItemIds).toEqual([
           'raw_mailbox_item_active_initial',
         ])
-        expect(input.deliveryAnsweredCoverage).toEqual({
-          lane: 'conversation',
-          laneSeq: '42',
-        })
         const admitted = await input.activeTurnInput?.({
           sessionId: 'session-1',
           turnId: 'turn-1',
@@ -7802,10 +7773,6 @@ describe('assistant auto-reply runtime', () => {
           throw new Error('expected active input admission')
         }
         expect(admitted.deliveryIdempotencyKey).toBe(replayKey)
-        expect(admitted.deliveryAnsweredCoverage).toEqual({
-          lane: 'conversation',
-          laneSeq: '43',
-        })
         expect(admitted.hostedDeliveryIdempotency?.inboundMailboxItemIds).toEqual([
           'raw_mailbox_item_active_initial',
           'raw_mailbox_item_active_late',
@@ -7849,7 +7816,6 @@ describe('assistant auto-reply runtime', () => {
 
     await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
-      answeredCoverageContext,
       context: initialContext,
       enabledChannels: ['linq'],
       executionContext,

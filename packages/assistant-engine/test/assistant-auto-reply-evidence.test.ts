@@ -211,17 +211,14 @@ test('auto-reply delivery intent lookup uses bounded turn receipts', async () =>
       await findAssistantAutoReplyDeliveryIntentIds({
         intents: [
           {
-            answeredCoverage: null,
             intentId: 'intent_legacy_segment',
             turnId: 'turn_auto_reply',
           },
           {
-            answeredCoverage: null,
             intentId: 'intent_legacy_final',
             turnId: 'turn_auto_reply',
           },
           {
-            answeredCoverage: null,
             intentId: 'intent_other',
             turnId: 'turn_other',
           },
@@ -232,35 +229,6 @@ test('auto-reply delivery intent lookup uses bounded turn receipts', async () =>
         'intent_legacy_segment',
         'intent_legacy_final',
       ]),
-    )
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true })
-  }
-})
-
-test('auto-reply delivery intent lookup uses intent answered coverage without receipts', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
-  try {
-    assert.deepEqual(
-      await findAssistantAutoReplyDeliveryIntentIds({
-        intents: [
-          {
-            answeredCoverage: {
-              lane: 'conversation',
-              laneSeq: '42',
-            },
-            intentId: 'intent_current_auto_reply',
-            turnId: 'turn_current_auto_reply',
-          },
-          {
-            answeredCoverage: null,
-            intentId: 'intent_missing_coverage',
-            turnId: 'turn_current_auto_reply',
-          },
-        ],
-        vault: vaultRoot,
-      }),
-      new Set(['intent_current_auto_reply']),
     )
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })

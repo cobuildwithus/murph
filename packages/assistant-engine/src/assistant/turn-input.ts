@@ -1,6 +1,5 @@
 import type {
   AssistantDeliverySource,
-  AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
@@ -38,7 +37,6 @@ export type AssistantActiveTurnInputAdmissionResult =
     }
   | {
       acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
-      deliveryAnsweredCoverage?: AssistantOutboxIntent['answeredCoverage'] | null
       deliveryDispatchMode?: AssistantOutboxDispatchMode
       deliveryIdempotencyKey?: string | null
       deliveryMessageReactionsAvailable?: boolean | null

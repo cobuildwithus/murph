@@ -77,10 +77,6 @@ describe("hosted runtime Linq delivery route", () => {
   it("records an accepted runtime delivery outcome without raw recipient fallback for participant sends", async () => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
-      answeredCoverage: {
-        lane: "conversation",
-        laneSeq: "999999999999999999999",
-      },
       attemptedAt: "2026-04-26T00:00:03.000Z",
       currentInbound: {
         dedupeKey: "evt_linq_current",
@@ -138,8 +134,6 @@ describe("hosted runtime Linq delivery route", () => {
         target: "linq_chat_123",
         targetKind: "participant",
       });
-    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx.mock.calls[0]?.[0])
-      .not.toHaveProperty("answeredCoverage");
     await expect(response.json()).resolves.toEqual({
       ok: true,
       recorded: true,
@@ -169,6 +163,40 @@ describe("hosted runtime Linq delivery route", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
+  });
+
+  it("validates answered current inbound against the original target after recovered delivery changes provider thread", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      currentInbound: {
+        dedupeKey: "evt_linq_current",
+        eventId: "evt_linq_current",
+        mailboxItemId: "mailbox_item_answered_42",
+        occurredAt: "2026-04-26T00:00:02.000Z",
+        replyToMessageId: "linq_message_inbound",
+        target: "linq_chat_old",
+      },
+      idempotencyKey: "assistant-outbox:intent_123",
+      intentId: "intent_123",
+      providerMessageId: "linq_message_sent",
+      providerTarget: "linq_chat_old",
+      providerThreadId: "linq_chat_recovered",
+      target: "linq_chat_old",
+      targetKind: "thread",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedLinqCurrentInboundMailboxItemIdForRuntime)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        target: "linq_chat_old",
+      }));
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        answeredMailboxItemId: "mailbox_item_answered_42",
+        linqChatId: "linq_chat_recovered",
+        messageId: "linq_message_sent",
+      }));
   });
 
   it("derives the active member Linq line from durable home routing for chat sends without route authority", async () => {

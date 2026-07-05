@@ -2,7 +2,6 @@ import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { sendAssistantMessage } from '../service.js'
 import {
-  assistantOutboxAnsweredCoverageSchema,
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -15,18 +14,12 @@ import {
 import {
   assistantInputIdFromInboxCaptureId,
 } from '../input-source.js'
-import {
-  readAssistantInputEvent,
-} from '../input-store.js'
 import { resolveAssistantStatePaths } from '../store/paths.js'
 import { readAssistantTurnReceipt } from '../turns.js'
 import { readAssistantAutoReplyReceiptMetadata } from './auto-reply-retry.js'
 
 const ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA =
   'murph.assistant-auto-reply-terminal-evidence.v1'
-const ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA =
-  'murph.assistant-auto-reply-answered-coverage.v1'
-const AUTO_REPLY_ANSWERED_COVERAGE_PENDING_RANGE_LIMIT = 500
 
 export type AssistantAutoReplyTerminalKind =
   | 'deferred'
@@ -65,18 +58,6 @@ export interface AssistantAutoReplyTerminalEvidence {
           maxFailedAttempts: number
           reason: string
         }
-}
-
-interface AssistantAutoReplyAnsweredCoverageState {
-  coverage: AssistantOutboxIntent['answeredCoverage']
-  pendingLaneRanges: AssistantAutoReplyAnsweredCoverageRange[]
-  pendingLaneSeqs: string[]
-  schema: typeof ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA
-}
-
-interface AssistantAutoReplyAnsweredCoverageRange {
-  endSeq: string
-  startSeq: string
 }
 
 export async function assistantAutoReplyTerminalEvidenceExists(
@@ -132,7 +113,7 @@ export async function readAssistantAutoReplyTerminalEvidenceByEvidenceId(
 export async function findAssistantAutoReplyDeliveryIntentIds(input: {
   intents: readonly Pick<
     AssistantOutboxIntent,
-    'answeredCoverage' | 'intentId' | 'turnId'
+    'intentId' | 'turnId'
   >[]
   vault: string
 }): Promise<Set<string>> {
@@ -140,10 +121,6 @@ export async function findAssistantAutoReplyDeliveryIntentIds(input: {
   const unresolvedByTurnId = new Map<string, string[]>()
 
   for (const intent of input.intents) {
-    if (intent.answeredCoverage) {
-      matched.add(intent.intentId)
-      continue
-    }
     const unresolved = unresolvedByTurnId.get(intent.turnId)
     if (unresolved) {
       unresolved.push(intent.intentId)
@@ -163,29 +140,6 @@ export async function findAssistantAutoReplyDeliveryIntentIds(input: {
   }
 
   return matched
-}
-
-export async function computeAssistantAutoReplyAnsweredCoverageFromTerminalInputs(input: {
-  baseCoverage?: AssistantOutboxIntent['answeredCoverage'] | null
-  terminalInputIds?: readonly string[] | null
-  vault: string
-}): Promise<AssistantOutboxIntent['answeredCoverage']> {
-  const current = await readAssistantAutoReplyAnsweredCoverageState(input.vault)
-  const currentWithBaseCoverage = {
-    ...current,
-    coverage: selectHighestAssistantAutoReplyAnsweredCoverage(
-      input.baseCoverage ?? null,
-      current.coverage,
-    ),
-  }
-  const inputLaneSeqs = await readAssistantAutoReplyAnsweredCoverageLaneSeqs({
-    inputIds: input.terminalInputIds ?? [],
-    vault: input.vault,
-  })
-  return advanceAssistantAutoReplyAnsweredCoverageState({
-    current: currentWithBaseCoverage,
-    laneSeqs: inputLaneSeqs,
-  }).coverage
 }
 
 async function assistantAutoReplyTerminalEvidenceGroupComplete(input: {
@@ -277,10 +231,6 @@ export async function writeAssistantAutoReplyReplyTerminalEvidence(input: {
       }),
     ),
   )
-  await recordAssistantAutoReplyAnsweredCoverage({
-    inputIds: group.inputIds,
-    vault: input.vault,
-  })
   return providerCleanup.linqMessageIds
 }
 
@@ -318,10 +268,6 @@ export async function writeAssistantAutoReplySuppressionEvidence(input: {
       }),
     ),
   )
-  await recordAssistantAutoReplyAnsweredCoverage({
-    inputIds: group.inputIds,
-    vault: input.vault,
-  })
   return providerCleanup.linqMessageIds
 }
 
@@ -478,322 +424,6 @@ function resolveAssistantAutoReplyEvidencePath(vault: string, evidenceId: string
     resolveAssistantAutoReplyEvidenceDirectory(vault),
     `${encodeURIComponent(evidenceId)}.json`,
   )
-}
-
-async function recordAssistantAutoReplyAnsweredCoverage(input: {
-  inputIds: readonly string[]
-  vault: string
-}): Promise<void> {
-  if (input.inputIds.length === 0) {
-    return
-  }
-
-  const inputLaneSeqs = await readAssistantAutoReplyAnsweredCoverageLaneSeqs(input)
-  if (inputLaneSeqs.length === 0) {
-    return
-  }
-
-  const current = await readAssistantAutoReplyAnsweredCoverageState(input.vault)
-  const next = advanceAssistantAutoReplyAnsweredCoverageState({
-    current,
-    laneSeqs: inputLaneSeqs,
-  })
-  if (sameAssistantAutoReplyAnsweredCoverageState(next, current)) {
-    return
-  }
-
-  const statePath = resolveAssistantAutoReplyAnsweredCoveragePath(input.vault)
-  await ensureAssistantStateDir(path.dirname(statePath))
-  await writeAssistantStateJson(statePath, next)
-}
-
-async function readAssistantAutoReplyAnsweredCoverageLaneSeqs(input: {
-  inputIds: readonly string[]
-  vault: string
-}): Promise<string[]> {
-  const laneSeqs = new Set<string>()
-  for (const inputId of input.inputIds) {
-    const normalizedInputId = normalizeNullableString(inputId)
-    if (!normalizedInputId) {
-      continue
-    }
-    const event = await readAssistantInputEventForAnsweredCoverage({
-      inputId: normalizedInputId,
-      vault: input.vault,
-    })
-    if (
-      event?.sourceRef.kind === 'hosted-mailbox' &&
-      event.sourceRef.lane === 'conversation'
-    ) {
-      laneSeqs.add(event.sourceRef.laneSeq)
-    }
-  }
-  return [...laneSeqs]
-}
-
-async function readAssistantInputEventForAnsweredCoverage(input: {
-  inputId: string
-  vault: string
-}): ReturnType<typeof readAssistantInputEvent> {
-  try {
-    return await readAssistantInputEvent(input)
-  } catch (error) {
-    if (isAssistantInputEventInvalidIdError(error)) {
-      return null
-    }
-    throw error
-  }
-}
-
-function isAssistantInputEventInvalidIdError(error: unknown): boolean {
-  return Boolean(
-    error &&
-    typeof error === 'object' &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 'ASSISTANT_INPUT_EVENT_INVALID_ID',
-  )
-}
-
-async function readAssistantAutoReplyAnsweredCoverageState(
-  vault: string,
-): Promise<AssistantAutoReplyAnsweredCoverageState> {
-  try {
-    const raw = await readFile(
-      resolveAssistantAutoReplyAnsweredCoveragePath(vault),
-      'utf8',
-    )
-    return parseAssistantAutoReplyAnsweredCoverageState(JSON.parse(raw))
-  } catch (error) {
-    if (isMissingFileError(error) || error instanceof SyntaxError) {
-      return createEmptyAssistantAutoReplyAnsweredCoverageState()
-    }
-    throw error
-  }
-}
-
-function resolveAssistantAutoReplyAnsweredCoveragePath(vault: string): string {
-  return path.join(
-    resolveAssistantStatePaths(vault).assistantStateRoot,
-    'auto-reply',
-    'answered-coverage.json',
-  )
-}
-
-function createEmptyAssistantAutoReplyAnsweredCoverageState(): AssistantAutoReplyAnsweredCoverageState {
-  return {
-    coverage: null,
-    pendingLaneRanges: [],
-    pendingLaneSeqs: [],
-    schema: ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA,
-  }
-}
-
-function parseAssistantAutoReplyAnsweredCoverageState(
-  value: unknown,
-): AssistantAutoReplyAnsweredCoverageState {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return createEmptyAssistantAutoReplyAnsweredCoverageState()
-  }
-  const record = value as {
-    coverage?: unknown
-    pendingLaneRanges?: unknown
-    pendingLaneSeqs?: unknown
-    schema?: unknown
-  }
-  if (record.schema !== ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA) {
-    return createEmptyAssistantAutoReplyAnsweredCoverageState()
-  }
-  const coverage = assistantOutboxAnsweredCoverageSchema
-    .nullable()
-    .safeParse(record.coverage ?? null)
-  const legacySeqRanges = Array.isArray(record.pendingLaneSeqs)
-    ? record.pendingLaneSeqs
-        .map((item) => normalizeUnknownNullableString(item))
-        .filter((item): item is string => item !== null)
-        .map((item) => parseNumericLaneSeq(item))
-        .filter((item): item is bigint => item !== null)
-        .map((seq) => ({ end: seq, start: seq }))
-    : []
-  return {
-    coverage: coverage.success ? coverage.data : null,
-    pendingLaneRanges: serializeAssistantAutoReplyAnsweredCoverageRanges(
-      capAssistantAutoReplyAnsweredCoverageRanges(
-        mergeAssistantAutoReplyAnsweredCoverageRanges([
-          ...legacySeqRanges,
-          ...parseAssistantAutoReplyAnsweredCoverageRanges(record.pendingLaneRanges),
-        ]),
-        AUTO_REPLY_ANSWERED_COVERAGE_PENDING_RANGE_LIMIT,
-      ),
-    ),
-    pendingLaneSeqs: [],
-    schema: ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA,
-  }
-}
-
-function advanceAssistantAutoReplyAnsweredCoverageState(input: {
-  current: AssistantAutoReplyAnsweredCoverageState
-  laneSeqs: readonly string[]
-}): AssistantAutoReplyAnsweredCoverageState {
-  const initialCoveredSeq = input.current.coverage
-    ? parseNumericLaneSeq(input.current.coverage.laneSeq)
-    : 0n
-  if (initialCoveredSeq === null) {
-    return input.current
-  }
-  let coveredSeq = initialCoveredSeq
-
-  const pending = new Set<bigint>()
-  for (const laneSeq of input.laneSeqs) {
-    const numeric = parseNumericLaneSeq(laneSeq)
-    if (numeric !== null && numeric > coveredSeq) {
-      pending.add(numeric)
-    }
-  }
-
-  let pendingRanges = mergeAssistantAutoReplyAnsweredCoverageRanges([
-    ...parseAssistantAutoReplyAnsweredCoverageRanges(input.current.pendingLaneRanges),
-    ...input.current.pendingLaneSeqs
-      .map((laneSeq) => parseNumericLaneSeq(laneSeq))
-      .filter((seq): seq is bigint => seq !== null)
-      .map((seq) => ({ end: seq, start: seq })),
-    ...[...pending].map((seq) => ({ end: seq, start: seq })),
-  ]).filter((range) => range.end > coveredSeq)
-
-  for (;;) {
-    const nextSeq = coveredSeq + 1n
-    const nextRange = pendingRanges[0]
-    if (!nextRange || nextRange.start > nextSeq) {
-      break
-    }
-    coveredSeq = nextRange.end > coveredSeq ? nextRange.end : coveredSeq
-    pendingRanges = pendingRanges.slice(1)
-  }
-
-  const pendingLaneRanges = serializeAssistantAutoReplyAnsweredCoverageRanges(
-    capAssistantAutoReplyAnsweredCoverageRanges(
-      pendingRanges.filter((range) => range.end > coveredSeq),
-      AUTO_REPLY_ANSWERED_COVERAGE_PENDING_RANGE_LIMIT,
-    ),
-  )
-
-  return {
-    coverage: coveredSeq > 0n
-      ? {
-          lane: 'conversation',
-          laneSeq: coveredSeq.toString(),
-        }
-      : null,
-    pendingLaneRanges,
-    pendingLaneSeqs: [],
-    schema: ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA,
-  }
-}
-
-function parseAssistantAutoReplyAnsweredCoverageRanges(
-  value: unknown,
-): Array<{ end: bigint; start: bigint }> {
-  if (!Array.isArray(value)) {
-    return []
-  }
-  const ranges: Array<{ end: bigint; start: bigint }> = []
-  for (const item of value) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      continue
-    }
-    const record = item as {
-      endSeq?: unknown
-      startSeq?: unknown
-    }
-    const startSeq = normalizeUnknownNullableString(record.startSeq)
-    const endSeq = normalizeUnknownNullableString(record.endSeq)
-    if (!startSeq || !endSeq) {
-      continue
-    }
-    const start = parseNumericLaneSeq(startSeq)
-    const end = parseNumericLaneSeq(endSeq)
-    if (start === null || end === null || end < start) {
-      continue
-    }
-    ranges.push({ end, start })
-  }
-  return ranges
-}
-
-function mergeAssistantAutoReplyAnsweredCoverageRanges(
-  ranges: readonly { end: bigint; start: bigint }[],
-): Array<{ end: bigint; start: bigint }> {
-  const sorted = ranges
-    .filter((range) => range.end >= range.start)
-    .sort((left, right) => left.start < right.start ? -1 : left.start > right.start ? 1 : 0)
-  const merged: Array<{ end: bigint; start: bigint }> = []
-  for (const range of sorted) {
-    const previous = merged.at(-1)
-    if (!previous || range.start > previous.end + 1n) {
-      merged.push({ ...range })
-      continue
-    }
-    if (range.end > previous.end) {
-      previous.end = range.end
-    }
-  }
-  return merged
-}
-
-function capAssistantAutoReplyAnsweredCoverageRanges(
-  ranges: readonly { end: bigint; start: bigint }[],
-  limit: number,
-): Array<{ end: bigint; start: bigint }> {
-  return ranges.slice(0, Math.max(0, limit)).map((range) => ({ ...range }))
-}
-
-function serializeAssistantAutoReplyAnsweredCoverageRanges(
-  ranges: readonly { end: bigint; start: bigint }[],
-): AssistantAutoReplyAnsweredCoverageRange[] {
-  return ranges.map((range) => ({
-    endSeq: range.end.toString(),
-    startSeq: range.start.toString(),
-  }))
-}
-
-function sameAssistantAutoReplyAnsweredCoverageState(
-  left: AssistantAutoReplyAnsweredCoverageState,
-  right: AssistantAutoReplyAnsweredCoverageState,
-): boolean {
-  const leftRanges = left.pendingLaneRanges
-    .map((range) => `${range.startSeq}-${range.endSeq}`)
-    .join('\u0000')
-  const rightRanges = right.pendingLaneRanges
-    .map((range) => `${range.startSeq}-${range.endSeq}`)
-    .join('\u0000')
-  return left.coverage?.laneSeq === right.coverage?.laneSeq &&
-    left.pendingLaneSeqs.join('\u0000') === right.pendingLaneSeqs.join('\u0000') &&
-    leftRanges === rightRanges
-}
-
-function selectHighestAssistantAutoReplyAnsweredCoverage(
-  left: AssistantOutboxIntent['answeredCoverage'],
-  right: AssistantOutboxIntent['answeredCoverage'],
-): AssistantOutboxIntent['answeredCoverage'] {
-  if (!left) {
-    return right
-  }
-  if (!right) {
-    return left
-  }
-  const leftSeq = parseNumericLaneSeq(left.laneSeq)
-  const rightSeq = parseNumericLaneSeq(right.laneSeq)
-  if (leftSeq === null || rightSeq === null) {
-    return left.laneSeq.localeCompare(right.laneSeq) >= 0 ? left : right
-  }
-  return leftSeq >= rightSeq ? left : right
-}
-
-function parseNumericLaneSeq(laneSeq: string): bigint | null {
-  try {
-    return /^\d+$/u.test(laneSeq) ? BigInt(laneSeq) : null
-  } catch {
-    return null
-  }
 }
 
 function parseAssistantAutoReplyTerminalEvidence(value: unknown): AssistantAutoReplyTerminalEvidence | null {

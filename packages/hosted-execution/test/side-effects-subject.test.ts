@@ -12,7 +12,6 @@ describe('hosted assistant delivery side effects subject support', () => {
       effectId: 'effect_123',
       payload: {
         actorId: null,
-        answeredCoverage: null,
         bindingDeliveryKind: null,
         bindingDeliveryTarget: null,
         channel: 'email',
@@ -43,7 +42,6 @@ describe('hosted assistant delivery side effects subject support', () => {
         kind: 'assistant.delivery',
         payload: {
           actorId: null,
-          answeredCoverage: null,
           bindingDeliveryKind: null,
           bindingDeliveryTarget: null,
           channel: 'email',

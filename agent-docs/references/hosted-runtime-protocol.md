@@ -272,17 +272,12 @@ provider secrets, and decrypted mailbox payloads must not be Temporal workflow
 inputs, outputs, or history payloads. The pointer signal only wakes durable
 orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
-adapter. Linq webhook ingress may additionally fire one best-effort direct
-`ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
-message payload) after the planning transaction appended the mailbox row for
-an admission-passed active member; it is a latency hint only, allowed because
-Linq has the delivery-outcome callback that advances consumed coverage. Other
-conversation channels remain Temporal-only until they grow equivalent
-delivery-time consume authority. Durable Object write-fence idempotency keeps
-racing ensures safe, and the unconditional Temporal signal remains the only
-durable wake authority. There is no direct
-web-to-Cloudflare message path and no second durable wake authority. If the
-Temporal signal cannot be accepted after the mailbox row exists, the failure is
+adapter through the signed Temporal-to-Cloudflare callback path. There is no
+direct web-to-Cloudflare `ensure-processing` message path and no Vercel-OIDC
+latency hint path. Durable Object write-fence idempotency keeps repeated
+Temporal ensures safe, and the unconditional Temporal signal remains the only
+durable wake authority. If the Temporal signal cannot be accepted after the
+mailbox row exists, the failure is
 logged as a post-commit best-effort handoff failure and does not make provider
 ingress fail. Web does not run a mailbox-lag cron backstop: missed post-commit
 workflow signal recovery remains future hardening for a DB-backed

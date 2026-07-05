@@ -547,10 +547,6 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
 
   const initialResultPromise = sendAssistantMessageLocal({
     deliverResponse: true,
-    deliveryAnsweredCoverage: {
-      lane: 'conversation',
-      laneSeq: '7',
-    },
     deliveryDispatchMode: 'queue-only',
     deliveryIdempotencyKey: 'delivery-one',
     deliveryReplyToMessageId: 'message-one',
@@ -618,7 +614,6 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
     precedingSegments.map((segment) => ({
       response: segment.response,
       deliveryDispatchMode: segment.deliveryContext?.deliveryDispatchMode,
-      deliveryAnsweredCoverage: segment.deliveryContext?.deliveryAnsweredCoverage,
       deliveryIdempotencyKey: segment.deliveryContext?.deliveryIdempotencyKey,
       deliveryReplyToMessageId: segment.deliveryContext?.deliveryReplyToMessageId,
       deliverySource: segment.deliveryContext?.deliverySource,
@@ -630,10 +625,6 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
     {
       response: 'Answer one.',
       deliveryDispatchMode: 'queue-only',
-      deliveryAnsweredCoverage: {
-        lane: 'conversation',
-        laneSeq: '7',
-      },
       deliveryIdempotencyKey: 'delivery-one',
       deliveryReplyToMessageId: 'message-one',
       deliverySource: {
@@ -652,7 +643,6 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
     {
       response: 'Answer two.',
       deliveryDispatchMode: 'immediate',
-      deliveryAnsweredCoverage: null,
       deliveryIdempotencyKey: 'delivery-two',
       deliveryReplyToMessageId: 'message-two',
       deliverySource: {
@@ -685,7 +675,6 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
       }),
     )
   expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.input).toMatchObject({
-    deliveryAnsweredCoverage: null,
     deliveryDispatchMode: 'immediate',
     deliveryIdempotencyKey: 'delivery-two',
     deliveryReplyToMessageId: 'message-two',
@@ -701,137 +690,6 @@ test('sendAssistantMessageLocal resolves pre-steer delivery contexts from accept
       inboundMailboxItemIds: ['mailbox-two'],
       recipientKey: 'recipient-two',
     },
-  })
-})
-
-test('sendAssistantMessageLocal does not carry failed preceding coverage onto a steered final reply', async () => {
-  const session = createAssistantSession({
-    binding: {
-      actorId: null,
-      channel: 'telegram',
-      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
-      delivery: {
-        kind: 'thread',
-        target: 'thread-1',
-      },
-      identityId: 'identity-1',
-      threadId: 'thread-1',
-      threadIsDirect: false,
-    },
-  })
-  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
-    session,
-  })
-  const providerStarted = createDeferred<void>()
-  const providerRelease = createDeferred<void>()
-  const liveSteeredPrompts: string[] = []
-  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
-    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
-      interrupt: async () => undefined,
-      codexThreadId: 'provider-thread-coverage-failure',
-      providerTurnId: 'provider-turn-coverage-failure',
-      sessionId: session.sessionId,
-      steer: async (input) => {
-        liveSteeredPrompts.push(input.prompt)
-      },
-      turnId: 'turn-1',
-    })
-    providerStarted.resolve()
-    await providerRelease.promise
-    releaseLiveTurn?.()
-    return {
-      kind: 'succeeded',
-      providerTurn: {
-        onboardingGuidanceInjected: true,
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        },
-        codexThreadId: 'provider-thread-coverage-failure',
-        precedingResponseSegments: [
-          {
-            deliveryContextOrdinal: 0,
-            response: 'Answer original.',
-            media: [],
-          },
-        ],
-        response: 'Answer after steer.',
-        route: {
-          routeId: 'route-coverage-failure',
-        },
-        session,
-      },
-    }
-  })
-  const sessionAfterPreceding = createAssistantSession({
-    sessionId: 'session-after-failed-preceding-coverage',
-  })
-  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
-    {
-      error: {
-        code: 'ASSISTANT_DELIVERY_FAILED',
-        message: 'segment delivery failed',
-      },
-      intentId: 'intent-original-failed',
-      kind: 'failed',
-      media: [],
-      session: sessionAfterPreceding,
-    },
-  ])
-
-  const initialResultPromise = sendAssistantMessageLocal({
-    deliverResponse: true,
-    deliveryAnsweredCoverage: {
-      lane: 'conversation',
-      laneSeq: '7',
-    },
-    deliveryIdempotencyKey: 'delivery-original',
-    prompt: 'Initial prompt',
-    vault: '/vaults/test',
-  })
-  await providerStarted.promise
-
-  const steeredResultPromise = sendAssistantMessageLocal({
-    conversation: {
-      channel: 'telegram',
-      identityId: 'identity-1',
-      threadId: 'thread-1',
-    },
-    deliveryIdempotencyKey: 'delivery-later',
-    expectedActiveTurnId: 'turn-1',
-    prompt: 'Late follow up',
-    vault: '/vaults/test',
-  })
-  await vi.waitFor(() => {
-    expect(liveSteeredPrompts).toEqual(['Late follow up'])
-  })
-  providerRelease.resolve()
-
-  const [initialResult, steeredResult] = await Promise.all([
-    initialResultPromise,
-    steeredResultPromise,
-  ])
-
-  expect(initialResult.response).toBe('Answer after steer.')
-  expect(steeredResult.response).toBe('Answer after steer.')
-  expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledTimes(1)
-  expect(
-    mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments?.[0]
-      ?.deliveryContext?.deliveryAnsweredCoverage,
-  ).toEqual({
-    lane: 'conversation',
-    laneSeq: '7',
-  })
-  expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
-  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]).toMatchObject({
-    response: 'Answer after steer.',
-    session: expect.objectContaining({
-      sessionId: 'session-after-failed-preceding-coverage',
-    }),
-  })
-  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.input).toMatchObject({
-    deliveryAnsweredCoverage: null,
-    deliveryIdempotencyKey: 'delivery-later',
-    prompt: 'Late follow up',
   })
 })
 

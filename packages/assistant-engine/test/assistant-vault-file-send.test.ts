@@ -505,7 +505,6 @@ function createVaultFileIntent() {
     channel: 'linq',
     createdAt: '2026-06-24T11:00:00.000Z',
     dedupeKey: 'dedupe_123',
-    answeredCoverage: null,
     delivery: null,
     deliveryConfirmationPending: false,
     deliveryIdempotencyKey: 'delivery_123',

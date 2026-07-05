@@ -35,7 +35,6 @@ import { ensureAssistantState } from './store/persistence.js'
 import { getAssistantSession, resolveAssistantStatePaths, saveAssistantSession } from './store.js'
 import {
   appendAssistantTurnReceiptEvent,
-  readAssistantTurnReceipt,
 } from './turns.js'
 import {
   buildAssistantOutboxPersistedTarget,
@@ -55,10 +54,7 @@ import {
   shouldDispatchAssistantOutboxIntent,
 } from './outbox/retry-policy.js'
 import { buildAssistantOutboxSummary as buildAssistantOutboxSummaryLocal } from './outbox/summary.js'
-import {
-  readAssistantOutboxAnsweredCoverageFromReceiptMetadata,
-  repairAssistantOutboxReceiptForIntent,
-} from './outbox/receipt-repair.js'
+import { repairAssistantOutboxReceiptForIntent } from './outbox/receipt-repair.js'
 import {
   findAssistantOutboxIntentByDedupeIdentity,
   listAssistantOutboxIntentsLocal as listAssistantOutboxIntentsLocalStore,
@@ -228,7 +224,6 @@ export type DeliverAssistantOutboxMessageResult =
 
 export type AssistantOutboxCreateIntentInput = {
   actorId?: string | null
-  answeredCoverage?: AssistantOutboxIntent['answeredCoverage']
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   createdAt?: string
@@ -335,61 +330,23 @@ export async function createAssistantOutboxIntent(
             rawTargetIdentity,
             updatedAt: createdAt,
           })
-      const coverageUpgradedExisting =
-        maybeUpgradeAssistantOutboxIntentAnsweredCoverage({
-          answeredCoverage: input.answeredCoverage ?? null,
-          intent: upgradedExisting,
-          updatedAt: createdAt,
-        })
-      const requiresDurableAnsweredCoverage =
-        assistantOutboxIntentRequiresDurableAnsweredCoverage(
-          coverageUpgradedExisting,
-        )
-      if (requiresDurableAnsweredCoverage) {
-        const repairedReceipt = await repairAssistantOutboxReceiptForIntent({
-          at: coverageUpgradedExisting.updatedAt,
-          intent: coverageUpgradedExisting,
-          vault: input.vault,
-        })
-        if (
-          !assistantOutboxIntentAnsweredCoverageIsDurablyRecorded({
-            intent: coverageUpgradedExisting,
-            receipt: repairedReceipt,
-          })
-        ) {
-          await failAssistantOutboxIntentWithoutDurableAnsweredCoverage({
-            intent: coverageUpgradedExisting,
-            intentPath: resolveAssistantOutboxIntentPath(
-              paths.outboxDirectory,
-              coverageUpgradedExisting.intentId,
-            ),
-            updatedAt: createdAt,
-            vault: input.vault,
-          })
-          throw createAssistantOutboxAnsweredCoverageReceiptRequiredError(
-            coverageUpgradedExisting,
-          )
-        }
-      }
-      if (coverageUpgradedExisting !== existing) {
+      if (upgradedExisting !== existing) {
         const persistedUpgradedExisting =
-          sanitizeAssistantOutboxIntentForPersistence(coverageUpgradedExisting)
+          sanitizeAssistantOutboxIntentForPersistence(upgradedExisting)
         await writeJsonFileAtomic(
           resolveAssistantOutboxIntentPath(
             paths.outboxDirectory,
-            coverageUpgradedExisting.intentId,
+            upgradedExisting.intentId,
           ),
           persistedUpgradedExisting,
         )
       }
-      if (!requiresDurableAnsweredCoverage) {
-        await repairAssistantOutboxReceiptForIntent({
-          at: coverageUpgradedExisting.updatedAt,
-          intent: coverageUpgradedExisting,
-          vault: input.vault,
-        })
-      }
-      return coverageUpgradedExisting
+      await repairAssistantOutboxReceiptForIntent({
+        at: upgradedExisting.updatedAt,
+        intent: upgradedExisting,
+        vault: input.vault,
+      })
+      return upgradedExisting
     }
 
     const intent = assistantOutboxIntentSchema.parse({
@@ -415,39 +372,19 @@ export async function createAssistantOutboxIntent(
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
       deliveryTransportIdempotent,
-      answeredCoverage: input.answeredCoverage ?? null,
       lastError: null,
     })
     const persistedIntentValue =
       sanitizeAssistantOutboxIntentForPersistence(intent)
-    const requiresDurableAnsweredCoverage =
-      assistantOutboxIntentRequiresDurableAnsweredCoverage(intent)
-    if (requiresDurableAnsweredCoverage) {
-      const repairedReceipt = await repairAssistantOutboxReceiptForIntent({
-        at: createdAt,
-        intent,
-        vault: input.vault,
-      })
-      if (
-        !assistantOutboxIntentAnsweredCoverageIsDurablyRecorded({
-          intent,
-          receipt: repairedReceipt,
-        })
-      ) {
-        throw createAssistantOutboxAnsweredCoverageReceiptRequiredError(intent)
-      }
-    }
     await writeJsonFileAtomic(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
       persistedIntentValue,
     )
-    if (!requiresDurableAnsweredCoverage) {
-      await repairAssistantOutboxReceiptForIntent({
-        at: createdAt,
-        intent,
-        vault: input.vault,
-      })
-    }
+    await repairAssistantOutboxReceiptForIntent({
+      at: createdAt,
+      intent,
+      vault: input.vault,
+    })
     await recordAssistantDiagnosticEvent({
       vault: input.vault,
       component: 'outbox',
@@ -470,32 +407,6 @@ export async function readAssistantOutboxIntent(
   intentId: string,
 ): Promise<AssistantOutboxIntent | null> {
   return readAssistantOutboxIntentLocal(vault, intentId)
-}
-
-export async function readAssistantOutboxIntentAnsweredCoverage(input: {
-  intentId: string
-  turnId: string
-  vault: string
-}): Promise<AssistantOutboxIntent['answeredCoverage']> {
-  const receipt = await readAssistantTurnReceipt(input.vault, input.turnId)
-  if (!receipt) {
-    return null
-  }
-
-  for (let index = receipt.timeline.length - 1; index >= 0; index -= 1) {
-    const event = receipt.timeline[index]
-    if (!event || event.metadata.intentId !== input.intentId) {
-      continue
-    }
-    const coverage = readAssistantOutboxAnsweredCoverageFromReceiptMetadata(
-      event.metadata,
-    )
-    if (coverage) {
-      return coverage
-    }
-  }
-
-  return null
 }
 
 export async function readAssistantOutboxIntentMirrorState(input: {
@@ -1066,7 +977,6 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
 
 export async function deliverAssistantOutboxMessage(input: {
   actorId?: string | null
-  answeredCoverage?: AssistantOutboxIntent['answeredCoverage']
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   dedupeToken?: string | null
@@ -1093,7 +1003,6 @@ export async function deliverAssistantOutboxMessage(input: {
   throwIfAssistantOutboxSignalAborted(input.signal)
   const intent = await createAssistantOutboxIntent({
     actorId: input.actorId,
-    answeredCoverage: input.answeredCoverage ?? null,
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
     dedupeToken: input.dedupeToken,
@@ -2042,88 +1951,6 @@ function resolveAssistantOutboxDeliveryTransportIdempotentForCreation(input: {
   })
 }
 
-async function failAssistantOutboxIntentWithoutDurableAnsweredCoverage(input: {
-  intent: AssistantOutboxIntent
-  intentPath: string
-  updatedAt: string
-  vault: string
-}): Promise<AssistantOutboxIntent> {
-  const error = createAssistantOutboxAnsweredCoverageReceiptRequiredError(
-    input.intent,
-  )
-  const failed = assistantOutboxIntentSchema.parse({
-    ...input.intent,
-    deliveryConfirmationPending: false,
-    lastError: normalizeAssistantDeliveryError(error),
-    nextAttemptAt: null,
-    preparedDispatchToken: null,
-    status: 'failed',
-    updatedAt: input.updatedAt,
-  })
-  await writeJsonFileAtomic(
-    input.intentPath,
-    sanitizeAssistantOutboxIntentForPersistence(failed),
-  )
-  await repairAssistantOutboxReceiptForIntent({
-    at: failed.updatedAt,
-    intent: failed,
-    vault: input.vault,
-  })
-  return failed
-}
-
-function assistantOutboxIntentAnsweredCoverageIsDurablyRecorded(input: {
-  intent: AssistantOutboxIntent
-  receipt: AssistantTurnReceipt | null
-}): boolean {
-  if (!assistantOutboxIntentRequiresDurableAnsweredCoverage(input.intent)) {
-    return true
-  }
-  if (!input.receipt) {
-    return false
-  }
-
-  for (let index = input.receipt.timeline.length - 1; index >= 0; index -= 1) {
-    const event = input.receipt.timeline[index]
-    if (!event || event.metadata.intentId !== input.intent.intentId) {
-      continue
-    }
-    const coverage = readAssistantOutboxAnsweredCoverageFromReceiptMetadata(
-      event.metadata,
-    )
-    if (
-      sameAssistantOutboxAnsweredCoverage(
-        coverage,
-        input.intent.answeredCoverage,
-      )
-    ) {
-      return true
-    }
-  }
-
-  return false
-}
-
-function assistantOutboxIntentRequiresDurableAnsweredCoverage(
-  intent: AssistantOutboxIntent,
-): boolean {
-  return intent.answeredCoverage !== null && (
-    intent.status === 'awaiting_approval' ||
-    intent.status === 'pending' ||
-    intent.status === 'retryable' ||
-    intent.status === 'sending'
-  )
-}
-
-function createAssistantOutboxAnsweredCoverageReceiptRequiredError(
-  intent: Pick<AssistantOutboxIntent, 'intentId' | 'turnId'>,
-): VaultCliError {
-  return new VaultCliError(
-    'ASSISTANT_OUTBOX_ANSWERED_COVERAGE_RECEIPT_REQUIRED',
-    `Covered assistant delivery ${intent.intentId} requires durable turn receipt coverage before dispatch for turn ${intent.turnId}.`,
-  )
-}
-
 function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
   deliveryIdempotencyKey: string | null
   deliveryTransportIdempotent: boolean
@@ -2150,64 +1977,6 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
       deliveryTransportIdempotent,
     }),
   )
-}
-
-function maybeUpgradeAssistantOutboxIntentAnsweredCoverage(input: {
-  answeredCoverage: AssistantOutboxIntent['answeredCoverage']
-  intent: AssistantOutboxIntent
-  updatedAt: string
-}): AssistantOutboxIntent {
-  const answeredCoverage = selectHighestAssistantOutboxAnsweredCoverage(
-    input.intent.answeredCoverage ?? null,
-    input.answeredCoverage ?? null,
-  )
-  if (
-    sameAssistantOutboxAnsweredCoverage(
-      answeredCoverage,
-      input.intent.answeredCoverage ?? null,
-    )
-  ) {
-    return input.intent
-  }
-
-  return assistantOutboxIntentSchema.parse({
-    ...input.intent,
-    answeredCoverage,
-    updatedAt: input.updatedAt,
-  })
-}
-
-function selectHighestAssistantOutboxAnsweredCoverage(
-  left: AssistantOutboxIntent['answeredCoverage'],
-  right: AssistantOutboxIntent['answeredCoverage'],
-): AssistantOutboxIntent['answeredCoverage'] {
-  if (!left) {
-    return right
-  }
-  if (!right) {
-    return left
-  }
-  return compareAssistantOutboxLaneSeq(left.laneSeq, right.laneSeq) >= 0
-    ? left
-    : right
-}
-
-function sameAssistantOutboxAnsweredCoverage(
-  left: AssistantOutboxIntent['answeredCoverage'],
-  right: AssistantOutboxIntent['answeredCoverage'],
-): boolean {
-  return (left?.lane ?? null) === (right?.lane ?? null) &&
-    (left?.laneSeq ?? null) === (right?.laneSeq ?? null)
-}
-
-function compareAssistantOutboxLaneSeq(left: string, right: string): number {
-  try {
-    const leftSeq = BigInt(left)
-    const rightSeq = BigInt(right)
-    return leftSeq < rightSeq ? -1 : leftSeq > rightSeq ? 1 : 0
-  } catch {
-    return left.localeCompare(right)
-  }
 }
 
 function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {

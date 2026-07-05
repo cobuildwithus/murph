@@ -104,18 +104,16 @@ Exact accepted-item computation (verified design, hardened by adversarial review
 - Select the current inbound item in the delivery context before provider
   send; prefer an exact `replyToMessageId` match before same-target
   fallback.
-- Forward the full `currentInbound` proof to web as consume authority.
-  Legacy `answeredCoverage` lane high-water may still exist in runner
-  payloads as runtime-local receipt metadata, but runtime-to-web delivery
-  outcomes omit it and web ignores legacy callers that still send it.
+- Forward the full `currentInbound` proof to web as consume authority. The
+  legacy runtime-side high-water coverage path has been removed
+  from outbox intents, receipt repair, auto-reply evidence, hosted delivery
+  side effects, and runtime-to-web delivery outcomes.
 - Persist the full `currentInbound` proof alongside the prepared Linq
   route/service authority so post-checkpoint prepared retries restore the
   same exact consume authority before provider send.
 - The runtime must synchronously record accepted delivery outcomes whenever
-  the accepted outcome carries a `currentInbound.mailboxItemId`, even when
-  legacy `answeredCoverage` is null because a lower lane gap blocks any
-  contiguous prefix.
-  Coverage-only outcomes are best-effort telemetry, not consume authority.
+  the accepted outcome carries a `currentInbound.mailboxItemId`; exact
+  current-inbound proof is the only answer-consume authority.
 - Progress Linq delivery may use `currentInbound` for the egress guard, but
   must not include it in delivery-outcome recording; progress is not
   terminal answer evidence.
@@ -256,8 +254,8 @@ Touch: `webhook-service-types.ts:17-26`;
 ## Verification
 
 - PR 1: focused runtime tests for exact Linq delivery context selection and
-  exact accepted mailbox item replay/import; web route test proving legacy
-  `answeredCoverage.laneSeq` is ignored; the restored #362 E2E suite
+  exact accepted mailbox item replay/import; web route tests for exact
+  current-inbound proof; the restored #362 E2E suite
   including the rapid-double-webhook scenario and the Linq delivery E2E
   that was the original failure signal, 2 consecutive green runs; prod
   readback of accepted delivery rows with
@@ -298,7 +296,8 @@ Touch: `webhook-service-types.ts:17-26`;
   and `CI=true pnpm hosted-local e2e linq-webhook --no-bundle` passed.
 - PR 1 ReviewGPT round 24 follow-up: prepared Linq retries now persist and
   restore the full `currentInbound` proof, and runtime-to-web Linq delivery
-  outcomes no longer include or synchronously depend on `answeredCoverage`.
+  outcomes no longer include or synchronously depend on legacy high-water
+  coverage.
   Focused local proof: hosted-runtime callback suite and assistant-engine
   outbox runtime suite passed.
 - PR 1 ReviewGPT round 25 follow-up: foreground prepare now receives the
@@ -306,6 +305,14 @@ Touch: `webhook-service-types.ts:17-26`;
   proof instead of latest same-chat proof, and restores no-route prepared
   current-inbound proof into a minimal Linq context. Focused local proof:
   hosted-runtime callback suite and full workspace typecheck passed.
+- PR 1 ReviewGPT round 26 follow-up: recovered Linq provider-thread delivery
+  outcomes validate answered current-inbound proof against the original inbound
+  target while recording the actual provider thread for delivery observability;
+  the obsolete high-water coverage stack is deleted. Focused local proof:
+  web Linq delivery route tests, hosted-execution side-effect tests,
+  assistant-engine focused runtime tests, assistant-runtime hosted callback
+  tests, assistantd HTTP tests, assistant-cli doctor/daemon coverage tests,
+  and full workspace typecheck passed.
 - PR 2: workflow replay tests per the patch procedure + Temporal
   orchestration E2E; full webhook owner suites for the wake-field
   collapse.

@@ -76,6 +76,7 @@ export const POST = withJsonError(async (request: Request) => {
   const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
   const linqChatId = providerThreadId
     ?? (targetKind === "participant" ? null : providerTarget ?? target);
+  const answeredLinqChatId = currentInbound?.target ?? linqChatId;
   const validatedRouteAuthority = routeAuthority
     ? assertHostedLinqRouteAuthorityMatchesTarget({
         chatId: linqChatId,
@@ -101,7 +102,7 @@ export const POST = withJsonError(async (request: Request) => {
     ? await resolveHostedLinqDeliveryAnsweredMailboxItemId({
         acceptedAt,
         currentInbound,
-        linqChatId,
+        linqChatId: answeredLinqChatId,
         memberId: userId,
         prisma,
         routeAuthority: validatedRouteAuthority,

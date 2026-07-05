@@ -33,7 +33,6 @@ import {
   normalizeAssistantDeliveryError,
   readAssistantAutomationState,
   readAssistantOutboxIntent,
-  readAssistantOutboxIntentAnsweredCoverage,
   readAssistantVaultFileMedia,
   readVerifiedAssistantVaultFileBytes,
   sendTelegramMessage,
@@ -661,10 +660,7 @@ async function buildHostedAssistantDeliveryEffectFromIntent(input: {
   intent: AssistantOutboxIntent;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryEffect> {
-  const payload = await buildHostedAssistantDeliveryPayloadFromIntentForDispatch({
-    intent: input.intent,
-    vaultRoot: input.vaultRoot,
-  });
+  const payload = buildHostedAssistantDeliveryPayloadFromIntent(input.intent);
   return buildHostedAssistantDeliveryEffect({
     dedupeKey: input.intent.dedupeKey,
     deliveryPhase: input.deliveryPhase,
@@ -3357,7 +3353,7 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
 }
 
 async function hostedAssistantDeliveryIntentIsAutoReply(input: {
-  intent: Pick<AssistantOutboxIntent, "answeredCoverage" | "intentId" | "turnId">;
+  intent: Pick<AssistantOutboxIntent, "intentId" | "turnId">;
   vaultRoot: string;
 }): Promise<boolean> {
   const matched = await findAssistantAutoReplyDeliveryIntentIds({
@@ -3611,7 +3607,6 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
   intent: Pick<
     AssistantOutboxIntent,
     | "actorId"
-    | "answeredCoverage"
     | "bindingDelivery"
     | "channel"
     | "deliveryIdempotencyKey"
@@ -3632,7 +3627,6 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
 ): HostedAssistantDeliveryPayload {
   const payload = {
     actorId: intent.actorId ?? null,
-    answeredCoverage: intent.answeredCoverage ?? null,
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
     channel: intent.channel ?? null,
@@ -3653,22 +3647,6 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
 
   assertSupportedHostedAssistantDeliveryPayload(payload);
   return payload;
-}
-
-async function buildHostedAssistantDeliveryPayloadFromIntentForDispatch(input: {
-  intent: AssistantOutboxIntent;
-  vaultRoot: string;
-}): Promise<HostedAssistantDeliveryPayload> {
-  const answeredCoverage = await readAssistantOutboxIntentAnsweredCoverage({
-    intentId: input.intent.intentId,
-    turnId: input.intent.turnId,
-    vault: input.vaultRoot,
-  });
-
-  return buildHostedAssistantDeliveryPayloadFromIntent({
-    ...input.intent,
-    answeredCoverage,
-  });
 }
 
 function normalizeHostedAssistantDeliveryMedia(

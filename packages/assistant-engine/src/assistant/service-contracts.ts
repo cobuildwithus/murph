@@ -4,7 +4,6 @@ import type {
   AssistantChatProvider,
   AssistantBindingDeliveryKind,
   AssistantDeliveryError,
-  AssistantOutboxIntent,
   AssistantDeliverySource,
   AssistantProviderSessionOptions,
   AssistantSandbox,
@@ -116,7 +115,6 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   codexConfigOverrides?: readonly string[] | null
   codexCommand?: string
   deliverResponse?: boolean
-  deliveryAnsweredCoverage?: AssistantOutboxIntent['answeredCoverage'] | null
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryIdempotencyKey?: string | null
   deliveryMessageReactionsAvailable?: boolean | null

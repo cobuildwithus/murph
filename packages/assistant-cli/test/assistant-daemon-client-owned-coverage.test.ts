@@ -118,7 +118,6 @@ const TEST_SESSION = {
 
 const TEST_OUTBOX_INTENT = {
   schema: 'murph.assistant-outbox-intent.v1',
-  answeredCoverage: null,
   intentId: 'intent_123',
   sessionId: TEST_SESSION.sessionId,
   turnId: 'turn_123',
