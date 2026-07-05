@@ -1214,6 +1214,8 @@ model HostedLinqDelivery {
   linqChatLookupKey    String?  @map("linq_chat_lookup_key")
   messageLookupKey     String?  @unique @map("message_lookup_key")
   messageIdSuffix      String?  @map("message_id_suffix")
+  answeredCoverageLane    String?  @map("answered_coverage_lane")
+  answeredCoverageLaneSeq String?  @map("answered_coverage_lane_seq")
   service              String?
   status               String   @default("attempted")
   attemptedAt          DateTime @map("attempted_at")

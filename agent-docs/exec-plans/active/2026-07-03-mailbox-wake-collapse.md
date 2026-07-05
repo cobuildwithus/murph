@@ -159,11 +159,13 @@ Coverage computation (verified design, hardened by adversarial review):
   are minted once and reused across retries; only the provider-accept path
   emits `acceptedAt`; the web route enforces accepted/failed XOR; the
   store's advance is monotonic so out-of-order accepts cannot regress.
-- Advance on ANY accepted outcome carrying coverage — not only on a
-  newly-accepted transition. The advance is monotonic-max, so replays are
-  free, and the deploy window requires it: new runner → old web records
-  accepted but ignores coverage; the retry hitting new web finds the row
-  already accepted and must still advance.
+- Persist coverage on the existing `HostedLinqDelivery` row when the row
+  first records an accepted outcome. Accepted replays may advance the
+  monotonic `consumed_seq` watermark from that stored row coverage, but
+  never from mutable replay request bodies. This deliberately rejects
+  broader compatibility machinery for pre-persistence accepted rows: if web
+  did not store coverage when the accepted fact was recorded, there is no
+  durable authority left to consume from later.
 - Rollback care: `assistantOutboxIntentSchema` is `.strict()`. A new
   runner writing the field then rolling back to an old runner must not
   brick outbox-state parsing. Follow the repo's outbox schema-evolution
@@ -391,6 +393,6 @@ Adversarial review (c1 gpt-5.5 xhigh, 2026-07-03) resolutions: fetch-gate
 deletion withdrawn (it is the only usage check on the direct-wake path);
 coverage scan pinned to the persisted lane prefix, not context candidates;
 suppression counts as terminal for coverage; lag netting made an explicit
-parameter with the status route audited alongside; watermark advances on
-any accepted+coverage report (replay/deploy-window safe); reaction-only
-sends excluded from callback assumptions.
+parameter with the status route audited alongside; accepted replays consume
+only from coverage stored on the delivery row; reaction-only sends excluded
+from callback assumptions.

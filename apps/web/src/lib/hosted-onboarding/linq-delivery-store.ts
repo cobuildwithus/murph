@@ -48,6 +48,11 @@ type HostedLinqDeliveryReceiptData = {
   service: string | null;
 };
 
+type HostedLinqDeliveryAnsweredCoverage = {
+  lane: "conversation";
+  laneSeq: string;
+};
+
 type HostedLinqReopenOnboardingLink = {
   memberId: string;
   occurredAt: string;
@@ -430,10 +435,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
 
 export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
   acceptedAt?: Date | null;
-  answeredCoverage?: {
-    lane: "conversation";
-    laneSeq: string;
-  } | null;
+  answeredCoverage?: HostedLinqDeliveryAnsweredCoverage | null;
   attemptedAt?: Date | null;
   failedAt?: Date | null;
   failureCode?: string | null;
@@ -500,6 +502,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
 
   return await runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
     let acceptedAdvanced = false;
+    let answeredCoverageToConsume: HostedLinqDeliveryAnsweredCoverage | null = null;
     const existing = await prisma.hostedLinqDelivery.findUnique({
       where: { idempotencyKey },
       select: hostedLinqDeliveryLifecycleSelect,
@@ -512,6 +515,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
             ? {
                 ...baseData,
                 acceptedAt,
+                ...serializeHostedLinqDeliveryAnsweredCoverage(input.answeredCoverage ?? null),
                 messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
                 messageLookupKey,
                 status: "accepted",
@@ -529,6 +533,9 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
               },
         });
         acceptedAdvanced = Boolean(acceptedAt);
+        answeredCoverageToConsume = acceptedAt
+          ? input.answeredCoverage ?? null
+          : null;
       } catch (error) {
         if (!isPrismaUniqueConstraintError(error)) {
           throw error;
@@ -542,6 +549,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         }
         acceptedAdvanced = await updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx({
           acceptedAt,
+          answeredCoverage: input.answeredCoverage ?? null,
           attemptedAt,
           failedAt,
           failureCode: input.failureCode ?? null,
@@ -555,10 +563,14 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
           sourceRef: input.sourceRef ?? null,
           targetKind: input.targetKind ?? null,
         });
+        answeredCoverageToConsume = acceptedAdvanced
+          ? input.answeredCoverage ?? null
+          : readHostedLinqDeliveryAnsweredCoverage(concurrent);
       }
     } else if (acceptedAt) {
       acceptedAdvanced = await updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx({
         acceptedAt,
+        answeredCoverage: input.answeredCoverage ?? null,
         attemptedAt,
         failedAt: null,
         failureCode: input.failureCode ?? null,
@@ -572,9 +584,13 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         sourceRef: input.sourceRef ?? null,
         targetKind: input.targetKind ?? null,
       });
+      answeredCoverageToConsume = acceptedAdvanced
+        ? input.answeredCoverage ?? null
+        : readHostedLinqDeliveryAnsweredCoverage(existing);
     } else if (failedAt) {
       await updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx({
         acceptedAt: null,
+        answeredCoverage: null,
         attemptedAt,
         failedAt,
         failureCode: input.failureCode ?? null,
@@ -590,11 +606,11 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
       });
     }
 
-    if (acceptedAdvanced && acceptedAt && input.answeredCoverage) {
+    if (acceptedAt && answeredCoverageToConsume) {
       await advanceHostedMailboxConsumedSeqByLane({
         lanes: [{
-          consumedSeq: input.answeredCoverage.laneSeq,
-          lane: input.answeredCoverage.lane,
+          consumedSeq: answeredCoverageToConsume.laneSeq,
+          lane: answeredCoverageToConsume.lane,
         }],
         prisma,
         userId: input.userId,
@@ -647,6 +663,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
 
 async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
   acceptedAt: Date | null;
+  answeredCoverage: HostedLinqDeliveryAnsweredCoverage | null;
   attemptedAt: Date;
   failedAt: Date | null;
   failureCode: string | null;
@@ -683,6 +700,7 @@ async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
       },
       data: {
         acceptedAt: input.acceptedAt,
+        ...serializeHostedLinqDeliveryAnsweredCoverage(input.answeredCoverage),
         attemptedAt: input.attemptedAt,
         failedAt: null,
         failureCode: null,
@@ -1222,8 +1240,37 @@ function isHostedLinqDeliveryProviderCorrelated(input: {
   );
 }
 
+function serializeHostedLinqDeliveryAnsweredCoverage(
+  coverage: HostedLinqDeliveryAnsweredCoverage | null,
+): {
+  answeredCoverageLane: string | null;
+  answeredCoverageLaneSeq: string | null;
+} {
+  return {
+    answeredCoverageLane: coverage?.lane ?? null,
+    answeredCoverageLaneSeq: coverage?.laneSeq ?? null,
+  };
+}
+
+function readHostedLinqDeliveryAnsweredCoverage(input: {
+  answeredCoverageLane?: string | null;
+  answeredCoverageLaneSeq?: string | null;
+}): HostedLinqDeliveryAnsweredCoverage | null {
+  const lane = normalizeNullable(input.answeredCoverageLane ?? null);
+  const laneSeq = normalizeNullable(input.answeredCoverageLaneSeq ?? null);
+  if (lane !== "conversation" || !laneSeq) {
+    return null;
+  }
+  return {
+    lane: "conversation",
+    laneSeq,
+  };
+}
+
 const hostedLinqDeliveryLifecycleSelect = {
   acceptedAt: true,
+  answeredCoverageLane: true,
+  answeredCoverageLaneSeq: true,
   attemptedAt: true,
   deliveredAt: true,
   failedAt: true,
