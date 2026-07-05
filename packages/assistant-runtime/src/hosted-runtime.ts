@@ -2345,14 +2345,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             latencySeed: checkpointWakeLatencySeed,
             requestIdKind: "checkpoint-wake",
           });
-          await runIdleWakeForegroundPass({
-            initialMailboxImport: foregroundImport.initialMailboxImport,
-            initialMailboxImportContext: foregroundImport.initialMailboxImportContext,
-            latencySeed: checkpointWakeLatencySeed,
-            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
-            requestIdKind: "checkpoint-wake",
-          });
-          continue;
+          if (
+            foregroundImport.initialMailboxImport.importResult.importedCount > 0
+            || foregroundImport.initialMailboxImport.importResult.blocked.some((item) =>
+              item.retryable
+            )
+          ) {
+            await runIdleWakeForegroundPass({
+              initialMailboxImport: foregroundImport.initialMailboxImport,
+              initialMailboxImportContext: foregroundImport.initialMailboxImportContext,
+              latencySeed: checkpointWakeLatencySeed,
+              projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+              requestIdKind: "checkpoint-wake",
+            });
+            continue;
+          }
         }
         if (
           projectedRuntimeWakeCanRunAfterCheckpoint({
