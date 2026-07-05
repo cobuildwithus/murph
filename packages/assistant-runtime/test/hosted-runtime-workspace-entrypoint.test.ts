@@ -6625,6 +6625,166 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("same-key checkpoint-blocked conversation wakes hide due assistant state before checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const idleCheckpointDelayMs = 180_000;
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    const assistantThreeObserved = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_runtime_same_key_conversation_wake",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + "runtime-same-key-conversation-wake.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  version: "4",
+                }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              events.push(
+                `assistant.phase:${assistantPhaseCalls}:`
+                  + `${input.workspace?.nextWakeAt ?? "none"}:`
+                  + `${input.workspace?.nextWakeReason ?? "none"}`,
+              );
+              if (assistantPhaseCalls === 1) {
+                assistantOneObserved.resolve();
+                return {
+                  afterCheckpoint: async () => ({
+                    checkpointReason: "provider_cleanup",
+                    nextWakeAt: TEST_NOW,
+                    nextWakeReason: "assistant",
+                  }),
+                  checkpointReason: "canonical_runtime_commit",
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              if (assistantPhaseCalls === 2) {
+                assistantTwoObserved.resolve();
+                return {
+                  progressed: false,
+                  redactedStatus: {
+                    hostedAssistantProgressed: false,
+                  },
+                };
+              }
+
+              if (assistantPhaseCalls === 3) {
+                assistantThreeObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: null,
+                  nextWakeReason: null,
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              throw new Error("Same-key due assistant wake should service exactly once.");
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_entrypoint_same_key_conversation_wake",
+        laneSeq: "1",
+        occurredAt: "2026-04-27T00:00:01.000Z",
+      }));
+      runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      assert.equal(checkpointRequests.length, 0);
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        `assistant.phase:1:${TEST_NOW}:assistant`,
+        "assistant.phase:2:none:none",
+      ]);
+
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(events, `assistant.phase:3:${TEST_NOW}:assistant`),
+      );
+
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      const result = await resultPromise;
+
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        ["idle_shutdown", TEST_NOW, "assistant"],
+        ["idle_shutdown", null, null],
+      ]);
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.status, "idle");
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("post-checkpoint projected wakes replace consumed phase wakes and wait for the idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-post-checkpoint-wake-"));
     const events: string[] = [];
@@ -9576,6 +9736,148 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
       assert.equal(result.status, "idle");
     } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("runtime wakes that interrupt checkpoint publication do not service same-key due wakes before checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 180_000;
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+    let snapshotAttempt = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_same_key_checkpoint_interrupt",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              snapshotAttempt += 1;
+              events.push(`snapshot:${snapshotAttempt}:${snapshotInput.reason}`);
+              if (snapshotAttempt === 1) {
+                throw new HostedRuntimeCheckpointInterruptedByWakeError();
+              }
+              return {
+                snapshotRef: createBundleRef({
+                  hash: `${snapshotAttempt}`.repeat(64).slice(0, 64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `runtime-same-key-checkpoint-interrupt-${snapshotAttempt}.bundle.json`,
+                  size: 640,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  version: "4",
+                }),
+              }),
+            }),
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              events.push(
+                `assistant.phase:${assistantPhaseCalls}:`
+                  + `${input.workspace?.nextWakeAt ?? "none"}:`
+                  + `${input.workspace?.nextWakeReason ?? "none"}`,
+              );
+              if (assistantPhaseCalls === 1) {
+                assistantOneObserved.resolve();
+                return {
+                  afterCheckpoint: async () => ({
+                    checkpointReason: "provider_cleanup",
+                    nextWakeAt: TEST_NOW,
+                    nextWakeReason: "assistant",
+                  }),
+                  checkpointReason: "canonical_runtime_commit",
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              if (assistantPhaseCalls === 2) {
+                assistantTwoObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: null,
+                  nextWakeReason: null,
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              throw new Error("Interrupted same-key due wake should service exactly once.");
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      assert.ok(
+        requireEventIndex(events, "snapshot:2:idle_shutdown")
+          < requireEventIndex(events, `assistant.phase:2:${TEST_NOW}:assistant`),
+      );
+
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      const result = await resultPromise;
+
+      assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
+        "snapshot:1:idle_shutdown",
+        "snapshot:2:idle_shutdown",
+        "snapshot:3:idle_shutdown",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        ["idle_shutdown", TEST_NOW, "assistant"],
+        ["idle_shutdown", null, null],
+      ]);
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.status, "idle");
+    } finally {
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });

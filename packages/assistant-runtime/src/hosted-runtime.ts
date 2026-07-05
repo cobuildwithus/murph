@@ -1850,21 +1850,33 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           nextWakeReason: accumulatedProjection.nextWakeReason,
         });
         const committedPassWorkspace = checkpointedWorkspace;
-        const committedWakeCanReplayBeforeCheckpoint =
+        const committedWakeKeyBeforePass =
+          committedPassWorkspace === null
+            ? null
+            : buildHostedRuntimeWakeKey({
+                nextWakeAt: committedPassWorkspace.nextWakeAt ?? null,
+                nextWakeReason: committedPassWorkspace.nextWakeReason ?? null,
+              });
+        const checkpointBlockedCommittedAssistantWake =
           committedPassWorkspace !== null
           && wakeInput.requestIdKind !== "checkpoint-wake"
           && runtimeStateDirty
           && hostedRuntimeWakeReasonIsAssistant(committedPassWorkspace.nextWakeReason ?? null)
-          && hostedRuntimeWakeIsDue(committedPassWorkspace.nextWakeAt ?? null)
-          && buildHostedRuntimeWakeKey({
-            nextWakeAt: committedPassWorkspace.nextWakeAt ?? null,
-            nextWakeReason: committedPassWorkspace.nextWakeReason ?? null,
-          }) !== projectedWakeKeyBeforePass;
-        const basePassWorkspace = committedWakeCanReplayBeforeCheckpoint
+          && hostedRuntimeWakeIsDue(committedPassWorkspace.nextWakeAt ?? null);
+        const projectedPassWake = checkpointBlockedCommittedAssistantWake
+          && committedWakeKeyBeforePass !== projectedWakeKeyBeforePass
           ? {
-              ...committedPassWorkspace,
               nextWakeAt: accumulatedProjection.nextWakeAt,
               nextWakeReason: accumulatedProjection.nextWakeReason,
+            }
+          : {
+              nextWakeAt: null,
+              nextWakeReason: null,
+            };
+        const basePassWorkspace = checkpointBlockedCommittedAssistantWake
+          ? {
+              ...committedPassWorkspace,
+              ...projectedPassWake,
             }
           : committedPassWorkspace;
         result = await runForegroundPass({
@@ -1913,6 +1925,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           && (
             pendingDurableCheckpointEffects.length > 0
             || accumulatedProjection.projectedWakeRequiresCheckpoint
+            || checkpointBlockedCommittedAssistantWake
           );
         accumulatedProjection = mergeHostedWorkspaceInvocationProjection(
           accumulatedProjection,
@@ -2257,16 +2270,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
         } catch (error) {
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
-            const latencySeed = createHostedRuntimeWakeLatencySeed(error.notification);
-            const foregroundImport = await importRuntimeWakeForegroundMailbox({
-              lanes: ["system", "conversation"],
-              latencySeed,
-              requestIdKind: "checkpoint-interrupt",
-            });
-            await runCheckpointInterruptForegroundPass({
-              initialMailboxImport: foregroundImport.initialMailboxImport,
-              initialMailboxImportContext: foregroundImport.initialMailboxImportContext,
-              latencySeed,
+            await runPreCheckpointRuntimeWakeForegroundPass({
+              latencySeed: createHostedRuntimeWakeLatencySeed(error.notification),
             });
             continue;
           }
