@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import type {
+  HostedMailboxItem,
+} from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -8,6 +11,7 @@ import {
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
+  readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems,
   recordHostedLinqDeliveryAttemptTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
@@ -1328,12 +1332,16 @@ describe("hosted Linq observability stores", () => {
   it("advances conversation consumed coverage when an accepted runtime outcome first records", async () => {
     const fixture = createObservabilityPrismaFixture();
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+    fixture.hostedMailboxItemFindFirst.mockResolvedValueOnce({
+      id: "mailbox_item_answered_42",
+    });
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
       answeredCoverage: {
         lane: "conversation",
         laneSeq: "42",
+        mailboxItemId: "mailbox_item_answered_42",
       },
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       idempotencyKey: "assistant-outbox:intent_first_accept",
@@ -1353,9 +1361,22 @@ describe("hosted Linq observability stores", () => {
         data: expect.objectContaining({
           answeredCoverageLane: "conversation",
           answeredCoverageLaneSeq: "42",
+          answeredCoverageMailboxItemId: "mailbox_item_answered_42",
         }),
       }),
     );
+    expect(fixture.hostedMailboxItemFindFirst).toHaveBeenCalledWith({
+      select: {
+        id: true,
+      },
+      where: {
+        id: "mailbox_item_answered_42",
+        kind: "conversation.message",
+        lane: "conversation",
+        laneSeq: 42n,
+        userId: "member_123",
+      },
+    });
     expect(fixture.hostedMailboxLaneCounterUpdateMany).toHaveBeenCalledWith({
       data: {
         consumedSeq: 42n,
@@ -1377,6 +1398,7 @@ describe("hosted Linq observability stores", () => {
       acceptedAt: new Date("2026-03-26T12:00:00.000Z"),
       answeredCoverageLane: "conversation",
       answeredCoverageLaneSeq: "12",
+      answeredCoverageMailboxItemId: "mailbox_item_stored_12",
       deliveredAt: null,
       failedAt: null,
       id: "hld_replayed_accepted",
@@ -1426,6 +1448,58 @@ describe("hosted Linq observability stores", () => {
         },
       }),
     );
+  });
+
+  it("reads exact accepted delivery consumed mailbox items from stored coverage", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        answeredCoverageLane: "conversation",
+        answeredCoverageLaneSeq: "3",
+        answeredCoverageMailboxItemId: "mailbox_item_answered_3",
+      },
+      {
+        answeredCoverageLane: "conversation",
+        answeredCoverageLaneSeq: "5",
+        answeredCoverageMailboxItemId: "mailbox_item_other",
+      },
+    ]);
+
+    await expect(readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems({
+      items: [
+        buildMailboxItem({
+          id: "mailbox_item_pending_2",
+          laneSeq: "2",
+        }),
+        buildMailboxItem({
+          id: "mailbox_item_answered_3",
+          laneSeq: "3",
+        }),
+      ],
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual([
+      {
+        itemId: "mailbox_item_answered_3",
+        lane: "conversation",
+        laneSeq: "3",
+      },
+    ]);
+
+    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
+      select: {
+        answeredCoverageLane: true,
+        answeredCoverageLaneSeq: true,
+        answeredCoverageMailboxItemId: true,
+      },
+      where: {
+        acceptedAt: {
+          not: null,
+        },
+        answeredCoverageMailboxItemId: {
+          in: ["mailbox_item_pending_2", "mailbox_item_answered_3"],
+        },
+      },
+    });
   });
 
   it("does not advance answered coverage for failed runtime outcomes", async () => {
@@ -2346,6 +2420,7 @@ function createObservabilityPrismaFixture() {
     userId: "member_123",
   });
   const hostedMailboxLaneCounterUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const hostedMailboxItemFindFirst = vi.fn().mockResolvedValue(null);
   const hostedLinqLineFindMany = vi.fn().mockResolvedValue([]);
   const hostedLinqLineFindUnique = vi.fn().mockResolvedValue(null);
   const hostedLinqLineUpdate = vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
@@ -2381,6 +2456,9 @@ function createObservabilityPrismaFixture() {
       findUnique: hostedMailboxLaneCounterFindUnique,
       updateMany: hostedMailboxLaneCounterUpdateMany,
     },
+    hostedMailboxItem: {
+      findFirst: hostedMailboxItemFindFirst,
+    },
     hostedLinqLine: {
       findMany: hostedLinqLineFindMany,
       findUnique: hostedLinqLineFindUnique,
@@ -2408,6 +2486,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqDeliveryUpsert,
     hostedMailboxLaneCounterFindUnique,
     hostedMailboxLaneCounterUpdateMany,
+    hostedMailboxItemFindFirst,
     hostedLinqLineFindMany,
     hostedLinqLineFindUnique,
     hostedLinqLineUpdate,
@@ -2417,6 +2496,28 @@ function createObservabilityPrismaFixture() {
     hostedLinqProviderEventFindFirst,
     hostedLinqProviderEventFindMany,
     prisma,
+  };
+}
+
+function buildMailboxItem(input: {
+  id: string;
+  laneSeq: string;
+}): HostedMailboxItem {
+  return {
+    createdAt: "2026-03-26T12:00:00.000Z",
+    dedupeKey: `dedupe:${input.id}`,
+    expiresAt: null,
+    id: input.id,
+    kind: "conversation.message",
+    lane: "conversation",
+    laneSeq: input.laneSeq,
+    occurredAt: "2026-03-26T12:00:00.000Z",
+    payloadBytes: 64,
+    payloadInlineCiphertext: "ciphertext",
+    payloadRef: null,
+    payloadSchema: "murph.hosted-mailbox-item.v1",
+    updatedAt: "2026-03-26T12:00:00.000Z",
+    userId: "member_123",
   };
 }
 

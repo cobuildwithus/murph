@@ -653,10 +653,20 @@ export interface HostedMailboxLaneConsumed {
   lane: HostedMailboxLane;
 }
 
+export interface HostedMailboxConsumedItem {
+  itemId: string;
+  lane: HostedMailboxLane;
+  laneSeq: string;
+}
+
 export interface HostedMailboxFetchResponse {
   // Optional for deploy-window compatibility: older web responses omit it and
   // the runtime treats every lane as consumed through seq 0.
   consumedSeqByLane?: HostedMailboxLaneConsumed[] | null;
+  // Optional exact per-item consumed authorities for delivered items above a
+  // lower pending lane gap. Older runtimes ignore it and fall back to the
+  // contiguous consumedSeqByLane prefix.
+  consumedItems?: HostedMailboxConsumedItem[] | null;
   fetchedAt: string;
   items: HostedMailboxItem[];
   maxSeqByLane: HostedMailboxLaneHighWater[];
@@ -1024,7 +1034,6 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
-    triggeredByWebDirect?: boolean;
     userRunnerEnsureStartedAtEpochMs?: number;
     activeWakeStartedAtEpochMs?: number;
     activeWakeFinishedAtEpochMs?: number;
@@ -1110,7 +1119,6 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "temporalActivityStartedAtEpochMs",
     "temporalActivityRequestStartedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
-    "triggeredByWebDirect",
     "userRunnerEnsureStartedAtEpochMs",
     "activeWakeStartedAtEpochMs",
     "activeWakeFinishedAtEpochMs",
@@ -1165,7 +1173,6 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
   [
     "orchestration.activeWakeAccepted",
     "orchestration.replacedStaleFence",
-    "orchestration.triggeredByWebDirect",
     "wake.activeRuntimePassForeground",
     "boot.restoreWasCold",
   ] as const;

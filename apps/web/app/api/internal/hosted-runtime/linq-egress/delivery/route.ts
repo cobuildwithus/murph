@@ -42,6 +42,7 @@ export const POST = withJsonError(async (request: Request) => {
   const answeredCoverage = parseHostedLinqDeliveryAnsweredCoverage(
     body.answeredCoverage,
   );
+  const currentInbound = parseHostedLinqDeliveryCurrentInbound(body.currentInbound);
   const targetKind = parseHostedLinqDeliveryTargetKind(body.targetKind);
   const acceptedAt = parseOptionalHostedLinqDeliveryDate(
     body.acceptedAt,
@@ -99,7 +100,12 @@ export const POST = withJsonError(async (request: Request) => {
   }
   const result = await recordHostedLinqRuntimeDeliveryOutcomeTx({
     acceptedAt,
-    answeredCoverage,
+    answeredCoverage: answeredCoverage
+      ? {
+          ...answeredCoverage,
+          mailboxItemId: currentInbound?.mailboxItemId ?? null,
+        }
+      : null,
     attemptedAt,
     failedAt,
     failureCode: readOptionalBodyString(body.failureCode),
@@ -263,6 +269,33 @@ function parseHostedLinqDeliveryAnsweredCoverage(value: unknown): {
     lane: "conversation",
     laneSeq,
   };
+}
+
+function parseHostedLinqDeliveryCurrentInbound(value: unknown): {
+  mailboxItemId: string;
+} | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_DELIVERY_CURRENT_INBOUND_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq delivery current inbound proof is invalid.",
+      retryable: false,
+    });
+  }
+  const record = value as Record<string, unknown>;
+  const mailboxItemId = readOptionalBodyString(record.mailboxItemId);
+  if (!mailboxItemId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_DELIVERY_CURRENT_INBOUND_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq delivery current inbound mailbox item is invalid.",
+      retryable: false,
+    });
+  }
+  return { mailboxItemId };
 }
 
 function parseRequiredHostedLinqDeliveryDate(value: unknown, field: string): Date {

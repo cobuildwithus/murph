@@ -2,9 +2,6 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_EXECUTION_SIGNATURE_HEADER,
-} from "@murphai/hosted-execution/contracts";
-import {
   verifyHostedExecutionVercelOidcRequest,
 } from "../auth-adapter.ts";
 import {
@@ -109,17 +106,6 @@ export async function authorizeRoute(
       });
       return unauthorized();
     }
-    case "web-callback-signature-or-vercel-oidc": {
-      // Dispatch on the credential the caller presented; never fall through
-      // from a failed signature to OIDC (or vice versa), so a bad credential
-      // of either kind stays fail-closed.
-      return authorizeRoute(
-        readPresentedWorkerRouteAuthorization(context.request),
-        context,
-        routeName,
-        options,
-      );
-    }
     case "vercel-oidc": {
       const validation = context.environment?.vercelOidcValidation;
       if (!validation) {
@@ -161,17 +147,6 @@ export async function authorizeRoute(
     default:
       return null;
   }
-}
-
-// For dual-scheme routes: which concrete credential the caller presented.
-// The signature header wins so orchestrator-signed requests keep their exact
-// current semantics; a request without it is authorized as web-plane OIDC.
-export function readPresentedWorkerRouteAuthorization(
-  request: Request,
-): "vercel-oidc" | "web-callback-signature" {
-  return request.headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER) !== null
-    ? "web-callback-signature"
-    : "vercel-oidc";
 }
 
 export function requireBoundInternalRouteUser(

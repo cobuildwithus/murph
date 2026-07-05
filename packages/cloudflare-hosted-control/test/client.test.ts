@@ -22,59 +22,8 @@ describe("createCloudflareHostedControlClient", () => {
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultSession",
       "deleteUserData",
-      "ensureRuntimeProcessing",
       "getRunnerStatus",
     ]);
-  });
-
-  it("posts runtime ensure-processing requests to the user route and parses the response", async () => {
-    const fetchImpl = vi.fn(async () => createJsonResponse({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-07-02T00:03:00.000Z",
-      runtimeAttemptId: "runtime-attempt-test",
-    })) as typeof fetch;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test",
-      fetchImpl,
-      getBearerToken: async () => "token-123",
-    });
-
-    await expect(client.ensureRuntimeProcessing({
-      orchestrationAttemptId: "web-ingress-attempt-test",
-      userId: "user_123",
-    })).resolves.toEqual({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-07-02T00:03:00.000Z",
-      runtimeAttemptId: "runtime-attempt-test",
-    });
-
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://runner.example.test/internal/users/user_123/runtime/ensure-processing");
-    expect(init.method).toBe("POST");
-    expect(init.body).toBe(JSON.stringify({
-      orchestrationAttemptId: "web-ingress-attempt-test",
-    }));
-    const headers = new Headers(init.headers);
-    expect(headers.get("authorization")).toBe("Bearer token-123");
-    expect(headers.get("x-hosted-execution-user-id")).toBe("user_123");
-  });
-
-  it("rejects blank user identifiers for runtime ensure-processing before issuing requests", () => {
-    const fetchImpl = vi.fn(async () => createJsonResponse(createRunnerStatus())) as typeof fetch;
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test",
-      fetchImpl,
-      getBearerToken: async () => "token-123",
-    });
-
-    expect(() => client.ensureRuntimeProcessing({
-      orchestrationAttemptId: "web-ingress-attempt-test",
-      userId: "  ",
-    })).toThrow("Cloudflare hosted control userId must not be blank.");
-    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("rejects an unconfigured base URL before issuing a request", () => {

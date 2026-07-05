@@ -2749,6 +2749,7 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
     answeredCoverage: input.answeredCoverage ?? null,
     attemptedAt: input.attemptedAt.toISOString(),
+    currentInbound: input.deliveryContext?.currentInbound ?? null,
     ...(input.failedAt ? { failedAt: input.failedAt.toISOString() } : {}),
     failureCode: input.failureCode ?? null,
     failureReason: input.failureReason ?? null,

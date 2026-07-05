@@ -68,6 +68,9 @@ describe("hosted runtime Linq delivery route", () => {
         laneSeq: "42",
       },
       attemptedAt: "2026-04-26T00:00:03.000Z",
+      currentInbound: {
+        mailboxItemId: "mailbox_item_answered_42",
+      },
       fromPhoneNumber: "+15550100099",
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
@@ -89,6 +92,7 @@ describe("hosted runtime Linq delivery route", () => {
         answeredCoverage: {
           lane: "conversation",
           laneSeq: "42",
+          mailboxItemId: "mailbox_item_answered_42",
         },
         attemptedAt: new Date("2026-04-26T00:00:03.000Z"),
         failedAt: null,

@@ -185,6 +185,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const itemsByLane = groupMailboxItemsByLane(fetched.items);
   const consumedSeqState = readHostedMailboxFetchConsumedSeqState(fetched);
   const consumedSeqByLane = consumedSeqState.seqByLane;
+  const consumedItemKeys = readHostedMailboxFetchConsumedItemKeys(fetched);
   let nextState = input.state;
   const assistantInputIds: string[] = [];
   let conversationImportedCount = 0;
@@ -208,11 +209,22 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     }
 
     const itemSeq = parseMailboxSeqForImportOrNull(item.laneSeq);
-    const itemIsDurablyConsumedReplay = itemSeq !== null
-      && isDurablyConsumedConversationReplay({
+    const exactItemConsumed = consumedItemKeys.has(buildHostedMailboxConsumedItemKey({
+      itemId: item.id,
+      lane,
+      laneSeq: item.laneSeq,
+    }));
+    const itemIsDurablyConsumed = itemSeq !== null
+      && isDurablyConsumedMailboxItem({
         consumedSeq: consumedSeqByLane[lane],
         consumedSeqPresent: consumedSeqState.presentByLane[lane],
+        exactItemConsumed,
         itemSeq,
+        lane,
+      });
+    const itemIsDurablyConsumedReplay = itemSeq !== null
+      && isDurablyConsumedConversationReplay({
+        itemIsDurablyConsumed,
         lane,
       });
     if (itemSeq !== null && shouldFastForwardHostedMailboxExpectedSeq({
@@ -349,7 +361,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     }
 
     const outcome = await input.importItem({
-      durablyConsumed: itemSeq <= consumedSeqByLane[lane],
+      durablyConsumed: itemIsDurablyConsumed,
       item,
       payload,
       route,
@@ -440,7 +452,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         importedSystemMailboxItemIds.push(item.id);
       }
       const replyableConversationInput =
-        route.action === "import-conversation-message" && itemSeq > consumedSeqByLane[lane];
+        route.action === "import-conversation-message" && !itemIsDurablyConsumedReplay;
       if (replyableConversationInput) {
         conversationImportedCount += 1;
       }
@@ -481,14 +493,23 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 }
 
 function isDurablyConsumedConversationReplay(input: {
+  itemIsDurablyConsumed: boolean;
+  lane: HostedMailboxLane;
+}): boolean {
+  return input.lane === "conversation" && input.itemIsDurablyConsumed;
+}
+
+function isDurablyConsumedMailboxItem(input: {
   consumedSeq: bigint;
   consumedSeqPresent: boolean;
+  exactItemConsumed: boolean;
   itemSeq: bigint;
   lane: HostedMailboxLane;
 }): boolean {
-  return input.lane === "conversation"
-    && input.consumedSeqPresent
-    && input.itemSeq <= input.consumedSeq;
+  return (
+    (input.lane === "conversation" && input.exactItemConsumed)
+    || (input.consumedSeqPresent && input.itemSeq <= input.consumedSeq)
+  );
 }
 
 function recordHostedMailboxDurablyConsumedReplaySkip(input: {
@@ -643,6 +664,31 @@ function readHostedMailboxFetchConsumedSeqState(
     presentByLane,
     seqByLane,
   };
+}
+
+function readHostedMailboxFetchConsumedItemKeys(
+  fetched: HostedMailboxFetchResponse,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const entry of fetched.consumedItems ?? []) {
+    if (entry.lane !== "conversation") {
+      continue;
+    }
+    keys.add(buildHostedMailboxConsumedItemKey({
+      itemId: entry.itemId,
+      lane: entry.lane,
+      laneSeq: entry.laneSeq,
+    }));
+  }
+  return keys;
+}
+
+function buildHostedMailboxConsumedItemKey(input: {
+  itemId: string;
+  lane: HostedMailboxLane;
+  laneSeq: string;
+}): string {
+  return `${input.lane}:${input.laneSeq}:${input.itemId}`;
 }
 
 function readHostedMailboxFetchMaxSeqByLane(

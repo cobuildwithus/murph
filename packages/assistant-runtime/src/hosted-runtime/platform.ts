@@ -217,6 +217,7 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   acceptedAt?: string | null;
   answeredCoverage?: HostedAssistantAnsweredCoverage | null;
   attemptedAt: string;
+  currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   failedAt?: string | null;
   failureCode?: string | null;
   failureReason?: string | null;

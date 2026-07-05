@@ -195,32 +195,14 @@ Riders (independent deletions, separate commits):
   plan transaction before short-circuiting. `recordedAdmission` has no
   other consumers (webhook-service.ts:202,210).
 
-#### Part 1b — re-land the direct wake (revert of 3c2a41bda2)
+#### Part 1b — direct wake removed after authorization review
 
-Restores the PR #362 fast path with a durable-ordering guard: webhook first
-gets the unconditional Temporal mailbox-append signal accepted, then fires a
-fire-and-forget ensure at the Cloudflare worker instead of waiting for the
-Temporal worker to dispatch the same ensure. ~643 withdrawn lines return (web
-wake helper, CF dual-auth ensure route, control-client method,
-`triggeredByWebDirect` trace leaf, E2E).
-With Part 1a live, racing ensures are harmless by construction: a stale
-invocation fetches the mailbox, sees input consumed (null reply target),
-finds no fresh work, exits.
-
-GATE — Linq only: the direct wake fires only for `source === "linq"`,
-because only Linq's reply path advances the watermark (Part 1a channel
-inventory). Firing it for Telegram/WhatsApp would reintroduce the #362
-duplicate hazard on channels with no delivery-time consume authority. One
-guarded condition in the shared wake helper, with the enabling rule named
-in a comment: a channel earns the fast path by growing a delivery-outcome
-callback. This composes instead of branching per provider ad hoc.
-
-Residual risk (documented, accepted): a dual-channel member whose turn
-answers a Telegram input during Linq-wake churn could still see a
-re-answered Telegram input in an inter-invocation gap — that window exists
-today under Temporal retries; the direct wake makes gaps marginally more frequent for
-dual-channel members only. The measured trigger for closing it is a
-Telegram delivery callback, not speculative coordination.
+ReviewGPT round 18 found the re-landed web direct ensure path moved wake
+authorization into a web-local branch: Cloudflare saw only Vercel OIDC plus a
+fresh attempt id, not the durable mailbox append/signal tuple. The simplest
+durable fix is deletion, not minting a new receipt protocol. Web now keeps the
+unconditional Temporal mailbox-append signal as the wake authority; Cloudflare
+`runtime/ensure-processing` is back to Temporal web-callback-signature only.
 
 - No workflow-side coordination, no new flags, no deploy-order dance
   between web and worker beyond web-first for the trace leaf. The protocol
@@ -246,16 +228,8 @@ Deploy-window analysis for the merged PR (replaces the old staged gate):
   the hosted-execution deploy), with `container_rollout=immediate` so old
   runner containers — which do not post coverage — are recycled rather
   than left delivering coverage-less replies.
-- Residual one-window risk, accepted and documented: a duplicate would
-  require a direct wake racing an ensure into an inter-invocation gap for
-  a message whose reply was delivered by a still-running OLD container
-  during the minutes between web and CF deploys. With the 404 gating (the
-  wake route only exists once CF deploys, i.e. once new runners exist)
-  this shrinks to old-container stragglers under immediate rollout —
-  narrower than the ordinary risk of any hosted deploy.
 - Post-deploy verification before calling it done: one prod observation of
-  `consumed_seq` advancing at delivery time, and `triggeredByWebDirect`
-  appearing in orchestration traces.
+  `consumed_seq` advancing at delivery time.
 
 ### PR 2 — retire the legacy workflow patch branch + collapse the wake fields
 
@@ -383,7 +357,7 @@ Touch: `webhook-service-types.ts:17-26`;
 
 | PR | Deleted | Added |
 | --- | --- | --- |
-| 1 | ~220-line checkpoint ack block, consume route+port+compat wiring, dead lag export, every-message admission pre-read (relocated) | intent field, report field, 1 store call, lag netting (explicit param, both callers audited), ~500 restored direct-wake lines (stateless hint; no new state/concepts) |
+| 1 | ~220-line checkpoint ack block, consume route+port+compat wiring, dead lag export, every-message admission pre-read (relocated), re-landed web direct-wake fast path after authorization review | intent field, report field, delivery-row coverage fields, 1 store call, lag netting (explicit param, both callers audited) |
 | 2 | legacy patch branch, runtime seam, patch constant, direct-summary recorder, replay fixture+test, four legacy wake plan fields + parallel consumers | `deprecatePatch` intermediate (itself later deleted) |
 
 Plan-level collapse already banked: the original PR C ("demote workflow to
@@ -392,10 +366,11 @@ deleted from this plan — PR A's lag netting makes the existing patched
 reconcile loop the correct backstop as-is.
 
 Adversarial review (c1 gpt-5.5 xhigh, 2026-07-03) resolutions: fetch-gate
-deletion withdrawn (it is the only usage check on the direct-wake path);
+deletion withdrawn before direct-wake deletion made that path obsolete;
 coverage scan pinned to the persisted lane prefix, not context candidates;
 suppression counts as terminal for coverage; lag netting made an explicit
 parameter with the status route audited alongside; accepted replays consume
-only from coverage stored on the delivery row; dispatch reads pre-provider
+only from coverage stored on the delivery row; mailbox fetch exposes accepted
+delivery-row item coverage for gap suppression; dispatch reads pre-provider
 coverage from receipt metadata; reaction-only sends excluded from callback
 assumptions.

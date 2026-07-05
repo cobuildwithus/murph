@@ -31,7 +31,6 @@ import {
   type WorkerRouteContext,
 } from "../../worker-routes/shared.ts";
 import {
-  readPresentedWorkerRouteAuthorization,
   requireBoundInternalRouteUser,
 } from "../auth.ts";
 import {
@@ -52,9 +51,7 @@ import {
 
 const runtimeEnsureProcessingRoute = {
   authorizeBeforeMethod: true,
-  // Signed requests come from the Temporal orchestrator; OIDC requests come
-  // from the web app's direct ingress wake fast path. Same idempotent ensure.
-  authorization: "web-callback-signature-or-vercel-oidc",
+  authorization: "web-callback-signature",
   beforeMethod(context, params) {
     return requireBoundInternalRouteUser(context, params, "runtime-ensure-processing");
   },
@@ -143,9 +140,6 @@ export async function handleRuntimeEnsureProcessingRoute(
     orchestration = readRuntimeEnsureProcessingOrchestrationDiagnostics(
       context.request.headers,
       cloudflareRouteReceivedAtEpochMs,
-      // Derived from the credential that authorized this request, never from
-      // caller-supplied body fields.
-      readPresentedWorkerRouteAuthorization(context.request) === "vercel-oidc",
     );
   } catch (error) {
     emitHostedExecutionStructuredLog({
@@ -202,7 +196,6 @@ export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): n
 function readRuntimeEnsureProcessingOrchestrationDiagnostics(
   headers: Headers,
   cloudflareRouteReceivedAtEpochMs: number,
-  triggeredByWebDirect: boolean,
 ): NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> {
   const temporalActivityStartedAtEpochMs = readOptionalEpochMsHeader(
     headers,
@@ -214,7 +207,6 @@ function readRuntimeEnsureProcessingOrchestrationDiagnostics(
   );
   return {
     cloudflareRouteReceivedAtEpochMs,
-    ...(triggeredByWebDirect ? { triggeredByWebDirect } : {}),
     ...(temporalActivityStartedAtEpochMs === null ? {} : { temporalActivityStartedAtEpochMs }),
     ...(temporalActivityRequestStartedAtEpochMs === null ? {} : {
       temporalActivityRequestStartedAtEpochMs,

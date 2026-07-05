@@ -1,4 +1,8 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type {
+  HostedMailboxConsumedItem,
+  HostedMailboxItem,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   createHostedLinqChatLookupKey,
@@ -51,6 +55,7 @@ type HostedLinqDeliveryReceiptData = {
 type HostedLinqDeliveryAnsweredCoverage = {
   lane: "conversation";
   laneSeq: string;
+  mailboxItemId?: string | null;
 };
 
 type HostedLinqReopenOnboardingLink = {
@@ -503,6 +508,13 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
   return await runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
     let acceptedAdvanced = false;
     let answeredCoverageToConsume: HostedLinqDeliveryAnsweredCoverage | null = null;
+    const answeredCoverage = acceptedAt
+      ? await resolveHostedLinqDeliveryAnsweredCoverageTx({
+          coverage: input.answeredCoverage ?? null,
+          prisma,
+          userId: input.userId,
+        })
+      : null;
     const existing = await prisma.hostedLinqDelivery.findUnique({
       where: { idempotencyKey },
       select: hostedLinqDeliveryLifecycleSelect,
@@ -515,7 +527,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
             ? {
                 ...baseData,
                 acceptedAt,
-                ...serializeHostedLinqDeliveryAnsweredCoverage(input.answeredCoverage ?? null),
+                ...serializeHostedLinqDeliveryAnsweredCoverage(answeredCoverage),
                 messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
                 messageLookupKey,
                 status: "accepted",
@@ -534,7 +546,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         });
         acceptedAdvanced = Boolean(acceptedAt);
         answeredCoverageToConsume = acceptedAt
-          ? input.answeredCoverage ?? null
+          ? answeredCoverage
           : null;
       } catch (error) {
         if (!isPrismaUniqueConstraintError(error)) {
@@ -549,7 +561,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         }
         acceptedAdvanced = await updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx({
           acceptedAt,
-          answeredCoverage: input.answeredCoverage ?? null,
+          answeredCoverage,
           attemptedAt,
           failedAt,
           failureCode: input.failureCode ?? null,
@@ -564,13 +576,13 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
           targetKind: input.targetKind ?? null,
         });
         answeredCoverageToConsume = acceptedAdvanced
-          ? input.answeredCoverage ?? null
+          ? answeredCoverage
           : readHostedLinqDeliveryAnsweredCoverage(concurrent);
       }
     } else if (acceptedAt) {
       acceptedAdvanced = await updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx({
         acceptedAt,
-        answeredCoverage: input.answeredCoverage ?? null,
+        answeredCoverage,
         attemptedAt,
         failedAt: null,
         failureCode: input.failureCode ?? null,
@@ -585,7 +597,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         targetKind: input.targetKind ?? null,
       });
       answeredCoverageToConsume = acceptedAdvanced
-        ? input.answeredCoverage ?? null
+        ? answeredCoverage
         : readHostedLinqDeliveryAnsweredCoverage(existing);
     } else if (failedAt) {
       await updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx({
@@ -987,6 +999,59 @@ export async function readHostedLinqDeliveryForProviderMessageTx(input: {
     : null;
 }
 
+export async function readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems(input: {
+  items: readonly HostedMailboxItem[];
+  prisma: HostedLinqDeliveryClient;
+}): Promise<HostedMailboxConsumedItem[]> {
+  const candidates = input.items.filter((item) =>
+    item.kind === "conversation.message"
+    && item.lane === "conversation"
+  );
+  if (candidates.length === 0) {
+    return [];
+  }
+  const itemIds = candidates.map((item) => item.id);
+  const rows = await input.prisma.hostedLinqDelivery.findMany({
+    where: {
+      acceptedAt: {
+        not: null,
+      },
+      answeredCoverageMailboxItemId: {
+        in: itemIds,
+      },
+    },
+    select: {
+      answeredCoverageLane: true,
+      answeredCoverageLaneSeq: true,
+      answeredCoverageMailboxItemId: true,
+    },
+  });
+  const consumedKeys = new Set<string>();
+  for (const row of rows) {
+    const coverage = readHostedLinqDeliveryAnsweredCoverage(row);
+    if (!coverage?.mailboxItemId) {
+      continue;
+    }
+    consumedKeys.add(buildHostedLinqDeliveryConsumedItemKey({
+      itemId: coverage.mailboxItemId,
+      lane: coverage.lane,
+      laneSeq: coverage.laneSeq,
+    }));
+  }
+
+  return candidates
+    .filter((item) => consumedKeys.has(buildHostedLinqDeliveryConsumedItemKey({
+      itemId: item.id,
+      lane: "conversation",
+      laneSeq: item.laneSeq,
+    })))
+    .map((item) => ({
+      itemId: item.id,
+      lane: "conversation",
+      laneSeq: item.laneSeq,
+    }));
+}
+
 function buildReceiptUpdate(event: ParsedHostedLinqProviderEvent): Prisma.HostedLinqDeliveryUpdateInput {
   if (!event.deliveryStatus) {
     throw new TypeError("Hosted Linq delivery receipt update requires a terminal status.");
@@ -1245,16 +1310,19 @@ function serializeHostedLinqDeliveryAnsweredCoverage(
 ): {
   answeredCoverageLane: string | null;
   answeredCoverageLaneSeq: string | null;
+  answeredCoverageMailboxItemId: string | null;
 } {
   return {
     answeredCoverageLane: coverage?.lane ?? null,
     answeredCoverageLaneSeq: coverage?.laneSeq ?? null,
+    answeredCoverageMailboxItemId: coverage?.mailboxItemId ?? null,
   };
 }
 
 function readHostedLinqDeliveryAnsweredCoverage(input: {
   answeredCoverageLane?: string | null;
   answeredCoverageLaneSeq?: string | null;
+  answeredCoverageMailboxItemId?: string | null;
 }): HostedLinqDeliveryAnsweredCoverage | null {
   const lane = normalizeNullable(input.answeredCoverageLane ?? null);
   const laneSeq = normalizeNullable(input.answeredCoverageLaneSeq ?? null);
@@ -1264,13 +1332,79 @@ function readHostedLinqDeliveryAnsweredCoverage(input: {
   return {
     lane: "conversation",
     laneSeq,
+    mailboxItemId: normalizeNullable(input.answeredCoverageMailboxItemId ?? null),
   };
+}
+
+async function resolveHostedLinqDeliveryAnsweredCoverageTx(input: {
+  coverage: HostedLinqDeliveryAnsweredCoverage | null;
+  prisma: HostedLinqDeliveryClient;
+  userId: string;
+}): Promise<HostedLinqDeliveryAnsweredCoverage | null> {
+  if (!input.coverage) {
+    return null;
+  }
+  const mailboxItemId = normalizeNullable(input.coverage.mailboxItemId ?? null);
+  if (!mailboxItemId) {
+    return {
+      lane: input.coverage.lane,
+      laneSeq: input.coverage.laneSeq,
+      mailboxItemId: null,
+    };
+  }
+  const laneSeq = parseHostedLinqDeliveryCoverageLaneSeq(input.coverage.laneSeq);
+  if (laneSeq === null) {
+    return {
+      lane: input.coverage.lane,
+      laneSeq: input.coverage.laneSeq,
+      mailboxItemId: null,
+    };
+  }
+  const item = await input.prisma.hostedMailboxItem.findFirst({
+    where: {
+      id: mailboxItemId,
+      kind: "conversation.message",
+      lane: input.coverage.lane,
+      laneSeq,
+      userId: input.userId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  return {
+    lane: input.coverage.lane,
+    laneSeq: input.coverage.laneSeq,
+    mailboxItemId: item?.id ?? null,
+  };
+}
+
+function parseHostedLinqDeliveryCoverageLaneSeq(value: string): bigint | null {
+  const normalized = normalizeNullable(value);
+  if (!normalized || !/^(0|[1-9]\d*)$/u.test(normalized)) {
+    return null;
+  }
+  try {
+    return BigInt(normalized);
+  } catch {
+    return null;
+  }
+}
+
+function buildHostedLinqDeliveryConsumedItemKey(input: {
+  itemId: string;
+  lane: "conversation";
+  laneSeq: string;
+}): string {
+  return `${input.lane}:${input.laneSeq}:${input.itemId}`;
 }
 
 const hostedLinqDeliveryLifecycleSelect = {
   acceptedAt: true,
   answeredCoverageLane: true,
   answeredCoverageLaneSeq: true,
+  answeredCoverageMailboxItemId: true,
   attemptedAt: true,
   deliveredAt: true,
   failedAt: true,

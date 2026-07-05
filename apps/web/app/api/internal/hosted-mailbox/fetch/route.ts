@@ -24,8 +24,12 @@ import {
 import {
   resolveHostedRuntimeAiUsageGate,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
+import {
+  readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems,
+} from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_MAILBOX_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
@@ -69,6 +73,10 @@ export const POST = withJsonError(async (request: Request) => {
     lanes: body.lanes,
     userId,
   });
+  const consumedItems = await readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems({
+    items: itemsResult.items,
+    prisma: getPrisma(),
+  });
   const maxSeqByLane = await readHostedMailboxMaxSeqByLane({
     lanes: requestedLanes,
     userId,
@@ -76,6 +84,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk(parseHostedMailboxFetchResponse({
     consumedSeqByLane,
+    consumedItems,
     fetchedAt: fetchedAt.toISOString(),
     items: itemsResult.items,
     maxSeqByLane,

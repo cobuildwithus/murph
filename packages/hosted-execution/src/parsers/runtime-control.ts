@@ -35,6 +35,7 @@ import {
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
+  type HostedMailboxConsumedItem,
   type HostedMailboxItem,
   type HostedMailboxKind,
   type HostedMailboxLane,
@@ -512,6 +513,17 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
           ).map((entry, index) => parseHostedMailboxLaneConsumed(
             entry,
             `Hosted mailbox fetch response consumedSeqByLane[${index}]`,
+          )),
+        }),
+    ...(record.consumedItems === undefined || record.consumedItems === null
+      ? {}
+      : {
+          consumedItems: requireArray(
+            record.consumedItems,
+            "Hosted mailbox fetch response consumedItems",
+          ).map((entry, index) => parseHostedMailboxConsumedItem(
+            entry,
+            `Hosted mailbox fetch response consumedItems[${index}]`,
           )),
         }),
     fetchedAt: requireString(record.fetchedAt, "Hosted mailbox fetch response fetchedAt"),
@@ -1759,7 +1771,6 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "temporalActivityStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "temporalActivityRequestStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
-      ...requireOptionalBoolean(orchestration, "triggeredByWebDirect", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "userRunnerEnsureStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeWakeStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeWakeFinishedAtEpochMs", orchestrationLabel),
@@ -2687,6 +2698,19 @@ function parseHostedMailboxLaneConsumed(
   return {
     consumedSeq: requireNonNegativeBigIntString(record.consumedSeq, `${label}.consumedSeq`),
     lane: parseHostedMailboxLane(record.lane),
+  };
+}
+
+function parseHostedMailboxConsumedItem(
+  value: unknown,
+  label: string,
+): HostedMailboxConsumedItem {
+  const record = requireObject(value, label);
+
+  return {
+    itemId: requireString(record.itemId, `${label}.itemId`),
+    lane: parseHostedMailboxLane(record.lane),
+    laneSeq: requireNonNegativeBigIntString(record.laneSeq, `${label}.laneSeq`),
   };
 }
 

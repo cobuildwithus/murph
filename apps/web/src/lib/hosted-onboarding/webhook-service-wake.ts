@@ -1,13 +1,8 @@
-import { randomUUID } from "node:crypto";
-
 import {
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
 } from "@murphai/hosted-execution/runtime-control";
 
-import {
-  readHostedExecutionControlClientIfConfigured,
-} from "../hosted-execution/control";
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
@@ -68,15 +63,9 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
           userId: input.userId,
         }
       : undefined;
-  // A channel earns the fast path by growing a delivery-outcome callback;
-  // Linq is currently the only channel that can advance delivery-time consume
-  // authority.
-  const directEnsureEligible = Boolean(knownCheckpoint && input.source === "linq");
-
   const handoffTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${input.source}.wake-handoff`,
     {
-      directEnsureWakeStarted: directEnsureEligible,
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
       responseReason: input.response.reason,
       userIdPresent: Boolean(input.userId),
@@ -108,29 +97,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     throw error;
   }
 
-  // Latency fast path: after Temporal has accepted the durable mailbox append
-  // signal, poke the idempotent Cloudflare ensure route directly instead of
-  // waiting for the Temporal worker to dispatch the same ensure activity.
-  // Gated on the planner checkpoint and Linq delivery-time consume authority
-  // because the planning transaction already verified the active member and
-  // admission for this wake. Best-effort only: losing this call leaves exactly
-  // the Temporal path, and the webhook response never waits on it.
-  const directEnsureWake = directEnsureEligible && input.userId
-    ? startHostedDirectEnsureWakeBestEffort({
-        source: "linq",
-        userId: input.userId,
-      })
-    : null;
-  if (directEnsureWake) {
-    if (input.scheduleAfterResponse) {
-      // Keep the in-flight request alive past the response without ever
-      // putting its latency on the provider success path.
-      input.scheduleAfterResponse(() => directEnsureWake);
-    } else {
-      void directEnsureWake;
-    }
-  }
-
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
     mailboxItemId,
     scheduleAfterResponse: input.scheduleAfterResponse,
@@ -148,59 +114,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     started: true,
     workflowId: signal.workflowId,
   };
-}
-
-// Starts the direct Cloudflare ensure request immediately and never throws or
-// rejects, including on synchronous client-configuration errors. The returned
-// promise exists only so callers can keep the request alive past the webhook
-// response; the Temporal signal never waits on it.
-function startHostedDirectEnsureWakeBestEffort(wake: {
-  source: "linq";
-  userId: string;
-}): Promise<void> {
-  const wakeSource = wake.source;
-  let client: ReturnType<typeof readHostedExecutionControlClientIfConfigured>;
-  try {
-    client = readHostedExecutionControlClientIfConfigured();
-  } catch (error) {
-    console.warn("Hosted direct ensure wake client is misconfigured.", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      source: wakeSource,
-    });
-    return Promise.resolve();
-  }
-  if (!client) {
-    return Promise.resolve();
-  }
-
-  try {
-    return client
-      .ensureRuntimeProcessing({
-        orchestrationAttemptId: `web-ingress-${randomUUID()}`,
-        userId: wake.userId,
-      })
-      .then((ensureResult) => {
-        console.info("Hosted direct ensure wake completed.", {
-          kind: ensureResult.kind,
-          ...(ensureResult.kind === "runtime_processing_accepted"
-            ? { action: ensureResult.action }
-            : {}),
-          source: wakeSource,
-        });
-      })
-      .catch((error: unknown) => {
-        console.warn("Hosted direct ensure wake failed.", {
-          errorName: deriveHostedOnboardingTimingErrorName(error),
-          source: wakeSource,
-        });
-      });
-  } catch (error) {
-    console.warn("Hosted direct ensure wake failed.", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      source: wakeSource,
-    });
-    return Promise.resolve();
-  }
 }
 
 function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {

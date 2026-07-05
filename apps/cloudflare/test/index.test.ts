@@ -1985,7 +1985,7 @@ describe("cloudflare worker routes", () => {
       });
     });
 
-    it("accepts web-plane OIDC runtime ensure-processing requests and stamps the direct-wake trigger", async () => {
+    it("rejects web-plane OIDC runtime ensure-processing requests", async () => {
       const stub = createUserRunnerStub({
         ensureRuntimeProcessingForUser: vi.fn(async () => ({
           action: "woken" as const,
@@ -2011,21 +2011,8 @@ describe("cloudflare worker routes", () => {
         env,
       );
 
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
-        action: "woken",
-        kind: "runtime_processing_accepted",
-        recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
-        runtimeAttemptId: "runtime-attempt-test",
-      });
-      expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
-        orchestrationAttemptId: "web-ingress-attempt-test",
-        orchestration: {
-          cloudflareRouteReceivedAtEpochMs: expect.any(Number),
-          triggeredByWebDirect: true,
-        },
-        userId: "test-user",
-      });
+      expect(response.status).toBe(401);
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
     it("rejects runtime ensure-processing requests whose only credential is an invalid OIDC bearer", async () => {

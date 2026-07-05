@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
   publishLatestBrowserVaultReplicaRef: vi.fn(),
   readAcceptedRuntimeAttemptFailureSignalOwnerLogId: vi.fn(),
+  readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
@@ -62,6 +63,11 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOr
     typeof import("@/src/lib/hosted-orchestration/runtime-usage-decision")
   >()),
   resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
+  readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems:
+    mocks.readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems,
 }));
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
@@ -157,6 +163,7 @@ describe("hosted runtime internal web routes", () => {
       consumedSeq: "999",
       lane,
     }))));
+    mocks.readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems.mockResolvedValue([]);
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
@@ -216,6 +223,13 @@ describe("hosted runtime internal web routes", () => {
         },
       ],
     });
+    mocks.readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems.mockResolvedValueOnce([
+      {
+        itemId: "mailbox_item_1",
+        lane: "conversation",
+        laneSeq: "12",
+      },
+    ]);
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
       {
         lane: "conversation",
@@ -265,6 +279,18 @@ describe("hosted runtime internal web routes", () => {
       userId: "member_routes_1",
     });
     expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
+    expect(mocks.readHostedLinqAcceptedDeliveryConsumedItemsForMailboxItems)
+      .toHaveBeenCalledWith({
+        items: payload.items,
+        prisma: expect.any(Object),
+      });
+    expect(payload.consumedItems).toEqual([
+      {
+        itemId: "mailbox_item_1",
+        lane: "conversation",
+        laneSeq: "12",
+      },
+    ]);
     expect(payload.items[1]).toMatchObject({
       payloadInlineCiphertext: null,
       payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,

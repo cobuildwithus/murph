@@ -405,6 +405,13 @@ describe("hosted runtime control contracts", () => {
       requestId: "mailbox-fetch-1",
     });
     expect(parseHostedMailboxFetchResponse({
+      consumedItems: [
+        {
+          itemId: "mailbox_item_consumed_12",
+          lane: "conversation",
+          laneSeq: "12",
+        },
+      ],
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
@@ -413,6 +420,13 @@ describe("hosted runtime control contracts", () => {
       ],
       userId: "member_123",
     })).toEqual({
+      consumedItems: [
+        {
+          itemId: "mailbox_item_consumed_12",
+          lane: "conversation",
+          laneSeq: "12",
+        },
+      ],
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
@@ -1190,37 +1204,6 @@ describe("hosted runtime control contracts", () => {
       activeWakeAccepted: "true",
       freshStartRequestedAtEpochMs: -1,
     })).toBeNull();
-  });
-
-  it("keeps the direct-wake trigger as a boolean orchestration leaf", () => {
-    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
-      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
-      triggeredByWebDirect: true,
-    })).toEqual({
-      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
-      triggeredByWebDirect: true,
-    });
-
-    // Non-boolean values are dropped like any other schema-mismatched leaf.
-    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
-      triggeredByWebDirect: 1,
-    })).toBeNull();
-
-    const merged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
-      existing: {},
-      incoming: {
-        orchestration: {
-          cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
-          triggeredByWebDirect: true,
-        },
-        schemaVersion: 1,
-      },
-      phases: ["orchestration"],
-    });
-    expect(merged.value.orchestration).toEqual({
-      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
-      triggeredByWebDirect: true,
-    });
   });
 
   it("parses workspace checkpoint contracts as the hosted commit primitive", () => {

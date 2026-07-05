@@ -30,13 +30,10 @@ Public routes:
 Internal control routes:
 
 - `POST /internal/users/:userId/runtime/ensure-processing` is the idempotent
-  processing adapter; it accepts either the Temporal orchestrator's callback
-  signature or web's Vercel OIDC credential (dispatched by presented
-  credential, never falling through a failed one), records which trigger won
-  as the `triggeredByWebDirect` orchestration latency leaf, and starts, wakes,
-  or accepts a pending runtime wake for only the bound user's runtime,
-  returning after that start/wake intent is accepted, not after the runtime
-  reaches idle
+  processing adapter; it accepts the Temporal orchestrator's callback
+  signature and starts, wakes, or accepts a pending runtime wake for only the
+  bound user's runtime, returning after that start/wake intent is accepted,
+  not after the runtime reaches idle
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API

@@ -1214,8 +1214,9 @@ model HostedLinqDelivery {
   linqChatLookupKey    String?  @map("linq_chat_lookup_key")
   messageLookupKey     String?  @unique @map("message_lookup_key")
   messageIdSuffix      String?  @map("message_id_suffix")
-  answeredCoverageLane    String?  @map("answered_coverage_lane")
-  answeredCoverageLaneSeq String?  @map("answered_coverage_lane_seq")
+  answeredCoverageLane          String?  @map("answered_coverage_lane")
+  answeredCoverageLaneSeq       String?  @map("answered_coverage_lane_seq")
+  answeredCoverageMailboxItemId String?  @map("answered_coverage_mailbox_item_id")
   service              String?
   status               String   @default("attempted")
   attemptedAt          DateTime @map("attempted_at")
@@ -1237,6 +1238,7 @@ model HostedLinqDelivery {
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])
   @@index([lastReceiptAt])
+  @@index([answeredCoverageMailboxItemId])
   @@map("hosted_linq_delivery")
 }
 
