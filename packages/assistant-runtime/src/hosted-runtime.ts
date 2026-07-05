@@ -1674,6 +1674,30 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         workspace: workspaceRead.workspace,
       });
       let servicedProjectedRuntimeWakeKey: string | null = null;
+      const stageDurableCheckpointFollowUp = (
+        workspace: HostedWorkspaceState | null,
+      ): void => {
+        const followUpCheckpointWake = selectEarliestHostedRuntimeWake([
+          {
+            at: workspace?.nextWakeAt ?? accumulatedProjection.nextWakeAt,
+            reason: workspace?.nextWakeReason ?? accumulatedProjection.nextWakeReason,
+          },
+          {
+            at: durableCheckpointWakeAt,
+            reason: durableCheckpointWakeReason,
+          },
+        ]);
+        accumulatedProjection = {
+          ...accumulatedProjection,
+          committedWorkspace: workspace ?? accumulatedProjection.committedWorkspace,
+          nextWakeAt: followUpCheckpointWake.nextWakeAt,
+          nextWakeReason: followUpCheckpointWake.nextWakeReason,
+          projectedWakeRequiresCheckpoint: true,
+        };
+        runtimeStateDirty = true;
+        idleCheckpointStartByMs = Date.now();
+        forceIdleCheckpointBeforeWake = true;
+      };
       const logHostedVaultShareProjectionOfferOutcome = (
         vaultShareOffer: Awaited<ReturnType<typeof offerHostedVaultShareProjectionBestEffort>>,
       ): void => {
@@ -2030,6 +2054,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
         }
       }
+      if (!runtimeStateDirty) {
+        assertRuntimeNotAborted();
+        // Replay-only mailbox consume acks are already backed by the restored
+        // durable checkpoint. If the ack fails and returns a retry wake, route
+        // that wake through the same follow-up checkpoint path as dirty turns.
+        const durableCheckpointEffects = await runDurableCheckpointEffectsBestEffort();
+        if (durableCheckpointEffects.requiresFollowUpCheckpoint) {
+          stageDurableCheckpointFollowUp(
+            accumulatedProjection.committedWorkspace ?? workspaceRead.workspace,
+          );
+        }
+      }
       while (runtimeStateDirty) {
         const forceCheckpointBeforeWake = forceIdleCheckpointBeforeWake;
         let checkpointProjectedWakeBeforeService = false;
@@ -2344,26 +2380,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // re-mutating it here would be a duplicate state owner and is the seam
         // that previously let inboxMediaRetentionWakeAt drift.
         if (durableCheckpointEffects.requiresFollowUpCheckpoint) {
-          const followUpCheckpointWake = selectEarliestHostedRuntimeWake([
-            {
-              at: checkpoint.workspace.nextWakeAt ?? accumulatedProjection.nextWakeAt,
-              reason: checkpoint.workspace.nextWakeReason ?? accumulatedProjection.nextWakeReason,
-            },
-            {
-              at: durableCheckpointWakeAt,
-              reason: durableCheckpointWakeReason,
-            },
-          ]);
-          accumulatedProjection = {
-            ...accumulatedProjection,
-            committedWorkspace: checkpoint.workspace,
-            nextWakeAt: followUpCheckpointWake.nextWakeAt,
-            nextWakeReason: followUpCheckpointWake.nextWakeReason,
-            projectedWakeRequiresCheckpoint: true,
-          };
-          runtimeStateDirty = true;
-          idleCheckpointStartByMs = Date.now();
-          forceIdleCheckpointBeforeWake = true;
+          stageDurableCheckpointFollowUp(checkpoint.workspace);
           continue;
         }
         accumulatedProjection = {
@@ -2491,9 +2508,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return invocationResult;
       }
     assertRuntimeNotAborted();
-    // Replay-only mailbox consume acks are already backed by the restored
-    // durable checkpoint, so they still need to flush when no new state is dirty.
-    await runDurableCheckpointEffectsBestEffort();
     const projection = accumulatedProjection;
     const shouldRunNoProgressBrowserVaultRefresh =
       browserVaultReplicaRefreshRequested;

@@ -4948,6 +4948,119 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("failed replay-only consume ack checkpoints mailbox retry wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-replay-consume-"));
+    const events: string[] = [];
+    const consumeRequests: HostedMailboxConsumeRequest[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const restoredState = createEmptyHostedMailboxImportState();
+    restoredState.watermarks.conversation = "100";
+    const bundle = createMailboxImportStateBundle(restoredState);
+    const replayItems = Array.from({ length: 100 }, (_, index) =>
+      createMailboxItem({
+        id: `mailbox_item_entrypoint_replay_consume_retry_${String(index + 1).padStart(3, "0")}`,
+        laneSeq: String(index + 1),
+        payloadInlineCiphertext: null,
+        payloadRef:
+          `payload_ref_entrypoint_replay_consume_retry_${String(index + 1).padStart(3, "0")}`,
+      })
+    );
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_replay_only_consume_retry",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/replay-consume-retry.bundle.json",
+                size: bundle.bytes.byteLength,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("locally imported replay should not be imported again");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[bundle.hash, bundle.bytes]]),
+            mailboxPort: {
+              ...createMailboxPort({
+                consumedSeqByLane: [
+                  {
+                    consumedSeq: "0",
+                    lane: "conversation",
+                  },
+                ],
+                events,
+                items: replayItems,
+              }),
+              async consume(request): Promise<HostedMailboxConsumeResponse> {
+                events.push("mailbox.consume");
+                consumeRequests.push(request);
+                throw new Error("synthetic replay consume failure");
+              },
+              async fetchPayload(): Promise<HostedMailboxPayloadFetchResponse> {
+                throw new Error("locally imported replay sidecar should not be fetched");
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                redactedStatus: {
+                  hostedMailboxConversationImportedSeq: "100",
+                },
+                snapshotRef: createBundleRef({
+                  hash: bundle.hash,
+                  key: "users/bundles/member-synthetic/replay-consume-retry-before.bundle.json",
+                  size: bundle.bytes.byteLength,
+                }),
+                version: "4",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            events.push("assistant");
+            return {
+              progressed: false,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(
+        consumeRequests.map((request) => request.lanes),
+        [[{ consumedSeq: "100", lane: "conversation" }]],
+      );
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.expectedWorkspaceVersion,
+          request.nextWakeAt === null ? null : "present",
+          request.nextWakeReason,
+        ]),
+        [["4", "present", "mailbox"]],
+      );
+      assert.ok(
+        events.indexOf("mailbox.consume") < events.indexOf("workspace.checkpoint"),
+        "mailbox retry wake should be checkpointed after the failed replay consume",
+      );
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt === null ? null : "present", "present");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("runtime abort blocks the foreground consume ack at the abort-guarded platform", async () => {
     // The guard half of the consume passthrough: the consumed-watermark ack is
     // a durable write, so once the runtime abort signal fires it must never
