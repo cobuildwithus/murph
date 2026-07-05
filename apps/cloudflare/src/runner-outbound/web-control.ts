@@ -17,6 +17,7 @@ import {
 import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_COVERAGE_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
@@ -158,6 +159,9 @@ export async function handleRunnerWebControlRequest(input: {
   const isLinqContactCardShareAfterOutboundRequest =
     policy.operation === "linq_contact_card_share_after_outbound"
     && input.request.method === "POST";
+  const isAssistantDeliveryCoverageRequest =
+    input.url.pathname === HOSTED_RUNTIME_ASSISTANT_DELIVERY_COVERAGE_PATH
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (
@@ -175,6 +179,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isConnectedAppsRequest
     || isCodexAuthUpdateRequest
     || isLinqContactCardShareAfterOutboundRequest
+    || isAssistantDeliveryCoverageRequest
     || isPhoneCallStartRequest
   ) {
     try {

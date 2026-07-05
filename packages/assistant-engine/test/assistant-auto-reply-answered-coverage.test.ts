@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -15,6 +15,9 @@ import {
   upsertAssistantInputEvent,
   type AssistantInputEventRecord,
 } from '../src/assistant/input-store.js'
+import {
+  resolveAssistantStatePaths,
+} from '../src/assistant/store/paths.js'
 
 describe('assistant auto-reply answered coverage', () => {
   it('holds back below a pending Telegram input even when a later Linq input is answered', async () => {
@@ -133,7 +136,7 @@ describe('assistant auto-reply answered coverage', () => {
     })
   })
 
-  it('keeps future terminal seqs lossless beyond the old pending list cap', async () => {
+  it('rebuilds terminal seqs beyond the bounded pending projection when a gap closes', async () => {
     await withCoverageVault(async (vault) => {
       const staged: AssistantInputEventRecord[] = []
       for (let seq = 1; seq <= 1002; seq += 1) {
@@ -149,8 +152,22 @@ describe('assistant auto-reply answered coverage', () => {
         inputIds: staged.slice(501).map((event) => event.inputId),
         vault,
       })
+      await expect(readAnsweredCoveragePendingSeqCount(vault)).resolves.toBe(500)
+
       await writeReplyEvidence({
-        inputIds: staged.slice(0, 501).map((event) => event.inputId),
+        inputIds: staged.slice(0, 500).map((event) => event.inputId),
+        vault,
+      })
+      await expect(computeAssistantAutoReplyAnsweredCoverage({
+        context: coverageContext(),
+        vault,
+      })).resolves.toEqual({
+        lane: 'conversation',
+        laneSeq: '500',
+      })
+
+      await writeReplyEvidence({
+        inputIds: [staged[500]!.inputId],
         vault,
       })
 
@@ -373,6 +390,28 @@ async function stageHostedMailboxInput(input: {
     },
     vault: input.vault,
   })
+}
+
+async function readAnsweredCoveragePendingSeqCount(vault: string): Promise<number> {
+  const statePath = path.join(
+    resolveAssistantStatePaths(vault).assistantStateRoot,
+    'auto-reply',
+    'answered-coverage.json',
+  )
+  const parsed = JSON.parse(await readFile(statePath, 'utf8')) as {
+    pendingLaneRanges?: Array<{ endSeq?: unknown; startSeq?: unknown }>
+  }
+  return (parsed.pendingLaneRanges ?? []).reduce((count, range) => {
+    if (typeof range.startSeq !== 'string' || typeof range.endSeq !== 'string') {
+      return count
+    }
+    const start = Number.parseInt(range.startSeq, 10)
+    const end = Number.parseInt(range.endSeq, 10)
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+      return count
+    }
+    return count + end - start + 1
+  }, 0)
 }
 
 function coverageTimestamp(laneSeq: string): string {

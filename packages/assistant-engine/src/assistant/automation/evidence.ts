@@ -26,6 +26,7 @@ const ASSISTANT_AUTO_REPLY_EVIDENCE_SCHEMA =
   'murph.assistant-auto-reply-terminal-evidence.v1'
 const ASSISTANT_AUTO_REPLY_ANSWERED_COVERAGE_SCHEMA =
   'murph.assistant-auto-reply-answered-coverage.v1'
+const AUTO_REPLY_ANSWERED_COVERAGE_PENDING_SEQ_LIMIT = 500
 
 export type AssistantAutoReplyTerminalKind =
   | 'deferred'
@@ -170,18 +171,24 @@ export async function computeAssistantAutoReplyAnsweredCoverageFromTerminalInput
   vault: string
 }): Promise<AssistantOutboxIntent['answeredCoverage']> {
   const current = await readAssistantAutoReplyAnsweredCoverageState(input.vault)
-  const laneSeqs = await readAssistantAutoReplyAnsweredCoverageLaneSeqs({
+  const currentWithBaseCoverage = {
+    ...current,
+    coverage: selectHighestAssistantAutoReplyAnsweredCoverage(
+      input.baseCoverage ?? null,
+      current.coverage,
+    ),
+  }
+  const inputLaneSeqs = await readAssistantAutoReplyAnsweredCoverageLaneSeqs({
     inputIds: input.terminalInputIds ?? [],
     vault: input.vault,
   })
+  const laneSeqs = await readAssistantAutoReplyLaneSeqsForCoverageAdvance({
+    current: currentWithBaseCoverage,
+    laneSeqs: inputLaneSeqs,
+    vault: input.vault,
+  })
   return advanceAssistantAutoReplyAnsweredCoverageState({
-    current: {
-      ...current,
-      coverage: selectHighestAssistantAutoReplyAnsweredCoverage(
-        input.baseCoverage ?? null,
-        current.coverage,
-      ),
-    },
+    current: currentWithBaseCoverage,
     laneSeqs,
   }).coverage
 }
@@ -486,12 +493,17 @@ async function recordAssistantAutoReplyAnsweredCoverage(input: {
     return
   }
 
-  const laneSeqs = await readAssistantAutoReplyAnsweredCoverageLaneSeqs(input)
-  if (laneSeqs.length === 0) {
+  const inputLaneSeqs = await readAssistantAutoReplyAnsweredCoverageLaneSeqs(input)
+  if (inputLaneSeqs.length === 0) {
     return
   }
 
   const current = await readAssistantAutoReplyAnsweredCoverageState(input.vault)
+  const laneSeqs = await readAssistantAutoReplyLaneSeqsForCoverageAdvance({
+    current,
+    laneSeqs: inputLaneSeqs,
+    vault: input.vault,
+  })
   const next = advanceAssistantAutoReplyAnsweredCoverageState({
     current,
     laneSeqs,
@@ -527,6 +539,77 @@ async function readAssistantAutoReplyAnsweredCoverageLaneSeqs(input: {
     }
   }
   return [...laneSeqs]
+}
+
+async function readAssistantAutoReplyLaneSeqsForCoverageAdvance(input: {
+  current: AssistantAutoReplyAnsweredCoverageState
+  laneSeqs: readonly string[]
+  vault: string
+}): Promise<string[]> {
+  if (
+    input.laneSeqs.length <= AUTO_REPLY_ANSWERED_COVERAGE_PENDING_SEQ_LIMIT &&
+    countAssistantAutoReplyAnsweredCoverageRanges(
+      parseAssistantAutoReplyAnsweredCoverageRanges(input.current.pendingLaneRanges),
+      AUTO_REPLY_ANSWERED_COVERAGE_PENDING_SEQ_LIMIT,
+    ) < AUTO_REPLY_ANSWERED_COVERAGE_PENDING_SEQ_LIMIT
+  ) {
+    return [...input.laneSeqs]
+  }
+
+  const rebuiltLaneSeqs =
+    await readAssistantAutoReplyAnsweredCoverageLaneSeqsFromTerminalEvidence(input.vault)
+  return [...new Set([...input.laneSeqs, ...rebuiltLaneSeqs])]
+}
+
+async function readAssistantAutoReplyAnsweredCoverageLaneSeqsFromTerminalEvidence(
+  vault: string,
+): Promise<string[]> {
+  const evidenceDirectory = resolveAssistantAutoReplyEvidenceDirectory(vault)
+  let entries: string[]
+  try {
+    entries = await readdir(evidenceDirectory)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return []
+    }
+    throw error
+  }
+
+  const inputIds = new Set<string>()
+  for (const entry of entries) {
+    if (!entry.endsWith('.json')) {
+      continue
+    }
+    const raw = await readFile(path.join(evidenceDirectory, entry), 'utf8')
+      .catch((error) => {
+        if (isMissingFileError(error)) {
+          return null
+        }
+        throw error
+      })
+    if (!raw) {
+      continue
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      continue
+    }
+    const evidence = parseAssistantAutoReplyTerminalEvidence(parsed)
+    if (!evidence) {
+      continue
+    }
+    inputIds.add(evidence.inputId)
+    for (const inputId of evidence.groupInputIds) {
+      inputIds.add(inputId)
+    }
+  }
+
+  return await readAssistantAutoReplyAnsweredCoverageLaneSeqs({
+    inputIds: [...inputIds],
+    vault,
+  })
 }
 
 async function readAssistantInputEventForAnsweredCoverage(input: {
@@ -665,7 +748,10 @@ function advanceAssistantAutoReplyAnsweredCoverageState(input: {
   }
 
   const pendingLaneRanges = serializeAssistantAutoReplyAnsweredCoverageRanges(
-    pendingRanges.filter((range) => range.end > coveredSeq),
+    capAssistantAutoReplyAnsweredCoverageRanges(
+      pendingRanges.filter((range) => range.end > coveredSeq),
+      AUTO_REPLY_ANSWERED_COVERAGE_PENDING_SEQ_LIMIT,
+    ),
   )
 
   return {
@@ -729,6 +815,46 @@ function mergeAssistantAutoReplyAnsweredCoverageRanges(
     }
   }
   return merged
+}
+
+function capAssistantAutoReplyAnsweredCoverageRanges(
+  ranges: readonly { end: bigint; start: bigint }[],
+  limit: number,
+): Array<{ end: bigint; start: bigint }> {
+  const capped: Array<{ end: bigint; start: bigint }> = []
+  let remaining = BigInt(Math.max(0, limit))
+  for (const range of ranges) {
+    if (remaining <= 0n) {
+      break
+    }
+    const size = range.end - range.start + 1n
+    if (size <= remaining) {
+      capped.push({ ...range })
+      remaining -= size
+      continue
+    }
+    capped.push({
+      end: range.start + remaining - 1n,
+      start: range.start,
+    })
+    break
+  }
+  return capped
+}
+
+function countAssistantAutoReplyAnsweredCoverageRanges(
+  ranges: readonly { end: bigint; start: bigint }[],
+  limit: number,
+): number {
+  let count = 0n
+  const cap = BigInt(Math.max(0, limit))
+  for (const range of ranges) {
+    count += range.end - range.start + 1n
+    if (count >= cap) {
+      return limit
+    }
+  }
+  return Number(count)
 }
 
 function serializeAssistantAutoReplyAnsweredCoverageRanges(
