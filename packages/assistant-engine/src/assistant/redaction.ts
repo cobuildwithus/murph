@@ -315,14 +315,21 @@ export function sanitizeAssistantTurnReceiptForPersistence(
 
 export function sanitizeAssistantOutboxIntentForPersistence(
   intent: AssistantOutboxIntent,
-): Omit<AssistantOutboxIntent, 'operation'> & {
+): Omit<
+  AssistantOutboxIntent,
+  'hostedDeliveryInboundMailboxItemIds' | 'operation'
+> & {
+  hostedDeliveryInboundMailboxItemIds?: AssistantOutboxIntent['hostedDeliveryInboundMailboxItemIds']
   operation?: NonNullable<AssistantOutboxIntent['operation']>
 } {
-  const { operation, ...baseIntent } = intent
+  const { hostedDeliveryInboundMailboxItemIds, operation, ...baseIntent } = intent
   return {
     ...baseIntent,
     schema: 'murph.assistant-outbox-intent.v1',
     lastError: sanitizeAssistantDeliveryErrorForPersistence(intent.lastError),
+    ...(hostedDeliveryInboundMailboxItemIds.length > 0
+      ? { hostedDeliveryInboundMailboxItemIds: [...hostedDeliveryInboundMailboxItemIds] }
+      : {}),
     ...(operation ? { operation } : {}),
   }
 }

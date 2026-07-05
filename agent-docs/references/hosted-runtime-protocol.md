@@ -240,9 +240,10 @@ accepted input set. Accepted Linq delivery outcomes carry the existing
 `currentInbound` proof plus `answeredMailboxItemIds`; web validates every item
 against the stored mailbox payload, target chat, runtime user, expiry, and route
 authority, then stores one `hosted_linq_delivery_answered_mailbox_item` row per
-validated item when the `HostedLinqDelivery` first records an accepted outcome.
-Failed outcomes store no answered items, and accepted replays rely only on the
-stored child rows rather than mutable replay payloads. Mailbox fetch/import
+validated item for accepted delivery rows. This insert is idempotent, so a
+web-first deploy window where an old runner records the accepted delivery before
+it can send exact item proof can be repaired by a later accepted replay with
+validated proof. Failed outcomes store no answered items. Mailbox fetch/import
 treats exactly those accepted items as conversation context with a null reply
 target, never as fresh reply candidates, so a workspace restore from a stale
 snapshot cannot re-reply to an already-handled message even when a lower gap

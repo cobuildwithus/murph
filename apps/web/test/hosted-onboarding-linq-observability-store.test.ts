@@ -1442,7 +1442,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("leaves accepted runtime outcome replays on the stored exact item fact only", async () => {
+  it("repairs exact item facts when an old-runner accepted outcome replays with proof", async () => {
     const fixture = createObservabilityPrismaFixture();
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
@@ -1457,6 +1457,9 @@ describe("hosted Linq observability stores", () => {
       status: "accepted",
     });
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+    fixture.hostedMailboxItemFindMany.mockResolvedValueOnce([
+      { id: "mailbox_item_replayed_42" },
+    ]);
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
@@ -1476,8 +1479,27 @@ describe("hosted Linq observability stores", () => {
 
     expect(fixture.hostedMailboxLaneCounterFindUnique).not.toHaveBeenCalled();
     expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedMailboxItemFindMany).toHaveBeenCalledWith({
+      select: {
+        id: true,
+      },
+      where: {
+        id: { in: ["mailbox_item_replayed_42"] },
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_123",
+      },
+    });
     expect(fixture.hostedLinqDeliveryAnsweredMailboxItemCreateMany)
-      .not.toHaveBeenCalled();
+      .toHaveBeenCalledWith({
+        data: [
+          {
+            deliveryId: "hld_replayed_accepted",
+            mailboxItemId: "mailbox_item_replayed_42",
+          },
+        ],
+        skipDuplicates: true,
+      });
   });
 
   it("reads exact accepted delivery consumed mailbox items from stored coverage", async () => {

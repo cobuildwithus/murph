@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { assistantOutboxIntentSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   containsInlineAssistantSecretMaterial,
   mergeAssistantHeaders,
@@ -9,10 +10,57 @@ import {
   redactAssistantSessionsForDisplay,
   redactAssistantStateString,
   redactAssistantStateStructuredValue,
+  sanitizeAssistantOutboxIntentForPersistence,
   splitAssistantHeadersForPersistence,
 } from '../src/assistant/redaction.ts'
 
 describe('assistant redaction helpers', () => {
+  it('omits empty hosted delivery mailbox ids from persisted outbox intents', () => {
+    const intent = assistantOutboxIntentSchema.parse({
+      schema: 'murph.assistant-outbox-intent.v1',
+      intentId: 'outbox_test',
+      sessionId: 'session_test',
+      turnId: 'turn_test',
+      createdAt: '2026-07-05T10:00:00.000Z',
+      updatedAt: '2026-07-05T10:00:00.000Z',
+      lastAttemptAt: null,
+      nextAttemptAt: null,
+      sentAt: null,
+      attemptCount: 0,
+      status: 'pending',
+      message: 'hello',
+      media: [],
+      subject: null,
+      operation: null,
+      dedupeKey: 'dedupe_test',
+      targetFingerprint: 'target_test',
+      channel: 'linq',
+      identityId: null,
+      actorId: null,
+      threadId: null,
+      threadIsDirect: null,
+      replyToMessageId: null,
+      bindingDelivery: null,
+      deliverySource: null,
+      explicitTarget: 'linq_thread',
+      delivery: null,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: 'delivery_test',
+      deliveryTransportIdempotent: true,
+      preparedDispatchToken: null,
+      lastError: null,
+    })
+
+    expect(sanitizeAssistantOutboxIntentForPersistence(intent))
+      .not.toHaveProperty('hostedDeliveryInboundMailboxItemIds')
+    expect(sanitizeAssistantOutboxIntentForPersistence({
+      ...intent,
+      hostedDeliveryInboundMailboxItemIds: ['mailbox_item_1'],
+    })).toEqual(expect.objectContaining({
+      hostedDeliveryInboundMailboxItemIds: ['mailbox_item_1'],
+    }))
+  })
+
   it('redacts inline secrets from strings and nested structured values', () => {
     const providerSecret = ['sk', 'providersecret12345'].join('-')
     const webhookSecret = ['whsec', 'runtimehook12345'].join('_')

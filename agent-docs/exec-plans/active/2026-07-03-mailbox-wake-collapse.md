@@ -127,14 +127,16 @@ Exact accepted-item computation (verified design, hardened by adversarial review
 - Mailbox fetch/import turns matching accepted delivery rows into
   `consumedItems` so the exact accepted items are context-only even when the
   contiguous `consumed_seq` floor is held back by a lower gap.
-- Accepted replays never recompute from mutable replay request bodies. If
-  web did not store the exact item rows when the accepted fact was recorded,
-  there is no durable authority left to consume from later.
+- Accepted replays may only add exact item rows after web validates current
+  inbound and answered-item proof against stored mailbox payloads and route
+  authority; they never advance contiguous `consumed_seq` or trust raw replay
+  bodies as coverage.
 - Rollback care: `assistantOutboxIntentSchema` is `.strict()`. A new
-  runner writing the field then rolling back to an old runner must not
-  brick outbox-state parsing. Follow the repo's outbox schema-evolution
-  precedent (accept-and-ignore first if none exists: land the schema field
-  in one runner release before the producer).
+  runner writing non-empty `hostedDeliveryInboundMailboxItemIds` and then
+  rolling back to an old strict runner can brick outbox-state parsing. Empty
+  arrays are omitted from persisted JSON; non-empty Linq consume authority is a
+  runner rollback boundary unless pending outbox is drained or scrubbed before
+  old code starts.
 
 Riders (independent deletions, separate commits):
 - Mailbox-fetch AI-usage gate: KEEP (rider withdrawn by adversarial
@@ -174,11 +176,17 @@ unconditional Temporal mailbox-append signal as the wake authority; Cloudflare
 
 Deploy-window analysis for the merged PR (replaces the old staged gate):
 - Web deploys first. The delivery route starts recording exact accepted item
-  sets once runner payloads include current inbound proof and answered item ids; it does not
-  advance `consumed_seq`.
+  sets once runner payloads include current inbound proof and answered item ids;
+  old-runner accepted rows without item rows can be repaired by a later
+  accepted replay carrying validated proof. This path does not advance
+  `consumed_seq`.
 - Cloudflare deploys second (worker route + runner bundle ship together in
   the hosted-execution deploy), with `container_rollout=immediate` so old
   runner containers are recycled into the exact-item context behavior.
+- Avoid rolling the runner back to a build that predates
+  `hostedDeliveryInboundMailboxItemIds` after the new runner has written
+  non-empty Linq outbox intents, unless pending outbox is drained or scrubbed
+  first.
 - Post-deploy verification before calling it done: one prod accepted Linq
   delivery with rows in `hosted_linq_delivery_answered_mailbox_item`,
   followed by a replay/fetch where those items are context-only and not replyable; mismatched
