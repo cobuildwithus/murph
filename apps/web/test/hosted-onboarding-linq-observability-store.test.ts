@@ -1502,6 +1502,53 @@ describe("hosted Linq observability stores", () => {
       });
   });
 
+  it("repairs exact item facts when an accepted replay follows a delivered receipt", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: new Date("2026-03-26T12:00:02.000Z"),
+      failedAt: null,
+      id: "hld_replayed_delivered",
+      lastReceiptAt: new Date("2026-03-26T12:00:02.000Z"),
+      messageLookupKey: "hbidx:linq-message:existing",
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      status: "delivered",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+    fixture.hostedMailboxItemFindMany.mockResolvedValueOnce([
+      { id: "mailbox_item_replayed_delivered" },
+    ]);
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      answeredMailboxItemIds: ["mailbox_item_replayed_delivered"],
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_replay_delivered",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_replay_delivered",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryAnsweredMailboxItemCreateMany)
+      .toHaveBeenCalledWith({
+        data: [
+          {
+            deliveryId: "hld_replayed_delivered",
+            mailboxItemId: "mailbox_item_replayed_delivered",
+          },
+        ],
+        skipDuplicates: true,
+      });
+  });
+
   it("reads exact accepted delivery consumed mailbox items from stored coverage", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryAnsweredMailboxItemFindMany.mockResolvedValueOnce([

@@ -236,7 +236,8 @@ uses `HostedMailboxLaneCounter`.
 `HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
 watermark, but accepted Linq reply consume authority is exact-item based. The
 assistant outbox intent carries `hostedDeliveryInboundMailboxItemIds` from the
-accepted input set. Accepted Linq delivery outcomes carry the existing
+accepted input set so same-turn multi-input replies keep one source of truth
+without adding a web-owned group table. Accepted Linq delivery outcomes carry the existing
 `currentInbound` proof plus `answeredMailboxItemIds`; web validates every item
 against the stored mailbox payload, target chat, runtime user, expiry, and route
 authority, then stores one `hosted_linq_delivery_answered_mailbox_item` row per

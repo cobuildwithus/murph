@@ -113,6 +113,10 @@ Exact accepted-item computation (verified design, hardened by adversarial review
 - Persist the full `currentInbound` proof alongside the prepared Linq
   route/service authority so post-checkpoint prepared retries restore the
   same exact consume authority before provider send.
+- The answered item set comes from the existing assistant input
+  `hostedDeliveryIdempotency.inboundMailboxItemIds`; it covers the proven
+  same-turn multi-input case without adding a web-owned group table or second
+  consume manager.
 - The runtime must synchronously record accepted delivery outcomes whenever
   the accepted outcome carries `currentInbound.mailboxItemId` or
   `answeredMailboxItemIds`; the validated accepted item set is the only

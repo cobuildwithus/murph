@@ -564,11 +564,11 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         });
         answeredItemsDeliveryId = concurrent.id;
         deliveryAccepted = acceptedAdvanced
-          || isHostedLinqDeliveryAccepted(concurrent);
+          || hasHostedLinqDeliveryAcceptedFact(concurrent);
       }
     } else if (acceptedAt) {
       answeredItemsDeliveryId = existing.id;
-      deliveryAccepted = isHostedLinqDeliveryAccepted(existing);
+      deliveryAccepted = hasHostedLinqDeliveryAcceptedFact(existing);
       acceptedAdvanced = await updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx({
         acceptedAt,
         attemptedAt,
@@ -1348,11 +1348,10 @@ const hostedLinqDeliveryLifecycleSelect = {
   status: true,
 } satisfies Prisma.HostedLinqDeliverySelect;
 
-function isHostedLinqDeliveryAccepted(delivery: {
+function hasHostedLinqDeliveryAcceptedFact(delivery: {
   acceptedAt: Date | null;
-  status: string;
 }): boolean {
-  return delivery.status === "accepted" && delivery.acceptedAt !== null;
+  return delivery.acceptedAt !== null;
 }
 
 async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
