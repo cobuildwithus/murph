@@ -2161,6 +2161,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const consumeRequests: HostedMailboxConsumeRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const dueWakeAt = new Date(Date.now() - 60_000).toISOString();
@@ -2173,6 +2174,7 @@ describe("hosted workspace runtime entrypoint", () => {
         requiresFollowUpCheckpoint: true,
       };
     });
+    const importedInputIds: string[] = [];
     let assistantPass = 0;
     let snapshotCount = 0;
 
@@ -2206,10 +2208,24 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             async importItem(item) {
               events.push(`mailbox.importItem:${item.item.id}`);
-              return { status: "imported" };
+              if (item.item.lane !== "conversation") {
+                return { status: "imported" };
+              }
+
+              const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              });
+              importedInputIds.push(inputId);
+              return {
+                assistantInputId: inputId,
+                status: "imported",
+              };
             },
             platform: createPlatform({
               mailboxPort: createMailboxPort({
+                consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+                consumeRequests,
                 events,
                 items: mailboxItems,
               }),
@@ -2255,6 +2271,12 @@ describe("hosted workspace runtime entrypoint", () => {
               }
 
               if (assistantPass === 2) {
+                const inputId = importedInputIds.shift();
+                assert.ok(inputId);
+                await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                  inputId,
+                  vaultRoot,
+                });
                 assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
                 assert.equal(input.workspace?.nextWakeReason, "assistant");
                 assert.ok(
@@ -2263,6 +2285,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 );
                 return {
                   checkpointReason: "assistant_runtime_commit",
+                  foregroundReplyFailed: 0,
                   nextWakeAt: freshFutureWakeAt,
                   nextWakeReason: "assistant",
                   progressed: true,
@@ -2311,6 +2334,14 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(
         requireEventIndex(events, "assistant:2")
           < requireEventIndex(events, "snapshot:idle_shutdown:3"),
+      );
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown:3")
+          < requireEventIndex(events, "mailbox.consume"),
+      );
+      assert.deepEqual(
+        consumeRequests.map((request) => request.lanes),
+        [[{ consumedSeq: "1", lane: "conversation" }]],
       );
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, freshFutureWakeAt);

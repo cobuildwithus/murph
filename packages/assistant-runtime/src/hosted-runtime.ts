@@ -1846,7 +1846,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           foregroundConversationWorkObserved
           && replaceWakeRequested
           && accumulatedProjection.nextWakeReason === "assistant"
-          && !hostedRuntimeWakeIsDue(accumulatedProjection.nextWakeAt);
+          && (
+            !hostedRuntimeWakeIsDue(accumulatedProjection.nextWakeAt)
+            || result.afterDurableCheckpoint.length > 0
+          );
         const preservePreviousWake =
           effectiveServicedProjectedWakeKey === null
           && accumulatedProjection.nextWakeAt !== null
