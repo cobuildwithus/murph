@@ -1915,6 +1915,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
       };
       const importRuntimeWakeForegroundMailbox = async (input: {
+        lanes: readonly ("conversation" | "system")[];
         latencySeed: HostedRuntimeWakeLatencySeed | null;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
       }): Promise<{
@@ -1931,7 +1932,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           importItem: importForegroundMailboxItem,
           importItemContext: initialMailboxImportContext,
           input: baseRunnerInput,
-          lanes: ["system", "conversation"],
+          lanes: input.lanes,
           limitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
           requestId:
             `${requestId}:${input.requestIdKind}-foreground-import:${idleWakeOrdinal + 1}`,
@@ -1945,11 +1946,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const runPreCheckpointRuntimeWakeForegroundPass = async (input: {
         latencySeed: HostedRuntimeWakeLatencySeed | null;
       }): Promise<void> => {
+        const checkpointBlockedProjectedWake = hasCheckpointBlockedProjectedWake();
         const foregroundImport = await importRuntimeWakeForegroundMailbox({
+          lanes: checkpointBlockedProjectedWake
+            ? HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES
+            : ["system", "conversation"],
           latencySeed: input.latencySeed,
           requestIdKind: "checkpoint-interrupt",
         });
-        if (hasCheckpointBlockedProjectedWake()) {
+        if (checkpointBlockedProjectedWake) {
           if (hostedMailboxImportHasForegroundConversationWork(
             foregroundImport.initialMailboxImport,
           )) {
@@ -2078,6 +2083,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               await runPreCheckpointRuntimeWakeForegroundPass({ latencySeed });
             } else {
               const foregroundImport = await importRuntimeWakeForegroundMailbox({
+                lanes: ["system", "conversation"],
                 latencySeed,
                 requestIdKind: "checkpoint-interrupt",
               });
@@ -2102,6 +2108,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               continue;
             }
             const foregroundImport = await importRuntimeWakeForegroundMailbox({
+              lanes: ["system", "conversation"],
               latencySeed: pendingWakeLatencySeed,
               requestIdKind: "checkpoint-interrupt",
             });
@@ -2240,6 +2247,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
             const latencySeed = createHostedRuntimeWakeLatencySeed(error.notification);
             const foregroundImport = await importRuntimeWakeForegroundMailbox({
+              lanes: ["system", "conversation"],
               latencySeed,
               requestIdKind: "checkpoint-interrupt",
             });
@@ -2329,6 +2337,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         pendingCheckpointWakeLatencySeed = null;
         if (checkpointWakeLatencySeed) {
           const foregroundImport = await importRuntimeWakeForegroundMailbox({
+            lanes: ["system", "conversation"],
             latencySeed: checkpointWakeLatencySeed,
             requestIdKind: "checkpoint-wake",
           });

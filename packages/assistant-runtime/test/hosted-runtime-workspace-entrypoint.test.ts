@@ -9595,8 +9595,6 @@ describe("hosted workspace runtime entrypoint", () => {
       }),
     ];
     let assistantPhaseCalls = 0;
-    let lateConversationInputId: string | null = null;
-
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
@@ -9630,7 +9628,6 @@ describe("hosted workspace runtime entrypoint", () => {
               item: item.item,
               vaultRoot,
             });
-            lateConversationInputId = inputId;
             return {
               assistantInputId: inputId,
               status: "imported",
@@ -9685,16 +9682,6 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             }
 
-            if (lateConversationInputId) {
-              assert.ok(await readAssistantInputEvent({
-                inputId: lateConversationInputId,
-                vault: vaultRoot,
-              }));
-              await writeSyntheticAssistantAutoReplyTerminalEvidence({
-                inputId: lateConversationInputId,
-                vaultRoot,
-              });
-            }
             const assistantRedactedStatus: HostedRuntimeRedactedJson = {
               hostedAssistantProgressed: true,
             };
@@ -10009,7 +9996,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const runtimeAbortController = new AbortController();
     const runtimeAbortReason = new Error("synthetic stale gate foreground proof complete");
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const idleCheckpointDelayMs = 10_000;
+    const idleCheckpointDelayMs = 1;
     const runtimeTransitionTimeoutMs = 15_000;
     const systemFollowUpWakeAt = "2099-04-27T00:10:00.000Z";
     const mailboxItems = [
@@ -10021,11 +10008,9 @@ describe("hosted workspace runtime entrypoint", () => {
       }),
     ];
     let assistantPhaseCalls = 0;
-    let lateConversationInputId: string | null = null;
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const startedAt = performance.now();
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -10057,7 +10042,6 @@ describe("hosted workspace runtime entrypoint", () => {
               item: item.item,
               vaultRoot,
             });
-            lateConversationInputId = inputId;
             return {
               assistantInputId: inputId,
               status: "imported",
@@ -10086,6 +10070,13 @@ describe("hosted workspace runtime entrypoint", () => {
               return {
                 afterCheckpoint: async () => {
                   events.push("system.afterCheckpoint");
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_foreground_stale_gate_system_late",
+                    kind: "device-sync.wake",
+                    lane: "system",
+                    laneSeq: "2",
+                    occurredAt: "2026-04-27T00:00:01.000Z",
+                  }));
                   runtimeWakeSignal.notify();
                   return {
                     checkpointReason: "system_mailbox_receipt" as const,
@@ -10102,51 +10093,7 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             }
 
-            if (assistantPhaseCalls === 2) {
-              mailboxItems.push(createMailboxItem({
-                id: "mailbox_item_entrypoint_foreground_stale_gate_conversation",
-                laneSeq: "1",
-                occurredAt: "2026-04-27T00:00:01.000Z",
-              }));
-              runtimeWakeSignal.notify();
-              await waitUntil(() => {
-                assert.ok(events.includes(
-                  "mailbox.importItem:mailbox_item_entrypoint_foreground_stale_gate_conversation",
-                ));
-              });
-              const assistantRedactedStatus: HostedRuntimeRedactedJson = {
-                hostedAssistantProgressed: true,
-              };
-              return {
-                checkpointReason: "active_turn_input" as const,
-                progressed: true,
-                redactedStatus: assistantRedactedStatus,
-              };
-            }
-
-            if (lateConversationInputId) {
-              assert.ok(await readAssistantInputEvent({
-                inputId: lateConversationInputId,
-                vault: vaultRoot,
-              }));
-              await writeSyntheticAssistantAutoReplyTerminalEvidence({
-                inputId: lateConversationInputId,
-                vaultRoot,
-              });
-            }
-            if (assistantPhaseCalls > 3) {
-              throw new Error(`Unexpected extra assistant phase: ${events.join(",")}`);
-            }
-            runtimeAbortController.abort(runtimeAbortReason);
-            const assistantRedactedStatus: HostedRuntimeRedactedJson = {
-              hostedAssistantProgressed: true,
-            };
-            return {
-              checkpointReason: "assistant_runtime_commit" as const,
-              nextWakeAt: null,
-              progressed: true,
-              redactedStatus: assistantRedactedStatus,
-            };
+            throw new Error("Source-blind system wake should not run before checkpoint.");
           },
           signal: runtimeAbortController.signal,
           vaultRoot,
@@ -10160,12 +10107,14 @@ describe("hosted workspace runtime entrypoint", () => {
         runtimeTransitionTimeoutMs,
         () => events.join(","),
       );
-      const elapsedMs = performance.now() - startedAt;
-
       assert.equal(result, "resolved");
       assert.equal(assistantPhaseCalls, 1, events.join(","));
       assert.ok(events.includes("snapshot:idle_shutdown"));
-      assert.ok(elapsedMs >= idleCheckpointDelayMs - 25);
+      assert.ok(
+        !events.includes(
+          "mailbox.importItem:mailbox_item_entrypoint_foreground_stale_gate_system_late",
+        ),
+      );
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.nextWakeAt, systemFollowUpWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
