@@ -802,3 +802,301 @@ function requireIsoTimestamp(value: unknown, label: string): string {
 
   return text;
 }
+
+/**
+ * Destination-side landing store for consented vault-share deliveries. The runtime
+ * importer (`vault-share-import.ts`) is the sole writer; this section owns the pure,
+ * fs-free contract shared by that writer and any reader: the schema seam, the store
+ * shape, the read-only parser, and the member-major pivot the group-chat reader
+ * consumes. Keeping it here (next to the delivery-record parser it reuses) means the
+ * writer and the `vault-cli group shared` reader can never drift on the shape.
+ */
+export const SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA =
+  "murph.shared-vault-projections.v1";
+
+/** Relative path of the landing store inside a destination member's vault. */
+export const SHARED_VAULT_SHARE_PROJECTIONS_RELATIVE_PATH =
+  "derived/vault-share/projections.json";
+
+/** Projection kind whose landed record carries a member's display name. */
+export const HOSTED_VAULT_SHARE_PROFILE_NAME_PROJECTION_KIND =
+  "profile-name.v0" satisfies HostedVaultShareProjectionKind;
+
+export interface SharedVaultShareRecordEntry {
+  receivedEventId: string;
+  record: HostedVaultShareDeliveryRecord;
+  schema: typeof HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA;
+  shareId: string;
+}
+
+export interface SharedVaultShareGrantorEntry {
+  grantorMemberId: string;
+  projectionKind: HostedVaultShareProjectionKind;
+  records: SharedVaultShareRecordEntry[];
+  shareId: string;
+  updatedAt: string;
+}
+
+export interface SharedVaultShareProjectionEntry {
+  grantors: Record<string, SharedVaultShareGrantorEntry>;
+}
+
+export interface SharedVaultShareProjectionsFile {
+  projections: Partial<
+    Record<HostedVaultShareProjectionKind, SharedVaultShareProjectionEntry>
+  >;
+  schema: typeof SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA;
+  updatedAt: string;
+}
+
+export function createEmptySharedVaultShareProjectionStore(): SharedVaultShareProjectionsFile {
+  return {
+    projections: {},
+    schema: SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA,
+    updatedAt: "1970-01-01T00:00:00.000Z",
+  };
+}
+
+/**
+ * Newest-first ordering for a grantor's landed records: occurredAt desc, then recordKey,
+ * then receivedEventId. The importer's upsert and the reader's pivot both use it so a
+ * grantor's records order identically no matter which side touched them last.
+ */
+export function compareSharedVaultShareRecords(
+  left: SharedVaultShareRecordEntry,
+  right: SharedVaultShareRecordEntry,
+): number {
+  return (
+    right.record.occurredAt.localeCompare(left.record.occurredAt)
+    || right.record.recordKey.localeCompare(left.record.recordKey)
+    || right.receivedEventId.localeCompare(left.receivedEventId)
+  );
+}
+
+/**
+ * Read-only, tolerant parse of the landed store JSON. Returns null on any structural
+ * mismatch so callers can decide their own recovery (the importer repairs; the reader
+ * reports unavailable). Never throws, never mutates.
+ */
+export function parseSharedVaultShareProjectionStore(
+  value: unknown,
+): SharedVaultShareProjectionsFile | null {
+  if (!isSharedVaultSharePlainRecord(value)) {
+    return null;
+  }
+  if (value.schema !== SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA) {
+    return null;
+  }
+  if (typeof value.updatedAt !== "string") {
+    return null;
+  }
+  if (!isSharedVaultSharePlainRecord(value.projections)) {
+    return null;
+  }
+
+  const projections: Partial<
+    Record<HostedVaultShareProjectionKind, SharedVaultShareProjectionEntry>
+  > = {};
+  for (const projectionKind of HOSTED_VAULT_SHARE_PROJECTION_KINDS) {
+    const projectionValue = value.projections[projectionKind];
+    if (projectionValue === undefined) {
+      continue;
+    }
+    const projection = parseSharedVaultShareProjection(projectionValue, projectionKind);
+    if (!projection) {
+      return null;
+    }
+    projections[projectionKind] = projection;
+  }
+
+  return {
+    projections,
+    schema: SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA,
+    updatedAt: value.updatedAt,
+  };
+}
+
+function parseSharedVaultShareProjection(
+  value: unknown,
+  projectionKind: HostedVaultShareProjectionKind,
+): SharedVaultShareProjectionEntry | null {
+  if (!isSharedVaultSharePlainRecord(value) || !isSharedVaultSharePlainRecord(value.grantors)) {
+    return null;
+  }
+
+  const grantors: Record<string, SharedVaultShareGrantorEntry> = {};
+  for (const [grantorMemberId, grantorValue] of Object.entries(value.grantors)) {
+    const grantor = parseSharedVaultShareGrantor(grantorValue, projectionKind);
+    if (!grantor || grantor.grantorMemberId !== grantorMemberId) {
+      return null;
+    }
+    grantors[grantorMemberId] = grantor;
+  }
+
+  return { grantors };
+}
+
+function parseSharedVaultShareGrantor(
+  value: unknown,
+  projectionKind: HostedVaultShareProjectionKind,
+): SharedVaultShareGrantorEntry | null {
+  if (!isSharedVaultSharePlainRecord(value)) {
+    return null;
+  }
+  if (
+    typeof value.grantorMemberId !== "string"
+    || value.projectionKind !== projectionKind
+    || typeof value.shareId !== "string"
+    || typeof value.updatedAt !== "string"
+    || !Array.isArray(value.records)
+  ) {
+    return null;
+  }
+
+  const records: SharedVaultShareRecordEntry[] = [];
+  for (const record of value.records) {
+    const parsed = parseSharedVaultShareRecordEntry(record, projectionKind);
+    if (!parsed) {
+      return null;
+    }
+    records.push(parsed);
+  }
+
+  return {
+    grantorMemberId: value.grantorMemberId,
+    projectionKind,
+    records: records
+      .sort(compareSharedVaultShareRecords)
+      .slice(0, HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS),
+    shareId: value.shareId,
+    updatedAt: value.updatedAt,
+  };
+}
+
+function parseSharedVaultShareRecordEntry(
+  value: unknown,
+  projectionKind: HostedVaultShareProjectionKind,
+): SharedVaultShareRecordEntry | null {
+  if (!isSharedVaultSharePlainRecord(value)) {
+    return null;
+  }
+  if (
+    typeof value.receivedEventId !== "string"
+    || value.schema !== HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA
+    || typeof value.shareId !== "string"
+  ) {
+    return null;
+  }
+
+  try {
+    return {
+      receivedEventId: value.receivedEventId,
+      record: parseHostedVaultShareDeliveryRecord(value.record, projectionKind),
+      schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
+      shareId: value.shareId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export interface SharedGroupMemberShareView {
+  projectionKind: HostedVaultShareProjectionKind;
+  records: HostedVaultShareDeliveryRecord[];
+}
+
+/**
+ * One group member's consented data as landed in this destination vault: the member's
+ * shared display name (null until their `profile-name.v0` record has arrived) plus the
+ * records they granted, grouped by projection kind. The `profile-name.v0` projection is
+ * consumed as the name join here, never surfaced as a data share.
+ */
+export interface SharedGroupMemberView {
+  displayName: string | null;
+  memberId: string;
+  shares: SharedGroupMemberShareView[];
+}
+
+/**
+ * Pure kind-major -> member-major pivot over the landed store: the reader-facing shape.
+ * Members are ordered named-first (by display name), then unnamed by member id, and each
+ * member's shares follow the projection-kind registry order, so the same store always
+ * renders the same view.
+ */
+export function flattenSharedVaultShareProjectionStore(
+  store: SharedVaultShareProjectionsFile,
+): SharedGroupMemberView[] {
+  const memberIds = new Set<string>();
+  for (const projectionKind of HOSTED_VAULT_SHARE_PROJECTION_KINDS) {
+    const projection = store.projections[projectionKind];
+    if (!projection) {
+      continue;
+    }
+    for (const grantorMemberId of Object.keys(projection.grantors)) {
+      memberIds.add(grantorMemberId);
+    }
+  }
+
+  const views: SharedGroupMemberView[] = [];
+  for (const memberId of memberIds) {
+    const shares: SharedGroupMemberShareView[] = [];
+    for (const projectionKind of HOSTED_VAULT_SHARE_PROJECTION_KINDS) {
+      if (projectionKind === HOSTED_VAULT_SHARE_PROFILE_NAME_PROJECTION_KIND) {
+        continue;
+      }
+      const grantor = store.projections[projectionKind]?.grantors[memberId];
+      if (!grantor || grantor.records.length === 0) {
+        continue;
+      }
+      shares.push({
+        projectionKind,
+        records: [...grantor.records]
+          .sort(compareSharedVaultShareRecords)
+          .map((entry) => entry.record),
+      });
+    }
+    views.push({
+      displayName: readSharedVaultShareProfileDisplayName(store, memberId),
+      memberId,
+      shares,
+    });
+  }
+
+  return views.sort(compareSharedGroupMemberViews);
+}
+
+function readSharedVaultShareProfileDisplayName(
+  store: SharedVaultShareProjectionsFile,
+  memberId: string,
+): string | null {
+  const grantor =
+    store.projections[HOSTED_VAULT_SHARE_PROFILE_NAME_PROJECTION_KIND]?.grantors[memberId];
+  const data = grantor?.records[0]?.record.data;
+  if (data && "displayName" in data && typeof data.displayName === "string") {
+    return data.displayName;
+  }
+  return null;
+}
+
+function compareSharedGroupMemberViews(
+  left: SharedGroupMemberView,
+  right: SharedGroupMemberView,
+): number {
+  if (left.displayName && right.displayName) {
+    return (
+      left.displayName.localeCompare(right.displayName)
+      || left.memberId.localeCompare(right.memberId)
+    );
+  }
+  if (left.displayName) {
+    return -1;
+  }
+  if (right.displayName) {
+    return 1;
+  }
+  return left.memberId.localeCompare(right.memberId);
+}
+
+function isSharedVaultSharePlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

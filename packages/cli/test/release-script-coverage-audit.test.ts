@@ -925,7 +925,7 @@ exit 1
     expect(architecture).toContain('execution residue, replay/continuity artifacts, and operator diagnostics only')
     expect(readme).toContain('it does not belong in assistant runtime first')
     expect(baselineArchitecture).toContain('do not use assistant runtime as a first stop for user-facing or queryable product state')
-    expect(invariants).toContain('never in assistant runtime state')
+    expect(invariants).toContain('never assistant runtime state')
     expect(commandSurface).toContain('runtime inspection/control only')
     expect(commandSurface).toContain('not an `assistant` runtime CRUD surface')
     expect(safeExtensionGuide).toContain('do not prototype it in assistant runtime first')

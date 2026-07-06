@@ -34,6 +34,12 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 
 const DEVICE_ACTIVITY_AUTOMATION_MAX_MATCHES_PER_PASS = 25
 
+// Suppress the summary for a device activity that finished long before the sync that surfaced it
+// (e.g. a WHOOP/Junction backfill after the device was offline for a day or more). Last night's
+// sleep and this morning's workout are always well under this bound; a record from an earlier day
+// is not.
+const DEVICE_ACTIVITY_MAX_STALENESS_MS = 24 * 60 * 60_000
+
 type DeviceActivitySchedule = Extract<AutomationSchedule, { kind: 'deviceActivity' }>
 type DeviceActivityAutomation = AutomationQueryRecord & { schedule: DeviceActivitySchedule }
 type ActivityEntity = VaultReadModel['events'][number]
@@ -110,7 +116,7 @@ async function scheduleDeviceActivityTriggeredAutomationsAt(
   }
 
   const vault = await readVaultRawTolerant(input.vault)
-  const activityCandidates = listDeviceActivityCandidates(vault)
+  const activityCandidates = listDeviceActivityCandidates(vault, input.nowIso)
   let matched = 0
   let moreMatchesRemain = false
   let scheduled = 0
@@ -204,9 +210,10 @@ async function hasDueAssistantRequireSendCronJob(input: {
   )
 }
 
-function listDeviceActivityCandidates(vault: VaultReadModel): DeviceActivityCandidate[] {
+function listDeviceActivityCandidates(vault: VaultReadModel, nowIso: string): DeviceActivityCandidate[] {
   return vault.events
     .filter(isDeviceActivityEventEntity)
+    .filter((entity) => !isStaleDeviceActivity(entity, nowIso))
     .flatMap((entity) => {
       const occurredAt = resolveActivityOccurredAt(entity)
       const triggeredAt = resolveDeviceActivityTriggeredAt(entity)
@@ -305,6 +312,22 @@ function isDeviceActivityEventEntity(
   entity: ActivityEntity,
 ): entity is ActivityEntity & { kind: DeviceActivityEventKind } {
   return entity.kind === 'activity_session' || entity.kind === 'sleep_session'
+}
+
+function isStaleDeviceActivity(entity: ActivityEntity, nowIso: string): boolean {
+  // Anchor on when the activity ended. Sleep carries an explicit endAt (it runs for hours, so its
+  // start can look stale while it is genuinely last night); activity sessions have no endAt and are
+  // short, so their start time is a fine anchor.
+  const endedAt = normalizeTimestamp(readString(entity.attributes.endAt)) ?? resolveActivityOccurredAt(entity)
+  if (endedAt === null) {
+    return false
+  }
+  const endedAtMs = Date.parse(endedAt)
+  const nowMs = Date.parse(nowIso)
+  if (!Number.isFinite(endedAtMs) || !Number.isFinite(nowMs)) {
+    return false
+  }
+  return nowMs - endedAtMs > DEVICE_ACTIVITY_MAX_STALENESS_MS
 }
 
 function resolveDeviceActivityKind(entity: ActivityEntity & { kind: DeviceActivityEventKind }): string {
