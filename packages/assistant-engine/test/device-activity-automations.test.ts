@@ -319,6 +319,79 @@ describe('device activity triggered automations', () => {
     )
   })
 
+  it('suppresses a backfilled sleep session that ended more than a day before the sync', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'sleep',
+        after: '2026-06-05T00:00:00.000Z',
+        automationId: 'auto_sleep',
+        instructions: 'Ask about sleep consistency.',
+        source: 'whoop_v2',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createSleepEntity({
+          endAt: '2026-06-05T14:00:00.000Z',
+          entityId: 'evt_sleep_stale',
+          occurredAt: '2026-06-05T06:00:00.000Z',
+          startAt: '2026-06-05T06:00:00.000Z',
+          title: 'Backfilled sleep',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 0,
+      nextWakeAt: null,
+      scheduled: 0,
+    })
+
+    expect(await readQueuedCronJobs(vaultRoot)).toHaveLength(0)
+  })
+
+  it('suppresses a backfilled workout that occurred more than a day before the sync', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'workout',
+        after: '2026-06-05T00:00:00.000Z',
+        automationId: 'auto_workout',
+        instructions: 'Ask about the imported workout.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_workout_stale',
+          occurredAt: '2026-06-05T06:00:00.000Z',
+          recordedAt: '2026-06-07T12:05:00.000Z',
+          title: 'Backfilled ride',
+          workoutType: 'Cycling',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:06:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 0,
+      nextWakeAt: null,
+      scheduled: 0,
+    })
+
+    expect(await readQueuedCronJobs(vaultRoot)).toHaveLength(0)
+  })
+
   it('uses the recorded import time for trigger windows and accepts workout selectors', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({
@@ -1416,8 +1489,10 @@ function createActivityEntity(input: {
 }
 
 function createSleepEntity(input: {
+  endAt?: string
   entityId: string
   occurredAt: string
+  startAt?: string
   title: string
 }): CanonicalEntity {
   return {
@@ -1426,12 +1501,13 @@ function createSleepEntity(input: {
         sourceProviderSlug: 'junction',
       },
       durationMinutes: 420,
+      endAt: input.endAt ?? input.occurredAt,
       externalRef: {
         resourceType: 'junction-whoop-v2-sleep',
         system: 'junction',
       },
       recordedAt: input.occurredAt,
-      startAt: '2026-06-07T04:00:00.000Z',
+      startAt: input.startAt ?? '2026-06-07T04:00:00.000Z',
     },
     body: null,
     date: '2026-06-07',
