@@ -265,26 +265,24 @@ provider secrets, and decrypted mailbox payloads must not be Temporal workflow
 inputs, outputs, or history payloads. The pointer signal only wakes durable
 orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
-adapter. There is no webhook-to-Cloudflare runner nudge path yet, no direct
-web-to-Cloudflare message path, and no second wake authority. A direct web
-ensure fast path was attempted and withdrawn 2026-07-02 (PR #362) because
-reply consume authority only became durable at checkpoint; the workflow's
-reconcile-ensure loop could still see the pointer as lagging and land extra
-ensures in inter-invocation gaps, producing invocation churn and a reachable
-duplicate turn on already-replied input. The required resolution for a future
-Linq-only re-land is delivery-time `consumedAt` stamping, not workflow-side
-pointer flags: a racing ensure may import the row, but consumed conversation
-rows stage with a null reply target and cannot be answered. Do not add
-derived-floor SQL or lag netting merely to avoid harmless post-delivery no-op
-ensures. If the Temporal signal cannot be accepted after the mailbox row
+adapter. Linq webhook ingress may additionally fire one best-effort direct
+`ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
+message payload) after the unconditional Temporal signal is accepted. This is a
+latency hint only, not a second durable wake authority: it is Linq-only because
+accepted Linq reply delivery stamps `HostedMailboxItem.consumedAt`, so a racing
+ensure may import an already-consumed row but it stages with a null reply target
+and cannot be answered again. Do not add workflow-side direct-wake flags,
+derived-floor SQL, or lag netting merely to avoid harmless post-delivery no-op
+ensures. There is no direct web-to-Cloudflare message path and no second durable
+wake authority. If the Temporal signal cannot be accepted after the mailbox row
 exists, the failure is logged as a post-commit best-effort handoff failure and
-does not make provider ingress fail. Web does not run a mailbox-lag cron
-backstop: missed post-commit workflow signal recovery remains future hardening
-for a DB-backed pending-handoff reconciler or Temporal-owned reconciler.
-Repeated dirty hints while the same connection is already dirty do not append
-or signal another device-sync wake; dirty coalescing remains the work-queue
-invariant, and any stronger signal-delivery repair must be mailbox-wide.
-Redacted runtime logs
+does not make provider ingress fail; direct Linq ensure is not fired without
+the accepted Temporal signal. Web does not run a mailbox-lag cron backstop:
+missed post-commit workflow signal recovery remains future hardening for a
+DB-backed pending-handoff reconciler or Temporal-owned reconciler. Repeated
+dirty hints while the same connection is already dirty do not append or signal
+another device-sync wake; dirty coalescing remains the work-queue invariant,
+and any stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
 remain diagnostic evidence only; they must not be merged into checkpointed
 import status for workflow completion or status projection. The narrow liveness
 exception is the exact `runner.accepted_attempt_failed` event: after web has

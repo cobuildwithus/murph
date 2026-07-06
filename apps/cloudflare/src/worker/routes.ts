@@ -21,6 +21,7 @@ export type RouteMatcher = (pathname: string) => RouteParams | null;
 export type WorkerRouteAuthorization =
   | "vercel-oidc"
   | "web-callback-signature"
+  | "web-callback-signature-or-vercel-oidc"
   | null;
 export type WrongMethodResponse = "method-not-allowed" | "not-found";
 
