@@ -936,6 +936,7 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
     "assistant.delivery.foreground_started",
     "assistant.delivery.sent",
     "cron.job.completed",
+    "cron.occurrence.expired",
     "cron.scan.job",
     "cron.scan.started",
     "input.replied",

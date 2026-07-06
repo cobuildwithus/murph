@@ -1047,6 +1047,8 @@ describe('assistant cron helpers and wrappers', () => {
     await appendAssistantCronRun(paths, {
       error: null,
       finishedAt: '2026-04-08T09:05:00.000Z',
+      outcome: 'delivered',
+      reason: 'sent',
       startedAt: '2026-04-08T09:00:00.000Z',
       status: 'succeeded',
       trigger: 'manual',
