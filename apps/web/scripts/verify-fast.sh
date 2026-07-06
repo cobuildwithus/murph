@@ -74,6 +74,10 @@ if [[ "$hosted_web_build_memory_guard" != "0" && "$hosted_web_build_memory_guard
   verify_fail "MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD must be 0 or 1."
 fi
 
+if [[ "$hosted_web_build_memory_guard_default" == "1" && "$hosted_web_build_memory_guard" == "0" ]]; then
+  verify_log "WARNING: hosted-web build memory guard DISABLED via MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0 on Linux CI; the Vercel Standard-machine memory budget is NOT being enforced for this build"
+fi
+
 run_timed_step() {
   local label="$1"
   shift

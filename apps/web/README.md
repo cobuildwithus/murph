@@ -589,7 +589,7 @@ with exit 137 on the 8 GB Vercel builder. Do not treat 8 GB as usable build
 heap. The operating system, page cache, and sibling processes consume the
 remaining memory.
 
-Linux CI wraps the `apps/web verify` production `next build` step with
+Linux CI defaults to wrapping the `apps/web verify` production `next build` step with
 `apps/web/scripts/build-memory-guard.sh`, which creates a root-level cgroup-v2
 child capped at 6,000,000,000 bytes. Privileged operations are limited to
 creating/configuring/removing that cgroup and moving the build process into it;
@@ -598,6 +598,9 @@ working directory, and stdio. The cap is intentionally between the known-good
 5.34 GB and known-bad 6.18 GB points. The guard prints cgroup `memory.peak` and
 `memory.events` on every CI build and fails loudly if cgroup v2, the root
 memory controller, passwordless `sudo`, or peak accounting are unavailable.
+Disabling the guard in Linux CI requires `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0`
+and logs a prominent warning that the Vercel Standard-machine memory budget is
+not being enforced.
 Local non-Linux wrapper validation may use
 `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE=passthrough`; that mode is rejected in
 CI and does not prove the memory cap.

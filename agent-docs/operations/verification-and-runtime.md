@@ -99,8 +99,8 @@ When that fast path applies:
 
 ## Current Command Meaning
 
-Hosted-web production build memory: on Linux CI, `apps/web verify` wraps its
-production `next build` step with
+Hosted-web production build memory: on Linux CI, `apps/web verify` defaults to
+wrapping its production `next build` step with
 `apps/web/scripts/build-memory-guard.sh`. The guard creates a root-level
 cgroup-v2 child with `memory.max=6000000000` and `memory.swap.max=0`, moves the
 build process into that cgroup, and then execs the build as the invoking user
@@ -109,7 +109,10 @@ prints cgroup `memory.peak` and `memory.events`, and fails if cgroup v2, the
 root memory controller, passwordless `sudo`, or peak accounting are
 unavailable. The cap is calibrated between PR #349's measured 5.34 GB passing
 build and 6.18 GB exit-137 Vercel builder failure; it is not an 8 GB
-usable-memory assumption. Local non-Linux wrapper validation may use
+usable-memory assumption. Disabling the guard in Linux CI requires
+`MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0` and logs a prominent warning that the
+Vercel Standard-machine memory budget is not being enforced. Local non-Linux
+wrapper validation may use
 `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE=passthrough`, but CI rejects
 passthrough mode.
 
