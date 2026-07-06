@@ -22,15 +22,25 @@ Last verified: 2026-07-06
 
 - Linux CI `apps/web verify` invocations default to wrapping the hosted-web production
   `next build` step with `apps/web/scripts/build-memory-guard.sh`. The guard
-  creates a root-level cgroup-v2 child with a 6,000,000,000-byte
+  creates a root-level cgroup-v2 child with a default 7,000,000,000-byte
   `memory.max`, disables swap with `memory.swap.max=0`, and moves the build
   process into that cgroup while keeping the build itself on the invoking user,
-  environment, cwd, and stdio. It prints cgroup `memory.peak` and
-  `memory.events`, and fails loudly if cgroup v2, the root memory controller,
-  passwordless `sudo`, or peak-accounting machinery is unavailable. The cap is
-  calibrated between the PR #349 5.34 GB passing build and 6.18 GB exit-137
-  Vercel Standard-builder failure, rather than assuming the full 8 GB machine
-  memory is usable by Next/Turbopack. Disabling the guard in Linux CI requires
+  environment, cwd, and stdio. The cap is a cgroup-unit model of Vercel
+  Standard's 8 GB build machine: 7.0 GB available to the build cgroup and a
+  1.0 GB reserve for OS/container overhead outside it. Guard cap overrides must
+  stay strictly above the 6,000,000,000-byte known-false-positive cgroup floor
+  and at or below 7,200,000,000 bytes, preserving at least a 0.8 GB reserve
+  under the 8 GB machine model. The floor comes from the fully working
+  2026-07-06 Linux CI run where a 6.0 GB cgroup cap OOM-killed a build that
+  Vercel's real 8 GB Standard machine accepts. PR #349's 5.34 GB passing and
+  6.18 GB exit-137 failure numbers are historical single-process RSS
+  measurements only, not cgroup cap bounds; cgroup accounting includes
+  anonymous memory across all build workers plus page cache. The guard prints
+  cgroup `memory.peak` and `memory.events`, fails loudly if cgroup v2, the root
+  memory controller, passwordless `sudo`, or peak-accounting machinery is
+  unavailable, and treats the pass/fail verdict as the memory-budget signal.
+  `memory.peak` remains the cgroup-unit trend to watch, but can read near the
+  cap when page cache saturates the cgroup. Disabling the guard in Linux CI requires
   `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0` and logs a prominent warning that the
   Vercel Standard-machine memory budget is not being enforced.
 - `.github/workflows/repo-hygiene.yml` runs the tracked private/build artifact guard on GitHub-hosted `ubuntu-24.04`.

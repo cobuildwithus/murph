@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-default_memory_cap_bytes=6000000000
-calibrated_passing_peak_bytes=5340000000
-calibrated_failing_peak_bytes=6180000000
+default_memory_cap_bytes=7000000000
+vercel_standard_machine_bytes=8000000000
+known_false_positive_floor_bytes=6000000000
+machine_model_ceiling_bytes=7200000000
 memory_cap_bytes="${MURPH_HOSTED_WEB_BUILD_MEMORY_CAP_BYTES:-$default_memory_cap_bytes}"
 mode="${MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE:-enforce}"
 
@@ -42,8 +43,8 @@ if [[ ! "$memory_cap_bytes" =~ ^[0-9]+$ ]]; then
   fail "MURPH_HOSTED_WEB_BUILD_MEMORY_CAP_BYTES must be an integer byte count."
 fi
 
-if (( memory_cap_bytes <= calibrated_passing_peak_bytes || memory_cap_bytes >= calibrated_failing_peak_bytes )); then
-  fail "memory cap ${memory_cap_bytes} must stay between the calibrated passing peak (${calibrated_passing_peak_bytes}) and failing peak (${calibrated_failing_peak_bytes})."
+if (( memory_cap_bytes <= known_false_positive_floor_bytes || memory_cap_bytes > machine_model_ceiling_bytes )); then
+  fail "memory cap ${memory_cap_bytes} must model cgroup-accounted bytes for an 8 GB Vercel Standard build machine: greater than the known false-positive 6.0 GB cgroup floor (${known_false_positive_floor_bytes}) and no more than ${machine_model_ceiling_bytes} bytes so at least 0.8 GB remains reserved outside the build cgroup."
 fi
 
 if [[ "$mode" == "passthrough" ]]; then
@@ -73,14 +74,24 @@ cleanup_cgroup() {
   local status="$1"
   local cleanup_output
   local cleanup_status
+  local cleanup_attempt
 
   if [[ "$cgroup_created" != "1" || -z "$cgroup_dir" ]]; then
     return 0
   fi
 
   set +e
-  cleanup_output="$(sudo -n rmdir "$cgroup_dir" 2>&1)"
-  cleanup_status=$?
+  for cleanup_attempt in 1 2 3 4 5; do
+    cleanup_output="$(sudo -n rmdir "$cgroup_dir" 2>&1)"
+    cleanup_status=$?
+    if [[ "$cleanup_status" -eq 0 ]]; then
+      return "$status"
+    fi
+
+    if [[ "$cleanup_attempt" -lt 5 ]]; then
+      sleep 0.2
+    fi
+  done
 
   if [[ "$cleanup_status" -ne 0 ]]; then
     if [[ -n "$cleanup_output" ]]; then
@@ -169,11 +180,16 @@ if ! sudo -n true >/dev/null 2>&1; then
   fail "passwordless sudo is required to configure the capped cgroup."
 fi
 
-printf '[apps/web build memory guard] enforcing cgroup cap %s bytes (%s GB); calibrated pass=%s GB, fail=%s GB\n' \
+memory_reserve_bytes=$((vercel_standard_machine_bytes - memory_cap_bytes))
+printf '[apps/web build memory guard] enforcing cgroup machine-model cap %s bytes (%s GB) for Vercel Standard machine=%s bytes (%s GB), reserve outside build cgroup=%s bytes (%s GB); allowed cap range: >%s bytes and <=%s bytes\n' \
   "$memory_cap_bytes" \
   "$(format_decimal_gb "$memory_cap_bytes")" \
-  "$(format_decimal_gb "$calibrated_passing_peak_bytes")" \
-  "$(format_decimal_gb "$calibrated_failing_peak_bytes")" >&2
+  "$vercel_standard_machine_bytes" \
+  "$(format_decimal_gb "$vercel_standard_machine_bytes")" \
+  "$memory_reserve_bytes" \
+  "$(format_decimal_gb "$memory_reserve_bytes")" \
+  "$known_false_positive_floor_bytes" \
+  "$machine_model_ceiling_bytes" >&2
 
 cgroup_dir="$cgroup_root/murph-web-build-$$"
 memory_peak_file="$cgroup_dir/memory.peak"
