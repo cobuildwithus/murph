@@ -1,4 +1,5 @@
 import {
+  resolveExperimentAdherenceRollupTarget,
   selectBrowserVaultExperimentResults,
   type BrowserVaultExperimentBiomarkerResult,
   type BrowserVaultExperimentExpectedRange,
@@ -417,6 +418,10 @@ function buildSchedule(
   results: BrowserVaultExperimentResultsView,
 ): ExperimentRunProjection["schedule"] {
   const schedule = results.schedule;
+  if (hasCalendarLessCountAdherenceTarget(results)) {
+    return undefined;
+  }
+
   if (!schedule && hasUnsupportedExplicitAdherence(results)) {
     return undefined;
   }
@@ -451,6 +456,14 @@ function buildSchedule(
     loggedSessions: results.progress?.adherence.loggedSessions ?? schedule?.completedSessions,
     weeks,
   };
+}
+
+function hasCalendarLessCountAdherenceTarget(results: BrowserVaultExperimentResultsView): boolean {
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(
+    results.experiment.runPlan.adherenceTargets,
+  );
+
+  return rollupTarget !== null && rollupTarget.calendar === undefined;
 }
 
 function hasUnsupportedExplicitAdherence(results: BrowserVaultExperimentResultsView): boolean {

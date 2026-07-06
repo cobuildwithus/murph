@@ -298,7 +298,18 @@ export function synthesizeLegacySessionAdherenceTargets(input: {
 
   const label = runPlan.modality?.trim() || "Session";
   const evidence = resolveAdherenceEvidence(runPlan.modality);
-  const base = {
+  const rollup =
+    runPlan.targetSessions !== undefined || runPlan.minimumUsefulSessions !== undefined
+      ? {
+          ...(runPlan.targetSessions !== undefined
+            ? { targetCompletions: runPlan.targetSessions }
+            : {}),
+          ...(runPlan.minimumUsefulSessions !== undefined
+            ? { minimumUsefulCompletions: runPlan.minimumUsefulSessions }
+            : {}),
+        }
+      : null;
+  const base: ExperimentAdherenceTarget = {
     targetId: slugifyTargetId(label) ?? "session",
     label,
     phase: "intervention" as const,
@@ -309,10 +320,7 @@ export function synthesizeLegacySessionAdherenceTargets(input: {
       missing: "missed_after_grace" as const,
     },
     grace: { hours: 24 },
-    rollup: {
-      targetCompletions: runPlan.targetSessions,
-      minimumUsefulCompletions: runPlan.minimumUsefulSessions,
-    },
+    ...(rollup ? { rollup } : {}),
   };
 
   if (runPlan.schedule) {
@@ -322,9 +330,7 @@ export function synthesizeLegacySessionAdherenceTargets(input: {
     }
   }
 
-  return runPlan.targetSessions !== undefined || runPlan.minimumUsefulSessions !== undefined
-    ? [base]
-    : [];
+  return [base];
 }
 
 export function resolveExperimentAdherenceRollupTarget<
@@ -652,7 +658,6 @@ function listActivityKindCandidates(attributes: Record<string, unknown>): string
     readString(sport?.slug),
     readString(sport?.name),
     readString(sport?.type),
-    readString(attributes.name),
     readString(workout?.activityKind),
     readString(workout?.activityType),
     readString(workout?.sportName),
@@ -661,7 +666,6 @@ function listActivityKindCandidates(attributes: Record<string, unknown>): string
     readString(workoutSport?.slug),
     readString(workoutSport?.name),
     readString(workoutSport?.type),
-    readString(workout?.name),
   ].filter((candidate): candidate is string => candidate !== null);
 }
 

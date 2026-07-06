@@ -2275,7 +2275,9 @@ export const experimentProgressSnapshotSchema = z
       .object({
         completedSessions: integerSchema(0),
         expectedSessionsByNow: integerSchema(0).nullable(),
+        loggedSessions: integerSchema(0).optional(),
         minimumUsefulSessions: integerSchema(0).nullable(),
+        partialSessions: integerSchema(0).optional(),
         sessionEventIds: uniqueArray(idSchema(ID_PREFIXES.event), { uniqueItems: true }).optional(),
         status: z.enum(EXPERIMENT_ADHERENCE_STATUSES),
         targetSessions: integerSchema(0).nullable(),

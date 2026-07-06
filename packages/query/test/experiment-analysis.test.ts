@@ -377,6 +377,7 @@ function makeActivitySession(input: {
   activityType: string;
   dayKey: string;
   entityId: string;
+  name?: string;
   occurredAt?: string;
   sportName?: string;
   title?: string;
@@ -392,6 +393,7 @@ function makeActivitySession(input: {
     title: input.title ?? input.activityType,
     attributes: {
       activityType: input.activityType,
+      ...(input.name === undefined ? {} : { name: input.name }),
       ...(input.sportName === undefined ? {} : { sportName: input.sportName }),
       ...(input.workout === undefined ? {} : { workout: input.workout }),
     },
@@ -740,6 +742,176 @@ test("experiment progress ignores fully generic activity sessions for running ad
   const progress = summarizeExperimentProgress(vault, "generic-workout-run-block", { asOf: "2026-06-09" });
 
   assert.equal(progress.adherence.completedSessions, 0);
+});
+
+test("experiment progress ignores free-text activity names for running adherence", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-free-text-workout-name-adherence",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFT",
+        slug: "free-text-workout-name-run-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Run",
+          targetSessions: 4,
+          minimumUsefulSessions: 2,
+        },
+      }),
+      makeActivitySession({
+        entityId: "evt_generic_named_workout_1",
+        dayKey: "2026-06-02",
+        activityType: "workout",
+        name: "post run mobility",
+        workout: { name: "post run mobility" },
+      }),
+      makeActivitySession({
+        entityId: "evt_structured_run_1",
+        dayKey: "2026-06-03",
+        activityType: "workout",
+        sportName: "Run",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "free-text-workout-name-run-block", { asOf: "2026-06-09" });
+
+  assert.equal(progress.adherence.completedSessions, 1);
+});
+
+test("experiment progress counts count-less run-plan device sessions", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-countless-running-adherence",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGA",
+        slug: "countless-run-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Run",
+        },
+      }),
+      makeActivitySession({
+        entityId: "evt_countless_run_1",
+        dayKey: "2026-06-02",
+        activityType: "workout",
+        sportName: "Run",
+      }),
+      makeActivitySession({
+        entityId: "evt_countless_run_2",
+        dayKey: "2026-06-05",
+        activityType: "workout",
+        sportName: "Run",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "countless-run-block", { asOf: "2026-06-09" });
+
+  assert.equal(progress.adherence.completedSessions, 2);
+  assert.equal(progress.adherence.expectedSessionsByNow, null);
+  assert.notEqual(progress.adherence.status, "not_started");
+});
+
+test("experiment progress counts count-less run-plan manual sessions", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJGB";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-countless-sauna-adherence",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId,
+        slug: "countless-sauna-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "sauna",
+        },
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE2GA",
+        experimentId,
+        experimentSlug: "countless-sauna-block",
+        occurredAt: "2026-06-02T19:00:00.000Z",
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE2GB",
+        experimentId,
+        experimentSlug: "countless-sauna-block",
+        occurredAt: "2026-06-05T19:00:00.000Z",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "countless-sauna-block", { asOf: "2026-06-09" });
+
+  assert.equal(progress.adherence.completedSessions, 2);
+  assert.equal(progress.adherence.expectedSessionsByNow, null);
+  assert.notEqual(progress.adherence.status, "not_started");
+});
+
+test("experiment progress treats partial calendar-less sessions as logged", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJGC";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-partial-count-path",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId,
+        slug: "partial-count-path",
+        runPlan: {
+          baselineStart: "2026-04-01",
+          baselineEnd: "2026-04-07",
+          interventionStart: "2026-04-08",
+          interventionEnd: "2026-04-12",
+          modality: "sauna",
+          targetSessions: 2,
+          minimumUsefulSessions: 1,
+        },
+        assistantSupport: {
+          remindersEnabled: true,
+          weeklyDigestEnabled: false,
+        },
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE2GC",
+        experimentId,
+        experimentSlug: "partial-count-path",
+        occurredAt: "2026-04-09T19:00:00.000Z",
+        sessionStatus: "partial",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "partial-count-path", {
+    asOf: "2026-04-10",
+  });
+  const { card } = buildExperimentProgressCard(vault, "partial-count-path", {
+    asOf: "2026-04-10",
+  });
+  const outcome = analyzeExperimentOutcome(vault, "partial-count-path", {
+    asOf: "2026-04-15",
+  });
+
+  assert.equal(progress.adherence.completedSessions, 0);
+  assert.equal(progress.adherence.partialSessions, 1);
+  assert.equal(progress.adherence.loggedSessions, 1);
+  assert.notEqual(progress.adherence.status, "not_started");
+  assert.notEqual(progress.recommendation.action, "remind");
+  assert.equal(card.sessions.logged, 1);
+  assert.deepEqual(outcome.confidence.reasons, [
+    "Primary biomarker coverage is insufficient for a strong before-and-after read.",
+  ]);
 });
 
 test("experiment progress counts manual sessions for device-observable running adherence", () => {
@@ -1659,7 +1831,7 @@ test("experiment outcome stays deterministic and expresses uncertainty through c
   assert.deepEqual(outcome.confidence, {
     level: "low",
     reasons: [
-      "Completed session count stayed below the minimum useful target.",
+      "Logged session count stayed below the minimum useful target.",
       "Context and confounder logs were present during the run.",
     ],
   });

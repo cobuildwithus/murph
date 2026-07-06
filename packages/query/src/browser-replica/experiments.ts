@@ -1187,13 +1187,24 @@ function buildAdherenceResult(
     return null;
   }
 
-  if (adherenceTargets.length === 0 || !interventionStart || !interventionEnd) {
+  if (
+    adherenceTargets.length === 0 ||
+    !interventionStart ||
+    !interventionEnd
+  ) {
     context.diagnostics.push({
       code: "no_schedule",
       message: "No structured adherence target is available for this experiment.",
       severity: "info",
     });
     return null;
+  }
+  if (!adherenceTargets.some((target) => target.calendar)) {
+    context.diagnostics.push({
+      code: "no_schedule",
+      message: "No structured adherence target is available for this experiment.",
+      severity: "info",
+    });
   }
 
   try {
@@ -1223,6 +1234,9 @@ function buildScheduleResult(
   adherence: BrowserVaultExperimentAdherenceResult | null,
 ): BrowserVaultExperimentScheduleResult | null {
   if (!adherence) {
+    return null;
+  }
+  if (!adherence.targets.some((target) => target.calendar)) {
     return null;
   }
 

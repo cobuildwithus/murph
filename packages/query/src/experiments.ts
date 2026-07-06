@@ -125,7 +125,9 @@ export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
   adherence: {
     completedSessions: number;
     expectedSessionsByNow: number | null;
+    loggedSessions?: number;
     minimumUsefulSessions: number | null;
+    partialSessions?: number;
     sessionEventIds?: string[];
     status: ExperimentAdherenceStatus;
     targetSessions: number | null;
@@ -673,6 +675,7 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
       })
     : null;
   let completedSessions = 0;
+  let partialSessions = 0;
   if (!hasAmbiguousTargets) {
     if (progressTarget?.calendar) {
       completedSessions = (rollupCells ?? adherenceCalendar?.cells ?? []).filter(
@@ -680,8 +683,10 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
       ).length;
     } else {
       completedSessions = progressCounts?.completedSessions ?? 0;
+      partialSessions = progressCounts?.partialSessions ?? 0;
     }
   }
+  const loggedSessions = completedSessions + partialSessions;
   const expectedSessionsByNow = hasAmbiguousTargets
     ? null
     : progressTarget?.calendar && adherenceCalendar
@@ -695,27 +700,28 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
   let status: ExperimentAdherenceStatus = "unknown";
   if (hasAmbiguousTargets) {
     status = "unknown";
-  } else if (completedSessions === 0) {
+  } else if (loggedSessions === 0) {
     status = "not_started";
-  } else if (targetSessions !== null && completedSessions >= targetSessions) {
+  } else if (targetSessions !== null && loggedSessions >= targetSessions) {
     status = "met_target";
   } else if (
     minimumUsefulSessions !== null &&
-    completedSessions >= minimumUsefulSessions
+    loggedSessions >= minimumUsefulSessions
   ) {
     status = "met_minimum";
   } else if (
     expectedSessionsByNow !== null &&
-    completedSessions < expectedSessionsByNow
+    loggedSessions < expectedSessionsByNow
   ) {
     status = "behind";
-  } else if (completedSessions > 0) {
+  } else if (loggedSessions > 0) {
     status = "on_track";
   }
 
   return {
     completedSessions,
     expectedSessionsByNow,
+    ...(partialSessions > 0 ? { loggedSessions, partialSessions } : {}),
     minimumUsefulSessions,
     status,
     targetSessions,
@@ -997,6 +1003,7 @@ function buildOutcomeConfidence(input: {
 }): ExperimentOutcomeSummary["confidence"] {
   const reasons: string[] = [];
   const primary = input.metricResults[0] ?? null;
+  const loggedSessions = readLoggedAdherenceSessions(input.adherence);
 
   if (!primary || primary.completeness === "insufficient") {
     reasons.push("Primary biomarker coverage is insufficient for a strong before-and-after read.")
@@ -1004,9 +1011,9 @@ function buildOutcomeConfidence(input: {
 
   if (
     input.adherence.minimumUsefulSessions !== null &&
-    input.adherence.completedSessions < input.adherence.minimumUsefulSessions
+    loggedSessions < input.adherence.minimumUsefulSessions
   ) {
-    reasons.push("Completed session count stayed below the minimum useful target.")
+    reasons.push("Logged session count stayed below the minimum useful target.")
   }
 
   if (input.confounders.length > 0) {
@@ -1024,6 +1031,13 @@ function buildOutcomeConfidence(input: {
     level,
     reasons,
   };
+}
+
+function readLoggedAdherenceSessions(
+  adherence: ExperimentProgressSummary["adherence"],
+): number {
+  return adherence.loggedSessions ??
+    adherence.completedSessions + (adherence.partialSessions ?? 0);
 }
 
 function buildOutcomeConclusion(

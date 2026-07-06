@@ -298,6 +298,24 @@ test("synthesizes device-observable count targets with activity evidence", () =>
   });
 });
 
+test("synthesizes count-less run-plan targets without rollup metadata", () => {
+  const targets = synthesizeLegacySessionAdherenceTargets({
+    runPlan: {
+      modality: "Run",
+    },
+  });
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0]?.calendar, undefined);
+  assert.equal(targets[0]?.rollup, undefined);
+  assert.deepEqual(targets[0]?.evidence, {
+    kind: "linkedEventCount",
+    eventKind: "activity_session",
+    activityKind: "running",
+    missing: "missed_after_grace",
+  });
+});
+
 test("counts calendar-less activity targets by matching activity kind", () => {
   const target: ExperimentAdherenceTarget = {
     targetId: "running",
