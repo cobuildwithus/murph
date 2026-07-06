@@ -52,9 +52,6 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import {
-  importHostedConversationMessageWakeIntoLocalInbox,
-} from "./events/conversation.ts";
-import {
   ensureHostedPendingAssistantInputIndex,
   enqueueHostedPendingAssistantInputId,
 } from "./pending-input-index.ts";
@@ -86,6 +83,11 @@ const ATTACHMENT_EVIDENCE_PARTIAL_REASON =
   "attachment.evidence_partial";
 const ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512;
 const RUNTIME_WAKE_NOTIFY_STALE_SKEW_TOLERANCE_MS = 5_000;
+
+type HostedConversationEventsModule = typeof import("./events/conversation.ts");
+
+let hostedConversationEventsModulePromise:
+  Promise<HostedConversationEventsModule> | null = null;
 
 export type HostedConversationMailboxPayloadDecodeResult =
   | {
@@ -705,11 +707,27 @@ async function importHostedConversationWakeWithLocalInbox(input: {
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<HostedConversationMailboxLocalImportResult> {
+  const {
+    importHostedConversationMessageWakeIntoLocalInbox,
+  } = await loadHostedConversationEventsModule();
   const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
   return {
     captureId: result.capture.captureId,
     metrics: result.metrics,
   };
+}
+
+function loadHostedConversationEventsModule(): Promise<HostedConversationEventsModule> {
+  if (!hostedConversationEventsModulePromise) {
+    const modulePromise = import("./events/conversation.ts").catch((error: unknown) => {
+      if (hostedConversationEventsModulePromise === modulePromise) {
+        hostedConversationEventsModulePromise = null;
+      }
+      throw error;
+    });
+    hostedConversationEventsModulePromise = modulePromise;
+  }
+  return hostedConversationEventsModulePromise;
 }
 
 async function stageHostedConversationAssistantInputEvent(input: {
