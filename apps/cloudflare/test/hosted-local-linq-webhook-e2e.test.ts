@@ -297,7 +297,10 @@ describe("hosted local Linq webhook e2e", () => {
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
 
     requireScenario().queueAssistantResponses([hostedLinqImageAssistantReplyText], {
-      matchInputContains: "outbox.png",
+      // The image pipeline normalizes outbox.png to WebP and the provider
+      // request renders the normalized evidence filename (asserted below as
+      // `fileName: outbox.webp`), so the matcher must use the normalized name.
+      matchInputContains: "outbox.webp",
     });
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
