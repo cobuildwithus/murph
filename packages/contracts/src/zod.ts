@@ -1981,7 +1981,16 @@ export const experimentAdherenceTargetSchema = z
       .strict()
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((target, context) => {
+    if (target.calendar === undefined && target.evidence.kind !== "linkedEventCount") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "calendar is required unless evidence is linkedEventCount.",
+        path: ["calendar"],
+      });
+    }
+  });
 
 export const experimentAdherenceTargetsSchema = uniqueArray(experimentAdherenceTargetSchema, {
   maxItems: 8,

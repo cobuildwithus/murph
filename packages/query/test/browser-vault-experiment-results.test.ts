@@ -1197,6 +1197,41 @@ test("counts calendar-less browser running adherence from activity sessions by s
   assert.deepEqual(result.schedule?.cells, []);
 });
 
+test("counts browser cycling adherence from provider ride activity sessions", () => {
+  const slug = "cycling-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_cycling_block",
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Cycling",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        activitySessionEvent({
+          activityType: "ride",
+          date: "2026-06-02",
+          id: "evt_ride_1",
+          sportName: "Ride",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 1);
+  assert.equal(result?.progress?.adherence.loggedSessions, 1);
+});
+
 test("counts browser running adherence after the real replica projects activity session classifications", async () => {
   const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFN";
   const slug = "device-run-block";

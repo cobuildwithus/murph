@@ -19,7 +19,6 @@ import {
   countCompletedAdherenceSessions,
   eventKindIsCandidateForEvidence,
   resolveActivityEvidenceLocalDate,
-  resolveAdherenceEvidence,
   resolveExperimentAdherenceRollupTarget,
   resolveAdherenceObservationActivityKind,
   synthesizeLegacySessionAdherenceTargets,
@@ -248,7 +247,9 @@ interface ExperimentSummaryContext {
 type ExperimentFollowupContext = Pick<
   ExperimentSummaryContext,
   "adherenceEvents" | "events" | "frontmatter" | "progressPhase"
->;
+> & {
+  adherenceTargets: readonly QueryExperimentAdherenceTarget[];
+};
 
 interface ExperimentMetricPointOptions {
   metricPoints?: readonly MetricPoint[];
@@ -506,6 +507,7 @@ function buildExperimentFollowupContext(
       targets: adherenceTargets,
       vault,
     }),
+    adherenceTargets,
     events,
     frontmatter,
     progressPhase: resolveProgressPhase(frontmatter, asOf),
@@ -1262,11 +1264,16 @@ function hasSessionLogForDate(context: ExperimentFollowupContext, date: string):
     return true;
   }
 
-  const evidence = resolveAdherenceEvidence(context.frontmatter.runPlan?.modality);
-  if (evidence.eventKind !== "activity_session" || !evidence.activityKind) {
+  const activityEvidenceKinds = context.adherenceTargets.flatMap((target) =>
+    target.evidence.kind === "linkedEventCount" &&
+      target.evidence.eventKind === "activity_session" &&
+      target.evidence.activityKind
+      ? [target.evidence.activityKind]
+      : []
+  );
+  if (activityEvidenceKinds.length === 0) {
     return false;
   }
-  const activityEvidenceKind = evidence.activityKind;
 
   return context.adherenceEvents.some((event) => {
     if (event.kind !== "activity_session") {
@@ -1281,7 +1288,9 @@ function hasSessionLogForDate(context: ExperimentFollowupContext, date: string):
     const activityKind = resolveAdherenceObservationActivityKind({
       attributes: event.attributes as Record<string, unknown>,
     });
-    return activityTextMatchesKind(activityKind, activityEvidenceKind);
+    return activityEvidenceKinds.some((activityEvidenceKind) =>
+      activityTextMatchesKind(activityKind, activityEvidenceKind)
+    );
   });
 }
 

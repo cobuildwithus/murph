@@ -1,7 +1,7 @@
 export const activityKindAliasGroups = [
   ["walk", "walking"],
   ["run", "running"],
-  ["bike", "biking", "cycle", "cycling"],
+  ["bike", "biking", "cycle", "cycling", "ride", "riding"],
   ["dance", "dancing"],
   ["surf", "surfing"],
   ["swim", "swimming"],

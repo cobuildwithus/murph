@@ -645,6 +645,38 @@ test("experiment progress counts calendar-less running adherence from activity s
   assert.equal(progress.adherence.targetSessions, 24);
 });
 
+test("experiment progress counts cycling adherence from provider ride activity sessions", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-cycling-ride-adherence",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFP",
+        slug: "cycling-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Cycling",
+          targetSessions: 4,
+          minimumUsefulSessions: 2,
+        },
+      }),
+      makeActivitySession({
+        entityId: "evt_ride_1",
+        dayKey: "2026-06-02",
+        activityType: "ride",
+        sportName: "Ride",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "cycling-block", { asOf: "2026-06-09" });
+
+  assert.equal(progress.adherence.completedSessions, 1);
+});
+
 test("experiment progress counts manual sessions for device-observable running adherence", () => {
   const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFN";
   const vault = createVaultReadModel({
@@ -2017,6 +2049,63 @@ test("experiment follow-up due skips missed-log when device activity already han
   });
 
   const decision = decideExperimentFollowupDue(vault, "daily-run", {
+    kind: "missed-log",
+    date: "2026-06-03",
+  });
+
+  assert.equal(decision.action, "skip");
+  assert.equal(decision.reason, "session_already_logged");
+});
+
+test("experiment follow-up due uses explicit activity target evidence for missed-log checks", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFQ",
+    slug: "daily-explicit-run",
+    runPlan: {
+      baselineStart: "2026-05-25",
+      baselineEnd: "2026-05-31",
+      interventionStart: "2026-06-01",
+      interventionEnd: "2026-06-14",
+      modality: "Workout",
+      targetSessions: 14,
+      minimumUsefulSessions: 10,
+      adherenceTargets: [{
+        targetId: "running",
+        label: "Running",
+        phase: "intervention",
+        evidence: {
+          kind: "linkedEventCount",
+          eventKind: "activity_session",
+          activityKind: "running",
+          missing: "missed_after_grace",
+        },
+        rollup: {
+          targetCompletions: 14,
+          minimumUsefulCompletions: 10,
+        },
+      }],
+    },
+    assistantSupport: {
+      remindersEnabled: true,
+      missedLogFollowup: "default_on",
+      weeklyDigestEnabled: false,
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-explicit-device-activity",
+    metadata: { timezone: "America/New_York" },
+    entities: [
+      experiment,
+      makeActivitySession({
+        entityId: "evt_explicit_daily_run_device_1",
+        dayKey: "2026-06-03",
+        occurredAt: "2026-06-03T22:00:00.000Z",
+        activityType: "Run",
+      }),
+    ],
+  });
+
+  const decision = decideExperimentFollowupDue(vault, "daily-explicit-run", {
     kind: "missed-log",
     date: "2026-06-03",
   });
