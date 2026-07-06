@@ -195,9 +195,12 @@ fi
 
 status=0
 (
-  # In bash, $$ remains the top-level shell PID inside this subshell. BASHPID is
-  # the process that will exec the build, so migrating it caps the build tree.
-  if ! printf '%s\n' "$BASHPID" | sudo -n tee "$cgroup_dir/cgroup.procs" >/dev/null; then
+  # In bash, $$ remains the top-level shell PID inside this subshell, and BASHPID
+  # is the live process that will exec the build. Capture it before invoking a
+  # helper: BASHPID is dynamic, so a pipeline producer or redirection helper can
+  # otherwise expand to its own short-lived PID.
+  build_pid=$BASHPID
+  if ! sudo -n tee "$cgroup_dir/cgroup.procs" >/dev/null <<<"$build_pid"; then
     printf '[apps/web build memory guard] ERROR: could not move the build process into %s.\n' "$cgroup_dir" >&2
     exit 1
   fi
