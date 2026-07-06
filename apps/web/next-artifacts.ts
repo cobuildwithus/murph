@@ -49,11 +49,12 @@ export function resolveHostedWebDistDir(
   phase: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
-  if (phase !== PHASE_DEVELOPMENT_SERVER) {
+  const useSmokeDistDir = environment[hostedWebDistModeEnvVarName] === hostedWebSmokeDistMode;
+  if (phase !== PHASE_DEVELOPMENT_SERVER && !useSmokeDistDir) {
     return HOSTED_WEB_BUILD_DIST_DIR;
   }
 
-  const baseDistDir = environment[hostedWebDistModeEnvVarName] === hostedWebSmokeDistMode
+  const baseDistDir = useSmokeDistDir
     ? HOSTED_WEB_SMOKE_DIST_DIR
     : HOSTED_WEB_DEV_DIST_DIR;
 

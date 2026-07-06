@@ -472,8 +472,17 @@ export async function startHostedLocalDevHarness(input: {
       await writeFile(nextEnvPath, originalNextEnvContents, "utf8");
     }
 
-    if (nextDistDir !== null) {
-      await rm(path.join(repoRoot, "apps/web", nextDistDir), {
+    const nextDistPath = nextDistDir === null
+      ? null
+      : path.join(repoRoot, "apps/web", nextDistDir);
+    if (
+      nextDistPath !== null
+      && !await shouldPreserveHostedLocalProductionWebDist({
+        distDir: nextDistPath,
+        env: input.env,
+      })
+    ) {
+      await rm(nextDistPath, {
         force: true,
         recursive: true,
       });
@@ -790,6 +799,29 @@ function resolveHostedLocalHarnessDistDir(
 ): string {
   const baseDistDir = nextDistDirMode === "smoke" ? ".next-smoke" : ".next-dev";
   return `${baseDistDir}-${nextDistDirSuffix}`;
+}
+
+async function shouldPreserveHostedLocalProductionWebDist(input: {
+  distDir: string;
+  env: NodeJS.ProcessEnv;
+}): Promise<boolean> {
+  if (!usesHostedLocalProductionWebProfile(input.env)) {
+    return false;
+  }
+
+  const nextDistDirMode = input.env.NEXT_DIST_DIR_MODE?.trim();
+  if (nextDistDirMode !== "smoke") {
+    return false;
+  }
+
+  const buildId = await readFile(path.join(input.distDir, "BUILD_ID"), "utf8")
+    .catch(() => null);
+  return buildId !== null && buildId.trim().length > 0;
+}
+
+function usesHostedLocalProductionWebProfile(env: NodeJS.ProcessEnv): boolean {
+  const profile = env.MURPH_HOSTED_LOCAL_PROFILE?.trim();
+  return profile === "e2e:stub" || profile === "e2e:live";
 }
 
 async function readHostedUserStatus(input: {

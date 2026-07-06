@@ -853,21 +853,10 @@ export async function startHostedLocalDevStack(input: {
 
     const webProcess = config.skipWeb
       ? null
-      : spawnChildProcess("web", "pnpm", [
-        "--dir",
-        ".",
-        "exec",
-        "tsx",
-        "apps/web/scripts/dev-local.ts",
-        "--",
-        "--hostname",
-        config.webHost,
-        "--port",
-        String(config.webPort),
-      ], {
-        ...runtimeEnv,
-        MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
-      }, {
+      : spawnChildProcess("web", "pnpm", buildHostedWebProcessArgs({
+        config,
+        env: runtimeEnv,
+      }), buildHostedWebProcessEnv(runtimeEnv), {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,
         stdoutTarget: input.stdoutTarget,
@@ -1529,6 +1518,55 @@ function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
   return env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED === "1"
     || profile === "e2e:stub"
     || profile === "e2e:live";
+}
+
+function shouldUseHostedWebProductionStart(env: NodeJS.ProcessEnv): boolean {
+  const profile = env.MURPH_HOSTED_LOCAL_PROFILE?.trim();
+  return profile === "e2e:stub" || profile === "e2e:live";
+}
+
+function buildHostedWebProcessArgs(input: {
+  config: HostedLocalDevConfig;
+  env: NodeJS.ProcessEnv;
+}): string[] {
+  const serverArgs = [
+    "--hostname",
+    input.config.webHost,
+    "--port",
+    String(input.config.webPort),
+  ];
+
+  if (shouldUseHostedWebProductionStart(input.env)) {
+    return [
+      "--dir",
+      "apps/web",
+      "exec",
+      "next",
+      "start",
+      ...serverArgs,
+    ];
+  }
+
+  return [
+    "--dir",
+    ".",
+    "exec",
+    "tsx",
+    "apps/web/scripts/dev-local.ts",
+    "--",
+    ...serverArgs,
+  ];
+}
+
+function buildHostedWebProcessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (shouldUseHostedWebProductionStart(env)) {
+    return { ...env };
+  }
+
+  return {
+    ...env,
+    MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
+  };
 }
 
 function hasHostedLocalWorktreeScope(env: NodeJS.ProcessEnv): boolean {

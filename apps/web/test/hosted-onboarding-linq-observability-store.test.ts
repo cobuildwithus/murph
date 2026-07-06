@@ -1354,6 +1354,7 @@ describe("hosted Linq observability stores", () => {
       sourceRef: "intent_group",
       targetKind: "thread",
       threadIsDirect: false,
+      userId: "member_123",
     })).resolves.toEqual({
       deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
       recorded: true,
@@ -1569,6 +1570,7 @@ describe("hosted Linq observability stores", () => {
       sourceRef: "intent_group_receipt",
       targetKind: "thread",
       threadIsDirect: false,
+      userId: "member_123",
     });
 
     expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
@@ -1686,6 +1688,7 @@ describe("hosted Linq observability stores", () => {
       sourceRef: "intent_group_retry",
       targetKind: "thread",
       threadIsDirect: false,
+      userId: "member_123",
     });
 
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
