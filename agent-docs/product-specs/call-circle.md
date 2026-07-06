@@ -2,17 +2,17 @@
 
 Last verified: 2026-07-06
 
-Status: decisions locked 2026-07-06; not yet implemented. Phase 1 is the next
-buildable unit.
+Status: decisions locked 2026-07-06 (revised same day after founder review);
+not yet implemented. Ships as one release including the connector bridge.
 
 ## Purpose
 
 Call Circle helps an existing Murph group actually talk on the phone. Friends
 want to call each other more, but nobody knows anyone's schedule and
 coordination costs kill the intent. Murph acts as the neutral third party:
-members privately tell their own Murph when they are usually free, a group
-automation matches pairs, Murph double-confirms with each person privately,
-and at the agreed time the call happens.
+members privately tell their own Murph when they like to talk, a group
+automation matches pairs weekly, Murph confirms both sides privately with
+calendar awareness, and at the agreed time Murph connects the call.
 
 This is a health feature. Social connection is one of the strongest
 wellbeing levers, and the product constitution asks for more participation
@@ -23,52 +23,63 @@ member's relationships instead of their metrics.
 
 - Any active group member can ask the group's Murph to set up Call Circle in
   the group chat. Setup is per group.
-- Availability is private. Each member tells their own Murph preferred days
-  and rough time windows in their own 1:1 conversation, or connects a
-  calendar there. Only coarse windows ever reach the group container, via a
-  dedicated vault-share projection kind. Raw calendars, exact events, phone
-  numbers, and private conversation content never enter the group vault.
-- A recurring group automation proposes at most one match per member per
-  cycle (default cadence: weekly per member, tunable per group). Matching
-  rotates pairs so the same two people are not matched twice in a row and no
-  member is starved.
-- Matches are confirmed privately with each member by their own Murph, in
-  their existing 1:1 thread:
-  - Morning-of soft confirm, answerable in one word.
-  - Short final confirm near the call time.
-  - Both must say yes before any call step happens.
-- Mystery framing is per-group and honest. Murph may withhold who the match
-  is until both confirm, but must never imply a specific person asked for
-  the call. Say "I matched you with someone from the group", not "one of
-  your buddies wants to talk to you".
-- Non-response is a graceful no. One confirm message per step, no chasing.
-  A dead match is dropped silently and the pair is eligible again in a later
-  cycle. Declining or ignoring never produces guilt copy.
-- Every member has an instant off-ramp: "pause calls" or equivalent in their
-  own thread pauses their participation per group without leaving the group.
-- Consent moment: the first Call Circle DM a member receives from their own
-  Murph is the enrollment ask ("Your group asked me to help you all talk
-  more. Want in? yes/no"). A yes records a feature consent grant; a no
-  records opt-out and stops all Call Circle DMs for that group. Joining a
-  group is not by itself consent to Call Circle.
+- Enrollment happens in the group chat. Members who reply "I'm in" (or
+  equivalent) are enrolled by matching the message's sender handle to the
+  group roster. The first private DM is not a consent question; it is a
+  transparent start with an instant off-ramp: Murph introduces Call Circle
+  for that group, asks for preferences, and says pausing is one word away.
+  Chat participants without their own Murph cannot enroll; the group's
+  Murph points them at the join link.
+- Availability preferences are private and stated conversationally: "weekday
+  lunches", "Sunday mornings", time zone aware. They live at full fidelity
+  in the member's own vault (time zone from vault metadata). No availability
+  projection is shared into the group vault.
+- A recurring group automation (default: one proposal per member per week,
+  tunable per group) matches pairs. Before proposing, it queries enrolled
+  members' stated preferences through the notification rail's silent-query
+  mode; responses carry coarse windows in absolute time. Matching rotates
+  pairs so the same two people are not matched twice in a row and no member
+  is starved.
+- Matches are named, not mystery, by default: the morning-of ask is "Free at
+  5 for a call with Mike? yes/no". A per-group mystery mode may withhold the
+  name until both confirm, but Murph must never imply a specific person
+  asked for the call.
+- Confirms are calendar-aware before asking. When web files a match-confirm
+  request for a member with a connected calendar, it checks free/busy for
+  the proposed window server-side (web already owns the Composio account
+  binding) and attaches the verdict to the request payload. Busy windows
+  bounce back to the matcher without disturbing the member; no calendar
+  detail beyond the free/busy verdict for the proposed window is read or
+  stored. Members without a connected calendar get plain asks.
+- Rescheduling is capped at one counter-proposal per side per match. If no
+  fit after that, the match is dropped quietly and the pair is eligible
+  again in a later cycle.
+- Both members must confirm (morning-of soft confirm plus a short final
+  confirm near call time) before any call step happens. Non-response is a
+  graceful no: one message per confirm step, no chasing, no guilt copy.
+- No phone call is ever placed to a member who has not interacted with Call
+  Circle in their own thread at least once (automatic, since matching
+  requires stated preferences).
+- Every member can say "pause" in their own thread to pause participation
+  per group without leaving the group.
 
-## Call Mechanics By Phase
+## Call Mechanics
 
-- Phase 1 (no telephony): when both members confirm, Murph tells each of
-  them who they are matched with and that the other is ready now, and one of
-  them dials directly. Murph never places a call.
-- Phase 2 (Retell connector bridge): at the agreed time Murph places one
-  outbound call to member A from a dedicated connector agent whose entire
-  script is one line ("This is Murph. Connecting you with a friend from your
-  group, one moment."), then transfers the call to member B's verified
-  phone. The AI is an operator for one sentence, never a call participant.
-  A "Murph Calls" contact card ships with enrollment so the incoming call is
-  named. If the transfer fails or B does not answer, the agent tells A it
-  will find another time, and both members get a low-key follow-up message.
-  Phase 2 does not start until transfer-failure behavior has been prototyped
-  and feels acceptable.
-- Phase 2 uses the existing phone-call disclosure posture: the connector
-  identifies itself as Murph in its single line.
+- At the agreed time Murph places one outbound call to member A from a
+  dedicated Retell connector agent whose entire script is one line ("This is
+  Murph. Connecting you with a friend from your group, one moment."), then
+  transfers the call to member B's verified phone. The AI is an operator for
+  one sentence, never a call participant. It identifies itself as Murph in
+  that single line, consistent with the existing phone-call disclosure
+  posture.
+- A "Murph Calls" contact card ships with enrollment so the incoming call is
+  named.
+- Fallback, not a phase: if the bridge fails, B does not answer, or line
+  health blocks calling, the connector tells A it will find another time and
+  both members get a low-key message with the other's confirmed readiness so
+  they can dial directly.
+- Transfer-failure behavior (what A hears when B does not pick up) must be
+  prototyped on Retell in week one of the build; it is on the critical path.
 
 ## Non-Goals
 
@@ -77,45 +88,30 @@ member's relationships instead of their metrics.
   it up.
 - No matching across groups, and no matching people who have not both
   enrolled.
-- No conference calls of three or more people in v1/v2.
+- No conference calls of three or more people.
 - No free-form outbound copy authored by the group container for private
   DMs (see security invariants).
-- No real-time calendar sync into the group vault.
+- No calendar data in the group vault, and no calendar reads beyond
+  free/busy for a concretely proposed window.
+- No new VaultShare projection kind; availability flows only through the
+  notification rail.
 
 ## Architecture
 
-Roughly 70% of Call Circle rides existing rails. Two primitives are new.
+Most of Call Circle rides existing rails: group containers and roster
+(`apps/web/src/lib/hosted-groups/`, roster handles landed in PR #398),
+canonical automations in the group vault for the weekly cadence
+(`packages/core/src/automation.ts`; the 60-minute stale-notification guard
+applies to scheduled steps), notification wakes with event-id dedupe and the
+notification-decision turn (phone-call result path in
+`apps/web/src/lib/phone-calls/result.ts` is the template), consent feature
+scopes (`apps/web/src/lib/legal/consent.ts`), Composio calendar accounts
+(`apps/web/src/lib/connected-apps/`), vCard generation, and the Retell stack
+(`apps/web/src/lib/phone-calls/`).
 
-### Reused
+Two primitives are new.
 
-- Group containers, provisioning, roster, and the group-chat skill
-  (`apps/web/src/lib/hosted-routing/thread-container-service.ts`,
-  `apps/web/src/lib/hosted-groups/`,
-  `packages/assistant-engine/skills/group-chat/SKILL.md`).
-- Canonical automations in the group vault for the matching cadence and
-  one-shot morning-of / near-time steps (`packages/core/src/automation.ts`,
-  cron execution in `packages/assistant-engine/src/assistant/cron/`). The
-  60-minute stale-notification guard applies to scheduled steps.
-- VaultShare closed projection registry for availability
-  (`packages/hosted-execution/src/vault-share.ts`): new kind
-  `call-circle-availability.v0`, current-state, coarse windows plus a
-  last-connected recency bucket. Follows the existing add-a-kind path:
-  schema parser, member-side projector, join-policy selectability, reader.
-- Per-member calendar via Composio connected apps (Google/Outlook) inside
-  the member's own container; the member's Murph derives coarse windows
-  from it. Calendar data itself never leaves the member container.
-- Consent feature scopes with grant/revoke
-  (`apps/web/src/lib/legal/consent.ts`; WhatsApp START/STOP is the
-  precedent), plus per-member per-group pause state.
-- Notification-wake delivery: `assistant.notification.requested` wakes with
-  event-id dedupe, queue-only dispatch, server-resolved route, consumed by
-  the notification-decision turn (phone-call result path in
-  `apps/web/src/lib/phone-calls/result.ts` is the template).
-- Phase 2 reuses the Retell stack (`apps/web/src/lib/phone-calls/`):
-  rows, signed webhooks, idempotency, and the `transfer_number` dynamic
-  variable.
-
-### New Primitive 1: Group-To-Member Private Notification (the linchpin)
+### New Primitive 1: Group-To-Member Private Notification Rail (the linchpin)
 
 A group container must never gain send authority into private threads. It
 may only file a request with web, and the member's own Murph decides and
@@ -130,20 +126,28 @@ Flow:
    definition, Cloudflare port, web handler in
    `apps/web/src/lib/hosted-groups/group-tool.ts`.
 2. Group runtime supplies: target `memberId` (roster id only), a `purpose`
-   from a closed enum (`call-circle.enroll`,
-   `call-circle.availability-request`, `call-circle.match-confirm`,
-   `call-circle.match-outcome`), a purpose-typed zod-validated structured
-   payload, and a `dedupeKey`.
+   from a closed enum, a purpose-typed zod-validated structured payload, and
+   a `dedupeKey`. Call Circle purposes: `call-circle.enroll-start`,
+   `call-circle.availability-query`, `call-circle.match-confirm`,
+   `call-circle.match-outcome`.
 3. Web validates: signed Cloudflare callback bound to the group runtime,
    thread-route authority re-read, target is an active member of that exact
-   group, feature consent granted (except `call-circle.enroll`, which is the
-   consent ask itself), not paused, rate limit per (group, member, purpose).
-4. Web persists a `HostedGroupMemberNotification` row and appends a
-   notification wake to the target member's own runtime with event id
-   `group-member-notify:<groupId>:<dedupeKey>` and an `expiresAt`.
-5. The member's Murph renders the ask in its own voice in the existing 1:1
-   thread. Skip is allowed (no `require_send`); the member's assistant keeps
-   editorial control over quiet hours and timing.
+   group, feature enrollment recorded (except `enroll-start`), not paused,
+   rate limit per (group, member, purpose).
+4. Purposes have a mode. Interactive purposes append a notification wake to
+   the member's own runtime (event id
+   `group-member-notify:<groupId>:<dedupeKey>`, `expiresAt` set); the
+   member's Murph renders the ask in its own voice and may skip (no
+   `require_send`). Silent purposes (`availability-query`) run the same wake
+   path, but the member's Murph answers from vault data and returns skip; the
+   member sees nothing. Notification turns have vault access but no
+   connected-app tools, which is sufficient for stated preferences and keeps
+   the unattended-turn trust boundary unchanged.
+5. For `match-confirm` targeting a member with a connected calendar, web
+   enriches the request payload with a free/busy verdict for the proposed
+   window before appending the wake (server-side Composio read, scoped to
+   that window). A busy verdict is returned to the matcher as a bounce
+   without appending any member-facing wake.
 6. The member's structured response returns through a member-side tool
    action keyed by notification id; web validates the notification targets
    that member and is pending, records the response, and appends a response
@@ -156,15 +160,21 @@ Security invariants:
 - Purpose-typed payloads, never free-form outbound copy. The group runtime
   reads untrusted group-chat text; free-form copy would let any group
   member prompt-inject someone's private DMs.
-- Web is the sole authority for membership, consent, pause, rate, and
+- Web is the sole authority for membership, enrollment, pause, rate, and
   dedupe.
-- Confirmation state lives in `HostedGroupMemberNotification` rows
-  (requested -> delivered/skipped -> responded/expired), never in runtime
-  memory.
-- The group vault learns only the structured response, never the private
-  conversation.
+- Match and confirmation state lives in `HostedGroupMemberNotification` rows
+  (requested -> delivered/skipped -> responded/expired) plus match rows,
+  never in runtime memory.
+- The group vault learns only structured responses, never private
+  conversations or calendar contents.
+- Unattended (notification/cron) container turns gain no new tool access;
+  the only calendar touch is web-side free/busy for a proposed window.
+- In-chat enrollment is recorded as attested by the group runtime (sender
+  handle matched to roster). The transparency DM and the
+  interact-before-any-call rule are the compensating controls; a member who
+  never engages privately can never be called.
 
-### New Primitive 2: Server-Initiated Connector Call (Phase 2 only)
+### New Primitive 2: Server-Initiated Connector Call
 
 - A separate minimal Retell "connector" agent (own agent id): one opening
   line, then immediate `transfer_call`. No health content, no conversation.
@@ -172,29 +182,15 @@ Security invariants:
   never by a model tool call. Containers never supply phone numbers.
 - A dedicated resolver returns member B's verified phone only when the match
   row is in `both_confirmed` state and the current time is inside the
-  confirmed window. This extends the existing invariant that the Retell
-  layer forwards whatever the server supplies, so the binding guarantee
-  must live in the resolver (`apps/web/src/lib/phone-calls/transfer.ts` is
-  the pattern).
+  confirmed window. The Retell layer forwards whatever the server supplies,
+  so the binding guarantee lives in the resolver
+  (`apps/web/src/lib/phone-calls/transfer.ts` is the pattern).
 - Bridge sessions get their own rows keyed by match id; do not overload
   `HostedPhoneCall` semantics that assume a member-initiated agent call.
 
-## Phasing
-
-1. Phase 1: availability projection kind, `call-circle` skill (group
-   workflow plus member-side enrollment/availability sections), matching
-   automation, the group-to-member notification primitive, consent/pause,
-   and the "you are both ready, call now" handoff. No telephony.
-2. Phase 2: connector-agent Retell bridge, "Murph Calls" vCard, transfer
-   failure handling. Gated on a transfer-failure prototype.
-3. Later, only if minutes cost or transfer UX demands it: a silent
-   Twilio-class conference bridge.
-
 ## Open Questions
 
-- Exact coarseness of availability windows (day-of-week plus broad
-  daypart vs. hour ranges) and whether time zones display per member.
-- Whether the group chat gets any ambient signal that Call Circle is active
-  (recommended: only what members say themselves, plus the setup
-  confirmation).
-- Retell transfer failure semantics (prototype before Phase 2 commit).
+- Which Composio free/busy tool slug is available under the current session
+  policy (verify during build; fall back to plain asks if reads prove
+  unreliable).
+- Retell transfer-failure semantics (week-one prototype gates the bridge).
