@@ -33,6 +33,7 @@ const reactionFailureUserId = `member_local_telegram_reaction_failure_${Date.now
 const telegramBotToken = "telegram-local-test-token";
 const hostedLocalTelegramRequestToken = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 const telegramHeartEmoji = "\u2764";
+const defaultTelegramInboundText = "yo murph telegram first contact e2e";
 const reactionReplyText = "Heart reaction test sent.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -72,7 +73,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
     });
 
     requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT], {
-      matchInputContains: "yo",
+      matchInputContains: defaultTelegramInboundText,
     });
     const requestCountBeforeInbound = requireTelegramStub().observedRequests.length;
     await requireScenario().runWake(buildInboundTelegramWake(userId), userId);
@@ -376,7 +377,7 @@ function buildInboundTelegramWake(
     telegramMessage: {
       messageId: overrides.messageId ?? buildTelegramMessageId(userId),
       schema: "murph.hosted-telegram-message.v1",
-      text: overrides.text ?? "yo",
+      text: overrides.text ?? defaultTelegramInboundText,
       threadId: buildTelegramThreadId(userId),
     },
     userId,
