@@ -490,6 +490,18 @@ function buildHostedMailboxItem(input: {
   };
 }
 
+function readSingleWakeHandoff(
+  plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>,
+) {
+  const wakeHandoffs = plan.wakeHandoffs ?? [];
+  expect(wakeHandoffs).toHaveLength(1);
+  const wakeHandoff = wakeHandoffs[0];
+  if (!wakeHandoff) {
+    throw new Error("Expected a wake handoff.");
+  }
+  return wakeHandoff;
+}
+
 function configureHostedContactPrivacyKeyringForTest(input: {
   currentVersion: string;
   entries: Record<string, string>;
@@ -770,8 +782,12 @@ describe("Linq explicit external-thread routing", () => {
       ok: true,
       reason: "wake-appended-thread-route",
     });
-    expect(plan.wakeUserId).toBe("member_thread_container_123");
-    expect(plan.wakeMailboxItemId).toBe("mailbox_group_123");
+    expect(readSingleWakeHandoff(plan)).toMatchObject({
+      eventId: "evt_group_123",
+      mailboxItemId: "mailbox_group_123",
+      source: "linq",
+      userId: "member_thread_container_123",
+    });
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.updateMany).not.toHaveBeenCalled();
   });
@@ -818,9 +834,13 @@ describe("Linq explicit external-thread routing", () => {
       ok: true,
       reason: "wake-appended-thread-route",
     });
-    expect(plan.wakeUserId).toBe("member_thread_container_123");
-    expect(plan.wakeMailboxItemId).toBe("mailbox_group_123");
-    expect(plan.wakeLinqChatId).toBe("chat_group_123");
+    expect(readSingleWakeHandoff(plan)).toMatchObject({
+      eventId: "evt_group_123",
+      linqChatId: "chat_group_123",
+      mailboxItemId: "mailbox_group_123",
+      source: "linq",
+      userId: "member_thread_container_123",
+    });
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         eventId: "evt_group_123",
@@ -892,8 +912,12 @@ describe("Linq explicit external-thread routing", () => {
       ok: true,
       reason: "wake-appended-thread-route",
     });
-    expect(plan.wakeUserId).toBe("member_thread_container_123");
-    expect(plan.wakeMailboxItemId).toBe("mailbox_sponsored_owner_123");
+    expect(readSingleWakeHandoff(plan)).toMatchObject({
+      eventId: "evt_group_123",
+      mailboxItemId: "mailbox_sponsored_owner_123",
+      source: "linq",
+      userId: "member_thread_container_123",
+    });
   });
 
   it("does not match a routed thread for another Linq recipient line with the same chat id", async () => {
@@ -1244,7 +1268,14 @@ describe("Linq explicit external-thread routing", () => {
       ok: true,
       reason: "duplicate-webhook-event",
     });
-    expect(plan.wakeMailboxItemId).toBe("mailbox_existing");
+    const wakeHandoff = readSingleWakeHandoff(plan);
+    expect(wakeHandoff).toMatchObject({
+      eventId: "evt_group_123",
+      mailboxItemId: "mailbox_existing",
+      source: "linq",
+      userId: "member_thread_container_123",
+    });
+    expect(wakeHandoff).not.toHaveProperty("wakeMailboxCheckpoint");
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 });
@@ -1376,8 +1407,12 @@ describe("Linq group chat auto-provision", () => {
     expect(containerCreate.data.ownerMemberId).toBe("member_owner_123");
     expect(containerCreate.data.monthlyUsageLimitUsdMicros).toBe(4_500_000n);
     expect(prisma.hostedThreadRoute.create).toHaveBeenCalledTimes(1);
-    expect(plan.wakeUserId).toBe(containerCreate.data.memberId);
-    expect(plan.wakeLinqChatId).toBe("chat_group_123");
+    expect(readSingleWakeHandoff(plan)).toMatchObject({
+      eventId: "evt_group_123",
+      linqChatId: "chat_group_123",
+      source: "linq",
+      userId: containerCreate.data.memberId,
+    });
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
@@ -1648,7 +1683,11 @@ describe("Linq group chat concurrent provisioning race", () => {
       ok: true,
       reason: "wake-appended-thread-route",
     });
-    expect(plan.wakeUserId).toBe("member_thread_container_999");
+    expect(readSingleWakeHandoff(plan)).toMatchObject({
+      eventId: "evt_group_123",
+      source: "linq",
+      userId: "member_thread_container_999",
+    });
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
   });

@@ -20,10 +20,6 @@ export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   linqReadReceiptRouteAuthority?: HostedLinqThreadRouteEgressAuthority;
   response: TResult;
   wakeHandoffs?: readonly HostedWebhookWakeHandoff[];
-  wakeLinqChatId?: string;
-  wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;
-  wakeMailboxItemId?: string;
-  wakeUserId?: string;
 };
 
 export type HostedWebhookWakeHandoff = {
