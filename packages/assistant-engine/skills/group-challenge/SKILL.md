@@ -53,9 +53,15 @@ The page carries these sections, kept current:
 
 Append one dated section per day with `vault-cli knowledge append-section`;
 read the page with `vault-cli knowledge show <slug>` before composing any
-challenge message. Also save one pointer with `vault-cli memory upsert` —
-"active challenge: <slug>; read that page before any challenge action" — so
-a fresh session finds the page, and remove it at close-out.
+challenge message. Also save one pointer so a fresh session finds the page:
+
+```
+vault-cli memory upsert "active challenge: <slug>; read that knowledge page \
+  before any challenge action" --section Context --format json
+```
+
+Record the returned memory id on the challenge page; close-out forgets it
+with `vault-cli memory forget <memory-id>`.
 
 ## Kickoff
 
@@ -140,7 +146,8 @@ when they recover.
    owe.
 3. Produce one closing artifact — a comic or recap built from the pinned
    photos and the challenge's canon.
-4. Flip the page to `--status archived` and remove the memory pointer.
+4. Flip the page to `--status archived` and forget the pointer with
+   `vault-cli memory forget <memory-id>` (the id recorded at kickoff).
 5. Results belong to the members. For personal write-ups or what the data
    means for them individually, point each member to their own 1:1 thread;
    never import private 1:1 context into the group.
