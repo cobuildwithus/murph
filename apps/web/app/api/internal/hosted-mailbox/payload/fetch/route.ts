@@ -29,6 +29,7 @@ import {
 const HOSTED_MAILBOX_PAYLOAD_FETCH_CALLBACK_BODY_LIMIT_BYTES = 16 * 1024;
 
 type HostedRuntimeMailboxPayloadAiUsageItem = {
+  consumedAt?: string | null;
   kind: string;
   lane: string;
   laneSeq: string;
@@ -83,6 +84,7 @@ async function requireHostedRuntimeMailboxPayloadAiUsageAccess(input: {
   if (!hostedMailboxItemsRequireAiUsageAccess({
     consumedSeqByLane,
     items: [{
+      consumedAt: input.item.consumedAt ?? null,
       kind: input.item.kind,
       lane: input.item.lane,
       laneSeq: input.item.laneSeq,

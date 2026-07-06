@@ -34,14 +34,90 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   description: string;
   label: string;
 }> = {
+  "activity-days.v0": {
+    label: "Recent activity minutes",
+    description:
+      "Allows this group to receive your recent daily active-minute totals as bounded shared records.",
+  },
+  "active-calories-days.v0": {
+    label: "Recent active calories",
+    description:
+      "Allows this group to receive your recent daily active-calorie totals as bounded shared records.",
+  },
+  "activity-score-days.v0": {
+    label: "Recent activity scores",
+    description:
+      "Allows this group to receive your recent daily activity scores as bounded shared records.",
+  },
+  "day-strain-days.v0": {
+    label: "Recent day strain",
+    description:
+      "Allows this group to receive your recent daily strain values as bounded shared records.",
+  },
+  "distance-days.v0": {
+    label: "Recent distance",
+    description:
+      "Allows this group to receive your recent daily distance totals as bounded shared records.",
+  },
+  "elevation-gain-days.v0": {
+    label: "Recent elevation gain",
+    description:
+      "Allows this group to receive your recent daily elevation-gain totals as bounded shared records.",
+  },
+  "floors-climbed-days.v0": {
+    label: "Recent floors climbed",
+    description:
+      "Allows this group to receive your recent daily floors-climbed totals as bounded shared records.",
+  },
+  "heart-rate-zones-days.v0": {
+    label: "Recent heart-rate zones",
+    description:
+      "Allows this group to receive your recent daily workout heart-rate zone minutes as bounded shared records.",
+  },
+  "hrv-days.v0": {
+    label: "Recent HRV",
+    description:
+      "Allows this group to receive your recent daily HRV values as bounded shared records.",
+  },
+  "max-heart-rate-days.v0": {
+    label: "Recent daily max heart rate",
+    description:
+      "Allows this group to receive your recent daily observed max heart rate as bounded shared records.",
+  },
+  "resting-heart-rate-days.v0": {
+    label: "Recent resting heart rate",
+    description:
+      "Allows this group to receive your recent daily resting heart rate as bounded shared records.",
+  },
   "sleep-times.v0": {
     label: "Recent sleep timing",
     description:
       "Allows this group to receive your recent sleep start and end times as bounded shared records.",
   },
+  "steps-days.v0": {
+    label: "Recent steps",
+    description:
+      "Allows this group to receive your recent daily step totals as bounded shared records.",
+  },
+  "vo2-max-days.v0": {
+    label: "Recent VO2 max",
+    description:
+      "Allows this group to receive your recent estimated VO2 max values as bounded shared records.",
+  },
+  "workout-days.v0": {
+    label: "Recent workout summaries",
+    description:
+      "Allows this group to receive your recent daily workout counts and minutes as bounded shared records.",
+  },
+  "workout-strain-days.v0": {
+    label: "Recent workout strain",
+    description:
+      "Allows this group to receive your recent daily workout strain values as bounded shared records.",
+  },
 };
 
-const MAX_JOIN_POLICY_PROJECTIONS = 8;
+const MAX_JOIN_POLICY_PROJECTIONS =
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length;
 
 export function readHostedGroupJoinPolicy(value: unknown): HostedGroupJoinPolicy {
   if (!value || typeof value !== "object") {

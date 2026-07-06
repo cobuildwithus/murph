@@ -7,8 +7,9 @@ import type { HostedLinqThreadRouteEgressAuthority } from "../hosted-routing/thr
 
 // Lane facts from the planner's own mailbox append/dedupe row. Presence means
 // the planning transaction already proved the active member, admission, and
-// workspace row for this wake, so the handoff may skip its re-reads and fire
-// the direct runtime ensure fast path.
+// workspace row for this wake, so Linq handoff can include them in its
+// Temporal signal and, after that signal is accepted, fire the direct runtime
+// ensure fast path.
 export type HostedWebhookWakeMailboxCheckpoint = {
   lane: HostedMailboxLane;
   laneSeq: string;
@@ -19,10 +20,6 @@ export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   linqReadReceiptRouteAuthority?: HostedLinqThreadRouteEgressAuthority;
   response: TResult;
   wakeHandoffs?: readonly HostedWebhookWakeHandoff[];
-  wakeLinqChatId?: string;
-  wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;
-  wakeMailboxItemId?: string;
-  wakeUserId?: string;
 };
 
 export type HostedWebhookWakeHandoff = {

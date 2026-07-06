@@ -1,5 +1,4 @@
 export const HOSTED_RUNTIME_MAILBOX_FETCH_PATH = "/api/internal/hosted-mailbox/fetch";
-export const HOSTED_RUNTIME_MAILBOX_CONSUME_PATH = "/api/internal/hosted-mailbox/consume";
 export const HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH =
   "/api/internal/hosted-mailbox/payload/fetch";
 export const HOSTED_RUNTIME_WORKSPACE_PATH = "/api/internal/hosted-workspace";
@@ -28,6 +27,8 @@ export const HOSTED_RUNTIME_CODEX_AUTH_PATH =
   "/api/internal/hosted-runtime/codex-auth";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH =
   "/api/internal/hosted-runtime/vault-share/deliver";
+export const HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH =
+  "/api/internal/hosted-runtime/vault-share/active-kinds";
 export const HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH =
   "/api/internal/hosted-runtime/action-approvals/request";
 export const HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH =

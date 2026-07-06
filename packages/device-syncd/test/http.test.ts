@@ -1021,6 +1021,36 @@ test("device sync http handler redirects successful callbacks and renders callba
   assert.match(failed.readText(), /The provider rejected the OAuth callback\./u);
 });
 
+test("device sync http handler redirects replayed callbacks to returnTo without asserting an outcome", async () => {
+  const response = await invokeHandler({
+    service: createStubService({
+      async handleOAuthCallback() {
+        throw new DeviceSyncError({
+          code: "OAUTH_STATE_REPLAYED",
+          message: "OAuth callback state was already handled by an earlier delivery.",
+          retryable: false,
+          httpStatus: 409,
+          details: {
+            provider: "demo",
+            returnTo: "https://app.example.test/settings/devices?deviceSyncStatus=error&deviceSyncError=OLD_ERROR",
+          },
+        });
+      },
+    }),
+    method: "GET",
+    url: "/device-sync/oauth/demo/callback?state=abc&code=xyz",
+    surface: "public",
+  });
+
+  assert.equal(response.statusCode, 302);
+  assert.ok(response.headers.location);
+  const destination = new URL(response.headers.location);
+  assert.equal(destination.origin, "https://app.example.test");
+  assert.equal(destination.pathname, "/settings/devices");
+  assert.equal(destination.searchParams.get("deviceSyncStatus"), null);
+  assert.equal(destination.searchParams.get("deviceSyncError"), null);
+});
+
 test("device sync http handler renders callback html when a stored success returnTo is unsafe", async () => {
   const response = await invokeHandler({
     service: createStubService({

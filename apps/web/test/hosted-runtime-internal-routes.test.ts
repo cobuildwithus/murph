@@ -2620,10 +2620,18 @@ function createPrismaClientStub() {
 
 function buildRuntimeMailboxAccessRecord(overrides: Partial<{
   id: string;
+  accountGroupMemberships: Array<{
+    group: { billingStatus: string; suspendedAt: Date | null };
+    status: string;
+  }>;
   billingStatus: string;
   suspendedAt: Date | null;
   threadContainer: {
     owner: {
+      accountGroupMemberships: Array<{
+        group: { billingStatus: string; suspendedAt: Date | null };
+        status: string;
+      }>;
       billingStatus: string;
       suspendedAt: Date | null;
     };
@@ -2631,6 +2639,7 @@ function buildRuntimeMailboxAccessRecord(overrides: Partial<{
 }> = {}) {
   return {
     id: "member_routes_1",
+    accountGroupMemberships: [],
     billingStatus: "active",
     suspendedAt: null,
     threadContainer: null,

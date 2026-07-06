@@ -45,15 +45,14 @@ history fixtures must be redacted or synthetic and must not commit raw payloads,
 prompts, transcripts, provider responses, secrets, local paths, or direct user
 identifiers.
 
-The hosted Temporal package carries a replay gate for the
-reconciliation-before-mailbox patch:
-`packages/hosted-orchestrator-temporal/test/hosted-user-runtime-replay.test.ts`
-uses `Worker.runReplayHistory` against a synthetic pre-patch mailbox history
-that scheduled `ensureRuntimeProcessing` directly. The root
+The hosted Temporal package has retired the
+reconciliation-before-mailbox pre-patch branch after production pre-patch
+histories drained. During this intermediate phase, the workflow keeps the
+`deprecatePatch()` marker for that patch id, and the root
 `hosted-temporal:guard` check is wired into `pnpm typecheck` and fails if that
-replay test, fixture, or CI package-coverage entry is removed. New
-command-order changes still need their own replay fixture or a documented
-Worker Versioning / patching plan for the affected histories.
+marker or CI package-coverage entry is removed early. New command-order changes
+still need their own replay fixture or a documented Worker Versioning /
+patching plan for the affected histories.
 
 Scoped verification may replace the repo-wide baseline only when all of the following are true:
 

@@ -63,6 +63,11 @@ describe("hosted runtime Linq delivery route", () => {
   it("records an accepted runtime delivery outcome without raw recipient fallback for participant sends", async () => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds: [
+        "mailbox_item_accepted_1",
+        "mailbox_item_accepted_1",
+        " mailbox_item_accepted_2 ",
+      ],
       attemptedAt: "2026-04-26T00:00:03.000Z",
       fromPhoneNumber: "+15550100099",
       idempotencyKey: "assistant-outbox:intent_123",
@@ -82,6 +87,10 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: new Date("2026-04-26T00:00:04.000Z"),
+        answeredMailboxItemIds: [
+          "mailbox_item_accepted_1",
+          "mailbox_item_accepted_2",
+        ],
         attemptedAt: new Date("2026-04-26T00:00:03.000Z"),
         failedAt: null,
         idempotencyKey: "assistant-outbox:intent_123",
@@ -91,6 +100,7 @@ describe("hosted runtime Linq delivery route", () => {
         phoneNumberLookupKey: null,
         sourceRef: "intent_123",
         targetKind: "participant",
+        userId: "member_123",
       }),
     );
     await expect(response.json()).resolves.toEqual({
@@ -202,6 +212,77 @@ describe("hosted runtime Linq delivery route", () => {
 
     expect(targetMismatch.status).toBe(403);
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects accepted delivery outcomes with too many answered mailbox item ids", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds: Array.from(
+        { length: 101 },
+        (_, index) => `mailbox_item_${index}`,
+      ),
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerTarget: "+15550100001",
+      providerThreadId: "linq_chat_123",
+      target: "+15550100001",
+      targetKind: "participant",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
+  });
+
+  it("accepts grouped delivery outcomes with more than forty answered mailbox item ids", async () => {
+    const answeredMailboxItemIds = Array.from(
+      { length: 45 },
+      (_, index) => `mailbox_item_grouped_${index}`,
+    );
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds,
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerTarget: "+15550100001",
+      providerThreadId: "linq_chat_123",
+      target: "+15550100001",
+      targetKind: "participant",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds,
+      }),
+    );
+  });
+
+  it("does not carry answered mailbox item ids for failed delivery outcomes", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      answeredMailboxItemIds: ["mailbox_item_should_not_consume"],
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      failedAt: "2026-04-26T00:00:05.000Z",
+      failureCode: "synthetic_failure",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerTarget: "+15550100001",
+      providerThreadId: "linq_chat_123",
+      target: "+15550100001",
+      targetKind: "participant",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: null,
+        answeredMailboxItemIds: [],
+        failedAt: new Date("2026-04-26T00:00:05.000Z"),
+        failureCode: "synthetic_failure",
+        userId: "member_123",
+      }),
+    );
   });
 });
 

@@ -779,6 +779,28 @@ export class DeviceSyncPublicIngress {
       });
     }
 
+    if (stateResult.status === "replayed") {
+      // Browsers deliver callback navigations at-least-once (refresh, tab
+      // restore, provider completion-page retries); the earlier delivery owns
+      // the outcome, so redelivery must not redo the connection work. The
+      // attached context lets transports send the user back into the app,
+      // where connection truth is rendered from the store.
+      throw attachOAuthCallbackContext(
+        deviceSyncError({
+          code: "OAUTH_STATE_REPLAYED",
+          message: "OAuth callback state was already handled by an earlier delivery.",
+          retryable: false,
+          httpStatus: 409,
+        }),
+        {
+          connectSourceId: readConnectSourceId(stateResult.record.metadata),
+          connectTarget: readConnectTarget(stateResult.record.metadata),
+          provider: provider.provider,
+          returnTo: this.sanitizeStoredReturnTo(stateResult.record.returnTo ?? null),
+        },
+      );
+    }
+
     const stateRecord = stateResult.record;
     const returnTo = this.sanitizeStoredReturnTo(stateRecord.returnTo ?? null);
     const seededAccountId = readSeededConnectionAccountId(stateRecord.metadata);

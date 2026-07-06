@@ -1,4 +1,7 @@
-import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
+import {
+  isHostedRuntimeIdShapedDiagnosticToken,
+  sanitizeHostedRuntimeDiagnosticText,
+} from "../hosted-runtime.ts";
 import { normalizeString, splitScopeList } from "../shared.ts";
 
 type ProviderDiagnosticValue = boolean | number | string | null | undefined;
@@ -181,7 +184,11 @@ export function inspectProviderErrorBody(body: string): ProviderErrorBodyDiagnos
 
   try {
     const parsed: unknown = JSON.parse(trimmed);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (Array.isArray(parsed)) {
+      return inspectProviderErrorEntries(parsed, "json_array");
+    }
+
+    if (!parsed || typeof parsed !== "object") {
       return {
         responseErrorCode: null,
         responseErrorDescription: null,
@@ -248,6 +255,19 @@ function inspectProviderErrorObject(record: Record<string, unknown>): ProviderEr
   };
 }
 
+function inspectProviderErrorEntries(
+  entries: readonly unknown[],
+  responseShapeKind: string,
+): ProviderErrorBodyDiagnostics {
+  return {
+    responseErrorCode: readNestedErrorsCode(entries),
+    responseErrorDescription: readNestedErrorsDescription(entries),
+    responseErrorDescriptionFieldPresent: hasNestedErrorsDescription(entries),
+    responseErrorFieldPresent: hasNestedErrorsCode(entries),
+    responseShapeKind,
+  };
+}
+
 function readFirstSafeProviderErrorCode(
   record: Record<string, unknown>,
   fields: readonly string[],
@@ -255,7 +275,11 @@ function readFirstSafeProviderErrorCode(
   for (const field of fields) {
     const value = record[field];
     const normalized = typeof value === "string" ? normalizeString(value)?.toLowerCase() : null;
-    if (normalized && /^[A-Za-z0-9_.:-]{1,128}$/u.test(normalized)) {
+    if (
+      normalized
+      && /^[A-Za-z0-9_.:-]{1,128}$/u.test(normalized)
+      && !isHostedRuntimeIdShapedDiagnosticToken(normalized)
+    ) {
       return normalized;
     }
   }
@@ -280,12 +304,19 @@ function readFirstSafeProviderErrorDescription(
   return null;
 }
 
-function readNestedErrorsCode(value: unknown): string | null {
-  if (!Array.isArray(value)) {
-    return null;
+// Nested error containers arrive as an array of entries or a single object
+// depending on the provider. Only object entries are trusted to carry typed
+// error fields; primitive arrays are treated as raw structured payloads and
+// yield no description.
+function readNestedErrorEntries(value: unknown): readonly unknown[] {
+  if (Array.isArray(value)) {
+    return value;
   }
+  return value !== null && typeof value === "object" ? [value] : [];
+}
 
-  for (const entry of value) {
+function readNestedErrorsCode(value: unknown): string | null {
+  for (const entry of readNestedErrorEntries(value)) {
     if (entry && typeof entry === "object" && !Array.isArray(entry)) {
       const code = readFirstSafeProviderErrorCode(
         entry as Record<string, unknown>,
@@ -301,19 +332,7 @@ function readNestedErrorsCode(value: unknown): string | null {
 }
 
 function readNestedErrorsDescription(value: unknown): string | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  for (const entry of value) {
-    if (typeof entry === "string") {
-      const sanitized = sanitizeProviderDiagnosticReasonText(entry);
-      if (sanitized) {
-        return sanitized;
-      }
-      continue;
-    }
-
+  for (const entry of readNestedErrorEntries(value)) {
     if (entry && typeof entry === "object" && !Array.isArray(entry)) {
       const sanitized = readFirstSafeProviderErrorDescription(
         entry as Record<string, unknown>,
@@ -329,11 +348,7 @@ function readNestedErrorsDescription(value: unknown): string | null {
 }
 
 function hasNestedErrorsCode(value: unknown): boolean {
-  if (!Array.isArray(value)) {
-    return false;
-  }
-
-  return value.some((entry) =>
+  return readNestedErrorEntries(value).some((entry) =>
     entry
     && typeof entry === "object"
     && !Array.isArray(entry)
@@ -341,16 +356,11 @@ function hasNestedErrorsCode(value: unknown): boolean {
 }
 
 function hasNestedErrorsDescription(value: unknown): boolean {
-  if (!Array.isArray(value)) {
-    return false;
-  }
-
-  return value.some((entry) =>
-    typeof entry === "string"
-    || (entry
-      && typeof entry === "object"
-      && !Array.isArray(entry)
-      && hasAnyOwnProperty(entry as Record<string, unknown>, PROVIDER_ERROR_DESCRIPTION_FIELDS)));
+  return readNestedErrorEntries(value).some((entry) =>
+    entry
+    && typeof entry === "object"
+    && !Array.isArray(entry)
+    && hasAnyOwnProperty(entry as Record<string, unknown>, PROVIDER_ERROR_DESCRIPTION_FIELDS));
 }
 
 function sanitizeProviderDiagnosticReasonText(value: string): string | null {

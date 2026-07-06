@@ -6,6 +6,7 @@ import { createJsonResponse, readUrl } from "./helpers.ts";
 
 import type {
   DeviceSyncAccount,
+  DeviceSyncJobInput,
   DeviceSyncJobRecord,
   ProviderJobContext,
 } from "../src/types.ts";
@@ -26,7 +27,7 @@ function createAccount(): DeviceSyncAccount {
     scopes: [],
     accessTokenExpiresAt: null,
     metadata: {},
-    connectedAt: "2026-04-01T00:00:00.000Z",
+    connectedAt: "2026-04-03T00:00:00.000Z",
     lastWebhookAt: null,
     lastSyncStartedAt: null,
     lastSyncCompletedAt: null,
@@ -63,6 +64,16 @@ function createJob(payload: Record<string, unknown>): DeviceSyncJobRecord {
   };
 }
 
+function assertConnectBackfillRetryWake(
+  result: {
+    nextReconcileAt?: string | null;
+    scheduledJobs?: readonly DeviceSyncJobInput[];
+  },
+): void {
+  assert.equal(result.nextReconcileAt, "2026-04-03T00:15:00.000Z");
+  assert.equal((result.scheduledJobs ?? []).some((job) => job.kind === "backfill"), false);
+}
+
 function createJobContext(importedSnapshots: unknown[]): ProviderJobContext {
   const account = createAccount();
 
@@ -97,6 +108,7 @@ function createProvider(summaryRecord: Record<string, unknown>) {
     environment: "sandbox",
     region: "us",
     summaryResources: ["sleep_cycle"],
+    summaryBackfillDays: 2,
     fetchImpl: async (input) => {
       const url = readUrl(input);
 
@@ -214,7 +226,7 @@ test("Junction sleep-cycle id-only historical backfill keeps retrying", async ()
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(result.scheduledJobs?.[0]?.kind, "backfill");
+  assertConnectBackfillRetryWake(result);
   assert.equal(importedSnapshots.length, 1);
 });
 
@@ -233,7 +245,7 @@ for (const stageCount of [0, -1]) {
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     });
-    assert.equal(result.scheduledJobs?.[0]?.kind, "backfill");
+    assertConnectBackfillRetryWake(result);
     assert.equal(importedSnapshots.length, 1);
   });
 }

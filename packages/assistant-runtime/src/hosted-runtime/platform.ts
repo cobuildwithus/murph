@@ -11,8 +11,6 @@ import type {
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
 import type {
-  HostedMailboxConsumeRequest,
-  HostedMailboxConsumeResponse,
   HostedMailboxFetchRequest,
   HostedMailboxFetchResponse,
   HostedMailboxPayloadFetchRequest,
@@ -52,6 +50,7 @@ import type {
 import type {
   HostedVaultShareDeliverRequest,
   HostedVaultShareDeliverResponse,
+  HostedVaultShareProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 import type {
   HostedWorkspaceSnapshotV2Aad,
@@ -216,6 +215,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
 
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   acceptedAt?: string | null;
+  answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt: string;
   failedAt?: string | null;
   failureCode?: string | null;
@@ -369,10 +369,6 @@ export interface HostedRuntimePhoneCallPort {
 }
 
 export interface HostedRuntimeMailboxPort {
-  // Optional for deploy-window compatibility with older platform builds.
-  // Advances the durable per-lane consumed watermark after a clean pass;
-  // idempotent monotonic max on the web side.
-  consume?(request: HostedMailboxConsumeRequest): Promise<HostedMailboxConsumeResponse>;
   fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
@@ -477,6 +473,7 @@ export interface HostedRuntimeActionApprovalPort {
 }
 
 export interface HostedRuntimeVaultSharePort {
+  listActiveProjectionKinds(): Promise<HostedVaultShareProjectionKind[]>;
   deliver(
     request: HostedVaultShareDeliverRequest,
   ): Promise<HostedVaultShareDeliverResponse>;

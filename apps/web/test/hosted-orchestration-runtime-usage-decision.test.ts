@@ -168,6 +168,15 @@ describe("hostedMailboxItemsRequireAiUsageAccess", () => {
       items: [buildHostedMailboxAiUsageGateItem({ laneSeq: "14" })],
       lanes: [{ importedSeq: "0", lane: "conversation" }],
     })).toBe(false);
+
+    expect(hostedMailboxItemsRequireAiUsageAccess({
+      consumedSeqByLane: [{ consumedSeq: "13", lane: "conversation" }],
+      items: [buildHostedMailboxAiUsageGateItem({
+        consumedAt: "2026-04-26T00:00:04.000Z",
+        laneSeq: "15",
+      })],
+      lanes: [{ importedSeq: "14", lane: "conversation" }],
+    })).toBe(false);
   });
 
   it("does not gate fresh conversation tombstones without payload handles", () => {
@@ -220,12 +229,14 @@ describe("hostedMailboxItemsRequireAiUsageAccess", () => {
 });
 
 function buildHostedMailboxAiUsageGateItem(input: {
+  consumedAt?: string | null;
   kind?: string;
   lane?: string;
   laneSeq: string;
   payloadInlineCiphertext?: string | null;
   payloadRef?: string | null;
 }): {
+  consumedAt: string | null;
   kind: string;
   lane: string;
   laneSeq: string;
@@ -233,6 +244,7 @@ function buildHostedMailboxAiUsageGateItem(input: {
   payloadRef: string | null;
 } {
   return {
+    consumedAt: input.consumedAt ?? null,
     kind: input.kind ?? "conversation.message",
     lane: input.lane ?? "conversation",
     laneSeq: input.laneSeq,

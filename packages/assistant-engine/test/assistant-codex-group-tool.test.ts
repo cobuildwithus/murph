@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
 
 import {
   MURPH_GROUP_TOOL,
@@ -24,6 +25,8 @@ describe("murph.group dynamic tool", () => {
       "read_chat_participants",
       "share_contact_card",
     ]);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.requestedVaultShareProjectionKinds.items.enum)
+      .toEqual([...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS]);
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
@@ -68,7 +71,7 @@ describe("murph.group dynamic tool", () => {
       action: "create_join_link",
       displayName: "Sunday sleep crew",
       kind: "friends",
-      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
     }));
 
     expect(request).toEqual({
@@ -78,7 +81,7 @@ describe("murph.group dynamic tool", () => {
         joinLink: {
           displayName: "Sunday sleep crew",
           kind: "friends",
-          requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+          requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
         },
       },
     });

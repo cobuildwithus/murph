@@ -4,11 +4,9 @@ import type {
 } from "@prisma/client";
 
 import {
-  hasHostedMemberEffectiveActiveAccessForMember,
-} from "../hosted-onboarding/family-plan";
-import {
-  hasHostedMemberActiveAccess,
-} from "../hosted-onboarding/entitlement";
+  hasActiveHostedMemberAccess,
+  hostedMemberAccessSelect,
+} from "../hosted-onboarding/member-access";
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
@@ -35,34 +33,10 @@ export async function requireHostedRuntimeActiveAccess(
     where: {
       id: userId,
     },
-    select: {
-      id: true,
-      billingStatus: true,
-      suspendedAt: true,
-      threadContainer: {
-        select: {
-          owner: {
-            select: {
-              billingStatus: true,
-              suspendedAt: true,
-            },
-          },
-        },
-      },
-    },
+    select: hostedMemberAccessSelect,
   });
 
-  if (
-    member
-    && await hasHostedMemberEffectiveActiveAccessForMember({
-      member,
-      prisma,
-    })
-    && (
-      !member.threadContainer
-      || hasHostedMemberActiveAccess(member.threadContainer.owner)
-    )
-  ) {
+  if (member && hasActiveHostedMemberAccess(member)) {
     return;
   }
 

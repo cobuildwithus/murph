@@ -26,11 +26,11 @@ import {
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_LOG_PATH,
-  HOSTED_RUNTIME_MAILBOX_CONSUME_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
+  HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -64,7 +64,6 @@ export type HostedRunnerWebControlOperation =
   | "device_sync_runtime_snapshot"
   | "family_plan_tool"
   | "group_tool"
-  | "mailbox_consume"
   | "mailbox_fetch"
   | "mailbox_payload_decode"
   | "mailbox_payload_fetch"
@@ -76,6 +75,7 @@ export type HostedRunnerWebControlOperation =
   | "runtime_log_write"
   | "product_feedback_recording"
   | "usage_recording"
+  | "vault_share_active_kinds"
   | "vault_share_deliver"
   | "workspace_checkpoint"
   | "workspace_read"
@@ -101,7 +101,6 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_CODEX_AUTH_PATH, "codex_auth_update"],
   [HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH, "family_plan_tool"],
   [HOSTED_RUNTIME_GROUP_TOOL_PATH, "group_tool"],
-  [HOSTED_RUNTIME_MAILBOX_CONSUME_PATH, "mailbox_consume"],
   [HOSTED_RUNTIME_MAILBOX_FETCH_PATH, "mailbox_fetch"],
   [HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH, "mailbox_payload_fetch"],
   [HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH, "linq_delivery_outcome"],
@@ -162,6 +161,16 @@ export function readHostedRunnerWebControlPolicy(input: {
     return {
       allowed: true,
       operation: "workspace_read",
+    };
+  }
+
+  if (
+    input.method === "GET"
+    && input.path === HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH
+  ) {
+    return {
+      allowed: true,
+      operation: "vault_share_active_kinds",
     };
   }
 

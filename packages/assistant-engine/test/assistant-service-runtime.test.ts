@@ -1776,6 +1776,7 @@ describe("assistant delivery orchestration seam", () => {
 
     expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith({
       actorId: "audience-actor",
+      answeredMailboxItemIds: [],
       bindingDelivery: {
         kind: "participant",
         target: "audience-delivery",
@@ -2707,29 +2708,80 @@ describe("assistant delivery orchestration seam", () => {
 
     seamMocks.markAssistantFirstContactSeen.mockClear();
 
+    // Any accepted non-empty reply is first contact, not just the canned
+    // welcome text — an organic onboarding reply must supersede a queued
+    // signup welcome for the same route.
     await finalizeAssistantTurnFromDeliveryOutcome({
       firstContactGuidanceInjected: true,
-      firstContactStateDocIds: ["doc-not-welcome"],
+      firstContactStateDocIds: ["doc-organic-reply"],
       outcome: {
         delivery: {
           channel: "telegram",
           idempotencyKey: null,
           messageLength: 16,
-          providerMessageId: "provider-not-welcome",
+          providerMessageId: "provider-organic-reply",
           providerThreadId: null,
           sentAt: "2026-04-08T12:30:00.000Z",
           target: "thread-1",
           targetKind: "thread",
         },
-        intentId: "intent-not-welcome",
+        intentId: "intent-organic-reply",
         kind: "sent",
         media: [],
         session: createAssistantSession({
-          sessionId: "session-not-welcome",
+          sessionId: "session-organic-reply",
         }),
       },
       response: "Happy to help.",
-      turnId: "turn-not-welcome-finalize",
+      turnId: "turn-organic-reply-finalize",
+      vault: "/vault",
+    });
+
+    expect(seamMocks.markAssistantFirstContactSeen).toHaveBeenCalledWith({
+      docIds: ["doc-organic-reply"],
+      seenAt: "2026-04-08T12:30:00.000Z",
+      vault: "/vault",
+    });
+
+    seamMocks.markAssistantFirstContactSeen.mockClear();
+
+    await finalizeAssistantTurnFromDeliveryOutcome({
+      firstContactGuidanceInjected: true,
+      firstContactStateDocIds: ["doc-no-reply"],
+      outcome: {
+        kind: "not-requested",
+        media: [],
+        session: createAssistantSession({
+          sessionId: "session-no-reply",
+        }),
+      },
+      response: "",
+      turnId: "turn-no-reply-finalize",
+      vault: "/vault",
+    });
+
+    await finalizeAssistantTurnFromDeliveryOutcome({
+      firstContactStateDocIds: ["doc-no-guidance"],
+      outcome: {
+        delivery: {
+          channel: "telegram",
+          idempotencyKey: null,
+          messageLength: 16,
+          providerMessageId: "provider-no-guidance",
+          providerThreadId: null,
+          sentAt: "2026-04-08T12:30:00.000Z",
+          target: "thread-1",
+          targetKind: "thread",
+        },
+        intentId: "intent-no-guidance",
+        kind: "sent",
+        media: [],
+        session: createAssistantSession({
+          sessionId: "session-no-guidance",
+        }),
+      },
+      response: "Happy to help.",
+      turnId: "turn-no-guidance-finalize",
       vault: "/vault",
     });
 

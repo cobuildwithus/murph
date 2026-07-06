@@ -30,6 +30,7 @@ import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 import type {
   DeviceConnectionSourceRecord,
   DeviceSyncAccount,
+  DeviceSyncJobInput,
   DeviceSyncJobRecord,
   ProviderJobContext,
   StoredDeviceSyncAccount,
@@ -58,7 +59,7 @@ function createAccount(overrides: Partial<Omit<DeviceSyncAccount, "credential">>
     scopes: [],
     accessTokenExpiresAt: null,
     metadata: {},
-    connectedAt: "2026-04-01T00:00:00.000Z",
+    connectedAt: "2026-04-03T00:00:00.000Z",
     lastWebhookAt: null,
     lastSyncStartedAt: null,
     lastSyncCompletedAt: null,
@@ -72,7 +73,9 @@ function createAccount(overrides: Partial<Omit<DeviceSyncAccount, "credential">>
   };
 }
 
-function createStoredAccount(): StoredDeviceSyncAccount {
+function createStoredAccount(
+  overrides: Partial<StoredDeviceSyncAccount> = {},
+): StoredDeviceSyncAccount {
   const account = createAccount();
 
   return {
@@ -88,6 +91,7 @@ function createStoredAccount(): StoredDeviceSyncAccount {
     hostedObservedUpdatedAt: null,
     localConnectionRevision: 0,
     localTokenRevision: 0,
+    ...overrides,
   };
 }
 
@@ -115,6 +119,17 @@ function createJob(kind: string, payload: Record<string, unknown>): DeviceSyncJo
   };
 }
 
+function assertConnectBackfillRetryWake(
+  result: {
+    nextReconcileAt?: string | null;
+    scheduledJobs?: readonly DeviceSyncJobInput[];
+  },
+  retryAt: string,
+): void {
+  assert.equal(result.nextReconcileAt, retryAt);
+  assert.equal((result.scheduledJobs ?? []).some((job) => job.kind === "backfill"), false);
+}
+
 function createJunctionProvider(
   fetchImpl: typeof fetch,
   overrides: Partial<Parameters<typeof createJunctionDeviceSyncProvider>[0]> = {},
@@ -125,6 +140,7 @@ function createJunctionProvider(
     environment: "sandbox",
     region: "us",
     summaryResources: ["activity"],
+    summaryBackfillDays: 2,
     timeseriesResources: [],
     fetchImpl,
     ...overrides,
@@ -166,7 +182,9 @@ function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): 
   };
 }
 
-function createEmptyJunctionBackfillProvider() {
+function createEmptyJunctionBackfillProvider(
+  overrides: Partial<Parameters<typeof createJunctionDeviceSyncProvider>[0]> = {},
+) {
   return createJunctionProvider(async (input) => {
     const url = readUrl(input);
 
@@ -191,7 +209,7 @@ function createEmptyJunctionBackfillProvider() {
       return createJsonResponse({ data: [] });
     }
     throw new Error(`Unexpected request: ${url}`);
-  });
+  }, overrides);
 }
 
 test("Junction provider defaults fetch every default summary resource", async () => {
@@ -558,7 +576,7 @@ test("Junction default provider filter covers hosted Link connect routes", () =>
   assert.equal(resolveJunctionConnectSourceLabel("accuchek_ble"), "Accu-Chek");
 });
 
-test("Junction empty historical backfill schedules a bounded same-window retry", async () => {
+test("Junction empty historical backfill records progress and stores the retry wake in metadata", async () => {
   const importedSnapshots: unknown[] = [];
   const provider = createEmptyJunctionBackfillProvider();
   const context = createJunctionJobContext({
@@ -573,8 +591,8 @@ test("Junction empty historical backfill schedules a bounded same-window retry",
     provider,
     context,
     createJob("backfill", {
-      windowStart: "2026-04-01T12:34:56.000Z",
-      windowEnd: "2026-04-03T08:09:10.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -583,32 +601,262 @@ test("Junction empty historical backfill schedules a bounded same-window retry",
     junctionHistoricalBackfillStatus: "retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-    junctionHistoricalBackfillWindowStart: "2026-04-01T12:34:56.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-03T08:09:10.000Z",
+    junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(result.scheduledJobs?.length, 1);
-  const retryJob = result.scheduledJobs?.[0];
-  assert.equal(retryJob?.kind, "backfill");
-  assert.deepEqual(retryJob?.payload, {
-    windowStart: "2026-04-01T12:34:56.000Z",
-    windowEnd: "2026-04-03T08:09:10.000Z",
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
+
+  // Retry metadata owns the connect-window wake; the scheduler materializes the
+  // exact-window job only when that wake is due.
+  const executor = requireValue(provider.jobExecutor, "Junction provider should expose a job executor.");
+  const retryingAccount = createStoredAccount({
+    metadata: result.metadataPatch as Record<string, unknown>,
   });
-  assert.deepEqual(Object.keys(retryJob?.payload ?? {}).sort(), ["windowEnd", "windowStart"]);
+  const beforeDue = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:10:00.000Z");
+  const delayedRetryJob = beforeDue?.jobs.find((job) => job.kind === "backfill");
+  assert.equal(delayedRetryJob, undefined);
+  assert.equal(beforeDue?.nextReconcileAt, "2026-04-04T00:15:00.000Z");
+
+  const due = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:15:00.000Z");
+  const retryJob = due?.jobs.find((job) => job.kind === "backfill");
   assert.equal(retryJob?.availableAt, "2026-04-04T00:15:00.000Z");
+  assert.equal(retryJob?.priority, 50);
+  assert.deepEqual(retryJob?.payload, {
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
   assert.equal(
     retryJob?.dedupeKey,
     buildExpectedJunctionDedupeKey(
       "backfill",
-      "2026-04-01T12:34:56.000Z",
-      "2026-04-03T08:09:10.000Z",
+      "2026-04-01T00:00:00.000Z",
+      "2026-04-03T00:00:00.000Z",
     ),
   );
+  assert.equal(due?.nextReconcileAt, "2026-04-04T01:15:00.000Z");
 });
 
-test("Junction empty historical backfill preserves explicit windows", async () => {
-  const provider = createEmptyJunctionBackfillProvider();
+test("Junction due historical backfill retry does not make ordinary reconcile own the retry wake", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-1",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                activity: true,
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+        return createJsonResponse({ data: [] });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+    {
+      reconcileIntervalMs: 60 * 60_000,
+    },
+  );
+  const context = createJunctionJobContext({
+    now: "2026-04-04T00:15:00.000Z",
+    account: createAccount({
+      connectedAt: "2026-04-03T00:00:00.000Z",
+      metadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+      },
+      nextReconcileAt: "2026-04-04T00:15:00.000Z",
+    }),
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:15:00.000Z",
+      windowEnd: "2026-04-04T00:15:00.000Z",
+    }),
+  );
+
+  assert.equal(result.nextReconcileAt, "2026-04-04T01:15:00.000Z");
+});
+
+test("Junction materialized due historical backfill retry advances normal reconcile after completion", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-1",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                activity: true,
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+        return createJsonResponse({
+          data: [{ id: "activity-1", connectionId: "provider-garmin-1", steps: 1234 }],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+    {
+      reconcileIntervalMs: 60 * 60_000,
+    },
+  );
+  const context = createJunctionJobContext({
+    now: "2026-04-04T00:15:00.000Z",
+    account: createAccount({
+      connectedAt: "2026-04-03T00:00:00.000Z",
+      metadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+      },
+      nextReconcileAt: "2026-04-04T00:15:00.000Z",
+    }),
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "complete");
+  assert.equal(result.nextReconcileAt, "2026-04-04T01:15:00.000Z");
+});
+
+test("Junction exact-window backfill preserves a pending metadata retry before it is due", async () => {
+  const provider = createEmptyJunctionBackfillProvider({
+    reconcileIntervalMs: 60 * 60_000,
+  });
+  const metadata = {
+    junctionHistoricalBackfillStatus: "retrying",
+    junctionHistoricalBackfillEmptyAttempts: 1,
+    junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+  };
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-04T00:05:00.000Z",
+      account: createAccount({
+        connectedAt: "2026-04-03T00:00:00.000Z",
+        metadata,
+        nextReconcileAt: "2026-04-04T00:15:00.000Z",
+      }),
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.metadataPatch, undefined);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
+});
+
+test("Junction retrying historical backfill without attempts uses the first retry delay", () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  });
+  const executor = requireValue(provider.jobExecutor, "Junction provider should expose a job executor.");
+  const retryingAccount = createStoredAccount({
+    metadata: {
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+    },
+  });
+
+  const beforeDue = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:05:00.000Z");
+  const delayedRetryJob = beforeDue?.jobs.find((job) => job.kind === "backfill");
+  assert.equal(delayedRetryJob, undefined);
+  assert.equal(beforeDue?.nextReconcileAt, "2026-04-04T00:15:00.000Z");
+
+  const due = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:16:00.000Z");
+  const retryJob = due?.jobs.find((job) => job.kind === "backfill");
+  assert.equal(retryJob?.availableAt, "2026-04-04T00:16:00.000Z");
+  assert.deepEqual(retryJob?.payload, {
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+  assert.equal(
+    retryJob?.dedupeKey,
+    buildExpectedJunctionDedupeKey(
+      "backfill",
+      "2026-04-01T00:00:00.000Z",
+      "2026-04-03T00:00:00.000Z",
+    ),
+  );
+  assert.equal(due?.nextReconcileAt, "2026-04-04T01:16:00.000Z");
+});
+
+test("Junction non-connect backfill window uses bounded job retry without historical metadata", async () => {
+  let activityRecords: unknown[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: activityRecords });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  });
   const context = createJunctionJobContext({
     now: "2026-04-04T00:00:00.000Z",
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
   });
 
   const result = await executeJunctionJob(
@@ -620,26 +868,46 @@ test("Junction empty historical backfill preserves explicit windows", async () =
     }),
   );
 
-  assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "retrying",
-    junctionHistoricalBackfillEmptyAttempts: 1,
-    junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-    junctionHistoricalBackfillWindowStart: "2025-01-01T12:34:56.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-05T08:09:10.000Z",
-  });
-  const retryJob = result.scheduledJobs?.[0];
-  assert.deepEqual(retryJob?.payload, {
+  assert.equal(result.metadataPatch, undefined);
+  assert.equal(result.nextReconcileAt, "2026-04-04T01:00:00.000Z");
+  const retryJob = requireValue(
+    result.scheduledJobs?.[0],
+    "Empty non-connect Junction backfill should schedule a delayed exact-window retry.",
+  );
+  assert.equal(result.scheduledJobs?.length, 1);
+  assert.equal(retryJob.availableAt, "2026-04-04T00:15:00.000Z");
+  assert.equal(retryJob.kind, "backfill");
+  assert.deepEqual(retryJob.payload, {
     windowStart: "2025-01-01T12:34:56.000Z",
     windowEnd: "2026-04-05T08:09:10.000Z",
+    emptyBackfillAttempts: 1,
   });
   assert.equal(
-    retryJob?.dedupeKey,
+    retryJob.dedupeKey,
     buildExpectedJunctionDedupeKey(
       "backfill",
       "2025-01-01T12:34:56.000Z",
       "2026-04-05T08:09:10.000Z",
     ),
   );
+  assert.equal(importedSnapshots.length, 0);
+
+  activityRecords = [{ id: "activity-event-retry-1", connectionId: "provider-garmin-1", steps: 1234 }];
+  const retryResult = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-04T00:15:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob(retryJob.kind, retryJob.payload ?? {}),
+  );
+
+  assert.equal(retryResult.metadataPatch, undefined);
+  assert.equal(retryResult.scheduledJobs, undefined);
+  assert.equal(importedSnapshots.length, 1);
 });
 
 test("Junction useful summary historical backfill marks the historical window complete", async () => {
@@ -681,8 +949,8 @@ test("Junction useful summary historical backfill marks the historical window co
       },
     }),
     createJob("backfill", {
-      windowStart: "2026-04-01T06:07:08.000Z",
-      windowEnd: "2026-04-03T09:10:11.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -690,8 +958,8 @@ test("Junction useful summary historical backfill marks the historical window co
     junctionHistoricalBackfillStatus: "complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
-    junctionHistoricalBackfillWindowStart: "2026-04-01T06:07:08.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-03T09:10:11.000Z",
+    junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs, undefined);
   assert.equal(importedSnapshots.length, 1);
@@ -701,8 +969,8 @@ test("Junction useful summary historical backfill marks the historical window co
   );
   assertJunctionWindowQuery(
     summaryRequest,
-    "2026-04-01T06:07:08.000Z",
-    "2026-04-03T09:10:11.000Z",
+    "2026-04-01T00:00:00.000Z",
+    "2026-04-03T00:00:00.000Z",
   );
 });
 
@@ -1593,7 +1861,7 @@ for (const testCase of [
       }),
       createJob("backfill", {
         windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
       }),
     );
 
@@ -1602,9 +1870,9 @@ for (const testCase of [
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     });
-    assert.equal(result.scheduledJobs?.length, 1);
+    assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
     assert.equal(importedSnapshots.length, 1);
   });
 }
@@ -1776,7 +2044,7 @@ for (const summaryResource of ["activity", "sleep", "workouts", "body"] as const
       }),
       createJob("backfill", {
         windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
       }),
     );
 
@@ -1785,9 +2053,9 @@ for (const summaryResource of ["activity", "sleep", "workouts", "body"] as const
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     });
-    assert.equal(result.scheduledJobs?.length, 1);
+    assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
     assert.equal(importedSnapshots.length, 1);
   });
 }
@@ -1849,7 +2117,7 @@ for (const summaryResource of ["sleep", "workouts"] as const) {
       }),
       createJob("backfill", {
         windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
       }),
     );
 
@@ -1858,9 +2126,9 @@ for (const summaryResource of ["sleep", "workouts"] as const) {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     });
-    assert.equal(result.scheduledJobs?.length, 1);
+    assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
     assert.equal(importedSnapshots.length, 1);
   });
 }
@@ -1904,7 +2172,7 @@ test("Junction useful summary without source linkage keeps the historical window
     }),
     createJob("backfill", {
       windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -1913,9 +2181,9 @@ test("Junction useful summary without source linkage keeps the historical window
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(result.scheduledJobs?.length, 1);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
   assert.equal(importedSnapshots.length, 1);
 });
 
@@ -1959,7 +2227,7 @@ test("Junction floating-provider metric-only summary keeps the historical window
     }),
     createJob("backfill", {
       windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -1968,9 +2236,9 @@ test("Junction floating-provider metric-only summary keeps the historical window
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(result.scheduledJobs?.length, 1);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
   assert.equal(importedSnapshots.length, 1);
 });
 
@@ -2087,7 +2355,7 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     }),
     createJob("backfill", {
       windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -2096,13 +2364,158 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(result.scheduledJobs?.length, 1);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
   assert.equal(importedSnapshots.length, 1);
   const timeseriesSnapshot = importedSnapshots[0] as { summaries?: Record<string, unknown[]>; timeseries?: Record<string, unknown[]> };
   assert.deepEqual(timeseriesSnapshot.summaries, {});
   assert.equal(timeseriesSnapshot.timeseries?.blood_oxygen?.length, 1);
+});
+
+test("Junction yielded connect-window backfills keep owner window and resume with a cursor", async () => {
+  const ownerWindowStart = "2026-04-01T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  const cursor = "2026-04-02T00:00:00.000Z";
+  const createProviderForRequests = (requests: string[]) =>
+    createJunctionProvider(async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-1",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                activity: true,
+                blood_oxygen: true,
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+        return createJsonResponse({
+          data: [{ id: "activity-1", sourceProviderSlug: "garmin", steps: 4321 }],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [{
+                start: new URL(url).searchParams.get("start_date"),
+                value: 97,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    }, {
+      timeseriesResources: ["blood_oxygen"],
+    });
+
+  const firstRequests: string[] = [];
+  const firstImportedSnapshots: unknown[] = [];
+  const initialJob = createJob("backfill", {
+    windowStart: ownerWindowStart,
+    windowEnd: ownerWindowEnd,
+  });
+  const firstResult = await executeJunctionJob(
+    createProviderForRequests(firstRequests),
+    createJunctionJobContext({
+      now: "2026-04-04T00:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        firstImportedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      shouldYield: () => firstRequests.some((url) => url.includes("/v2/timeseries/")),
+    }),
+    initialJob,
+  );
+
+  const continuation = requireValue(
+    firstResult.scheduledJobs?.[0],
+    "Yielded Junction backfill should schedule a continuation.",
+  );
+  assert.equal(firstResult.metadataPatch, undefined);
+  assert.deepEqual(continuation.payload, {
+    windowStart: ownerWindowStart,
+    windowEnd: ownerWindowEnd,
+    timeseriesCursor: cursor,
+  });
+  assert.equal(
+    continuation.dedupeKey,
+    buildExpectedJunctionDedupeKey("backfill", ownerWindowStart, ownerWindowEnd),
+  );
+  assert.deepEqual(
+    firstRequests
+      .filter((url) => url.includes("/v2/timeseries/"))
+      .map((url) => {
+        const searchParams = new URL(url).searchParams;
+        return [searchParams.get("start_date"), searchParams.get("end_date")];
+      }),
+    [["2026-04-01", "2026-04-01"]],
+  );
+
+  const secondRequests: string[] = [];
+  const secondImportedSnapshots: unknown[] = [];
+  const continuationJob = {
+    ...createJob("backfill", continuation.payload ?? {}),
+    dedupeKey: continuation.dedupeKey ?? null,
+    priority: continuation.priority ?? 50,
+  };
+  const provider = createProviderForRequests(secondRequests);
+  const secondResult = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-04T00:05:00.000Z",
+      importSnapshot: async (snapshot) => {
+        secondImportedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    continuationJob,
+  );
+
+  assert.deepEqual(
+    secondRequests
+      .filter((url) => url.includes("/v2/timeseries/"))
+      .map((url) => {
+        const searchParams = new URL(url).searchParams;
+        return [searchParams.get("start_date"), searchParams.get("end_date")];
+      }),
+    [["2026-04-02", "2026-04-02"]],
+  );
+  assert.deepEqual(secondResult.metadataPatch, {
+    junctionHistoricalBackfillStatus: "complete",
+    junctionHistoricalBackfillEmptyAttempts: 0,
+    junctionHistoricalBackfillLastEmptyAt: null,
+    junctionHistoricalBackfillWindowStart: ownerWindowStart,
+    junctionHistoricalBackfillWindowEnd: ownerWindowEnd,
+  });
+  assert.equal(secondResult.scheduledJobs, undefined);
+  assert.equal(secondImportedSnapshots.length, 2);
+
+  const scheduledAfterCompletion = provider.jobExecutor?.createScheduledJobs?.(
+    createStoredAccount({
+      metadata: secondResult.metadataPatch ?? {},
+    }),
+    "2026-04-04T00:10:00.000Z",
+  );
+  assert.equal(
+    scheduledAfterCompletion?.jobs.some((job) => job.kind === "backfill"),
+    false,
+  );
 });
 
 test("Junction profile-only historical backfill keeps the summary window retrying", async () => {
@@ -2147,7 +2560,7 @@ test("Junction profile-only historical backfill keeps the summary window retryin
     }),
     createJob("backfill", {
       windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -2157,9 +2570,9 @@ test("Junction profile-only historical backfill keeps the summary window retryin
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(result.scheduledJobs?.length, 1);
+  assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
   assert.equal(importedSnapshots.length, 1);
   const profileRequest = requireValue(
     requests.find((url) => new URL(url).pathname.includes("/v2/summary/profile/")),
@@ -3064,7 +3477,7 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
   assert.equal(connection.setupPhase, "link_returned");
   assert.deepEqual(connection.initialJobs?.map((job) => job.kind), ["backfill", "reconcile"]);
   assert.deepEqual(connection.initialJobs?.[0]?.payload, {
-    windowStart: "2025-10-05T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
     windowEnd: "2026-04-03T00:00:00.000Z",
   });
   const payload = connection.initialJobs?.[0]?.payload as Record<string, unknown> | undefined;
@@ -3086,12 +3499,78 @@ test("Junction scheduled polling uses stable closed-day windows", () => {
     "2026-04-03T23:45:00.000Z",
   );
 
-  assert.equal(first?.jobs.length, 1);
+  assert.equal(first?.jobs.length, 2);
   assert.deepEqual(first?.jobs[0]?.payload, {
     windowStart: "2026-03-27T00:00:00.000Z",
     windowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(first?.jobs[0]?.dedupeKey, second?.jobs[0]?.dedupeKey);
+  // With no recorded historical-backfill outcome, the scheduled pass also
+  // re-derives the connect-window backfill until a terminal status lands.
+  const derivedBackfill = first?.jobs[1];
+  assert.equal(derivedBackfill?.kind, "backfill");
+  assert.deepEqual(derivedBackfill?.payload, {
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+  assert.equal(derivedBackfill?.dedupeKey, second?.jobs[1]?.dedupeKey);
+});
+
+test("Junction scheduled pass derives historical backfill work only until a terminal status", () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  });
+  const executor = requireValue(provider.jobExecutor, "Junction provider should expose a job executor.");
+
+  for (const status of ["complete", "exhausted"] as const) {
+    const scheduled = executor.createScheduledJobs?.(
+      createStoredAccount({
+        metadata: {
+          junctionHistoricalBackfillStatus: status,
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        },
+      }),
+      "2026-04-03T12:34:56.000Z",
+    );
+    assert.equal(scheduled?.jobs.some((job) => job.kind === "backfill"), false, status);
+  }
+
+  const completeOtherWindow = executor.createScheduledJobs?.(
+    createStoredAccount({
+      metadata: {
+        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+      },
+    }),
+    "2026-04-03T12:34:56.000Z",
+  );
+  assert.deepEqual(
+    completeOtherWindow?.jobs.find((job) => job.kind === "backfill")?.payload,
+    {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    },
+  );
+
+  const retryingOtherWindow = executor.createScheduledJobs?.(
+    createStoredAccount({
+      metadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-03T12:30:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+      },
+    }),
+    "2026-04-03T12:34:56.000Z",
+  );
+  const retryingBackfill = retryingOtherWindow?.jobs.find((job) => job.kind === "backfill");
+  assert.deepEqual(retryingBackfill?.payload, {
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
 });
 
 test("Junction reconcile keeps summaries current while compact timeseries stays on closed days", async () => {
@@ -3505,10 +3984,65 @@ test("Junction completeConnection preserves the sanitized Link failure reason", 
   );
 });
 
-test("Junction completeConnection drops secret-bearing Link failure reason values entirely", async () => {
-  // sanitizeHostedRuntimeDiagnosticText fails closed: a value that still looks
-  // unsafe after redaction is dropped from the reason instead of partially
-  // surfaced.
+test("Junction completeConnection drops JSON-array Link failure descriptions", async () => {
+  // A provider-controlled error_description carrying a structured dump must
+  // fail closed out of the reason instead of surfacing its entries.
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        error: "provider_connection_error",
+        error_description: '["junction-user-1"]',
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.ok(error.message.includes("error=provider_connection_error"));
+      assert.ok(!error.message.includes("junction-user-1"));
+      assert.ok(!error.message.includes("error_description="));
+      return true;
+    },
+  );
+});
+
+test("Junction completeConnection drops bracketed comma-list Link failure descriptions", async () => {
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        error: "provider_connection_error",
+        error_description: "[junction-user-1, Jane Doe]",
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.ok(error.message.includes("error=provider_connection_error"));
+      assert.ok(!error.message.includes("junction-user-1"));
+      assert.ok(!error.message.includes("Jane"));
+      assert.ok(!error.message.includes("Doe"));
+      assert.ok(!error.message.includes("error_description="));
+      return true;
+    },
+  );
+});
+
+test("Junction completeConnection masks secret-bearing Link failure reason values", async () => {
+  // sanitizeHostedRuntimeDiagnosticText masks the secret span so the rest of
+  // the provider's explanation stays available for debugging.
   const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
 
   await assert.rejects(
@@ -3528,7 +4062,34 @@ test("Junction completeConnection drops secret-bearing Link failure reason value
       assert.equal(error.code, "JUNCTION_LINK_FAILED");
       assert.ok(error.message.includes("error=provider_connection_error"));
       assert.ok(!error.message.includes("secret-value-1"));
-      assert.ok(!error.message.includes("error_description="));
+      assert.ok(error.message.includes("error_description=User denied access"));
+      assert.ok(!error.message.includes("access_token"));
+      return true;
+    },
+  );
+});
+
+test("Junction completeConnection masks colon-form token Link failure reasons", async () => {
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        error: "provider_connection_error",
+        error_description: "refresh token: abcdefghijklmnopqrst expired",
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.ok(error.message.includes("error=provider_connection_error"));
+      assert.ok(error.message.includes("error_description=refresh token: <redacted-token> expired"));
+      assert.ok(!error.message.includes("abcdefghijklmnopqrst"));
       return true;
     },
   );
@@ -3559,10 +4120,9 @@ test("Junction completeConnection rejects non-truthy success callbacks with the 
   );
 });
 
-test("Junction completeConnection omits token-shaped Link callback values from failure reasons", async () => {
-  // JWT-shaped values are redacted then dropped by the fail-closed check, and
-  // long opaque tokens are dropped outright, so neither can leak into the
-  // persisted/logged failure message.
+test("Junction completeConnection masks token-shaped Link callback values in failure reasons", async () => {
+  // JWT-shaped and long opaque token values are masked in place, so the
+  // failure reason keeps its shape without leaking either value.
   const jwtDescription = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJlLXBhcnQ";
   const opaqueState = "a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8";
   const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
@@ -3582,9 +4142,10 @@ test("Junction completeConnection omits token-shaped Link callback values from f
     (error) => {
       assert.ok(error instanceof DeviceSyncError);
       assert.equal(error.code, "JUNCTION_LINK_FAILED");
-      assert.equal(error.message, "Junction Link callback reported a failed link outcome.");
       assert.ok(!error.message.includes(jwtDescription));
       assert.ok(!error.message.includes(opaqueState));
+      assert.ok(error.message.includes("error_description=[redacted.jwt]"));
+      assert.ok(error.message.includes("state=<redacted-token>"));
       return true;
     },
   );
@@ -4412,6 +4973,49 @@ test("Junction accepts user ids nested inside webhook envelopes", async () => {
     assert.equal(parsed.externalAccountId, expectedUserId);
     assert.deepEqual(parsed.jobs.map((job) => job.kind), ["backfill", "reconcile"]);
   }
+});
+
+test("Junction connection-event backfill completion does not write historical metadata for a non-connect window", async () => {
+  const provider = createEmptyJunctionBackfillProvider({
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "provider.connection.created",
+      user_id: "junction-user-1",
+      data: {},
+    },
+    messageId: "msg_connection_created_backfill",
+    timestamp: "1775174400",
+  });
+
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const backfillJob = requireValue(
+    parsed.jobs.find((job) => job.kind === "backfill"),
+    "Junction connection event should derive a backfill job.",
+  );
+  assert.deepEqual(backfillJob.payload, {
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ connectedAt: "2026-04-01T00:00:00.000Z" }),
+      now: "2026-04-04T00:00:00.000Z",
+    }),
+    createJob(backfillJob.kind, backfillJob.payload ?? {}),
+  );
+
+  assert.equal(
+    Object.keys(result.metadataPatch ?? {}).some((key) => key.startsWith("junctionHistoricalBackfill")),
+    false,
+  );
 });
 
 test("Junction rejects webhooks with conflicting signed payload user ids", async () => {
@@ -5793,14 +6397,767 @@ test("Junction ambiguous skip detail redacts the account id from provider error 
   assert.equal(warnings.length, 1);
   assert.equal(
     warnings[0]?.responseDetail,
-    "invalid_request: User <redacted-account> cannot access this summary.",
+    "invalid_request: User <redacted-id> cannot access this summary.",
   );
   assert.equal(
     result.metadataPatch?.junctionSkippedResourceLastDetail,
-    "invalid_request: User <redacted-account> cannot access this summary.",
+    "invalid_request: User <redacted-id> cannot access this summary.",
   );
   assert.equal(JSON.stringify(warnings).toLowerCase().includes("junction-user-1"), false);
   assert.equal(JSON.stringify(result.metadataPatch).toLowerCase().includes("junction-user-1"), false);
+});
+
+test("Junction ambiguous skip detail truncates unknown assignment tails after user_id prose", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "request rejected for user_id: hbm_abc123, display_name=Jane Doe upstream",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "invalid_request: request rejected for user_id: <redacted-id>";
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  for (const sensitive of ["display_name", "hbm_abc123", "Jane", "Doe"]) {
+    assert.equal(serializedWarnings.includes(sensitive), false);
+    assert.equal(serializedMetadata.includes(sensitive), false);
+  }
+});
+
+test("Junction ambiguous skip detail drops object-shaped display-name diagnostics", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: {
+          type: "resource_misconfigured",
+          msg: "display_name: Jane Doe cannot access sleep_cycle",
+        },
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, "resource_misconfigured");
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "resource_misconfigured");
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  for (const sensitive of ["display_name", "Jane", "Doe"]) {
+    assert.equal(serializedWarnings.includes(sensitive), false);
+    assert.equal(serializedMetadata.includes(sensitive), false);
+  }
+});
+
+test("Junction ambiguous skip detail drops object-shaped unlabeled user diagnostics", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: {
+          type: "resource_misconfigured",
+          msg: "Patient Jane Doe not found",
+        },
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "resource_misconfigured";
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  for (const sensitive of ["Jane", "Doe"]) {
+    assert.equal(serializedWarnings.includes(sensitive), false);
+    assert.equal(serializedMetadata.includes(sensitive), false);
+  }
+});
+
+test("Junction ambiguous skip detail masks object-shaped credential-label diagnostics", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: {
+          type: "resource_misconfigured",
+          msg: "api key secretvalue leaked",
+        },
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "resource_misconfigured: api key <redacted-token> leaked";
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  assert.equal(serializedWarnings.includes("secretvalue"), false);
+  assert.equal(serializedMetadata.includes("secretvalue"), false);
+});
+
+test("Junction ambiguous skip detail masks slash-bearing identifier phrases", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "user hbm_abc123/Jane-Doe is blocked upstream",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "invalid_request: user <redacted-id> is blocked upstream";
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  for (const sensitive of ["hbm_abc123", "Jane", "Doe"]) {
+    assert.equal(serializedWarnings.includes(sensitive), false);
+    assert.equal(serializedMetadata.includes(sensitive), false);
+  }
+});
+
+test("Junction ambiguous skip detail masks embedded ids from provider prose", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: "Team 11649ed4-27e2-4718-959f-d68de1d1a120 is not configured for sleep_cycle.",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(
+    result.metadataPatch?.junctionSkippedResourceLastDetail,
+    "Team <redacted-id> is not configured for sleep_cycle.",
+  );
+  assert.equal(
+    warnings[0]?.responseDetail,
+    "Team <redacted-id> is not configured for sleep_cycle.",
+  );
+  assert.equal(JSON.stringify(result.metadataPatch).includes("11649ed4"), false);
+});
+
+test("Junction ambiguous skip detail drops id-shaped provider error codes", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        code: "11649ed4-27e2-4718-959f-d68de1d1a120",
+        message: "sleep_cycle disabled",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "sleep_cycle disabled");
+  assert.equal(warnings[0]?.responseDetail, "sleep_cycle disabled");
+  assert.equal(JSON.stringify(warnings).includes("11649ed4"), false);
+  assert.equal(JSON.stringify(result.metadataPatch).includes("11649ed4"), false);
+});
+
+test("Junction ambiguous skip detail reads FastAPI-shaped sleep_cycle validation arrays", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse([
+        {
+          type: "value_error.date",
+          msg: "start_date must be before end_date",
+        },
+      ], 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "value_error.date: start_date must be before end_date";
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+});
+
+test("Junction ambiguous skip detail keeps safe date validation prose before bracket suffixes", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: "Datetimes provided to dates should have zero time [type=date_from_datetime_inexact]",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const storedDetail = result.metadataPatch?.junctionSkippedResourceLastDetail;
+  const warningDetail = warnings[0]?.responseDetail;
+
+  assert.equal(storedDetail, "Datetimes provided to dates should have zero time");
+  assert.equal(warningDetail, "Datetimes provided to dates should have zero time");
+  assert.equal(storedDetail?.endsWith("zero time"), true);
+  assert.equal(warningDetail?.includes("Datetimes provided to dates should have zero time"), true);
+
+  for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
+    assert.equal(exposed.includes("date_from_datetime_inexact"), false);
+    assert.equal(exposed.includes("type="), false);
+  }
+});
+
+test("Junction ambiguous skip detail ignores top-level primitive arrays", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse(["Jane Doe"], 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, undefined);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, null);
+
+  for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
+    assert.equal(exposed.includes("Jane"), false);
+    assert.equal(exposed.includes("Doe"), false);
+  }
+});
+
+test("Junction ambiguous skip detail truncates bracketed diagnostics with unknown keys", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "Validation failed [user_id=1234, display_name=Jane Doe]",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, "invalid_request: Validation failed");
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "invalid_request: Validation failed");
+
+  for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
+    assert.equal(exposed.includes("Jane"), false);
+    assert.equal(exposed.includes("Doe"), false);
+    assert.equal(exposed.includes("1234"), false);
+  }
+});
+
+test("Junction ambiguous skip detail keeps safe prefix before nested bracketed diagnostics", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        message: "Validation failed [context [field] display_name=Jane]",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, "Validation failed");
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "Validation failed");
+
+  for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
+    assert.equal(exposed.includes("Jane"), false);
+    assert.equal(exposed.includes("display_name"), false);
+  }
+});
+
+test("Junction ambiguous skip detail reads object-shaped provider error bodies", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: { type: "resource_misconfigured", msg: "user hbm_abc123xyz sleep_cycle summaries are disabled." },
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext(),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(
+    result.metadataPatch?.junctionSkippedResourceLastDetail,
+    "resource_misconfigured: user <redacted-id> sleep_cycle summaries are disabled.",
+  );
 });
 
 test("Junction ambiguous skip detail is clamped to the stored-metadata string cap", async () => {

@@ -111,6 +111,13 @@ const wearableActivitySummarySchema = z.object({
   distanceKm: wearableResolvedMetricSchema.optional(),
   estimatedVo2Max: wearableResolvedMetricSchema.optional(),
   floorsClimbed: wearableResolvedMetricSchema.optional(),
+  heartRateZones: z.array(z.object({
+    durationMinutes: z.number().nonnegative(),
+    label: z.string().min(1).optional(),
+    maxHeartRate: z.number().nonnegative().optional(),
+    minHeartRate: z.number().nonnegative().optional(),
+    zone: z.number().int().nonnegative().optional(),
+  })).optional(),
   maxHeartRate: wearableResolvedMetricSchema.optional(),
   notes: z.array(z.string()).optional(),
   percentRecorded: wearableResolvedMetricSchema.optional(),

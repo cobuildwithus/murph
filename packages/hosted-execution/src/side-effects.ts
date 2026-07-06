@@ -6,6 +6,9 @@ import {
 } from "@murphai/gateway-core";
 
 export const HOSTED_ASSISTANT_DELIVERY_KIND = "assistant.delivery" as const;
+// Must stay >= the hosted mailbox run import limit so one grouped auto-reply
+// can carry every answered conversation item through the side-effect payload.
+const HOSTED_ASSISTANT_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
 
 export const hostedAssistantDeliveryTargetKindValues =
   gatewayDeliveryTargetKindValues;
@@ -106,6 +109,7 @@ export type HostedAssistantMessageReaction =
 
 export interface HostedAssistantDeliveryPayload {
   actorId: string | null;
+  answeredMailboxItemIds: readonly string[];
   bindingDeliveryKind: HostedAssistantBindingDeliveryKind | null;
   bindingDeliveryTarget: string | null;
   channel: string | null;
@@ -646,6 +650,10 @@ function parseHostedAssistantDeliveryPayload(
 
   return {
     actorId: requireNullableString(record.actorId ?? null, `${label}.actorId`),
+    answeredMailboxItemIds: parseHostedAssistantDeliveryAnsweredMailboxItemIds(
+      record.answeredMailboxItemIds ?? [],
+      `${label}.answeredMailboxItemIds`,
+    ),
     bindingDeliveryKind: requireNullableHostedAssistantBindingDeliveryKind(
       record.bindingDeliveryKind ?? null,
       `${label}.bindingDeliveryKind`,
@@ -684,6 +692,28 @@ function parseHostedAssistantDeliveryPayload(
     ),
     turnId: requireString(record.turnId, `${label}.turnId`),
   };
+}
+
+function parseHostedAssistantDeliveryAnsweredMailboxItemIds(
+  value: unknown,
+  label: string,
+): string[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+  if (value.length > HOSTED_ASSISTANT_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT) {
+    throw new TypeError(
+      `${label} must contain at most ${HOSTED_ASSISTANT_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT} entries.`,
+    );
+  }
+
+  return value.map((entry, index) => {
+    const itemId = requireString(entry, `${label}[${index}]`).trim();
+    if (!itemId) {
+      throw new TypeError(`${label}[${index}] must be a non-empty string.`);
+    }
+    return itemId;
+  });
 }
 
 function parseHostedAssistantDeliveryMediaList(

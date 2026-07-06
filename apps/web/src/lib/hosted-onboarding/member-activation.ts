@@ -22,9 +22,10 @@ import {
 } from "../hosted-mailbox/store";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import {
-  deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,
+  isHostedMemberSuspended,
 } from "./entitlement";
+import { readActiveHostedMemberAccess } from "./member-access";
 import {
   clearHostedMemberPendingActivationTimeZone,
   composeHostedMemberSnapshot,
@@ -110,7 +111,6 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
       sourceEventId: input.sourceEventId,
       sourceType: "hosted.family.sponsorship",
     },
-    familyAccessActive: true,
     memberId: input.memberId,
     preserveBillingStatus: true,
     prisma: input.prisma,
@@ -122,7 +122,6 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
 async function activateHostedMemberForPositiveSourceTxInner(input: {
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
-  familyAccessActive?: boolean;
   memberId: string;
   preserveBillingStatus?: boolean;
   prisma: Prisma.TransactionClient;
@@ -131,7 +130,6 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   welcomeMessage?: string;
 }): Promise<HostedMemberActivationResult> {
   const currentMember = await readActivationReadyHostedMemberTx({
-    familyAccessActive: input.familyAccessActive ?? false,
     memberId: input.memberId,
     prisma: input.prisma,
   });
@@ -336,7 +334,6 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
 }
 
 async function readActivationReadyHostedMemberTx(input: {
-  familyAccessActive?: boolean;
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationSnapshot | null> {
@@ -347,23 +344,24 @@ async function readActivationReadyHostedMemberTx(input: {
     prisma: input.prisma,
   });
 
+  if (!currentMember || isHostedMemberSuspended(currentMember.core.suspendedAt)) {
+    return null;
+  }
+
+  // A hard-blocked own billing status (canceled/paused/unpaid) only bars
+  // activation when no sponsorship covers the member; a family-sponsored
+  // member with a stale own status is still activation-ready.
   if (
-    !currentMember ||
-    (
-      input.familyAccessActive !== true &&
-      isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)
-    )
+    isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)
+    && !(await readActiveHostedMemberAccess({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }))
   ) {
     return null;
   }
 
-  const entitlement = deriveHostedEntitlement({
-    billingStatus: currentMember.core.billingStatus,
-    familyAccessActive: input.familyAccessActive ?? false,
-    suspendedAt: currentMember.core.suspendedAt,
-  });
-
-  return entitlement.activationReady ? currentMember : null;
+  return currentMember;
 }
 
 async function readHostedMemberActivationSnapshotTx(input: {

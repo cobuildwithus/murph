@@ -74,7 +74,6 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
-  compactHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
 import {
@@ -155,10 +154,8 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
 
 interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
-  conversationConsumedSeq(): string | null;
   discardMailboxPostCheckpointEffects(): void;
   hasRuntimeStateDirty(): boolean;
-  hasConversationAssistantInputForConsumeAck(): boolean;
   latestMailboxImportCoveredByWorkspace(): boolean;
   latestMailboxImport(): HostedMailboxImportCheckpointResult | null;
   latestWorkspace(): HostedWorkspaceState | null;
@@ -248,7 +245,6 @@ export type HostedWorkspaceDurableCheckpointEffects =
   | HostedWorkspaceDurableCheckpointEffect
   | readonly HostedWorkspaceDurableCheckpointEffect[];
 
-const HOSTED_CONVERSATION_MAILBOX_CONSUME_ACK_RETRY_DELAY_MS = 15 * 1000;
 const HOSTED_PRE_AUTO_REPLY_SYSTEM_IMPORT_MAX_PAGES = 4;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
@@ -802,13 +798,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     })) {
       postCheckpointWakeMerged = false;
     }
-    await stageHostedConversationMailboxConsumedAckBestEffort({
-      afterDurableCheckpoint,
-      assistantPhaseResult,
-      checkpointRequestSession,
-      initialMailboxImport,
-      input,
-    });
     mailboxPostCheckpointEffectsFinished = scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
@@ -1284,258 +1273,6 @@ async function writeHostedMailboxImportRuntimeLog(input: {
   });
 }
 
-async function stageHostedConversationMailboxConsumedAckBestEffort(context: {
-  afterDurableCheckpoint: HostedWorkspaceDurableCheckpointEffect[];
-  assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
-  checkpointRequestSession: HostedWorkspaceCheckpointRequestSession;
-  initialMailboxImport: HostedMailboxImportCheckpointResult;
-  input: HostedWorkspaceRunnerInput;
-}): Promise<void> {
-  // Durable replay guard: only a foreground assistant pass that finished with
-  // zero failed replies and no pending foreground assistant input may advance
-  // the conversation consumed watermark. Anything unhandled must stay
-  // replayable as a live reply candidate. The ack is best-effort: a missed ack
-  // only widens the replay window, it must never fail the pass.
-  // Ordering invariant: this must run after checkpointHostedWorkspaceAssistantPhase —
-  // foregroundReplyFailed does not count post-checkpoint delivery-effect failures,
-  // so lost-reply safety relies on any failed intent already being in that snapshot.
-  // Every skip is logged: prod showed consumed_seq never advancing for any
-  // member (2026-06-11 rollback incident) with zero observable evidence of
-  // which gate was responsible. A silent skip here is an unbounded replay
-  // window after an unclean container death.
-  try {
-    const pendingInputIds = canSkipPendingAssistantInputProbe(context.input.vaultRoot)
-      ? []
-      : await resolveHostedPendingAssistantInputIdsForConsumeAck({
-        vaultRoot: context.input.vaultRoot,
-      });
-    if (pendingInputIds.length > 0) {
-      await writeHostedConversationMailboxConsumeSkipRuntimeLog({
-        input: context.input,
-        skipReason: "pending_assistant_input",
-      });
-      return;
-    }
-    const ack = await resolveHostedConversationMailboxConsumedSeqForAck({
-      containsAssistantInput: context.checkpointRequestSession
-        .hasConversationAssistantInputForConsumeAck(),
-      conversationConsumedSeq: context.checkpointRequestSession.conversationConsumedSeq(),
-      initialMailboxImport: context.initialMailboxImport,
-      latestMailboxImport: context.checkpointRequestSession.latestMailboxImport()
-        ?? context.initialMailboxImport,
-    });
-    if (!ack) {
-      await writeHostedConversationMailboxConsumeSkipRuntimeLog({
-        input: context.input,
-        skipReason: "no_covered_conversation_input",
-      });
-      return;
-    }
-    if (
-      ack.containsAssistantInput
-      && context.assistantPhaseResult.foregroundReplyFailed !== 0
-    ) {
-      await writeHostedConversationMailboxConsumeSkipRuntimeLog({
-        input: context.input,
-        skipReason: context.assistantPhaseResult.foregroundReplyFailed == null
-          ? "reply_outcome_missing"
-          : "reply_failed",
-      });
-      return;
-    }
-    const mailboxPort = context.input.platform.mailboxPort;
-    if (!mailboxPort?.consume) {
-      await writeHostedConversationMailboxConsumeSkipRuntimeLog({
-        input: context.input,
-        skipReason: "consume_port_missing",
-      });
-      return;
-    }
-    const consume = mailboxPort.consume.bind(mailboxPort);
-    context.afterDurableCheckpoint.push(async () => {
-      try {
-        await consume({
-          lanes: [
-            {
-              consumedSeq: ack.consumedSeq,
-              lane: "conversation",
-            },
-          ],
-          requestId: `${context.input.requestId}:mailbox-consume`,
-        });
-        await writeHostedRuntimeLogBestEffort({
-          entry: {
-            ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
-            component: "mailbox",
-            eventCode: "mailbox.consume_ack_advanced",
-            level: "info",
-            mailboxLane: "conversation",
-            mailboxSeqEnd: ack.consumedSeq,
-            phase: "checkpoint",
-          },
-          now: context.input.now,
-          platform: context.input.platform,
-        });
-      } catch (error) {
-        await writeHostedConversationMailboxConsumeFailureRuntimeLog({
-          error,
-          input: context.input,
-        });
-        return {
-          nextWakeAt: resolveHostedConversationMailboxConsumeAckRetryAt(
-            context.input.now?.(),
-          ),
-          nextWakeReason: "mailbox",
-        };
-      }
-    });
-  } catch (error) {
-    await writeHostedConversationMailboxConsumeFailureRuntimeLog({
-      error,
-      input: context.input,
-    });
-  }
-}
-
-async function resolveHostedPendingAssistantInputIdsForConsumeAck(input: {
-  vaultRoot: string;
-}): Promise<string[]> {
-  return await compactHostedPendingAssistantInputIds({
-    vaultRoot: input.vaultRoot,
-  });
-}
-
-type HostedConversationMailboxConsumeSkipReason =
-  | "consume_port_missing"
-  | "no_covered_conversation_input"
-  | "pending_assistant_input"
-  | "reply_failed"
-  | "reply_outcome_missing";
-
-function resolveHostedConversationMailboxConsumedSeqForAck(context: {
-  containsAssistantInput: boolean;
-  conversationConsumedSeq?: string | null;
-  initialMailboxImport: HostedMailboxImportCheckpointResult;
-  latestMailboxImport: HostedMailboxImportCheckpointResult;
-}): {
-  consumedSeq: string;
-  containsAssistantInput: boolean;
-} | null {
-  const baseSeq = resolveHostedConversationMailboxAckBaseConsumedSeq(context);
-  if (baseSeq === null) {
-    return null;
-  }
-  const latestLocalSeq = parseHostedConversationMailboxAckSeqOrNull(
-    context.latestMailboxImport.state.watermarks.conversation,
-  );
-  const restoredLocalSeq = parseHostedConversationMailboxAckSeqOrNull(
-    context.initialMailboxImport.previousState.watermarks.conversation,
-  );
-  if (latestLocalSeq === null || restoredLocalSeq === null || latestLocalSeq <= baseSeq) {
-    return null;
-  }
-
-  return {
-    consumedSeq: latestLocalSeq.toString(),
-    containsAssistantInput: context.containsAssistantInput,
-  };
-}
-
-function resolveHostedConversationMailboxAckBaseConsumedSeq(context: {
-  conversationConsumedSeq?: string | null;
-  initialMailboxImport: HostedMailboxImportCheckpointResult;
-  latestMailboxImport: HostedMailboxImportCheckpointResult;
-}): bigint | null {
-  let result = parseHostedConversationMailboxOptionalAckSeqOrNull(
-    context.conversationConsumedSeq ?? null,
-  );
-
-  for (const value of [
-    context.initialMailboxImport.importResult.consumedSeqByLane?.conversation ?? null,
-    context.latestMailboxImport.importResult.consumedSeqByLane?.conversation ?? null,
-  ]) {
-    const seq = parseHostedConversationMailboxOptionalAckSeqOrNull(value);
-    if (seq !== null && (result === null || seq > result)) {
-      result = seq;
-    }
-  }
-
-  return result;
-}
-
-function parseHostedConversationMailboxOptionalAckSeqOrNull(
-  value: string | null,
-): bigint | null {
-  return value === null ? null : parseHostedConversationMailboxAckSeqOrNull(value);
-}
-
-function parseHostedConversationMailboxAckSeqOrNull(value: string): bigint | null {
-  return /^(?:0|[1-9][0-9]*)$/u.test(value) ? BigInt(value) : null;
-}
-
-function resolveHostedConversationMailboxConsumeAckRetryAt(nowIso?: string): string {
-  const nowMs = nowIso ? Date.parse(nowIso) : Number.NaN;
-  const baseMs = Number.isFinite(nowMs) ? nowMs : Date.now();
-  return new Date(
-    baseMs + HOSTED_CONVERSATION_MAILBOX_CONSUME_ACK_RETRY_DELAY_MS,
-  ).toISOString();
-}
-
-async function writeHostedConversationMailboxConsumeSkipRuntimeLog(context: {
-  input: HostedWorkspaceRunnerInput;
-  skipReason: HostedConversationMailboxConsumeSkipReason;
-}): Promise<void> {
-  // Routine passes legitimately skip (background passes carry no foreground
-  // reply outcome; fresh members have an empty watermark), so skips log at
-  // info — the prod question is the reason distribution on reply passes, not
-  // any single skip. A missing consume port is the one true wiring failure
-  // (the replay guard can never engage) and stays warn.
-  await writeHostedRuntimeLogBestEffort({
-    entry: {
-      ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
-      component: "mailbox",
-      eventCode: "mailbox.consume_ack_skipped",
-      level: context.skipReason === "consume_port_missing" ? "warn" : "info",
-      mailboxLane: "conversation",
-      phase: "checkpoint",
-      redactedJson: {
-        skipReason: context.skipReason,
-      },
-    },
-    now: context.input.now,
-    platform: context.input.platform,
-  });
-}
-
-async function writeHostedConversationMailboxConsumeFailureRuntimeLog(context: {
-  error: unknown;
-  input: HostedWorkspaceRunnerInput;
-}): Promise<void> {
-  const failure = buildHostedMailboxPostCheckpointEffectFailureLog(context.error);
-  console.warn("Hosted conversation mailbox consume ack failed; replay window stays open.", {
-    errorCode: failure.errorCode,
-    errorName: failure.name ?? (context.error instanceof Error ? context.error.name : typeof context.error),
-  });
-  await writeHostedRuntimeLogBestEffort({
-    entry: {
-      ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
-      component: "mailbox",
-      errorCode: "mailbox_consume_failed",
-      eventCode: "runner.error",
-      level: "warn",
-      phase: "checkpoint",
-      redactedJson: {
-        failureCodeDetails: failure.codeDetail ? [failure.codeDetail] : [],
-        failureNames: failure.name ? [failure.name] : [],
-        failureSummaries: failure.summary ? [failure.summary] : [],
-        nestedErrorCode: failure.errorCode,
-      },
-    },
-    now: context.input.now,
-    platform: context.input.platform,
-  });
-}
-
 async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(context: {
   error: unknown;
   errorCode: "assistant_after_checkpoint_checkpoint_failed" | "assistant_after_checkpoint_failed";
@@ -1899,17 +1636,12 @@ function createHostedWorkspaceCheckpointRequestSession(
   let latestMailboxImportSequence = 0;
   let latestWorkspaceMailboxImportSequence = 0;
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
-  let conversationAssistantInputForConsumeAck = false;
-  let conversationConsumedSeq: bigint | null = null;
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
   let mailboxRetryAt: string | null = null;
   let runtimeStateDirty = false;
 
   return {
-    conversationConsumedSeq() {
-      return conversationConsumedSeq?.toString() ?? null;
-    },
     createRequest(input) {
       const requestInput = expectedWorkspaceVersion === null
         ? input
@@ -1938,9 +1670,6 @@ function createHostedWorkspaceCheckpointRequestSession(
     hasRuntimeStateDirty() {
       return runtimeStateDirty;
     },
-    hasConversationAssistantInputForConsumeAck() {
-      return conversationAssistantInputForConsumeAck;
-    },
     latestMailboxImport() {
       return latestMailboxImport;
     },
@@ -1966,18 +1695,6 @@ function createHostedWorkspaceCheckpointRequestSession(
           "mailbox",
         ),
       ]).at;
-      conversationAssistantInputForConsumeAck ||= (
-        result.importResult.assistantInputIds?.length ?? 0
-      ) > 0;
-      const importConsumedSeq = parseHostedConversationMailboxOptionalAckSeqOrNull(
-        result.importResult.consumedSeqByLane?.conversation ?? null,
-      );
-      if (
-        importConsumedSeq !== null
-        && (conversationConsumedSeq === null || importConsumedSeq > conversationConsumedSeq)
-      ) {
-        conversationConsumedSeq = importConsumedSeq;
-      }
       mailboxPostCheckpointEffects.push(...result.afterCheckpointEffects);
       if (result.checkpoint?.checkpointed === true) {
         checkpointRequestBuilder.recordCheckpoint?.(result.checkpoint);

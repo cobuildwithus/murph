@@ -619,24 +619,24 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH",
       "HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH",
       "HOSTED_RUNTIME_LOG_PATH",
-      "HOSTED_RUNTIME_MAILBOX_CONSUME_PATH",
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
+      "HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
     ]);
-    expect(routeModule.HOSTED_RUNTIME_MAILBOX_CONSUME_PATH).toBe(
-      "/api/internal/hosted-mailbox/consume",
-    );
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(
       "/api/internal/hosted-mailbox/payload/fetch",
     );
     expect(routeModule.HOSTED_RUNTIME_USAGE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/usage/record",
+    );
+    expect(routeModule.HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH).toBe(
+      "/api/internal/hosted-runtime/vault-share/active-kinds",
     );
     expect(routeModule.HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH).toBe(
       "/api/internal/hosted-runtime/action-approvals/consume",

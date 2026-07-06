@@ -117,6 +117,7 @@ const TEST_OUTBOX_INTENT: AssistantOutboxIntent = {
   channel: 'telegram',
   identityId: null,
   actorId: 'chat-123',
+  answeredMailboxItemIds: [],
   threadId: 'chat-123',
   threadIsDirect: true,
   replyToMessageId: null,
@@ -141,6 +142,7 @@ type LegacyMessageOutboxIntentWire = {
 
 const LEGACY_MESSAGE_OUTBOX_INTENT_KEYS = [
   'actorId',
+  'answeredMailboxItemIds',
   'attemptCount',
   'bindingDelivery',
   'channel',

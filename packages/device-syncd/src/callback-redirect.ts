@@ -24,6 +24,16 @@ export function buildDeviceSyncCallbackSuccessRedirectLocation(input: {
   });
 }
 
+/**
+ * Validates and normalizes a stored returnTo for redirects that must not
+ * assert a connection outcome, such as replayed callback deliveries. Stale
+ * deviceSync callback params are stripped so the destination renders
+ * connection truth from the store.
+ */
+export function buildDeviceSyncCallbackReturnLocation(returnTo: string | null): string | null {
+  return buildDeviceSyncCallbackRedirectLocation(returnTo, () => {});
+}
+
 export function buildDeviceSyncCallbackErrorRedirectLocation(input: {
   returnTo: string | null;
   provider: string;

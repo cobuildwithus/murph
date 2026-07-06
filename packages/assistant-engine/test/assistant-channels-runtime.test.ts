@@ -1748,6 +1748,7 @@ describe('assistant channels runtime seam', () => {
 
     expect(runtimeMocks.probeLinqApi).not.toHaveBeenCalled()
     expect(sendLinq).toHaveBeenCalledWith({
+      answeredMailboxItemIds: [],
       directRecipientPhoneNumber: '+15550001',
       fromPhoneNumber: null,
       idempotencyKey: 'idem-stale-thread',

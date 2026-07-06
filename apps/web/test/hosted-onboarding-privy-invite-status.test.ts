@@ -48,6 +48,13 @@ import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-servic
 
 const NOW = new Date("2026-04-06T12:00:00.000Z");
 
+const ACTIVE_MEMBER_ACCESS_RECORD = {
+  accountGroupMemberships: [],
+  billingStatus: HostedBillingStatus.active,
+  suspendedAt: null,
+  threadContainer: null,
+};
+
 describe("getHostedInviteStatus", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -57,6 +64,9 @@ describe("getHostedInviteStatus", () => {
   it("loads the identity relation when reading invite status", async () => {
     const findUnique = vi.fn().mockResolvedValue(null);
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique,
       },
@@ -85,6 +95,9 @@ describe("getHostedInviteStatus", () => {
 
   it("keeps the invite active while exposing queued background activation after transport handoff", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -115,6 +128,9 @@ describe("getHostedInviteStatus", () => {
 
   it("does not authenticate a stored Privy binding without an app-session member", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -143,6 +159,9 @@ describe("getHostedInviteStatus", () => {
 
   it("keeps a resolved app member match active regardless of stored identity lookup keys", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -175,6 +194,9 @@ describe("getHostedInviteStatus", () => {
 
   it("returns only the masked phone hint for a verify-stage invite", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -221,6 +243,9 @@ describe("getHostedInviteStatus", () => {
 
   it("derives a saved phone target from signup phone when the stored hint is missing", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -268,6 +293,9 @@ describe("getHostedInviteStatus", () => {
 
   it("uses manual phone entry when no stored invite phone can be texted", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -304,6 +332,9 @@ describe("getHostedInviteStatus", () => {
 
   it("uses email verification for pending Linq email participant contacts", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -359,6 +390,9 @@ describe("getHostedInviteStatus", () => {
 
   it("does not expose the stored phone after the invite is already active", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -395,6 +429,9 @@ describe("getHostedInviteStatus", () => {
 
   it("does not expose a verified phone as a prefill to an unauthenticated invite holder", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -435,6 +472,9 @@ describe("getHostedInviteStatus", () => {
 
   it("does not expose a refreshed signup phone once the member phone is verified", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -475,6 +515,9 @@ describe("getHostedInviteStatus", () => {
 
   it("returns the assigned Murph phone number only for matched active sessions", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -504,6 +547,9 @@ describe("getHostedInviteStatus", () => {
 
   it("redacts the assigned Murph phone number for unmatched sessions", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({
@@ -537,8 +583,50 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
+  it("reports a family-sponsored not_started member as active instead of checkout", async () => {
+    const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [{
+            group: {
+              billingStatus: HostedBillingStatus.active,
+              suspendedAt: null,
+            },
+            status: "active",
+          }],
+          billingStatus: HostedBillingStatus.not_started,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            billingStatus: HostedBillingStatus.not_started,
+            identity: await createIdentity(),
+          }),
+        })),
+      },
+    } as never;
+    mocks.isHostedMemberActivationPending.mockResolvedValue(false);
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      stage: "active",
+    });
+  });
+
   it("stays active once activation is no longer pending", async () => {
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(ACTIVE_MEMBER_ACCESS_RECORD),
+      },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(createInvite({
           member: createMember({

@@ -152,6 +152,7 @@ function createPayload(
 ): HostedAssistantDeliveryPayload {
   return {
     actorId: "actor_123",
+    answeredMailboxItemIds: [],
     bindingDeliveryKind: "participant",
     bindingDeliveryTarget: "chat_123",
     channel: "telegram",
@@ -715,6 +716,7 @@ describe("hosted runtime callbacks", () => {
         effectId: "intent_reaction",
         payload: {
           actorId: "actor_1",
+          answeredMailboxItemIds: [],
           bindingDeliveryKind: "participant",
           bindingDeliveryTarget: "chat_1",
           channel: "telegram",
@@ -739,6 +741,7 @@ describe("hosted runtime callbacks", () => {
         effectId: "intent_1",
         payload: {
           actorId: "actor_1",
+          answeredMailboxItemIds: [],
           bindingDeliveryKind: "participant",
           bindingDeliveryTarget: "chat_1",
           channel: "telegram",
@@ -4903,6 +4906,7 @@ describe("hosted runtime callbacks", () => {
   it("marks signup welcome Linq sends as first-contact engagement", async () => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
+      answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
       bindingDeliveryTarget: "+15550100001",
       channel: "linq",
       idempotencyKey: "signup-welcome:member_123",
@@ -4910,6 +4914,7 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: false,
     });
     const assertRecentInbound = vi.fn(async () => undefined);
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_123",
@@ -4918,6 +4923,7 @@ describe("hosted runtime callbacks", () => {
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
         directRecipientPhoneNumber: null,
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
@@ -4944,6 +4950,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
       }),
       forwardedEnv: {
         LINQ_API_TOKEN: "linq-token",
@@ -4980,6 +4987,7 @@ describe("hosted runtime callbacks", () => {
   it("records hosted runtime Linq delivery outcomes after provider acceptance", async () => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
+      answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
       bindingDeliveryTarget: "+15550100001",
       channel: "linq",
       idempotencyKey: "signup-welcome:member_123",
@@ -4995,6 +5003,7 @@ describe("hosted runtime callbacks", () => {
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
         directRecipientPhoneNumber: null,
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
@@ -5035,6 +5044,7 @@ describe("hosted runtime callbacks", () => {
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: expect.stringMatching(/Z$/u),
+        answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
         attemptedAt: expect.stringMatching(/Z$/u),
         failureCode: null,
         failureReason: null,
@@ -5118,6 +5128,137 @@ describe("hosted runtime callbacks", () => {
       { errorName: "Error" },
     );
     warnSpy.mockRestore();
+  });
+
+  it("surfaces accepted Linq outcome recording failures with answered mailbox ids for outbox retry", async () => {
+    const answeredMailboxItemIds = [
+      "mailbox_item_answered_1",
+      "mailbox_item_answered_2",
+    ];
+    const effect = createEffect({
+      answeredMailboxItemIds,
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: true,
+    });
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >()
+      .mockRejectedValueOnce(new Error("web callback unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const effectsPort = createHostedRuntimeEffectsPortStub({
+      recordLinqDeliveryOutcome: recordDeliveryOutcome,
+    });
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          answeredMailboxItemIds,
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "reply",
+          replyToMessageId: null,
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+      } catch (error) {
+        const deliveryError = {
+          code: error instanceof VaultCliError ? error.code : null,
+          message: error instanceof Error ? error.message : String(error),
+        };
+        return createDispatchResult({
+          answeredMailboxItemIds,
+          lastError: deliveryError,
+          status: "retryable",
+        }, deliveryError);
+      }
+
+      throw new Error("Expected required delivery outcome recording to fail.");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort,
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED",
+        deliveryStatus: "retryable",
+        retryable: true,
+      }),
+    ]);
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+    expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
+
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds,
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "reply",
+        replyToMessageId: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        answeredMailboxItemIds,
+        delivery: createDelivery({
+          channel: "linq",
+          idempotencyKey: "assistant-outbox:intent_123",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const secondPass = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort,
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(secondPass).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        providerMessageId: "linq_message_sent",
+      }),
+    ]);
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(2);
+    expect(recordDeliveryOutcome).toHaveBeenCalledTimes(2);
+    expect(recordDeliveryOutcome.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        acceptedAt: expect.stringMatching(/Z$/u),
+        answeredMailboxItemIds,
+        providerMessageId: "linq_message_sent",
+      }),
+    );
   });
 
   it("does not let one hung Linq outcome write block later outcome writes", async () => {

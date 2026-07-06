@@ -39,15 +39,16 @@ import {
 } from "@/src/lib/hosted-onboarding/request-auth";
 
 describe("hosted Privy request auth", () => {
+  const hostedMemberAccessFindUnique = vi.fn();
   const prisma = {
-    hostedAccountGroupMembership: {
-      count: vi.fn(async () => 0),
-      findFirst: vi.fn(async () => null),
+    hostedMember: {
+      findUnique: hostedMemberAccessFindUnique,
     },
   } as never;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState());
     mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
       identity: {
         phone: {
@@ -431,6 +432,9 @@ describe("hosted Privy request auth", () => {
         }),
       }),
     );
+    hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
+      suspendedAt: new Date("2025-03-27T08:00:00.000Z"),
+    }));
 
     await expect(requireActivePrivyMemberAuth(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
       code: "HOSTED_MEMBER_SUSPENDED",
@@ -446,6 +450,9 @@ describe("hosted Privy request auth", () => {
         }),
       }),
     );
+    hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
+      billingStatus: HostedBillingStatus.unpaid,
+    }));
 
     await expect(requireActivePrivyMemberAuth(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
       code: "HOSTED_ACCESS_REQUIRED",
@@ -462,12 +469,48 @@ describe("hosted Privy request auth", () => {
         }),
       }),
     );
+    hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
+      billingStatus: HostedBillingStatus.canceled,
+    }));
 
     await expect(requireActivePrivyMemberAuth(createAuthenticatedRequest(), prisma)).rejects.toMatchObject({
       code: "HOSTED_ACCESS_REQUIRED",
       httpStatus: 403,
       message: "Your subscription is canceled. Open billing to resume access.",
     });
+  });
+
+  it("allows Family-sponsored members without direct billing through active hosted mutations", async () => {
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(
+      createHostedMemberLookup({
+        core: createHostedMember({
+          billingStatus: HostedBillingStatus.not_started,
+        }),
+      }),
+    );
+    hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
+      accountGroupMemberships: [
+        {
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+          status: "active",
+        },
+      ],
+      billingStatus: HostedBillingStatus.not_started,
+    }));
+
+    await expect(requireActivePrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
+      member: {
+        id: "member_123",
+      },
+    });
+    expect(hostedMemberAccessFindUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: "member_123",
+      },
+    }));
   });
 
   it("requires a valid app session and fresh Privy proof for identity-sensitive member operations", async () => {
@@ -517,6 +560,9 @@ describe("hosted Privy request auth", () => {
       privyUserId: "did:privy:user_123",
       sessionId: "hws_123",
     });
+    hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
+      billingStatus: HostedBillingStatus.unpaid,
+    }));
 
     await expect(
       requireFreshActivePrivyMemberAuthForHostedAppSession(createAuthenticatedRequest(), prisma),
@@ -547,6 +593,37 @@ function createHostedMember(
     signupWelcomeEmailAttemptedAt: null,
     suspendedAt: null,
     updatedAt: new Date("2025-03-27T08:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+interface HostedMemberAccessStateFixture {
+  accountGroupMemberships: Array<{
+    group: {
+      billingStatus: HostedBillingStatus;
+      suspendedAt: Date | null;
+    };
+    status: string;
+  }>;
+  billingStatus: HostedBillingStatus;
+  suspendedAt: Date | null;
+  threadContainer: null | {
+    owner: {
+      accountGroupMemberships: HostedMemberAccessStateFixture["accountGroupMemberships"];
+      billingStatus: HostedBillingStatus;
+      suspendedAt: Date | null;
+    };
+  };
+}
+
+function createHostedMemberAccessState(
+  overrides: Partial<HostedMemberAccessStateFixture> = {},
+): HostedMemberAccessStateFixture {
+  return {
+    accountGroupMemberships: [],
+    billingStatus: HostedBillingStatus.active,
+    suspendedAt: null,
+    threadContainer: null,
     ...overrides,
   };
 }

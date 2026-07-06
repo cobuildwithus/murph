@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import { buildWearableSummaryBundleFromDataset } from "../src/wearables.ts";
 import type {
+  WearableActivitySessionAggregate,
   WearableDataset,
   WearableMetricCandidate,
   WearableSleepWindowCandidate,
@@ -83,6 +84,30 @@ function sleepWindow(
     sourceKind: overrides.sourceKind ?? "sleep-window",
     startAt: overrides.startAt ?? `${date}T23:08:00.000Z`,
     title: overrides.title ?? `${provider} sleep`,
+  };
+}
+
+function activityAggregate(input: {
+  activityTypes?: string[];
+  date: string;
+  durationMinutes: number;
+  heartRateZones?: WearableActivitySessionAggregate["heartRateZones"];
+  provider: string;
+  sessionCount?: number;
+}): WearableActivitySessionAggregate {
+  return {
+    activityTypes: input.activityTypes ?? [],
+    candidateId: `${input.provider}:activity-session-aggregate:${input.date}`,
+    dataOrigin: null,
+    date: input.date,
+    heartRateZones: input.heartRateZones ?? [],
+    paths: [`ledger/events/2026/${input.date.slice(0, 7)}.jsonl`],
+    provider: input.provider,
+    recordedAt: `${input.date}T08:11:23.000Z`,
+    recordIds: [`evt_${input.provider}_activity_${input.date}`],
+    sessionCount: input.sessionCount ?? 1,
+    sessionMinutes: input.durationMinutes,
+    workoutMetricKeys: [],
   };
 }
 
@@ -253,6 +278,46 @@ test("compose preserves stored same-public provider conflict evidence", () => {
     garminOnlySteps.confidence.reasons.some((reason) => reason.includes("Junction")),
     false,
   );
+});
+
+test("compose preserves stored activity aggregate-owned types and heart-rate zones", () => {
+  const date = "2026-05-04";
+  const dataset: WearableDataset = {
+    activitySessionAggregates: [
+      activityAggregate({
+        activityTypes: ["Running"],
+        date,
+        durationMinutes: 45,
+        heartRateZones: [{
+          durationMinutes: 18,
+          label: "Zone 2",
+          zone: 2,
+        }],
+        provider: "garmin",
+      }),
+    ],
+    metricCandidates: [],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  };
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const composed = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows,
+  }, {});
+  const activity = composed.activityDays.find((summary) => summary.date === date);
+
+  assert.ok(activity);
+  assert.equal(activity.sessionMinutes.selection.value, 45);
+  assert.equal(activity.sessionCount.selection.value, 1);
+  assert.deepEqual(activity.activityTypes, ["Running"]);
+  assert.deepEqual(activity.heartRateZones, [{
+    durationMinutes: 18,
+    label: "Zone 2",
+    zone: 2,
+  }]);
 });
 
 test("compose preserves non-selected provider same-public conflict evidence", () => {

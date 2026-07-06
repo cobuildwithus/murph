@@ -234,16 +234,18 @@ the same transaction as the product/control-plane mutation that made work
 necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
 uses `HostedMailboxLaneCounter`.
 `HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
-watermark: after a foreground assistant pass finishes with zero failed replies
-and no pending foreground assistant input, the runtime acks the conversation
-watermark through the runner-allowlisted `/api/internal/hosted-mailbox/consume`
-callback (monotonic max, clamped to the lane append high-water, best-effort).
-The mailbox fetch response returns `consumedSeqByLane`; replayed items at or
-below the watermark are re-staged as conversation context with a null reply
-target, never as fresh reply candidates, so a workspace restore from a stale
-snapshot cannot re-reply to an already-handled message. A container rollout
-SIGTERM additionally makes the runtime treat the idle window as elapsed and run
-its normal `idle_shutdown` checkpoint inside the termination grace period.
+checkpoint replay floor. Accepted Linq reply delivery carries the finer
+delivery-time consume authority: the runtime reports
+`answeredMailboxItemIds`, and the signed delivery callback stamps matching
+same-user `conversation.message` rows with `HostedMailboxItem.consumedAt`.
+The mailbox fetch response returns both `consumedSeqByLane` and each item's
+`consumedAt`; replayed conversation items at or below the checkpoint replay
+floor, or with `consumedAt != null`, are re-staged as conversation context with
+a null reply target, never as fresh reply candidates. This keeps a workspace
+restore or restart from re-replying to an already-handled message without a
+side table or lane high-water advance past gaps. A container rollout SIGTERM
+additionally makes the runtime treat the idle window as elapsed and run its
+normal `idle_shutdown` checkpoint inside the termination grace period.
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
@@ -263,23 +265,24 @@ provider secrets, and decrypted mailbox payloads must not be Temporal workflow
 inputs, outputs, or history payloads. The pointer signal only wakes durable
 orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
-adapter. There is no
-webhook-to-Cloudflare runner nudge path, no direct web-to-Cloudflare message
-path, and no second wake authority. A direct web ensure fast path was
-attempted and withdrawn 2026-07-02 (PR #362): because runtime import/consume
-watermarks publish at checkpoint, the workflow's reconcile-ensure loop treats
-a direct-woken pointer as still-lagging and lands extra ensures in
-inter-invocation gaps, producing invocation churn and a reachable duplicate
-turn on already-replied input. Any future direct wake must carry pointer
-awareness into the workflow so it skips its immediate ensure. If the
-Temporal signal cannot be accepted after the mailbox row exists, the failure is
-logged as a post-commit best-effort handoff failure and does not make provider
-ingress fail. Web does not run a mailbox-lag cron backstop: missed post-commit
-workflow signal recovery remains future hardening for a DB-backed
-pending-handoff reconciler or Temporal-owned reconciler. Repeated dirty hints
-while the same connection is already dirty do not append or signal another
-device-sync wake; dirty coalescing remains the work-queue invariant, and any
-stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
+adapter. Linq webhook ingress may additionally fire one best-effort direct
+`ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
+message payload) after the unconditional Temporal signal is accepted. This is a
+latency hint only, not a second durable wake authority: it is Linq-only because
+accepted Linq reply delivery stamps `HostedMailboxItem.consumedAt`, so a racing
+ensure may import an already-consumed row but it stages with a null reply target
+and cannot be answered again. Do not add workflow-side direct-wake flags,
+derived-floor SQL, or lag netting merely to avoid harmless post-delivery no-op
+ensures. There is no direct web-to-Cloudflare message path and no second durable
+wake authority. If the Temporal signal cannot be accepted after the mailbox row
+exists, the failure is logged as a post-commit best-effort handoff failure and
+does not make provider ingress fail; direct Linq ensure is not fired without
+the accepted Temporal signal. Web does not run a mailbox-lag cron backstop:
+missed post-commit workflow signal recovery remains future hardening for a
+DB-backed pending-handoff reconciler or Temporal-owned reconciler. Repeated
+dirty hints while the same connection is already dirty do not append or signal
+another device-sync wake; dirty coalescing remains the work-queue invariant,
+and any stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
 remain diagnostic evidence only; they must not be merged into checkpointed
 import status for workflow completion or status projection. The narrow liveness
 exception is the exact `runner.accepted_attempt_failed` event: after web has

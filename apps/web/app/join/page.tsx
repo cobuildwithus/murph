@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { issueHostedInvite } from "@/src/lib/hosted-onboarding/invite-service";
 import { deriveHostedPostVerificationStage } from "@/src/lib/hosted-onboarding/lifecycle";
+import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
 export default async function JoinResumePage() {
@@ -14,6 +15,7 @@ export default async function JoinResumePage() {
 
   const stage = deriveHostedPostVerificationStage({
     billingStatus: member.billingStatus,
+    sponsoredAccessActive: await readActiveHostedMemberAccess({ memberId: member.id }),
     suspendedAt: member.suspendedAt,
   });
 

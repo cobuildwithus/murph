@@ -2284,6 +2284,7 @@ function createHostedAssistantLinqSendDependency(input: {
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
           attemptedAt,
+          answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
           deliveryContext,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
@@ -2300,11 +2301,12 @@ function createHostedAssistantLinqSendDependency(input: {
       });
       throw error;
     }
-    queueHostedAssistantLinqDeliveryOutcomeWrite({
+    await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
         acceptedAt: new Date(),
         attemptedAt,
+        answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
         fromPhoneNumber,
         idempotencyKey: request.idempotencyKey ?? null,
@@ -2495,6 +2497,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
           attemptedAt,
+          answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
           deliveryContext,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
@@ -2511,11 +2514,12 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       });
       throw error;
     }
-    queueHostedAssistantLinqDeliveryOutcomeWrite({
+    await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
         acceptedAt: new Date(),
         attemptedAt,
+        answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
         fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
         idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
@@ -2534,6 +2538,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
 
 function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   acceptedAt?: Date | null;
+  answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt: Date;
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   failedAt?: Date | null;
@@ -2550,6 +2555,9 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
 }): HostedRuntimeLinqDeliveryOutcomeRequest {
   return {
     ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
+    ...(input.answeredMailboxItemIds?.length
+      ? { answeredMailboxItemIds: [...input.answeredMailboxItemIds] }
+      : {}),
     attemptedAt: input.attemptedAt.toISOString(),
     ...(input.failedAt ? { failedAt: input.failedAt.toISOString() } : {}),
     failureCode: input.failureCode ?? null,
@@ -2567,6 +2575,85 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
 }
 
 const pendingHostedAssistantLinqDeliveryOutcomeWrites = new Set<Promise<void>>();
+
+async function recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
+  outcome: HostedRuntimeLinqDeliveryOutcomeRequest;
+}): Promise<void> {
+  if (shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(input.outcome)) {
+    await recordHostedAssistantLinqDeliveryOutcomeRequired(input);
+    return;
+  }
+
+  queueHostedAssistantLinqDeliveryOutcomeWrite(input);
+}
+
+function shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(
+  outcome: HostedRuntimeLinqDeliveryOutcomeRequest,
+): boolean {
+  return Boolean(outcome.acceptedAt && outcome.answeredMailboxItemIds?.length);
+}
+
+async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
+  outcome: HostedRuntimeLinqDeliveryOutcomeRequest;
+}): Promise<void> {
+  const recordOutcome = input.effectsPort?.recordLinqDeliveryOutcome;
+  if (!recordOutcome) {
+    throw new VaultCliError(
+      "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORDER_UNAVAILABLE",
+      "Accepted Linq delivery with answered mailbox items requires delivery outcome recording.",
+      { retryable: true },
+    );
+  }
+
+  const abortController = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const record = recordOutcome(input.outcome, { signal: abortController.signal });
+    void record.catch(() => undefined);
+    const timeout = new Promise<"timed_out">((resolve) => {
+      timer = setTimeout(() => {
+        abortController.abort();
+        resolve("timed_out");
+      }, HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    const result = await Promise.race([
+      record.then(() => "recorded" as const),
+      timeout,
+    ]);
+    if (result === "timed_out") {
+      throw new VaultCliError(
+        "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_TIMED_OUT",
+        "Accepted Linq delivery outcome recording timed out before consume state could be stored.",
+        {
+          retryable: true,
+          timeoutMs: HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS,
+        },
+      );
+    }
+  } catch (error) {
+    if (
+      error instanceof VaultCliError &&
+      error.code === "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_TIMED_OUT"
+    ) {
+      throw error;
+    }
+    throw new VaultCliError(
+      "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED",
+      "Accepted Linq delivery outcome recording failed before consume state could be stored.",
+      {
+        errorName: error instanceof Error ? error.name : typeof error,
+        retryable: true,
+      },
+    );
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  }
+}
 
 function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
   effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
@@ -3313,6 +3400,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
   intent: Pick<
     AssistantOutboxIntent,
     | "actorId"
+    | "answeredMailboxItemIds"
     | "bindingDelivery"
     | "channel"
     | "deliveryIdempotencyKey"
@@ -3333,6 +3421,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
 ): HostedAssistantDeliveryPayload {
   const payload = {
     actorId: intent.actorId ?? null,
+    answeredMailboxItemIds: intent.answeredMailboxItemIds ?? [],
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
     channel: intent.channel ?? null,

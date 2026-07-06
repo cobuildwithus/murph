@@ -101,7 +101,7 @@ describe("hosted Linq read receipt route authority", () => {
       webhook_version: "2026-01-01",
     });
     mocks.maybeHandoffHostedExecutionWebhookWake.mockResolvedValue({
-      reason: null,
+      reason: "temporal-signaled",
       signalAccepted: true,
       started: true,
     });
@@ -121,9 +121,13 @@ describe("hosted Linq read receipt route authority", () => {
         ok: true,
         reason: "wake-appended-active-member",
       },
-      wakeLinqChatId: "chat_123",
-      wakeMailboxItemId: "mailbox_123",
-      wakeUserId: "member_123",
+      wakeHandoffs: [{
+        eventId: "evt_read_receipt_mismatch",
+        linqChatId: "chat_123",
+        mailboxItemId: "mailbox_123",
+        source: "linq",
+        userId: "member_123",
+      }],
     });
 
     await expect(handleHostedOnboardingLinqWebhook({

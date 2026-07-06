@@ -114,6 +114,12 @@ describe("hosted signup timezone handoff", () => {
         }
       }),
       hostedMember: {
+        findUnique: vi.fn(async () => ({
+          accountGroupMemberships: [],
+          billingStatus: MEMBER.billingStatus,
+          suspendedAt: null,
+          threadContainer: null,
+        })),
         updateMany: vi.fn(async ({ data }: { data: { pendingActivationTimeZone: string } }) => {
           if (!memberResolutionTransactionOpen || activationClaimed) {
             sequence.push("timezone:lost");
@@ -124,9 +130,6 @@ describe("hosted signup timezone handoff", () => {
           sequence.push("timezone:persist");
           return { count: 1 };
         }),
-      },
-      hostedAccountGroupMembership: {
-        findFirst: vi.fn().mockResolvedValue(null),
       },
     } as unknown as PrismaClient;
 

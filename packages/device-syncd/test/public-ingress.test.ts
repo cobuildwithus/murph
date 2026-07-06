@@ -34,6 +34,7 @@ import {
 
 class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   private readonly oauthStates = new Map<string, OAuthStateRecord>();
+  private readonly consumedOAuthStates = new Set<string>();
   private readonly accounts = new Map<string, PublicDeviceSyncAccount>();
   private readonly accountOwners = new Map<string, string>();
   private readonly accountsByProviderExternal = new Map<string, string>();
@@ -59,6 +60,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     for (const [state, record] of this.oauthStates.entries()) {
       if (Date.parse(record.expiresAt) <= Date.parse(now)) {
         this.oauthStates.delete(state);
+        this.consumedOAuthStates.delete(state);
         deleted += 1;
       }
     }
@@ -81,6 +83,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
 
     if (!record || Date.parse(record.expiresAt) <= Date.parse(now)) {
       this.oauthStates.delete(state);
+      this.consumedOAuthStates.delete(state);
       return {
         status: "missing",
       };
@@ -99,15 +102,23 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       };
     }
 
-    this.oauthStates.delete(state);
+    if (this.consumedOAuthStates.has(state)) {
+      return {
+        status: "replayed",
+        record,
+      };
+    }
+
+    this.consumedOAuthStates.add(state);
     return {
       status: "consumed",
       record,
     };
   }
 
+  /** Whether the state is still consumable (present and not yet consumed). */
   hasOAuthState(state: string): boolean {
-    return this.oauthStates.has(state);
+    return this.oauthStates.has(state) && !this.consumedOAuthStates.has(state);
   }
 
   peekOAuthState(state: string): OAuthStateRecord | null {
@@ -1798,6 +1809,51 @@ test("public ingress validates OAuth callback state ownership and required param
       && error.code === "OAUTH_CODE_MISSING"
       && error.httpStatus === 400,
   );
+});
+
+test("public ingress resolves a redelivered callback as a replay carrying return context", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store,
+  });
+
+  const begin = await ingress.startConnection({
+    provider: "demo",
+    returnTo: "https://sync.example.test/settings/devices",
+    connectSourceId: "demo",
+    connectTarget: "demo",
+  });
+
+  const connected = await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+  assert.equal(connected.account.provider, "demo");
+
+  await assert.rejects(
+    () =>
+      ingress.handleOAuthCallback({
+        provider: "demo",
+        state: begin.state,
+        code: "abc",
+      }),
+    (error: unknown) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "OAUTH_STATE_REPLAYED");
+      assert.equal(error.httpStatus, 409);
+      assert.equal(error.details?.provider, "demo");
+      assert.equal(error.details?.connectSourceId, "demo");
+      assert.equal(error.details?.connectTarget, "demo");
+      assert.equal(error.details?.returnTo, "https://sync.example.test/settings/devices");
+      return true;
+    },
+  );
+
+  // Redelivery must not redo the connection work.
+  assert.equal(store.upsertConnectionCalls, 1);
 });
 
 test("public ingress falls back to granted scopes when the provider omits scopes", async () => {

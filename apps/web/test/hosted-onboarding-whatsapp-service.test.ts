@@ -941,6 +941,9 @@ type WhatsAppPrismaHarness = {
     findUnique: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
+  hostedMember: {
+    findUnique: ReturnType<typeof vi.fn>;
+  };
   hostedMemberIdentity: {
     findMany: ReturnType<typeof vi.fn>;
   };
@@ -995,6 +998,16 @@ function createWhatsAppPrismaHarness(input: {
         : null),
       create: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: input.consentGrantUpdateManyCount ?? 1 })),
+    },
+    hostedMember: {
+      findUnique: vi.fn(async () => memberId
+        ? {
+            accountGroupMemberships: [],
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+            threadContainer: null,
+          }
+        : null),
     },
     hostedMemberIdentity: {
       findMany: vi.fn(async () => memberId

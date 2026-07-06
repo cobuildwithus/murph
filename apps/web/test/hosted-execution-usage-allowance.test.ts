@@ -1769,8 +1769,65 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
   });
 
+  it("allows a not_started container member through its active owner", async () => {
+    // Containers are created not_started; their own billing must never be an
+    // early denial — the container branch decides via the owner.
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      spentUsdMicros: 1_000_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 3_500_000n,
+    });
+  });
+
+  it("allows a not_started container member through a family-sponsored owner", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      spentUsdMicros: 0n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+      threadContainerOwnerFamilySponsored: true,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+    });
+  });
+
+  it("denies a suspended container member even with an active owner", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      spentUsdMicros: 0n,
+      suspendedAt: new Date("2026-03-20T00:00:00.000Z"),
+      threadContainerLimitUsdMicros: 4_500_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "hosted_access_inactive",
+    });
+  });
+
   it("denies thread-container usage when the owner authority is inactive", async () => {
     const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
       spentUsdMicros: 1_000_000n,
       threadContainerLimitUsdMicros: 4_500_000n,
       threadContainerOwnerBillingStatus: HostedBillingStatus.paused,
@@ -2209,6 +2266,7 @@ function createGatePrisma(input: {
   spentUsdMicros: bigint;
   threadContainerLimitUsdMicros?: bigint | null;
   threadContainerOwnerBillingStatus?: HostedBillingStatus;
+  threadContainerOwnerFamilySponsored?: boolean;
   threadContainerOwnerSuspendedAt?: Date | null;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
@@ -2228,7 +2286,18 @@ function createGatePrisma(input: {
     : {
         monthlyUsageLimitUsdMicros: input.threadContainerLimitUsdMicros,
         owner: {
-          billingStatus: input.threadContainerOwnerBillingStatus ?? HostedBillingStatus.active,
+          accountGroupMemberships: input.threadContainerOwnerFamilySponsored
+            ? [{
+                group: {
+                  billingStatus: HostedBillingStatus.active,
+                  suspendedAt: null,
+                },
+                status: "active",
+              }]
+            : [],
+          billingStatus: input.threadContainerOwnerFamilySponsored
+            ? HostedBillingStatus.not_started
+            : input.threadContainerOwnerBillingStatus ?? HostedBillingStatus.active,
           suspendedAt: input.threadContainerOwnerSuspendedAt ?? null,
         },
       };

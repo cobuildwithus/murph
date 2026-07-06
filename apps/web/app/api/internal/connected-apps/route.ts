@@ -6,12 +6,9 @@ import {
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import {
-  hasHostedMemberEffectiveActiveAccessForMember,
-} from "@/src/lib/hosted-onboarding/family-plan";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { readHostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { executeHostedConnectedAppsRequest } from "@/src/lib/connected-apps/service";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -56,18 +53,7 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 async function requireConnectedAppsActiveMember(memberId: string): Promise<void> {
-  const prisma = getPrisma();
-  const member = await readHostedMemberCoreState({
-    memberId,
-    prisma,
-  });
-  if (
-    member &&
-    await hasHostedMemberEffectiveActiveAccessForMember({
-      member,
-      prisma,
-    })
-  ) {
+  if (await readActiveHostedMemberAccess({ memberId, prisma: getPrisma() })) {
     return;
   }
   throw hostedOnboardingError({

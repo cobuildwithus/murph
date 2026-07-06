@@ -98,13 +98,14 @@ model DeviceTokenAudit {
 }
 
 model DeviceOauthSession {
-  state        String   @id
-  userId       String?  @map("user_id")
+  state        String    @id
+  userId       String?   @map("user_id")
   provider     String
-  returnTo     String?  @map("return_to")
-  metadataJson Json?    @map("metadata_json")
-  createdAt    DateTime @map("created_at")
-  expiresAt    DateTime @map("expires_at")
+  returnTo     String?   @map("return_to")
+  metadataJson Json?     @map("metadata_json")
+  createdAt    DateTime  @map("created_at")
+  expiresAt    DateTime  @map("expires_at")
+  consumedAt   DateTime? @map("consumed_at")
 
   @@index([expiresAt])
   @@index([userId, provider])
@@ -679,6 +680,7 @@ model HostedMailboxItem {
   payloadRef              String?               @map("payload_ref")
   payloadBytes            Int?                  @map("payload_bytes")
   payloadHash             String?               @map("payload_hash")
+  consumedAt              DateTime?             @map("consumed_at")
   expiresAt               DateTime?             @map("expires_at")
   createdAt               DateTime              @default(now()) @map("created_at")
   updatedAt               DateTime              @updatedAt @map("updated_at")

@@ -33,6 +33,7 @@ import {
   completeDeviceSyncJob,
   completeDeviceSyncJobIfOwned,
   completeDeviceSyncJobsIfOwned,
+  completeDeviceSyncJobsIfOwnedInTransaction,
   enqueueDeviceSyncJobInTransaction,
   failDeviceSyncJob,
   failDeviceSyncJobIfOwned,
@@ -40,6 +41,7 @@ import {
   listDueDeviceSyncJobBatchCandidates,
   markPendingDeviceSyncJobsDeadForAccount,
   readNextDeviceSyncJobWakeAt,
+  readNextDeviceSyncJobWakeAtForAccount,
   releaseDeviceSyncJobIfOwned,
 } from "./store/jobs.ts";
 import {
@@ -60,6 +62,7 @@ import {
   markConnectionSetupFailed as markStoredConnectionSetupFailed,
   markSyncStarted as markStoredSyncStarted,
   markSyncSucceeded as markStoredSyncSucceeded,
+  markSyncSucceededInTransaction as markStoredSyncSucceededInTransaction,
   markWebhookReceived as markStoredWebhookReceived,
   readNextActiveReconcileAt as readNextStoredActiveReconcileAt,
 } from "./store/sync-state.ts";
@@ -85,6 +88,13 @@ import type {
   StoredDeviceSyncAccount,
   UpsertDeviceConnectionSourceInput,
 } from "./types.ts";
+
+class DeviceSyncSuccessFenceRejectedError extends Error {
+  constructor() {
+    super("Device sync success fence rejected.");
+    this.name = "DeviceSyncSuccessFenceRejectedError";
+  }
+}
 
 export class SqliteDeviceSyncStore {
   readonly databasePath: string;
@@ -328,6 +338,10 @@ export class SqliteDeviceSyncStore {
     return readNextDeviceSyncJobWakeAt(this.database);
   }
 
+  readNextJobWakeAtForAccount(accountId: string): string | null {
+    return readNextDeviceSyncJobWakeAtForAccount(this.database, accountId);
+  }
+
   claimDueJob(workerId: string, now: string, leaseMs: number): DeviceSyncJobRecord | null {
     return claimDueDeviceSyncJob(this.database, workerId, now, leaseMs);
   }
@@ -368,6 +382,69 @@ export class SqliteDeviceSyncStore {
       now,
       workerId,
     });
+  }
+
+  completeJobsMarkSyncSucceededAndEnqueueJobs(input: {
+    accountId: string;
+    completedAt: string;
+    disconnectGeneration: number | null;
+    jobIds: readonly string[];
+    jobs: readonly DeviceSyncJobInput[];
+    provider: string;
+    syncSucceededAt: string;
+    syncSuccessOptions: {
+      localConnectionRevision?: number | null;
+      metadataPatch?: Record<string, unknown>;
+      nextReconcileAt?: string | null;
+    };
+    workerId: string;
+  }): boolean {
+    try {
+      return withImmediateTransaction(this.database, () => {
+        const completed = completeDeviceSyncJobsIfOwnedInTransaction(this.database, {
+          jobIds: input.jobIds,
+          now: input.completedAt,
+          workerId: input.workerId,
+        });
+
+        if (!completed) {
+          return false;
+        }
+
+        const markedSucceeded = markStoredSyncSucceededInTransaction(
+          this.database,
+          input.accountId,
+          input.syncSucceededAt,
+          input.disconnectGeneration,
+          input.syncSuccessOptions,
+        );
+
+        if (!markedSucceeded) {
+          throw new DeviceSyncSuccessFenceRejectedError();
+        }
+
+        for (const job of input.jobs) {
+          enqueueDeviceSyncJobInTransaction(this.database, {
+            provider: input.provider,
+            accountId: input.accountId,
+            kind: job.kind,
+            payload: job.payload ?? {},
+            priority: job.priority ?? 0,
+            availableAt: job.availableAt,
+            maxAttempts: job.maxAttempts,
+            dedupeKey: job.dedupeKey,
+          });
+        }
+
+        return true;
+      });
+    } catch (error) {
+      if (error instanceof DeviceSyncSuccessFenceRejectedError) {
+        return false;
+      }
+
+      throw error;
+    }
   }
 
   releaseJobIfOwned(jobId: string, workerId: string, now: string): boolean {
