@@ -1014,6 +1014,290 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("round1: durable-effect wake survives a due-assistant service pass that reschedules", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const idleCheckpointDelayMs = 1;
+    const dueAssistantWakeAt = TEST_NOW;
+    const durableWakeAt = "2026-04-27T00:02:00.000Z";
+    const replacementWakeAt = "2026-04-27T00:05:00.000Z";
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      return {
+        nextWakeAt: durableWakeAt,
+        nextWakeReason: "system-mailbox",
+        requiresFollowUpCheckpoint: true,
+      };
+    });
+    let assistantPass = 0;
+    let snapshotCount = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_round1_durable_wake_survives_reschedule",
+              idleCheckpointDelayMs,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              snapshotCount += 1;
+              events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: String(snapshotCount).repeat(64).slice(0, 64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `round1-durable-wake-survives-reschedule-${snapshotCount}.bundle.json`,
+                  size: 512,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPass += 1;
+              events.push(
+                `assistant:${assistantPass}:${input.workspace?.nextWakeAt ?? "none"}`,
+              );
+
+              if (assistantPass === 1) {
+                assistantOneObserved.resolve();
+                return {
+                  afterCheckpoint: async () => ({
+                    afterDurableCheckpoint: durableEffect,
+                    checkpointReason: "system_mailbox_receipt",
+                    nextWakeAt: dueAssistantWakeAt,
+                    nextWakeReason: "assistant",
+                  }),
+                  checkpointReason: "system_mailbox_receipt",
+                  nextWakeAt: dueAssistantWakeAt,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                };
+              }
+
+              if (assistantPass === 2) {
+                assistantTwoObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: replacementWakeAt,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                };
+              }
+
+              return {
+                progressed: false,
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      const result = await resultPromise;
+
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.ok(
+        checkpointRequests.some((request) => request.nextWakeAt === durableWakeAt)
+          || result.nextWakeAt === durableWakeAt,
+        events.join(","),
+      );
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant:")), [
+        "assistant:1:none",
+        `assistant:2:${dueAssistantWakeAt}`,
+      ]);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("round3: fresh hot work during durable-wake reconciliation still waits the idle delay", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 180_000;
+    const dueAssistantWakeAt = TEST_NOW;
+    const durableWakeAt = "2026-04-27T00:02:00.000Z";
+    const replacementWakeAt = "2026-04-27T00:10:00.000Z";
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    const checkpointStartedAtMs: number[] = [];
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      return {
+        nextWakeAt: durableWakeAt,
+        nextWakeReason: "system-mailbox",
+        requiresFollowUpCheckpoint: true,
+      };
+    });
+    let assistantPass = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_round3_hot_work_durable_reconcile_waits",
+              idleCheckpointDelayMs,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              checkpointStartedAtMs.push(Date.now());
+              events.push(`snapshot:${snapshotInput.reason}:${checkpointStartedAtMs.length}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: `${checkpointStartedAtMs.length}`.repeat(64).slice(0, 64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `round3-hot-work-durable-reconcile-${checkpointStartedAtMs.length}.bundle.json`,
+                  size: 512,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            async runAssistantPhase(input) {
+              assistantPass += 1;
+              events.push(
+                `assistant:${assistantPass}:${input.workspace?.nextWakeAt ?? "none"}`,
+              );
+
+              if (assistantPass === 1) {
+                assistantOneObserved.resolve();
+                return {
+                  afterCheckpoint: async () => ({
+                    afterDurableCheckpoint: durableEffect,
+                    checkpointReason: "system_mailbox_receipt",
+                    nextWakeAt: dueAssistantWakeAt,
+                    nextWakeReason: "assistant",
+                  }),
+                  checkpointReason: "system_mailbox_receipt",
+                  nextWakeAt: dueAssistantWakeAt,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                };
+              }
+
+              if (assistantPass === 2) {
+                assistantTwoObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: replacementWakeAt,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                };
+              }
+
+              return {
+                progressed: false,
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+
+      assert.equal(checkpointRequests.length, 2, events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+      assert.equal(checkpointRequests.length, 2, events.join(","));
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await resultPromise;
+
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.deepEqual(checkpointStartedAtMs, [
+        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
+        Date.parse(TEST_NOW) + idleCheckpointDelayMs,
+        Date.parse(TEST_NOW) + idleCheckpointDelayMs * 2,
+      ]);
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.reason,
+          request.nextWakeAt,
+          request.nextWakeReason,
+        ]),
+        [
+          ["idle_shutdown", dueAssistantWakeAt, "assistant"],
+          ["idle_shutdown", dueAssistantWakeAt, "assistant"],
+          ["idle_shutdown", durableWakeAt, "system-mailbox"],
+        ],
+      );
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant:")), [
+        "assistant:1:none",
+        `assistant:2:${dueAssistantWakeAt}`,
+      ]);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, durableWakeAt);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("services a due wake blocked only by durable effects instead of exiting the attempt", async () => {
     // Incident shape (2026-07-03): a reply turn leaves a plain due assistant
     // wake (starved system-lane work) plus pending durable effects (consume
@@ -6493,6 +6777,1561 @@ describe("hosted workspace runtime entrypoint", () => {
       } finally {
         await removeTempRoot(vaultRoot);
       }
+    }
+  });
+
+  // === COLLAPSE INVARIANT SUITE (assert observable behavior only) ===
+
+  test("collapse invariant 1: fresh conversation wake runs before idle shutdown checkpointing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const idleCheckpointDelayMs = 180_000;
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_collapse_invariant_fresh_conversation_preempts",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "1".repeat(64),
+                  key: "users/bundles/member-synthetic/collapse-fresh-conversation.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  version: "4",
+                }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              events.push(
+                `assistant.phase:${assistantPhaseCalls}:`
+                  + `${input.workspace?.nextWakeAt ?? "none"}`,
+              );
+              if (assistantPhaseCalls === 1) {
+                assistantOneObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: null,
+                  nextWakeReason: null,
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              assistantTwoObserved.resolve();
+              return {
+                progressed: false,
+                redactedStatus: {
+                  hostedAssistantProgressed: false,
+                },
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      assert.equal(checkpointRequests.length, 0);
+
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_collapse_fresh_conversation",
+        laneSeq: "1",
+        occurredAt: "2026-04-27T00:00:01.000Z",
+      }));
+      runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      assert.equal(checkpointRequests.length, 0);
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      const result = await resultPromise;
+
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:2:none")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+      );
+      assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_collapse_fresh_conversation",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        ["idle_shutdown", null, null],
+      ]);
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("collapse invariant 2a: due assistant wake waits for the idle checkpoint delay", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 180_000;
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    let firstCheckpointStartedAtMs: number | null = null;
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_collapse_invariant_due_assistant_waits",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              firstCheckpointStartedAtMs ??= Date.now();
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "2".repeat(64),
+                  key: "users/bundles/member-synthetic/collapse-due-assistant-waits.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              events.push(
+                `assistant.phase:${assistantPhaseCalls}:`
+                  + `${input.workspace?.nextWakeAt ?? "none"}`,
+              );
+              if (assistantPhaseCalls === 1) {
+                assistantOneObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              assistantTwoObserved.resolve();
+              return {
+                progressed: false,
+                redactedStatus: {
+                  hostedAssistantProgressed: false,
+                },
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+      assert.equal(checkpointRequests.length, 0);
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        "assistant.phase:1:none",
+      ]);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      const result = await resultPromise;
+
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(events, `assistant.phase:2:${TEST_NOW}`),
+      );
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        ["idle_shutdown", TEST_NOW, "assistant"],
+      ]);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("collapse invariant 2b: mailbox budget exhaustion waits for the idle checkpoint delay", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const importObserved = createDeferred<void>();
+    const idleCheckpointDelayMs = 180_000;
+    let firstCheckpointStartedAtMs: number | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_collapse_invariant_budget_waits",
+              budget: {
+                maxMailboxItems: 1,
+              },
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              firstCheckpointStartedAtMs ??= Date.now();
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "3".repeat(64),
+                  key: "users/bundles/member-synthetic/collapse-budget-waits.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              importObserved.resolve();
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [
+                  createMailboxItem({
+                    id: "mailbox_item_collapse_budget_001",
+                    laneSeq: "1",
+                  }),
+                  createMailboxItem({
+                    createdAt: "9999-01-01T00:00:00.000Z",
+                    id: "mailbox_item_collapse_budget_002",
+                    laneSeq: "2",
+                  }),
+                ],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(importObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+      assert.equal(checkpointRequests.length, 0);
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await resultPromise;
+
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_collapse_budget_001",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeReason,
+      ]), [
+        ["idle_shutdown", "mailbox"],
+      ]);
+      assert.equal(result.status, "budget_exhausted");
+      assert.match(result.nextWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("collapse invariant 2c: durable follow-up effects do not pull the first checkpoint earlier", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 180_000;
+    const assistantObserved = createDeferred<void>();
+    const durableEffectObserved = createDeferred<void>();
+    const durableWakeAt = "2026-04-27T00:02:00.000Z";
+    let firstCheckpointStartedAtMs: number | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_collapse_invariant_durable_followup_waits",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              firstCheckpointStartedAtMs ??= Date.now();
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `collapse-durable-followup-waits-${checkpointRequests.length}.bundle.json`,
+                  size: 640,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            async runAssistantPhase() {
+              events.push("assistant.phase:1");
+              assistantObserved.resolve();
+              return {
+                afterCheckpoint: async () => ({
+                  afterDurableCheckpoint: async () => {
+                    events.push("durable-effect");
+                    durableEffectObserved.resolve();
+                    return {
+                      nextWakeAt: durableWakeAt,
+                      nextWakeReason: "system-mailbox",
+                      requiresFollowUpCheckpoint: true,
+                    };
+                  },
+                  checkpointReason: "system_mailbox_receipt",
+                }),
+                checkpointReason: "system_mailbox_receipt",
+                progressed: true,
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
+      assert.equal(checkpointRequests.length, 0);
+      await vi.advanceTimersByTimeAsync(1);
+      await withRealTimeout(durableEffectObserved.promise, 15_000, () => events.join(","));
+      if (vi.getTimerCount() > 0) {
+        await vi.runOnlyPendingTimersAsync();
+      }
+      const result = await resultPromise;
+
+      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(events, "durable-effect"),
+      );
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, durableWakeAt);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("collapse invariant 2d: shutdown checkpoints dirty state immediately", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const shutdownController = new AbortController();
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_collapse_invariant_shutdown_immediate",
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "4".repeat(64),
+                key: "users/bundles/member-synthetic/collapse-shutdown-immediate.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ id: "mailbox_item_collapse_shutdown", laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            events.push("assistant.phase:1");
+            shutdownController.abort(
+              new DOMException("Synthetic container SIGTERM.", "AbortError"),
+            );
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:1")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+      );
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.equal(result.status, "scheduled");
+      assert.ok(result.nextWakeAt);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("collapse invariant 3a: due assistant wake committed by checkpoint is serviced in the same attempt", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 60_000;
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_collapse_invariant_due_assistant_serviced",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: `${checkpointRequests.length + 5}`.repeat(64).slice(0, 64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `collapse-due-assistant-serviced-${checkpointRequests.length}.bundle.json`,
+                  size: 640,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              events.push(
+                `assistant.phase:${assistantPhaseCalls}:`
+                  + `${input.workspace?.nextWakeAt ?? "none"}`,
+              );
+              if (assistantPhaseCalls === 1) {
+                assistantOneObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              assistantTwoObserved.resolve();
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: null,
+                nextWakeReason: null,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      const result = await resultPromise;
+
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(events, `assistant.phase:2:${TEST_NOW}`),
+      );
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        ["idle_shutdown", TEST_NOW, "assistant"],
+        ["idle_shutdown", null, null],
+      ]);
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("collapse invariant 3b: due device-sync wake committed by checkpoint is returned without assistant service", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 180_000;
+    const assistantObserved = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_collapse_invariant_device_sync_returned",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "6".repeat(64),
+                  key: "users/bundles/member-synthetic/collapse-device-sync-returned.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            async runAssistantPhase() {
+              assistantPhaseCalls += 1;
+              events.push(`assistant.phase:${assistantPhaseCalls}`);
+              assistantObserved.resolve();
+              return {
+                checkpointReason: "system_mailbox_receipt",
+                nextWakeAt: TEST_NOW,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      const result = await resultPromise;
+
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        "assistant.phase:1",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        ["idle_shutdown", TEST_NOW, "device-sync.reconcile"],
+      ]);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("round4: foreground drain loop terminates with device-sync maintenance and assistant input churn", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-round4-drain-loop-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const continuationWakeAt = "2026-04-27T00:00:30.000Z";
+    const mailboxItems: HostedMailboxItem[] = [
+      createMailboxItem({
+        id: "mailbox_item_round4_drain_loop_001",
+        laneSeq: "1",
+      }),
+    ];
+    let assistantPhaseCalls = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_round4_foreground_drain_loop_terminates",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/round4-drain-loop.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            return {
+              assistantInputId: await stagePendingLinqAssistantInputForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: TEST_NOW,
+                nextWakeReason: "device-sync.reconcile",
+                version: "4",
+              }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls > 6) {
+              throw new Error("Foreground drain loop did not terminate.");
+            }
+
+            if (assistantPhaseCalls <= 2) {
+              const nextSeq = String(assistantPhaseCalls + 1);
+              const nextItemId = `mailbox_item_round4_drain_loop_00${nextSeq}`;
+              mailboxItems.push(createMailboxItem({
+                id: nextItemId,
+                laneSeq: nextSeq,
+                occurredAt: `2026-04-27T00:00:0${nextSeq}.000Z`,
+              }));
+              runtimeWakeSignal.notify(Date.parse(TEST_NOW) + assistantPhaseCalls);
+              await waitUntil(() => {
+                assert.ok(events.includes(`mailbox.importItem:${nextItemId}`));
+              });
+            }
+
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              deviceSyncMaintenanceRan: true,
+              nextWakeAt: continuationWakeAt,
+              nextWakeReason: "device-sync.reconcile",
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+                hostedDeviceSyncSkipped: false,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      const result = await withRealTimeout(
+        resultPromise,
+        5_000,
+        () => `Foreground drain loop did not return. Events: ${events.join(",")}`,
+      );
+
+      assert.equal(assistantPhaseCalls, 3);
+      assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_round4_drain_loop_001",
+        "mailbox.importItem:mailbox_item_round4_drain_loop_002",
+        "mailbox.importItem:mailbox_item_round4_drain_loop_003",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        ["idle_shutdown", continuationWakeAt, "device-sync.reconcile"],
+      ]);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, continuationWakeAt);
+    } finally {
+      runtimeAbortController.abort();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("round4: committed due assistant wake hidden pre-checkpoint is still serviced, not lost", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-round4-hidden-wake-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const idleCheckpointDelayMs = 50;
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    const assistantThreeObserved = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_round4_committed_due_assistant_hidden_then_serviced",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `round4-hidden-wake-${checkpointRequests.length}.bundle.json`,
+                  size: 640,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  version: "4",
+                }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              events.push(
+                `assistant.phase:${assistantPhaseCalls}:`
+                  + `${input.workspace?.nextWakeAt ?? "none"}:`
+                  + `${input.workspace?.nextWakeReason ?? "none"}`,
+              );
+              if (assistantPhaseCalls === 1) {
+                assistantOneObserved.resolve();
+                setTimeout(() => {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_round4_hidden_wake_conversation",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:01.000Z",
+                  }));
+                  runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+                }, 0);
+                return {
+                  checkpointReason: "canonical_runtime_commit" as const,
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              if (assistantPhaseCalls === 2) {
+                assistantTwoObserved.resolve();
+                return {
+                  progressed: false,
+                  redactedStatus: {
+                    hostedAssistantProgressed: false,
+                  },
+                };
+              }
+
+              if (assistantPhaseCalls === 3) {
+                assistantThreeObserved.resolve();
+                return {
+                  checkpointReason: "assistant_runtime_commit" as const,
+                  nextWakeAt: null,
+                  nextWakeReason: null,
+                  progressed: true,
+                  redactedStatus: {
+                    hostedAssistantProgressed: true,
+                  },
+                };
+              }
+
+              throw new Error("Committed due assistant wake should be serviced exactly once after checkpoint.");
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(0);
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      assert.equal(checkpointRequests.length, 0);
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        `assistant.phase:1:${TEST_NOW}:assistant`,
+        "assistant.phase:2:none:none",
+      ]);
+
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await withRealTimeout(assistantThreeObserved.promise, 15_000, () => events.join(","));
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(events, `assistant.phase:3:${TEST_NOW}:assistant`),
+      );
+      assert.ok(
+        requireEventIndex(events, "mailbox.importItem:mailbox_item_round4_hidden_wake_conversation")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+      );
+
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      const result = await resultPromise;
+
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        ["idle_shutdown", TEST_NOW, "assistant"],
+        ["idle_shutdown", null, null],
+      ]);
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  for (const scenario of [
+    {
+      name: "replacement",
+      nextWakeAt: "2026-04-27T00:05:00.000Z",
+      nextWakeReason: "assistant" as const,
+      resultStatus: "scheduled" as const,
+      systemItemId: null,
+    },
+    {
+      name: "clear",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      resultStatus: "idle" as const,
+      systemItemId: "mailbox_item_collapse_stale_clear_system",
+    },
+    {
+      name: "null-reason-clear",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      resultStatus: "idle" as const,
+      systemItemId: "mailbox_item_collapse_stale_null_reason_system",
+    },
+  ]) {
+    test(`collapse invariant 4: stale committed assistant wake is not replayed before checkpoint (${scenario.name})`, async () => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+      const events: string[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const mailboxItems: HostedMailboxItem[] = [];
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const idleCheckpointDelayMs = 50;
+      const staleWakeAt = TEST_NOW;
+      const assistantOneObserved = createDeferred<void>();
+      const assistantTwoObserved = createDeferred<void>();
+      let assistantPhaseCalls = 0;
+
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      try {
+        vi.setSystemTime(new Date(TEST_NOW));
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+        const resultPromise = withRealTimeout(
+          runHostedWorkspaceRuntimeJobInProcess(
+            createWorkspaceRuntimeJobInput({
+              request: {
+                attemptId: `attempt_collapse_invariant_stale_${scenario.name}`,
+                idleCheckpointDelayMs,
+                leaseGeneration: "9",
+                userId: TEST_USER_ID,
+                workspaceVersion: "4",
+              },
+            }),
+            {
+              async createCheckpointSnapshot(snapshotInput) {
+                events.push(`snapshot:${snapshotInput.reason}`);
+                return {
+                  snapshotRef: createBundleRef({
+                    hash: "7".repeat(64),
+                    key:
+                      "users/bundles/member-synthetic/"
+                      + `collapse-stale-${scenario.name}.bundle.json`,
+                    size: 640,
+                  }),
+                };
+              },
+              async importItem(item) {
+                events.push(`mailbox.importItem:${item.item.id}`);
+                return { status: "imported" };
+              },
+              platform: createPlatform({
+                mailboxPort: createMailboxPort({
+                  events,
+                  items: mailboxItems,
+                }),
+                workspacePort: createWorkspacePort({
+                  checkpointRequests,
+                  events,
+                  workspace: createWorkspaceState({
+                    nextWakeAt: staleWakeAt,
+                    nextWakeReason: scenario.name === "null-reason-clear" ? null : "assistant",
+                    version: "4",
+                  }),
+                }),
+              }),
+              runtimeWakeSignal,
+              async runAssistantPhase(input) {
+                assistantPhaseCalls += 1;
+                events.push(
+                  `assistant.phase:${assistantPhaseCalls}:`
+                    + `${input.workspace?.nextWakeAt ?? "none"}`,
+                );
+                if (assistantPhaseCalls === 1) {
+                  assistantOneObserved.resolve();
+                  mailboxItems.push(createMailboxItem({
+                    id: `mailbox_item_collapse_stale_${scenario.name}_conversation`,
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:01.000Z",
+                  }));
+                  setTimeout(() => runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1), 0);
+                  return {
+                    checkpointReason: "canonical_runtime_commit",
+                    nextWakeAt: scenario.nextWakeAt,
+                    nextWakeReason: scenario.nextWakeReason,
+                    progressed: true,
+                    redactedStatus: {
+                      hostedAssistantProgressed: true,
+                    },
+                  };
+                }
+
+                assistantTwoObserved.resolve();
+                return {
+                  progressed: false,
+                  redactedStatus: {
+                    hostedAssistantProgressed: false,
+                  },
+                };
+              },
+              vaultRoot,
+            },
+          ),
+          15_000,
+          () => events.join(","),
+        );
+
+        await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+        await waitForFakeTimerScheduled(() => events.join(","));
+        await vi.advanceTimersByTimeAsync(0);
+        await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+        await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+        if (vi.getTimerCount() > 0) {
+          await vi.runOnlyPendingTimersAsync();
+        }
+        const result = await resultPromise;
+
+        const assistantEvents = events.filter((event) =>
+          event.startsWith("assistant.phase:")
+        );
+        assert.deepEqual(
+          assistantEvents.filter((event) => event.includes(staleWakeAt)),
+          [`assistant.phase:1:${staleWakeAt}`],
+        );
+        assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+        assert.equal(checkpointRequests[0]?.nextWakeAt, scenario.nextWakeAt);
+        assert.equal(checkpointRequests[0]?.nextWakeReason, scenario.nextWakeReason);
+        assert.equal(result.status, scenario.resultStatus);
+        assert.equal(result.nextWakeAt, scenario.nextWakeAt);
+        assert.ok(
+          requireEventIndex(
+            events,
+            `mailbox.importItem:mailbox_item_collapse_stale_${scenario.name}_conversation`,
+          )
+            < requireEventIndex(events, "snapshot:idle_shutdown"),
+        );
+      } finally {
+        vi.useRealTimers();
+        await removeTempRoot(vaultRoot);
+      }
+    });
+  }
+
+  test("collapse invariant 5: source-blind pre-checkpoint import is conversation-only and system work waits", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const idleCheckpointDelayMs = 50;
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    const systemFollowUpWakeAt = "2099-04-27T00:10:00.000Z";
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_collapse_invariant_system_waits_for_checkpoint",
+            idleCheckpointDelayMs,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "8".repeat(64),
+                key: "users/bundles/member-synthetic/collapse-system-waits.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: TEST_NOW,
+                nextWakeReason: "assistant",
+                version: "4",
+              }),
+            }),
+          }),
+          runtimeWakeSignal,
+          signal: runtimeAbortController.signal,
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push(
+              `assistant.phase:${assistantPhaseCalls}:`
+                + `${input.workspace?.nextWakeAt ?? "none"}`,
+            );
+            if (assistantPhaseCalls === 1) {
+              assistantOneObserved.resolve();
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_collapse_system_after_checkpoint",
+                kind: "member.activated",
+                lane: "system",
+                laneSeq: "1",
+                occurredAt: "2026-04-27T00:00:01.000Z",
+              }));
+              setTimeout(() => runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1), 0);
+              return {
+                checkpointReason: "canonical_runtime_commit",
+                nextWakeAt: systemFollowUpWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
+            }
+
+            assistantTwoObserved.resolve();
+            return {
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+      const resultWithTimeout = withRealTimeout(
+        resultPromise,
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(0);
+      assert.equal(
+        events.includes("mailbox.importItem:mailbox_item_collapse_system_after_checkpoint"),
+        false,
+      );
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      if (vi.getTimerCount() > 0) {
+        await vi.runOnlyPendingTimersAsync();
+      }
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      const result = await resultWithTimeout;
+
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown")
+          < requireEventIndex(
+            events,
+            "mailbox.importItem:mailbox_item_collapse_system_after_checkpoint",
+          ),
+      );
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_collapse_system_after_checkpoint",
+        )
+          < requireEventIndex(events, `assistant.phase:2:${systemFollowUpWakeAt}`),
+      );
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.nextWakeAt, systemFollowUpWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[1]?.nextWakeAt, systemFollowUpWakeAt);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, systemFollowUpWakeAt);
+    } finally {
+      vi.useRealTimers();
+      runtimeAbortController.abort();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("collapse invariant 6: durable post-checkpoint wake is persisted by a follow-up checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 1;
+    const durableWakeAt = "2026-04-27T00:03:00.000Z";
+    const assistantObserved = createDeferred<void>();
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_collapse_invariant_durable_wake_followup",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: `${checkpointRequests.length + 9}`.repeat(64).slice(0, 64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `collapse-durable-wake-followup-${checkpointRequests.length}.bundle.json`,
+                  size: 640,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            async runAssistantPhase() {
+              events.push("assistant.phase:1");
+              assistantObserved.resolve();
+              return {
+                afterCheckpoint: async () => ({
+                  afterDurableCheckpoint: async () => {
+                    events.push("durable-effect");
+                    return {
+                      nextWakeAt: durableWakeAt,
+                      nextWakeReason: "system-mailbox",
+                      requiresFollowUpCheckpoint: true,
+                    };
+                  },
+                  checkpointReason: "system_mailbox_receipt",
+                }),
+                checkpointReason: "system_mailbox_receipt",
+                progressed: true,
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      if (vi.getTimerCount() > 0) {
+        await vi.runOnlyPendingTimersAsync();
+      }
+      const result = await resultPromise;
+
+      const snapshotEvents = events.filter((event) => event === "snapshot:idle_shutdown");
+      assert.equal(snapshotEvents.length, 2, events.join(","));
+      assert.ok(
+        requireEventIndex(events, "durable-effect")
+          < events.lastIndexOf("snapshot:idle_shutdown"),
+      );
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        ["idle_shutdown", null, null],
+        ["idle_shutdown", durableWakeAt, "system-mailbox"],
+      ]);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, durableWakeAt);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("collapse invariant 7: redacted status counters survive a checkpointed follow-up pass", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 1;
+    const assistantOneObserved = createDeferred<void>();
+    const assistantTwoObserved = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_collapse_invariant_redacted_status_survives",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: `${checkpointRequests.length + 11}`.repeat(64).slice(0, 64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `collapse-redacted-status-${checkpointRequests.length}.bundle.json`,
+                  size: 640,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            async runAssistantPhase() {
+              assistantPhaseCalls += 1;
+              events.push(`assistant.phase:${assistantPhaseCalls}`);
+              if (assistantPhaseCalls === 1) {
+                assistantOneObserved.resolve();
+                const systemPreparedStatus: HostedRuntimeRedactedJson = {
+                  hostedSystemMailboxPrepared: 1,
+                };
+                const systemRecordedStatus: HostedRuntimeRedactedJson = {
+                  hostedSystemMailboxRecorded: 1,
+                };
+                return {
+                  afterCheckpoint: async () => ({
+                    checkpointReason: "system_mailbox_receipt" as const,
+                    nextWakeAt: TEST_NOW,
+                    nextWakeReason: "assistant",
+                    redactedStatus: systemRecordedStatus,
+                  }),
+                  checkpointReason: "system_mailbox_receipt" as const,
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                  redactedStatus: systemPreparedStatus,
+                };
+              }
+
+              assistantTwoObserved.resolve();
+              const assistantStatus: HostedRuntimeRedactedJson = {
+                hostedAssistantProgressed: true,
+                hostedSystemMailboxPrepared: 0,
+                hostedSystemMailboxRecorded: 0,
+              };
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: null,
+                nextWakeReason: null,
+                progressed: true,
+                redactedStatus: assistantStatus,
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      const result = await resultPromise;
+
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        "assistant.phase:1",
+        "assistant.phase:2",
+      ]);
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.redactedStatus?.hostedSystemMailboxPrepared, 1);
+      assert.equal(result.redactedStatus?.hostedSystemMailboxRecorded, 1);
+      assert.equal(result.redactedStatus?.hostedAssistantProgressed, true);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
     }
   });
 
