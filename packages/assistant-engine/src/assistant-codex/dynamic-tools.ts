@@ -1,15 +1,24 @@
 import { z } from 'zod'
+import { loadVault } from '@murphai/core'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
+  HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
+  HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
+  HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupToolRequest,
+  type HostedRuntimeNewsletterParticipantSummary,
+  type HostedRuntimeNewsletterScheduledAuthority,
+  type HostedRuntimeNewsletterToolRequest,
+  type HostedRuntimeNewsletterToolResponse,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from '@murphai/hosted-execution/vault-share'
+import type { OverviewWeeklyStat } from '@murphai/query'
 import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
@@ -85,6 +94,12 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
+import {
+  buildGroupNewsletterSharedWeeklyStats,
+  GroupNewsletterSharedProjectionUnavailableError,
+  readGroupNewsletterSharedMemberDailyRecords,
+  type GroupNewsletterSharedMemberDailyRecords,
+} from './group-newsletter-shared-stats.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step'
@@ -313,14 +328,21 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional health permissions stay individually selected on the join page. A join offer tells people to like the server-owned offer message, then liking grants membership plus only the posted health-permission snapshot. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or opt anyone into email.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer tells people to like the server-owned offer message, then liking grants membership plus only the posted permission snapshot. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       action: {
         type: 'string',
-        enum: ['read_current', 'create_join_link', 'post_join_offer', 'read_chat_participants', 'share_contact_card'],
+        enum: [
+          'read_current',
+          'create_join_link',
+          'post_join_offer',
+          'read_chat_participants',
+          'share_contact_card',
+          'revoke_own_email_share',
+        ],
       },
       displayName: {
         type: 'string',
@@ -356,6 +378,48 @@ export const MURPH_GROUP_TOOL = {
       },
     },
     required: ['action'],
+  },
+} as const
+
+export const MURPH_NEWSLETTER_TOOL = {
+  namespace: 'murph',
+  name: 'newsletter',
+  description:
+    'Read or send the current hosted group health newsletter. Use action="read_stats" with a groupId to get opted-in participants only, each participant\'s member id, display name, hasEmail flag, shared weekly health rollups, group superlatives, and participants without a verified email. Use action="send" only during the scheduled newsletter run after the setup notice and opt-out window have elapsed; never send the first edition immediately after creating or editing the newsletter automation. It sends one shared email thread to participants who granted email authorization and have a verified email. This tool never returns raw email addresses and does not create or edit the cron automation.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['read_stats', 'send'],
+      },
+      groupId: {
+        type: 'string',
+        minLength: 1,
+      },
+      subject: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
+      },
+      html: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
+      },
+      text: {
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+          },
+          { type: 'null' },
+        ],
+        default: null,
+      },
+    },
+    required: ['action', 'groupId'],
   },
 } as const
 
@@ -565,6 +629,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_GROUP_TOOL,
+  MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
@@ -597,6 +662,7 @@ export interface MurphDynamicToolAvailability {
   connectedAppsAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
   groupAvailable?: boolean | null
+  newsletterAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
@@ -627,6 +693,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
+    [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
@@ -708,6 +775,11 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .strict(),
   z
     .object({
+      action: z.literal('revoke_own_email_share'),
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal('create_join_link'),
       displayName: z
         .string()
@@ -719,6 +791,29 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       requestedVaultShareProjectionKinds: z
         .array(z.enum(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS))
         .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length)
+        .optional(),
+    })
+    .strict(),
+])
+
+const newsletterArgumentsSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('read_stats'),
+      groupId: z.string().trim().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('send'),
+      groupId: z.string().trim().min(1),
+      html: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH),
+      subject: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH),
+      text: z
+        .string()
+        .trim()
+        .max(HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH)
+        .nullable()
         .optional(),
     })
     .strict(),
@@ -1065,12 +1160,20 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-newsletter-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
     }
   | {
       kind: 'group'
       request: HostedRuntimeGroupToolRequest
+    }
+  | {
+      kind: 'newsletter'
+      request: HostedRuntimeNewsletterToolRequest
     }
   | {
       kind: 'submit-product-feedback'
@@ -1249,6 +1352,19 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'group',
+        request: parsed.request,
+      }
+    }
+    case MURPH_NEWSLETTER_TOOL.name: {
+      const parsed = parseNewsletterArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-newsletter-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'newsletter',
         request: parsed.request,
       }
     }
@@ -1450,6 +1566,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid family plan arguments')
     case 'invalid-group-arguments':
       return toolTextResult(false, 'invalid group arguments')
+    case 'invalid-newsletter-arguments':
+      return toolTextResult(false, 'invalid newsletter arguments')
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-media-arguments':
@@ -1588,6 +1706,12 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeGroupTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
+      })
+    case 'newsletter':
+      return await executeNewsletterTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
+        vaultRoot: input.vaultRoot ?? null,
       })
     case 'finish-without-reply':
       return {
@@ -1818,6 +1942,205 @@ async function executeGroupTool(input: {
   } catch {
     return toolTextResult(false, 'group tool request failed')
   }
+}
+
+interface GroupNewsletterParticipantStats {
+  displayName: string | null
+  hasEmail: boolean
+  memberId: string
+  weeklyStats: OverviewWeeklyStat[]
+}
+
+interface GroupNewsletterSuperlative {
+  displayName: string | null
+  kind: 'top_current_week'
+  memberId: string
+  stream: string
+  unit: string | null
+  value: number
+}
+
+async function executeNewsletterTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeNewsletterToolRequest
+  vaultRoot: string | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  const newsletterTool = input.hostedToolContext?.newsletterTool ?? null
+  if (!newsletterTool) {
+    return toolTextResult(false, 'newsletter tools are unavailable for this turn')
+  }
+  try {
+    if (input.request.action === 'send') {
+      await ensureGroupNewsletterSharedProjectionAvailable(input.vaultRoot)
+    }
+
+    const scheduledAutomationAuthority =
+      input.hostedToolContext?.currentScheduledAutomationAuthority?.() ??
+      null
+    const request: HostedRuntimeNewsletterToolRequest =
+      input.request.action === 'send'
+        ? {
+            ...input.request,
+            scheduledAutomationAuthority,
+          }
+        : input.request
+    const result = await newsletterTool.request(request)
+    if (result.action === 'send') {
+      input.hostedToolContext?.recordNewsletterSendResult?.(result)
+    }
+    const toolSucceeded = !isNewsletterAllRecipientSendFailure(result)
+    if (
+      input.request.action !== 'read_stats'
+      || result.action !== 'read_stats'
+      || result.result.status !== 'ok'
+    ) {
+      return toolTextResult(toolSucceeded, safeToolPayloadText(result))
+    }
+
+    const statsContext = await resolveGroupNewsletterStatsContext({
+      scheduledAutomationAuthority,
+      vaultRoot: input.vaultRoot,
+    })
+    const participants = await readGroupNewsletterParticipantStats({
+      participants: result.result.participants,
+      referenceDate: statsContext.referenceDate,
+      timeZone: statsContext.timeZone,
+      vaultRoot: input.vaultRoot,
+    })
+    return toolTextResult(true, safeToolPayloadText({
+      action: 'read_stats',
+      result: {
+        groupId: result.result.groupId,
+        missingEmailParticipants: participants.filter((participant) => !participant.hasEmail),
+        participants,
+        status: 'ok',
+        superlatives: buildGroupNewsletterSuperlatives(participants),
+      },
+    }))
+  } catch (error) {
+    if (error instanceof GroupNewsletterSharedProjectionUnavailableError) {
+      return groupNewsletterSharedProjectionUnavailableResult(input.request.action)
+    }
+    return toolTextResult(false, 'newsletter tool request failed')
+  }
+}
+
+function isNewsletterAllRecipientSendFailure(
+  result: HostedRuntimeNewsletterToolResponse,
+): boolean {
+  return (
+    result.action === 'send' &&
+    result.result.status === 'unavailable' &&
+    result.result.unavailableReason === 'send_failed'
+  )
+}
+
+async function ensureGroupNewsletterSharedProjectionAvailable(
+  vaultRoot: string | null,
+): Promise<void> {
+  if (!vaultRoot) {
+    return
+  }
+  await readGroupNewsletterSharedMemberDailyRecords({ vaultRoot })
+}
+
+function groupNewsletterSharedProjectionUnavailableResult(
+  action: HostedRuntimeNewsletterToolRequest['action'],
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(true, safeToolPayloadText({
+    action,
+    result: {
+      status: 'unavailable',
+      unavailableReason: 'shared_projection_unavailable',
+    },
+  }))
+}
+
+async function readGroupNewsletterParticipantStats(input: {
+  participants: readonly HostedRuntimeNewsletterParticipantSummary[]
+  referenceDate?: string
+  timeZone?: string | null
+  vaultRoot: string | null
+}): Promise<GroupNewsletterParticipantStats[]> {
+  const sharedByGrantor = new Map<string, GroupNewsletterSharedMemberDailyRecords>()
+  if (input.vaultRoot) {
+    for (const entry of await readGroupNewsletterSharedMemberDailyRecords({
+      vaultRoot: input.vaultRoot,
+    })) {
+      sharedByGrantor.set(entry.memberId, entry)
+    }
+  }
+
+  return input.participants.map((participant) => {
+    const shared = sharedByGrantor.get(participant.memberId) ?? null
+    return {
+      displayName: shared?.displayName ?? participant.displayName,
+      hasEmail: participant.hasEmail,
+      memberId: participant.memberId,
+      weeklyStats: buildGroupNewsletterSharedWeeklyStats({
+        dailySampleSummaries: shared?.dailySampleSummaries ?? [],
+        referenceDate: input.referenceDate,
+        timeZone: input.timeZone,
+      }),
+    }
+  })
+}
+
+async function resolveGroupNewsletterStatsContext(input: {
+  scheduledAutomationAuthority: HostedRuntimeNewsletterScheduledAuthority | null
+  vaultRoot: string | null
+}): Promise<{
+  referenceDate?: string
+  timeZone: string | null
+}> {
+  let timeZone: string | null = null
+  if (input.vaultRoot) {
+    try {
+      const vault = await loadVault({ vaultRoot: input.vaultRoot })
+      timeZone = vault.metadata.timezone
+    } catch {
+      timeZone = null
+    }
+  }
+
+  return {
+    referenceDate: input.scheduledAutomationAuthority?.occurrenceAt,
+    timeZone,
+  }
+}
+
+function buildGroupNewsletterSuperlatives(
+  participants: readonly GroupNewsletterParticipantStats[],
+): GroupNewsletterSuperlative[] {
+  const topByMetric = new Map<string, GroupNewsletterSuperlative>()
+  for (const participant of participants) {
+    for (const stat of participant.weeklyStats) {
+      if (stat.currentWeekAvg === null) {
+        continue
+      }
+      const candidate = {
+        displayName: participant.displayName,
+        kind: 'top_current_week',
+        memberId: participant.memberId,
+        stream: stat.stream,
+        unit: stat.unit,
+        value: stat.currentWeekAvg,
+      } satisfies GroupNewsletterSuperlative
+      const key = `${candidate.stream}:${candidate.unit ?? ''}`
+      const existing = topByMetric.get(key)
+      if (!existing || candidate.value > existing.value) {
+        topByMetric.set(key, candidate)
+      }
+    }
+  }
+
+  return [...topByMetric.values()]
+    .sort((left, right) =>
+      left.stream === right.stream
+        ? left.memberId.localeCompare(right.memberId)
+        : left.stream.localeCompare(right.stream),
+    )
+    .slice(0, 3)
 }
 
 async function executeProgressUpdateTool(input: {
@@ -2535,10 +2858,54 @@ function parseGroupArguments(
   if (
     parsed.data.action === 'read_chat_participants'
     || parsed.data.action === 'share_contact_card'
+    || parsed.data.action === 'revoke_own_email_share'
   ) {
     return { ok: true, request: { action: parsed.data.action } }
   }
   return { ok: true, request: { action: 'read_current' } }
+}
+
+function parseNewsletterArguments(
+  value: unknown,
+):
+  | {
+      request: HostedRuntimeNewsletterToolRequest
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = newsletterArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.newsletter.input',
+        schemaRootKeys: ['action', 'groupId'],
+        toolName: 'murph.newsletter',
+      }),
+    }
+  }
+  if (parsed.data.action === 'read_stats') {
+    return {
+      ok: true,
+      request: {
+        action: 'read_stats',
+        groupId: parsed.data.groupId,
+      },
+    }
+  }
+
+  return {
+    ok: true,
+    request: {
+      action: 'send',
+      groupId: parsed.data.groupId,
+      html: parsed.data.html,
+      subject: parsed.data.subject,
+      ...(parsed.data.text === undefined ? {} : { text: parsed.data.text }),
+    },
+  }
 }
 
 function parseFinishWithoutReplyArguments(

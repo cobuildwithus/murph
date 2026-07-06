@@ -195,6 +195,20 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     expect(deliver).not.toHaveBeenCalled();
   });
 
+  it("skips email delivery authorization grants because they carry no records", async () => {
+    const deliver = vi.fn();
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot: "/nonexistent",
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionKinds: async () => ["group-email.v0"],
+      },
+    });
+
+    expect(result.outcome).toBe("no-projectable-records");
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it("sends nothing when the vault has no projectable share data", async () => {
     const vaultRoot = await createProfileVault(null);
     const deliver = vi.fn();
@@ -659,6 +673,24 @@ describe("importHostedVaultShareDeliveryWake", () => {
       join(vaultRoot, "raw", "shared", "vault-share-projections.json"),
       "utf8",
     )).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("skips email delivery authorization imports because they carry no records", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+
+    await expect(importHostedVaultShareDeliveryWake({
+      vaultRoot,
+      wake: {
+        ...wake,
+        delivery: {
+          ...wake.delivery,
+          projectionKind: "group-email.v0",
+        },
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    await expect(readFile(storePath(vaultRoot), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("replaces a shared record when a corrected delivery revision arrives", async () => {

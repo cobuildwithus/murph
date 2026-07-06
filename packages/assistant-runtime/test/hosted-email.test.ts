@@ -8,7 +8,7 @@ import {
 } from "../src/hosted-email.ts";
 
 test("hosted email send parsing accepts only hosted-supported target kinds", () => {
-  assert.deepEqual(hostedEmailSendTargetKindValues, ["explicit", "thread"]);
+  assert.deepEqual(hostedEmailSendTargetKindValues, ["explicit", "group", "thread"]);
 
   for (const targetKind of hostedEmailSendTargetKindValues) {
     assert.equal(
@@ -36,6 +36,7 @@ test("hosted email send parsing ignores the legacy identityId and timeoutMs fiel
       timeoutMs: 45_000,
     }),
     {
+      html: null,
       idempotencyKey: null,
       message: "hello",
       replyToMessageId: null,
@@ -67,6 +68,7 @@ test("hosted email send parsing preserves idempotency and reply target fields", 
       targetKind: "thread",
     }),
     {
+      html: null,
       idempotencyKey: "email-send-123",
       message: "hello",
       replyToMessageId: "message-parent-123",
@@ -114,7 +116,7 @@ test("hosted email send parsing rejects unsupported target kinds", () => {
       target: "user@example.com",
       targetKind: "broadcast",
     }),
-    /must be explicit or thread/u,
+    /must be explicit, group, or thread/u,
   );
   assert.throws(
     () => parseHostedEmailSendRequest({
@@ -122,6 +124,6 @@ test("hosted email send parsing rejects unsupported target kinds", () => {
       target: "user@example.com",
       targetKind: "participant",
     }),
-    /must be explicit or thread/u,
+    /must be explicit, group, or thread/u,
   );
 });

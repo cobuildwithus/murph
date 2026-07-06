@@ -148,6 +148,8 @@ function resolveProjectableRecordReader(
   projectionKind: HostedVaultShareProjectionKind,
 ): (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]> {
   switch (projectionKind) {
+    case "group-email.v0":
+      return async () => [];
     case "heart-rate-zones-days.v0":
       return readProjectableHeartRateZoneDays;
     case "profile-name.v0":

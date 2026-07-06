@@ -25,6 +25,7 @@ describe('hosted runtime email subject support', () => {
         targetKind: 'explicit',
       }),
     ).toEqual({
+      html: null,
       idempotencyKey: null,
       message: 'Hello from Murph',
       replyToMessageId: null,
