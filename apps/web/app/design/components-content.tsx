@@ -17,6 +17,7 @@ import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
+import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
@@ -29,6 +30,7 @@ import { Separator } from "@/src/components/ui/separator";
 import { Input } from "@/src/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/src/components/ui/input-otp";
 import { Label } from "@/src/components/ui/label";
+import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import { Alert, AlertTitle, AlertDescription } from "@/src/components/ui/alert";
@@ -80,6 +82,17 @@ function DialogPreviewFrame({ label, children }: { label: string; children: Reac
   );
 }
 
+function resolveDesignPhoneCountryOption(value: string) {
+  const option =
+    HOSTED_PHONE_COUNTRY_OPTIONS.find((candidate) => candidate.code === value)
+    ?? HOSTED_PHONE_COUNTRY_OPTIONS.find((candidate) => candidate.code === "US")
+    ?? HOSTED_PHONE_COUNTRY_OPTIONS[0];
+  if (!option) {
+    throw new Error("Phone country options are empty.");
+  }
+  return option;
+}
+
 
 const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   {
@@ -115,6 +128,9 @@ export function ComponentsContent() {
   const [addedContactAvatar, setAddedContactAvatar] =
     useState<MurphContactAvatarOption | null>(null);
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
+  const [phoneInputCountryCode, setPhoneInputCountryCode] = useState("US");
+  const [phoneInputValue, setPhoneInputValue] = useState("");
+  const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(phoneInputCountryCode);
 
   return (
     <TooltipProvider>
@@ -184,6 +200,17 @@ export function ComponentsContent() {
             <div className="grid gap-2">
               <Label htmlFor="disabled-ds">Disabled</Label>
               <Input id="disabled-ds" placeholder="Can't edit this" disabled />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="phone-number-ds">Phone number</Label>
+              <PhoneNumberInput
+                id="phone-number-ds"
+                options={HOSTED_PHONE_COUNTRY_OPTIONS}
+                selectedCountry={selectedPhoneInputCountry}
+                value={phoneInputValue}
+                onCountryChange={setPhoneInputCountryCode}
+                onPhoneNumberChange={setPhoneInputValue}
+              />
             </div>
           </div>
         </Section>

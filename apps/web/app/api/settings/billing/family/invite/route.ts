@@ -3,11 +3,11 @@ import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/enti
 import { readHostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/env";
 import {
   buildHostedFamilyInviteAcceptUrl,
-  buildHostedFamilyTelegramInviteUrl,
   ensureHostedAccountGroupForOwnerTx,
   hostedFamilyInviteHasReusableTarget,
   issueHostedFamilyInviteTx,
   readHostedFamilyOwnerSnapshotForMember,
+  resolveHostedFamilyTelegramInviteUrl,
   updateHostedFamilySeatCount,
   waitForHostedFamilyBilledSeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
@@ -102,12 +102,11 @@ export const POST = withJsonError(async (request: Request) => {
       status: invite.status,
       targetLabel: invite.targetLabel,
       targetPhoneHint: invite.targetPhoneHint,
-      telegramInviteUrl: telegramBotUsername
-        ? buildHostedFamilyTelegramInviteUrl({
-            botUsername: telegramBotUsername,
-            inviteCode: invite.inviteCode,
-          })
-        : null,
+      telegramInviteUrl: resolveHostedFamilyTelegramInviteUrl({
+        inviteCode: invite.inviteCode,
+        isTelegramBound: invite.targetTelegramUsername !== null,
+        telegramBotUsername,
+      }),
     },
   });
 });
