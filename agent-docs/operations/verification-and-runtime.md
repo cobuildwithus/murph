@@ -102,22 +102,25 @@ When that fast path applies:
 Hosted-web production build memory: on Linux CI, `apps/web verify` defaults to
 wrapping its production `next build` step with
 `apps/web/scripts/build-memory-guard.sh`. The guard creates a root-level
-cgroup-v2 child with `memory.max=7000000000` and `memory.swap.max=0`, moves the
+cgroup-v2 child with `memory.max=7200000000` and `memory.swap.max=0`, moves the
 build process into that cgroup, and then execs the build as the invoking user
 with the caller's environment, working directory, and stdio unchanged. The cap
-is a cgroup-unit machine model for Vercel Standard's 8 GB build machine: 7.0 GB
-available to the build cgroup, with a 1.0 GB reserve for OS/container overhead
-outside it. Guard cap overrides must stay strictly greater than the
-6,000,000,000-byte cgroup floor and less than or equal to 7,200,000,000 bytes,
-which preserves at least a 0.8 GB reserve under that model. The floor comes from
-a fully working Linux CI run on 2026-07-06 where a 6.0 GB cgroup cap OOM-killed
-a build that the real Vercel 8 GB machine accepts, so caps at or below that
-floor are known false positives. PR #349's 5.34 GB passing and 6.18 GB
-exit-137 failure numbers are historical single-process RSS measurements only;
-they are not comparable to cgroup accounting, which includes anonymous memory
-across all build workers plus page cache. The guard prints cgroup `memory.peak`
-and `memory.events`, and fails if cgroup v2, the root memory controller,
-passwordless `sudo`, or peak accounting are unavailable. Treat the guard
+is a cgroup-unit machine model for Vercel Standard's 8 GB build machine: 7.2 GB
+available to the build cgroup, with a 0.8 GB reserve for OS/container overhead
+outside it at the ceiling. The cap sits at the ceiling pending decomposition
+evidence because 7.0 GB was measured to false-positive on 2026-07-06 while the
+real Vercel machine passes. Guard cap overrides must stay strictly greater than
+the 6,000,000,000-byte cgroup floor and less than or equal to 7,200,000,000
+bytes, which preserves at least a 0.8 GB reserve under that model. The floor
+comes from a fully working Linux CI run on 2026-07-06 where a 6.0 GB cgroup cap
+OOM-killed a build that the real Vercel 8 GB machine accepts, so caps at or
+below that floor are known false positives. PR #349's 5.34 GB passing and 6.18
+GB exit-137 failure numbers are historical single-process RSS measurements
+only; they are not comparable to cgroup accounting, which includes anonymous
+memory across all build workers plus page cache. The guard prints cgroup
+`memory.peak`, `memory.events`, and selected final-read `memory.stat` values,
+and fails if cgroup v2, the root memory controller, passwordless `sudo`, or
+peak accounting are unavailable. Treat the guard
 verdict as the memory-budget signal; `memory.peak` is the cgroup-unit trend to
 watch, but it can sit near the cap when page cache saturates the cgroup.
 Disabling the guard in Linux CI requires

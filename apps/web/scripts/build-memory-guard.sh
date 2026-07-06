@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-default_memory_cap_bytes=7000000000
+default_memory_cap_bytes=7200000000
 vercel_standard_machine_bytes=8000000000
 known_false_positive_floor_bytes=6000000000
 machine_model_ceiling_bytes=7200000000
@@ -120,6 +120,7 @@ report_cgroup_memory() {
   local peak_gb
   local cap_gb
   local memory_events
+  local memory_stat
   local oom_kill_count=""
 
   if [[ ! -r "$memory_peak_file" ]]; then
@@ -144,6 +145,27 @@ report_cgroup_memory() {
     memory_events="$(tr "\n" " " < "$memory_events_file" | sed "s/[[:space:]]*$//")"
     oom_kill_count="$(awk '$1 == "oom_kill" { print $2 }' "$memory_events_file")"
     printf '[apps/web build memory guard] cgroup memory.events: %s\n' "$memory_events" >&2
+  fi
+
+  if [[ -r "$memory_stat_file" ]]; then
+    memory_stat="$(awk '
+      $1 == "anon" || $1 == "file" || $1 == "file_dirty" || $1 == "file_writeback" || $1 == "slab" || $1 == "kernel_stack" {
+        value[$1] = $2
+      }
+      END {
+        key_count = split("anon file file_dirty file_writeback slab kernel_stack", keys, " ")
+        for (i = 1; i <= key_count; i++) {
+          key = keys[i]
+          if (key in value) {
+            printf "%s%s=%s", seen ? " " : "", key, value[key]
+            seen = 1
+          }
+        }
+      }
+    ' "$memory_stat_file")"
+    if [[ -n "$memory_stat" ]]; then
+      printf '[apps/web build memory guard] cgroup memory.stat: %s\n' "$memory_stat" >&2
+    fi
   fi
 
   if [[ -n "$oom_kill_count" && "$oom_kill_count" -gt 0 ]]; then
@@ -194,6 +216,7 @@ printf '[apps/web build memory guard] enforcing cgroup machine-model cap %s byte
 cgroup_dir="$cgroup_root/murph-web-build-$$"
 memory_peak_file="$cgroup_dir/memory.peak"
 memory_events_file="$cgroup_dir/memory.events"
+memory_stat_file="$cgroup_dir/memory.stat"
 trap 'status=$?; cleanup_cgroup "$status"; exit "$status"' EXIT
 
 if ! sudo -n mkdir "$cgroup_dir"; then
