@@ -544,16 +544,19 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledTimes(
       HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
     );
-    const updateWhere = mocks.hostedThreadContainerParticipantUpdateMany.mock.calls[0]?.[0]?.where;
-    expect(updateWhere?.participantMemberId?.notIn).toHaveLength(
-      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
-    );
+    expect(mocks.hostedThreadContainerParticipantUpdateMany).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "Hosted thread-container participant reconcile capped.",
       expect.objectContaining({
         cap: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
         reason: "roster_exceeds_cap",
         rosterSize: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1,
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted thread-container participant reconcile skipped.",
+      expect.objectContaining({
+        reason: "roster_exceeds_cap",
       }),
     );
     warn.mockRestore();
@@ -592,16 +595,19 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledTimes(
       HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
     );
-    const updateWhere = mocks.hostedThreadContainerParticipantUpdateMany.mock.calls[0]?.[0]?.where;
-    expect(updateWhere?.participantMemberId?.notIn).toHaveLength(
-      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
-    );
+    expect(mocks.hostedThreadContainerParticipantUpdateMany).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "Hosted thread-container participant reconcile capped.",
       expect.objectContaining({
         cap: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
         reason: "roster_exceeds_cap",
         rosterSize: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1,
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted thread-container participant reconcile skipped.",
+      expect.objectContaining({
+        reason: "roster_exceeds_cap",
       }),
     );
     warn.mockRestore();

@@ -307,7 +307,45 @@ function createPrisma(input: {
     updateMany: vi.fn(),
   };
   const hostedMember = {
-    findUnique: vi.fn().mockResolvedValue(null),
+    findUnique: vi.fn().mockImplementation(async ({ where }: { where: { id: string } }) => {
+      if (routeContainerMemberId && where.id === routeContainerMemberId) {
+        return {
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          suspendedAt: routeContainerActive
+            ? null
+            : new Date("2026-06-24T00:00:00.000Z"),
+          threadContainer: {
+            owner: {
+              accountGroupMemberships: routeOwnerSponsored
+                ? [
+                    {
+                      group: {
+                        billingStatus: HostedBillingStatus.active,
+                        suspendedAt: null,
+                      },
+                      status: "active",
+                    },
+                  ]
+                : [],
+              billingStatus: routeOwnerSponsored
+                ? HostedBillingStatus.not_started
+                : routeOwnerActive
+                  ? HostedBillingStatus.active
+                  : HostedBillingStatus.paused,
+              suspendedAt: null,
+            },
+          },
+        };
+      }
+
+      return {
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      };
+    }),
   };
   const hostedThreadContainerParticipant = {
     findFirst: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) =>

@@ -1725,6 +1725,22 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     if (!routeLookupKey) {
       throw new Error("Expected test route lookup key.");
     }
+    const threadContainerAccessRecord = {
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-03-26T00:00:00.000Z"),
+      id: "member_thread_container_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+    };
+    const ownerAccessRecord = {
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-03-26T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+    };
     const prisma = asPrismaTransactionClient({
       hostedThreadRoute: {
         findMany: vi.fn()
@@ -1739,19 +1755,24 @@ describe("handleHostedOnboardingLinqWebhook", () => {
                   suspendedAt: null,
                   updatedAt: new Date("2026-03-26T00:00:00.000Z"),
                 },
-                owner: {
-                  billingStatus: HostedBillingStatus.active,
-                  createdAt: new Date("2026-03-26T00:00:00.000Z"),
-                  id: "member_owner_123",
-                  suspendedAt: null,
-                  updatedAt: new Date("2026-03-26T00:00:00.000Z"),
-                },
+                owner: ownerAccessRecord,
               },
               containerMemberId: "member_thread_container_123",
               threadLookupKey: routeLookupKey,
             },
           ])
           .mockResolvedValue([]),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...threadContainerAccessRecord,
+          threadContainer: {
+            owner: ownerAccessRecord,
+          },
+        }),
+      },
+      hostedThreadContainerParticipant: {
+        findFirst: vi.fn().mockResolvedValue(null),
       },
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),

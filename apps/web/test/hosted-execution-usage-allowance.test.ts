@@ -2005,7 +2005,9 @@ describe("checkHostedAiUsageGate", () => {
         scheduledBillingPlanCode: null,
       },
       billingStatus: HostedBillingStatus.active,
+      id: "member_123",
       suspendedAt: null,
+      threadContainer: null,
     }));
 
     await expect(checkHostedAiUsageGate({
@@ -2051,7 +2053,9 @@ describe("checkHostedAiUsageGate", () => {
         scheduledBillingPlanCode: null,
       },
       billingStatus: HostedBillingStatus.active,
+      id: "member_123",
       suspendedAt: null,
+      threadContainer: null,
     }));
     await expect(checkHostedAiUsageGate({
       memberId: "member_123",
@@ -2417,44 +2421,25 @@ function createGatePrisma(input: {
         : null),
     },
     hostedMember: {
-      findUnique: vi.fn()
-        .mockResolvedValueOnce({
-          billingRef: {
-            currentBillingPhase: input.billingPhase ?? null,
-            currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
-            currentCheckoutOffer: input.checkoutOffer ?? null,
-            currentPeriodEnd: periodEnd,
-            currentPeriodStart: periodStart,
-            currentTrialEndsAt: input.trialEndsAt ?? null,
-            currentTrialStartedAt: input.trialStartedAt ?? null,
-            pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
-            pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
-            scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
-            scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
-          },
-          billingStatus: input.billingStatus ?? HostedBillingStatus.active,
-          suspendedAt: input.suspendedAt ?? null,
-          threadContainer,
-        })
-        .mockResolvedValueOnce({
-          billingRef: {
-            currentBillingPhase: input.billingPhase ?? null,
-            currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
-            currentCheckoutOffer: input.checkoutOffer ?? null,
-            currentPeriodEnd: periodEnd,
-            currentPeriodStart: periodStart,
-            currentTrialEndsAt: input.trialEndsAt ?? null,
-            currentTrialStartedAt: input.trialStartedAt ?? null,
-            pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
-            pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
-            scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
-            scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
-          },
-          billingStatus: input.billingStatus ?? HostedBillingStatus.active,
-          id: "member_123",
-          suspendedAt: input.suspendedAt ?? null,
-          threadContainer,
-        }),
+      findUnique: vi.fn(async () => ({
+        billingRef: {
+          currentBillingPhase: input.billingPhase ?? null,
+          currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
+          currentCheckoutOffer: input.checkoutOffer ?? null,
+          currentPeriodEnd: periodEnd,
+          currentPeriodStart: periodStart,
+          currentTrialEndsAt: input.trialEndsAt ?? null,
+          currentTrialStartedAt: input.trialStartedAt ?? null,
+          pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
+          pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
+          scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
+          scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
+        },
+        billingStatus: input.billingStatus ?? HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: input.suspendedAt ?? null,
+        threadContainer,
+      })),
     },
     hostedThreadContainerParticipant: {
       findFirst: vi.fn(async () => input.threadContainerParticipantActive

@@ -9,10 +9,7 @@ import { issueHostedInviteTx } from "./invite-service";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
-import {
-  hasActiveHostedThreadContainerAccessWithParticipants,
-  readActiveHostedMemberAccess,
-} from "./member-access";
+import { readActiveHostedMemberAccess } from "./member-access";
 import {
   isHostedOnboardingError,
 } from "./errors";
@@ -1024,10 +1021,8 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     summary,
   } = input.context;
 
-  const containerAccessActive = await hasActiveHostedThreadContainerAccessWithParticipants({
-    container: input.route.container,
-    containerMemberId: input.route.containerMemberId,
-    owner: input.route.owner,
+  const containerAccessActive = await readActiveHostedMemberAccess({
+    memberId: input.route.containerMemberId,
     prisma: input.prisma,
   });
 

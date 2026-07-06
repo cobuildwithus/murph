@@ -24,10 +24,10 @@ import type { HostedOnboardingReadClient } from "./shared";
  *
  * - an active membership in an active, unsuspended account group (family), or
  * - for synthetic thread-container members, the container owner's access, or
- *   an active current participant through the async thread-container resolver.
+ *   an active current participant through `readActiveHostedMemberAccess`.
  *
  * Owners cannot themselves be containers, so the derivation depth is at most
- * two and a single query loads everything `hasActiveHostedMemberAccess` needs.
+ * two and a single query loads everything the owner branch needs.
  * Every runtime, webhook, page, and egress gate must use this module; the
  * own-billing predicates in `entitlement.ts` are for billing surfaces that
  * genuinely mean "this member's own subscription".
@@ -98,8 +98,8 @@ export function hasActiveHostedMemberAccess(member: HostedMemberAccessState): bo
   }
 
   // A thread-container member is synthetic: its own billing status is not an
-  // access source. Participant-aware container gates use the async resolver
-  // below; this pure member resolver stays owner-only for legacy callers.
+  // access source. Async gates must use `readActiveHostedMemberAccess`, which
+  // adds participant-aware access after this owner-only pure shortcut.
   if (member.threadContainer) {
     return hasActiveHostedPersonAccess(member.threadContainer.owner);
   }
@@ -139,10 +139,10 @@ export async function hasActiveHostedThreadContainerAccessWithParticipants(input
 }
 
 /**
- * Set-based projection of `hasActiveHostedMemberAccess` for queries that must
- * select access-holding members in the database (pagination, counts, sweeps).
- * Keep it semantically identical to the pure derivation above; the raw-SQL
- * due-reconcile sweep in device-sync mirrors the person branch of this shape.
+ * Set-based projection of the pure access branch for queries that must select
+ * access-holding members in the database (pagination, counts, sweeps). It
+ * intentionally cannot recurse into thread-container participant rosters; use
+ * `readActiveHostedMemberAccess` for user-visible async gates.
  */
 export function activeHostedMemberAccessWhere(): Prisma.HostedMemberWhereInput {
   const personAccess: Prisma.HostedMemberWhereInput["OR"] = [
@@ -193,7 +193,20 @@ export async function readActiveHostedMemberAccess(input: {
     },
   });
 
-  return member !== null && hasActiveHostedMemberAccess(member);
+  if (!member) {
+    return false;
+  }
+
+  if (member.threadContainer) {
+    return await hasActiveHostedThreadContainerAccessWithParticipants({
+      container: member,
+      containerMemberId: input.memberId,
+      owner: member.threadContainer.owner,
+      prisma,
+    });
+  }
+
+  return hasActiveHostedMemberAccess(member);
 }
 
 export async function hasAnyActiveHostedThreadContainerParticipant(input: {
@@ -201,6 +214,9 @@ export async function hasAnyActiveHostedThreadContainerParticipant(input: {
   prisma?: HostedOnboardingReadClient;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
+  // Participant rows are a provider-roster projection. A departed member can
+  // remain active until the next successful complete roster reconcile; that
+  // stale-open window is accepted because false removal would drop live groups.
   const participant = await prisma.hostedThreadContainerParticipant.findFirst({
     select: {
       participantMemberId: true,

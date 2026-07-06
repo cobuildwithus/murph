@@ -12,9 +12,9 @@ import {
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
 import {
-  hasActiveHostedThreadContainerAccessWithParticipants,
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
+  readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import {
   hostedOnboardingError,
@@ -257,10 +257,8 @@ export async function assertHostedThreadRouteEgressAuthority(input: {
   });
 
   if (route && route.containerMemberId === input.authority.containerMemberId) {
-    if (await hasActiveHostedThreadContainerAccessWithParticipants({
-      container: route.container,
-      containerMemberId: route.containerMemberId,
-      owner: route.owner,
+    if (await readActiveHostedMemberAccess({
+      memberId: route.containerMemberId,
       prisma: input.prisma,
     })) {
       return route;

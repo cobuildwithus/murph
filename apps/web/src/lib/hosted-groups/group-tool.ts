@@ -274,7 +274,7 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
   await reconcileHostedThreadContainerParticipants({
     chatId: authorized.chatId,
     containerMemberId: input.memberId,
-    handles: participantHandles,
+    handles,
     prisma,
     resolvedParticipants,
   });
@@ -308,6 +308,8 @@ export async function reconcileHostedThreadContainerParticipants(input: {
       return;
     }
 
+    const hasCompleteRoster =
+      handles.length <= HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX;
     const participantHandles = selectHostedThreadContainerParticipantHandles({
       chatId: input.chatId,
       containerMemberId: input.containerMemberId,
@@ -361,6 +363,15 @@ export async function reconcileHostedThreadContainerParticipants(input: {
           },
         },
       });
+    }
+
+    if (!hasCompleteRoster) {
+      logHostedThreadContainerParticipantReconcileSkipped({
+        chatId: input.chatId,
+        containerMemberId: input.containerMemberId,
+        reason: "roster_exceeds_cap",
+      });
+      return;
     }
 
     await input.prisma.hostedThreadContainerParticipant.updateMany({

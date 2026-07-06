@@ -37,9 +37,9 @@ import {
   readHostedFamilyAccessForMember,
 } from "../hosted-onboarding/family-plan";
 import {
-  hasActiveHostedThreadContainerAccessWithParticipants,
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
+  readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
@@ -298,14 +298,8 @@ async function hasHostedAiUsageThreadContainerAccess(input: {
     return null;
   }
 
-  if (input.container.suspendedAt !== null) {
-    return false;
-  }
-
-  return await hasActiveHostedThreadContainerAccessWithParticipants({
-    container: input.container,
-    containerMemberId: input.containerMemberId,
-    owner: input.threadContainer.owner,
+  return await readActiveHostedMemberAccess({
+    memberId: input.containerMemberId,
     prisma: input.tx,
   });
 }

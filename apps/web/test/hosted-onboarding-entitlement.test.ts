@@ -10,6 +10,7 @@ import {
   hasActiveHostedMemberAccess,
   hasActiveHostedThreadContainerAccess,
   hasActiveHostedThreadContainerAccessWithParticipants,
+  readActiveHostedMemberAccess,
 } from "@/src/lib/hosted-onboarding/member-access";
 
 const SUSPENDED_AT = new Date("2026-04-06T10:00:00.000Z");
@@ -258,6 +259,41 @@ describe("hosted member access (single resolver)", () => {
       prisma: prisma as never,
     })).resolves.toBe(true);
 
+    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
+      select: {
+        participantMemberId: true,
+      },
+      where: expect.objectContaining({
+        containerMemberId: "member_container",
+        removedAt: null,
+      }),
+    });
+  });
+
+  it("makes readActiveHostedMemberAccess the participant-aware thread-container gate", async () => {
+    const prisma = {
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          ...person({ billingStatus: HostedBillingStatus.not_started }),
+          threadContainer: {
+            owner: person({ billingStatus: HostedBillingStatus.paused }),
+          },
+        })),
+      },
+      hostedThreadContainerParticipant: {
+        findFirst: vi.fn(async () => ({ participantMemberId: "member_participant" })),
+      },
+    };
+
+    await expect(readActiveHostedMemberAccess({
+      memberId: "member_container",
+      prisma: prisma as never,
+    })).resolves.toBe(true);
+
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledWith({
+      select: expect.any(Object),
+      where: { id: "member_container" },
+    });
     expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
       select: {
         participantMemberId: true,

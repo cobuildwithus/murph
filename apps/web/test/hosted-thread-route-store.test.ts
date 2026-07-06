@@ -44,6 +44,25 @@ function createPrismaMock() {
   };
 }
 
+function buildThreadContainerAccessRecord(input: {
+  containerSuspendedAt?: Date | null;
+  ownerBillingStatus?: string;
+  ownerSuspendedAt?: Date | null;
+}) {
+  return {
+    accountGroupMemberships: [],
+    billingStatus: "not_started",
+    suspendedAt: input.containerSuspendedAt ?? null,
+    threadContainer: {
+      owner: {
+        accountGroupMemberships: [],
+        billingStatus: input.ownerBillingStatus ?? "paused",
+        suspendedAt: input.ownerSuspendedAt ?? null,
+      },
+    },
+  };
+}
+
 describe("hosted thread route store", () => {
   it("reads a routed external thread without exposing raw thread ids", async () => {
     const prisma = createPrismaMock();
@@ -355,6 +374,9 @@ describe("hosted thread route store", () => {
         threadLookupKey,
       },
     ]);
+    prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
+      ownerBillingStatus: "paused",
+    }));
     prisma.hostedThreadContainerParticipant.findFirst.mockResolvedValueOnce({
       participantMemberId: "member_active_participant_123",
     });
@@ -417,6 +439,9 @@ describe("hosted thread route store", () => {
         threadLookupKey,
       },
     ]);
+    prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
+      ownerBillingStatus: "paused",
+    }));
     prisma.hostedThreadContainerParticipant.findFirst.mockResolvedValueOnce(null);
 
     await expect(assertHostedLinqRouteEgressAuthority({
@@ -468,6 +493,10 @@ describe("hosted thread route store", () => {
         threadLookupKey,
       },
     ]);
+    prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
+      containerSuspendedAt: new Date("2026-06-24T00:00:00.000Z"),
+      ownerBillingStatus: "paused",
+    }));
     prisma.hostedThreadContainerParticipant.findFirst.mockResolvedValueOnce({
       participantMemberId: "member_active_participant_123",
     });

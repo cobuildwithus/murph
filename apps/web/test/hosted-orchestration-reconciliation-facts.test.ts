@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   drainHostedLinqSideEffectsDirect: vi.fn(),
   fetch: vi.fn(),
   getPrisma: vi.fn(),
+  hostedThreadContainerParticipantFindFirst: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxFirstPendingConversationItem: vi.fn(),
@@ -103,6 +104,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord());
+    mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([
@@ -921,6 +923,40 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
+  it("does not block thread-container runtime facts when an active participant keeps an inactive-owner group alive", async () => {
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord({
+      billingStatus: "not_started",
+      threadContainer: {
+        owner: {
+          accountGroupMemberships: [],
+          billingStatus: "paused",
+          suspendedAt: null,
+        },
+      },
+    }));
+    mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue({
+      participantMemberId: "member_active_participant",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toBeNull();
+    expect(mocks.hostedThreadContainerParticipantFindFirst).toHaveBeenCalledWith({
+      select: {
+        participantMemberId: true,
+      },
+      where: expect.objectContaining({
+        containerMemberId: MEMBER_ID,
+        removedAt: null,
+      }),
+    });
+  });
+
   it("gates due model-capable workspace wakes", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T11:59:59.000Z",
@@ -1137,6 +1173,9 @@ function createPrismaClientStub() {
     },
     hostedMember: {
       findUnique: mocks.hostedMemberFindUnique,
+    },
+    hostedThreadContainerParticipant: {
+      findFirst: mocks.hostedThreadContainerParticipantFindFirst,
     },
     kind: "prisma",
   };
