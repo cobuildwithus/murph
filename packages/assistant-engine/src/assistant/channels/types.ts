@@ -130,6 +130,7 @@ export interface AssistantChannelDependencies {
   >
   telegramVoiceMemoRuntime?: TelegramRuntimeDependencies
   sendLinq?: (input: {
+    answeredMailboxItemIds?: readonly string[] | null
     directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
     idempotencyKey?: string | null
@@ -150,6 +151,7 @@ export interface AssistantChannelDependencies {
     | void
   >
   sendLinqVoiceMemo?: (input: {
+    answeredMailboxItemIds?: readonly string[] | null
     attachmentId: string
     replyToMessageId?: string | null
     signal?: AbortSignal
@@ -231,6 +233,7 @@ export interface AssistantChannelAdapter {
   send: (
     input: {
       actorId: string | null
+      answeredMailboxItemIds?: readonly string[] | null
       bindingDelivery: AssistantBindingDelivery | null
       deliverySource?: AssistantDeliverySource | null
       explicitTarget: string | null
@@ -279,6 +282,7 @@ export interface AssistantChannelAdapterSpec {
   }) => boolean
   sendMessage: (input: {
     actorId: string | null
+    answeredMailboxItemIds?: readonly string[] | null
     candidate: AssistantDeliveryCandidate
     deliverySource?: AssistantDeliverySource | null
     dependencies: AssistantChannelDependencies

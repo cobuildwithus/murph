@@ -130,6 +130,7 @@ const TEST_OUTBOX_INTENT = {
   status: 'pending',
   message: 'hello',
   media: [],
+  answeredMailboxItemIds: [],
   operation: null,
   subject: null,
   dedupeKey: 'dedupe_123',

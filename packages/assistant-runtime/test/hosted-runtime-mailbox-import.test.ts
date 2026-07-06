@@ -195,6 +195,51 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "2");
   });
 
+  test("uses consumedAt as per-item durable consume authority without covering a lower gap", async () => {
+    const { mailboxPort } = createMailboxPort({
+      consumedSeqByLane: [
+        { consumedSeq: "0", lane: "conversation" },
+      ],
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_conversation_pending_gap_001",
+          laneSeq: "1",
+        }),
+        createMailboxItem({
+          consumedAt: "2026-04-26T00:00:04.000Z",
+          id: "mailbox_item_conversation_answered_behind_gap_002",
+          laneSeq: "2",
+        }),
+      ],
+    });
+    const durablyConsumedBySeq = new Map<string, boolean | undefined>();
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
+        return {
+          assistantInputId: `assistant_input_per_item_${input.item.laneSeq}`,
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_consumed_at_gap",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual([...durablyConsumedBySeq.entries()], [
+      ["1", false],
+      ["2", true],
+    ]);
+    assert.deepEqual(result.assistantInputIds, ["assistant_input_per_item_1"]);
+    assert.equal(result.importedCount, 2);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.equal(result.state.watermarks.conversation, "2");
+  });
+
   test("imports a fresh conversation tail when the consumed watermark lags local import", async () => {
     const nextItem = createMailboxItem({
       id: "mailbox_item_conversation_new_after_replay",
@@ -1791,6 +1836,7 @@ function createMailboxPort(input: {
 function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMailboxItem {
   return {
     createdAt: TEST_NOW,
+    consumedAt: null,
     dedupeKey: "dedupe_synthetic_import",
     expiresAt: null,
     id: "mailbox_item_conversation_001",

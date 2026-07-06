@@ -61,9 +61,8 @@ export type HostedMailboxPostCheckpointEffect = () =>
   Promise<HostedMailboxPostCheckpointEffectResult>;
 
 export interface HostedMailboxResolvedImportItem {
-  // True when the durable consumed watermark from the mailbox fetch response
-  // already covers this item's laneSeq: the item is a replay of an
-  // already-handled message and must stay conversation context only, never a
+  // True when this item is durably marked handled by its item stamp or the
+  // lane consumed watermark: it must stay conversation context only, never a
   // fresh reply candidate.
   durablyConsumed?: boolean;
   item: HostedMailboxItem;
@@ -209,11 +208,11 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
     const itemSeq = parseMailboxSeqForImportOrNull(item.laneSeq);
     const itemIsDurablyConsumedReplay = itemSeq !== null
-      && isDurablyConsumedConversationReplay({
+      && isDurablyConsumedReplay({
         consumedSeq: consumedSeqByLane[lane],
         consumedSeqPresent: consumedSeqState.presentByLane[lane],
+        item,
         itemSeq,
-        lane,
       });
     if (itemSeq !== null && shouldFastForwardHostedMailboxExpectedSeq({
       consumedSeq: consumedSeqByLane[lane],
@@ -348,7 +347,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     }
 
     const outcome = await input.importItem({
-      durablyConsumed: itemSeq <= consumedSeqByLane[lane],
+      durablyConsumed: itemIsDurablyConsumedReplay,
       item,
       payload,
       route,
@@ -439,7 +438,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         importedSystemMailboxItemIds.push(item.id);
       }
       const replyableConversationInput =
-        route.action === "import-conversation-message" && itemSeq > consumedSeqByLane[lane];
+        route.action === "import-conversation-message" && !itemIsDurablyConsumedReplay;
       if (replyableConversationInput) {
         conversationImportedCount += 1;
       }
@@ -479,15 +478,27 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   };
 }
 
-function isDurablyConsumedConversationReplay(input: {
+function isDurablyConsumedReplay(input: {
   consumedSeq: bigint;
   consumedSeqPresent: boolean;
+  item: HostedMailboxItem;
   itemSeq: bigint;
-  lane: HostedMailboxLane;
 }): boolean {
-  return input.lane === "conversation"
-    && input.consumedSeqPresent
-    && input.itemSeq <= input.consumedSeq;
+  // Two complementary consume signals, not redundant: consumedAt is the
+  // delivery-time per-item stamp for Linq-answered items (fills the window
+  // before checkpoint so the direct wake is duplicate-safe); consumedSeq is the
+  // checkpoint watermark covering every handled conversation item across all
+  // channels, suppressions, and no-reply turns. Do not collapse to one: only
+  // Linq replies stamp consumedAt, so dropping consumedSeq would re-process
+  // non-Linq/no-reply handled items after a restore.
+  if (hasHostedMailboxItemConsumedAt(input.item)) {
+    return true;
+  }
+  return input.consumedSeqPresent && input.itemSeq <= input.consumedSeq;
+}
+
+function hasHostedMailboxItemConsumedAt(item: HostedMailboxItem): boolean {
+  return typeof item.consumedAt === "string" && item.consumedAt.trim().length > 0;
 }
 
 function recordHostedMailboxDurablyConsumedReplaySkip(input: {

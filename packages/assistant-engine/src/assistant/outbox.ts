@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
+  ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT,
   type AssistantChannelDelivery,
   assistantChannelDeliverySchema,
   assistantOutboxIntentSchema,
@@ -115,6 +116,7 @@ export interface DispatchAssistantOutboxIntentResult {
 
 export interface AssistantOutboxDispatchMessage {
   actorId?: string | null
+  answeredMailboxItemIds?: readonly string[] | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   deliveryIdempotencyKey?: string | null
@@ -222,6 +224,7 @@ export type DeliverAssistantOutboxMessageResult =
 
 export type AssistantOutboxCreateIntentInput = {
   actorId?: string | null
+  answeredMailboxItemIds?: readonly string[] | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   createdAt?: string
@@ -289,6 +292,9 @@ export async function createAssistantOutboxIntent(
       ...rawTargetIdentity,
     })
     const deliveryIdempotencyKey = normalizeNullableString(input.deliveryIdempotencyKey)
+    const answeredMailboxItemIds = normalizeAssistantOutboxAnsweredMailboxItemIds(
+      input.answeredMailboxItemIds ?? [],
+    )
     const deliveryTransportIdempotent =
       operation
         ? resolveAssistantOutboxReactionTransportIdempotent({
@@ -314,17 +320,21 @@ export async function createAssistantOutboxIntent(
         deliveryTransportIdempotent,
         intent: existing,
       })
+      const answeredItemsUpgradedExisting = maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds({
+        answeredMailboxItemIds,
+        intent: idempotencyUpgradedExisting,
+      })
       const upgradedExisting = operation
         ? maybeUpgradeAssistantOutboxIntentReactionOperation({
             deliveryTransportIdempotent,
-            intent: idempotencyUpgradedExisting,
+            intent: answeredItemsUpgradedExisting,
             operation,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
           })
         : maybeUpgradeAssistantOutboxIntentPreDispatchTarget({
-            intent: idempotencyUpgradedExisting,
+            intent: answeredItemsUpgradedExisting,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
@@ -376,6 +386,7 @@ export async function createAssistantOutboxIntent(
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
       deliveryTransportIdempotent,
+      answeredMailboxItemIds,
       lastError: null,
     })
     const persistedIntent = assistantOutboxIntentSchema.parse(
@@ -992,6 +1003,7 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
 
 export async function deliverAssistantOutboxMessage(input: {
   actorId?: string | null
+  answeredMailboxItemIds?: readonly string[] | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   dedupeToken?: string | null
@@ -1018,6 +1030,7 @@ export async function deliverAssistantOutboxMessage(input: {
   throwIfAssistantOutboxSignalAborted(input.signal)
   const intent = await createAssistantOutboxIntent({
     actorId: input.actorId,
+    answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
     dedupeToken: input.dedupeToken,
@@ -1281,6 +1294,7 @@ export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxD
       sessionId: input.sessionId,
       media: input.media ?? [],
       message: input.message,
+      answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
       subject,
       channel: input.channel,
       deliverySource: input.deliverySource ?? null,
@@ -1977,6 +1991,30 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
   )
 }
 
+function maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds(input: {
+  answeredMailboxItemIds: readonly string[]
+  intent: AssistantOutboxIntent
+}): AssistantOutboxIntent {
+  if (
+    input.intent.answeredMailboxItemIds.length > 0
+    || input.answeredMailboxItemIds.length === 0
+    || (
+      input.intent.status !== 'pending'
+      && input.intent.status !== 'retryable'
+      && input.intent.status !== 'sending'
+    )
+  ) {
+    return input.intent
+  }
+
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      answeredMailboxItemIds: [...input.answeredMailboxItemIds],
+    }),
+  )
+}
+
 function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
   intent: AssistantOutboxIntent
   persistedTarget: AssistantOutboxPersistedTarget
@@ -1995,6 +2033,30 @@ function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
       updatedAt: input.updatedAt,
     }),
   )
+}
+
+function normalizeAssistantOutboxAnsweredMailboxItemIds(
+  values: readonly string[],
+): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+
+  for (const value of values) {
+    const itemId = normalizeNullableString(value)
+    if (!itemId || seen.has(itemId)) {
+      continue
+    }
+    seen.add(itemId)
+    result.push(itemId)
+    if (result.length > ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT) {
+      throw new VaultCliError(
+        'ASSISTANT_OUTBOX_ANSWERED_MAILBOX_ITEM_IDS_TOO_MANY',
+        `Assistant outbox answered mailbox item ids exceed the ${ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT} item limit.`,
+      )
+    }
+  }
+
+  return result
 }
 
 function shouldUpgradeAssistantOutboxIntentPreDispatchTarget(input: {

@@ -1,5 +1,4 @@
 export const HOSTED_RUNTIME_MAILBOX_FETCH_PATH = "/api/internal/hosted-mailbox/fetch";
-export const HOSTED_RUNTIME_MAILBOX_CONSUME_PATH = "/api/internal/hosted-mailbox/consume";
 export const HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH =
   "/api/internal/hosted-mailbox/payload/fetch";
 export const HOSTED_RUNTIME_WORKSPACE_PATH = "/api/internal/hosted-workspace";

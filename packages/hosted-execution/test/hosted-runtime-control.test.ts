@@ -384,7 +384,9 @@ describe("hosted runtime control contracts", () => {
   });
 
   it("parses mailbox fetch contracts without run ownership fields", () => {
-    const item = createMailboxItem();
+    const item = createMailboxItem({
+      consumedAt: "2026-04-26T00:00:03.000Z",
+    });
 
     expect(parseHostedMailboxItem(item)).toEqual(item);
     expect(parseHostedMailboxFetchRequest({
@@ -474,6 +476,7 @@ describe("hosted runtime control contracts", () => {
     };
     const nullableItem = {
       ...minimalItem,
+      consumedAt: null,
       expiresAt: null,
       payloadBytes: null,
       payloadInlineCiphertext: null,
@@ -1190,6 +1193,37 @@ describe("hosted runtime control contracts", () => {
       activeWakeAccepted: "true",
       freshStartRequestedAtEpochMs: -1,
     })).toBeNull();
+  });
+
+  it("keeps the direct-wake trigger as a boolean orchestration leaf", () => {
+    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
+      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
+      triggeredByWebDirect: true,
+    })).toEqual({
+      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
+      triggeredByWebDirect: true,
+    });
+
+    // Non-boolean values are dropped like any other schema-mismatched leaf.
+    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
+      triggeredByWebDirect: 1,
+    })).toBeNull();
+
+    const merged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {},
+      incoming: {
+        orchestration: {
+          cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
+          triggeredByWebDirect: true,
+        },
+        schemaVersion: 1,
+      },
+      phases: ["orchestration"],
+    });
+    expect(merged.value.orchestration).toEqual({
+      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
+      triggeredByWebDirect: true,
+    });
   });
 
   it("parses workspace checkpoint contracts as the hosted commit primitive", () => {
@@ -2113,7 +2147,7 @@ describe("hosted runtime control contracts", () => {
   });
 });
 
-function createMailboxItem() {
+function createMailboxItem(overrides: Record<string, unknown> = {}) {
   return {
     createdAt: "2026-04-26T00:00:01.000Z",
     dedupeKey: "conversation:member_123:message_10",
@@ -2127,6 +2161,7 @@ function createMailboxItem() {
     payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
     updatedAt: "2026-04-26T00:00:01.000Z",
     userId: "member_123",
+    ...overrides,
   };
 }
 

@@ -2,6 +2,7 @@ import type { AssistantMessageInput } from './service-contracts.js'
 
 export type AssistantReplyDeliveryContext = Pick<
   AssistantMessageInput,
+  | 'answeredMailboxItemIds'
   | 'deliveryDispatchMode'
   | 'deliveryIdempotencyKey'
   | 'deliveryMessageReactionsAvailable'
@@ -19,6 +20,7 @@ export function pickAssistantReplyDeliveryContext(
   input: AssistantMessageInput,
 ): AssistantReplyDeliveryContext {
   return {
+    answeredMailboxItemIds: input.answeredMailboxItemIds,
     deliveryDispatchMode: input.deliveryDispatchMode,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryMessageReactionsAvailable:
@@ -35,6 +37,9 @@ export function pickDefinedAssistantReplyDeliveryContext(
   input: Partial<AssistantReplyDeliveryContext>,
 ): AssistantReplyDeliveryContextOverrides {
   return {
+    ...(input.answeredMailboxItemIds === undefined
+      ? {}
+      : { answeredMailboxItemIds: input.answeredMailboxItemIds }),
     ...(input.deliveryDispatchMode === undefined
       ? {}
       : { deliveryDispatchMode: input.deliveryDispatchMode }),
@@ -70,6 +75,10 @@ export function mergeAssistantReplyDeliveryContextOverrides(
   second: Partial<AssistantReplyDeliveryContext> | null | undefined,
 ): AssistantReplyDeliveryContextOverrides {
   return pickDefinedAssistantReplyDeliveryContext({
+    answeredMailboxItemIds:
+      second?.answeredMailboxItemIds === undefined
+        ? first.answeredMailboxItemIds
+        : second.answeredMailboxItemIds,
     deliveryDispatchMode:
       second?.deliveryDispatchMode === undefined
         ? first.deliveryDispatchMode
@@ -115,6 +124,7 @@ export function applyAssistantReplyDeliveryContext(input: {
 
   return {
     ...input.input,
+    answeredMailboxItemIds: input.context.answeredMailboxItemIds,
     deliveryDispatchMode: input.context.deliveryDispatchMode,
     deliveryIdempotencyKey: input.context.deliveryIdempotencyKey,
     deliveryMessageReactionsAvailable:

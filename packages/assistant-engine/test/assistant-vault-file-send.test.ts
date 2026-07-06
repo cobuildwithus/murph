@@ -500,6 +500,7 @@ function createApprovedVaultFileResponseMedia() {
 function createVaultFileIntent() {
   return {
     actorId: null,
+    answeredMailboxItemIds: [],
     attemptCount: 0,
     bindingDelivery: { kind: 'thread' as const, target: 'chat_123' },
     channel: 'linq',

@@ -33,8 +33,6 @@ import {
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
-  type HostedMailboxConsumeRequest,
-  type HostedMailboxConsumeResponse,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
   type HostedMailboxItem,
@@ -356,6 +354,9 @@ export function parseHostedMailboxItem(value: unknown): HostedMailboxItem {
   const record = requireObject(value, "Hosted mailbox item");
 
   return {
+    ...(record.consumedAt === undefined
+      ? {}
+      : { consumedAt: readNullableString(record.consumedAt, "Hosted mailbox item consumedAt") }),
     createdAt: requireString(record.createdAt, "Hosted mailbox item createdAt"),
     dedupeKey: requireString(record.dedupeKey, "Hosted mailbox item dedupeKey"),
     ...(record.expiresAt === undefined
@@ -527,38 +528,6 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
       `Hosted mailbox fetch response maxSeqByLane[${index}]`,
     )),
     userId: requireString(record.userId, "Hosted mailbox fetch response userId"),
-  };
-}
-
-export function parseHostedMailboxConsumeRequest(value: unknown): HostedMailboxConsumeRequest {
-  const record = requireObject(value, "Hosted mailbox consume request");
-
-  return {
-    lanes: requireArray(record.lanes, "Hosted mailbox consume request lanes")
-      .map((entry, index) => parseHostedMailboxLaneConsumed(
-        entry,
-        `Hosted mailbox consume request lanes[${index}]`,
-      )),
-    requestId: requireString(record.requestId, "Hosted mailbox consume request requestId"),
-  };
-}
-
-export function parseHostedMailboxConsumeResponse(value: unknown): HostedMailboxConsumeResponse {
-  const record = requireObject(value, "Hosted mailbox consume response");
-
-  return {
-    acknowledgedAt: requireString(
-      record.acknowledgedAt,
-      "Hosted mailbox consume response acknowledgedAt",
-    ),
-    consumedSeqByLane: requireArray(
-      record.consumedSeqByLane,
-      "Hosted mailbox consume response consumedSeqByLane",
-    ).map((entry, index) => parseHostedMailboxLaneConsumed(
-      entry,
-      `Hosted mailbox consume response consumedSeqByLane[${index}]`,
-    )),
-    userId: requireString(record.userId, "Hosted mailbox consume response userId"),
   };
 }
 
@@ -1793,6 +1762,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "temporalActivityStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "temporalActivityRequestStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalBoolean(orchestration, "triggeredByWebDirect", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "userRunnerEnsureStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeWakeStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeWakeFinishedAtEpochMs", orchestrationLabel),

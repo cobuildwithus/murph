@@ -88,6 +88,7 @@ export function createAssistantChannelAdapter(
       })
       const delivered = await spec.sendMessage({
         actorId: normalizeOptionalText(input.actorId),
+        answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
         candidate,
         deliverySource: input.deliverySource ?? null,
         dependencies,
