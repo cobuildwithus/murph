@@ -1907,6 +1907,7 @@ export const experimentAdherenceEvidenceRuleSchema = z
           "measurement",
         ]),
         missing: z.enum(["missed_after_grace", "unknown"]),
+        activityKind: boundedString(1, 80).optional(),
         partialCredit: numberSchema(0, 1).optional(),
       })
       .strict(),
@@ -1969,7 +1970,7 @@ export const experimentAdherenceTargetSchema = z
     targetId: patternedString(SLUG_PATTERN),
     label: boundedString(1, 160),
     phase: z.enum(["baseline", "intervention", "run"]),
-    calendar: experimentAdherenceCalendarSchema,
+    calendar: experimentAdherenceCalendarSchema.optional(),
     evidence: experimentAdherenceEvidenceRuleSchema,
     grace: experimentAdherenceGraceSchema.optional(),
     rollup: z

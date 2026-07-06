@@ -5,6 +5,7 @@ import { test } from "vitest";
 
 import {
   buildExperimentAdherenceCalendar,
+  countCompletedAdherenceSessions,
   synthesizeLegacySessionAdherenceTargets,
 } from "../src/experiment-adherence.ts";
 
@@ -243,7 +244,7 @@ test("synthesizes legacy schedules into adherence targets", () => {
   });
 });
 
-test("does not infer day-level adherence from legacy session counts without a schedule", () => {
+test("synthesizes calendar-less count targets from legacy session counts", () => {
   const targets = synthesizeLegacySessionAdherenceTargets({
     runPlan: {
       modality: "Supplement",
@@ -253,7 +254,82 @@ test("does not infer day-level adherence from legacy session counts without a sc
     } as const,
   });
 
-  assert.deepEqual(targets, []);
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0]?.calendar, undefined);
+  assert.deepEqual(targets[0]?.evidence, {
+    kind: "linkedEventCount",
+    eventKind: "intervention_session",
+    missing: "missed_after_grace",
+  });
+  assert.deepEqual(targets[0]?.rollup, {
+    targetCompletions: 28,
+    minimumUsefulCompletions: 20,
+  });
+
+  const result = buildExperimentAdherenceCalendar({
+    asOf: "2026-04-10T12:00:00.000Z",
+    targets,
+    windows,
+  });
+  assert.equal(result.cells.length, 0);
+  assert.equal(result.targets[0]?.plannedCount, 0);
+});
+
+test("synthesizes device-observable count targets with activity evidence", () => {
+  const targets = synthesizeLegacySessionAdherenceTargets({
+    runPlan: {
+      modality: "Run",
+      targetSessions: 24,
+      minimumUsefulSessions: 12,
+    },
+  });
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0]?.calendar, undefined);
+  assert.deepEqual(targets[0]?.evidence, {
+    kind: "linkedEventCount",
+    eventKind: "activity_session",
+    activityKind: "running",
+    missing: "missed_after_grace",
+  });
+  assert.deepEqual(targets[0]?.rollup, {
+    targetCompletions: 24,
+    minimumUsefulCompletions: 12,
+  });
+});
+
+test("counts calendar-less activity targets by matching activity kind", () => {
+  const target: ExperimentAdherenceTarget = {
+    targetId: "running",
+    label: "Running",
+    phase: "intervention",
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "activity_session",
+      activityKind: "running",
+      missing: "missed_after_grace",
+    },
+    rollup: {
+      targetCompletions: 24,
+    },
+  };
+
+  const counts = countCompletedAdherenceSessions({
+    asOfDate: "2026-04-12",
+    observations: [
+      { evidenceId: "run_1", eventKind: "activity_session", activityKind: "running", localDate: "2026-04-08" },
+      { evidenceId: "run_2", eventKind: "activity_session", activityKind: "morning-run", localDate: "2026-04-09" },
+      { evidenceId: "run_3", eventKind: "activity_session", activityKind: "run", localDate: "2026-04-10" },
+      { evidenceId: "run_4", eventKind: "activity_session", activityKind: "trail-running", localDate: "2026-04-11" },
+      { evidenceId: "ride_1", eventKind: "activity_session", activityKind: "cycling", localDate: "2026-04-08" },
+      { evidenceId: "walk_1", eventKind: "activity_session", activityKind: "walking", localDate: "2026-04-09" },
+      { evidenceId: "strength_1", eventKind: "activity_session", activityKind: "strength", localDate: "2026-04-10" },
+    ],
+    target,
+    windows,
+  });
+
+  assert.equal(counts.completedSessions, 4);
 });
 
 test("rejects adherence calendars that expand beyond the browser-safe cell limit", () => {

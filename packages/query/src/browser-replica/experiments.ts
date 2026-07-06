@@ -7,7 +7,9 @@ import {
 
 import {
   buildExperimentAdherenceCalendar,
+  countCompletedAdherenceSessions,
   resolveExperimentAdherenceRollupTarget,
+  resolveAdherenceObservationActivityKind,
   synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceCellStatus,
@@ -122,7 +124,9 @@ export interface BrowserVaultExperimentResultRun {
 }
 
 export interface BrowserVaultExperimentAdherenceTarget {
-  calendar: ExperimentAdherenceTarget["calendar"];
+  activityKind?: string;
+  calendar?: ExperimentAdherenceTarget["calendar"];
+  evidence: ExperimentAdherenceTarget["evidence"];
   label: string;
   phase: ExperimentAdherenceTarget["phase"];
   rollup?: ExperimentAdherenceTarget["rollup"];
@@ -291,6 +295,7 @@ export interface BrowserVaultExperimentResultsView {
 }
 
 interface BrowserVaultExperimentRunContext {
+  adherenceEvents: BrowserVaultEntity[];
   adherenceTargets: ExperimentAdherenceTarget[];
   asOf: string;
   asOfDate: string;
@@ -445,7 +450,7 @@ function buildRunContext(
         },
       })
     : parsedAdherenceTargets.targets;
-  const runTimeZone = adherenceTargets[0]?.calendar.timeZone ?? schedule?.timeZone ?? null;
+  const runTimeZone = adherenceTargets.find((target) => target.calendar)?.calendar?.timeZone ?? schedule?.timeZone ?? null;
   const asOfDate = runTimeZone ? toZonedIsoDate(asOf, runTimeZone) : toIsoDate(asOf);
   const startedOn = readString(attributes.startedOn) ?? entity.date ?? extractDate(entity.occurredAt);
   const completedAt = readString(attributes.completedAt) ?? readString(attributes.endedOn);
@@ -475,9 +480,18 @@ function buildRunContext(
     windows,
   } satisfies BrowserVaultExperimentResultRun;
   const events = selectExperimentEvents(client, entity, run, asOfDate, runTimeZone);
+  const adherenceEvents = selectAdherenceEvidenceEvents({
+    asOfDate,
+    client,
+    eventTimeZone: runTimeZone,
+    linkedEvents: events,
+    run,
+    targets: adherenceTargets,
+  });
   const expectedEffects = readExpectedEffectInputs(attributes);
 
   return {
+    adherenceEvents,
     asOf,
     asOfDate,
     diagnostics,
@@ -495,7 +509,11 @@ function projectBrowserAdherenceTarget(
   target: ExperimentAdherenceTarget,
 ): BrowserVaultExperimentAdherenceTarget {
   return {
-    calendar: target.calendar,
+    ...(target.evidence.kind === "linkedEventCount" && target.evidence.activityKind
+      ? { activityKind: target.evidence.activityKind }
+      : {}),
+    ...(target.calendar ? { calendar: target.calendar } : {}),
+    evidence: target.evidence,
     label: target.label,
     phase: target.phase,
     rollup: target.rollup,
@@ -571,7 +589,8 @@ function readAdherenceTargets(
 
 function isBrowserSupportedAdherenceTarget(target: ExperimentAdherenceTarget): boolean {
   return target.evidence.kind === "linkedEventCount" &&
-    target.evidence.eventKind === "intervention_session";
+    (target.evidence.eventKind === "intervention_session" ||
+      target.evidence.eventKind === "activity_session");
 }
 
 function selectExperimentEvents(
@@ -611,6 +630,50 @@ function selectExperimentEvents(
 
     return entity.links.some((link) => link.targetId === experiment.id || link.targetId === run.id);
   });
+}
+
+function selectAdherenceEvidenceEvents(input: {
+  asOfDate: string;
+  client: BrowserVaultQueryClient;
+  eventTimeZone: string | null;
+  linkedEvents: readonly BrowserVaultEntity[];
+  run: BrowserVaultExperimentResultRun;
+  targets: readonly ExperimentAdherenceTarget[];
+}): BrowserVaultEntity[] {
+  const byId = new Map(input.linkedEvents.map((event) => [event.id, event]));
+  const needsActivityEvidence = input.targets.some((target) =>
+    target.evidence.kind === "linkedEventCount" &&
+    target.evidence.eventKind === "activity_session"
+  );
+  if (!needsActivityEvidence) {
+    return [...byId.values()];
+  }
+
+  const interventionStart = input.run.windows.interventionStart;
+  const interventionEnd = input.run.windows.interventionEnd;
+  if (!interventionStart || !interventionEnd || input.asOfDate < interventionStart) {
+    return [...byId.values()];
+  }
+  const effectiveEnd = minIsoDate(interventionEnd, input.asOfDate);
+  if (!effectiveEnd) {
+    return [...byId.values()];
+  }
+
+  for (const entity of input.client.replica.entities) {
+    if (entity.family !== "event" || entity.kind !== "activity_session") {
+      continue;
+    }
+    const eventDate =
+      readEventLocalDate(entity, input.eventTimeZone) ??
+      entity.date ??
+      extractDate(entity.occurredAt);
+    if (!eventDate || eventDate < interventionStart || eventDate > effectiveEnd) {
+      continue;
+    }
+    byId.set(entity.id, entity);
+  }
+
+  return [...byId.values()];
 }
 
 function readEventLocalDate(entity: BrowserVaultEntity, timeZone: string | null): string | null {
@@ -1197,15 +1260,17 @@ function buildAdherenceObservations(
     switch (target.evidence.kind) {
       case "linkedEventCount":
         const linkedEvidence = target.evidence;
-        observations.push(...context.events
+        observations.push(...context.adherenceEvents
           .filter((event) => event.kind === linkedEvidence.eventKind)
           .map((event) => ({
+            activityKind: resolveAdherenceObservationActivityKind({ attributes: event.attributes }),
             evidenceId: event.id,
             eventKind: event.kind,
             localDate:
               readSessionEventLocalDate(event) ??
-              readEventLocalDate(event, target.calendar.timeZone) ??
+              readEventLocalDate(event, target.calendar?.timeZone ?? context.eventTimeZone) ??
               event.date ??
+              extractDate(event.occurredAt) ??
               context.asOfDate,
             status: readSessionScheduleStatus(event),
             targetId: target.targetId,
@@ -1387,23 +1452,44 @@ function buildProgressResult(
     hasUnsupportedExplicitTargets ? null :
     rollupTarget?.rollup?.minimumUsefulCompletions ??
     (hasAmbiguousTargets ? null : context.run.runPlan.minimumUsefulSessions);
+  const progressTarget = hasUnsupportedExplicitTargets || hasAmbiguousTargets
+    ? null
+    : rollupTarget ?? context.adherenceTargets[0] ?? null;
+  const progressCounts = progressTarget && !progressTarget.calendar
+    ? countCompletedAdherenceSessions({
+        asOfDate: context.asOfDate,
+        observations: buildAdherenceObservations(context, [progressTarget]),
+        target: progressTarget,
+        windows: context.run.windows,
+      })
+    : null;
   const completedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? 0
-    : schedule?.completedSessions ?? countSessionEvents(context.events, "completed");
+    : progressTarget?.calendar
+    ? schedule?.completedSessions ?? 0
+    : progressCounts?.completedSessions ?? 0;
   const partialSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? 0
-    : schedule?.partialSessions ?? countSessionEvents(context.events, "partial");
+    : progressTarget?.calendar
+    ? schedule?.partialSessions ?? 0
+    : progressCounts?.partialSessions ?? 0;
   const missedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? 0
-    : schedule?.missedSessions ?? countSessionEvents(context.events, "missed");
-  const skippedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets ? 0 : schedule?.skippedSessions ?? 0;
+    : progressTarget?.calendar
+    ? schedule?.missedSessions ?? 0
+    : progressCounts?.missedSessions ?? 0;
+  const skippedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
+    ? 0
+    : progressTarget?.calendar
+    ? schedule?.skippedSessions ?? 0
+    : progressCounts?.skippedSessions ?? 0;
   const loggedSessions = completedSessions + partialSessions;
-  const progressSchedule = rollupTarget && schedule
+  const progressSchedule = progressTarget?.calendar && rollupTarget && schedule
     ? {
         ...schedule,
         cells: schedule.cells.filter((cell) => cell.targetId === rollupTarget.targetId),
       }
-    : schedule;
+    : progressTarget?.calendar ? schedule : null;
   const expectedSessionsByNow = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? null
     : computeExpectedSessionsByNow(
@@ -2061,16 +2147,6 @@ function computeExpectedSessionsByNow(
     1,
     Math.floor((targetSessions * daysBetweenInclusive(interventionStart, elapsedEnd)) / totalDays),
   );
-}
-
-function countSessionEvents(
-  events: readonly BrowserVaultEntity[],
-  status: NonNullable<ExperimentAdherenceObservation["status"]>,
-): number {
-  return events
-    .filter((event) => event.kind === "intervention_session")
-    .filter((event) => readSessionScheduleStatus(event) === status)
-    .length;
 }
 
 function countCells(

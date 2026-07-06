@@ -15,7 +15,9 @@ import {
 import { getExperiment, type VaultReadModel } from "./read-model.ts";
 import {
   buildExperimentAdherenceCalendar,
+  countCompletedAdherenceSessions,
   resolveExperimentAdherenceRollupTarget,
+  resolveAdherenceObservationActivityKind,
   synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
@@ -226,9 +228,9 @@ export interface ExperimentFollowupDueDecision {
 }
 
 interface ExperimentSummaryContext {
+  adherenceEvents: CanonicalEntity[];
   asOf: string;
   baselineDates: string[];
-  completedSessions: number;
   confounders: string[];
   events: CanonicalEntity[];
   experiment: CanonicalEntity;
@@ -439,8 +441,15 @@ function buildExperimentSummaryContext(
   const frontmatter = requireExperimentFrontmatter(experiment);
   const asOf = normalizeAsOfDate(options.asOf);
   const progressPhase = resolveProgressPhase(frontmatter, asOf);
+  const adherenceTargets = resolveAdherenceTargetsFromFrontmatter(frontmatter);
   const events = findExperimentEvents(vault, experiment, frontmatter, asOf);
-  const completedSessions = events.filter(isCompletedSessionEvent).length;
+  const adherenceEvents = findAdherenceEvidenceEvents({
+    asOf,
+    events,
+    frontmatter,
+    targets: adherenceTargets,
+    vault,
+  });
   const dateSet = new Set<string>([
     ...dateRange(frontmatter.runPlan?.baselineStart, frontmatter.runPlan?.baselineEnd),
     ...dateRange(
@@ -455,9 +464,9 @@ function buildExperimentSummaryContext(
   }
 
   return {
+    adherenceEvents,
     asOf,
     baselineDates: dateRange(frontmatter.runPlan?.baselineStart, frontmatter.runPlan?.baselineEnd),
-    completedSessions,
     confounders: summarizeConfounders(events),
     events,
     experiment,
@@ -595,10 +604,16 @@ export function collectExperimentAdherenceCalendar(
 function resolveAdherenceTargets(
   context: ExperimentSummaryContext,
 ): QueryExperimentAdherenceTarget[] {
+  return resolveAdherenceTargetsFromFrontmatter(context.frontmatter);
+}
+
+function resolveAdherenceTargetsFromFrontmatter(
+  frontmatter: QueryExperimentFrontmatter,
+): QueryExperimentAdherenceTarget[] {
   return (
-    context.frontmatter.runPlan?.adherenceTargets ??
+    frontmatter.runPlan?.adherenceTargets ??
     synthesizeLegacySessionAdherenceTargets({
-      runPlan: context.frontmatter.runPlan,
+      runPlan: frontmatter.runPlan,
     })
   );
 }
@@ -629,18 +644,32 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
   const minimumUsefulSessions =
     rollupTarget?.rollup?.minimumUsefulCompletions ??
     (hasAmbiguousTargets ? null : context.frontmatter.runPlan?.minimumUsefulSessions ?? null);
+  const progressTarget = hasAmbiguousTargets ? null : rollupTarget ?? targets[0] ?? null;
   const adherenceCalendar = buildAdherenceCalendarFromContext(context);
-  const rollupCells = rollupTarget && adherenceCalendar
+  const rollupCells = progressTarget?.calendar && rollupTarget && adherenceCalendar
     ? adherenceCalendar.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
     : null;
-  const completedSessions = hasAmbiguousTargets
-    ? 0
-    : rollupCells
-    ? rollupCells.filter((cell) => cell.status === "satisfied").length
-    : context.completedSessions;
+  const progressCounts = progressTarget && !progressTarget.calendar
+    ? countCompletedAdherenceSessions({
+        asOfDate: context.asOf,
+        observations: buildAdherenceObservations(context, [progressTarget]),
+        target: progressTarget,
+        windows: buildWindowSummary(context.frontmatter),
+      })
+    : null;
+  let completedSessions = 0;
+  if (!hasAmbiguousTargets) {
+    if (progressTarget?.calendar) {
+      completedSessions = (rollupCells ?? adherenceCalendar?.cells ?? []).filter(
+        (cell) => cell.status === "satisfied",
+      ).length;
+    } else {
+      completedSessions = progressCounts?.completedSessions ?? 0;
+    }
+  }
   const expectedSessionsByNow = hasAmbiguousTargets
     ? null
-    : adherenceCalendar
+    : progressTarget?.calendar && adherenceCalendar
     ? (rollupCells ?? adherenceCalendar.cells).filter((cell) => cell.status !== "scheduled").length
     : computeExpectedSessionsByNow(
         context.frontmatter,
@@ -688,17 +717,20 @@ function buildAdherenceObservations(
     switch (target.evidence.kind) {
       case "linkedEventCount":
         const linkedEvidence = target.evidence;
-        observations.push(...context.events
+        observations.push(...context.adherenceEvents
           .filter((event) => event.kind === linkedEvidence.eventKind)
           .map((event) => ({
+            activityKind: resolveAdherenceObservationActivityKind({
+              attributes: event.attributes as Record<string, unknown>,
+            }),
             evidenceId: event.entityId,
             eventKind: event.kind,
             localDate:
               readStringAttribute(event, "scheduledLocalDate") ??
               readStringAttribute(event, "sessionLocalDate") ??
-              (event.occurredAt
-                ? toLocalDayKey(new Date(event.occurredAt), target.calendar.timeZone)
-                : event.date ?? context.asOf),
+              (target.calendar && event.occurredAt
+                ? toLocalDayKey(new Date(event.occurredAt), target.calendar?.timeZone ?? "UTC")
+                : event.date ?? extractDate(event.occurredAt) ?? context.asOf),
             status: readExperimentSessionStatus(event),
             targetId: target.targetId,
           })));
@@ -1687,6 +1719,46 @@ function findExperimentEvents(
 
     return event.links.some((link) => link.targetId === experiment.entityId);
   });
+}
+
+function findAdherenceEvidenceEvents(input: {
+  asOf: string;
+  events: readonly CanonicalEntity[];
+  frontmatter: ExperimentFrontmatter;
+  targets: readonly QueryExperimentAdherenceTarget[];
+  vault: VaultReadModel;
+}): CanonicalEntity[] {
+  const byId = new Map(input.events.map((event) => [event.entityId, event]));
+  const needsActivityEvidence = input.targets.some((target) =>
+    target.evidence.kind === "linkedEventCount" &&
+    target.evidence.eventKind === "activity_session"
+  );
+  if (!needsActivityEvidence) {
+    return [...byId.values()];
+  }
+
+  const interventionStart = input.frontmatter.runPlan?.interventionStart;
+  const interventionEnd = input.frontmatter.runPlan?.interventionEnd;
+  if (!interventionStart || !interventionEnd || input.asOf < interventionStart) {
+    return [...byId.values()];
+  }
+  const effectiveEnd = minIsoDate(interventionEnd, input.asOf);
+  if (!effectiveEnd) {
+    return [...byId.values()];
+  }
+
+  for (const event of input.vault.events) {
+    if (event.kind !== "activity_session") {
+      continue;
+    }
+    const date = event.date ?? extractDate(event.occurredAt);
+    if (!date || date < interventionStart || date > effectiveEnd) {
+      continue;
+    }
+    byId.set(event.entityId, event);
+  }
+
+  return [...byId.values()];
 }
 
 function isCompletedSessionEvent(event: CanonicalEntity): boolean {

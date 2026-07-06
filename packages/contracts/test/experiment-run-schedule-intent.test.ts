@@ -166,6 +166,29 @@ describe("experiment adherence targets", () => {
     ).toBe(false);
   });
 
+  it("accepts calendar-less linked activity targets", () => {
+    const target = {
+      targetId: "running",
+      label: "Running",
+      phase: "intervention",
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "activity_session",
+        activityKind: "running",
+        missing: "missed_after_grace",
+      },
+      rollup: {
+        targetCompletions: 24,
+        minimumUsefulCompletions: 12,
+      },
+    } as const;
+
+    expect(experimentAdherenceTargetsSchema.parse([target])).toEqual([target]);
+    expect(experimentRunPlanSchema.parse({ adherenceTargets: [target] }).adherenceTargets).toEqual([
+      target,
+    ]);
+  });
+
   it("rejects ambiguous target ids and invalid threshold rules", () => {
     const target = {
       targetId: "sauna",

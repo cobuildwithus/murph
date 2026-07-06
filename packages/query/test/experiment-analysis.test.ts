@@ -373,6 +373,29 @@ function makeSession(input: {
   });
 }
 
+function makeActivitySession(input: {
+  activityType: string;
+  dayKey: string;
+  entityId: string;
+  occurredAt?: string;
+  sportName?: string;
+  title?: string;
+}): CanonicalEntity {
+  return makeEntity({
+    entityId: input.entityId,
+    family: "event",
+    kind: "activity_session",
+    recordClass: "ledger",
+    occurredAt: input.occurredAt ?? `${input.dayKey}T12:00:00.000Z`,
+    date: input.dayKey,
+    title: input.title ?? input.activityType,
+    attributes: {
+      activityType: input.activityType,
+      sportName: input.sportName ?? input.activityType,
+    },
+  });
+}
+
 function makeContextNote(): CanonicalEntity {
   return makeEntity({
     entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE1YK",
@@ -584,6 +607,42 @@ test("experiment progress summarizes adherence, coverage, confounders, and remin
     reason: "Logged sessions are behind the current target pace.",
     shouldNotifyUser: true,
   });
+});
+
+test("experiment progress counts calendar-less running adherence from activity sessions by sport", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-running-adherence",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFN",
+        slug: "run-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Run",
+          targetSessions: 24,
+          minimumUsefulSessions: 12,
+        },
+      }),
+      makeActivitySession({ entityId: "evt_run_1", dayKey: "2026-06-01", activityType: "Running" }),
+      makeActivitySession({ entityId: "evt_run_2", dayKey: "2026-06-03", activityType: "Run" }),
+      makeActivitySession({ entityId: "evt_run_3", dayKey: "2026-06-05", activityType: "Morning run" }),
+      makeActivitySession({ entityId: "evt_run_4", dayKey: "2026-06-08", activityType: "Trail running" }),
+      makeActivitySession({ entityId: "evt_bike_1", dayKey: "2026-06-02", activityType: "Cycling" }),
+      makeActivitySession({ entityId: "evt_walk_1", dayKey: "2026-06-04", activityType: "Walking" }),
+      makeActivitySession({ entityId: "evt_strength_1", dayKey: "2026-06-06", activityType: "Strength" }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "run-block", { asOf: "2026-06-09" });
+
+  assert.equal(progress.adherence.completedSessions, 4);
+  assert.equal(progress.adherence.expectedSessionsByNow, 7);
+  assert.equal(progress.adherence.status, "behind");
+  assert.equal(progress.adherence.targetSessions, 24);
 });
 
 test("experiment analysis uses lab measurement anchors separately from run baseline windows", () => {
