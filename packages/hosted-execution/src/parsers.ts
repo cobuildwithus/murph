@@ -555,8 +555,17 @@ export function parseHostedExecutionExternalThreadRouteAuthority(
   label = "Hosted execution external thread route authority",
 ): HostedExecutionExternalThreadRouteAuthority {
   const record = requireObject(value, label);
+  // Phase 1 deploy skew: readers tolerate missing accountLookupKey while
+  // emitters keep sending it until both web and runner readers are rolled out.
   return {
-    accountLookupKey: requireString(record.accountLookupKey, `${label} accountLookupKey`),
+    ...(record.accountLookupKey === undefined
+      ? {}
+      : {
+          accountLookupKey: readOptionalNullableString(
+            record.accountLookupKey,
+            `${label} accountLookupKey`,
+          ),
+        }),
     channel: parseHostedExecutionExternalThreadRouteChannel(record.channel, `${label} channel`),
     containerMemberId: requireString(record.containerMemberId, `${label} containerMemberId`),
     threadId: requireString(record.threadId, `${label} threadId`),

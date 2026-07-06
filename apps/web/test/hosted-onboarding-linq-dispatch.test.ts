@@ -8,6 +8,7 @@ import {
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
@@ -1722,8 +1723,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       channel: "linq",
       threadId: "chat_123",
     });
-    if (!routeLookupKey) {
-      throw new Error("Expected test route lookup key.");
+    const routeIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_123",
+    });
+    if (!routeLookupKey || !routeIdentityLookupKey) {
+      throw new Error("Expected test route lookup keys.");
     }
     const threadContainerAccessRecord = {
       accountGroupMemberships: [],
@@ -1809,8 +1814,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       1,
       expect.objectContaining({
         where: expect.objectContaining({
-          threadLookupKey: {
-            in: expect.arrayContaining([routeLookupKey]),
+          threadIdentityLookupKey: {
+            in: expect.arrayContaining([routeIdentityLookupKey]),
           },
         }),
       }),
@@ -1819,8 +1824,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       2,
       expect.objectContaining({
         where: expect.objectContaining({
-          threadLookupKey: {
-            in: expect.arrayContaining([routeLookupKey]),
+          threadIdentityLookupKey: {
+            in: expect.arrayContaining([routeIdentityLookupKey]),
           },
         }),
       }),

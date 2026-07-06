@@ -1296,8 +1296,17 @@ function parseHostedRuntimeLinqExternalThreadRouteAuthority(
     throw new TypeError(`${label} channel must be linq.`);
   }
 
+  // Phase 1 deploy skew: readers tolerate missing accountLookupKey while
+  // emitters keep sending it until both web and runner readers are rolled out.
   return {
-    accountLookupKey: requireString(record.accountLookupKey, `${label} accountLookupKey`),
+    ...(record.accountLookupKey === undefined
+      ? {}
+      : {
+          accountLookupKey: readOptionalNullableString(
+            record.accountLookupKey,
+            `${label} accountLookupKey`,
+          ),
+        }),
     channel,
     containerMemberId: requireString(record.containerMemberId, `${label} containerMemberId`),
     threadId: requireString(record.threadId, `${label} threadId`),
