@@ -21,6 +21,7 @@ Last verified: 2026-06-21
 | `agent-docs/product-specs/companion-app-mvp.md` | Two-screen MVP build spec: Privy phone/email login, Connect Apple Health, Junction sign-in token endpoint. | Planned |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step where the member picks the avatar on Murph's vCard; picker components live on `/design`. | Planned |
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
+| `agent-docs/product-specs/call-circle.md` | Friend-call matchmaking for groups: private availability projection, group matching automation, group-to-member private notification primitive, and phased call mechanics ending in a Retell connector bridge. | Planned |
 
 ## Rule
 
