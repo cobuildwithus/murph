@@ -155,6 +155,11 @@ Telegram `from.username`.
 
 The simplest acceptance path should be chat-first.
 
+The web accept page (`/family/accept/<code>`) selects the accept channel from how
+the invite is actually bound (phone, Telegram, or email). A configured Telegram
+bot is never a fallback for a non-Telegram invite: an invitee with only a phone
+number must not be routed into Telegram.
+
 ### Telegram
 
 Telegram invites use a deep link such as:
@@ -178,6 +183,17 @@ the invited phone number and the WhatsApp messaging consent path has been
 completed. For the MVP, the inbound family invite token is the WhatsApp
 consent-writing command for that phone-bound acceptance. The accepted member
 still gets their own `HostedMember` and routing rows.
+
+### iMessage / SMS
+
+A phone pre-bound invite opened on the web accept page leads with a "Continue in
+Messages" action: an `sms:` deep link to Murph prefilled with the family invite
+token (`family_<code>`). Sending it reuses the same inbound phone-bound
+acceptance path, so the invitee joins from the thread they already use with no
+separate web sign-in or verification step. Prefer the Murph line an existing
+member already messages on so acceptance lands in their current thread instead
+of being redirected to their home line; fall back to a configured line for a
+brand-new invitee, whom the webhook assigns a home line on first contact.
 
 ### Web Fallback
 

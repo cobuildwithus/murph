@@ -192,6 +192,7 @@ function acceptanceViewPrisma(input: {
   status: string;
   targetEmailLookupKey?: string | null;
   targetPhoneLookupKey: string | null;
+  targetTelegramUsernameLookupKey?: string | null;
 }) {
   return {
     hostedAccountGroupInvite: {
@@ -204,6 +205,7 @@ function acceptanceViewPrisma(input: {
         targetEmailLookupKey: input.targetEmailLookupKey ?? null,
         targetLabel: "Dad",
         targetPhoneLookupKey: input.targetPhoneLookupKey,
+        targetTelegramUsernameLookupKey: input.targetTelegramUsernameLookupKey ?? null,
       }),
     },
     hostedAccountGroupMembership: {
@@ -211,6 +213,11 @@ function acceptanceViewPrisma(input: {
     },
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
+    },
+    // No existing member matches the invited phone by default, so the accept
+    // page falls back to a configured Murph line.
+    hostedMemberIdentity: {
+      findUnique: vi.fn().mockResolvedValue(null),
     },
   };
 }
@@ -234,6 +241,9 @@ test("phone-bound invite to an active group is web-acceptable", async () => {
   expect(view).toMatchObject({
     groupActive: true,
     isPhoneBound: true,
+    isTelegramBound: false,
+    // No existing member matches, so the page falls back to a configured line.
+    messagesRecipientPhone: null,
     seatAvailable: true,
     status: "pending",
     webAcceptable: true,
@@ -266,7 +276,30 @@ test("email-bound invite to an active group is web-acceptable", async () => {
   });
 });
 
-test("Telegram/label-only invite is NOT web-acceptable (must use the chat link)", async () => {
+test("Telegram-bound invite exposes the Telegram link and is not web-acceptable", async () => {
+  const prisma = acceptanceViewPrisma({
+    activeMemberships: 2,
+    expiresAt: FUTURE,
+    pendingInvites: 1,
+    status: "pending",
+    targetPhoneLookupKey: null,
+    targetTelegramUsernameLookupKey: "lookup_telegram_dad",
+  });
+
+  const view = await readHostedFamilyInviteAcceptanceView({
+    // @ts-expect-error: focused prisma double
+    prisma,
+    inviteCode: "CODEDAD",
+    now: NOW,
+  });
+
+  expect(view?.isPhoneBound).toBe(false);
+  expect(view?.isTelegramBound).toBe(true);
+  expect(view?.webAcceptable).toBe(false);
+  expect(view?.telegramInviteUrl).toBe("https://t.me/withmurph_bot?start=family_CODEDAD");
+});
+
+test("label-only invite offers no channel link (Telegram is not a fallback)", async () => {
   const prisma = acceptanceViewPrisma({
     activeMemberships: 2,
     expiresAt: FUTURE,
@@ -283,8 +316,12 @@ test("Telegram/label-only invite is NOT web-acceptable (must use the chat link)"
   });
 
   expect(view?.isPhoneBound).toBe(false);
+  expect(view?.isTelegramBound).toBe(false);
   expect(view?.webAcceptable).toBe(false);
-  expect(view?.telegramInviteUrl).toBe("https://t.me/withmurph_bot?start=family_CODEDAD");
+  // A configured Telegram bot must never turn a non-Telegram invite into a
+  // Telegram redirect.
+  expect(view?.telegramInviteUrl).toBeNull();
+  expect(view?.messagesRecipientPhone).toBeNull();
 });
 
 test("invite to an inactive (canceled) group is not web-acceptable", async () => {

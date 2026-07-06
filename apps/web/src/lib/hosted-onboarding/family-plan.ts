@@ -9,7 +9,7 @@ import {
   type HostedExecutionAssistantNotificationRoute,
 } from "@murphai/hosted-execution";
 
-import { normalizeMurphTelegramUsername } from "../murph-contact-routing";
+import { buildMurphSmsHref, normalizeMurphTelegramUsername } from "../murph-contact-routing";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { getPrisma } from "../prisma";
 import {
@@ -82,7 +82,10 @@ import {
 } from "./member-activation";
 import { createHostedMember } from "./hosted-member-store";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
-import { readHostedMemberIdentity } from "./hosted-member-identity-store";
+import {
+  lookupHostedMemberIdentityByPhoneLookupKey,
+  readHostedMemberIdentity,
+} from "./hosted-member-identity-store";
 import {
   readHostedMemberRoutingState,
   resolveHostedMemberRoutingByTelegramUserId,
@@ -330,6 +333,14 @@ export interface HostedFamilyInviteAcceptanceView {
   inviteCode: string;
   isEmailBound: boolean;
   isPhoneBound: boolean;
+  isTelegramBound: boolean;
+  /**
+   * The Murph line a phone-bound invitee already messages Murph on, when they
+   * are an existing member. The accept page prefers this so accepting by text
+   * lands in their existing thread instead of being redirected to their home
+   * line. Null for brand-new invitees (the page falls back to a configured line).
+   */
+  messagesRecipientPhone: string | null;
   seatAvailable: boolean;
   status: HostedAccountGroupInviteStatus;
   targetLabel: string | null;
@@ -597,6 +608,7 @@ export async function readHostedFamilyInviteAcceptanceView(input: {
       targetEmailLookupKey: true,
       targetLabel: true,
       targetPhoneLookupKey: true,
+      targetTelegramUsernameLookupKey: true,
     },
     where: {
       inviteCode: input.inviteCode,
@@ -646,7 +658,19 @@ export async function readHostedFamilyInviteAcceptanceView(input: {
   });
   const isPhoneBound = invite.targetPhoneLookupKey !== null;
   const isEmailBound = invite.targetEmailLookupKey !== null;
+  const isTelegramBound = invite.targetTelegramUsernameLookupKey !== null;
   const telegramBotUsername = readHostedOnboardingEnvironment().telegramBotUsername;
+
+  // A phone-bound invitee accepts by texting the family token to Murph; the
+  // LinQ webhook matches it against their phone. Resolve the line they already
+  // message Murph on (when they are an existing member) so acceptance lands in
+  // their existing thread rather than being redirected to their home line.
+  const messagesRecipientPhone = isPhoneBound && isPending
+    ? await resolveHostedFamilyInviteExistingHomeLinePhone({
+        phoneLookupKey: invite.targetPhoneLookupKey,
+        prisma,
+      })
+    : null;
 
   return {
     groupActive,
@@ -654,11 +678,16 @@ export async function readHostedFamilyInviteAcceptanceView(input: {
     inviteCode: invite.inviteCode,
     isEmailBound,
     isPhoneBound,
+    isTelegramBound,
+    messagesRecipientPhone,
     seatAvailable,
     status,
     targetLabel: invite.targetLabel,
+    // Only route to Telegram when the invite is actually bound to a Telegram
+    // username. A bot username being configured does not mean the invitee uses
+    // Telegram, so it must never be the fallback channel.
     telegramInviteUrl:
-      telegramBotUsername && isPending
+      telegramBotUsername && isPending && isTelegramBound
         ? buildHostedFamilyTelegramInviteUrl({
             botUsername: telegramBotUsername,
             inviteCode: invite.inviteCode,
@@ -666,6 +695,33 @@ export async function readHostedFamilyInviteAcceptanceView(input: {
         : null,
     webAcceptable: isPending && seatAvailable && groupActive && (isPhoneBound || isEmailBound),
   };
+}
+
+/**
+ * Resolves the Murph LinQ line a phone-bound invitee already messages on, when
+ * they are an existing member. Returns null for brand-new invitees, letting the
+ * accept page fall back to a configured line (the webhook assigns a home line
+ * on first contact for those).
+ */
+async function resolveHostedFamilyInviteExistingHomeLinePhone(input: {
+  phoneLookupKey: string | null;
+  prisma: HostedOnboardingReadClient;
+}): Promise<string | null> {
+  if (!input.phoneLookupKey) {
+    return null;
+  }
+  const identity = await lookupHostedMemberIdentityByPhoneLookupKey({
+    phoneLookupKey: input.phoneLookupKey,
+    prisma: input.prisma,
+  });
+  if (!identity) {
+    return null;
+  }
+  const routing = await readHostedMemberRoutingState({
+    memberId: identity.core.id,
+    prisma: input.prisma,
+  });
+  return normalizePhoneNumber(routing?.linqRecipientPhone ?? null);
 }
 
 export async function readHostedAccountGroupStripeBillingRef(input: {
@@ -3029,6 +3085,22 @@ export function buildHostedFamilyTelegramInviteUrl(input: {
   }
 
   return `https://t.me/${botUsername}?start=${encodeURIComponent(`family_${input.inviteCode}`)}`;
+}
+
+/**
+ * Builds the `sms:` deep link a phone-bound invitee taps to accept by text. The
+ * prefilled body is exactly the `family_<code>` token the LinQ webhook parses
+ * via {@link parseHostedFamilyInviteStartToken}, so the message the invitee
+ * sends is recognized and matched against their phone.
+ */
+export function buildHostedFamilyInviteMessagesHref(input: {
+  inviteCode: string;
+  murphPhoneNumber: string;
+}): string {
+  return buildMurphSmsHref({
+    body: `family_${input.inviteCode}`,
+    murphPhoneNumber: input.murphPhoneNumber,
+  });
 }
 
 export function buildHostedFamilyInviteAcceptUrl(input: {
