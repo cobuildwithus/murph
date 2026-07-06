@@ -529,6 +529,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     captureIds: context.optionalInboxCaptureIds,
     inputIds: context.inputIds,
     deliveryDispatchMode: input.deliveryDispatchMode,
+    answeredMailboxItemIds: hostedDelivery.answeredMailboxItemIds,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
     deliveryTarget: decision.deliveryTarget,
@@ -1339,6 +1340,7 @@ function promptInputCarriesNativeReplyReference(
 }
 
 interface HostedAutoReplyDeliveryIdempotency {
+  answeredMailboxItemIds: string[]
   deliveryIdempotencyKey: string | null
   hostedDeliveryIdempotency: AssistantHostedDeliveryIdempotencyContext | null
 }
@@ -1351,6 +1353,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
   const userId = normalizeNullableString(input.executionContext?.hosted?.memberId)
   if (!userId) {
     return {
+      answeredMailboxItemIds: [],
       deliveryIdempotencyKey: null,
       hostedDeliveryIdempotency: null,
     }
@@ -1359,6 +1362,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
   const candidates = autoReplyInputCandidatesFromContext(input.context)
   if (candidates.length === 0) {
     return {
+      answeredMailboxItemIds: [],
       deliveryIdempotencyKey: null,
       hostedDeliveryIdempotency: null,
     }
@@ -1369,6 +1373,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
   for (const candidate of candidates) {
     if (candidate.event.sourceRef.kind !== 'hosted-mailbox') {
       return {
+        answeredMailboxItemIds: [],
         deliveryIdempotencyKey: null,
         hostedDeliveryIdempotency: null,
       }
@@ -1385,6 +1390,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
   const channel = normalizeNullableString(input.context.firstItem.summary.source)
   if (!channel) {
     return {
+      answeredMailboxItemIds: [],
       deliveryIdempotencyKey: null,
       hostedDeliveryIdempotency: null,
     }
@@ -1415,6 +1421,7 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
     : null
 
   return {
+    answeredMailboxItemIds: hostedMailboxItemIds,
     deliveryIdempotencyKey: createHostedDeliveryId({
       assistantTurnOrdinal,
       channel,
@@ -1458,6 +1465,7 @@ async function executeAssistantAutoReply(input: {
   captureIds: readonly string[]
   inputIds: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
+  answeredMailboxItemIds: readonly string[]
   deliveryIdempotencyKey: string | null
   hostedDeliveryIdempotency: AssistantHostedDeliveryIdempotencyContext | null
   deliveryTarget: string | null
@@ -1523,6 +1531,7 @@ async function executeAssistantAutoReply(input: {
       onFinishWithoutReplyAccepted:
         input.onFinishWithoutReplyAccepted ?? null,
       bindingDeliveryTarget: input.bindingDeliveryTarget,
+      answeredMailboxItemIds: input.answeredMailboxItemIds,
       deliveryIdempotencyKey: input.deliveryIdempotencyKey,
       hostedDeliveryIdempotency: input.hostedDeliveryIdempotency,
       ...(input.deliveryMessageReactionsAvailable === undefined
@@ -1837,6 +1846,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       acceptedInputs,
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
       hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
+      answeredMailboxItemIds: hostedDelivery.answeredMailboxItemIds,
       ...(acceptedInputDeliveryTarget !== null
         ? { deliveryTarget: acceptedInputDeliveryTarget }
         : {}),
@@ -2182,6 +2192,7 @@ function admitCapturelessAssistantInputs(input: {
     acceptedInputs,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
+    answeredMailboxItemIds: hostedDelivery.answeredMailboxItemIds,
     ...(deliveryReplyToMessageId !== undefined
       ? { deliveryReplyToMessageId }
       : {}),

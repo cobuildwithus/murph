@@ -2272,8 +2272,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return invocationResult;
       }
     assertRuntimeNotAborted();
-    // Replay-only mailbox consume acks are already backed by the restored
-    // durable checkpoint, so they still need to flush when no new state is dirty.
+    // Mailbox post-checkpoint effects are backed by the restored durable
+    // checkpoint, so they still need to flush when no new state is dirty.
     await runDurableCheckpointEffectsBestEffort();
     const projection = accumulatedProjection;
     const shouldRunNoProgressBrowserVaultRefresh =
@@ -3446,21 +3446,8 @@ function createAbortGuardedHostedRuntimePlatform(
     ...(platform.mailboxPort
       ? {
           mailboxPort: {
-            // Spread so optional port methods survive this wrapper; the
-            // consumed-watermark ack silently vanished here when consume was
-            // added to the port but not to this enumeration (2026-06 prod
-            // consume_port_missing incident). Reads stay unguarded because
-            // they are replay-safe; consume is a durable write and takes the
-            // abort guard like every other write port.
-            ...platform.mailboxPort,
             fetch: (request) => platform.mailboxPort!.fetch(request),
             fetchPayload: (request) => platform.mailboxPort!.fetchPayload(request),
-            ...(platform.mailboxPort.consume
-              ? {
-                  consume: (request) =>
-                    guard(() => platform.mailboxPort!.consume!(request)),
-                }
-              : {}),
           },
         }
       : {}),

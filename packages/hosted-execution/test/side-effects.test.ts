@@ -26,6 +26,7 @@ function createHostedAssistantDeliveryPayload(
 ): HostedAssistantDeliveryPayload {
   return {
     actorId: "actor-1",
+    answeredMailboxItemIds: [],
     bindingDeliveryKind: "participant",
     bindingDeliveryTarget: "chat-1",
     channel: "telegram",
@@ -466,7 +467,9 @@ describe("hosted assistant delivery contracts", () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe-1",
       effectId: "intent-1",
-      payload: createHostedAssistantDeliveryPayload(),
+      payload: createHostedAssistantDeliveryPayload({
+        answeredMailboxItemIds: ["mailbox_item_1", "mailbox_item_2"],
+      }),
     });
 
     expect(parseHostedAssistantDeliverySideEffect(effect)).toEqual(effect);

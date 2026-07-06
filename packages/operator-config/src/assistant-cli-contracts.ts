@@ -810,6 +810,7 @@ export const assistantOutboxIntentSchema = z
     deliveryConfirmationPending: z.boolean().default(false),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
+    answeredMailboxItemIds: z.array(z.string().trim().min(1)).max(40).default([]),
     preparedDispatchToken: z.string().min(1).nullable().default(null),
     lastError: assistantDeliveryErrorSchema.nullable(),
   })

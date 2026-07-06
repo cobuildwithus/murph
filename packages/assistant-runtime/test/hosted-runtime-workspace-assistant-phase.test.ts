@@ -10561,6 +10561,7 @@ function createDeliveryEffect(): HostedAssistantDeliverySideEffect {
     kind: "assistant.delivery",
     payload: {
       actorId: null,
+      answeredMailboxItemIds: [],
       bindingDeliveryKind: null,
       bindingDeliveryTarget: null,
       channel: "telegram",

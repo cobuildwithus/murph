@@ -152,6 +152,7 @@ function createPayload(
 ): HostedAssistantDeliveryPayload {
   return {
     actorId: "actor_123",
+    answeredMailboxItemIds: [],
     bindingDeliveryKind: "participant",
     bindingDeliveryTarget: "chat_123",
     channel: "telegram",
@@ -715,6 +716,7 @@ describe("hosted runtime callbacks", () => {
         effectId: "intent_reaction",
         payload: {
           actorId: "actor_1",
+          answeredMailboxItemIds: [],
           bindingDeliveryKind: "participant",
           bindingDeliveryTarget: "chat_1",
           channel: "telegram",
@@ -739,6 +741,7 @@ describe("hosted runtime callbacks", () => {
         effectId: "intent_1",
         payload: {
           actorId: "actor_1",
+          answeredMailboxItemIds: [],
           bindingDeliveryKind: "participant",
           bindingDeliveryTarget: "chat_1",
           channel: "telegram",
@@ -4903,6 +4906,7 @@ describe("hosted runtime callbacks", () => {
   it("marks signup welcome Linq sends as first-contact engagement", async () => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
+      answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
       bindingDeliveryTarget: "+15550100001",
       channel: "linq",
       idempotencyKey: "signup-welcome:member_123",
@@ -4918,6 +4922,7 @@ describe("hosted runtime callbacks", () => {
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
         directRecipientPhoneNumber: null,
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
@@ -4980,6 +4985,7 @@ describe("hosted runtime callbacks", () => {
   it("records hosted runtime Linq delivery outcomes after provider acceptance", async () => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
+      answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
       bindingDeliveryTarget: "+15550100001",
       channel: "linq",
       idempotencyKey: "signup-welcome:member_123",
@@ -4995,6 +5001,7 @@ describe("hosted runtime callbacks", () => {
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
         directRecipientPhoneNumber: null,
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
@@ -5035,6 +5042,7 @@ describe("hosted runtime callbacks", () => {
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: expect.stringMatching(/Z$/u),
+        answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
         attemptedAt: expect.stringMatching(/Z$/u),
         failureCode: null,
         failureReason: null,

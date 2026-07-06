@@ -384,7 +384,9 @@ describe("hosted runtime control contracts", () => {
   });
 
   it("parses mailbox fetch contracts without run ownership fields", () => {
-    const item = createMailboxItem();
+    const item = createMailboxItem({
+      consumedAt: "2026-04-26T00:00:03.000Z",
+    });
 
     expect(parseHostedMailboxItem(item)).toEqual(item);
     expect(parseHostedMailboxFetchRequest({
@@ -474,6 +476,7 @@ describe("hosted runtime control contracts", () => {
     };
     const nullableItem = {
       ...minimalItem,
+      consumedAt: null,
       expiresAt: null,
       payloadBytes: null,
       payloadInlineCiphertext: null,
@@ -2113,7 +2116,7 @@ describe("hosted runtime control contracts", () => {
   });
 });
 
-function createMailboxItem() {
+function createMailboxItem(overrides: Record<string, unknown> = {}) {
   return {
     createdAt: "2026-04-26T00:00:01.000Z",
     dedupeKey: "conversation:member_123:message_10",
@@ -2127,6 +2130,7 @@ function createMailboxItem() {
     payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
     updatedAt: "2026-04-26T00:00:01.000Z",
     userId: "member_123",
+    ...overrides,
   };
 }
 

@@ -35,6 +35,7 @@ export type AssistantActiveTurnInputAdmissionResult =
     }
   | {
       acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
+      answeredMailboxItemIds?: readonly string[] | null
       deliveryDispatchMode?: AssistantOutboxDispatchMode
       deliveryIdempotencyKey?: string | null
       deliveryMessageReactionsAvailable?: boolean | null

@@ -60,6 +60,7 @@ export interface HostedMailboxItemRow {
   payloadRef: string | null;
   payloadBytes: number | null;
   payloadHash: string | null;
+  consumedAt: Date | null;
   expiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -269,6 +270,7 @@ export async function appendHostedMailboxItemTx(
       payload_ref,
       payload_bytes,
       payload_hash,
+      consumed_at,
       expires_at,
       updated_at
     )
@@ -285,6 +287,7 @@ export async function appendHostedMailboxItemTx(
       ${payloadStorage.payloadRef},
       ${payloadBytes},
       ${payloadHash},
+      NULL,
       ${expiresAt},
       NOW()
     )
@@ -302,6 +305,7 @@ export async function appendHostedMailboxItemTx(
       payload_ref AS "payloadRef",
       payload_bytes AS "payloadBytes",
       payload_hash AS "payloadHash",
+      consumed_at AS "consumedAt",
       expires_at AS "expiresAt",
       created_at AS "createdAt",
       updated_at AS "updatedAt"
@@ -1098,6 +1102,7 @@ export function projectHostedMailboxItem(
   return {
     createdAt: record.createdAt.toISOString(),
     dedupeKey: record.dedupeKey,
+    consumedAt: record.consumedAt?.toISOString() ?? null,
     expiresAt: record.expiresAt?.toISOString() ?? null,
     id: record.id,
     kind: requireHostedMailboxKind(record.kind),

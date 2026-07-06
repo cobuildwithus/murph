@@ -427,6 +427,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
 
 export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
   acceptedAt?: Date | null;
+  answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt?: Date | null;
   failedAt?: Date | null;
   failureCode?: string | null;
@@ -439,6 +440,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
   prisma: HostedLinqDeliveryClient;
   sourceRef?: string | null;
   targetKind?: string | null;
+  userId: string;
 }): Promise<{
   deliveryId: string | null;
   recorded: boolean;
@@ -617,6 +619,22 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
           providerCreatedAt: catchup.receipt.providerCreatedAt,
         });
       }
+    }
+    if (acceptedAt && input.answeredMailboxItemIds?.length) {
+      await prisma.hostedMailboxItem.updateMany({
+        data: {
+          consumedAt: acceptedAt,
+        },
+        where: {
+          consumedAt: null,
+          id: {
+            in: [...input.answeredMailboxItemIds],
+          },
+          kind: "conversation.message",
+          lane: "conversation",
+          userId: input.userId,
+        },
+      });
     }
 
     return {

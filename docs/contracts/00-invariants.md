@@ -39,8 +39,8 @@
 
 ## Ordered Progress And Causal Anchors
 
-- Any persisted cursor, mailbox sequence, pending-input index, consume ack, wake gate, receipt watermark, or paginated read must use a total, transitive, owner-shared ordering primitive. Do not duplicate timestamp comparators, pick timestamp fields pairwise, or rely on ordering that can make persisted records unreachable or repeated.
-- Import progress is not handling progress; checkpoint progress is not delivery progress; scanner discovery is not consume authority. Consume/clear/advance only from owner-provided coverage plus terminal evidence, and preserve gates when a later pass sees no current work but older retryable work still exists.
+- Any persisted cursor, mailbox sequence, pending-input index, consume stamp, wake gate, receipt watermark, or paginated read must use a total, transitive, owner-shared ordering primitive. Do not duplicate timestamp comparators, pick timestamp fields pairwise, or rely on ordering that can make persisted records unreachable or repeated.
+- Import progress is not handling progress; checkpoint progress is not delivery progress; scanner discovery is not consume authority. Consume/clear/advance only from owner-provided per-item authority or cursor coverage plus terminal evidence; do not advance a lane high-water past pending lower work when a per-item stamp is the simpler durable truth.
 - Post-checkpoint side effects are state transitions, not auxiliary logs. When a post-checkpoint send, cleanup, or provider mutation consumes a pending wake or delivery effect, its result must replace the pre-side-effect wake/status before the next durable checkpoint; do not preserve stale due wakes or pending counters with a scheduler/harness retry.
 - Explicit causal anchors beat positional heuristics: provider reply ids, selected input ids, delivery-context ordinals, server sequences, and segment ordinals must be resolved before "latest", "oldest", grouping, watermarks, or time-window fallbacks. Events with different explicit anchors must not be grouped into one turn.
 

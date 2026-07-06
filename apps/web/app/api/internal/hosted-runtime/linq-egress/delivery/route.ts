@@ -31,6 +31,7 @@ import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_LINQ_EGRESS_DELIVERY_BODY_LIMIT_BYTES = 8 * 1024;
+const HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 40;
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
@@ -67,6 +68,9 @@ export const POST = withJsonError(async (request: Request) => {
     body.attemptedAt,
     "attemptedAt",
   );
+  const answeredMailboxItemIds = acceptedAt
+    ? parseAnsweredMailboxItemIds(body.answeredMailboxItemIds)
+    : [];
   const providerTarget = readOptionalBodyString(body.providerTarget);
   const providerThreadId = readOptionalBodyString(body.providerThreadId);
   const target = readOptionalBodyString(body.target);
@@ -96,6 +100,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
   const result = await recordHostedLinqRuntimeDeliveryOutcomeTx({
     acceptedAt,
+    answeredMailboxItemIds,
     attemptedAt,
     failedAt,
     failureCode: readOptionalBodyString(body.failureCode),
@@ -109,6 +114,7 @@ export const POST = withJsonError(async (request: Request) => {
     sourceRef: readOptionalBodyString(body.intentId)
       ?? readOptionalBodyString(body.idempotencyKey),
     targetKind,
+    userId,
   });
 
   return jsonOk({
@@ -136,6 +142,48 @@ async function readHostedLinqDeliveryRouteLineLookupKey(input: {
     prisma: input.prisma,
   });
   return route.accountLookupKey;
+}
+
+function parseAnsweredMailboxItemIds(value: unknown): string[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_IDS_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq delivery answered mailbox item ids must be an array.",
+      retryable: false,
+    });
+  }
+  const itemIds: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const itemId = readOptionalBodyString(entry);
+    if (!itemId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_INVALID",
+        httpStatus: 400,
+        message: "Hosted Linq delivery answered mailbox item id is invalid.",
+        retryable: false,
+      });
+    }
+    if (seen.has(itemId)) {
+      continue;
+    }
+    seen.add(itemId);
+    itemIds.push(itemId);
+    if (itemIds.length > HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_IDS_TOO_MANY",
+        httpStatus: 400,
+        message: "Hosted Linq delivery answered mailbox item ids are too many.",
+        retryable: false,
+      });
+    }
+  }
+
+  return itemIds;
 }
 
 async function readHostedLinqDeliveryMemberRouteLineLookupKey(input: {

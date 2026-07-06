@@ -187,6 +187,7 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   channel: 'local',
   identityId: null,
   actorId: null,
+  answeredMailboxItemIds: [],
   threadId: null,
   threadIsDirect: true,
   replyToMessageId: null,

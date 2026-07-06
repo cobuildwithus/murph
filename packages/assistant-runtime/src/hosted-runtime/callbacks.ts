@@ -2284,6 +2284,7 @@ function createHostedAssistantLinqSendDependency(input: {
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
           attemptedAt,
+          answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
           deliveryContext,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
@@ -2305,6 +2306,7 @@ function createHostedAssistantLinqSendDependency(input: {
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
         acceptedAt: new Date(),
         attemptedAt,
+        answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
         fromPhoneNumber,
         idempotencyKey: request.idempotencyKey ?? null,
@@ -2495,6 +2497,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
           attemptedAt,
+          answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
           deliveryContext,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
@@ -2516,6 +2519,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
         acceptedAt: new Date(),
         attemptedAt,
+        answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
         fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
         idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
@@ -2534,6 +2538,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
 
 function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   acceptedAt?: Date | null;
+  answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt: Date;
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   failedAt?: Date | null;
@@ -2550,6 +2555,9 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
 }): HostedRuntimeLinqDeliveryOutcomeRequest {
   return {
     ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
+    ...(input.answeredMailboxItemIds?.length
+      ? { answeredMailboxItemIds: [...input.answeredMailboxItemIds] }
+      : {}),
     attemptedAt: input.attemptedAt.toISOString(),
     ...(input.failedAt ? { failedAt: input.failedAt.toISOString() } : {}),
     failureCode: input.failureCode ?? null,
@@ -3313,6 +3321,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
   intent: Pick<
     AssistantOutboxIntent,
     | "actorId"
+    | "answeredMailboxItemIds"
     | "bindingDelivery"
     | "channel"
     | "deliveryIdempotencyKey"
@@ -3333,6 +3342,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
 ): HostedAssistantDeliveryPayload {
   const payload = {
     actorId: intent.actorId ?? null,
+    answeredMailboxItemIds: intent.answeredMailboxItemIds ?? [],
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
     channel: intent.channel ?? null,

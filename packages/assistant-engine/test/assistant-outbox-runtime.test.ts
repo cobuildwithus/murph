@@ -151,6 +151,38 @@ describe('assistant outbox runtime', () => {
     ).rejects.toThrow('Assistant outbox messages must include text or response media.')
   })
 
+  it('persists answered mailbox item ids and defaults other sends to none', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-answered-mailbox-')
+
+    const replyIntent = await createIntent(vaultRoot, {
+      answeredMailboxItemIds: [
+        'mailbox_item_answered_1',
+        'mailbox_item_answered_1',
+        ' mailbox_item_answered_2 ',
+      ],
+      message: 'auto reply with answered mailbox ids',
+      sessionId: 'session-answered-mailbox',
+      turnId: 'turn-answered-mailbox',
+    })
+    const reminderIntent = await createIntent(vaultRoot, {
+      message: 'scheduled reminder without answered mailbox ids',
+      sessionId: 'session-reminder-no-answered-mailbox',
+      turnId: 'turn-reminder-no-answered-mailbox',
+    })
+
+    await expect(readAssistantOutboxIntent(vaultRoot, replyIntent.intentId))
+      .resolves.toMatchObject({
+        answeredMailboxItemIds: [
+          'mailbox_item_answered_1',
+          'mailbox_item_answered_2',
+        ],
+      })
+    await expect(readAssistantOutboxIntent(vaultRoot, reminderIntent.intentId))
+      .resolves.toMatchObject({
+        answeredMailboxItemIds: [],
+      })
+  })
+
   it('persists auto-reply intent provenance when receipt repair has no receipt', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-provenance-')
 
@@ -1702,6 +1734,10 @@ describe('assistant outbox runtime', () => {
     )
 
     const queued = await deliverAssistantOutboxMessage({
+      answeredMailboxItemIds: [
+        'mailbox_item_prepared_retry_1',
+        'mailbox_item_prepared_retry_2',
+      ],
       channel: 'linq',
       dispatchMode: 'queue-only',
       message: 'queue the Linq reminder',
@@ -1713,6 +1749,10 @@ describe('assistant outbox runtime', () => {
     })
 
     expect(queued.kind).toBe('queued')
+    expect(queued.intent.answeredMailboxItemIds).toEqual([
+      'mailbox_item_prepared_retry_1',
+      'mailbox_item_prepared_retry_2',
+    ])
     expect(queued.intent.bindingDelivery).toEqual({
       kind: 'thread',
       target: 'linq-thread-inferred',
@@ -1744,6 +1784,10 @@ describe('assistant outbox runtime', () => {
     expect(dispatched.intent.status).toBe('sent')
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
       expect.objectContaining({
+        answeredMailboxItemIds: [
+          'mailbox_item_prepared_retry_1',
+          'mailbox_item_prepared_retry_2',
+        ],
         session: {
           binding: expect.objectContaining({
             channel: 'linq',
@@ -3014,6 +3058,7 @@ async function createIntent(
   vault: string,
   overrides: Partial<{
     actorId: string | null
+    answeredMailboxItemIds: string[]
     channel: string | null
     createdAt: string
     deliveryIdempotencyKey: string | null
@@ -3035,6 +3080,7 @@ async function createIntent(
 
   return createAssistantOutboxIntent({
     actorId: overrides.actorId ?? null,
+    answeredMailboxItemIds: overrides.answeredMailboxItemIds,
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
     deliveryIdempotencyKey: overrides.deliveryIdempotencyKey,

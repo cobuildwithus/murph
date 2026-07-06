@@ -392,6 +392,31 @@ describe("deleteHostedAccountData", () => {
     ]));
   });
 
+  it("deletes delivery-time consume stamps with hosted mailbox item rows", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => {},
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_mailbox_item"]).toBe(1);
+    expect(deleteCalls).toEqual(expect.arrayContaining([
+      {
+        model: "hostedMailboxItem",
+        where: {
+          userId: "member_123",
+        },
+      },
+    ]));
+    expect(deleteCalls.map((call) => call.model)).not.toContain("hostedMailboxItemConsume");
+  });
+
   it("revokes outgoing vault shares before member rows cascade and wakes surviving destinations", async () => {
     const operationOrder: string[] = [];
     serviceMocks.revokeOutgoingHostedVaultSharesForMemberDeletionTx.mockImplementation(

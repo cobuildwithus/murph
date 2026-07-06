@@ -1269,6 +1269,7 @@ describe("hosted Linq observability stores", () => {
 
     await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
+      answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
       attemptedAt,
       idempotencyKey: "assistant-outbox:intent_123",
       linqChatId: "linq_chat_123",
@@ -1277,6 +1278,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_123",
       targetKind: "thread",
+      userId: "member_123",
     })).resolves.toEqual({
       deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
       recorded: true,
@@ -1304,6 +1306,20 @@ describe("hosted Linq observability stores", () => {
         }),
       }),
     );
+    expect(fixture.hostedMailboxItemUpdateMany).toHaveBeenCalledWith({
+      data: {
+        consumedAt: acceptedAt,
+      },
+      where: {
+        consumedAt: null,
+        id: {
+          in: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
+        },
+        kind: "conversation.message",
+        lane: "conversation",
+        userId: "member_123",
+      },
+    });
     expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
@@ -1337,6 +1353,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_unknown_line",
       targetKind: "thread",
+      userId: "member_123",
     })).resolves.toEqual({
       deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
       recorded: true,
@@ -1354,6 +1371,38 @@ describe("hosted Linq observability stores", () => {
     );
     expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
     expect(fixture.hostedLinqLineUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not stamp answered mailbox rows for failed runtime outcomes", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const failedAt = new Date("2026-03-26T12:00:02.000Z");
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      answeredMailboxItemIds: ["mailbox_item_should_not_consume"],
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      failedAt,
+      failureCode: "synthetic_failure",
+      idempotencyKey: "assistant-outbox:intent_failed",
+      linqChatId: "linq_chat_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_failed",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failedAt,
+          status: "failed",
+        }),
+      }),
+    );
+    expect(fixture.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
   });
 
   it("does not double-count outbound totals when the provider echo lands before runtime acceptance", async () => {
@@ -1376,6 +1425,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_echo_first",
       targetKind: "thread",
+      userId: "member_123",
     });
 
     expect(fixture.hostedLinqProviderEventFindFirst).toHaveBeenCalledWith(
@@ -1423,6 +1473,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_123",
       targetKind: "thread",
+      userId: "member_123",
     });
 
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
@@ -1488,6 +1539,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_123",
       targetKind: "thread",
+      userId: "member_123",
     });
 
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
@@ -1545,6 +1597,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_123",
       targetKind: "thread",
+      userId: "member_123",
     })).resolves.toEqual({
       deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
       recorded: true,
@@ -1788,6 +1841,7 @@ describe("hosted Linq observability stores", () => {
         },
       }),
     );
+    expect(fixture.hostedMailboxItemUpdateMany).not.toHaveBeenCalled();
   });
 
   it("treats concurrent skipped delivery creation as an idempotent success", async () => {
@@ -2196,6 +2250,7 @@ function createObservabilityPrismaFixture() {
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqProviderEventFindFirst = vi.fn().mockResolvedValue(null);
   const hostedLinqProviderEventFindMany = vi.fn().mockResolvedValue([]);
+  const hostedMailboxItemUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
   const prisma = {
     $executeRaw: executeRaw,
     hostedLinqAlert: {
@@ -2225,6 +2280,9 @@ function createObservabilityPrismaFixture() {
       findFirst: hostedLinqProviderEventFindFirst,
       findMany: hostedLinqProviderEventFindMany,
     },
+    hostedMailboxItem: {
+      updateMany: hostedMailboxItemUpdateMany,
+    },
   };
 
   return {
@@ -2246,6 +2304,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqProviderEventCreateMany,
     hostedLinqProviderEventFindFirst,
     hostedLinqProviderEventFindMany,
+    hostedMailboxItemUpdateMany,
     prisma,
   };
 }
