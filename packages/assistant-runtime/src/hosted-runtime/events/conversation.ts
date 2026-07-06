@@ -21,7 +21,7 @@ import {
   createInboxPipeline,
   type PersistedCapture,
   openInboxRuntime,
-} from "@murphai/inboxd";
+} from "@murphai/inboxd/runtime";
 import {
   createConfiguredParserRegistry,
   createInboxParserService,

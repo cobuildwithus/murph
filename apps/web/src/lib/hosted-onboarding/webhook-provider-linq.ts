@@ -9,10 +9,7 @@ import { issueHostedInviteTx } from "./invite-service";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
-import {
-  hasActiveHostedThreadContainerAccess,
-  readActiveHostedMemberAccess,
-} from "./member-access";
+import { readActiveHostedMemberAccess } from "./member-access";
 import {
   isHostedOnboardingError,
 } from "./errors";
@@ -98,7 +95,6 @@ import type {
   HostedLinqFirstContactAdmissionRequest,
 } from "./linq-first-contact-admission";
 import {
-  readHostedThreadRouteByExternalThread,
   readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
   type HostedThreadRouteSnapshot,
@@ -166,38 +162,18 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const threadRouteAccountLookupKeys = createHostedPhoneLookupKeyReadCandidates(
     recipientPhoneNumber,
   );
-  if (threadRouteAccountLookupKeys.length > 0) {
-    const explicitThreadRoute = await readHostedThreadRouteByExternalThread({
-      accountLookupKeys: threadRouteAccountLookupKeys,
-      channel: "linq",
-      prisma: input.prisma,
-      threadId: summary.chatId,
-    });
-    if (explicitThreadRoute) {
-      return planHostedLinqExplicitThreadRouteWebhook({
-        context,
-        event: input.event,
-        prisma: input.prisma,
-        route: explicitThreadRoute,
-      });
-    }
-  }
-
-  const mismatchedThreadRoute = await readHostedThreadRouteByThreadIdentity({
+  const explicitThreadRoute = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma: input.prisma,
     threadId: summary.chatId,
   });
-  if (mismatchedThreadRoute) {
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("thread-route-authority-mismatch"),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: false,
-        existingMemberMatch: "none",
-        reason: "thread-route-authority-mismatch",
-        routeStage: "thread-route-authority-mismatch",
-      }),
-    );
+  if (explicitThreadRoute) {
+    return planHostedLinqExplicitThreadRouteWebhook({
+      context,
+      event: input.event,
+      prisma: input.prisma,
+      route: explicitThreadRoute,
+    });
   }
 
   if (isHostedLinqGroupChat(messageEvent)) {
@@ -1024,12 +1000,12 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     summary,
   } = input.context;
 
-  if (
-    !hasActiveHostedThreadContainerAccess({
-      container: input.route.container,
-      owner: input.route.owner,
-    })
-  ) {
+  const containerAccessActive = await readActiveHostedMemberAccess({
+    memberId: input.route.containerMemberId,
+    prisma: input.prisma,
+  });
+
+  if (!containerAccessActive) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("thread-container-inactive"),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
@@ -1097,7 +1073,9 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     );
   }
 
+  const currentLineAccountLookupKey = createHostedPhoneLookupKey(input.context.recipientPhoneNumber);
   const routeAuthority = buildHostedLinqThreadRouteEgressAuthority({
+    accountLookupKey: currentLineAccountLookupKey,
     route: input.route,
     threadId: summary.chatId,
   });
@@ -1138,7 +1116,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
 
   await recordHostedThreadRouteLinqInboundEngagementTx({
     chatId: summary.chatId,
-    linePhoneNumberLookupKey: input.route.accountLookupKey,
     memberId: input.route.containerMemberId,
     occurredAt,
     prisma: input.prisma,
@@ -1178,7 +1155,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   }
 
   const mailboxWake = buildHostedLinqConversationWakeForMailbox({
-    accountLookupKey: input.route.accountLookupKey,
+    ...(currentLineAccountLookupKey ? { accountLookupKey: currentLineAccountLookupKey } : {}),
     eventId: input.event.event_id,
     linqMessage: {
       chatId: summary.chatId,
@@ -1336,8 +1313,9 @@ async function planHostedLinqGroupChatWebhook(input: {
     return ignored("group-chat-not-home-line");
   }
 
+  let createdContainerMemberId: string | null = null;
   try {
-    await ensureHostedThreadContainerRouteTx({
+    const ensureResult = await ensureHostedThreadContainerRouteTx({
       accountLookupKey,
       accountLookupKeys: input.threadRouteAccountLookupKeys,
       channel: "linq",
@@ -1346,6 +1324,9 @@ async function planHostedLinqGroupChatWebhook(input: {
       prisma: input.prisma,
       threadId: summary.chatId,
     });
+    createdContainerMemberId = ensureResult.created
+      ? ensureResult.containerMemberId
+      : null;
   } catch (error) {
     if (
       !isHostedOnboardingError(error)
@@ -1359,8 +1340,7 @@ async function planHostedLinqGroupChatWebhook(input: {
     // of dropping an authorized inbound; a missing route still fails closed.
   }
 
-  const route = await readHostedThreadRouteByExternalThread({
-    accountLookupKeys: input.threadRouteAccountLookupKeys,
+  const route = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma: input.prisma,
     threadId: summary.chatId,
@@ -1369,12 +1349,26 @@ async function planHostedLinqGroupChatWebhook(input: {
     return ignored("group-chat-provision-unavailable");
   }
 
-  return planHostedLinqExplicitThreadRouteWebhook({
+  const plan = await planHostedLinqExplicitThreadRouteWebhook({
     context: input.context,
     event: input.event,
     prisma: input.prisma,
     route,
   });
+  if (createdContainerMemberId && route.containerMemberId === createdContainerMemberId) {
+    return {
+      ...plan,
+      postCommitGroupRosterReconciles: [
+        ...(plan.postCommitGroupRosterReconciles ?? []),
+        {
+          chatId: summary.chatId,
+          containerMemberId: route.containerMemberId,
+        },
+      ],
+    };
+  }
+
+  return plan;
 }
 
 async function planHostedLinqInboundAdmissionDenied(input: {
@@ -1573,11 +1567,12 @@ function normalizeHostedLinqFirstContactAdmissionService(
 }
 
 function buildHostedLinqThreadRouteEgressAuthority(input: {
+  accountLookupKey?: string | null;
   route: HostedThreadRouteSnapshot;
   threadId: string;
 }): HostedLinqThreadRouteEgressAuthority {
   return {
-    accountLookupKey: input.route.accountLookupKey,
+    ...(input.accountLookupKey ? { accountLookupKey: input.accountLookupKey } : {}),
     channel: "linq",
     containerMemberId: input.route.containerMemberId,
     threadId: input.threadId,

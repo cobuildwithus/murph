@@ -1136,6 +1136,15 @@ describe("hosted local dev stack", () => {
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 103 }))
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 104 }));
     vi.mocked(access).mockResolvedValueOnce(undefined);
+    vi.mocked(readFile).mockImplementationOnce(async (filePath) => {
+      if (/apps[/\\]web[/\\]\.next-smoke-e2e-fixture[/\\]BUILD_ID$/u.test(String(filePath))) {
+        return "smoke-build-id\n";
+      }
+
+      const error = new Error("File not found") as Error & { code: string };
+      error.code = "ENOENT";
+      throw error;
+    });
 
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
@@ -1226,6 +1235,59 @@ describe("hosted local dev stack", () => {
     expect(maybeStartHostedLocalMinio).toHaveBeenCalledWith(expect.objectContaining({
       containerHost: expect.any(String),
       tempDir: "/tmp/murph-dev-env-test",
+    }));
+  });
+
+  it("falls back to web dev for an E2E profile without a prebuilt smoke BUILD_ID", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      linqWebhookTunnelMode: "disabled",
+      skipLinqWebhookRegister: true,
+      skipStripeListen: true,
+      webPort: 31001,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 105 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 106 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+        MURPH_DEV_WEB_PORT: "31001",
+        MURPH_DEV_WORKER_PORT: "32001",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    const webCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    expect(webCall?.[2]).toEqual([
+      "--dir",
+      ".",
+      "exec",
+      "tsx",
+      "apps/web/scripts/dev-local.ts",
+      "--",
+      "--hostname",
+      "localhost",
+      "--port",
+      "31001",
+    ]);
+    expect(webCall?.[3]).toEqual(expect.objectContaining({
+      MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
     }));
   });
 

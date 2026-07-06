@@ -10,13 +10,30 @@ import { readHostedFamilyInviteAcceptanceView } from "@/src/lib/hosted-onboardin
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
-export const metadata: Metadata = {
-  ...createMurphPageMetadata({
-    title: "Family invite — Murph",
-    description: "Join a Murph Family plan.",
-  }),
-  robots: { follow: false, index: false },
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ inviteCode: string }>;
+}): Promise<Metadata> {
+  const { inviteCode } = await params;
+  const inviteOpenGraphImage = {
+    alt: "You’re invited to Murph Family.",
+    height: 630,
+    type: "image/png",
+    url: `/family/accept/${encodeURIComponent(inviteCode)}/opengraph-image`,
+    width: 1200,
+  } as const;
+
+  return {
+    ...createMurphPageMetadata({
+      title: "Family invite · Murph",
+      description: "Join a Murph Family plan.",
+      openGraph: { images: [inviteOpenGraphImage] },
+      twitter: { images: [inviteOpenGraphImage] },
+    }),
+    robots: { follow: false, index: false },
+  };
+}
 
 export default async function FamilyAcceptPage({
   params,

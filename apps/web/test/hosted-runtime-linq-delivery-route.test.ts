@@ -176,9 +176,7 @@ describe("hosted runtime Linq delivery route", () => {
       containerMemberId: "member_123",
       threadId: "linq_chat_123",
     };
-    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValueOnce({
-      accountLookupKey: "hbidx:phone:v1:account",
-    });
+    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValueOnce({});
 
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
@@ -232,6 +230,38 @@ describe("hosted runtime Linq delivery route", () => {
 
     expect(targetMismatch.status).toBe(403);
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts routed delivery authority without a line account lookup key", async () => {
+    const routeAuthority = {
+      channel: "linq",
+      containerMemberId: "member_123",
+      threadId: "linq_chat_123",
+    };
+    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValueOnce({});
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      routeAuthority,
+      target: "linq_chat_123",
+      targetKind: "thread",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
+      authority: routeAuthority,
+      prisma,
+    });
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phoneNumber: null,
+        phoneNumberLookupKey: null,
+      }),
+    );
   });
 
   it("rejects accepted delivery outcomes with too many answered mailbox item ids", async () => {

@@ -89,6 +89,14 @@ export const assistantTurnEventKindValues = [
 ] as const
 export const assistantCronScheduleKindValues = automationTimeScheduleKindValues
 export const assistantCronTriggerValues = ['manual', 'scheduled'] as const
+export const assistantCronRunOutcomeValues = [
+  'delivered',
+  'delivery_pending',
+  'no_op',
+  'expired',
+  'skipped_gate',
+  'failed',
+] as const
 export const assistantCronRunStatusValues = [
   'succeeded',
   'failed',
@@ -316,7 +324,7 @@ export const assistantDeliverySourceSchema = z.discriminatedUnion('kind', [
 
 export const assistantExternalThreadRouteAuthoritySchema = z
   .object({
-    accountLookupKey: z.string().min(1),
+    accountLookupKey: z.string().min(1).nullable().optional(),
     channel: z.enum(['email', 'linq', 'telegram']),
     containerMemberId: z.string().min(1),
     threadId: z.string().min(1),
@@ -1169,13 +1177,91 @@ export const assistantCronJobSchema = z
   })
   .strict()
 
-export const assistantCronRunRecordSchema = z
-  .object({
+const assistantCronLegacyRunStatusValues: ReadonlySet<string> =
+  new Set(assistantCronRunStatusValues)
+
+function normalizeAssistantCronRunRecordInput(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value
+  }
+
+  const record = value as Record<string, unknown>
+  const outcome = typeof record.outcome === 'string'
+    ? record.outcome.trim()
+    : ''
+  if (outcome.length > 0) {
+    return {
+      ...record,
+      reason: normalizeAssistantCronRunReason(record.reason, outcome),
+    }
+  }
+
+  const status = typeof record.status === 'string'
+    ? record.status.trim()
+    : ''
+  if (!assistantCronLegacyRunStatusValues.has(status)) {
+    return value
+  }
+
+  return {
+    ...record,
+    outcome: legacyAssistantCronStatusToOutcome(status, record.error),
+    reason: legacyAssistantCronStatusToReason(status, record.error),
+  }
+}
+
+function legacyAssistantCronStatusToOutcome(
+  status: string,
+  error: unknown,
+): (typeof assistantCronRunOutcomeValues)[number] {
+  switch (status) {
+    case 'succeeded':
+      return 'delivered'
+    case 'failed':
+      return 'failed'
+    case 'skipped':
+      return typeof error === 'string' && error.length > 0
+        ? 'skipped_gate'
+        : 'no_op'
+    default:
+      return 'failed'
+  }
+}
+
+function legacyAssistantCronStatusToReason(
+  status: string,
+  error: unknown,
+): string {
+  if (status === 'failed') {
+    return 'legacy_failed'
+  }
+  if (status === 'skipped') {
+    return typeof error === 'string' && error.length > 0
+      ? 'legacy_skipped'
+      : 'legacy_no_op'
+  }
+  return 'legacy_succeeded'
+}
+
+function normalizeAssistantCronRunReason(
+  value: unknown,
+  fallback: string,
+): string {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : fallback
+}
+
+export const assistantCronRunRecordSchema = z.preprocess(
+  normalizeAssistantCronRunRecordInput,
+  z.object({
     schema: z.literal('murph.assistant-cron-run.v1'),
     runId: assistantCronRunIdSchema,
     jobId: assistantCronJobIdSchema,
     trigger: z.enum(assistantCronTriggerValues),
-    status: z.enum(assistantCronRunStatusValues),
+    outcome: z.enum(assistantCronRunOutcomeValues),
+    reason: z.string().trim().min(1).max(120),
+    status: z.enum(assistantCronRunStatusValues).optional(),
     startedAt: isoTimestampSchema,
     finishedAt: isoTimestampSchema,
     sessionId: assistantSessionIdSchema.nullable(),
@@ -1183,7 +1269,8 @@ export const assistantCronRunRecordSchema = z
     responseLength: z.number().int().nonnegative(),
     error: z.string().nullable(),
   })
-  .strict()
+  .strict(),
+)
 
 export const assistantCronPresetVariableSchema = z
   .object({
@@ -1678,6 +1765,8 @@ export type AssistantOutboxIntentStatus =
   (typeof assistantOutboxIntentStatusValues)[number]
 export type AssistantCronScheduleKind = AutomationTimeScheduleKind
 export type AssistantCronTrigger = (typeof assistantCronTriggerValues)[number]
+export type AssistantCronRunOutcome =
+  (typeof assistantCronRunOutcomeValues)[number]
 export type AssistantCronRunStatus =
   (typeof assistantCronRunStatusValues)[number]
 export type AssistantTurnReceiptStatus =

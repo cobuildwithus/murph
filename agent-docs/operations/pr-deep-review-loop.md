@@ -1,9 +1,10 @@
 # PR Deep-Review Loop
 
-Last verified: 2026-06-28
+Last verified: 2026-07-06
 
-Required external deep-review loop that runs after the repo-required completion workflow, on PR-lane work.
-For PR-lane patch implementation, this loop is the audit gate: the worktree/PR-lane skip in `agent-docs/operations/completion-workflow.md` lets the parent agent default-skip the local required audit subagent passes and rely on this loop to cover that surface. For current-checkout (non-PR-lane) work it stays additive — it does not satisfy, replace, or reorder the local required completion audits in that document, and those passes still run there.
+Required post-completion deep-review loop that runs after the repo-required completion workflow, on PR-lane work. It runs on the **local Codex CLI** (Codex `gpt-5.5`), the same engine as the routed completion audit passes — not ReviewGPT, `review:gpt`, `cobuild-review-gpt`, an external ChatGPT thread, or any managed-browser/autosend/`thread wake` flow. ReviewGPT is retired for this loop as of 2026-07-06; do not route a round through it even as a fallback.
+
+For PR-lane patch implementation, this loop is the audit gate: the worktree/PR-lane skip in `agent-docs/operations/completion-workflow.md` lets the parent agent default-skip the individual local required audit subagent passes and rely on this consolidated Codex deep-review loop to cover that surface. For current-checkout (non-PR-lane) work it stays additive — it does not satisfy, replace, or reorder the local required completion audits in that document, and those passes still run there.
 For non-trivial PR-lane work, do not call the PR good to merge until this loop has passed.
 
 ## When It Runs
@@ -14,49 +15,24 @@ Run the loop when all of the following hold:
 2. All routed completion audits passed and the scoped commit is pushed.
 3. The user has not explicitly opted out in the current task.
 
-The review target must be the pushed PR head. Do not run this loop on
-unpushed local changes, local patch text, or local ZIP/repomix context that
-does not represent the pushed PR head. If the current fixes are only local,
-commit and push them to the PR branch first, then run ReviewGPT against the PR
-URL. The reviewer must read the required ReviewGPT attachments for that pushed
-head: the guarded source snapshot ZIP, including
-`review-gpt-pr-context/pr.diff` and
-`review-gpt-pr-context/changed-files.txt`, plus the matching repomix artifact.
+The review target must be the pushed PR head. Run the loop against a clean checkout/worktree of the PR branch at the pushed head: Codex reads the working tree and computes the diff (`git diff origin/<base>...HEAD`) directly, so the review, CI, and merge target all refer to the same commit. Do not run it on unpushed local changes, a dirty worktree, or a checkout that is not at the pushed head. If the current fixes are only local, commit and push them to the PR branch first, then run the loop against the pushed head.
 
 The PR body must carry the intent contract from `agent-docs/operations/completion-workflow.md` § PR Description (why the PR exists, the user-visible goal it is meant to ship, and invariants to preserve). Before firing a round, confirm that block is present and current — if it is missing or stale (for example the PR's intended behavior has shifted since the last round), update the PR body first so the reviewer judges the diff against intent rather than the current runtime state.
 
-Fire each round as soon as the head it reviews is pushed — do NOT wait for
-PR CI to go green first. CI and the review round run in parallel; a round
-typically takes as long as the CI lane, so serializing them roughly doubles
-loop latency for nothing (the reviewer reads the pushed diff, not CI
-output). Green CI on the final head remains a hard MERGE-READINESS gate: a
-PR is merge-ready only when the final head has both green CI and a
-zero-accepted-findings round.
+Fire each round as soon as the head it reviews is pushed — do NOT wait for PR CI to go green first. CI and the review round run in parallel; serializing them roughly doubles loop latency for nothing (the reviewer reads the pushed diff, not CI output). Green CI on the final head remains a hard MERGE-READINESS gate: a PR is merge-ready only when the final head has both green CI and a zero-accepted-findings round.
 
 Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit current-task user opt-out.
 
 ## One Round
 
-1. Fire a new ChatGPT thread (never reuse a thread between rounds; omitting `--chat-url` creates a fresh one). The initial prompt text must include the literal PR URL through `--prompt "PR: <pr-url>"`; do not run a bare preset-only `pnpm review:gpt pr-review --send ...` command and rely on defaults, prior context, browser state, or connector context to infer the PR. Run the pushed-head preflight immediately before packaging so the attachments cannot include unpushed or dirty local files:
+1. Run the `deep-review` pass on the local Codex CLI against the PR-branch worktree at the pushed head. Route it exactly like the routed completion audits (see `agent-docs/operations/completion-workflow.md` § Audit Worker Rules): Codex `gpt-5.5` through the `c1` operator alias (`CODEX_HOME=$HOME/.codex-1 codex --profile full_access exec -C <worktree> -o audit-packages/pr-<number>-round-<k>.md - < <deep-review-prompt-file>`) or a direct non-interactive `codex exec`. Bind stdin exactly once: with the `-` prompt form, redirect stdin from the prompt file only — do not also append `</dev/null`, which wins as the last stdin redirect and feeds Codex an empty prompt (observed 2026-07-06). Close stdin with `</dev/null` only when the prompt is passed as a command-line argument instead of stdin (an open non-TTY stdin otherwise makes `codex exec` wait for piped input and hang). Honor the `MURPH_AUDIT_CODEX_HOME` override when set. Use **xhigh** reasoning for the PR gate — it is a whole-PR final bug hunt.
 
-   ```sh
-   pr_url="<pr-url>"
-   scripts/review-gpt-pr-head-preflight.sh "$pr_url"
+   Hand the run: the PR intent contract from the PR body, the exact commit range under review, an explicit `review only` instruction (no file edits, no commit helpers, no commits), and the standard deep-review instruction — use `murph-deep-review`, load `feynman-auditor`, follow the modified files plus directly affected call paths, and answer the exact question "What final bugs or edge cases could still break this change in production?" Because this is the consolidated PR-lane gate, keep the sweep whole-diff: surface cross-cutting bug, security/exposure, frontend, coverage, and prompt concerns as they come up, the same breadth the retired ReviewGPT loop covered. Write findings to `audit-packages/pr-<number>-round-<k>.md` (uncommitted working artifact). Run it as a background task and resume when the process exits.
 
-   REVIEW_GPT_PR_URL="$pr_url" pnpm review:gpt pr-review \
-     --prompt "PR: $pr_url" \
-     --zip \
-     --send --wait --wait-timeout 90m \
-     --response-marker REVIEW_COMPLETE \
-     --response-file audit-packages/pr-<number>-round-<k>.md
-   ```
+   Because Codex reads the worktree directly, there is no guarded ZIP, repomix attachment, managed browser, connector, composer, or thread export to manage; the earlier ReviewGPT packaging/preflight steps no longer apply. If the Codex CLI or its auth is unavailable in the current environment, report that limitation and run the pass on the parent agent's current model instead — do not silently route the round through ReviewGPT, a connector, pasted text, or ad hoc archives.
 
-   Run it as a background task and resume when the process exits. Use GPT-5.5 Pro / Pro Extended on the Eragon managed browser lane. Do not downgrade to non-Pro models, lower reasoning, connector-based context, or a different browser lane when the Pro run is slow or sticky; retry on Pro in a fresh Eragon thread instead. The repo defaults use `gpt-5.5-pro` with the guarded source snapshot ZIP and matching repomix attachment enabled. Setting `REVIEW_GPT_PR_URL` makes the packaging wrapper add the exact PR diff at `review-gpt-pr-context/pr.diff` and the touched-file list at `review-gpt-pr-context/changed-files.txt` inside `repo.snapshot.zip`; do not omit it for PR review rounds. Before auto-send, confirm the Eragon composer has no selected app connector pill; the config intentionally uses `app_connector="current"` only to avoid selecting one, and the PR review context must come from attachments. ReviewGPT can take up to about 90 minutes before a usable final response is available, especially on Pro/Pro Extended, and occasional runs may take longer. While waiting or recapturing, poll or export about every 2 minutes — not more frequently — to keep parent-agent token usage low and avoid hammering the browser or starting duplicate threads. Keep the `90m` command timeout as the normal outer guard.
+2. Confirm the captured output is the actual review before triaging it. The round completes when the Codex process exits and the response file holds concrete findings or an explicit no-findings summary. If the run died, timed out, or left an empty or preliminary file, the round does not count; rerun it against the same pushed head rather than triaging a partial result.
 
-   Active ReviewGPT runs on the same managed browser profile/port are not a reason to queue behind that profile by default. One profile can support about 10 concurrent ReviewGPT runs, so do not wait just because one or two other PR rounds are already running there. Wait, switch profiles, or report a blocker only when the profile is near that concurrency cap, rate-limited, browser-unresponsive, or otherwise failing to start a new thread safely.
-
-   If a round returns that ReviewGPT cannot access, read, or find the required ZIP/repomix attachments, or cannot find `review-gpt-pr-context/pr.diff` and `review-gpt-pr-context/changed-files.txt` inside `repo.snapshot.zip`, confirm the command ran with `--zip` and `REVIEW_GPT_PR_URL="$pr_url"` against the already-pushed PR head and retry the round once on the same Pro + Eragon configuration in a fresh thread. If the retry still cannot read the attachments, stop and report the context failure rather than silently routing the round through a connector, pasted text, local dirty-worktree archives, or another ad hoc context path.
-2. Check the captured response is the actual review before triaging it. If the response file is a short preliminary acknowledgment (for example "I'll inspect the PR and report back") instead of findings or an explicit no-findings summary, the model was still working when capture finished: the round does not count, and do not fire a new thread. Re-capture the finished reply from the same thread with `pnpm review:gpt thread export --chat-url <thread-url> --output audit-packages/pr-<number>-round-<k>-recapture.json` (the thread URL is in the run output) and read the final assistant message from that export. Note the conversation URL does not load (redirects home) while the turn is still generating, so wait a few minutes and retry the export until the thread loads. If the same thread still cannot load or export a final review after roughly 90 minutes, try recovery before abandoning the round: use the in-app browser or Computer Use against the managed browser session from `scripts/review-gpt.config.sh` to inspect the ChatGPT thread, recover the thread URL from the ReviewGPT output, or copy/export the final assistant reply. Start a fresh Pro thread only after the original thread is proven inaccessible, failed, or missing a final review.
 3. When the response lands, the local agent triages every finding before any fix:
    first decide whether it is worth fixing at all. Reject it when it is wrong,
    already handled, speculative, lower-impact than the review claims, or when
@@ -96,7 +72,7 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
    insufficient. When repeated findings cluster on one mechanism, pause
    tactical patching and either collapse that mechanism to a simpler ownership
    shape, split/abandon the PR, or explicitly reject the collapse finding.
-   ReviewGPT is strongest as an adversarial reviewer, not as the final
+   Codex deep-review is strongest as an adversarial reviewer, not as the final
    architecture owner.
 4. Fix only accepted findings after the reproduction/proof above is in place,
    run the verification required by
@@ -107,8 +83,8 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
 ## Base-Update-Only Exception
 
 If a round has already reached zero accepted findings and the PR later needs to
-be updated only because the base branch moved, do not start another external
-review round just for that base update.
+be updated only because the base branch moved, do not start another deep-review
+round just for that base update.
 
 This exception applies only when the post-review change is a normal merge or
 rebase of the PR base branch with no manual conflict resolution, new feature
@@ -123,13 +99,13 @@ fires immediately, in parallel with CI).
 
 ## Stop Condition
 
-- Stop when a round produces **zero accepted findings**. ChatGPT saying "looks clean" is not the terminator; the verification filter is.
+- Stop when a round produces **zero accepted findings**. Codex saying "looks clean" is not the terminator; the verification filter is.
 - Hard cap: 10 rounds per PR. If the cap is hit with accepted findings still landing each round, stop and report that the PR likely needs structural rework rather than more review rounds.
 - Report a per-round summary at handoff: findings received, accepted, rejected (with reasons), and what landed.
 
 ## Boundaries
 
-- For current-checkout (non-PR-lane) work, never use this loop (or any `review:gpt`/`thread wake` flow) to satisfy the local required completion audits; see `agent-docs/operations/completion-workflow.md`. For PR-lane patch implementation, the worktree/PR-lane skip in that document explicitly lets this loop serve as the audit gate, so the local subagent passes default-skip and this loop must run to zero accepted findings before merge.
-- Do not use pasted text, connector context, local dirty-worktree context, or ad hoc archives for this PR-lane loop. The reviewer must inspect the pushed PR through ReviewGPT's guarded source snapshot ZIP, its generated `review-gpt-pr-context/pr.diff` and `review-gpt-pr-context/changed-files.txt`, plus the matching repomix attachment for that pushed head, so the review, CI, and merge target all refer to the same code.
+- For current-checkout (non-PR-lane) work, never use this loop to satisfy the local required completion audits; see `agent-docs/operations/completion-workflow.md`. For PR-lane patch implementation, the worktree/PR-lane skip in that document explicitly lets this loop serve as the audit gate, so the individual local subagent passes default-skip and this loop must run to zero accepted findings before merge.
+- Do not use ReviewGPT, `review:gpt`, `cobuild-review-gpt`, external ChatGPT threads, pasted text, connector context, local dirty-worktree context, or ad hoc archives for this loop. Run it on the local Codex CLI against a clean worktree at the pushed PR head so the review, CI, and merge target all refer to the same code.
 - Response files under `audit-packages/` are local working artifacts and stay uncommitted.
-- The managed browser profile, port, model, and attachment defaults live in `scripts/review-gpt.config.sh`; the prompt lives in `scripts/chatgpt-review-presets/pr-deep-review.md`. Change them there, not inline.
+- The Codex routing (operator alias, model, reasoning, `CODEX_HOME`/`MURPH_AUDIT_CODEX_HOME` resolution) lives in `agent-docs/operations/completion-workflow.md` § Audit Worker Rules and `agent-docs/operations/agent-workflow-routing.md`; the deep-review scope and question live in the `deep-review` pass definition there. Change them there, not inline.

@@ -1849,6 +1849,37 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
   });
 
+  it("allows thread-container usage when an active participant has access", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      spentUsdMicros: 1_000_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+      threadContainerOwnerBillingStatus: HostedBillingStatus.paused,
+      threadContainerParticipantActive: true,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 3_500_000n,
+      spentUsdMicros: 1_000_000n,
+    });
+
+    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
+      select: {
+        participantMemberId: true,
+      },
+      where: expect.objectContaining({
+        containerMemberId: "member_123",
+        removedAt: null,
+      }),
+    });
+  });
+
   it("uses usage-period spend for billing periods before allowing", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
@@ -1974,7 +2005,9 @@ describe("checkHostedAiUsageGate", () => {
         scheduledBillingPlanCode: null,
       },
       billingStatus: HostedBillingStatus.active,
+      id: "member_123",
       suspendedAt: null,
+      threadContainer: null,
     }));
 
     await expect(checkHostedAiUsageGate({
@@ -2020,7 +2053,9 @@ describe("checkHostedAiUsageGate", () => {
         scheduledBillingPlanCode: null,
       },
       billingStatus: HostedBillingStatus.active,
+      id: "member_123",
       suspendedAt: null,
+      threadContainer: null,
     }));
     await expect(checkHostedAiUsageGate({
       memberId: "member_123",
@@ -2268,6 +2303,7 @@ function createGatePrisma(input: {
   threadContainerOwnerBillingStatus?: HostedBillingStatus;
   threadContainerOwnerFamilySponsored?: boolean;
   threadContainerOwnerSuspendedAt?: Date | null;
+  threadContainerParticipantActive?: boolean;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
   suspendedAt?: Date | null;
@@ -2385,44 +2421,30 @@ function createGatePrisma(input: {
         : null),
     },
     hostedMember: {
-      findUnique: vi.fn()
-        .mockResolvedValueOnce({
-          billingRef: {
-            currentBillingPhase: input.billingPhase ?? null,
-            currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
-            currentCheckoutOffer: input.checkoutOffer ?? null,
-            currentPeriodEnd: periodEnd,
-            currentPeriodStart: periodStart,
-            currentTrialEndsAt: input.trialEndsAt ?? null,
-            currentTrialStartedAt: input.trialStartedAt ?? null,
-            pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
-            pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
-            scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
-            scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
-          },
-          billingStatus: input.billingStatus ?? HostedBillingStatus.active,
-          suspendedAt: input.suspendedAt ?? null,
-          threadContainer,
-        })
-        .mockResolvedValueOnce({
-          billingRef: {
-            currentBillingPhase: input.billingPhase ?? null,
-            currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
-            currentCheckoutOffer: input.checkoutOffer ?? null,
-            currentPeriodEnd: periodEnd,
-            currentPeriodStart: periodStart,
-            currentTrialEndsAt: input.trialEndsAt ?? null,
-            currentTrialStartedAt: input.trialStartedAt ?? null,
-            pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
-            pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
-            scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
-            scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
-          },
-          billingStatus: input.billingStatus ?? HostedBillingStatus.active,
-          id: "member_123",
-          suspendedAt: input.suspendedAt ?? null,
-          threadContainer,
-        }),
+      findUnique: vi.fn(async () => ({
+        billingRef: {
+          currentBillingPhase: input.billingPhase ?? null,
+          currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
+          currentCheckoutOffer: input.checkoutOffer ?? null,
+          currentPeriodEnd: periodEnd,
+          currentPeriodStart: periodStart,
+          currentTrialEndsAt: input.trialEndsAt ?? null,
+          currentTrialStartedAt: input.trialStartedAt ?? null,
+          pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
+          pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
+          scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
+          scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
+        },
+        billingStatus: input.billingStatus ?? HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: input.suspendedAt ?? null,
+        threadContainer,
+      })),
+    },
+    hostedThreadContainerParticipant: {
+      findFirst: vi.fn(async () => input.threadContainerParticipantActive
+        ? { participantMemberId: "member_participant" }
+        : null),
     },
   };
 }

@@ -851,12 +851,16 @@ export async function startHostedLocalDevStack(input: {
     }
     throwIfAbortSignalAborted(input.abortSignal);
 
+    const shouldUseWebProductionStart = config.skipWeb
+      ? false
+      : await shouldUseHostedWebProductionStart(runtimeEnv);
+
     const webProcess = config.skipWeb
       ? null
       : spawnChildProcess("web", "pnpm", buildHostedWebProcessArgs({
         config,
-        env: runtimeEnv,
-      }), buildHostedWebProcessEnv(runtimeEnv), {
+        shouldUseProductionStart: shouldUseWebProductionStart,
+      }), buildHostedWebProcessEnv(runtimeEnv, shouldUseWebProductionStart), {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,
         stdoutTarget: input.stdoutTarget,
@@ -1520,14 +1524,29 @@ function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
     || profile === "e2e:live";
 }
 
-function shouldUseHostedWebProductionStart(env: NodeJS.ProcessEnv): boolean {
+async function shouldUseHostedWebProductionStart(env: NodeJS.ProcessEnv): Promise<boolean> {
   const profile = env.MURPH_HOSTED_LOCAL_PROFILE?.trim();
-  return profile === "e2e:stub" || profile === "e2e:live";
+  if (profile !== "e2e:stub" && profile !== "e2e:live") {
+    return false;
+  }
+
+  const nextDistDirMode = env.NEXT_DIST_DIR_MODE?.trim();
+  if (nextDistDirMode !== "smoke") {
+    return false;
+  }
+
+  // Keep this predicate in exact agreement with
+  // shouldPreserveHostedLocalProductionWebDist in apps/cloudflare test helpers.
+  const buildId = await readFile(
+    path.join(webDir, resolveHostedWebDevDistDirName(env), "BUILD_ID"),
+    "utf8",
+  ).catch(() => null);
+  return buildId !== null && buildId.trim().length > 0;
 }
 
 function buildHostedWebProcessArgs(input: {
   config: HostedLocalDevConfig;
-  env: NodeJS.ProcessEnv;
+  shouldUseProductionStart: boolean;
 }): string[] {
   const serverArgs = [
     "--hostname",
@@ -1536,7 +1555,7 @@ function buildHostedWebProcessArgs(input: {
     String(input.config.webPort),
   ];
 
-  if (shouldUseHostedWebProductionStart(input.env)) {
+  if (input.shouldUseProductionStart) {
     return [
       "--dir",
       "apps/web",
@@ -1558,8 +1577,11 @@ function buildHostedWebProcessArgs(input: {
   ];
 }
 
-function buildHostedWebProcessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  if (shouldUseHostedWebProductionStart(env)) {
+function buildHostedWebProcessEnv(
+  env: NodeJS.ProcessEnv,
+  shouldUseProductionStart: boolean,
+): NodeJS.ProcessEnv {
+  if (shouldUseProductionStart) {
     return { ...env };
   }
 

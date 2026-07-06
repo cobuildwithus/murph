@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   getHostedLinqChatHandles: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
+  hostedThreadContainerParticipantUpdateMany: vi.fn(),
+  hostedThreadContainerParticipantUpsert: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   isHostedMemberSuspended: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
@@ -84,14 +86,27 @@ const fakeTx = {
   hostedMember: { findUnique: mocks.hostedMemberFindUnique },
   hostedThreadContainer: { findUnique: mocks.hostedThreadContainerFindUnique },
 };
+const fakePrisma = {
+  ...fakeTx,
+  hostedThreadContainerParticipant: {
+    updateMany: mocks.hostedThreadContainerParticipantUpdateMany,
+    upsert: mocks.hostedThreadContainerParticipantUpsert,
+  },
+};
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({
+    ...fakePrisma,
     $transaction: (run: (tx: typeof fakeTx) => Promise<unknown>) => run(fakeTx),
   }),
 }));
 
-import { handleHostedRuntimeGroupTool } from "@/src/lib/hosted-groups/group-tool";
+import {
+  HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION,
+  HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+  handleHostedRuntimeGroupTool,
+  reconcileHostedThreadContainerParticipants,
+} from "@/src/lib/hosted-groups/group-tool";
 import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
 import {
   mergeHostedGroupJoinPolicy,
@@ -112,15 +127,28 @@ describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY);
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
     mocks.hostedThreadContainerFindUnique.mockResolvedValue({
+      member: { suspendedAt: null },
       ownerMemberId: "member_owner",
     });
     mocks.hostedMemberFindUnique.mockResolvedValue({ suspendedAt: null });
+    mocks.hostedThreadContainerParticipantUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.hostedThreadContainerParticipantUpsert.mockResolvedValue({});
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValue({
       group: GROUP_SUMMARY,
       joinCode: "abc123",
+    });
+  });
+
+  it("classifies group-tool actions by access authority", () => {
+    expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
+      create_join_link: "owner_active",
+      read_chat_participants: "participant_aware",
+      read_current: "participant_aware",
+      share_contact_card: "owner_active",
     });
   });
 
@@ -196,7 +224,16 @@ describe("handleHostedRuntimeGroupTool", () => {
 
     expect(mocks.hostedThreadContainerFindUnique).toHaveBeenCalledWith({
       where: { memberId: "member_group_runtime" },
-      select: { ownerMemberId: true },
+      select: {
+        member: {
+          select: { suspendedAt: true },
+        },
+        ownerMemberId: true,
+      },
+    });
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
+      memberId: "member_owner",
+      prisma: fakeTx,
     });
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -209,8 +246,31 @@ describe("handleHostedRuntimeGroupTool", () => {
     );
   });
 
-  it("does not mint a join link when runtime access is inactive", async () => {
-    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+  it("does not mint a join link when the owner lacks active access even if participant-aware access is active", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "create_join_link" },
+    })).resolves.toEqual({
+      action: "create_join_link",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "owner_unavailable",
+      },
+    });
+
+    expect(mocks.hasHostedRuntimeActiveAccess).not.toHaveBeenCalled();
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
+  });
+
+  it("does not mint a join link when the synthetic group runtime member is suspended", async () => {
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue({
+      member: { suspendedAt: new Date("2026-07-06T12:00:00Z") },
+      ownerMemberId: "member_owner",
+    });
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
@@ -224,6 +284,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       },
     });
 
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
   });
 
@@ -257,24 +318,6 @@ describe("handleHostedRuntimeGroupTool", () => {
         group: null,
         status: "unavailable",
         unavailableReason: "not_group_runtime",
-      },
-    });
-
-    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
-  });
-
-  it("rejects join-link creation when the container owner is suspended", async () => {
-    mocks.hostedMemberFindUnique.mockResolvedValue({ suspendedAt: new Date() });
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_group_runtime",
-      request: { action: "create_join_link" },
-    })).resolves.toEqual({
-      action: "create_join_link",
-      result: {
-        group: null,
-        status: "unavailable",
-        unavailableReason: "owner_unavailable",
       },
     });
 
@@ -363,6 +406,10 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       { handle: "person@example.com", isMe: false, status: null },
       { handle: "+15550000002", isMe: false, status: "left" },
     ]);
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue({
+      member: { suspendedAt: null },
+      ownerMemberId: "member_owner",
+    });
     mocks.isHostedMemberSuspended.mockReturnValue(false);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_participant", suspendedAt: null },
@@ -432,6 +479,23 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.getHostedLinqChatHandles).not.toHaveBeenCalled();
   });
 
+  it("keeps read_chat_participants participant-aware when the generic runtime gate is inactive", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+    })).resolves.toMatchObject({
+      action: "read_chat_participants",
+      result: {
+        status: "ok",
+      },
+    });
+
+    expect(mocks.hasHostedRuntimeActiveAccess).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerFindUnique).not.toHaveBeenCalled();
+  });
+
   it("classifies chat participants by Murph membership and skips the line and departed handles", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -454,6 +518,147 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.lookupHostedMemberByVerifiedEmailAddress).toHaveBeenCalledWith(
       expect.objectContaining({ address: "person@example.com" }),
     );
+    expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          containerMemberId: "member_container",
+          handleLookupKey: expect.stringMatching(/^hbidx:phone:/),
+          participantMemberId: "member_participant",
+          removedAt: null,
+        }),
+        update: expect.objectContaining({
+          handleLookupKey: expect.stringMatching(/^hbidx:phone:/),
+          removedAt: null,
+        }),
+        where: {
+          containerMemberId_participantMemberId: {
+            containerMemberId: "member_container",
+            participantMemberId: "member_participant",
+          },
+        },
+      }),
+    );
+    expect(mocks.hostedThreadContainerParticipantUpdateMany).toHaveBeenCalledWith({
+      data: {
+        removedAt: expect.any(Date),
+      },
+      where: {
+        containerMemberId: "member_container",
+        participantMemberId: { notIn: ["member_participant"] },
+        removedAt: null,
+      },
+    });
+  });
+
+  it("bounds read_chat_participants lookups and reconcile writes to the roster cap", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const activeHandles = Array.from(
+      { length: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1 },
+      (_, index) => ({
+        handle: `+1555001${index.toString().padStart(4, "0")}`,
+        isMe: false,
+        status: "active",
+      }),
+    );
+    mocks.getHostedLinqChatHandles.mockResolvedValue([
+      { handle: "+15557770000", isMe: true, status: "active" },
+      ...activeHandles,
+    ]);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(async ({ phoneNumber }) => ({
+      core: { id: `member_${phoneNumber.slice(-4)}`, suspendedAt: null },
+    }));
+
+    const response = await handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+    });
+
+    expect(response).toMatchObject({
+      action: "read_chat_participants",
+      result: { status: "ok" },
+    });
+    if (response.action !== "read_chat_participants" || response.result.status !== "ok") {
+      throw new Error("Expected ok participants response.");
+    }
+    expect(response.result.participants).toHaveLength(
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+    );
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledTimes(
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+    );
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledTimes(
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+    );
+    expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledTimes(
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+    );
+    expect(mocks.hostedThreadContainerParticipantUpdateMany).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted thread-container participant reconcile capped.",
+      expect.objectContaining({
+        cap: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+        reason: "roster_exceeds_cap",
+        rosterSize: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1,
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted thread-container participant reconcile skipped.",
+      expect.objectContaining({
+        reason: "roster_exceeds_cap",
+      }),
+    );
+    warn.mockRestore();
+  });
+
+  it("bounds at-creation reconcile lookups and upserts to the roster cap", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const activeHandles = Array.from(
+      { length: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1 },
+      (_, index) => ({
+        handle: `+1555011${index.toString().padStart(4, "0")}`,
+        isMe: false,
+        status: "active",
+      }),
+    );
+    mocks.getHostedLinqChatHandles.mockResolvedValue([
+      { handle: "+15557770000", isMe: true, status: "active" },
+      ...activeHandles,
+    ]);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(async ({ phoneNumber }) => ({
+      core: { id: `member_${phoneNumber.slice(-4)}`, suspendedAt: null },
+    }));
+
+    await reconcileHostedThreadContainerParticipants({
+      chatId: "chat_group_1",
+      containerMemberId: "member_container",
+      prisma: fakePrisma as never,
+    });
+
+    expect(mocks.getHostedLinqChatHandles).toHaveBeenCalledWith({
+      chatId: "chat_group_1",
+    });
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledTimes(
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+    );
+    expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledTimes(
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+    );
+    expect(mocks.hostedThreadContainerParticipantUpdateMany).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted thread-container participant reconcile capped.",
+      expect.objectContaining({
+        cap: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+        reason: "roster_exceeds_cap",
+        rosterSize: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1,
+      }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted thread-container participant reconcile skipped.",
+      expect.objectContaining({
+        reason: "roster_exceeds_cap",
+      }),
+    );
+    warn.mockRestore();
   });
 
   it("treats an unrecognized empty roster as provider trouble, not an empty room", async () => {
@@ -486,6 +691,50 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
+  });
+
+  it("soft-removes prior roster members when a successful roster pass sees none", async () => {
+    await reconcileHostedThreadContainerParticipants({
+      chatId: "chat_group_1",
+      containerMemberId: "member_container",
+      handles: [
+        { handle: "+15550000001", isMe: false, status: "left" },
+      ],
+      prisma: fakePrisma as never,
+      resolvedParticipants: [],
+    });
+
+    expect(mocks.hostedThreadContainerParticipantUpsert).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantUpdateMany).toHaveBeenCalledWith({
+      data: {
+        removedAt: expect.any(Date),
+      },
+      where: {
+        containerMemberId: "member_container",
+        removedAt: null,
+      },
+    });
+  });
+
+  it("keeps the existing roster projection when the provider fetch fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.getHostedLinqChatHandles.mockRejectedValueOnce(new Error("linq unavailable"));
+
+    await reconcileHostedThreadContainerParticipants({
+      chatId: "chat_group_1",
+      containerMemberId: "member_container",
+      prisma: fakePrisma as never,
+    });
+
+    expect(mocks.hostedThreadContainerParticipantUpsert).not.toHaveBeenCalled();
+    expect(mocks.hostedThreadContainerParticipantUpdateMany).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted thread-container participant reconcile skipped.",
+      expect.objectContaining({
+        reason: "reconcile_failed",
+      }),
+    );
+    warn.mockRestore();
   });
 
   it("sends the contact card vcf into the chat using the line's own handle", async () => {
@@ -521,6 +770,26 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         memberId: "member_container",
       }),
     );
+  });
+
+  it("does not share the contact card when the owner lacks active access even if participant-aware access is active", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "share_contact_card", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "owner_unavailable",
+      },
+    });
+
+    expect(mocks.hasHostedRuntimeActiveAccess).not.toHaveBeenCalled();
+    expect(mocks.reserveHostedLinqContactCardShareAttempt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
   it("reports already_shared when the per-chat throttle is active", async () => {

@@ -7,10 +7,27 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 const JOIN_INVITE_METADATA_DESCRIPTION =
   "Finish signup, then add a phone number or connect Telegram so Murph can reach you.";
 
-export const metadata: Metadata = createMurphPageMetadata({
-  title: "Murph invite",
-  description: JOIN_INVITE_METADATA_DESCRIPTION,
-});
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ inviteCode: string }>;
+}): Promise<Metadata> {
+  const { inviteCode } = await params;
+  const ogImage = {
+    alt: "You’re invited to Murph.",
+    height: 630,
+    type: "image/png",
+    url: `/join/${encodeURIComponent(inviteCode)}/opengraph-image`,
+    width: 1200,
+  } as const;
+
+  return createMurphPageMetadata({
+    title: "Murph invite",
+    description: JOIN_INVITE_METADATA_DESCRIPTION,
+    openGraph: { images: [ogImage] },
+    twitter: { images: [ogImage] },
+  });
+}
 
 export default async function JoinInvitePage(input: {
   params: Promise<{ inviteCode: string }>;

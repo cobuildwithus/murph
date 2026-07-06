@@ -1024,6 +1024,12 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   orchestration?: {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
+    tokenAcquireStartedAtEpochMs?: number;
+    tokenAcquiredAtEpochMs?: number;
+    directEnsureRequestStartedAtEpochMs?: number;
+    directEnsureResponseReceivedAtEpochMs?: number;
+    runtimeControlAuthStartedAtEpochMs?: number;
+    runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
     triggeredByWebDirect?: boolean;
     userRunnerEnsureStartedAtEpochMs?: number;
@@ -1110,6 +1116,12 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   orchestration: [
     "temporalActivityStartedAtEpochMs",
     "temporalActivityRequestStartedAtEpochMs",
+    "tokenAcquireStartedAtEpochMs",
+    "tokenAcquiredAtEpochMs",
+    "directEnsureRequestStartedAtEpochMs",
+    "directEnsureResponseReceivedAtEpochMs",
+    "runtimeControlAuthStartedAtEpochMs",
+    "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
     "triggeredByWebDirect",
     "userRunnerEnsureStartedAtEpochMs",
