@@ -299,7 +299,7 @@ async function ensureAssistantStateDirectoryPrivate(directoryPath: string): Prom
       }
     }
 
-    await chmod(currentPath, ASSISTANT_STATE_DIRECTORY_MODE)
+    await chmodExistingPath(currentPath, ASSISTANT_STATE_DIRECTORY_MODE)
   }
 }
 

@@ -315,8 +315,8 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'pr-deep-review-loop.md'),
       'utf8',
     )
-    expect(prDeepReviewLoop).toContain('scripts/review-gpt-pr-head-preflight.sh "$pr_url"')
-    expect(prDeepReviewLoop).toContain('confirm the Eragon composer has no selected app connector pill')
+    expect(prDeepReviewLoop).toContain('local Codex CLI')
+    expect(prDeepReviewLoop).toContain('the earlier ReviewGPT packaging/preflight steps no longer apply')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
