@@ -30,7 +30,7 @@ export const GET = withJsonError(async (request: Request) => {
 });
 
 export const POST = withJsonError(async (request: Request) => {
-  await requireHostedOpsRequestAccess(request, {
+  const session = await requireHostedOpsRequestAccess(request, {
     requireMutationOrigin: true,
   });
   const body = await readHostedOnboardingJsonObject(request, {
@@ -38,19 +38,30 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorCode: "HOSTED_LINQ_REHOME_REQUEST_TOO_LARGE",
     tooLargeErrorMessage: "Hosted Linq rehome request body is too large.",
   });
+  const memberId = readRequiredString(
+    body.memberId,
+    "HOSTED_LINQ_REHOME_MEMBER_ID_REQUIRED",
+    "Hosted Linq rehome requires a memberId.",
+  );
+  const targetLineLookupKey = readRequiredString(
+    body.targetLineLookupKey,
+    "HOSTED_LINQ_REHOME_TARGET_LOOKUP_KEY_REQUIRED",
+    "Hosted Linq rehome requires a targetLineLookupKey.",
+  );
 
-  return jsonOk(await rehomeHostedMemberLinqHomeLine({
-    memberId: readRequiredString(
-      body.memberId,
-      "HOSTED_LINQ_REHOME_MEMBER_ID_REQUIRED",
-      "Hosted Linq rehome requires a memberId.",
-    ),
-    targetLineLookupKey: readRequiredString(
-      body.targetLineLookupKey,
-      "HOSTED_LINQ_REHOME_TARGET_LOOKUP_KEY_REQUIRED",
-      "Hosted Linq rehome requires a targetLineLookupKey.",
-    ),
-  }));
+  const result = await rehomeHostedMemberLinqHomeLine({
+    memberId,
+    targetLineLookupKey,
+  });
+  console.info("Hosted ops Linq rehome completed.", {
+    fromLineHint: result.fromLineHint,
+    operatorMemberId: session.member.id,
+    targetMemberId: memberId,
+    timestamp: new Date().toISOString(),
+    toLineHint: result.toLineHint,
+  });
+
+  return jsonOk(result);
 });
 
 function readRequiredString(

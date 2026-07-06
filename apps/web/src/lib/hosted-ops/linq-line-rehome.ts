@@ -24,6 +24,7 @@ import {
   type HostedLinqAssignableHomeLine,
 } from "../hosted-onboarding/linq-line-store";
 import { chooseHostedLinqHomeLine } from "../hosted-onboarding/linq-routing-policy";
+import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { getPrisma } from "../prisma";
 
 type HostedLinqRehomeClient = PrismaClient | Prisma.TransactionClient;
@@ -131,6 +132,10 @@ export async function rehomeHostedMemberLinqHomeLine(input: {
       memberId,
       prisma: tx,
       rejectSuspended: true,
+    });
+    await assertHostedLinqRehomeMemberHasPhoneIdentity({
+      memberId,
+      prisma: tx,
     });
     await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
       prisma: tx,
@@ -242,6 +247,33 @@ async function readHostedLinqRehomeMemberOrThrow(input: {
   return member;
 }
 
+async function assertHostedLinqRehomeMemberHasPhoneIdentity(input: {
+  memberId: string;
+  prisma: HostedLinqRehomeClient;
+}): Promise<void> {
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      phoneLookupKey: true,
+    },
+  });
+
+  if (identity?.phoneLookupKey) {
+    return;
+  }
+
+  // Linq rediscovers fresh chats by member phone identity; activation already
+  // requires one, so rehome cannot clear old chat bindings for phone-less members.
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_REHOME_MEMBER_PHONE_REQUIRED",
+    httpStatus: 409,
+    message: "Hosted Linq rehome requires a verified member phone identity.",
+    retryable: false,
+  });
+}
+
 async function readHostedLinqRehomeRoutingState(input: {
   memberId: string;
   prisma: HostedLinqRehomeClient;
@@ -294,6 +326,10 @@ function hostedLinqRoutingAlreadyTargetsLine(input: {
   routing: HostedMemberRoutingStateSnapshot | null;
   target: HostedLinqAssignableHomeLine;
 }): boolean {
+  if (normalizePhoneNumber(input.routing?.linqRecipientPhone) === input.target.phoneNumber) {
+    return true;
+  }
+
   const currentLookupKey = input.routing?.linqRecipientPhoneLookupKey;
   if (!currentLookupKey) {
     return false;
