@@ -6002,12 +6002,15 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const importObserved = createDeferred<void>();
     const idleCheckpointDelayMs = 180_000;
+    const runtimeAbortController = new AbortController();
     let firstCheckpointStartedAtMs: number | null = null;
+    let assistantPhaseCalls = 0;
+    let invocationPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
-      const resultPromise = withRealTimeout(
+      invocationPromise =
         runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
@@ -6059,12 +6062,26 @@ describe("hosted workspace runtime entrypoint", () => {
                 workspace: createWorkspaceState({ version: "4" }),
               }),
             }),
+            async runAssistantPhase() {
+              assistantPhaseCalls += 1;
+              events.push(`assistant.phase:${assistantPhaseCalls}`);
+              return {
+                progressed: false,
+                redactedStatus: {
+                  hostedAssistantProgressed: false,
+                },
+              };
+            },
+            signal: runtimeAbortController.signal,
             vaultRoot,
           },
-        ),
+        );
+      const resultPromise = withRealTimeout(
+        invocationPromise,
         15_000,
         () => events.join(","),
       );
+      void resultPromise.catch(() => undefined);
 
       await withRealTimeout(importObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
@@ -6077,6 +6094,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_collapse_budget_001",
       ]);
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        "assistant.phase:1",
+      ]);
       assert.deepEqual(checkpointRequests.map((request) => [
         request.reason,
         request.nextWakeReason,
@@ -6086,6 +6106,8 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.status, "budget_exhausted");
       assert.match(result.nextWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
     } finally {
+      runtimeAbortController.abort(new DOMException("Synthetic test cleanup.", "AbortError"));
+      await invocationPromise?.catch(() => undefined);
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
