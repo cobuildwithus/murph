@@ -198,6 +198,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .artifacts/cloudflare-hosted-e2e
+          # DIAGNOSTIC (temporary): sample host + per-container resource usage
+          # every 3s so we can attribute the codex/E2E CPU+memory pressure.
+          ( while true; do
+              printf '=== %s load=%s ===\n' "$(date -u +%H:%M:%S)" "$(cut -d' ' -f1-3 /proc/loadavg)"
+              free -m | awk '/Mem:/{printf "  host mem: used=%sMB avail=%sMB total=%sMB\n",$3,$7,$2}'
+              docker stats --no-stream --format '  ctr {{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}}' 2>/dev/null | head -12 || true
+              ps -eo pcpu,pmem,rss,comm --sort=-rss 2>/dev/null | awk 'NR>1 && NR<=11{printf "  proc cpu=%s%% mem=%s%% rss=%sKB %s\n",$1,$2,$3,$4}' || true
+              sleep 3
+            done ) > .artifacts/cloudflare-hosted-e2e/resource-samples.log 2>&1 &
+          res_sampler_pid=$!
+          trap 'kill "$res_sampler_pid" 2>/dev/null || true' EXIT
           for scenario in ${{ matrix.scenarios }}; do
             pnpm hosted-local e2e "$scenario" --no-bundle 2>&1 \
               | tee ".artifacts/cloudflare-hosted-e2e/$scenario.log"
