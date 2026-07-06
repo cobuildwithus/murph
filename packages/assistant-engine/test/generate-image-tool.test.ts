@@ -1,5 +1,4 @@
 import { Buffer } from 'node:buffer'
-import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -11,7 +10,6 @@ import {
 } from '../src/assistant-codex/generate-image-tool.js'
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-const PNG_BYTES_SHA256 = createHash('sha256').update(PNG_BYTES).digest('hex')
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(path.join(tmpdir(), 'murph-generate-image-tool-'))
@@ -100,9 +98,6 @@ describe('executeGenerateImageTool reference images', () => {
           referenceImageRefs: ['raw/inbox/photo.png'],
           size: '1024x1024',
         },
-        authorizedReferenceImageRefs: new Map([
-          ['raw/inbox/photo.png', { sha256: PNG_BYTES_SHA256 }],
-        ]),
         codexHome,
         env: { OPENAI_API_KEY: 'test-key' },
         fetchImpl,
