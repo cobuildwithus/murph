@@ -179,6 +179,10 @@ import {
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import {
+  isHostedDeviceSyncMaintenanceModuleLoadError,
+  loadHostedDeviceSyncMaintenanceModule,
+} from "../src/hosted-runtime/device-sync-maintenance-import.ts";
 import type {
   HostedAssistantDeliveryOutcome,
 } from "../src/hosted-runtime/models.ts";
@@ -1929,6 +1933,91 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeReason: "device-sync.reconcile",
       progressed: true,
     }));
+  });
+
+  it("keeps the foreground reply running when follow-up device-sync wake projection cannot load", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const moduleLoadError = new Error("synthetic device-sync module load failure");
+    vi.mocked(loadHostedDeviceSyncMaintenanceModule).mockRejectedValueOnce(
+      moduleLoadError,
+    );
+    vi.mocked(isHostedDeviceSyncMaintenanceModuleLoadError).mockReturnValue(true);
+    const deliveryEffect = createDeliveryEffect();
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createSentDeliveryOutcome(),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: {
+        checkpointedAt: "2026-04-27T00:00:00.000Z",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
+        nextWakeReason: "device-sync.reconcile",
+        redactedStatus: null,
+        snapshotRef: null,
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        userId: "member_synthetic_phase",
+        version: "8",
+      },
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeBackgroundDueIntents: false,
+        preferredIntentIds: [deliveryEffect.effectId],
+      }),
+    );
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [deliveryEffect],
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      }),
+    );
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    const moduleLoadFailureLog = logRequests
+      .flatMap((request) => request.entries)
+      .find((entry) => entry.eventCode === "device-sync.module_load_failed");
+    expect(moduleLoadFailureLog).toEqual(expect.objectContaining({
+      component: "device-sync",
+      eventCode: "device-sync.module_load_failed",
+      level: "warn",
+      phase: "invoke",
+      redactedJson: expect.objectContaining({
+        followUpWakeProjection: true,
+        projectionPath: "follow-up-wake",
+      }),
+    }));
+    expect("nextWakeReason" in result ? result.nextWakeReason : null)
+      .not.toBe("device-sync.reconcile");
+    expect(postCheckpoint?.nextWakeReason ?? null).not.toBe("device-sync.reconcile");
+    expect(JSON.stringify(logRequests)).not.toContain("synthetic-whoop-secret");
   });
 
   it("keeps due device-sync wakes out when non-conversation mailbox input is fresh", async () => {

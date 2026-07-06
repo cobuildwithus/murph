@@ -4204,7 +4204,19 @@ async function resolveHostedDeviceSyncFollowUpWake(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputWakeAt: string | null;
 }): Promise<HostedRuntimeWakeCandidate | null> {
-  let localDeviceSyncScheduledWake = await resolveHostedLocalDeviceSyncScheduledWake(input.input);
+  let localDeviceSyncScheduledWake: HostedRuntimeWakeCandidate | null;
+  try {
+    localDeviceSyncScheduledWake = await resolveHostedLocalDeviceSyncScheduledWake(input.input);
+  } catch (error) {
+    if (!isHostedDeviceSyncMaintenanceModuleLoadError(error)) {
+      throw error;
+    }
+    await writeHostedDeviceSyncFollowUpWakeProjectionModuleLoadFailureRuntimeLog({
+      error,
+      input: input.input,
+    });
+    return null;
+  }
   const handledDeviceSyncWake = input.input.deviceSyncWorkspaceWakeHandled ?? null;
   if (
     localDeviceSyncScheduledWake?.at
@@ -4267,6 +4279,44 @@ function shouldRescheduleSkippedDeviceSyncWake(
     || hasFreshHostedConversationInput(input)
     || input.shouldYieldBackgroundMaintenance?.() === true
   );
+}
+
+async function writeHostedDeviceSyncFollowUpWakeProjectionModuleLoadFailureRuntimeLog(input: {
+  error: unknown;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<void> {
+  const failure = buildHostedRuntimeFailureDiagnostics(
+    input.error,
+    "Hosted device-sync follow-up wake projection failed to load the maintenance module.",
+  );
+  const moduleLoadErrorCode = isHostedDeviceSyncMaintenanceModuleLoadError(input.error)
+    ? input.error.code
+    : null;
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.input.request.attemptId,
+        leaseGeneration: input.input.request.leaseGeneration,
+        workspaceVersion: input.input.request.workspaceVersion,
+      }),
+      component: "device-sync",
+      errorCode: moduleLoadErrorCode
+        ? toHostedRuntimeLogCode(moduleLoadErrorCode)
+        : failure.errorCode,
+      eventCode: "device-sync.module_load_failed",
+      level: "warn",
+      phase: "invoke",
+      redactedJson: {
+        ...failure.redactedJson,
+        errorMessagePresent: input.error instanceof Error
+          ? input.error.message.length > 0
+          : input.error !== null && input.error !== undefined,
+        followUpWakeProjection: true,
+        projectionPath: "follow-up-wake",
+      },
+    },
+    platform: input.input.runtime.platform,
+  });
 }
 
 async function resolveHostedLocalDeviceSyncScheduledWake(
