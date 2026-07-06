@@ -53,6 +53,9 @@ import {
   readHostedGroupByRuntimeMemberId,
 } from "./group-store";
 
+export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
+
 export async function handleHostedRuntimeGroupTool(input: {
   memberId: string;
   request: HostedRuntimeGroupToolRequest;
@@ -231,13 +234,15 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
   }
 
   const prisma = getPrisma();
+  const participantHandles = selectHostedThreadContainerParticipantHandles({
+    chatId: authorized.chatId,
+    containerMemberId: input.memberId,
+    handles,
+  });
   const participants: HostedRuntimeGroupChatParticipant[] = [];
   const resolvedParticipants: HostedThreadContainerResolvedParticipant[] = [];
   try {
-    for (const handle of handles) {
-      if (!isCurrentHostedLinqParticipantHandle(handle)) {
-        continue;
-      }
+    for (const handle of participantHandles) {
       const lookup = await lookupParticipantMemberByHandle({
         handle: handle.handle,
         prisma,
@@ -249,7 +254,7 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
           participantMemberId,
         });
       }
-      if (participants.length < HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
+      if (participants.length < HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX) {
         participants.push({
           handle: handle.handle,
           hasOwnMurph: participantMemberId !== null
@@ -269,7 +274,7 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
   await reconcileHostedThreadContainerParticipants({
     chatId: authorized.chatId,
     containerMemberId: input.memberId,
-    handles,
+    handles: participantHandles,
     prisma,
     resolvedParticipants,
   });
@@ -303,11 +308,17 @@ export async function reconcileHostedThreadContainerParticipants(input: {
       return;
     }
 
-    const resolvedParticipants = input.resolvedParticipants
+    const participantHandles = selectHostedThreadContainerParticipantHandles({
+      chatId: input.chatId,
+      containerMemberId: input.containerMemberId,
+      handles,
+    });
+    const boundedHandleValues = new Set(participantHandles.map((handle) => handle.handle));
+    const resolvedParticipants = (input.resolvedParticipants
       ?? await resolveHostedThreadContainerParticipants({
-        handles,
+        handles: participantHandles,
         prisma: input.prisma,
-      });
+      })).filter((participant) => boundedHandleValues.has(participant.handle));
     const now = new Date();
     const seenByMemberId = new Map<string, {
       handleLookupKey: string;
@@ -423,6 +434,24 @@ function isCurrentHostedLinqParticipantHandle(handle: HostedLinqChatHandleSummar
     && (!handle.status || handle.status.trim().toLowerCase() === "active");
 }
 
+function selectHostedThreadContainerParticipantHandles(input: {
+  chatId: string;
+  containerMemberId: string;
+  handles: readonly HostedLinqChatHandleSummary[];
+}): HostedLinqChatHandleSummary[] {
+  const currentHandles = input.handles.filter(isCurrentHostedLinqParticipantHandle);
+  if (currentHandles.length > HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX) {
+    logHostedThreadContainerParticipantReconcileCapped({
+      cap: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+      chatId: input.chatId,
+      containerMemberId: input.containerMemberId,
+      rosterSize: currentHandles.length,
+    });
+  }
+
+  return currentHandles.slice(0, HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX);
+}
+
 function createHostedThreadContainerParticipantHandleLookupKey(handle: string): string | null {
   if (handle.includes("@")) {
     return createHostedLinqParticipantContactLookupKey({
@@ -452,6 +481,23 @@ function logHostedThreadContainerParticipantReconcileSkipped(input: {
       containerMemberIdSuffix: toHostedOnboardingLogIdSuffix(input.containerMemberId),
       errorName: input.errorName,
       reason: input.reason,
+    }),
+  });
+}
+
+function logHostedThreadContainerParticipantReconcileCapped(input: {
+  cap: number;
+  chatId: string;
+  containerMemberId: string;
+  rosterSize: number;
+}): void {
+  console.warn("Hosted thread-container participant reconcile capped.", {
+    ...sanitizeHostedOnboardingStructuredLogDetails({
+      cap: input.cap,
+      chatIdSuffix: toHostedOnboardingLogIdSuffix(input.chatId),
+      containerMemberIdSuffix: toHostedOnboardingLogIdSuffix(input.containerMemberId),
+      reason: "roster_exceeds_cap",
+      rosterSize: input.rosterSize,
     }),
   });
 }

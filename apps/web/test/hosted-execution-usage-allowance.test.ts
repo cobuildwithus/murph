@@ -1849,6 +1849,37 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
   });
 
+  it("allows thread-container usage when an active participant has access", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      spentUsdMicros: 1_000_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+      threadContainerOwnerBillingStatus: HostedBillingStatus.paused,
+      threadContainerParticipantActive: true,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 3_500_000n,
+      spentUsdMicros: 1_000_000n,
+    });
+
+    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
+      select: {
+        participantMemberId: true,
+      },
+      where: expect.objectContaining({
+        containerMemberId: "member_123",
+        removedAt: null,
+      }),
+    });
+  });
+
   it("uses usage-period spend for billing periods before allowing", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
@@ -2268,6 +2299,7 @@ function createGatePrisma(input: {
   threadContainerOwnerBillingStatus?: HostedBillingStatus;
   threadContainerOwnerFamilySponsored?: boolean;
   threadContainerOwnerSuspendedAt?: Date | null;
+  threadContainerParticipantActive?: boolean;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
   suspendedAt?: Date | null;
@@ -2423,6 +2455,11 @@ function createGatePrisma(input: {
           suspendedAt: input.suspendedAt ?? null,
           threadContainer,
         }),
+    },
+    hostedThreadContainerParticipant: {
+      findFirst: vi.fn(async () => input.threadContainerParticipantActive
+        ? { participantMemberId: "member_participant" }
+        : null),
     },
   };
 }

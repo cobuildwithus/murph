@@ -5,6 +5,7 @@ import type {
 
 import {
   hasActiveHostedMemberAccess,
+  hasActiveHostedThreadContainerAccessWithParticipants,
   hostedMemberAccessSelect,
 } from "../hosted-onboarding/member-access";
 import {
@@ -36,8 +37,18 @@ export async function requireHostedRuntimeActiveAccess(
     select: hostedMemberAccessSelect,
   });
 
-  if (member && hasActiveHostedMemberAccess(member)) {
-    return;
+  if (member) {
+    const active = member.threadContainer
+      ? await hasActiveHostedThreadContainerAccessWithParticipants({
+          container: member,
+          containerMemberId: userId,
+          owner: member.threadContainer.owner,
+          prisma,
+        })
+      : hasActiveHostedMemberAccess(member);
+    if (active) {
+      return;
+    }
   }
 
   throw hostedOnboardingError({

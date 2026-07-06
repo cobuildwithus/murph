@@ -1357,6 +1357,10 @@ describe("Linq explicit external-thread routing", () => {
         removedAt: null,
       }),
     });
+    expect(usageAllowance.checkHostedAiUsageGate).toHaveBeenCalledWith({
+      memberId: "member_thread_container_123",
+      prisma,
+    });
     expect(readSingleWakeHandoff(plan)).toMatchObject({
       eventId: "evt_group_123",
       mailboxItemId: "mailbox_active_participant_123",

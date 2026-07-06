@@ -37,7 +37,7 @@ import {
   readHostedFamilyAccessForMember,
 } from "../hosted-onboarding/family-plan";
 import {
-  hasActiveHostedMemberAccess,
+  hasActiveHostedThreadContainerAccessWithParticipants,
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
 } from "../hosted-onboarding/member-access";
@@ -286,6 +286,28 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
 interface HostedAiUsageAllowanceThreadContainerRef {
   monthlyUsageLimitUsdMicros: bigint;
   owner: HostedMemberPersonAccessState;
+}
+
+async function hasHostedAiUsageThreadContainerAccess(input: {
+  container: { suspendedAt: Date | null };
+  containerMemberId: string;
+  threadContainer: HostedAiUsageAllowanceThreadContainerRef | null;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean | null> {
+  if (!input.threadContainer) {
+    return null;
+  }
+
+  if (input.container.suspendedAt !== null) {
+    return false;
+  }
+
+  return await hasActiveHostedThreadContainerAccessWithParticipants({
+    container: input.container,
+    containerMemberId: input.containerMemberId,
+    owner: input.threadContainer.owner,
+    prisma: input.tx,
+  });
 }
 
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
@@ -575,12 +597,19 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
         billingRef: memberState.billingRef,
         familyAccessActive: false,
       };
+  const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
+    container: memberState,
+    containerMemberId: input.memberId,
+    threadContainer: memberState.threadContainer,
+    tx: input.tx,
+  });
   const period = await ensureHostedAiUsageAllowancePeriodTx({
     at,
     billingRef: allowanceAccess.billingRef,
     memberId: input.memberId,
     now,
     threadContainer: memberState.threadContainer,
+    threadContainerAccessActive,
     tx: input.tx,
   });
   if (period.kind === "denied") {
@@ -718,11 +747,17 @@ export async function resolveHostedAiUsageGate(input: {
         };
     const allowanceBillingRef = allowanceAccess.billingRef;
     const familyAccessActive = allowanceAccess.familyAccessActive;
+    const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
+      container: memberState,
+      containerMemberId: input.memberId,
+      threadContainer: memberState.threadContainer,
+      tx,
+    });
 
     // Thread-container members are synthetic (`not_started` own billing):
-    // their access is the owner's, decided by the container branch of the
-    // allowance-period resolver below. Only non-container members are denied
-    // on their own billing here; suspension always fails closed.
+    // their access is decided by the container branch of the allowance-period
+    // resolver below. Only non-container members are denied on their own
+    // billing here; suspension always fails closed.
     if (
       memberState.suspendedAt !== null ||
       (
@@ -736,6 +771,7 @@ export async function resolveHostedAiUsageGate(input: {
         billingRef: allowanceBillingRef,
         memberId: input.memberId,
         threadContainer: memberState.threadContainer,
+        threadContainerAccessActive,
       });
     }
 
@@ -745,6 +781,7 @@ export async function resolveHostedAiUsageGate(input: {
       memberId: input.memberId,
       now,
       threadContainer: memberState.threadContainer,
+      threadContainerAccessActive,
       tx,
     });
     if (period.kind === "denied") {
@@ -819,11 +856,17 @@ export async function readHostedAiUsageGate(input: {
         };
     const allowanceBillingRef = allowanceAccess.billingRef;
     const familyAccessActive = allowanceAccess.familyAccessActive;
+    const threadContainerAccessActive = await hasHostedAiUsageThreadContainerAccess({
+      container: memberState,
+      containerMemberId: input.memberId,
+      threadContainer: memberState.threadContainer,
+      tx,
+    });
 
     // Thread-container members are synthetic (`not_started` own billing):
-    // their access is the owner's, decided by the container branch of the
-    // allowance-period resolver below. Only non-container members are denied
-    // on their own billing here; suspension always fails closed.
+    // their access is decided by the container branch of the allowance-period
+    // resolver below. Only non-container members are denied on their own
+    // billing here; suspension always fails closed.
     if (
       memberState.suspendedAt !== null ||
       (
@@ -837,6 +880,7 @@ export async function readHostedAiUsageGate(input: {
         billingRef: allowanceBillingRef,
         memberId: input.memberId,
         threadContainer: memberState.threadContainer,
+        threadContainerAccessActive,
       });
     }
 
@@ -845,6 +889,7 @@ export async function readHostedAiUsageGate(input: {
       billingRef: allowanceBillingRef,
       memberId: input.memberId,
       threadContainer: memberState.threadContainer,
+      threadContainerAccessActive,
       tx,
     });
 
@@ -955,12 +1000,14 @@ function resolveHostedAiUsageInactiveGateDecision(input: {
   billingRef: HostedAiUsageAllowanceBillingRef | null;
   memberId: string;
   threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
+  threadContainerAccessActive?: boolean | null;
 }): HostedAiUsageGateDecision {
   const resolved = resolveHostedAiUsageAllowancePeriod({
     at: input.at,
     billingRef: input.billingRef,
     memberId: input.memberId,
     threadContainer: input.threadContainer ?? null,
+    threadContainerAccessActive: input.threadContainerAccessActive ?? null,
   });
   const period = resolved.kind === "denied"
     ? resolved
@@ -1054,6 +1101,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
   memberId: string;
   now: Date;
   threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
+  threadContainerAccessActive?: boolean | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowancePeriodResult> {
   const resolved = resolveHostedAiUsageAllowancePeriod({
@@ -1061,6 +1109,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     billingRef: input.billingRef,
     memberId: input.memberId,
     threadContainer: input.threadContainer ?? null,
+    threadContainerAccessActive: input.threadContainerAccessActive ?? null,
   });
   if (resolved.kind === "denied") {
     return {
@@ -1207,6 +1256,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
   billingRef: HostedAiUsageAllowanceBillingRef | null;
   memberId: string;
   threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
+  threadContainerAccessActive?: boolean | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowancePeriodResult> {
   const resolved = resolveHostedAiUsageAllowancePeriod({
@@ -1214,6 +1264,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     billingRef: input.billingRef,
     memberId: input.memberId,
     threadContainer: input.threadContainer ?? null,
+    threadContainerAccessActive: input.threadContainerAccessActive ?? null,
   });
   if (resolved.kind === "denied") {
     return {
@@ -1312,6 +1363,7 @@ function resolveHostedAiUsageAllowancePeriod(input: {
   billingRef: HostedAiUsageAllowanceBillingRef | null;
   memberId: string;
   threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
+  threadContainerAccessActive?: boolean | null;
 }): HostedAiUsageAllowancePeriodResolution {
   const billingPlanCode =
     parseHostedBillingPlanCode(input.billingRef?.currentBillingPlanCode)
@@ -1329,7 +1381,7 @@ function resolveHostedAiUsageAllowancePeriod(input: {
 
     if (
       threadContainerLimitUsdMicros === null
-      || !hasActiveHostedMemberAccess(input.threadContainer.owner)
+      || input.threadContainerAccessActive !== true
     ) {
       return {
         billingPlanCode,

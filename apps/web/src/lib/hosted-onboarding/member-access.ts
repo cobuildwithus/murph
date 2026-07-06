@@ -23,7 +23,8 @@ import type { HostedOnboardingReadClient } from "./shared";
  * that already exist in the data model:
  *
  * - an active membership in an active, unsuspended account group (family), or
- * - for synthetic thread-container members, the container owner's access.
+ * - for synthetic thread-container members, the container owner's access, or
+ *   an active current participant through the async thread-container resolver.
  *
  * Owners cannot themselves be containers, so the derivation depth is at most
  * two and a single query loads everything `hasActiveHostedMemberAccess` needs.
@@ -97,7 +98,8 @@ export function hasActiveHostedMemberAccess(member: HostedMemberAccessState): bo
   }
 
   // A thread-container member is synthetic: its own billing status is not an
-  // access source. The container lives and dies with its owner.
+  // access source. Participant-aware container gates use the async resolver
+  // below; this pure member resolver stays owner-only for legacy callers.
   if (member.threadContainer) {
     return hasActiveHostedPersonAccess(member.threadContainer.owner);
   }
@@ -111,6 +113,29 @@ export function hasActiveHostedThreadContainerAccess(input: {
 }): boolean {
   return !isHostedMemberSuspended(input.container.suspendedAt)
     && hasActiveHostedPersonAccess(input.owner);
+}
+
+export async function hasActiveHostedThreadContainerAccessWithParticipants(input: {
+  container: Pick<HostedMemberPersonAccessState, "suspendedAt">;
+  containerMemberId: string;
+  owner: HostedMemberPersonAccessState;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  if (hasActiveHostedThreadContainerAccess({
+    container: input.container,
+    owner: input.owner,
+  })) {
+    return true;
+  }
+
+  if (isHostedMemberSuspended(input.container.suspendedAt)) {
+    return false;
+  }
+
+  return await hasAnyActiveHostedThreadContainerParticipant({
+    containerMemberId: input.containerMemberId,
+    prisma: input.prisma,
+  });
 }
 
 /**

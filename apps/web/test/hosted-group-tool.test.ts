@@ -102,12 +102,10 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 import {
+  HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
   handleHostedRuntimeGroupTool,
   reconcileHostedThreadContainerParticipants,
 } from "@/src/lib/hosted-groups/group-tool";
-import {
-  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-} from "@murphai/hosted-execution/runtime-control";
 import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
 import {
   mergeHostedGroupJoinPolicy,
@@ -504,9 +502,10 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("reconciles every resolved member even when the returned participant list is capped", async () => {
+  it("bounds read_chat_participants lookups and reconcile writes to the roster cap", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const activeHandles = Array.from(
-      { length: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX + 1 },
+      { length: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1 },
       (_, index) => ({
         handle: `+1555001${index.toString().padStart(4, "0")}`,
         isMe: false,
@@ -534,15 +533,78 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       throw new Error("Expected ok participants response.");
     }
     expect(response.result.participants).toHaveLength(
-      HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+    );
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledTimes(
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+    );
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledTimes(
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
     );
     expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledTimes(
-      HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX + 1,
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
     );
     const updateWhere = mocks.hostedThreadContainerParticipantUpdateMany.mock.calls[0]?.[0]?.where;
     expect(updateWhere?.participantMemberId?.notIn).toHaveLength(
-      HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX + 1,
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
     );
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted thread-container participant reconcile capped.",
+      expect.objectContaining({
+        cap: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+        reason: "roster_exceeds_cap",
+        rosterSize: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1,
+      }),
+    );
+    warn.mockRestore();
+  });
+
+  it("bounds at-creation reconcile lookups and upserts to the roster cap", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const activeHandles = Array.from(
+      { length: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1 },
+      (_, index) => ({
+        handle: `+1555011${index.toString().padStart(4, "0")}`,
+        isMe: false,
+        status: "active",
+      }),
+    );
+    mocks.getHostedLinqChatHandles.mockResolvedValue([
+      { handle: "+15557770000", isMe: true, status: "active" },
+      ...activeHandles,
+    ]);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockImplementation(async ({ phoneNumber }) => ({
+      core: { id: `member_${phoneNumber.slice(-4)}`, suspendedAt: null },
+    }));
+
+    await reconcileHostedThreadContainerParticipants({
+      chatId: "chat_group_1",
+      containerMemberId: "member_container",
+      prisma: fakePrisma as never,
+    });
+
+    expect(mocks.getHostedLinqChatHandles).toHaveBeenCalledWith({
+      chatId: "chat_group_1",
+    });
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledTimes(
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+    );
+    expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledTimes(
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+    );
+    const updateWhere = mocks.hostedThreadContainerParticipantUpdateMany.mock.calls[0]?.[0]?.where;
+    expect(updateWhere?.participantMemberId?.notIn).toHaveLength(
+      HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted thread-container participant reconcile capped.",
+      expect.objectContaining({
+        cap: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
+        reason: "roster_exceeds_cap",
+        rosterSize: HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX + 1,
+      }),
+    );
+    warn.mockRestore();
   });
 
   it("treats an unrecognized empty roster as provider trouble, not an empty room", async () => {
