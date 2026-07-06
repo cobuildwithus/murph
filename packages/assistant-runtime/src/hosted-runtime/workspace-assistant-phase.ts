@@ -37,7 +37,7 @@ import {
 import {
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
-} from "@murphai/device-syncd/config";
+} from "@murphai/device-syncd/connect-config";
 import type {
   AssistantCurrentDeliveryRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
@@ -69,9 +69,11 @@ import {
 } from "./current-delivery-route.ts";
 import {
   runHostedAssistantAutomationLane,
-  runHostedDeviceSyncWakeLane,
-  resolveHostedDeviceSyncNextWakeAt,
 } from "./maintenance.ts";
+import {
+  isHostedDeviceSyncMaintenanceModuleLoadError,
+  loadHostedDeviceSyncMaintenanceModule,
+} from "./device-sync-maintenance-import.ts";
 import type {
   HostedMailboxImportLoopResult,
 } from "./mailbox-import.ts";
@@ -110,6 +112,7 @@ import type {
   HostedAssistantDeliveryOutcome,
   HostedAssistantWorkspaceRuntimeJobInput,
   HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
+  HostedMaintenanceMetrics,
   HostedRestoredExecutionContext,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
@@ -650,7 +653,7 @@ export async function runHostedWorkspaceAssistantPhase(
         backgroundMaintenanceYielded
         || deferredPendingSystemMailboxMaintenance.backgroundMaintenanceYielded;
     }
-    const deviceSyncFollowUpWake = resolveHostedDeviceSyncFollowUpWake({
+    const deviceSyncFollowUpWake = await resolveHostedDeviceSyncFollowUpWake({
       deviceSyncMaintenanceRan,
       input,
       pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
@@ -1835,7 +1838,7 @@ interface HostedPreparedAssistantDeliveryEffects {
   preparation: HostedAssistantDeliveryPreparation | null;
 }
 type HostedAssistantMetrics = Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
-type HostedDeviceSyncWakeMetrics = Awaited<ReturnType<typeof runHostedDeviceSyncWakeLane>>;
+type HostedDeviceSyncWakeMetrics = HostedMaintenanceMetrics;
 type HostedDeviceActivityAutomationScheduleResult =
   Awaited<ReturnType<typeof scheduleDeviceActivityTriggeredAutomations>>;
 type HostedSystemMailboxPreparation = NonNullable<
@@ -2133,6 +2136,9 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
   });
 
   try {
+    const {
+      runHostedDeviceSyncWakeLane,
+    } = await loadHostedDeviceSyncMaintenanceModule();
     return await runHostedDeviceSyncWakeLane({
       deviceSyncPort: input.phaseInput.runtime.platform.deviceSyncPort ?? null,
       platformEnv: input.phaseInput.runtime.platformEnv,
@@ -2270,11 +2276,18 @@ async function writeHostedIdleDeviceSyncFailureRuntimeLog(input: {
     input.error,
     "Hosted idle device-sync maintenance failed.",
   );
+  const moduleLoadErrorCode = isHostedDeviceSyncMaintenanceModuleLoadError(input.error)
+    ? input.error.code
+    : null;
   await writeHostedRuntimeLogBestEffort({
     entry: {
       component: "device-sync",
-      errorCode: failure.errorCode,
-      eventCode: "device-sync.job_failed",
+      errorCode: moduleLoadErrorCode
+        ? toHostedRuntimeLogCode(moduleLoadErrorCode)
+        : failure.errorCode,
+      eventCode: moduleLoadErrorCode
+        ? "device-sync.module_load_failed"
+        : "device-sync.job_failed",
       level: "warn",
       phase: "idle",
       redactedJson: {
@@ -2734,7 +2747,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     vaultRoot: phaseInput.restored.vaultRoot,
   });
   initialProviderCleanupCheckpoint = cleanupPlan.checkpoint;
-  const deviceSyncFollowUpWake = resolveHostedDeviceSyncFollowUpWake({
+  const deviceSyncFollowUpWake = await resolveHostedDeviceSyncFollowUpWake({
     deviceSyncMaintenanceRan,
     input: phaseInput,
     pendingAssistantInputWakeAt,
@@ -4186,12 +4199,12 @@ function resolveSkippedDeviceSyncWake(input: {
   return null;
 }
 
-function resolveHostedDeviceSyncFollowUpWake(input: {
+async function resolveHostedDeviceSyncFollowUpWake(input: {
   deviceSyncMaintenanceRan: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputWakeAt: string | null;
-}): HostedRuntimeWakeCandidate | null {
-  let localDeviceSyncScheduledWake = resolveHostedLocalDeviceSyncScheduledWake(input.input);
+}): Promise<HostedRuntimeWakeCandidate | null> {
+  let localDeviceSyncScheduledWake = await resolveHostedLocalDeviceSyncScheduledWake(input.input);
   const handledDeviceSyncWake = input.input.deviceSyncWorkspaceWakeHandled ?? null;
   if (
     localDeviceSyncScheduledWake?.at
@@ -4256,13 +4269,16 @@ function shouldRescheduleSkippedDeviceSyncWake(
   );
 }
 
-function resolveHostedLocalDeviceSyncScheduledWake(
+async function resolveHostedLocalDeviceSyncScheduledWake(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
-): HostedRuntimeWakeCandidate | null {
+): Promise<HostedRuntimeWakeCandidate | null> {
   if (!hasHostedDeviceSyncRuntimeConfigured(input)) {
     return null;
   }
 
+  const {
+    resolveHostedDeviceSyncNextWakeAt,
+  } = await loadHostedDeviceSyncMaintenanceModule();
   const nextWakeAt = resolveHostedDeviceSyncNextWakeAt({
     deviceSyncConfig: input.runtime.resolvedConfig.deviceSync,
     platform: input.runtime.platform,

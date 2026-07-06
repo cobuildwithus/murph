@@ -3071,6 +3071,7 @@ function isHostedRuntimeFailureLogEntry(entry: HostedRuntimeLogEntry): boolean {
     || entry.eventCode === "mailbox.parser_drain_failed"
     || entry.eventCode === "mailbox.parser_jobs_failed"
     || entry.eventCode === "device-sync.job_failed"
+    || entry.eventCode === "device-sync.module_load_failed"
     || (entry.eventCode === "assistant.device_connect" && entry.level === "warn")
     || (entry.eventCode === "assistant.automation_detail"
       && entry.level === "warn"
