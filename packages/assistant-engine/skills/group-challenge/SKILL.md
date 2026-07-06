@@ -73,13 +73,18 @@ a fresh session finds the page, and remove it at close-out.
    arrives:
 
    ```
-   vault-cli capture add --media <vault path of the inbox photo> \
-     --collection challenge-<slug> --label intro-<name>
+   vault-cli capture add --media <absolute path of the inbox photo> \
+     --collection challenge-<slug> --label intro-<name> --format json
    ```
 
-   Record the capture id and stored `raw/captures/**` path on the page.
-   Those paths stay valid as `referenceImageRefs` for `generate_image` on
-   any later day; inbox paths expire, captures do not.
+   `--media` is a filesystem path resolved from the process working
+   directory, not a vault-relative ref — pass the photo's absolute path
+   under the active vault root (the `raw/inbox/**` file you located).
+   The command copies it to an immutable `raw/captures/**` attachment;
+   record the returned capture id and stored `raw/captures/**` path on
+   the page. Those vault-relative stored paths stay valid as
+   `referenceImageRefs` for `generate_image` on any later day; inbox
+   paths expire, captures do not.
 4. **Set baselines.** Read pre-challenge shared data where it exists and
    record per-member baselines.
 5. **Let stakes emerge.** The group invents stakes; your job is to remember
