@@ -5,7 +5,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   buildHostedFamilyInviteAcceptUrl: vi.fn(),
-  buildHostedFamilyTelegramInviteUrl: vi.fn(),
+  resolveHostedFamilyTelegramInviteUrl: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
   hostedFamilyInviteHasReusableTarget: vi.fn(),
@@ -34,7 +34,7 @@ vi.mock("@/src/lib/hosted-onboarding/env", () => ({
 }));
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   buildHostedFamilyInviteAcceptUrl: mocks.buildHostedFamilyInviteAcceptUrl,
-  buildHostedFamilyTelegramInviteUrl: mocks.buildHostedFamilyTelegramInviteUrl,
+  resolveHostedFamilyTelegramInviteUrl: mocks.resolveHostedFamilyTelegramInviteUrl,
   ensureHostedAccountGroupForOwnerTx: mocks.ensureHostedAccountGroupForOwnerTx,
   hostedFamilyInviteHasReusableTarget: mocks.hostedFamilyInviteHasReusableTarget,
   issueHostedFamilyInviteTx: mocks.issueHostedFamilyInviteTx,
@@ -89,8 +89,12 @@ beforeEach(async () => {
   mocks.buildHostedFamilyInviteAcceptUrl.mockReturnValue(
     "https://app.murph.test/family/accept/NEWCODE",
   );
-  mocks.buildHostedFamilyTelegramInviteUrl.mockReturnValue(
-    "https://t.me/withmurph_bot?start=family_NEWCODE",
+  // Mirror the real gate: a Telegram link only for a Telegram-bound invite.
+  mocks.resolveHostedFamilyTelegramInviteUrl.mockImplementation(
+    (input: { inviteCode: string; isTelegramBound: boolean }) =>
+      input.isTelegramBound
+        ? `https://t.me/withmurph_bot?start=family_${input.inviteCode}`
+        : null,
   );
   mocks.revokeHostedFamilyInviteTx.mockResolvedValue(true);
   mocks.removeHostedFamilyMemberTx.mockResolvedValue(true);
@@ -142,7 +146,8 @@ test("issues a family invite and returns safe share links", async () => {
       status: "pending",
       targetLabel: "Mom",
       targetPhoneHint: "+48 6** *** ***",
-      telegramInviteUrl: "https://t.me/withmurph_bot?start=family_NEWCODE",
+      // Phone-bound invite: no Telegram link even though a bot is configured.
+      telegramInviteUrl: null,
     },
   });
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledWith(
@@ -152,6 +157,18 @@ test("issues a family invite and returns safe share links", async () => {
       targetLabel: "Mom",
       targetPhoneNumber: "+48600000000",
     }),
+  );
+});
+
+test("returns a Telegram share link only for a Telegram-bound invite", async () => {
+  const response = await inviteRoute.POST(
+    inviteRequest({ targetLabel: "Uncle", targetTelegramUsername: "@uncle" }),
+  );
+
+  expect(response.status).toBe(200);
+  const payload = (await response.json()) as { invite: { telegramInviteUrl: string | null } };
+  expect(payload.invite.telegramInviteUrl).toBe(
+    "https://t.me/withmurph_bot?start=family_NEWCODE",
   );
 });
 

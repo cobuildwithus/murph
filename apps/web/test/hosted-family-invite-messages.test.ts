@@ -1,15 +1,24 @@
 import { HostedBillingStatus } from "@prisma/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+const encryptionMocks = vi.hoisted(() => ({
+  decryptHostedWebNullableString: vi.fn(),
+}));
+
 const storeMocks = vi.hoisted(() => ({
-  lookupHostedMemberIdentityByPhoneLookupKey: vi.fn(),
+  lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-web/encryption", async (importActual) => ({
+  ...(await importActual<object>()),
+  decryptHostedWebNullableString: encryptionMocks.decryptHostedWebNullableString,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", async (importActual) => ({
   ...(await importActual<object>()),
-  lookupHostedMemberIdentityByPhoneLookupKey:
-    storeMocks.lookupHostedMemberIdentityByPhoneLookupKey,
+  lookupHostedMemberIdentityByPhoneNumber:
+    storeMocks.lookupHostedMemberIdentityByPhoneNumber,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async (importActual) => ({
@@ -25,6 +34,7 @@ import {
 
 const NOW = new Date("2026-06-24T00:00:00.000Z");
 const FUTURE = new Date("2026-07-01T00:00:00.000Z");
+const INVITED_PHONE = "+15550001111";
 const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
 
 const GROUP = {
@@ -38,6 +48,8 @@ const GROUP = {
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://app.murph.test";
+  // The invitee's phone is resolved from the encrypted invite field.
+  encryptionMocks.decryptHostedWebNullableString.mockResolvedValue(INVITED_PHONE);
 });
 
 afterEach(() => {
@@ -60,6 +72,7 @@ function phoneBoundPrisma() {
         targetEmailLookupKey: null,
         targetLabel: "Dad",
         targetPhoneLookupKey: "lookup_dad",
+        targetPhoneNumberEncrypted: "enc:dad-phone",
         targetTelegramUsernameLookupKey: null,
       }),
     },
@@ -72,8 +85,8 @@ function phoneBoundPrisma() {
   };
 }
 
-test("prefers an existing member's home line for the Messages accept target", async () => {
-  storeMocks.lookupHostedMemberIdentityByPhoneLookupKey.mockResolvedValue({
+test("prefers an existing member's home line, resolved by the decrypted phone", async () => {
+  storeMocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
     core: { id: "m_dad" },
   });
   storeMocks.readHostedMemberRoutingState.mockResolvedValue({
@@ -88,8 +101,10 @@ test("prefers an existing member's home line for the Messages accept target", as
   });
 
   expect(view?.messagesRecipientPhone).toBe("+15551112222");
-  expect(storeMocks.lookupHostedMemberIdentityByPhoneLookupKey).toHaveBeenCalledWith(
-    expect.objectContaining({ phoneLookupKey: "lookup_dad" }),
+  // Version-tolerant authority: it resolves the member by the raw phone (the
+  // same path the accept-by-phone webhook uses), not the invite's stored key.
+  expect(storeMocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledWith(
+    expect.objectContaining({ phoneNumber: INVITED_PHONE }),
   );
   expect(storeMocks.readHostedMemberRoutingState).toHaveBeenCalledWith(
     expect.objectContaining({ memberId: "m_dad" }),
@@ -97,7 +112,7 @@ test("prefers an existing member's home line for the Messages accept target", as
 });
 
 test("returns no Messages target when the phone matches no existing member", async () => {
-  storeMocks.lookupHostedMemberIdentityByPhoneLookupKey.mockResolvedValue(null);
+  storeMocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue(null);
 
   const view = await readHostedFamilyInviteAcceptanceView({
     // @ts-expect-error: focused prisma double
@@ -108,6 +123,22 @@ test("returns no Messages target when the phone matches no existing member", asy
 
   expect(view?.messagesRecipientPhone).toBeNull();
   expect(storeMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+});
+
+test("degrades to no home-line target (not a page error) when resolution throws", async () => {
+  storeMocks.lookupHostedMemberIdentityByPhoneNumber.mockRejectedValue(
+    new Error("ambiguous phone lookup"),
+  );
+
+  const view = await readHostedFamilyInviteAcceptanceView({
+    // @ts-expect-error: focused prisma double
+    prisma: phoneBoundPrisma(),
+    inviteCode: "CODEDAD",
+    now: NOW,
+  });
+
+  expect(view?.messagesRecipientPhone).toBeNull();
+  expect(view?.isPhoneBound).toBe(true);
 });
 
 test("builds an sms deep link carrying the webhook-parseable family token", () => {

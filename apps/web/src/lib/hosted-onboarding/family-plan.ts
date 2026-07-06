@@ -83,7 +83,7 @@ import {
 import { createHostedMember } from "./hosted-member-store";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
 import {
-  lookupHostedMemberIdentityByPhoneLookupKey,
+  lookupHostedMemberIdentityByPhoneNumber,
   readHostedMemberIdentity,
 } from "./hosted-member-identity-store";
 import {
@@ -545,12 +545,11 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
         targetLabel: invite.targetLabel,
         targetPhoneHint: projected.targetPhoneHint,
         targetTelegramUsername: projected.targetTelegramUsername,
-        telegramInviteUrl: telegramBotUsername
-          ? buildHostedFamilyTelegramInviteUrl({
-              botUsername: telegramBotUsername,
-              inviteCode: invite.inviteCode,
-            })
-          : null,
+        telegramInviteUrl: resolveHostedFamilyTelegramInviteUrl({
+          inviteCode: invite.inviteCode,
+          isTelegramBound: projected.targetTelegramUsername !== null,
+          telegramBotUsername,
+        }),
       };
     }),
   );
@@ -608,6 +607,7 @@ export async function readHostedFamilyInviteAcceptanceView(input: {
       targetEmailLookupKey: true,
       targetLabel: true,
       targetPhoneLookupKey: true,
+      targetPhoneNumberEncrypted: true,
       targetTelegramUsernameLookupKey: true,
     },
     where: {
@@ -667,8 +667,9 @@ export async function readHostedFamilyInviteAcceptanceView(input: {
   // their existing thread rather than being redirected to their home line.
   const messagesRecipientPhone = isPhoneBound && isPending
     ? await resolveHostedFamilyInviteExistingHomeLinePhone({
-        phoneLookupKey: invite.targetPhoneLookupKey,
+        ownerMemberId: invite.group.ownerMemberId,
         prisma,
+        targetPhoneNumberEncrypted: invite.targetPhoneNumberEncrypted,
       })
     : null;
 
@@ -683,45 +684,61 @@ export async function readHostedFamilyInviteAcceptanceView(input: {
     seatAvailable,
     status,
     targetLabel: invite.targetLabel,
-    // Only route to Telegram when the invite is actually bound to a Telegram
-    // username. A bot username being configured does not mean the invitee uses
-    // Telegram, so it must never be the fallback channel.
-    telegramInviteUrl:
-      telegramBotUsername && isPending && isTelegramBound
-        ? buildHostedFamilyTelegramInviteUrl({
-            botUsername: telegramBotUsername,
-            inviteCode: invite.inviteCode,
-          })
-        : null,
+    telegramInviteUrl: isPending
+      ? resolveHostedFamilyTelegramInviteUrl({
+          inviteCode: invite.inviteCode,
+          isTelegramBound,
+          telegramBotUsername,
+        })
+      : null,
     webAcceptable: isPending && seatAvailable && groupActive && (isPhoneBound || isEmailBound),
   };
 }
 
 /**
  * Resolves the Murph LinQ line a phone-bound invitee already messages on, when
- * they are an existing member. Returns null for brand-new invitees, letting the
- * accept page fall back to a configured line (the webhook assigns a home line
- * on first contact for those).
+ * they are an existing member, so accepting by text lands in their existing
+ * thread instead of being redirected to their home line. Returns null for
+ * brand-new invitees (the accept page falls back to a configured line and the
+ * webhook assigns a home line on first contact).
+ *
+ * It resolves the member by the decrypted phone via version-tolerant read
+ * candidates, the same authority `acceptHostedFamilyInviteFromPhoneTx` uses.
+ * Matching on the invite's single stored lookup key would miss an existing
+ * member after a contact key-version rotation and silently point them at the
+ * wrong line. Best-effort: any failure falls back to null so a resolution error
+ * degrades to a configured line rather than failing the accept page.
  */
 async function resolveHostedFamilyInviteExistingHomeLinePhone(input: {
-  phoneLookupKey: string | null;
+  ownerMemberId: string;
   prisma: HostedOnboardingReadClient;
+  targetPhoneNumberEncrypted: string | null;
 }): Promise<string | null> {
-  if (!input.phoneLookupKey) {
+  try {
+    const phoneNumber = await decryptHostedWebNullableString({
+      field: HOSTED_ACCOUNT_GROUP_INVITE_TARGET_PHONE_FIELD,
+      memberId: input.ownerMemberId,
+      prisma: input.prisma,
+      value: input.targetPhoneNumberEncrypted,
+    });
+    if (!phoneNumber) {
+      return null;
+    }
+    const identity = await lookupHostedMemberIdentityByPhoneNumber({
+      phoneNumber,
+      prisma: input.prisma,
+    });
+    if (!identity) {
+      return null;
+    }
+    const routing = await readHostedMemberRoutingState({
+      memberId: identity.core.id,
+      prisma: input.prisma,
+    });
+    return normalizePhoneNumber(routing?.linqRecipientPhone ?? null);
+  } catch {
     return null;
   }
-  const identity = await lookupHostedMemberIdentityByPhoneLookupKey({
-    phoneLookupKey: input.phoneLookupKey,
-    prisma: input.prisma,
-  });
-  if (!identity) {
-    return null;
-  }
-  const routing = await readHostedMemberRoutingState({
-    memberId: identity.core.id,
-    prisma: input.prisma,
-  });
-  return normalizePhoneNumber(routing?.linqRecipientPhone ?? null);
 }
 
 export async function readHostedAccountGroupStripeBillingRef(input: {
@@ -3085,6 +3102,28 @@ export function buildHostedFamilyTelegramInviteUrl(input: {
   }
 
   return `https://t.me/${botUsername}?start=${encodeURIComponent(`family_${input.inviteCode}`)}`;
+}
+
+/**
+ * A family invite routes to Telegram only when it is actually bound to a
+ * Telegram username. A configured bot username alone must never turn a phone-
+ * or email-only invite into a Telegram link on any surface (accept page, owner
+ * snapshot, invite API response, assistant tool). This is the single gate every
+ * projection uses so the "Telegram only when Telegram-bound" rule stays
+ * consistent across surfaces.
+ */
+export function resolveHostedFamilyTelegramInviteUrl(input: {
+  inviteCode: string;
+  isTelegramBound: boolean;
+  telegramBotUsername: string | null | undefined;
+}): string | null {
+  if (!input.telegramBotUsername || !input.isTelegramBound) {
+    return null;
+  }
+  return buildHostedFamilyTelegramInviteUrl({
+    botUsername: input.telegramBotUsername,
+    inviteCode: input.inviteCode,
+  });
 }
 
 /**
