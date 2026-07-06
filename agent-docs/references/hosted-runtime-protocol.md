@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-06-23
+Last verified: 2026-07-03
 
 ## Decision
 
@@ -681,6 +681,15 @@ response that interrupts idle checkpointing so the same invocation can import
 fresh foreground mailbox input; Cloudflare may retire the upload session as an
 orphan candidate, but it must not collapse that response into a generic HTTP
 conflict before `packages/assistant-runtime` handles it.
+Checkpoint-required wake metadata must still respect the configured idle
+checkpoint delay. Due or projected assistant wakes, mailbox budget exhaustion,
+and deferred durable checkpoint follow-ups preserve their invocation-local wake
+candidate for the next `idle_shutdown`, but they do not pull checkpointing
+earlier than the idle timer. If fresh foreground input interrupts checkpoint
+publication with `foreground_pending`, the runtime imports that input in the
+same invocation and then retries the checkpoint so the follow-up wake is durably
+preserved before it is serviced; this does not create another snapshot reason or
+foreground-bypass flag.
 Web must evaluate the workspace-version CAS before returning
 `foreground_pending`: pending conversation input may interrupt only a checkpoint
 whose locked workspace version still equals the request's expected version.

@@ -343,6 +343,83 @@ it("lets fresh mailbox lag settle before recovery nudging", async () => {
   }
 });
 
+it("keeps polling hosted completion while a workspace wake is due", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const dueWakeStatus = {
+    inFlight: false,
+    lastErrorCode: null,
+    mailboxLag: [
+      {
+        importedSeq: "1",
+        lag: "0",
+        lane: "conversation",
+        maxSeq: "1",
+      },
+    ],
+    recentLogs: [],
+    userId: "member_due_wake_completion",
+    workspace: {
+      browserVaultReplicaRef: null,
+      checkpointedAt: "2026-05-08T00:00:02.000Z",
+      createdAt: "2026-05-08T00:00:00.000Z",
+      nextWakeAt: "2026-05-08T00:00:01.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: null,
+      snapshotRef: null,
+      updatedAt: "2026-05-08T00:00:02.000Z",
+      userId: "member_due_wake_completion",
+      version: "1",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const completedStatus = {
+    ...dueWakeStatus,
+    workspace: {
+      ...dueWakeStatus.workspace,
+      checkpointedAt: "2026-05-08T00:00:04.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      updatedAt: "2026-05-08T00:00:04.000Z",
+      version: "2",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const statuses = [dueWakeStatus, completedStatus];
+  const fetch = vi.fn(async (request: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(request).includes("/runtime/ensure-processing")) {
+      return Response.json({ accepted: true });
+    }
+    return Response.json(statuses.shift() ?? completedStatus);
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedCompletion("member_due_wake_completion", {
+      pollIntervalMs: 1,
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({
+      userId: "member_due_wake_completion",
+      workspace: {
+        nextWakeAt: null,
+      },
+    });
+
+    expect(fetch.mock.calls.some(([request, init]) =>
+      String(request) === "http://127.0.0.1:8787/internal/users/member_due_wake_completion/runtime/ensure-processing"
+      && init?.method === "POST"
+    )).toBe(true);
+  } finally {
+    await harness.stop();
+  }
+});
+
 it("does not treat recent foreground conversation imports as completion while durable lag remains", async () => {
   const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
   const status = {

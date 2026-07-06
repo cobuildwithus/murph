@@ -8,6 +8,7 @@ export interface RuntimeWakeNotifyInput {
 }
 
 export interface RuntimeWakeNotification {
+  latestNotifiedAtEpochMs?: number;
   notifiedAtEpochMs: number;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
 }
@@ -30,16 +31,24 @@ export function consumePendingRuntimeWakeUnlessShuttingDown(input: {
 }
 
 export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
+  let latestPendingNotifyAtEpochMs: number | null = null;
   let pendingNotifyAtEpochMs: number | null = null;
   let pendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;
   let pending = false;
   let flushScheduled = false;
   const waiters = new Set<(notification: RuntimeWakeNotification) => void>();
   const consumePendingNotification = (): RuntimeWakeNotification => {
+    const notifiedAtEpochMs = pendingNotifyAtEpochMs ?? Date.now();
+    const latestNotifiedAtEpochMs =
+      latestPendingNotifyAtEpochMs ?? notifiedAtEpochMs;
     const notification = {
-      notifiedAtEpochMs: pendingNotifyAtEpochMs ?? Date.now(),
+      ...(latestNotifiedAtEpochMs !== notifiedAtEpochMs
+        ? { latestNotifiedAtEpochMs }
+        : {}),
+      notifiedAtEpochMs,
       ...(pendingOrchestration ? { orchestration: pendingOrchestration } : {}),
     };
+    latestPendingNotifyAtEpochMs = null;
     pendingNotifyAtEpochMs = null;
     pendingOrchestration = null;
     return notification;
@@ -70,10 +79,19 @@ export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
     notify(input?: number | RuntimeWakeNotifyInput) {
       const notification = normalizeRuntimeWakeNotifyInput(input);
       if (!pending) {
+        latestPendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
         pendingNotifyAtEpochMs = notification.notifiedAtEpochMs;
         pendingOrchestration = notification.orchestration ?? null;
-      } else if (!pendingOrchestration && notification.orchestration) {
-        pendingOrchestration = notification.orchestration;
+      } else {
+        latestPendingNotifyAtEpochMs = Math.max(
+          latestPendingNotifyAtEpochMs
+            ?? pendingNotifyAtEpochMs
+            ?? notification.notifiedAtEpochMs,
+          notification.notifiedAtEpochMs,
+        );
+        if (!pendingOrchestration && notification.orchestration) {
+          pendingOrchestration = notification.orchestration;
+        }
       }
       pending = true;
       if (waiters.size > 0 && !flushScheduled) {

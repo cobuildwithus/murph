@@ -319,7 +319,6 @@ export interface HostedWorkspaceRunnerResult {
   latestWorkspace: HostedWorkspaceState | null;
   mailboxPostCheckpointEffectsFinished: Promise<void> | null;
   mailboxRetryAt: string | null;
-  projectedWakeRequiresCheckpoint: boolean;
   runtimeStateDirty: boolean;
 }
 
@@ -516,7 +515,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         ?? input.workspace,
       mailboxPostCheckpointEffectsFinished: null,
       mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
-      projectedWakeRequiresCheckpoint: false,
       runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
     };
   }
@@ -595,6 +593,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       once: true,
     });
   }
+  const runnerStartedAtEpochMs = Date.now();
   let foregroundConversationWorkObserved = false;
   const foregroundMailboxImportLoop =
     startHostedForegroundConversationMailboxImportLoop({
@@ -622,10 +621,30 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       return false;
     }
 
-    if (!input.runtimeWakeSignal?.consumePending()) {
+    const pendingRuntimeWake = input.runtimeWakeSignal?.consumePending() ?? null;
+    if (!pendingRuntimeWake) {
       return false;
     }
 
+    const latestRuntimeWakeAtEpochMs =
+      pendingRuntimeWake.latestNotifiedAtEpochMs
+      ?? pendingRuntimeWake.notifiedAtEpochMs;
+    if (latestRuntimeWakeAtEpochMs < runnerStartedAtEpochMs) {
+      return false;
+    }
+
+    input.runtimeWakeSignal?.notify({
+      ...(pendingRuntimeWake.orchestration
+        ? { orchestration: pendingRuntimeWake.orchestration }
+        : {}),
+      notifiedAtEpochMs: pendingRuntimeWake.notifiedAtEpochMs,
+    });
+    if (
+      pendingRuntimeWake.latestNotifiedAtEpochMs !== undefined
+      && pendingRuntimeWake.latestNotifiedAtEpochMs !== pendingRuntimeWake.notifiedAtEpochMs
+    ) {
+      input.runtimeWakeSignal?.notify(pendingRuntimeWake.latestNotifiedAtEpochMs);
+    }
     foregroundRuntimeWakeObservedAfterStop = true;
     return true;
   };
@@ -668,7 +687,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   };
   let assistantContextSnapshotDirty = false;
   let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
-  let projectedWakeRequiresCheckpoint = false;
+  let postCheckpointWakeMerged = false;
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
     initialMailboxImport,
@@ -742,7 +761,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           assistantPhaseResult,
           postCheckpoint,
         });
-        projectedWakeRequiresCheckpoint = mergeDeferredPostCheckpointWake({
+        postCheckpointWakeMerged = mergeDeferredPostCheckpointWake({
           assistantPhaseResult,
           postCheckpoint,
         });
@@ -773,11 +792,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     if (await reconcilePendingAssistantInputWake({
       foregroundConversationWorkObserved,
       now: input.now,
-      projectedWakeRequiresCheckpoint,
+      postCheckpointWakeMerged,
       result: assistantPhaseResult,
       vaultRoot: input.vaultRoot,
     })) {
-      projectedWakeRequiresCheckpoint = false;
+      postCheckpointWakeMerged = false;
     }
     mailboxPostCheckpointEffectsFinished = scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
@@ -823,7 +842,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       ?? input.workspace,
     mailboxPostCheckpointEffectsFinished,
     mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
-    projectedWakeRequiresCheckpoint,
     runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
   };
 }
@@ -1475,7 +1493,7 @@ function mergeAssistantContextSnapshotRefreshWake(input: {
 async function reconcilePendingAssistantInputWake(input: {
   foregroundConversationWorkObserved: boolean;
   now?: (() => string) | null;
-  projectedWakeRequiresCheckpoint: boolean;
+  postCheckpointWakeMerged: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   vaultRoot: string;
 }): Promise<boolean> {
@@ -1483,11 +1501,11 @@ async function reconcilePendingAssistantInputWake(input: {
     const nextWakeReason = input.result.nextWakeReason ?? "assistant";
     const wakeIsImmediate = hostedWorkspaceRunnerWakeIsImmediate(input.result.nextWakeAt, input.now);
     if (input.foregroundConversationWorkObserved && nextWakeReason === "assistant") {
-      if (input.projectedWakeRequiresCheckpoint && wakeIsImmediate) {
+      if (input.postCheckpointWakeMerged && wakeIsImmediate) {
         return false;
       }
     } else if (
-      input.projectedWakeRequiresCheckpoint
+      input.postCheckpointWakeMerged
       || nextWakeReason !== "assistant"
       || !wakeIsImmediate
     ) {

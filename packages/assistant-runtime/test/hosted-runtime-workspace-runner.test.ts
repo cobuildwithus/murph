@@ -131,22 +131,140 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
 } as const;
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
-  test("coalesced runtime wakes preserve the first pending notify timestamp", () => {
+  test("coalesced runtime wakes preserve first and latest pending notify timestamps", () => {
     vi.useFakeTimers();
     const firstNotifyAt = new Date("2026-04-26T00:00:01.000Z");
+    const secondNotifyAt = new Date("2026-04-26T00:00:05.000Z");
 
     try {
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
       vi.setSystemTime(firstNotifyAt);
       runtimeWakeSignal.notify();
-      vi.setSystemTime(new Date("2026-04-26T00:00:05.000Z"));
+      vi.setSystemTime(secondNotifyAt);
       runtimeWakeSignal.notify();
+      runtimeWakeSignal.notify(firstNotifyAt.getTime() + 2_000);
 
       assert.deepEqual(runtimeWakeSignal.consumePending(), {
+        latestNotifiedAtEpochMs: secondNotifyAt.getTime(),
         notifiedAtEpochMs: firstNotifyAt.getTime(),
       });
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  test("stale pending runtime wakes do not yield background maintenance after foreground stop", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-stale-runtime-wake-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const yieldStates: boolean[] = [];
+
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_stale_runtime_wake",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_stale_runtime_wake",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          await input.prepareAutoReplyDelivery?.();
+
+          runtimeWakeSignal.notify(Date.parse(TEST_NOW) - 1);
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+
+          runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(yieldStates, [false, false, true]);
+      assert.deepEqual(runtimeWakeSignal.consumePending(), {
+        notifiedAtEpochMs: Date.parse(TEST_NOW) + 1,
+      });
+    } finally {
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("fresh coalesced runtime wake yields background maintenance after foreground stop", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-coalesced-runtime-wake-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const yieldStates: boolean[] = [];
+
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_coalesced_runtime_wake",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_coalesced_runtime_wake",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          await input.prepareAutoReplyDelivery?.();
+
+          runtimeWakeSignal.notify(Date.parse(TEST_NOW) - 1);
+          runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(yieldStates, [false, true]);
+      assert.deepEqual(runtimeWakeSignal.consumePending(), {
+        latestNotifiedAtEpochMs: Date.parse(TEST_NOW) + 1,
+        notifiedAtEpochMs: Date.parse(TEST_NOW) - 1,
+      });
+    } finally {
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 
