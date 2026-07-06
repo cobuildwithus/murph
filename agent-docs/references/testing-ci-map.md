@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-06-25
+Last verified: 2026-07-06
 
 ## Current Repo Checks
 
@@ -20,6 +20,17 @@ Last verified: 2026-06-25
 
 ## Current CI Workflows
 
+- Linux CI `apps/web verify` invocations wrap the hosted-web production
+  `next build` step with `apps/web/scripts/build-memory-guard.sh`. The guard
+  creates a root-level cgroup-v2 child with a 6,000,000,000-byte
+  `memory.max`, disables swap with `memory.swap.max=0`, and moves the build
+  process into that cgroup while keeping the build itself on the invoking user,
+  environment, cwd, and stdio. It prints cgroup `memory.peak` and
+  `memory.events`, and fails loudly if cgroup v2, the root memory controller,
+  passwordless `sudo`, or peak-accounting machinery is unavailable. The cap is
+  calibrated between the PR #349 5.34 GB passing build and 6.18 GB exit-137
+  Vercel Standard-builder failure, rather than assuming the full 8 GB machine
+  memory is usable by Next/Turbopack.
 - `.github/workflows/repo-hygiene.yml` runs the tracked private/build artifact guard on GitHub-hosted `ubuntu-24.04`.
 - `.github/workflows/host-support.yml` runs a host-support matrix on GitHub-hosted `ubuntu-24.04` and `macos-latest`, installing with `pnpm install --frozen-lockfile`, building the workspace, preparing `pnpm build:test-runtime:prepared`, and then exercising the focused built-runtime CLI host-support suite (`packages/cli/test/setup-cli.test.ts` and `packages/cli/test/inbox-service-boundaries.test.ts`) with `MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1` on both hosts. The macOS host leg serializes package-script workspace builds so sibling `tsc -b --force` package scripts do not rewrite shared project-reference declarations at once while the Linux leg keeps the normal package-build fanout. The workflow also carries deterministic CI-only hosted-web build placeholders for `DATABASE_URL`, hosted device routing, contact privacy, hosted mailbox fingerprinting, and the public Privy app id so its Linux release shards can finish `apps/web verify` without inheriting production secrets.
 - The same workflow also preserves the Ubuntu `pnpm release:check` surface without running it as one long job: release metadata/build/typecheck, package coverage shards, app verification, and fixture coverage run as parallel jobs, then a final `Release checks (ubuntu)` aggregator preserves the required-check name. This keeps Linux bootstrap and release packaging exercised in CI while avoiding the serial package-coverage wall clock.

@@ -8,6 +8,13 @@ hosted_web_default_database_url="postgresql://postgres:postgres@127.0.0.1:5432/m
 hosted_web_default_hosted_key="BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc"
 hosted_web_default_hosted_key_version="v1"
 hosted_web_build_default_privy_app_id="cm_app_build_placeholder1"
+hosted_web_build_memory_guard_default=0
+
+if [[ -n "${CI:-}" && "$(uname -s)" == "Linux" ]]; then
+  hosted_web_build_memory_guard_default=1
+fi
+
+hosted_web_build_memory_guard="${MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD:-$hosted_web_build_memory_guard_default}"
 
 if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
   exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "apps/web verify" -- \
@@ -57,6 +64,15 @@ tracked_background_pids=()
 verify_log() {
   printf '[apps/web verify] %s\n' "$*" >&2
 }
+
+verify_fail() {
+  verify_log "ERROR: $*"
+  exit 1
+}
+
+if [[ "$hosted_web_build_memory_guard" != "0" && "$hosted_web_build_memory_guard" != "1" ]]; then
+  verify_fail "MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD must be 0 or 1."
+fi
 
 run_timed_step() {
   local label="$1"
@@ -217,6 +233,7 @@ run_next_build() {
   local build_contact_privacy_keys
   local build_hosted_mailbox_fingerprint_key
   local build_privy_app_id
+  local next_build_command=(next build)
 
   next_build_node_options="$(compose_node_options_with_sqlite_warning_filter)"
   build_database_url="$(compose_database_url_for_build)"
@@ -225,13 +242,20 @@ run_next_build() {
   build_hosted_mailbox_fingerprint_key="$(compose_hosted_mailbox_fingerprint_key_for_build)"
   build_privy_app_id="$(compose_privy_app_id_for_build)"
 
+  if [[ "$hosted_web_build_memory_guard" == "1" ]]; then
+    next_build_command=(bash "$script_dir/build-memory-guard.sh" -- "${next_build_command[@]}")
+  fi
+
   DATABASE_URL="$build_database_url" \
     HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION="$build_contact_privacy_current_key_version" \
     HOSTED_CONTACT_PRIVACY_KEYS="$build_contact_privacy_keys" \
     HOSTED_MAILBOX_FINGERPRINT_KEY="$build_hosted_mailbox_fingerprint_key" \
     NEXT_PUBLIC_PRIVY_APP_ID="$build_privy_app_id" \
+    NEXT_TELEMETRY_DISABLED=1 \
     NODE_OPTIONS="$next_build_node_options" \
-    next build
+    VERCEL=1 \
+    VERCEL_ENV=preview \
+    "${next_build_command[@]}"
 }
 
 run_timed_step "legal pdf" pnpm legal:pdf
@@ -270,14 +294,16 @@ if [[ "$verify_step_parallel" != "1" ]]; then
   exit 0
 fi
 
+if [[ "$hosted_web_build_memory_guard" == "1" ]]; then
+  verify_log "run next build serially because the memory guard owns a capped cgroup"
+  run_timed_step "next build" run_next_build
+fi
+
 trap cleanup_background_jobs EXIT
 trap 'handle_termination_signal INT' INT
 trap 'handle_termination_signal TERM' TERM
 trap 'handle_termination_signal HUP' HUP
 
-run_timed_step "next build" run_next_build &
-build_pid="$!"
-register_background_pid "$build_pid"
 run_timed_step "dev smoke" run_dev_smoke &
 smoke_pid="$!"
 register_background_pid "$smoke_pid"
@@ -287,4 +313,12 @@ register_background_pid "$test_pid"
 run_timed_step "lint" pnpm lint &
 lint_pid="$!"
 register_background_pid "$lint_pid"
-wait_for_background_jobs "$build_pid" "$smoke_pid" "$test_pid" "$lint_pid"
+if [[ "$hosted_web_build_memory_guard" == "1" ]]; then
+  wait_for_background_jobs "$smoke_pid" "$test_pid" "$lint_pid"
+  exit 0
+fi
+
+run_timed_step "next build" run_next_build &
+build_pid="$!"
+register_background_pid "$build_pid"
+wait_for_background_jobs "$smoke_pid" "$test_pid" "$lint_pid" "$build_pid"

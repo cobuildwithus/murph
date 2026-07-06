@@ -574,6 +574,38 @@ greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during
 the skew window.
 
+## Production build memory guard
+
+The hosted web production build must keep fitting Vercel's Standard build
+machine: 4 vCPUs, 8 GB RAM, and 32 GB disk. PR #349 calibrated this repo's
+local measurement method against the Vercel failure mode:
+
+```bash
+/usr/bin/time -l env NEXT_TELEMETRY_DISABLED=1 VERCEL=1 VERCEL_ENV=preview pnpm --dir apps/web build
+```
+
+That calibration found 5.34 GB peak RSS passing and 6.18 GB peak RSS failing
+with exit 137 on the 8 GB Vercel builder. Do not treat 8 GB as usable build
+heap. The operating system, page cache, and sibling processes consume the
+remaining memory.
+
+Linux CI wraps the `apps/web verify` production `next build` step with
+`apps/web/scripts/build-memory-guard.sh`, which creates a root-level cgroup-v2
+child capped at 6,000,000,000 bytes. Privileged operations are limited to
+creating/configuring/removing that cgroup and moving the build process into it;
+the build itself still runs as the invoking user with its normal environment,
+working directory, and stdio. The cap is intentionally between the known-good
+5.34 GB and known-bad 6.18 GB points. The guard prints cgroup `memory.peak` and
+`memory.events` on every CI build and fails loudly if cgroup v2, the root
+memory controller, passwordless `sudo`, or peak accounting are unavailable.
+Local non-Linux wrapper validation may use
+`MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE=passthrough`; that mode is rejected in
+CI and does not prove the memory cap.
+
+Only raise the cap with fresh Vercel-compatible evidence, and keep the
+calibration points or replace them with newer pass/fail measurements from the
+same production build shape.
+
 The hosted schema now includes the canonical member slices, hosted email
 authorization, device-sync web ownership models, the anonymized hosted
 assistant-runtime issue sink, canonical hosted mailbox rows, hosted workspace

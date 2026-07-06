@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-06-25
+Last verified: 2026-07-06
 
 ## Verification Matrix
 
@@ -98,6 +98,20 @@ When that fast path applies:
 - `pnpm test`, `pnpm verify:acceptance`, and the explicit acceptance-only lanes such as `pnpm test:coverage` are optional and should be skipped unless the touched files really need broader proof.
 
 ## Current Command Meaning
+
+Hosted-web production build memory: on Linux CI, `apps/web verify` wraps its
+production `next build` step with
+`apps/web/scripts/build-memory-guard.sh`. The guard creates a root-level
+cgroup-v2 child with `memory.max=6000000000` and `memory.swap.max=0`, moves the
+build process into that cgroup, and then execs the build as the invoking user
+with the caller's environment, working directory, and stdio unchanged. It
+prints cgroup `memory.peak` and `memory.events`, and fails if cgroup v2, the
+root memory controller, passwordless `sudo`, or peak accounting are
+unavailable. The cap is calibrated between PR #349's measured 5.34 GB passing
+build and 6.18 GB exit-137 Vercel builder failure; it is not an 8 GB
+usable-memory assumption. Local non-Linux wrapper validation may use
+`MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE=passthrough`, but CI rejects
+passthrough mode.
 
 - `pnpm build:workspace:clean`: clears the referenced workspace-build runtime-package outputs plus their project-reference `tsbuildinfo` files first, preserving `packages/importers/dist` during the clean step because package entrypoints can be loaded directly by release checks. It then runs the root TypeScript project-reference graph through one `tsc -b tsconfig.json` invocation and finishes with the importers package safe build, which compiles through a private staged config and refreshes `dist` with a complete directory swap only after importers TypeScript succeeds. Use this when the build itself needs clean-build semantics, such as release or CI proof.
 - `pnpm build:workspace:incremental`: runs that same root TypeScript project-reference graph without first deleting outputs or incremental metadata, then refreshes `packages/importers/dist` through the package safe build, so warm local runs can reuse package-local `.tsbuildinfo` files while keeping published entrypoints current. The importers staged config is private to the package build helper; downstream package `tsconfig` references stay on the normal importers project boundary.
