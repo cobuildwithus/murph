@@ -809,7 +809,6 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 }
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
-  intro?: string | null;
   // Closed over the individually selectable kinds; the offer always includes
   // the membership-implied profile-name.v0 share in its deterministic copy.
   projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;

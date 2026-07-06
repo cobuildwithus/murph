@@ -296,7 +296,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   }
 
   const message = buildHostedGroupJoinOfferMessage({
-    intro: input.joinOffer?.intro ?? null,
     joinUrl,
     projectionKinds,
   });
@@ -342,23 +341,14 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 }
 
 function buildHostedGroupJoinOfferMessage(input: {
-  intro: string | null;
   joinUrl: string;
   projectionKinds: readonly HostedVaultShareProjectionKind[];
 }): string {
-  const intro = normalizeHostedGroupJoinOfferIntro(input.intro);
-  const body = [
+  return [
     "Like this message to join this Murph group.",
     renderHostedGroupJoinOfferScopeSentence(input.projectionKinds),
     `You can manage what you share anytime from the join page: ${input.joinUrl}`,
   ].join(" ");
-  return intro ? `${intro}\n\n${body}` : body;
-}
-
-function normalizeHostedGroupJoinOfferIntro(value: string | null): string | null {
-  const normalized = value?.trim().replace(/\s+/gu, " ") ?? "";
-  if (!normalized) return null;
-  return normalized.length > 500 ? normalized.slice(0, 500).trim() : normalized;
 }
 
 function renderHostedGroupJoinOfferScopeSentence(

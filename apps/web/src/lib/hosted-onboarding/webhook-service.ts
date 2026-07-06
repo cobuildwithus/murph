@@ -165,22 +165,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         event: providerEvent,
         prisma,
       });
-      if (providerResult.duplicate) {
-        const response: HostedOnboardingLinqWebhookResponse = {
-          duplicate: true,
-          ignored: true,
-          ok: true,
-          reason: "duplicate-linq-provider-event",
-        };
-        responseReason = response.reason ?? null;
-        finishHostedOnboardingTiming(timing, "completed", {
-          duplicate: true,
-          eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
-          eventType,
-          responseReason,
-        });
-        return response;
-      }
       const reactionResult = await handleHostedGroupJoinOfferReaction({
         event: providerEvent,
         prisma,
@@ -188,6 +172,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         signal: input.signal,
       });
       const response: HostedOnboardingLinqWebhookResponse = {
+        duplicate: providerResult.duplicate || undefined,
         ignored: reactionResult.status !== "accepted",
         ok: true,
         reason: reactionResult.status === "accepted"
@@ -196,7 +181,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       };
       responseReason = response.reason ?? null;
       finishHostedOnboardingTiming(timing, "completed", {
-        duplicate: false,
+        duplicate: providerResult.duplicate,
         eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
         eventType,
         responseReason,

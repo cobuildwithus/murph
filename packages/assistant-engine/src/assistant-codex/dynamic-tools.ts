@@ -344,13 +344,6 @@ export const MURPH_GROUP_TOOL = {
         description:
           'Optional bounded health projections the join page may offer joining members. Joining never shares them automatically; each member approves their own selection.',
       },
-      intro: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 500,
-        description:
-          'Optional short intro to put before the server-owned like-to-join offer message. Use only with action="post_join_offer".',
-      },
       projectionKinds: {
         type: 'array',
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length,
@@ -707,7 +700,6 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('post_join_offer'),
-      intro: z.string().trim().min(1).max(500).optional(),
       projectionKinds: z
         .array(z.enum(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS))
         .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length)
@@ -2542,7 +2534,6 @@ function parseGroupArguments(
   }
   if (parsed.data.action === 'post_join_offer') {
     const joinOffer = {
-      ...(parsed.data.intro !== undefined ? { intro: parsed.data.intro } : {}),
       ...(parsed.data.projectionKinds !== undefined
         ? { projectionKinds: parsed.data.projectionKinds }
         : {}),

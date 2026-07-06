@@ -801,21 +801,10 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
   const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
   assertAllowedObjectKeys(
     record,
-    new Set(["intro", "projectionKinds"]),
+    new Set(["projectionKinds"]),
     "Hosted runtime group tool post_join_offer joinOffer",
   );
-  const intro = readNullableString(
-    record.intro,
-    "Hosted runtime group tool post_join_offer intro",
-  );
-  if (intro !== null && intro.trim().length === 0) {
-    throw new TypeError("Hosted runtime group tool post_join_offer intro must not be blank.");
-  }
-  if (intro !== null && intro.length > 500) {
-    throw new TypeError("Hosted runtime group tool post_join_offer intro is too long.");
-  }
   return {
-    intro,
     projectionKinds: parseHostedRuntimeGroupProjectionKindArray(
       record.projectionKinds,
       "Hosted runtime group tool post_join_offer projectionKinds",

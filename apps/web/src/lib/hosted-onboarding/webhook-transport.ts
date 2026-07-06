@@ -246,7 +246,9 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       chatId: string;
+      memberId: string;
       message: string;
+      offerMessageLookupKey: string;
       occurredAt: string;
       replyToMessageId?: string | null;
       sourceEventId: string;
@@ -305,7 +307,30 @@ function buildHostedWebhookLinqMessageEffectId(
     return buildHostedLinqConversationHomeRedirectEffectId(input);
   }
 
+  if (input.template === "group_join_offer_accepted") {
+    return buildHostedGroupJoinOfferAcceptedEffectId(input);
+  }
+
   return `linq-message:${input.sourceEventId}`;
+}
+
+function buildHostedGroupJoinOfferAcceptedEffectId(
+  input: Extract<
+    CreateHostedWebhookLinqMessageSideEffectInput,
+    { template: "group_join_offer_accepted" }
+  >,
+): string {
+  const memberId = input.memberId.trim();
+  const offerMessageLookupKey = input.offerMessageLookupKey.trim();
+  if (!memberId || !offerMessageLookupKey) {
+    return `linq-message:${input.sourceEventId}`;
+  }
+
+  const hash = sha256Hex(JSON.stringify({
+    memberId,
+    offerMessageLookupKey,
+  })).slice(0, 32);
+  return `linq-group-join-offer-accepted:${hash}`;
 }
 
 // One redirect per wrong Linq chat + home line + member. If the member's home
@@ -516,6 +541,7 @@ async function sendHostedLinqSideEffect(
     if (
       effect.payload.template === "invite_signup"
       || effect.payload.template === "invite_signup_fallback"
+      || effect.payload.template === "group_join_offer_accepted"
     ) {
       await deliveryAttemptTask;
       await markHostedLinqDeliveryFailedBestEffort({
@@ -1162,8 +1188,21 @@ async function claimHostedLinqNoticeForSideEffect(
       });
     case "conversation_home_redirect":
     case "family_invite_reply":
-    case "group_join_offer_accepted":
       return true;
+    case "group_join_offer_accepted": {
+      const target = readHostedLinqSideEffectDeliveryTarget(effect.payload);
+      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+        idempotencyKey: effect.effectId,
+        linqChatId: target.linqChatId,
+        phoneNumber: target.phoneNumber,
+        prisma,
+        source: "hosted_webhook_side_effect",
+        sourceRef: effect.effectId,
+        targetKind: target.targetKind,
+        template: effect.payload.template,
+      });
+      return claim.claimed;
+    }
   }
 }
 

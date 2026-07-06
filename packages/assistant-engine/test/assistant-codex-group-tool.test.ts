@@ -49,14 +49,12 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
-      intro: "Like this to join.",
       projectionKinds: ["sleep-times.v0"],
     }))).toEqual({
       kind: "group",
       request: {
         action: "post_join_offer",
         joinOffer: {
-          intro: "Like this to join.",
           projectionKinds: ["sleep-times.v0"],
         },
       },
@@ -130,6 +128,11 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "create_join_link",
       requestedVaultShareProjectionKinds: ["all-health-data"],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      intro: "Like this to join.",
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({

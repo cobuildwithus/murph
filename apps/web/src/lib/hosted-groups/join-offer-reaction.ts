@@ -158,10 +158,12 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     sideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.event.linqChatId,
+        memberId: member.id,
         message: buildHostedGroupJoinOfferAcceptedReply({
           joinUrl,
           projectionKinds: accepted.selectedVaultShareProjectionKinds,
         }),
+        offerMessageLookupKey: input.event.messageLookupKey,
         occurredAt: input.event.providerCreatedAt.toISOString(),
         replyToMessageId: input.event.linqMessageId,
         sourceEventId: input.event.eventId,

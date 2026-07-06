@@ -466,7 +466,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "post_join_offer",
         joinOffer: {
-          intro: "Want in on the sleep check-in?",
           projectionKinds: ["sleep-times.v0"],
         },
         linqThread: LINQ_THREAD,
@@ -492,7 +491,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       expect.objectContaining({
         chatId: "chat_group_1",
         idempotencyKey: expect.stringMatching(/^group-join-offer:hgrp_123:/u),
-        message: expect.stringContaining("Want in on the sleep check-in?"),
+        message: expect.not.stringContaining("Want in on the sleep check-in?"),
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(

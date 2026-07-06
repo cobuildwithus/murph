@@ -506,13 +506,11 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
       joinOffer: {
-        intro: "Like this to join us.",
         projectionKinds: ["sleep-times.v0", "activity-days.v0"],
       },
     })).toEqual({
       action: "post_join_offer",
       joinOffer: {
-        intro: "Like this to join us.",
         projectionKinds: ["sleep-times.v0", "activity-days.v0"],
       },
     });
@@ -554,6 +552,12 @@ describe("parseHostedRuntimeGroupTool", () => {
         joinLink: { displayName: "   " },
       })
     ).toThrow(/must not be blank/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
+        joinOffer: { intro: "Like this to join us." },
+      })
+    ).toThrow(/not allowed/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "post_join_offer",

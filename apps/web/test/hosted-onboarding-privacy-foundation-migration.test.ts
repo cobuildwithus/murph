@@ -590,6 +590,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260703160000_device_oauth_session_consumed_at",
       "20260705120000_hosted_mailbox_item_consumed_at",
       "20260706120000_hosted_thread_container_participant",
+      "20260706130000_hosted_group_join_offer",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
