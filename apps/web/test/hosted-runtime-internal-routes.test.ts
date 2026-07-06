@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
   hostedRuntimeMailboxMemberFindUnique: vi.fn(),
+  hostedThreadContainerParticipantFindFirst: vi.fn(),
   getPrisma: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
   publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
@@ -149,6 +150,7 @@ describe("hosted runtime internal web routes", () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
       buildRuntimeMailboxAccessRecord(),
     );
+    mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
     mocks.getPrisma.mockReturnValue(createPrismaClientStub());
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
     mocks.readHostedMailboxConsumedSeqByLane.mockImplementation((input: {
@@ -2609,6 +2611,9 @@ function createPrismaClientStub() {
   return {
     hostedMember: {
       findUnique: mocks.hostedRuntimeMailboxMemberFindUnique,
+    },
+    hostedThreadContainerParticipant: {
+      findFirst: mocks.hostedThreadContainerParticipantFindFirst,
     },
     hostedAccountGroupMembership: {
       count: vi.fn(async () => 0),

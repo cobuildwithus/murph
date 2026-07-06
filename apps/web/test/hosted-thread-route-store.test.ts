@@ -27,15 +27,39 @@ function createPrismaMock() {
   const hostedThreadRoute = {
     findMany: vi.fn(),
   };
+  const hostedThreadContainerParticipant = {
+    findFirst: vi.fn(),
+  };
 
   return {
     hostedMember,
     hostedMemberRouting,
+    hostedThreadContainerParticipant,
     hostedThreadRoute,
   } as unknown as Prisma.TransactionClient & {
     hostedMember: typeof hostedMember;
     hostedMemberRouting: typeof hostedMemberRouting;
+    hostedThreadContainerParticipant: typeof hostedThreadContainerParticipant;
     hostedThreadRoute: typeof hostedThreadRoute;
+  };
+}
+
+function buildThreadContainerAccessRecord(input: {
+  containerSuspendedAt?: Date | null;
+  ownerBillingStatus?: string;
+  ownerSuspendedAt?: Date | null;
+}) {
+  return {
+    accountGroupMemberships: [],
+    billingStatus: "not_started",
+    suspendedAt: input.containerSuspendedAt ?? null,
+    threadContainer: {
+      owner: {
+        accountGroupMemberships: [],
+        billingStatus: input.ownerBillingStatus ?? "paused",
+        suspendedAt: input.ownerSuspendedAt ?? null,
+      },
+    },
   };
 }
 
@@ -313,6 +337,183 @@ describe("hosted thread route store", () => {
     );
     expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("authorizes egress when an active participant keeps an inactive-owner group alive", async () => {
+    const prisma = createPrismaMock();
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+      channel: "linq",
+      threadId: "chat_group_abc",
+    });
+    if (!threadLookupKey) {
+      throw new Error("Expected test thread lookup key.");
+    }
+    prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([
+      {
+        channel: "linq",
+        container: {
+          member: {
+            billingStatus: "not_started",
+            createdAt: new Date("2026-06-24T00:00:00.000Z"),
+            id: "member_container_123",
+            suspendedAt: null,
+            updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+          },
+          owner: {
+            accountGroupMemberships: [],
+            billingStatus: "paused",
+            createdAt: new Date("2026-06-24T00:00:00.000Z"),
+            id: "member_owner_123",
+            suspendedAt: null,
+            updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+          },
+        },
+        containerMemberId: "member_container_123",
+        threadLookupKey,
+      },
+    ]);
+    prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
+      ownerBillingStatus: "paused",
+    }));
+    prisma.hostedThreadContainerParticipant.findFirst.mockResolvedValueOnce({
+      participantMemberId: "member_active_participant_123",
+    });
+
+    await expect(assertHostedLinqRouteEgressAuthority({
+      authority: {
+        accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+        channel: "linq",
+        containerMemberId: "member_container_123",
+        threadId: "chat_group_abc",
+      },
+      prisma,
+    })).resolves.toMatchObject({
+      channel: "linq",
+      containerMemberId: "member_container_123",
+    });
+
+    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
+      select: {
+        participantMemberId: true,
+      },
+      where: expect.objectContaining({
+        containerMemberId: "member_container_123",
+        removedAt: null,
+      }),
+    });
+  });
+
+  it("does not authorize egress when owner and projected participants are inactive", async () => {
+    const prisma = createPrismaMock();
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+      channel: "linq",
+      threadId: "chat_group_abc",
+    });
+    if (!threadLookupKey) {
+      throw new Error("Expected test thread lookup key.");
+    }
+    prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([
+      {
+        channel: "linq",
+        container: {
+          member: {
+            billingStatus: "not_started",
+            createdAt: new Date("2026-06-24T00:00:00.000Z"),
+            id: "member_container_123",
+            suspendedAt: null,
+            updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+          },
+          owner: {
+            accountGroupMemberships: [],
+            billingStatus: "paused",
+            createdAt: new Date("2026-06-24T00:00:00.000Z"),
+            id: "member_owner_123",
+            suspendedAt: null,
+            updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+          },
+        },
+        containerMemberId: "member_container_123",
+        threadLookupKey,
+      },
+    ]);
+    prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
+      ownerBillingStatus: "paused",
+    }));
+    prisma.hostedThreadContainerParticipant.findFirst.mockResolvedValueOnce(null);
+
+    await expect(assertHostedLinqRouteEgressAuthority({
+      authority: {
+        accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+        channel: "linq",
+        containerMemberId: "member_container_123",
+        threadId: "chat_group_abc",
+      },
+      prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    });
+
+    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not authorize egress for a suspended container even with an active participant", async () => {
+    const prisma = createPrismaMock();
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+      channel: "linq",
+      threadId: "chat_group_abc",
+    });
+    if (!threadLookupKey) {
+      throw new Error("Expected test thread lookup key.");
+    }
+    prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([
+      {
+        channel: "linq",
+        container: {
+          member: {
+            billingStatus: "not_started",
+            createdAt: new Date("2026-06-24T00:00:00.000Z"),
+            id: "member_container_123",
+            suspendedAt: new Date("2026-06-24T00:00:00.000Z"),
+            updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+          },
+          owner: {
+            accountGroupMemberships: [],
+            billingStatus: "paused",
+            createdAt: new Date("2026-06-24T00:00:00.000Z"),
+            id: "member_owner_123",
+            suspendedAt: null,
+            updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+          },
+        },
+        containerMemberId: "member_container_123",
+        threadLookupKey,
+      },
+    ]);
+    prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
+      containerSuspendedAt: new Date("2026-06-24T00:00:00.000Z"),
+      ownerBillingStatus: "paused",
+    }));
+    prisma.hostedThreadContainerParticipant.findFirst.mockResolvedValueOnce({
+      participantMemberId: "member_active_participant_123",
+    });
+
+    await expect(assertHostedLinqRouteEgressAuthority({
+      authority: {
+        accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+        channel: "linq",
+        containerMemberId: "member_container_123",
+        threadId: "chat_group_abc",
+      },
+      prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    });
+
+    expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
   });
 
   it("fails closed when lookup candidates match multiple containers", async () => {

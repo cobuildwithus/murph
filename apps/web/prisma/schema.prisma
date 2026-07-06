@@ -377,6 +377,7 @@ model HostedMember {
   sensitiveActionChallenges      HostedSensitiveActionChallenge[]
   threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
   ownedThreadContainers          HostedThreadContainer[]         @relation("HostedThreadContainerOwner")
+  threadContainerParticipations  HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -1092,10 +1093,28 @@ model HostedThreadContainer {
   createdAt                  DateTime            @default(now()) @map("created_at")
   member                     HostedMember        @relation("HostedThreadContainerMember", fields: [memberId], references: [id], onDelete: Cascade)
   owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
+  participants               HostedThreadContainerParticipant[]
   routes                     HostedThreadRoute[]
 
   @@index([ownerMemberId])
   @@map("hosted_thread_container")
+}
+
+model HostedThreadContainerParticipant {
+  containerMemberId   String                @map("container_member_id")
+  participantMemberId String                @map("participant_member_id")
+  handleLookupKey     String                @map("handle_lookup_key")
+  firstSeenAt         DateTime              @map("first_seen_at")
+  lastSeenAt          DateTime              @map("last_seen_at")
+  removedAt           DateTime?             @map("removed_at")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
+  container           HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
+  participant         HostedMember          @relation("HostedThreadContainerParticipantMember", fields: [participantMemberId], references: [id], onDelete: Cascade)
+
+  @@id([containerMemberId, participantMemberId])
+  @@index([containerMemberId])
+  @@map("hosted_thread_container_participant")
 }
 
 model HostedThreadRoute {

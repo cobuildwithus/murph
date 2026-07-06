@@ -12,9 +12,15 @@ export type HostedOnboardingLinqWebhookResponse = {
   reason?: string;
 };
 
+export type HostedOnboardingLinqGroupRosterReconcile = {
+  chatId: string;
+  containerMemberId: string;
+};
+
 export type HostedOnboardingLinqDirectPlan =
   HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect>
   & {
     firstContactAdmissionParticipantContact?: HostedLinqParticipantContact;
     firstContactAdmissionRequest?: HostedLinqFirstContactAdmissionRequest;
+    postCommitGroupRosterReconciles?: readonly HostedOnboardingLinqGroupRosterReconcile[];
   };

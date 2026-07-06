@@ -41,21 +41,17 @@ describe("hosted runtime crypto root route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
-    mocks.getPrisma.mockReturnValue({
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          accountGroupMemberships: [],
-          billingStatus: "active",
-          suspendedAt: null,
-          threadContainer: null,
-        }),
+    mocks.getPrisma.mockReturnValue(createPrisma({
+      member: {
+        accountGroupMemberships: [],
+        billingStatus: "active",
+        suspendedAt: null,
+        threadContainer: null,
       },
-      hostedWorkspace: {
-        findUnique: vi.fn().mockResolvedValue({
-          userId: "member_123",
-        }),
+      workspace: {
+        userId: "member_123",
       },
-    });
+    }));
     mocks.readHostedDomainRootEnvelopeByRootKeyIdOrThrow.mockResolvedValue({
       domain: "runtime",
       rootKeyId: "udrk:runtime:test-root",
@@ -95,4 +91,78 @@ describe("hosted runtime crypto root route", () => {
       },
     });
   });
+
+  it("allows crypto root reads when an active participant keeps an inactive-owner group alive", async () => {
+    const prisma = createPrisma({
+      member: {
+        accountGroupMemberships: [],
+        billingStatus: "not_started",
+        suspendedAt: null,
+        threadContainer: {
+          owner: {
+            accountGroupMemberships: [],
+            billingStatus: "paused",
+            suspendedAt: null,
+          },
+        },
+      },
+      participantActive: true,
+      workspace: {
+        userId: "member_123",
+      },
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await hostedRuntimeCryptoRootRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-runtime/crypto-context/root", {
+        body: JSON.stringify({
+          domain: "runtime",
+          rootKeyId: "udrk:runtime:test-root",
+        }),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
+      select: {
+        participantMemberId: true,
+      },
+      where: expect.objectContaining({
+        containerMemberId: "member_123",
+        removedAt: null,
+      }),
+    });
+    expect(mocks.readHostedDomainRootEnvelopeByRootKeyIdOrThrow).toHaveBeenCalledWith({
+      domain: "runtime",
+      prisma,
+      rootKeyId: "udrk:runtime:test-root",
+      userId: "member_123",
+    });
+  });
 });
+
+function createPrisma(input: {
+  member: {
+    accountGroupMemberships: unknown[];
+    billingStatus: string;
+    suspendedAt: Date | null;
+    threadContainer: null | { owner: unknown };
+  } | null;
+  participantActive?: boolean;
+  workspace: { userId: string } | null;
+}) {
+  return {
+    hostedMember: {
+      findUnique: vi.fn().mockResolvedValue(input.member),
+    },
+    hostedThreadContainerParticipant: {
+      findFirst: vi.fn(async () => input.participantActive
+        ? { participantMemberId: "member_active_participant" }
+        : null),
+    },
+    hostedWorkspace: {
+      findUnique: vi.fn().mockResolvedValue(input.workspace),
+    },
+  };
+}
