@@ -158,6 +158,37 @@ export async function recordHostedIngressTemporalSignalAccepted(input: {
   return { matchedCount: 1, recorded: true, unmatchedCount: 0 };
 }
 
+export async function recordHostedIngressDirectEnsureTiming(input: {
+  expectedUserId?: string | null;
+  mailboxItemId: string;
+  phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown;
+  prisma?: HostedIngressLatencyPrismaClient;
+  source: HostedIngressLatencySource | string;
+}): Promise<HostedIngressLatencyWriteResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const source = normalizeHostedIngressLatencySource(input.source);
+  const mailboxItem = await readTraceMailboxItem(prisma, {
+    expectedUserId: input.expectedUserId ?? null,
+    mailboxItemId: input.mailboxItemId,
+  });
+
+  if (!mailboxItem) {
+    return { matchedCount: 0, recorded: false, unmatchedCount: 1 };
+  }
+
+  const trace = await upsertHostedIngressLatencyTraceFromMailboxItem(prisma, {
+    mailboxItem,
+    source,
+  });
+  const recorded = await updateHostedIngressLatencyTracePhaseBreakdownLocked(prisma, {
+    phaseBreakdown: input.phaseBreakdown,
+    phases: ["orchestration"],
+    traceId: trace.id,
+  });
+
+  return { matchedCount: 1, recorded, unmatchedCount: 0 };
+}
+
 export async function recordHostedIngressAssistantInputStaged(input: {
   assistantInputId: string;
   at?: Date | string | null;
@@ -738,6 +769,40 @@ async function readHostedIngressLatencyTraceForUpdate(
     FOR UPDATE
   `;
   return rows[0] ?? null;
+}
+
+async function updateHostedIngressLatencyTracePhaseBreakdownLocked(
+  prisma: HostedIngressLatencyPrismaClient,
+  input: {
+    phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown;
+    phases: readonly HostedRuntimeLatencyPhaseBreakdownPhase[];
+    traceId: string;
+  },
+): Promise<boolean> {
+  return await prisma.$transaction(async (tx) => {
+    const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
+    if (!trace) {
+      return false;
+    }
+
+    const phaseBreakdownUpdate = readPhaseBreakdownMergeUpdate(
+      trace.phaseBreakdownJson,
+      input.phaseBreakdown,
+      input.phases,
+    );
+    if (Object.keys(phaseBreakdownUpdate).length === 0) {
+      return false;
+    }
+
+    await tx.hostedIngressLatencyTrace.update({
+      data: phaseBreakdownUpdate,
+      where: {
+        id: trace.id,
+      },
+    });
+
+    return true;
+  });
 }
 
 async function updateHostedIngressAssistantInputStagedLocked(

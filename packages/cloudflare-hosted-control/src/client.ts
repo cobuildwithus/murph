@@ -8,6 +8,9 @@ import {
 } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 import {
@@ -76,10 +79,18 @@ export interface CloudflareHostedControlClient {
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
   ensureRuntimeProcessing(input: {
+    onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
     orchestrationAttemptId: string;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+}
+
+export interface CloudflareHostedControlRuntimeEnsureProcessingTiming {
+  directEnsureRequestStartedAtEpochMs: number;
+  directEnsureResponseReceivedAtEpochMs: number;
+  tokenAcquiredAtEpochMs: number;
+  tokenAcquireStartedAtEpochMs: number;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -185,6 +196,7 @@ export function createCloudflareHostedControlClient(
         fetchImpl,
         getAuthorizationHeader,
         label: "runtime ensure-processing",
+        onRuntimeEnsureProcessingTiming: input.onTiming,
         parse: parseHostedRuntimeEnsureProcessingResponse,
         path: buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId),
         request: {
@@ -669,6 +681,9 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   fetchImpl: typeof fetch;
   getAuthorizationHeader: () => Promise<string>;
   label: string;
+  onRuntimeEnsureProcessingTiming?: (
+    timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
+  ) => void;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -686,12 +701,40 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   }
 
   const headers = new Headers(input.request.headers);
+  const tokenAcquireStartedAtEpochMs = input.onRuntimeEnsureProcessingTiming
+    ? Date.now()
+    : null;
   headers.set("authorization", await input.getAuthorizationHeader());
+  const tokenAcquiredAtEpochMs = tokenAcquireStartedAtEpochMs === null
+    ? null
+    : Date.now();
 
   if (input.boundUserId !== undefined) {
     headers.set(
       HOSTED_EXECUTION_USER_ID_HEADER,
       requireCloudflareHostedControlUserId(input.boundUserId),
+    );
+  }
+
+  const directEnsureRequestStartedAtEpochMs = tokenAcquireStartedAtEpochMs === null
+    ? null
+    : Date.now();
+  if (
+    tokenAcquireStartedAtEpochMs !== null
+    && tokenAcquiredAtEpochMs !== null
+    && directEnsureRequestStartedAtEpochMs !== null
+  ) {
+    headers.set(
+      HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
+      String(tokenAcquireStartedAtEpochMs),
+    );
+    headers.set(
+      HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
+      String(tokenAcquiredAtEpochMs),
+    );
+    headers.set(
+      HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+      String(directEnsureRequestStartedAtEpochMs),
     );
   }
 
@@ -702,6 +745,26 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     redirect: "error",
     signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
   });
+  const directEnsureResponseReceivedAtEpochMs = directEnsureRequestStartedAtEpochMs === null
+    ? null
+    : Date.now();
+  if (
+    tokenAcquireStartedAtEpochMs !== null
+    && tokenAcquiredAtEpochMs !== null
+    && directEnsureRequestStartedAtEpochMs !== null
+    && directEnsureResponseReceivedAtEpochMs !== null
+  ) {
+    try {
+      input.onRuntimeEnsureProcessingTiming?.({
+        directEnsureRequestStartedAtEpochMs,
+        directEnsureResponseReceivedAtEpochMs,
+        tokenAcquiredAtEpochMs,
+        tokenAcquireStartedAtEpochMs,
+      });
+    } catch {
+      // Timing callbacks are diagnostics-only and must not affect control requests.
+    }
+  }
 
   if (!response.ok) {
     throw new HostedExecutionHttpResponseError({
