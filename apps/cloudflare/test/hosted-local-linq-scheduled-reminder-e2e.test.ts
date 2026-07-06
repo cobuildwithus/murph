@@ -43,6 +43,8 @@ const scheduledReminderLeadMs = 60_000;
 const setupLeadText = "about one minute";
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
+const scheduledReminderInstructions =
+  "Send the user the hosted-local sleep reminder: go to sleep.";
 const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
@@ -145,7 +147,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         text: reminderText,
       }),
     ], {
-      matchInputContains: "Sleep reminder",
+      matchInputContains: scheduledReminderInstructions,
     });
     const reminderSendBaselineCount = requireLinqStub().countObservedSends(reminderPath);
     const reminderProviderRequestBaselineCount =
@@ -218,7 +220,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     requireScenario().queueAssistantResponses([
       heldOverlapReminderResponse.response,
     ], {
-      matchInputContains: "Sleep reminder",
+      matchInputContains: scheduledReminderInstructions,
     });
     requireScenario().queueAssistantResponses([
       overlapForegroundReplyText,
@@ -231,7 +233,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         text: overlapReminderText,
       }),
     ], {
-      matchInputContains: "Sleep reminder",
+      matchInputContains: scheduledReminderInstructions,
     });
     const overlapProviderBaselineCount = countAssistantProviderResponsesApiRequests();
     const overlapForegroundReplyMatcher =
@@ -542,7 +544,7 @@ function buildHostedAssistantAutomationSaveResponses(input: {
       "--request-id",
       input.requestId ?? `hosted-local-reminder-${userId}`,
       "--instructions",
-      "Send the user a short reminder to go to sleep.",
+      scheduledReminderInstructions,
       "--summary",
       "One-shot sleep reminder.",
       "--tags",

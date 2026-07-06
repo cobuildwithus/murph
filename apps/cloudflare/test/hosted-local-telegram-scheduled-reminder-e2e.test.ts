@@ -32,6 +32,8 @@ const hostedLocalTelegramRequestToken = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const setupReplyText = "Done - I will remind you here in a few minutes.";
 const setupRequestText = "Remind me here in a few minutes to go to sleep.";
+const scheduledReminderInstructions =
+  "Send the user the hosted-local sleep reminder: go to sleep.";
 const scheduledReminderLeadMs = 360_000;
 const scheduledReminderMinimumRunwayMs = 30_000;
 const scheduledReminderSendWaitMs = 240_000;
@@ -128,7 +130,7 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
         text: reminderText,
       }),
     ], {
-      matchInputContains: "Sleep reminder",
+      matchInputContains: scheduledReminderInstructions,
     });
 
     const reminderSendBaselineCount = countScheduledReminderSendsWithoutNudge({
@@ -210,7 +212,7 @@ function buildHostedAssistantAutomationSaveResponses(input: {
       "--request-id",
       `hosted-local-telegram-reminder-${userId}`,
       "--instructions",
-      "Send the user a short reminder to go to sleep.",
+      scheduledReminderInstructions,
       "--summary",
       "One-shot sleep reminder.",
       "--tags",
