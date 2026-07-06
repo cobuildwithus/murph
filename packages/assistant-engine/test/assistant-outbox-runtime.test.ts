@@ -2379,6 +2379,55 @@ describe('assistant outbox runtime', () => {
     )
   })
 
+  it('forwards Linq answered mailbox ids through the real adapter before retrying outcome failures', async () => {
+    await useActualOutboundDeliveryImplementation()
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-real-consume-retry-')
+    const answeredMailboxItemIds = [
+      'mailbox_item_real_path_1',
+      'mailbox_item_real_path_2',
+    ]
+    const seeded = await createIntent(vaultRoot, {
+      answeredMailboxItemIds,
+      channel: 'linq',
+      message: 'real adapter reply needs consume stamp',
+      sessionId: 'session-linq-real-consume-retry',
+      threadId: 'linq-thread-real-consume-retry',
+      turnId: 'turn-linq-real-consume-retry',
+    })
+    const sendLinq = vi.fn(
+      async (
+        _input: Parameters<NonNullable<AssistantChannelDependencies['sendLinq']>>[0],
+      ) => {
+        throw new VaultCliError(
+          'ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED',
+          'Accepted Linq delivery outcome recording failed before consume state could be stored.',
+          { retryable: true },
+        )
+      },
+    )
+
+    const failedReport = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:30:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(sendLinq).toHaveBeenCalledOnce()
+    expect(sendLinq.mock.calls[0]?.[0]).toMatchObject({
+      answeredMailboxItemIds,
+      target: 'linq-thread-real-consume-retry',
+      targetKind: 'thread',
+    })
+    expect(failedReport.intent.status).toBe('retryable')
+    expect(failedReport.intent.sentAt).toBeNull()
+    expect(failedReport.intent.answeredMailboxItemIds).toEqual(answeredMailboxItemIds)
+    expect(failedReport.intent.lastError?.code).toBe(
+      'ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED',
+    )
+  })
+
   it('rethrows selected dispatch errors before failure persistence', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-rethrow-')
     const seeded = await createIntent(vaultRoot, {

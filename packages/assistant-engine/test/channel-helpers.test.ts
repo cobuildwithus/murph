@@ -346,6 +346,7 @@ describe('channel helper seams', () => {
 
     expect(sendMessage).toHaveBeenCalledWith({
       actorId: null,
+      answeredMailboxItemIds: [],
       candidate: {
         kind: 'participant',
         target: 'participant-7',
