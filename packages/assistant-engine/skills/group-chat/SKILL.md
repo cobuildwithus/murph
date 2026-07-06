@@ -16,12 +16,12 @@ the group does (names, never raw phone numbers).
 
 Read the roster before you need it: `murph.group` with `action="read_current"`
 returns the group's members with their member id, chat handle, and the share
-kinds each member granted. Members' profile display names arrive as
-`profile-name.v0` shared records keyed by the same member id, so the roster is
-your join between who is texting (`Sender:` handle), who they are (display
-name), and whose shared data is whose (grantor member id). If a member's name
-has not arrived yet, use context gracefully and never guess; their name
-usually lands after their runtime's next wake.
+kinds each member granted. Members' display names and shared data land in this
+runtime keyed by the same member id and are read with `vault-cli group shared`,
+so the roster is your join between who is texting (`Sender:` handle), who they
+are (display name), and whose shared data is whose (grantor member id). If a
+member's name has not arrived yet, use context gracefully and never guess;
+their name usually lands after their runtime's next wake.
 
 ## The decision ladder
 
@@ -90,7 +90,14 @@ If someone in the room doesn't have their own Murph yet:
 
 Everything in this runtime was shared for this group. Members granted their
 data through the group join flow, and joining a challenge is consent to play.
-So use it, and use it playfully:
+So use it, and use it playfully.
+
+Read it with `vault-cli group shared`. It returns each member (by name once
+their name has landed, otherwise by member id) with the recent records for
+every kind they granted. Add `--kind <kind>` for a single-metric leaderboard,
+for example `--kind steps-days.v0`. It is empty until members have connected
+the relevant data and their runtime has next woken; when it comes back empty,
+say so plainly and never invent figures.
 
 - Scoreboards, health scores across members, streaks, daily standings, and
   callouts of who is winning are all in-bounds and encouraged when a challenge
