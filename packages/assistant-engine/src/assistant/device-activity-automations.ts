@@ -9,12 +9,16 @@ import {
   type AutomationQueryRecord,
   type VaultReadModel,
 } from '@murphai/query'
-import type { AutomationSchedule } from '@murphai/contracts'
 import {
   assistantCronJobSchema,
   assistantCronTargetSchema,
   type AssistantCronJob,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  activityTextMatchesKind,
+  normalizeActivityKindToken,
+  type AutomationSchedule,
+} from '@murphai/contracts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from './automation-tags.js'
 import { withAssistantCronWriteLock } from './cron/locking.js'
 import {
@@ -336,7 +340,7 @@ function resolveDeviceActivityKind(entity: ActivityEntity & { kind: DeviceActivi
   }
 
   for (const candidate of listActivityKindTextCandidates(entity)) {
-    const normalized = normalizeDeviceActivityKindToken(candidate)
+    const normalized = normalizeActivityKindToken(candidate)
     if (normalized) {
       return normalized
     }
@@ -376,15 +380,15 @@ function deviceActivityKindMatches(
     return true
   }
 
-  const requested = normalizeDeviceActivityKindToken(activityKind)
+  const requested = normalizeActivityKindToken(activityKind)
   if (!requested) {
     return false
   }
 
   if (isSleepActivityKind(requested)) {
     return candidate.recordKind === 'sleep_session'
-      || deviceActivityTextMatchesKind(candidate.activityKind, requested)
-      || deviceActivityTextMatchesKind(candidate.title, requested)
+      || activityTextMatchesKind(candidate.activityKind, requested)
+      || activityTextMatchesKind(candidate.title, requested)
   }
 
   if (requested === 'activity') {
@@ -395,8 +399,8 @@ function deviceActivityKindMatches(
     return candidate.recordKind === 'activity_session'
   }
 
-  return deviceActivityTextMatchesKind(candidate.activityKind, requested)
-    || deviceActivityTextMatchesKind(candidate.title, requested)
+  return activityTextMatchesKind(candidate.activityKind, requested)
+    || activityTextMatchesKind(candidate.title, requested)
 }
 
 function deviceActivitySourceMatches(
@@ -771,63 +775,6 @@ function normalizeSourceToken(value: string | null | undefined): string | null {
   return normalized && normalized.length > 0 ? normalized : null
 }
 
-function normalizeDeviceActivityKindToken(value: string | null | undefined): string | null {
-  const normalized = value
-    ?.trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-  return normalized && normalized.length > 0 ? normalized : null
-}
-
-function deviceActivityTextMatchesKind(
-  text: string | null | undefined,
-  requested: string,
-): boolean {
-  const normalized = normalizeDeviceActivityKindToken(text)
-  if (!normalized) {
-    return false
-  }
-
-  if (deviceActivityKindsEquivalent(normalized, requested)) {
-    return true
-  }
-
-  const requestedAliases = deviceActivityKindAliasSet(requested)
-  return normalized.split('-').some((part) => requestedAliases.has(part))
-}
-
-function deviceActivityKindsEquivalent(left: string, right: string): boolean {
-  return left === right
-    || deviceActivityKindAliasSet(left).has(right)
-    || deviceActivityKindAliasSet(right).has(left)
-}
-
 function isSleepActivityKind(value: string): boolean {
-  return deviceActivityKindAliasSet('sleep').has(value)
+  return activityTextMatchesKind('sleep', value)
 }
-
-function deviceActivityKindAliasSet(value: string): Set<string> {
-  const aliases = new Set([value])
-  for (const group of deviceActivityKindAliasGroups) {
-    if ((group as readonly string[]).includes(value)) {
-      for (const alias of group) {
-        aliases.add(alias)
-      }
-    }
-  }
-  return aliases
-}
-
-const deviceActivityKindAliasGroups = [
-  ['walk', 'walking'],
-  ['run', 'running'],
-  ['bike', 'biking', 'cycle', 'cycling'],
-  ['dance', 'dancing'],
-  ['surf', 'surfing'],
-  ['swim', 'swimming'],
-  ['hike', 'hiking'],
-  ['row', 'rowing'],
-  ['strength', 'strength-training', 'weightlifting', 'weights'],
-  ['sleep', 'sleep-session', 'sleep-summary', 'sleep-cycle'],
-] as const satisfies readonly (readonly string[])[]

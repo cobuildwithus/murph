@@ -4,6 +4,7 @@ import {
   createBrowserVaultQueryClient,
   createBrowserVaultReplica,
   createVaultReadModel,
+  selectBrowserVaultExperimentResults,
   type BrowserVaultQueryClient,
   type BrowserVaultMetricRow,
 } from "@murphai/query/browser";
@@ -813,6 +814,8 @@ describe("experiment detail private-run composition", () => {
       protocol: protocol!,
     });
 
+    expect(privateRun?.schedule).toBeDefined();
+
     const interventionKinds = privateRun?.schedule?.weeks
       .flatMap((week) => week.cells)
       .filter((cell) => cell.kind !== "baseline")
@@ -835,6 +838,81 @@ describe("experiment detail private-run composition", () => {
     expect(scheduleMarkup).toContain("5 planned");
     expect(scheduleMarkup).not.toContain("2 done");
     expect(scheduleMarkup).not.toContain("1 missed");
+  });
+
+  it("does not synthesize a schedule grid for calendar-less count adherence", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+
+    expect(protocol).not.toBeNull();
+
+    const client = await createClient({
+      additionalEntities: [
+        createActivitySessionEntity({
+          activityType: "Running",
+          date: "2026-06-01",
+          id: "evt_count_run_1",
+          sportName: "Run",
+        }),
+        createActivitySessionEntity({
+          activityType: "Running",
+          date: "2026-06-03",
+          id: "evt_count_run_2",
+          sportName: "Run",
+        }),
+        createActivitySessionEntity({
+          activityType: "Running",
+          date: "2026-06-05",
+          id: "evt_count_run_3",
+          sportName: "Run",
+        }),
+        createActivitySessionEntity({
+          activityType: "Running",
+          date: "2026-06-08",
+          id: "evt_count_run_4",
+          sportName: "Run",
+        }),
+      ],
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      trackedExperiments: [{
+        frontmatter: createExperimentFrontmatter({
+          analysisPlan: {
+            desiredDirection: "increase",
+            primaryBiomarkerKey: "biomarker:vo2-max",
+          },
+          id: "exp_count_run_schedule",
+          runPlan: {
+            baselineEnd: "2026-05-31",
+            baselineStart: "2026-05-25",
+            interventionEnd: "2026-06-28",
+            interventionStart: "2026-06-01",
+            minimumUsefulSessions: 12,
+            modality: "Run",
+            targetSessions: 24,
+          },
+          slug: "norwegian-4x4",
+          startedOn: "2026-05-25",
+          status: "active",
+          title: "Private running block",
+        }),
+        id: "exp_count_run_schedule",
+        slug: "norwegian-4x4",
+        startedOn: "2026-05-25",
+        status: "active",
+        summary: "Count-style running adherence should stay out of the daily grid.",
+        tags: ["running"],
+        title: "Private running block",
+      }],
+    });
+
+    const rawResults = selectBrowserVaultExperimentResults(client, { slug: "norwegian-4x4" });
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client,
+      protocol: protocol!,
+    });
+
+    expect(rawResults?.progress?.adherence.loggedSessions).toBe(4);
+    expect(privateRun?.schedule).toBeUndefined();
+    expect(privateRun?.summaryDetail).toContain("4 logged");
   });
 
   it("does not synthesize a schedule grid for unsupported explicit adherence", async () => {
@@ -1347,6 +1425,26 @@ function createSessionEntity(input: {
     occurredAt: `${input.date}T13:00:00.000Z`,
     recordClass: "ledger",
     title: "Sauna session",
+  });
+}
+
+function createActivitySessionEntity(input: {
+  activityType: string;
+  date: string;
+  id: string;
+  sportName?: string;
+}): BrowserVaultEntity {
+  return createEntity("event", input.id, {
+    attributes: {
+      activityType: input.activityType,
+      ...(input.sportName === undefined ? {} : { sportName: input.sportName }),
+    },
+    date: input.date,
+    kind: "activity_session",
+    lookupIds: [input.id],
+    occurredAt: `${input.date}T12:00:00.000Z`,
+    recordClass: "ledger",
+    title: input.activityType,
   });
 }
 

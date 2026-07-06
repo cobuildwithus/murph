@@ -156,6 +156,92 @@ describe('device activity triggered automations', () => {
     )
   })
 
+  it('matches device activity from any provider when source is omitted', async () => {
+    const automation = createDeviceActivityAutomation({
+      activityKind: 'run',
+      after: '2026-06-07T11:00:00.000Z',
+      automationId: 'auto_run_any_provider',
+      instructions: 'Ask how the run felt.',
+    })
+    deviceActivityMocks.automations = [automation]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_garmin_run',
+          externalRefResourceType: 'garmin/activity_session',
+          externalRefSystem: 'garmin',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          sourceProviderSlug: 'garmin',
+          title: 'Morning run',
+          workoutType: 'running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:01:00.000Z',
+      scheduled: 1,
+    })
+
+    expect(await readQueuedCronJobs(vaultRoot)).toHaveLength(1)
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: '2026-06-07T12:00:00.000Z',
+        afterEntityId: 'evt_garmin_run',
+        afterOccurredAt: '2026-06-07T12:00:00.000Z',
+        expectedActivityKind: 'run',
+        expectedSource: undefined,
+        lookup: 'auto_run_any_provider',
+        vaultRoot,
+      }),
+    )
+  })
+
+  it('keeps explicit whoop device activity automations scoped to whoop providers', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T11:00:00.000Z',
+        source: 'whoop',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_garmin_run',
+          externalRefResourceType: 'garmin/activity_session',
+          externalRefSystem: 'garmin',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          sourceProviderSlug: 'garmin',
+          title: 'Morning run',
+          workoutType: 'running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 0,
+      nextWakeAt: null,
+      scheduled: 0,
+    })
+
+    expect(await readQueuedCronJobs(vaultRoot)).toEqual([])
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).not.toHaveBeenCalled()
+  })
+
   it('schedules arbitrary sport activity kinds from device sessions', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({
@@ -1446,8 +1532,11 @@ function buildLegacyDeviceActivityAuthorityKey(
 
 function createActivityEntity(input: {
   entityId: string
+  externalRefResourceType?: string
+  externalRefSystem?: string
   occurredAt: string
   recordedAt?: string
+  sourceProviderSlug?: string
   title: string
   workoutSport?: Record<string, string>
   workoutType?: string
@@ -1455,12 +1544,12 @@ function createActivityEntity(input: {
   return {
     attributes: {
       dataOrigin: {
-        sourceProviderSlug: 'junction',
+        sourceProviderSlug: input.sourceProviderSlug ?? 'junction',
       },
       durationMinutes: 32,
       externalRef: {
-        resourceType: 'whoop_v2/activity_session',
-        system: 'junction',
+        resourceType: input.externalRefResourceType ?? 'whoop_v2/activity_session',
+        system: input.externalRefSystem ?? 'junction',
       },
       ...(input.recordedAt ? { recordedAt: input.recordedAt } : {}),
       workout: input.workoutSport

@@ -1,4 +1,5 @@
 import {
+  resolveExperimentAdherenceRollupTarget,
   selectBrowserVaultExperimentResults,
   type BrowserVaultExperimentBiomarkerResult,
   type BrowserVaultExperimentExpectedRange,
@@ -417,6 +418,10 @@ function buildSchedule(
   results: BrowserVaultExperimentResultsView,
 ): ExperimentRunProjection["schedule"] {
   const schedule = results.schedule;
+  if (hasCalendarLessCountAdherenceTarget(results)) {
+    return undefined;
+  }
+
   if (!schedule && hasUnsupportedExplicitAdherence(results)) {
     return undefined;
   }
@@ -451,6 +456,14 @@ function buildSchedule(
     loggedSessions: results.progress?.adherence.loggedSessions ?? schedule?.completedSessions,
     weeks,
   };
+}
+
+function hasCalendarLessCountAdherenceTarget(results: BrowserVaultExperimentResultsView): boolean {
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(
+    results.experiment.runPlan.adherenceTargets,
+  );
+
+  return rollupTarget !== null && rollupTarget.calendar === undefined;
 }
 
 function hasUnsupportedExplicitAdherence(results: BrowserVaultExperimentResultsView): boolean {
@@ -640,6 +653,10 @@ function summarizeScheduleWeek(cells: readonly ScheduleCell[]): string | undefin
 function readTargetCountPerDay(
   calendar: BrowserVaultExperimentResultsView["experiment"]["runPlan"]["adherenceTargets"][number]["calendar"],
 ): number {
+  if (!calendar) {
+    return 1;
+  }
+
   switch (calendar.kind) {
     case "daily":
     case "weekdays":
@@ -651,7 +668,7 @@ function readTargetCountPerDay(
 
 function formatScheduleCadence(results: BrowserVaultExperimentResultsView): string {
   const adherenceTarget = results.experiment.runPlan.adherenceTargets[0];
-  if (adherenceTarget) {
+  if (adherenceTarget?.calendar) {
     const targetCount = readTargetCountPerDay(adherenceTarget.calendar);
     const countPrefix = targetCount > 1 ? `${targetCount}x ` : "";
     if (adherenceTarget.calendar.kind === "daily") {
@@ -662,6 +679,9 @@ function formatScheduleCadence(results: BrowserVaultExperimentResultsView): stri
         adherenceTarget.calendar.localTime ? ` at ${adherenceTarget.calendar.localTime}` : ""
       }`;
     }
+    return `${adherenceTarget.label} target`;
+  }
+  if (adherenceTarget) {
     return `${adherenceTarget.label} target`;
   }
 
