@@ -171,6 +171,25 @@ export async function readActiveHostedMemberAccess(input: {
   return member !== null && hasActiveHostedMemberAccess(member);
 }
 
+export async function hasAnyActiveHostedThreadContainerParticipant(input: {
+  containerMemberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const participant = await prisma.hostedThreadContainerParticipant.findFirst({
+    select: {
+      participantMemberId: true,
+    },
+    where: {
+      containerMemberId: input.containerMemberId,
+      participant: activeHostedMemberAccessWhere(),
+      removedAt: null,
+    },
+  });
+
+  return participant !== null;
+}
+
 export async function assertActiveHostedMemberAccessAllowed(input: {
   memberId: string;
   prisma?: HostedOnboardingReadClient;

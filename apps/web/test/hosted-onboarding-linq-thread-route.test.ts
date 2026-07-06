@@ -161,6 +161,7 @@ function createPrisma(input: {
   routeContainerActive?: boolean;
   routeOwnerActive?: boolean;
   routeOwnerSponsored?: boolean;
+  routeParticipantActive?: boolean;
 } = {}) {
   const routeAccountLookupKey = createHostedPhoneLookupKey(
     input.routeAccountPhone ?? "+15550000000",
@@ -169,6 +170,7 @@ function createPrisma(input: {
   const routeContainerActive = input.routeContainerActive ?? true;
   const routeOwnerActive = input.routeOwnerActive ?? true;
   const routeOwnerSponsored = input.routeOwnerSponsored ?? false;
+  const routeParticipantActive = input.routeParticipantActive ?? false;
   const hostedThreadRoute = {
     findMany: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) => {
       if (!routeContainerMemberId) {
@@ -247,12 +249,22 @@ function createPrisma(input: {
   const hostedMember = {
     findUnique: vi.fn().mockResolvedValue(null),
   };
+  const hostedThreadContainerParticipant = {
+    findFirst: vi.fn().mockImplementation(async ({ where }: { where: Record<string, unknown> }) =>
+      routeParticipantActive
+      && where.containerMemberId === routeContainerMemberId
+      && where.removedAt === null
+        ? { participantMemberId: "member_active_participant_123" }
+        : null
+    ),
+  };
   const hostedWorkspace = {
     upsert: vi.fn().mockResolvedValue({}),
   };
   return {
     hostedMember,
     hostedMemberRouting,
+    hostedThreadContainerParticipant,
     hostedThreadRoute,
     hostedWorkspace,
   };
@@ -1189,6 +1201,7 @@ describe("Linq explicit external-thread routing", () => {
     const prisma = createPrisma({
       routeContainerActive: false,
       routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: true,
     });
 
     const plan = await planHostedOnboardingLinqWebhook({
@@ -1202,6 +1215,7 @@ describe("Linq explicit external-thread routing", () => {
       reason: "thread-container-inactive",
     });
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainerParticipant.findFirst).not.toHaveBeenCalled();
   });
 
   it("ignores routed thread traffic when the route owner is inactive", async () => {
@@ -1221,6 +1235,74 @@ describe("Linq explicit external-thread routing", () => {
       reason: "thread-container-inactive",
     });
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("routes a bound group thread when any current participant has active access", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeOwnerActive: false,
+      routeParticipantActive: true,
+    });
+    vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
+    vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
+      dayUtc: new Date("2026-06-24T00:00:00.000Z"),
+      inboundCount: 1,
+      memberId: "member_thread_container_123",
+      outboundCount: 0,
+      quotaReplySentAt: null,
+    } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+    });
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_active_participant_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
+      select: {
+        participantMemberId: true,
+      },
+      where: expect.objectContaining({
+        containerMemberId: "member_thread_container_123",
+        removedAt: null,
+      }),
+    });
+    expect(readSingleWakeHandoff(plan)).toMatchObject({
+      eventId: "evt_group_123",
+      mailboxItemId: "mailbox_active_participant_123",
+      source: "linq",
+      userId: "member_thread_container_123",
+    });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "conversation.message",
+        userId: "member_thread_container_123",
+      }),
+      tx: prisma,
+    });
   });
 
   it("fails closed for an inactive routed direct thread instead of normal Linq routing", async () => {

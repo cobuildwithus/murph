@@ -11,7 +11,9 @@ import {
   createHostedExternalThreadLookupKeyReadCandidates,
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
+import { isHostedMemberSuspended } from "../hosted-onboarding/entitlement";
 import {
+  hasAnyActiveHostedThreadContainerParticipant,
   hasActiveHostedThreadContainerAccess,
   type HostedMemberPersonAccessState,
   hostedMemberPersonAccessSelect,
@@ -256,15 +258,23 @@ export async function assertHostedThreadRouteEgressAuthority(input: {
     threadId: input.authority.threadId,
   });
 
-  if (
-    route
-    && route.containerMemberId === input.authority.containerMemberId
-    && hasActiveHostedThreadContainerAccess({
+  if (route && route.containerMemberId === input.authority.containerMemberId) {
+    if (hasActiveHostedThreadContainerAccess({
       container: route.container,
       owner: route.owner,
-    })
-  ) {
-    return route;
+    })) {
+      return route;
+    }
+
+    if (
+      !isHostedMemberSuspended(route.container.suspendedAt)
+      && await hasAnyActiveHostedThreadContainerParticipant({
+        containerMemberId: route.containerMemberId,
+        prisma: input.prisma,
+      })
+    ) {
+      return route;
+    }
   }
 
   throw buildHostedThreadRouteEgressUnauthorizedError();

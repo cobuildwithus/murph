@@ -10,6 +10,7 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
+  hasAnyActiveHostedThreadContainerParticipant,
   hasActiveHostedThreadContainerAccess,
   readActiveHostedMemberAccess,
 } from "./member-access";
@@ -1024,12 +1025,19 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     summary,
   } = input.context;
 
-  if (
-    !hasActiveHostedThreadContainerAccess({
-      container: input.route.container,
-      owner: input.route.owner,
-    })
-  ) {
+  const ownerOrSponsorActive = hasActiveHostedThreadContainerAccess({
+    container: input.route.container,
+    owner: input.route.owner,
+  });
+  const participantActive = ownerOrSponsorActive
+    ? false
+    : !isHostedMemberSuspended(input.route.container.suspendedAt)
+      && await hasAnyActiveHostedThreadContainerParticipant({
+        containerMemberId: input.route.containerMemberId,
+        prisma: input.prisma,
+      });
+
+  if (!ownerOrSponsorActive && !participantActive) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("thread-container-inactive"),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {

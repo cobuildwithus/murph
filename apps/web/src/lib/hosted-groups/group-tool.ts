@@ -10,13 +10,12 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
-import {
-} from "../hosted-onboarding/entitlement";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
   getHostedLinqChatHandles,
+  type HostedLinqChatHandleSummary,
   isHostedLinqAttachmentSendPrepareFailure,
   sendHostedLinqAttachmentMessage,
 } from "../hosted-onboarding/linq-client";
@@ -31,8 +30,17 @@ import {
   releaseHostedLinqContactCardShareAttempt,
   reserveHostedLinqContactCardShareAttempt,
 } from "../hosted-onboarding/linq-contact-card-share";
+import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
+import {
+  deriveHostedOnboardingTimingErrorName,
+  sanitizeHostedOnboardingStructuredLogDetails,
+  toHostedOnboardingLogIdSuffix,
+} from "../hosted-onboarding/logging";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  type HostedOnboardingReadClient,
+} from "../hosted-onboarding/shared";
 import {
   signalHostedRuntimeMaintenanceRuntime,
 } from "../hosted-orchestration/signal-runtime";
@@ -224,24 +232,33 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
 
   const prisma = getPrisma();
   const participants: HostedRuntimeGroupChatParticipant[] = [];
+  const resolvedParticipants: HostedThreadContainerResolvedParticipant[] = [];
   try {
     for (const handle of handles) {
-      if (handle.isMe) {
+      if (!isCurrentHostedLinqParticipantHandle(handle)) {
         continue;
       }
-      if (handle.status && handle.status.trim().toLowerCase() !== "active") {
-        continue;
-      }
-      if (participants.length >= HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
-        break;
-      }
-      participants.push({
+      const lookup = await lookupParticipantMemberByHandle({
         handle: handle.handle,
-        hasOwnMurph: await hasParticipantOwnMurphMembership({
-          handle: handle.handle,
-          prisma,
-        }),
+        prisma,
       });
+      const participantMemberId = lookup?.core.id ?? null;
+      if (participantMemberId) {
+        resolvedParticipants.push({
+          handle: handle.handle,
+          participantMemberId,
+        });
+      }
+      if (participants.length < HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
+        participants.push({
+          handle: handle.handle,
+          hasOwnMurph: participantMemberId !== null
+            && await readActiveHostedMemberAccess({
+              memberId: participantMemberId,
+              prisma,
+            }),
+        });
+      }
     }
   } catch {
     // A failed identity lookup must not degrade into a guessed hasOwnMurph
@@ -249,28 +266,141 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
     return unavailable("membership_lookup_unavailable");
   }
 
+  await reconcileHostedThreadContainerParticipants({
+    chatId: authorized.chatId,
+    containerMemberId: input.memberId,
+    handles,
+    prisma,
+    resolvedParticipants,
+  });
+
   return {
     action: "read_chat_participants",
     result: { participants, status: "ok" },
   };
 }
 
-async function hasParticipantOwnMurphMembership(input: {
+export type HostedThreadContainerResolvedParticipant = {
   handle: string;
-  prisma: ReturnType<typeof getPrisma>;
-}): Promise<boolean> {
-  const lookup = await lookupParticipantMemberByHandle(input);
-  const member = lookup?.core ?? null;
-  return member !== null
-    && await readActiveHostedMemberAccess({
-      memberId: member.id,
+  participantMemberId: string;
+};
+
+export async function reconcileHostedThreadContainerParticipants(input: {
+  chatId: string;
+  containerMemberId: string;
+  handles?: readonly HostedLinqChatHandleSummary[];
+  prisma: HostedOnboardingReadClient;
+  resolvedParticipants?: readonly HostedThreadContainerResolvedParticipant[];
+}): Promise<void> {
+  try {
+    const handles = input.handles ?? await getHostedLinqChatHandles({ chatId: input.chatId });
+    if (handles.length === 0) {
+      logHostedThreadContainerParticipantReconcileSkipped({
+        chatId: input.chatId,
+        containerMemberId: input.containerMemberId,
+        reason: "empty_roster",
+      });
+      return;
+    }
+
+    const resolvedParticipants = input.resolvedParticipants
+      ?? await resolveHostedThreadContainerParticipants({
+        handles,
+        prisma: input.prisma,
+      });
+    const now = new Date();
+    const seenByMemberId = new Map<string, {
+      handleLookupKey: string;
+      participantMemberId: string;
+    }>();
+
+    for (const participant of resolvedParticipants) {
+      const handleLookupKey = createHostedThreadContainerParticipantHandleLookupKey(
+        participant.handle,
+      );
+      if (!handleLookupKey || seenByMemberId.has(participant.participantMemberId)) {
+        continue;
+      }
+      seenByMemberId.set(participant.participantMemberId, {
+        handleLookupKey,
+        participantMemberId: participant.participantMemberId,
+      });
+    }
+
+    const seenParticipantMemberIds = [...seenByMemberId.keys()];
+    for (const participant of seenByMemberId.values()) {
+      await input.prisma.hostedThreadContainerParticipant.upsert({
+        create: {
+          containerMemberId: input.containerMemberId,
+          firstSeenAt: now,
+          handleLookupKey: participant.handleLookupKey,
+          lastSeenAt: now,
+          participantMemberId: participant.participantMemberId,
+          removedAt: null,
+        },
+        update: {
+          handleLookupKey: participant.handleLookupKey,
+          lastSeenAt: now,
+          removedAt: null,
+        },
+        where: {
+          containerMemberId_participantMemberId: {
+            containerMemberId: input.containerMemberId,
+            participantMemberId: participant.participantMemberId,
+          },
+        },
+      });
+    }
+
+    await input.prisma.hostedThreadContainerParticipant.updateMany({
+      data: {
+        removedAt: now,
+      },
+      where: {
+        containerMemberId: input.containerMemberId,
+        ...(seenParticipantMemberIds.length > 0
+          ? { participantMemberId: { notIn: seenParticipantMemberIds } }
+          : {}),
+        removedAt: null,
+      },
+    });
+  } catch (error) {
+    logHostedThreadContainerParticipantReconcileSkipped({
+      chatId: input.chatId,
+      containerMemberId: input.containerMemberId,
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      reason: "reconcile_failed",
+    });
+  }
+}
+
+async function resolveHostedThreadContainerParticipants(input: {
+  handles: readonly HostedLinqChatHandleSummary[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedThreadContainerResolvedParticipant[]> {
+  const resolvedParticipants: HostedThreadContainerResolvedParticipant[] = [];
+  for (const handle of input.handles) {
+    if (!isCurrentHostedLinqParticipantHandle(handle)) {
+      continue;
+    }
+    const lookup = await lookupParticipantMemberByHandle({
+      handle: handle.handle,
       prisma: input.prisma,
     });
+    const participantMemberId = lookup?.core.id ?? null;
+    if (participantMemberId) {
+      resolvedParticipants.push({
+        handle: handle.handle,
+        participantMemberId,
+      });
+    }
+  }
+  return resolvedParticipants;
 }
 
 async function lookupParticipantMemberByHandle(input: {
   handle: string;
-  prisma: ReturnType<typeof getPrisma>;
+  prisma: HostedOnboardingReadClient;
 }) {
   if (input.handle.includes("@")) {
     return await lookupHostedMemberByVerifiedEmailAddress({
@@ -285,6 +415,44 @@ async function lookupParticipantMemberByHandle(input: {
   return await lookupHostedMemberIdentityByPhoneNumber({
     phoneNumber,
     prisma: input.prisma,
+  });
+}
+
+function isCurrentHostedLinqParticipantHandle(handle: HostedLinqChatHandleSummary): boolean {
+  return !handle.isMe
+    && (!handle.status || handle.status.trim().toLowerCase() === "active");
+}
+
+function createHostedThreadContainerParticipantHandleLookupKey(handle: string): string | null {
+  if (handle.includes("@")) {
+    return createHostedLinqParticipantContactLookupKey({
+      kind: "email",
+      value: handle,
+    });
+  }
+
+  const phoneNumber = normalizePhoneNumber(handle);
+  return phoneNumber
+    ? createHostedLinqParticipantContactLookupKey({
+        kind: "phone",
+        value: phoneNumber,
+      })
+    : null;
+}
+
+function logHostedThreadContainerParticipantReconcileSkipped(input: {
+  chatId: string;
+  containerMemberId: string;
+  errorName?: string;
+  reason: string;
+}): void {
+  console.warn("Hosted thread-container participant reconcile skipped.", {
+    ...sanitizeHostedOnboardingStructuredLogDetails({
+      chatIdSuffix: toHostedOnboardingLogIdSuffix(input.chatId),
+      containerMemberIdSuffix: toHostedOnboardingLogIdSuffix(input.containerMemberId),
+      errorName: input.errorName,
+      reason: input.reason,
+    }),
   });
 }
 
