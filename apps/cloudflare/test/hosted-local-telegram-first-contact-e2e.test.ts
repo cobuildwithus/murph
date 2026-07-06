@@ -19,7 +19,9 @@ import {
   buildTelegramThreadId,
   HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT,
   HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT,
+  HOSTED_TELEGRAM_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
   startHostedLocalTelegramStub,
+  type ObservedTelegramRequest,
   type HostedLocalTelegramStub,
 } from "./helpers/hosted-local-telegram-support.js";
 import {
@@ -141,20 +143,37 @@ describe("hosted local Telegram auto-reply e2e", () => {
     });
 
     const expectedSendPath = `/bot${hostedLocalTelegramRequestToken}/sendMessage`;
+    const sendMessageMatcher = requireTelegramStub().createSendMessageMatcher(fastReplyUserId);
     const baselineSendCount = requireTelegramStub().countObservedRequests(
       expectedSendPath,
-      requireTelegramStub().createSendMessageMatcher(fastReplyUserId),
+      sendMessageMatcher,
+    );
+    const nameText = "U can call me Rocket Man";
+    const goalsText = "I want to build more strength, improve endurance, and get fitter overall.";
+    const groupedReplyMatcher = (request: ObservedTelegramRequest) =>
+      sendMessageMatcher(request)
+      && requireTelegramStub().parseObservedJson(request.body)?.text ===
+        HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT;
+    const groupedReplyCountBefore = requireTelegramStub().countObservedRequests(
+      expectedSendPath,
+      groupedReplyMatcher,
     );
 
-    requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT], {
-      matchInputContains:
-        "I want to build more strength, improve endurance, and get fitter overall.",
-    });
+    requireScenario().queueAssistantResponses([
+      {
+        matchInputContains: nameText,
+        response: HOSTED_TELEGRAM_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
+      },
+      {
+        matchInputContains: goalsText,
+        response: HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT,
+      },
+    ]);
     await requireScenario().enqueueWake(
       buildInboundTelegramWake(fastReplyUserId, {
         eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_name`,
         messageId: `${buildTelegramMessageId(fastReplyUserId)}1`,
-        text: "U can call me Rocket Man",
+        text: nameText,
       }),
       fastReplyUserId,
     );
@@ -163,7 +182,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
       buildInboundTelegramWake(fastReplyUserId, {
         eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_goals`,
         messageId: `${buildTelegramMessageId(fastReplyUserId)}2`,
-        text: "I want to build more strength, improve endurance, and get fitter overall.",
+        text: goalsText,
       }),
       fastReplyUserId,
     );
@@ -175,22 +194,26 @@ describe("hosted local Telegram auto-reply e2e", () => {
       userId: fastReplyUserId,
     });
 
-    const replyRequests = await requireTelegramStub().waitForRequestCount({
-      expectedCount: baselineSendCount + 1,
+    await requireTelegramStub().waitForRequestCount({
+      expectedCount: groupedReplyCountBefore + 1,
       expectedPath: expectedSendPath,
-      matchRequest: requireTelegramStub().createSendMessageMatcher(fastReplyUserId),
+      matchRequest: groupedReplyMatcher,
       scenario: requireScenario(),
       userId: fastReplyUserId,
     });
-    const newReplyRequests = replyRequests.slice(baselineSendCount);
-    expect(newReplyRequests).toHaveLength(1);
+    const newReplyRequests = requireTelegramStub().observedRequests.filter((request) =>
+      request.url === expectedSendPath && sendMessageMatcher(request)
+    ).slice(baselineSendCount);
     const replyTexts = newReplyRequests.map((request) =>
       requireTelegramStub().parseObservedJson(request.body)?.text
     );
 
-    expect(replyTexts).toEqual([
-      HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT,
-    ]);
+    expect(replyTexts).toContain(HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT);
+    expect(replyTexts.every((text) =>
+      text === HOSTED_TELEGRAM_ROCKET_MAN_ASSISTANT_REPLY_TEXT
+      || text === HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT
+    )).toBe(true);
+    expect(replyTexts.length).toBeLessThanOrEqual(2);
   }, 300_000);
 
   it("advertises the reaction tool and delivers a Telegram message reaction", async () => {

@@ -324,9 +324,22 @@ function dequeueAssistantProviderResponse(input: {
     body: input.requestBody,
     bodyJson: input.requestBodyJson,
   });
-  const responseIndex = queuedResponses.findIndex((scriptedResponse) =>
-    assistantProviderScriptedResponseMatchesRequest(scriptedResponse, requestMatchText)
-  );
+  let responseIndex = -1;
+  for (let index = queuedResponses.length - 1; index >= 0; index -= 1) {
+    const scriptedResponse = queuedResponses[index]!;
+    if (
+      assistantProviderScriptedResponseHasRequestMatchers(scriptedResponse)
+      && assistantProviderScriptedResponseMatchesRequest(scriptedResponse, requestMatchText)
+    ) {
+      responseIndex = index;
+      break;
+    }
+  }
+  if (responseIndex < 0) {
+    responseIndex = queuedResponses.findIndex((scriptedResponse) =>
+      assistantProviderScriptedResponseMatchesRequest(scriptedResponse, requestMatchText)
+    );
+  }
   if (responseIndex < 0) {
     return input.fallbackResponseText ?? null;
   }
@@ -399,6 +412,13 @@ function assistantProviderScriptedResponseMatchesRequest(
 
   return matchInputContains.length === 0
     || matchInputContains.every((matcher) => requestMatchText.includes(matcher));
+}
+
+function assistantProviderScriptedResponseHasRequestMatchers(
+  scriptedResponse: HostedLocalAssistantProviderScriptedResponse,
+): boolean {
+  return isScopedAssistantProviderScriptedResponse(scriptedResponse)
+    && normalizeAssistantProviderResponseMatchers(scriptedResponse.matchInputContains).length > 0;
 }
 
 function buildAssistantProviderRequestMatchText(input: {

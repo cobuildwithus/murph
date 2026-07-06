@@ -253,6 +253,59 @@ describe("startAssistantProviderStubServer", () => {
     }
   });
 
+  it("uses the newest scoped fixture when one request matches multiple queued inputs", async () => {
+    const responseState = {
+      queuedResponses: [
+        {
+          matchInputContains: "U can call me Rocket Man",
+          response: "nickname reply",
+        },
+        {
+          matchInputContains: "I want to build more strength",
+          response: "grouped reply",
+        },
+      ],
+    };
+    const server = await startAssistantProviderStubServer({ responseState });
+
+    try {
+      const response = await fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            input: [
+              {
+                content: [
+                  "Input 1/2:",
+                  "U can call me Rocket Man",
+                  "Input 2/2:",
+                  "I want to build more strength",
+                ].join("\n"),
+                role: "user",
+              },
+            ],
+            model: "gpt-5.5",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      );
+      const body = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(body).toContain("grouped reply");
+      expect(body).not.toContain("nickname reply");
+      expect(responseState.queuedResponses).toHaveLength(1);
+      expect(responseState.queuedResponses[0]).toMatchObject({
+        response: "nickname reply",
+      });
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
   it("caps recorded Responses API request bodies in diagnostic recorder mode", async () => {
     const requests: Array<{ body: string; method: string; url: string }> = [];
     const server = await startAssistantProviderStubServer({

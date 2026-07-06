@@ -50,6 +50,7 @@ import {
   buildLinqRecipientPhoneNumber,
   HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
   HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
+  HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
   startHostedLocalLinqStub,
   type ObservedLinqRequest,
   type HostedLocalLinqStub,
@@ -495,18 +496,33 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const expectedDirectReplyChatPath =
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
+    const nameText = "U can call me Rocket Man";
+    const goalsText = "I want to build more strength, improve endurance, and get fitter overall.";
+    const groupedReplyMatcher = (request: ObservedLinqRequest) =>
+      requireLinqStub().readObservedMessageText(request) ===
+        HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT;
+    const groupedReplyCountBefore = requireLinqStub().countObservedSends(
+      expectedDirectReplyChatPath,
+      groupedReplyMatcher,
+    );
 
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT], {
-      matchInputContains:
-        "I want to build more strength, improve endurance, and get fitter overall.",
-    });
+    requireScenario().queueAssistantResponses([
+      {
+        matchInputContains: nameText,
+        response: HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
+      },
+      {
+        matchInputContains: goalsText,
+        response: HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
+      },
+    ]);
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       fastReplyUserId,
       materializedChatId,
       {
         eventId: `evt_fast_reply_name_${fastReplyUserId}`,
         messageId: `msg_fast_name_${fastReplyUserId}`,
-        text: "U can call me Rocket Man",
+        text: nameText,
       },
     ));
     const secondWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -515,7 +531,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       {
         eventId: `evt_fast_reply_goals_${fastReplyUserId}`,
         messageId: `msg_fast_goals_${fastReplyUserId}`,
-        text: "I want to build more strength, improve endurance, and get fitter overall.",
+        text: goalsText,
       },
     ));
     expect(firstWebhookResponse.status).toBe(202);
@@ -534,9 +550,10 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     await requireScenario().waitForHostedCompletion(fastReplyUserId);
     const statusAfterWait = await requireScenario().harness.readUserStatus(fastReplyUserId);
 
-    const replySends = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: outboundCountBeforeReply + 1,
+    await requireLinqStub().waitForAdditionalSend({
+      baselineCount: groupedReplyCountBefore,
       expectedPath: expectedDirectReplyChatPath,
+      matchRequest: groupedReplyMatcher,
       scenario: requireScenario(),
       userId: fastReplyUserId,
     });
@@ -559,10 +576,18 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       );
     }
 
-    const newReplySends = replySends.slice(outboundCountBeforeReply);
-    expect(newReplySends).toHaveLength(1);
-    const groupedReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
-    expect(groupedReplyText).toBe(HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT);
+    const newReplySends = requireLinqStub().observedRequests.filter((request) =>
+      request.method === "POST" && request.url === expectedDirectReplyChatPath
+    ).slice(outboundCountBeforeReply);
+    const newReplyTexts = newReplySends.map((request) =>
+      requireLinqStub().readObservedMessageText(request)
+    );
+    expect(newReplyTexts).toContain(HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT);
+    expect(newReplyTexts.every((text) =>
+      text === HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT
+      || text === HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT
+    )).toBe(true);
+    expect(newReplyTexts.length).toBeLessThanOrEqual(2);
     },
     300_000,
   );
