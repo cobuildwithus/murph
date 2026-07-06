@@ -143,6 +143,78 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({ entryBytes: 2_000, totalBytes: 6_000 });
   });
 
+  it("rejects provider connector inputs from the static boot closure", () => {
+    const metafile: Metafile = {
+      inputs: {
+        "dist/container-entrypoint.js": { bytes: 600, imports: [] },
+        "node_modules/grammy/out/mod.js": { bytes: 5_000, imports: [] },
+      },
+      outputs: {
+        "dist-bundled/container-entrypoint.js": {
+          bytes: 2_000,
+          entryPoint: "dist/container-entrypoint.js",
+          exports: [],
+          imports: [{ kind: "import-statement", path: "./chunk-STATIC.js" }],
+          inputs: {
+            "dist/container-entrypoint.js": { bytesInOutput: 600 },
+          },
+        },
+        "dist-bundled/chunk-STATIC.js": {
+          bytes: 4_000,
+          entryPoint: undefined,
+          exports: [],
+          imports: [],
+          inputs: {
+            "node_modules/grammy/out/mod.js": { bytesInOutput: 4_000 },
+          },
+        },
+      },
+    };
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, {
+        entryBytes: 10_000,
+        totalBytes: 10_000,
+      }),
+    ).toThrow(/provider connector inputs in the static boot closure[\s\S]*node_modules\/grammy\/out\/mod\.js/);
+  });
+
+  it("allows provider connector inputs behind dynamic imports", () => {
+    const metafile: Metafile = {
+      inputs: {
+        "dist/container-entrypoint.js": { bytes: 600, imports: [] },
+        "node_modules/grammy/out/mod.js": { bytes: 5_000, imports: [] },
+      },
+      outputs: {
+        "dist-bundled/container-entrypoint.js": {
+          bytes: 2_000,
+          entryPoint: "dist/container-entrypoint.js",
+          exports: [],
+          imports: [{ kind: "dynamic-import", path: "./conversation-LAZY.js" }],
+          inputs: {
+            "dist/container-entrypoint.js": { bytesInOutput: 600 },
+          },
+        },
+        "dist-bundled/conversation-LAZY.js": {
+          bytes: 4_000,
+          entryPoint: "dist/conversation.js",
+          exports: [],
+          imports: [],
+          inputs: {
+            "node_modules/grammy/out/mod.js": { bytesInOutput: 4_000 },
+          },
+        },
+      },
+    };
+
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(metafile, {
+        entryBytes: 10_000,
+        totalBytes: 10_000,
+      }),
+    ).toEqual({ entryBytes: 2_000, totalBytes: 6_000 });
+  });
+
   it("rejects metafiles without a container-entrypoint.js entry output", () => {
     const metafile: Metafile = {
       inputs: {},

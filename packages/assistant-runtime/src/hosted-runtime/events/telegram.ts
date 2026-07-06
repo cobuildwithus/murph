@@ -1,5 +1,5 @@
-import {
-  type TelegramAttachmentDownloadDriver,
+import type {
+  TelegramAttachmentDownloadDriver,
 } from "@murphai/inboxd/connectors/hosted-conversation";
 import type { TelegramFile } from "@murphai/messaging-ingress/telegram-webhook";
 import type {

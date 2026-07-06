@@ -28,12 +28,20 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 
 // Byte budgets over the esbuild metafile so import-graph creep in the boot
 // surface fails the assembly instead of silently regressing cold start.
-// Baselines measured from the real assembled bundle on 2026-06-12: total
-// 7,423,834B across 27 chunks, entry container-entrypoint.js 2,825,655B.
-// Budgets are baseline + ~25% headroom; investigate the listed largest
-// inputs before raising them.
+// Baselines measured from the real assembled bundle on 2026-07-06: total
+// 8,201,281B across 34 chunks, entry container-entrypoint.js 2,288,516B.
+// The entry budget is baseline + ~25% headroom (it gates cold-start parse).
+// The total ceiling is held at its prior 9,300,000B value: this change shrank
+// the bundle, so there is no reason to loosen the regression guard.
+// Investigate the listed largest inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BYTES_BUDGET = 3_600_000;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BYTES_BUDGET = 2_900_000;
+const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
+  "node_modules/grammy/",
+  "node_modules/node-fetch/",
+  "node_modules/@murphai/inboxd/dist/connectors/hosted-conversation.js",
+  "node_modules/@murphai/inboxd/dist/connectors/telegram/connector.js",
+] as const;
 
 export async function bundleRunnerContainerEntrypoint(
   bundleDir: string,
@@ -115,6 +123,7 @@ export function assertRunnerEntrypointBundleWithinBudgets(
     );
   }
   const [entryPath, { bytes: entryBytes }] = entryOutput;
+  assertRunnerEntrypointBundleBootInputsAllowed(metafile, entryPath);
 
   const violations: string[] = [];
   if (totalBytes > budgets.totalBytes) {
@@ -143,6 +152,93 @@ export function assertRunnerEntrypointBundleWithinBudgets(
       ...largestInputs,
     ].join("\n"),
   );
+}
+
+function assertRunnerEntrypointBundleBootInputsAllowed(
+  metafile: Metafile,
+  entryPath: string,
+): void {
+  const bootOutputPaths = collectStaticRunnerEntrypointOutputPaths(metafile, entryPath);
+  const forbiddenInputs = new Set<string>();
+
+  for (const outputPath of bootOutputPaths) {
+    const output = metafile.outputs[outputPath];
+    if (!output) {
+      continue;
+    }
+    for (const inputPath of Object.keys(output.inputs)) {
+      const normalizedInputPath = normalizeMetafilePath(inputPath);
+      if (
+        RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS.some((marker) =>
+          normalizedInputPath.includes(marker)
+        )
+      ) {
+        forbiddenInputs.add(inputPath);
+      }
+    }
+  }
+
+  if (forbiddenInputs.size > 0) {
+    throw new Error(
+      [
+        "runner entrypoint bundle includes provider connector inputs in the static boot closure.",
+        "Move these imports behind a per-turn dynamic import:",
+        ...[...forbiddenInputs].sort().map((inputPath) => `  ${inputPath}`),
+      ].join("\n"),
+    );
+  }
+}
+
+function collectStaticRunnerEntrypointOutputPaths(
+  metafile: Metafile,
+  entryPath: string,
+): Set<string> {
+  const outputPaths = new Set<string>();
+  const pending = [normalizeMetafilePath(entryPath)];
+
+  while (pending.length > 0) {
+    const outputPath = pending.pop();
+    if (!outputPath || outputPaths.has(outputPath)) {
+      continue;
+    }
+    outputPaths.add(outputPath);
+
+    const output = metafile.outputs[outputPath];
+    if (!output) {
+      continue;
+    }
+    for (const imported of output.imports) {
+      if (imported.kind === "dynamic-import") {
+        continue;
+      }
+      const importedOutputPath = resolveMetafileOutputImportPath(
+        outputPath,
+        imported.path,
+      );
+      if (importedOutputPath in metafile.outputs) {
+        pending.push(importedOutputPath);
+      }
+    }
+  }
+
+  return outputPaths;
+}
+
+function resolveMetafileOutputImportPath(
+  importerOutputPath: string,
+  importedPath: string,
+): string {
+  const normalizedImportedPath = normalizeMetafilePath(importedPath);
+  if (!normalizedImportedPath.startsWith(".")) {
+    return normalizedImportedPath;
+  }
+  return normalizeMetafilePath(
+    path.join(path.dirname(importerOutputPath), normalizedImportedPath),
+  );
+}
+
+function normalizeMetafilePath(inputPath: string): string {
+  return inputPath.replaceAll("\\", "/");
 }
 
 // Boot probe on the real assembled artifact: importing the bundled entry must
