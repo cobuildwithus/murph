@@ -324,17 +324,10 @@ function dequeueAssistantProviderResponse(input: {
     body: input.requestBody,
     bodyJson: input.requestBodyJson,
   });
-  let responseIndex = -1;
-  for (let index = queuedResponses.length - 1; index >= 0; index -= 1) {
-    const scriptedResponse = queuedResponses[index]!;
-    if (
-      assistantProviderScriptedResponseHasRequestMatchers(scriptedResponse)
-      && assistantProviderScriptedResponseMatchesRequest(scriptedResponse, requestMatchText)
-    ) {
-      responseIndex = index;
-      break;
-    }
-  }
+  let responseIndex = selectMatchingScopedAssistantProviderResponseIndex(
+    queuedResponses,
+    requestMatchText,
+  );
   if (responseIndex < 0) {
     responseIndex = queuedResponses.findIndex((scriptedResponse) =>
       assistantProviderScriptedResponseMatchesRequest(scriptedResponse, requestMatchText)
@@ -350,6 +343,32 @@ function dequeueAssistantProviderResponse(input: {
   }
 
   return readHostedLocalAssistantProviderResponsePayload(scriptedResponse);
+}
+
+function selectMatchingScopedAssistantProviderResponseIndex(
+  queuedResponses: readonly HostedLocalAssistantProviderScriptedResponse[],
+  requestMatchText: string,
+): number {
+  const seenSignatures = new Set<string>();
+  let selectedIndex = -1;
+  for (let index = 0; index < queuedResponses.length; index += 1) {
+    const scriptedResponse = queuedResponses[index]!;
+    const matchers = getAssistantProviderScriptedResponseMatchers(scriptedResponse);
+    if (
+      matchers.length === 0
+      || !assistantProviderResponseMatchersMatchRequest(matchers, requestMatchText)
+    ) {
+      continue;
+    }
+
+    const signature = JSON.stringify(matchers);
+    if (!seenSignatures.has(signature)) {
+      seenSignatures.add(signature);
+      selectedIndex = index;
+    }
+  }
+
+  return selectedIndex;
 }
 
 function readHostedLocalAssistantProviderResponsePayload(
@@ -406,19 +425,25 @@ function assistantProviderScriptedResponseMatchesRequest(
   scriptedResponse: HostedLocalAssistantProviderScriptedResponse,
   requestMatchText: string,
 ): boolean {
-  const matchInputContains = isScopedAssistantProviderScriptedResponse(scriptedResponse)
-    ? normalizeAssistantProviderResponseMatchers(scriptedResponse.matchInputContains)
-    : [];
+  const matchInputContains = getAssistantProviderScriptedResponseMatchers(scriptedResponse);
 
   return matchInputContains.length === 0
-    || matchInputContains.every((matcher) => requestMatchText.includes(matcher));
+    || assistantProviderResponseMatchersMatchRequest(matchInputContains, requestMatchText);
 }
 
-function assistantProviderScriptedResponseHasRequestMatchers(
+function getAssistantProviderScriptedResponseMatchers(
   scriptedResponse: HostedLocalAssistantProviderScriptedResponse,
-): boolean {
+): string[] {
   return isScopedAssistantProviderScriptedResponse(scriptedResponse)
-    && normalizeAssistantProviderResponseMatchers(scriptedResponse.matchInputContains).length > 0;
+    ? normalizeAssistantProviderResponseMatchers(scriptedResponse.matchInputContains)
+    : [];
+}
+
+function assistantProviderResponseMatchersMatchRequest(
+  matchInputContains: readonly string[],
+  requestMatchText: string,
+): boolean {
+  return matchInputContains.every((matcher) => requestMatchText.includes(matcher));
 }
 
 function buildAssistantProviderRequestMatchText(input: {

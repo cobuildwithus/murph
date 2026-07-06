@@ -16,6 +16,7 @@ import {
   mergeRequiredEnvProfile,
   reserveLocalTemporalTcpPort,
   resolveHostedAssistantLocalDevEnv,
+  scopeHostedLocalAssistantProviderResponse,
   startAssistantProviderStubServer,
   stopHttpStubServer,
   type HostedLocalAssistantProviderStubRequest,
@@ -253,7 +254,7 @@ describe("startAssistantProviderStubServer", () => {
     }
   });
 
-  it("uses the newest scoped fixture when one request matches multiple queued inputs", async () => {
+  it("uses the newest matcher-signature group when one request matches multiple queued inputs", async () => {
     const responseState = {
       queuedResponses: [
         {
@@ -300,6 +301,116 @@ describe("startAssistantProviderStubServer", () => {
       expect(responseState.queuedResponses).toHaveLength(1);
       expect(responseState.queuedResponses[0]).toMatchObject({
         response: "nickname reply",
+      });
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it("pops scoped fixture sequences with the same matcher in FIFO order", async () => {
+    const triggerText = "Can you send me the setup image?";
+    const responseState = {
+      queuedResponses: [
+        scopeHostedLocalAssistantProviderResponse(
+          buildAssistantProviderVaultCliCall(["automation", "save", "image setup"]),
+          { matchInputContains: triggerText },
+        ),
+        {
+          matchInputContains: triggerText,
+          response: "same matcher follow-up reply",
+        },
+      ],
+    };
+    const server = await startAssistantProviderStubServer({ responseState });
+
+    try {
+      const baseUrl =
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`;
+      const toolCallResponse = await fetch(baseUrl, {
+        body: JSON.stringify({
+          input: [{ content: triggerText, role: "user" }],
+          model: "gpt-5.5",
+          stream: true,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+      const toolCallBody = await toolCallResponse.text();
+
+      expect(toolCallResponse.status).toBe(200);
+      expect(toolCallBody).toContain('"type":"function_call"');
+      expect(toolCallBody).toContain("vault-cli");
+      expect(toolCallBody).not.toContain("same matcher follow-up reply");
+
+      const followupResponse = await fetch(baseUrl, {
+        body: JSON.stringify({
+          input: [
+            {
+              content: [
+                triggerText,
+                "Previous tool result: saved the requested setup image.",
+              ].join("\n"),
+              role: "user",
+            },
+          ],
+          model: "gpt-5.5",
+          stream: true,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+      const followupBody = await followupResponse.text();
+
+      expect(followupResponse.status).toBe(200);
+      expect(followupBody).toContain("same matcher follow-up reply");
+      expect(followupBody).not.toContain('"type":"function_call"');
+      expect(responseState.queuedResponses).toHaveLength(0);
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it("uses the only matching scoped fixture when newer scoped fixtures do not match", async () => {
+    const responseState = {
+      queuedResponses: [
+        {
+          matchInputContains: "target message",
+          response: "target reply",
+        },
+        {
+          matchInputContains: "unrelated later message",
+          response: "unrelated reply",
+        },
+      ],
+    };
+    const server = await startAssistantProviderStubServer({ responseState });
+
+    try {
+      const response = await fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            input: [{ content: "please handle this target message", role: "user" }],
+            model: "gpt-5.5",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      );
+      const body = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(body).toContain("target reply");
+      expect(body).not.toContain("unrelated reply");
+      expect(responseState.queuedResponses).toHaveLength(1);
+      expect(responseState.queuedResponses[0]).toMatchObject({
+        response: "unrelated reply",
       });
     } finally {
       await stopHttpStubServer(server);
