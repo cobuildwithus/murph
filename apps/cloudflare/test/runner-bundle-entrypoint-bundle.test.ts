@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assertRunnerEntrypointBundleWithinBudgets,
   bundleRunnerContainerEntrypoint,
+  collectLazyRunnerEntrypointOutputPaths,
   resolveRunnerEntrypointBundleBudgets,
   RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME,
 } from "../scripts/runner-bundle/bundle-entrypoint.js";
@@ -232,6 +233,74 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         totalBytes: 10_000,
       }),
     ).toEqual({ entryBytes: 2_000, totalBytes: 6_000 });
+  });
+
+  it("collects output chunks reachable only through dynamic imports", () => {
+    const metafile: Metafile = {
+      inputs: {
+        "dist/container-entrypoint.js": { bytes: 10, imports: [] },
+        "dist/static.js": { bytes: 10, imports: [] },
+        "dist/lazy.js": { bytes: 10, imports: [] },
+      },
+      outputs: {
+        "dist-bundled/container-entrypoint.js": {
+          bytes: 100,
+          entryPoint: "dist/container-entrypoint.js",
+          exports: [],
+          imports: [
+            { kind: "import-statement", path: "./static-STATIC.js" },
+            { kind: "dynamic-import", path: "./lazy-LAZY.js" },
+          ],
+          inputs: {
+            "dist/container-entrypoint.js": { bytesInOutput: 10 },
+          },
+        },
+        "dist-bundled/static-STATIC.js": {
+          bytes: 100,
+          entryPoint: undefined,
+          exports: [],
+          imports: [
+            { kind: "import-statement", path: "./static-shared-STATIC.js" },
+          ],
+          inputs: {
+            "dist/static.js": { bytesInOutput: 10 },
+          },
+        },
+        "dist-bundled/static-shared-STATIC.js": {
+          bytes: 100,
+          entryPoint: undefined,
+          exports: [],
+          imports: [],
+          inputs: {},
+        },
+        "dist-bundled/lazy-LAZY.js": {
+          bytes: 100,
+          entryPoint: "dist/lazy.js",
+          exports: [],
+          imports: [
+            { kind: "import-statement", path: "./lazy-shared-LAZY.js" },
+          ],
+          inputs: {
+            "dist/lazy.js": { bytesInOutput: 10 },
+          },
+        },
+        "dist-bundled/lazy-shared-LAZY.js": {
+          bytes: 100,
+          entryPoint: undefined,
+          exports: [],
+          imports: [],
+          inputs: {},
+        },
+      },
+    };
+
+    expect([...collectLazyRunnerEntrypointOutputPaths(
+      metafile,
+      "dist-bundled/container-entrypoint.js",
+    )].sort()).toEqual([
+      "dist-bundled/lazy-LAZY.js",
+      "dist-bundled/lazy-shared-LAZY.js",
+    ]);
   });
 
   it("resolves the production budgets as the ratcheted entry baseline plus tolerance", () => {
