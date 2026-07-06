@@ -14,6 +14,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  assistantWithinConversationDriftFields,
   getAssistantBindingIsolationConflicts,
   mergeAssistantBinding,
   type AssistantBindingPatch,
@@ -434,13 +435,27 @@ export async function persistResolvedSession(
     session.binding,
     input.bindingPatch,
   )
-  if (
-    routingConflicts.length > 0 &&
-    !(
-      input.allowBindingRebind === true &&
-      input.lookupSource === 'session-id'
+  // A conversation-key match is located BY the routing boundary itself: channel,
+  // identity, and the thread-or-actor scope are all encoded in the lookup key, so
+  // a match already proves those are equal. The only isolation fields that can
+  // still differ are within-conversation drift — a group's active speaker, or the
+  // direct/group flag flipping as members are added and removed. That drift must
+  // update the binding, never fail the reply: rejecting it strands the inbound
+  // message as unhandled and wedges the whole conversation. We enforce the drift
+  // boundary locally (not just trust the key derivation) so a conflict on any
+  // wider field still fails closed. Explicit session-id resumes stay opt-in via
+  // allowBindingRebind because the caller supplies the identifier and could be
+  // retargeting the session at a genuinely different audience; alias resumes
+  // never rebind for the same reason.
+  const conversationKeyRebindAllowed =
+    input.lookupSource === 'conversation-key' &&
+    routingConflicts.every((conflict) =>
+      assistantWithinConversationDriftFields.has(conflict.field),
     )
-  ) {
+  const bindingRebindAllowed =
+    conversationKeyRebindAllowed ||
+    (input.allowBindingRebind === true && input.lookupSource === 'session-id')
+  if (routingConflicts.length > 0 && !bindingRebindAllowed) {
     throw createAssistantSessionRoutingConflictError({
       conflicts: routingConflicts,
       lookupSource: input.lookupSource,
