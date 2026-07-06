@@ -535,6 +535,7 @@ test('deliverAssistantMessage uses stored Linq thread bindings so one assistant 
     target: 'chat_123',
     targetKind: 'thread',
     message: 'Linq thread reply.',
+    answeredMailboxItemIds: [],
     replyToMessageId: null,
   })
   assert.equal(result.delivery.channel, 'linq')
@@ -586,6 +587,7 @@ test('deliverAssistantMessage forwards Linq reply anchors when one is available'
     target: 'chat_123',
     targetKind: 'thread',
     message: 'Anchored Linq reply.',
+    answeredMailboxItemIds: [],
     replyToMessageId: 'msg_parent_123',
   })
 })

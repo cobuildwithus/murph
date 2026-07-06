@@ -484,6 +484,13 @@ function isDurablyConsumedReplay(input: {
   item: HostedMailboxItem;
   itemSeq: bigint;
 }): boolean {
+  // Two complementary consume signals, not redundant: consumedAt is the
+  // delivery-time per-item stamp for Linq-answered items (fills the window
+  // before checkpoint so the direct wake is duplicate-safe); consumedSeq is the
+  // checkpoint watermark covering every handled conversation item across all
+  // channels, suppressions, and no-reply turns. Do not collapse to one: only
+  // Linq replies stamp consumedAt, so dropping consumedSeq would re-process
+  // non-Linq/no-reply handled items after a restore.
   if (hasHostedMailboxItemConsumedAt(input.item)) {
     return true;
   }
