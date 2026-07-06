@@ -1,9 +1,9 @@
 import {
   condition,
   continueAsNew,
+  deprecatePatch,
   defineQuery,
   defineSignal,
-  patched,
   proxyActivities,
   setHandler,
   uuid4,
@@ -80,10 +80,10 @@ export async function hostedUserRuntimeWorkflow(
     ),
     continueAsNewSuggested: () => workflowInfo().continueAsNewSuggested,
     currentHistoryLength: () => workflowInfo().historyLength,
+    deprecateReconciliationBeforeMailboxProcessingPatch: () =>
+      deprecatePatch(HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID),
     ensureRuntimeProcessing: processingActivities.ensureRuntimeProcessing,
     nowMs: () => Date.now(),
-    reconciliationBeforeMailboxProcessingEnabled: () =>
-      patched(HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID),
     readRuntimeReconciliationFacts:
       reconciliationActivities.readRuntimeReconciliationFacts,
     uuid: uuid4,
@@ -106,13 +106,13 @@ export interface HostedUserRuntimeWorkflowRuntime {
   continueAsNew(input: HostedUserRuntimeWorkflowInput): Promise<never>;
   continueAsNewSuggested(): boolean;
   currentHistoryLength(): number;
+  deprecateReconciliationBeforeMailboxProcessingPatch(): void;
   ensureRuntimeProcessing(input: {
     orchestrationAttemptId: string;
     processingMode?: "default" | "inbox_media_retention" | null;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
-  reconciliationBeforeMailboxProcessingEnabled(): boolean;
   readRuntimeReconciliationFacts(
     request: HostedRuntimeReconciliationFactsRequest,
   ): Promise<HostedRuntimeReconciliationFacts>;
@@ -294,15 +294,12 @@ export function createHostedUserRuntimeWorkflowMachine(
       if (
         state.latestMailboxPointer !== null
         && latestMailboxSignalVersion === mailboxSignalVersion
-        && !runtime.reconciliationBeforeMailboxProcessingEnabled()
       ) {
-        latestMailboxSignalVersion = null;
-        lastMailboxSignalVersionRead = mailboxSignalVersion;
-        recordDirectMailboxProcessingSummary(state);
-        await executeRuntimeProcessing({
-          clearMailboxPointerOnAccepted: true,
-        });
-        continue;
+        // Temporal patch retirement step 2: the old direct-mailbox branch is
+        // removed after pre-patch histories drain. Keep this deprecation marker
+        // and patch id until Phase 2 removes them after deprecatePatch-window
+        // histories drain.
+        runtime.deprecateReconciliationBeforeMailboxProcessingPatch();
       }
 
       const versionBeforeReconciliation = state.signalVersion;
@@ -696,15 +693,6 @@ function recordReconciliationFactsSummary(
       facts.workspace.inboxMediaRetentionWakeAt,
     ])
     : null;
-}
-
-function recordDirectMailboxProcessingSummary(
-  state: HostedRuntimeWorkflowState,
-): void {
-  state.lastReconciliationStatus = "work_pending";
-  state.lastReconciliationNextWakeAt = null;
-  state.lastReconciliationBlockedReason = null;
-  state.lastMailboxLagLaneCount = 0;
 }
 
 function hasAnyMailboxLag(facts: HostedRuntimeReconciliationFacts): boolean {

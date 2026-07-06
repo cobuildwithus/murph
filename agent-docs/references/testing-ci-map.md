@@ -39,11 +39,11 @@ Last verified: 2026-06-25
   Background Worker Blueprint for the worker process. The hosted-local E2E
   suite now includes `temporal-orchestration`, which starts managed local
   Temporal, signals through web, queries the workflow, and proves the worker
-  reaches Cloudflare ensure-processing. The hosted Temporal package also has a
-  replay test that runs `Worker.runReplayHistory` against a synthetic
-  pre-patch mailbox history that scheduled `ensureRuntimeProcessing` directly,
-  the `hosted-temporal:guard` script requires that replay gate and CI
-  package-coverage entry to remain present, and the host-support package
+  reaches Cloudflare ensure-processing. The hosted Temporal package has retired
+  the reconciliation-before-mailbox pre-patch branch after production pre-patch
+  histories drained; during the intermediate retirement window the
+  `hosted-temporal:guard` script requires the workflow `deprecatePatch()` marker
+  and CI package-coverage entry to remain present, and the host-support package
   coverage shard runs `packages/hosted-orchestrator-temporal`. Future
   command-ordering edits to `hosted-user-runtime.ts` still require Worker
   Versioning/deployment pinning, `patched()` / `deprecatePatch()`, or a replay
