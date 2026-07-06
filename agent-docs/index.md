@@ -55,6 +55,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-06-12 |
 | `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion app MVP build spec: Privy login, Connect Apple Health, sign-in token endpoint. | Companion app build plan | High | 2026-06-10 |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step with member-chosen contact-card avatar. | Contact-card picker spec | Medium | 2026-07-03 |
+| `agent-docs/product-specs/call-circle.md` | Friend-call matchmaking for groups: private availability, matching automation, group-to-member notification primitive, phased Retell connector bridge. | Call Circle spec | Medium | 2026-07-06 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/phone-calls/retell-analysis-fields.md` | Retell post-call analysis field contract and transcript-retention boundary. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/feature-user-story-audit/README.md` | Feature user-story audit overview and artifact inventory. | Point-in-time feature audit | Low | 2026-06-21 |
