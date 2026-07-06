@@ -6,13 +6,21 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   readConfiguredMurphPhoneNumbers: vi.fn<() => string[]>(),
   readHostedFamilyInviteAcceptanceView: vi.fn(),
-  signInButtonProps: null as { bindingLabel: string; variant?: string } | null,
+  signInButtonProps: null as {
+    bindingLabel: string;
+    description?: string;
+    variant?: string;
+  } | null,
   signInButtonRendered: false,
   webAcceptButtonProps: null as { inviteCode: string } | null,
 }));
 
 vi.mock("@/src/components/family/family-invite-accept-client", () => ({
-  FamilyInviteSignInButton(props: { bindingLabel: string; variant?: string }) {
+  FamilyInviteSignInButton(props: {
+    bindingLabel: string;
+    description?: string;
+    variant?: string;
+  }) {
     mocks.signInButtonProps = props;
     mocks.signInButtonRendered = true;
     return createElement(
@@ -35,7 +43,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   buildHostedFamilyInviteMessagesHref: (input: {
     inviteCode: string;
     murphPhoneNumber: string;
-  }) => `sms:${input.murphPhoneNumber}?body=family_${input.inviteCode}`,
+  }) => `sms:${input.murphPhoneNumber}?body=Hi%20Murph%2C%20joining%20the%20family%20plan%20(code%20family_${input.inviteCode})`,
   readHostedFamilyInviteAcceptanceView: mocks.readHostedFamilyInviteAcceptanceView,
 }));
 
@@ -115,7 +123,9 @@ test("leads phone-bound invites with the Messages accept path, not Telegram", as
   const markup = await renderFamilyAcceptPage("CODEPHONE");
 
   expect(markup).toContain("Continue in Messages");
-  expect(markup).toContain("sms:+15551230000?body=family_CODEPHONE");
+  expect(markup).toContain(
+    "sms:+15551230000?body=Hi%20Murph%2C%20joining%20the%20family%20plan%20(code%20family_CODEPHONE)",
+  );
   expect(markup).toContain("This opens a text to Murph");
   // The web sign-in is offered only as a compact secondary option.
   expect(mocks.signInButtonProps).toEqual({
@@ -134,7 +144,9 @@ test("falls back to a configured Murph line for a brand-new phone invitee", asyn
 
   const markup = await renderFamilyAcceptPage("CODEPHONE");
 
-  expect(markup).toContain("sms:+15559990000?body=family_CODEPHONE");
+  expect(markup).toContain(
+    "sms:+15559990000?body=Hi%20Murph%2C%20joining%20the%20family%20plan%20(code%20family_CODEPHONE)",
+  );
   expect(markup).toContain("Continue in Messages");
 });
 
@@ -147,7 +159,9 @@ test("uses the one-tap web accept path for authenticated phone-bound invites", a
   expect(mocks.webAcceptButtonProps).toEqual({ inviteCode: "CODEPHONE" });
   expect(markup).toContain("Accept invite");
   expect(markup).toContain("Continue in Messages");
-  expect(markup).toContain("sms:+15551230000?body=family_CODEPHONE");
+  expect(markup).toContain(
+    "sms:+15551230000?body=Hi%20Murph%2C%20joining%20the%20family%20plan%20(code%20family_CODEPHONE)",
+  );
   expect(markup).toContain(
     "Joining by text works from the phone this invite was sent to.",
   );
@@ -169,18 +183,30 @@ test("continues in Telegram only for Telegram-bound invites", async () => {
   expect(mocks.signInButtonRendered).toBe(false);
 });
 
-test("shows a channel-neutral fallback for a label-only invite", async () => {
+test("shows Messages, web sign-in, and Telegram options for a label-only invite", async () => {
   mocks.readHostedFamilyInviteAcceptanceView.mockResolvedValue({
     ...BASE_VIEW,
     inviteCode: "CODELABEL",
+    telegramInviteUrl: "https://t.me/withmurph_bot?start=family_CODELABEL",
+    webAcceptable: true,
   });
+  mocks.readConfiguredMurphPhoneNumbers.mockReturnValue(["+15559990000"]);
 
   const markup = await renderFamilyAcceptPage("CODELABEL");
 
-  expect(markup).toContain("Open this invite from the chat where you received it");
-  expect(markup).not.toContain("Continue in Telegram");
-  expect(markup).not.toContain("Continue in Messages");
-  expect(mocks.signInButtonRendered).toBe(false);
+  expect(markup).toContain("Continue in Messages");
+  expect(markup).toContain(
+    "sms:+15559990000?body=Hi%20Murph%2C%20joining%20the%20family%20plan%20(code%20family_CODELABEL)",
+  );
+  expect(markup).toContain("Sign in on the web instead");
+  expect(markup).toContain("Continue in Telegram");
+  expect(markup).toContain("https://t.me/withmurph_bot?start=family_CODELABEL");
+  expect(mocks.signInButtonProps).toEqual({
+    bindingLabel: "your phone number or email address",
+    description: "Sign in with your own phone number or email address. We'll bring you back here.",
+    variant: "link",
+  });
+  expect(markup).not.toContain("Open this invite from the chat where you received it");
 });
 
 async function renderFamilyAcceptPage(inviteCode: string): Promise<string> {

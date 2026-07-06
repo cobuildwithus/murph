@@ -349,7 +349,7 @@ test("Telegram-bound invite exposes the Telegram link and is not web-acceptable"
   expect(view?.telegramInviteUrl).toBe("https://t.me/withmurph_bot?start=family_CODEDAD");
 });
 
-test("label-only invite offers no channel link (Telegram is not a fallback)", async () => {
+test("label-only acceptance view offers unbound claim channels", async () => {
   const prisma = acceptanceViewPrisma({
     activeMemberships: 2,
     expiresAt: FUTURE,
@@ -367,10 +367,8 @@ test("label-only invite offers no channel link (Telegram is not a fallback)", as
 
   expect(view?.isPhoneBound).toBe(false);
   expect(view?.isTelegramBound).toBe(false);
-  expect(view?.webAcceptable).toBe(false);
-  // A configured Telegram bot must never turn a non-Telegram invite into a
-  // Telegram redirect.
-  expect(view?.telegramInviteUrl).toBeNull();
+  expect(view?.webAcceptable).toBe(true);
+  expect(view?.telegramInviteUrl).toBe("https://t.me/withmurph_bot?start=family_CODEDAD");
   expect(view?.messagesRecipientPhone).toBeNull();
 });
 

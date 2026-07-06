@@ -57,11 +57,16 @@ export default async function FamilyAcceptPage({
   );
 }
 
-// The invitee accepts by texting Murph the family token. Prefer the line an
-// existing member already messages on; fall back to a configured line for a
-// brand-new invitee (the webhook assigns them a home line on first contact).
+// The invitee accepts by texting Murph the family token. Phone-bound invites
+// prefer the line an existing member already messages on; unbound invites fall
+// back to a configured line and the webhook assigns a home line on first
+// contact.
 function resolveMessagesAcceptHref(view: FamilyInviteView): string | null {
-  if (!view || !view.isPhoneBound) {
+  if (!view) {
+    return null;
+  }
+  const isFullyUnbound = !view.isPhoneBound && !view.isEmailBound && !view.isTelegramBound;
+  if (!view.isPhoneBound && !isFullyUnbound) {
     return null;
   }
   const murphPhoneNumber =
@@ -151,12 +156,15 @@ function renderInvite(input: {
   }
 
   const inviter = view.groupDisplayName ?? "Your family plan owner";
+  const isFullyUnbound = !view.isPhoneBound && !view.isEmailBound && !view.isTelegramBound;
   const webBindingLabel =
-    view.isEmailBound && view.isPhoneBound
-      ? "phone number or email address"
-      : view.isEmailBound
-        ? "email address"
-        : "phone number";
+    isFullyUnbound
+      ? "your phone number or email address"
+      : view.isEmailBound && view.isPhoneBound
+        ? "phone number or email address"
+        : view.isEmailBound
+          ? "email address"
+          : "phone number";
 
   return (
     <>
@@ -184,6 +192,9 @@ function renderInvite(input: {
           messagesAcceptHref: input.messagesAcceptHref,
           view,
           webBindingLabel,
+          webSignInDescription: isFullyUnbound
+            ? "Sign in with your own phone number or email address. We'll bring you back here."
+            : undefined,
         })}
       </div>
     </>
@@ -195,10 +206,15 @@ function renderAcceptCta(input: {
   messagesAcceptHref: string | null;
   view: NonNullable<FamilyInviteView>;
   webBindingLabel: string;
+  webSignInDescription?: string;
 }): ReactNode {
   const { view } = input;
+  const isFullyUnbound = !view.isPhoneBound && !view.isEmailBound && !view.isTelegramBound;
+  const webSignInDescriptionProps = input.webSignInDescription
+    ? { description: input.webSignInDescription }
+    : {};
 
-  // Already signed in as an invite-bound identity: one tap, no re-verification.
+  // Already signed in with an acceptable identity: one tap, no re-verification.
   if (input.authenticated && view.webAcceptable) {
     if (input.messagesAcceptHref) {
       return (
@@ -213,7 +229,9 @@ function renderAcceptCta(input: {
             Continue in Messages
           </Button>
           <p className="text-xs leading-5 text-muted-foreground">
-            Joining by text works from the phone this invite was sent to.
+            {isFullyUnbound
+              ? "Joining by text works from the phone you use to send the message."
+              : "Joining by text works from the phone this invite was sent to."}
           </p>
         </>
       );
@@ -222,9 +240,7 @@ function renderAcceptCta(input: {
     return <FamilyInviteWebAcceptButton inviteCode={view.inviteCode} />;
   }
 
-  // Phone-bound: accept in the channel they already use. Texting the token to
-  // Murph proves it's them by matching their phone, so there's no separate
-  // verification step or web sign-in required.
+  // Phone-bound or unbound-by-text: accept in Messages by sending the token.
   if (input.messagesAcceptHref) {
     return (
       <>
@@ -239,7 +255,22 @@ function renderAcceptCta(input: {
           This opens a text to Murph so you can join right from your phone.
         </p>
         {view.webAcceptable ? (
-          <FamilyInviteSignInButton bindingLabel={input.webBindingLabel} variant="link" />
+          <FamilyInviteSignInButton
+            bindingLabel={input.webBindingLabel}
+            variant="link"
+            {...webSignInDescriptionProps}
+          />
+        ) : null}
+        {isFullyUnbound && view.telegramInviteUrl ? (
+          <Button
+            render={<a href={view.telegramInviteUrl} />}
+            nativeButton={false}
+            size="sm"
+            variant="link"
+            className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-foreground"
+          >
+            Continue in Telegram
+          </Button>
         ) : null}
       </>
     );
@@ -250,9 +281,13 @@ function renderAcceptCta(input: {
   if (view.webAcceptable) {
     return (
       <>
-        <FamilyInviteSignInButton bindingLabel={input.webBindingLabel} />
+        <FamilyInviteSignInButton
+          bindingLabel={input.webBindingLabel}
+          {...webSignInDescriptionProps}
+        />
         <p className="text-xs leading-5 text-muted-foreground">
-          {`Sign in with the ${input.webBindingLabel} this invite was sent to, and we'll bring you back here.`}
+          {input.webSignInDescription ??
+            `Sign in with the ${input.webBindingLabel} this invite was sent to, and we'll bring you back here.`}
         </p>
       </>
     );

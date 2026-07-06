@@ -348,6 +348,16 @@ export interface HostedFamilyInviteAcceptanceView {
   webAcceptable: boolean;
 }
 
+function hostedFamilyInviteIsFullyUnbound(input: {
+  targetEmailLookupKey: string | null;
+  targetPhoneLookupKey: string | null;
+  targetTelegramUsernameLookupKey: string | null;
+}): boolean {
+  return !input.targetEmailLookupKey &&
+    !input.targetPhoneLookupKey &&
+    !input.targetTelegramUsernameLookupKey;
+}
+
 type HostedFamilyBillingCheckoutInput =
   | {
       alreadyActive: true;
@@ -659,6 +669,7 @@ export async function readHostedFamilyInviteAcceptanceView(input: {
   const isPhoneBound = invite.targetPhoneLookupKey !== null;
   const isEmailBound = invite.targetEmailLookupKey !== null;
   const isTelegramBound = invite.targetTelegramUsernameLookupKey !== null;
+  const isFullyUnbound = hostedFamilyInviteIsFullyUnbound(invite);
   const telegramBotUsername = readHostedOnboardingEnvironment().telegramBotUsername;
 
   // A phone-bound invitee accepts by texting the family token to Murph; the
@@ -687,11 +698,14 @@ export async function readHostedFamilyInviteAcceptanceView(input: {
     telegramInviteUrl: isPending
       ? resolveHostedFamilyTelegramInviteUrl({
           inviteCode: invite.inviteCode,
-          isTelegramBound,
+          isTelegramBound: isTelegramBound || isFullyUnbound,
           telegramBotUsername,
         })
       : null,
-    webAcceptable: isPending && seatAvailable && groupActive && (isPhoneBound || isEmailBound),
+    webAcceptable: isPending &&
+      seatAvailable &&
+      groupActive &&
+      (isPhoneBound || isEmailBound || isFullyUnbound),
   };
 }
 
@@ -2570,9 +2584,31 @@ export function parseHostedFamilyInviteStartToken(text: string | null | undefine
 
   const token = normalized.match(/^\/?start\s+(family_[A-Za-z0-9_-]+)$/u)?.[1]
     ?? normalized.match(/^(family_[A-Za-z0-9_-]+)$/u)?.[1]
+    ?? normalized.match(/(?:^|[^A-Za-z0-9_-])(family_[A-Za-z0-9_-]+)(?=$|[^A-Za-z0-9_-])/u)?.[1]
     ?? null;
 
   return token ? token.slice("family_".length) : null;
+}
+
+export async function resolveHostedFamilyInviteTokenForInbound(input: {
+  prisma: HostedOnboardingReadClient;
+  text: string | null | undefined;
+}): Promise<string | null> {
+  const inviteCode = parseHostedFamilyInviteStartToken(input.text);
+  if (!inviteCode) {
+    return null;
+  }
+
+  const invite = await input.prisma.hostedAccountGroupInvite.findUnique({
+    select: {
+      id: true,
+    },
+    where: {
+      inviteCode,
+    },
+  });
+
+  return invite ? inviteCode : null;
 }
 
 export async function acceptHostedFamilyInviteFromTelegramTx(input: {
@@ -2761,7 +2797,9 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     select: {
       expiresAt: true,
       status: true,
+      targetEmailLookupKey: true,
       targetPhoneLookupKey: true,
+      targetTelegramUsernameLookupKey: true,
     },
     where: {
       inviteCode,
@@ -2770,7 +2808,8 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   if (!invite) {
     return null;
   }
-  if (!invite.targetPhoneLookupKey) {
+  const isFullyUnbound = hostedFamilyInviteIsFullyUnbound(invite);
+  if (!invite.targetPhoneLookupKey && !isFullyUnbound) {
     return null;
   }
   if (
@@ -2779,7 +2818,10 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
   ) {
     return null;
   }
-  if (!hostedPhoneLookupKeyMatchesValue(input.phoneNumber, invite.targetPhoneLookupKey)) {
+  if (
+    invite.targetPhoneLookupKey &&
+    !hostedPhoneLookupKeyMatchesValue(input.phoneNumber, invite.targetPhoneLookupKey)
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
       httpStatus: 403,
@@ -2799,7 +2841,7 @@ export async function acceptHostedFamilyInviteFromPhoneTx(input: {
     now,
     onAcceptedMemberValidated: input.onAcceptedMemberValidated,
     phoneNumber: input.phoneNumber,
-    requirePhoneBinding: true,
+    requirePhoneBinding: !isFullyUnbound,
     tx: input.tx,
   });
 }
@@ -2835,8 +2877,11 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
+  const isFullyUnbound = hostedFamilyInviteIsFullyUnbound(invite);
+
   if (
     input.requireWebBinding &&
+    invite.targetTelegramUsernameLookupKey &&
     !invite.targetPhoneLookupKey &&
     !invite.targetEmailLookupKey
   ) {
@@ -2844,6 +2889,19 @@ export async function acceptHostedFamilyInviteTx(input: {
       code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
       httpStatus: 409,
       message: "Open this invite from Telegram or WhatsApp to join.",
+    });
+  }
+
+  if (
+    input.requireWebBinding &&
+    isFullyUnbound &&
+    !normalizePhoneNumber(input.phoneNumber) &&
+    !normalizeHostedEmailAddress(input.email)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
+      httpStatus: 409,
+      message: "Sign in with a verified phone number or email address to join.",
     });
   }
 
@@ -3003,7 +3061,36 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
+  if (isFullyUnbound) {
+    await notifyHostedFamilyOwnerOfUnboundInviteClaimTx({
+      acceptedMemberId: input.acceptedMemberId,
+      invite,
+      now,
+      tx: input.tx,
+    });
+  }
+
   return membership;
+}
+
+async function notifyHostedFamilyOwnerOfUnboundInviteClaimTx(input: {
+  acceptedMemberId: string;
+  invite: HostedAccountGroupInviteSnapshot;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const route = await resolveHostedFamilyChatNotificationRouteTx({
+    memberId: input.invite.group.ownerMemberId,
+    tx: input.tx,
+  });
+  await appendHostedFamilyChatNotificationTx({
+    memberId: input.invite.group.ownerMemberId,
+    message: `${input.invite.targetLabel ?? "Someone"} just joined your family plan.`,
+    occurredAt: input.now.toISOString(),
+    route,
+    sourceEventId: `family-invite-claim:${input.invite.id}:${input.acceptedMemberId}`,
+    tx: input.tx,
+  });
 }
 
 export async function removeHostedFamilyMemberTx(input: {
@@ -3105,12 +3192,9 @@ export function buildHostedFamilyTelegramInviteUrl(input: {
 }
 
 /**
- * A family invite routes to Telegram only when it is actually bound to a
- * Telegram username. A configured bot username alone must never turn a phone-
- * or email-only invite into a Telegram link on any surface (accept page, owner
- * snapshot, invite API response, assistant tool). This is the single gate every
- * projection uses so the "Telegram only when Telegram-bound" rule stays
- * consistent across surfaces.
+ * Resolves a Telegram claim URL for surfaces that are allowed to offer
+ * Telegram. Owner snapshot/API projections pass true only for Telegram-bound
+ * invites; the public accept view may also pass true for fully unbound invites.
  */
 export function resolveHostedFamilyTelegramInviteUrl(input: {
   inviteCode: string;
@@ -3127,17 +3211,16 @@ export function resolveHostedFamilyTelegramInviteUrl(input: {
 }
 
 /**
- * Builds the `sms:` deep link a phone-bound invitee taps to accept by text. The
- * prefilled body is exactly the `family_<code>` token the LinQ webhook parses
- * via {@link parseHostedFamilyInviteStartToken}, so the message the invitee
- * sends is recognized and matched against their phone.
+ * Builds the `sms:` deep link a phone-bound or unbound invitee taps to accept
+ * by text. The prefilled body contains the `family_<code>` token the LinQ
+ * webhook parses via {@link parseHostedFamilyInviteStartToken}.
  */
 export function buildHostedFamilyInviteMessagesHref(input: {
   inviteCode: string;
   murphPhoneNumber: string;
 }): string {
   return buildMurphSmsHref({
-    body: `family_${input.inviteCode}`,
+    body: `Hi Murph, joining the family plan (code family_${input.inviteCode})`,
     murphPhoneNumber: input.murphPhoneNumber,
   });
 }
@@ -3207,7 +3290,16 @@ export function buildHostedFamilyInviteReplyText(input: {
       })}`,
     );
   } else if (input.invite.targetLabel) {
-    lines.push(`Telegram invite token: ${inviteToken}`);
+    const acceptUrl = buildHostedFamilyInviteAcceptUrl({
+      inviteCode: input.invite.inviteCode,
+      publicBaseUrl: input.publicBaseUrl ?? null,
+    });
+    if (acceptUrl) {
+      lines.push(`Forward this Family invite link to ${targetLabel}: ${acceptUrl}`);
+      lines.push("Whoever opens it can join, so it is best sent directly to them.");
+    } else {
+      lines.push(`Family invite token: ${inviteToken}`);
+    }
   }
 
   lines.push(

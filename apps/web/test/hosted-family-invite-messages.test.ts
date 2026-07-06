@@ -147,17 +147,18 @@ test("builds an sms deep link carrying the webhook-parseable family token", () =
       inviteCode: "CODEDAD",
       murphPhoneNumber: "+15550000000",
     }),
-  ).toBe("sms:+15550000000?body=family_CODEDAD");
+  ).toBe(
+    "sms:+15550000000?body=Hi%20Murph%2C%20joining%20the%20family%20plan%20(code%20family_CODEDAD)",
+  );
 });
 
-test("the prefilled sms body is exactly what the accept-by-phone webhook parses", () => {
+test("the prefilled sms body is still what the accept-by-phone webhook parses", () => {
   const href = buildHostedFamilyInviteMessagesHref({
     inviteCode: "CODEDAD",
     murphPhoneNumber: "+15550000000",
   });
   const body = decodeURIComponent(href.split("?body=")[1] ?? "");
 
-  // The invitee sends this body to Murph; the LinQ webhook must recover the
-  // invite code from it, or accept-by-text silently fails.
+  expect(body).toBe("Hi Murph, joining the family plan (code family_CODEDAD)");
   expect(parseHostedFamilyInviteStartToken(body)).toBe("CODEDAD");
 });
