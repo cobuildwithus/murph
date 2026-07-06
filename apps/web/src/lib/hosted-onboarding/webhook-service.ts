@@ -9,7 +9,7 @@ import {
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
-import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
+import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
   type HostedOnboardingLinqWebhookResponse,
@@ -75,6 +75,9 @@ import {
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
 } from "./linq-egress-engagement";
+import type {
+  HostedWebhookWakeHandoff,
+} from "./webhook-service-types";
 
 export {
   handleHostedStripeWebhook,
@@ -313,7 +316,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       firstContactAdmissionClassified,
       firstContactAdmissionMode,
       ok: plan.response.ok,
-      wakeUserPresent: Boolean(plan.wakeUserId),
+      wakeUserPresent: Boolean(plan.wakeHandoffs?.some((handoff) => handoff.userId)),
     });
 
     if (plan.desiredSideEffects.length > 0) {
@@ -333,14 +336,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     responseReason = plan.response.reason ?? null;
-    const wakeHandoff = await maybeHandoffHostedExecutionWebhookWake({
-      eventId: event.event_id,
-      mailboxItemId: plan.wakeMailboxItemId,
+    const wakeHandoff = plan.wakeHandoffs?.[0];
+    const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
       response: plan.response,
       scheduleAfterResponse: input.scheduleAfterResponse,
-      source: "linq",
-      userId: plan.wakeUserId,
-      wakeMailboxCheckpoint: plan.wakeMailboxCheckpoint,
+      wakeHandoff,
     });
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       currentInboundReply,
@@ -348,6 +348,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       prisma,
       signal: input.signal,
       wakeHandoff,
+      wakeHandoffResult,
     });
     if (input.scheduleAfterResponse) {
       input.scheduleAfterResponse(sendReadReceipt);
@@ -361,9 +362,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       eventType,
       responseReason,
       signalAbortedBeforeReturn: input.signal?.aborted ?? false,
-      wakeHandoffReason: wakeHandoff?.reason ?? null,
-      wakeHandoffSignalAccepted: wakeHandoff?.signalAccepted ?? false,
-      wakeHandoffStarted: wakeHandoff?.started ?? false,
+      wakeHandoffReason: wakeHandoffResult?.reason ?? null,
+      wakeHandoffSignalAccepted: wakeHandoffResult?.signalAccepted ?? false,
+      wakeHandoffStarted: wakeHandoffResult?.started ?? false,
     });
     return plan.response;
   } catch (error) {
@@ -383,18 +384,19 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
   prisma: PrismaClient;
   signal?: AbortSignal;
-  wakeHandoff: Awaited<ReturnType<typeof maybeHandoffHostedExecutionWebhookWake>>;
+  wakeHandoff?: HostedWebhookWakeHandoff;
+  wakeHandoffResult: Awaited<ReturnType<typeof maybeHandoffHostedExecutionWebhookWake>>;
 }): Promise<void> {
-  const chatId = input.plan.wakeLinqChatId?.trim() ?? "";
+  const chatId = input.wakeHandoff?.linqChatId?.trim() ?? "";
 
   if (chatId.length === 0) {
     return;
   }
 
   const responseReason = input.plan.response.reason ?? null;
-  const wakeHandoffReason = input.wakeHandoff?.reason ?? null;
-  const wakeHandoffStarted = input.wakeHandoff?.started === true;
-  const wakeHandoffSignalAccepted = input.wakeHandoff?.signalAccepted ?? false;
+  const wakeHandoffReason = input.wakeHandoffResult?.reason ?? null;
+  const wakeHandoffStarted = input.wakeHandoffResult?.started === true;
+  const wakeHandoffSignalAccepted = input.wakeHandoffResult?.signalAccepted ?? false;
   const readReceiptTiming = startHostedOnboardingTiming(
     "hosted-onboarding.webhook.linq.ingress-read-receipt",
     {
@@ -586,7 +588,6 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   assertHostedTelegramWebhookSecret(input.secretToken);
 
   const update = parseHostedTelegramWebhookUpdate(input.rawBody);
-  const eventId = buildHostedTelegramWebhookEventId(update);
   const plan = await runHostedOnboardingWebhookTransaction(
     prisma,
     (transaction) =>
@@ -603,13 +604,9 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   }
 
   await maybeHandoffHostedExecutionWebhookWake({
-    eventId,
-    mailboxItemId: plan.wakeMailboxItemId,
     response: plan.response,
     scheduleAfterResponse: input.scheduleAfterResponse,
-    source: "telegram",
-    userId: plan.wakeUserId,
-    wakeMailboxCheckpoint: plan.wakeMailboxCheckpoint,
+    wakeHandoff: plan.wakeHandoffs?.[0],
   });
   return plan.response;
 }
@@ -660,7 +657,7 @@ export async function handleHostedOnboardingWhatsAppWebhook(input: {
         }),
     );
 
-    if (plan.desiredSideEffects.length > 0 || plan.wakeMailboxItemId || plan.wakeUserId) {
+    if (plan.desiredSideEffects.length > 0) {
       throw new Error(
         "Hosted WhatsApp webhook planning unexpectedly requested legacy runtime side effects.",
       );
@@ -669,13 +666,9 @@ export async function handleHostedOnboardingWhatsAppWebhook(input: {
     const wakeHandoffs = plan.wakeHandoffs ?? [];
     for (const wakeHandoff of wakeHandoffs) {
       await maybeHandoffHostedExecutionWebhookWake({
-        eventId: wakeHandoff.eventId,
-        mailboxItemId: wakeHandoff.mailboxItemId,
         response: plan.response,
         scheduleAfterResponse: input.scheduleAfterResponse,
-        source: "whatsapp",
-        userId: wakeHandoff.userId,
-        wakeMailboxCheckpoint: wakeHandoff.wakeMailboxCheckpoint,
+        wakeHandoff,
       });
     }
 

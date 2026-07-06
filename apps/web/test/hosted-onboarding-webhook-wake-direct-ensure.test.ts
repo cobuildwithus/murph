@@ -40,6 +40,22 @@ const response = {
   reason: "wake-appended-active-member",
 } as never;
 
+function buildWakeHandoff(
+  overrides: Partial<NonNullable<Parameters<typeof maybeHandoffHostedExecutionWebhookWake>[0]["wakeHandoff"]>> = {},
+) {
+  return {
+    eventId: "evt_123",
+    mailboxItemId: "mailbox_123",
+    source: "linq" as const,
+    userId: "member_123",
+    wakeMailboxCheckpoint: {
+      lane: "conversation" as const,
+      laneSeq: "42",
+    },
+    ...overrides,
+  };
+}
+
 describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -79,18 +95,11 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_123",
-      mailboxItemId: "mailbox_123",
       response,
       scheduleAfterResponse: (task) => {
         afterResponseTasks.push(task);
       },
-      source: "linq",
-      userId: "member_123",
-      wakeMailboxCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-      },
+      wakeHandoff: buildWakeHandoff(),
     })).resolves.toEqual({
       reason: "temporal-signaled",
       signalAccepted: true,
@@ -121,15 +130,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     mocks.ensureRuntimeProcessing.mockRejectedValue(new Error("cloudflare unreachable"));
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_123",
-      mailboxItemId: "mailbox_123",
       response,
-      source: "linq",
-      userId: "member_123",
-      wakeMailboxCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-      },
+      wakeHandoff: buildWakeHandoff(),
     })).resolves.toMatchObject({
       reason: "temporal-signaled",
       signalAccepted: true,
@@ -150,15 +152,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_123",
-      mailboxItemId: "mailbox_123",
       response,
-      source: "linq",
-      userId: "member_123",
-      wakeMailboxCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-      },
+      wakeHandoff: buildWakeHandoff(),
     })).resolves.toMatchObject({
       reason: "temporal-signaled",
       signalAccepted: true,
@@ -172,15 +167,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_123",
-      mailboxItemId: "mailbox_123",
       response,
-      source: "telegram",
-      userId: "member_123",
-      wakeMailboxCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-      },
+      wakeHandoff: buildWakeHandoff({ source: "telegram" }),
     })).resolves.toMatchObject({
       reason: "temporal-signaled",
       signalAccepted: true,
@@ -195,15 +183,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValue(new Error("temporal down"));
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_123",
-      mailboxItemId: "mailbox_123",
       response,
-      source: "linq",
-      userId: "member_123",
-      wakeMailboxCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-      },
+      wakeHandoff: buildWakeHandoff(),
     })).rejects.toThrow("temporal down");
 
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
@@ -216,15 +197,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_123",
-      mailboxItemId: "mailbox_123",
       response,
-      source: "linq",
-      userId: "member_123",
-      wakeMailboxCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-      },
+      wakeHandoff: buildWakeHandoff(),
     })).resolves.toMatchObject({ signalAccepted: true });
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
@@ -237,11 +211,13 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
 
   it("skips the direct ensure and lane facts when the planner checkpoint is absent", async () => {
     await maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_123",
-      mailboxItemId: "mailbox_123",
       response,
-      source: "linq",
-      userId: "member_123",
+      wakeHandoff: {
+        eventId: "evt_123",
+        mailboxItemId: "mailbox_123",
+        source: "linq",
+        userId: "member_123",
+      },
     });
 
     expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
@@ -254,15 +230,13 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
 
   it("falls back to the legacy signal path when checkpoint lane facts are malformed", async () => {
     await maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_123",
-      mailboxItemId: "mailbox_123",
       response,
-      source: "linq",
-      userId: "member_123",
-      wakeMailboxCheckpoint: {
-        lane: undefined,
-        laneSeq: undefined,
-      } as never,
+      wakeHandoff: buildWakeHandoff({
+        wakeMailboxCheckpoint: {
+          lane: "conversation",
+          laneSeq: "",
+        },
+      }),
     });
 
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
@@ -276,15 +250,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue(null);
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_123",
-      mailboxItemId: "mailbox_123",
       response,
-      source: "linq",
-      userId: "member_123",
-      wakeMailboxCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-      },
+      wakeHandoff: buildWakeHandoff(),
     })).resolves.toMatchObject({ signalAccepted: true });
 
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();

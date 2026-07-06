@@ -23,7 +23,7 @@ import {
 } from "./logging";
 import type {
   HostedWebhookServiceResponse,
-  HostedWebhookWakeMailboxCheckpoint,
+  HostedWebhookWakeHandoff,
 } from "./webhook-service-types";
 
 // Latency traces are observability only. They are scheduled after the webhook
@@ -41,44 +41,45 @@ export type HostedWebhookWakeHandoffResult =
 type HostedWebhookPostResponseScheduler = (task: () => Promise<void>) => void;
 
 export async function maybeHandoffHostedExecutionWebhookWake(input: {
-  eventId: string;
-  mailboxItemId?: string;
   response: HostedWebhookServiceResponse;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
-  source: "linq" | "telegram" | "whatsapp";
-  userId?: string;
-  wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;
+  wakeHandoff?: HostedWebhookWakeHandoff;
 }): Promise<HostedWebhookWakeHandoffResult | null> {
-  if (!input.mailboxItemId) {
+  if (!input.wakeHandoff) {
     return null;
   }
-  const mailboxItemId = input.mailboxItemId;
+  const {
+    eventId,
+    mailboxItemId,
+    source,
+    userId,
+    wakeMailboxCheckpoint,
+  } = input.wakeHandoff;
   // Guarded at runtime: a checkpoint missing lane facts falls back to the
   // legacy signal path (checkpoint re-read + workspace ensure) instead of
   // failing the wake on malformed planner data.
   const knownCheckpoint =
-    input.userId
-    && typeof input.wakeMailboxCheckpoint?.lane === "string"
-    && input.wakeMailboxCheckpoint.lane.length > 0
-    && typeof input.wakeMailboxCheckpoint.laneSeq === "string"
-    && input.wakeMailboxCheckpoint.laneSeq.length > 0
+    typeof wakeMailboxCheckpoint?.lane === "string"
+    && wakeMailboxCheckpoint.lane.length > 0
+    && typeof wakeMailboxCheckpoint.laneSeq === "string"
+    && wakeMailboxCheckpoint.laneSeq.length > 0
       ? {
-          lane: input.wakeMailboxCheckpoint.lane,
-          laneSeq: input.wakeMailboxCheckpoint.laneSeq,
-          userId: input.userId,
+          lane: wakeMailboxCheckpoint.lane,
+          laneSeq: wakeMailboxCheckpoint.laneSeq,
+          userId,
         }
       : undefined;
-  const directEnsureEligible = Boolean(knownCheckpoint && input.source === "linq");
+  const directEnsureEligible = Boolean(knownCheckpoint && source === "linq");
 
   const handoffTiming = startHostedOnboardingTiming(
-    `hosted-onboarding.webhook.${input.source}.wake-handoff`,
+    `hosted-onboarding.webhook.${source}.wake-handoff`,
     {
       directEnsureWakeEligible: directEnsureEligible,
-      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
       plannerCheckpointPresent: Boolean(knownCheckpoint),
       responseReason: input.response.reason,
-      userIdPresent: Boolean(input.userId),
-      userIdSuffix: input.userId ? toHostedOnboardingLogIdSuffix(input.userId) : null,
+      userIdPresent: true,
+      userIdSuffix: toHostedOnboardingLogIdSuffix(userId),
     },
   );
 
@@ -86,7 +87,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   let temporalSignalAcceptedAt: Date | null = null;
   try {
     signal = await signalHostedMailboxAppendRuntime({
-      expectedUserId: input.userId ?? null,
+      expectedUserId: userId,
       ...(knownCheckpoint ? { knownCheckpoint } : {}),
       mailboxItemId,
     });
@@ -95,9 +96,9 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
       mailboxItemId,
       scheduleAfterResponse: input.scheduleAfterResponse,
-      source: input.source,
+      source,
       temporalSignalAcceptedAt,
-      userId: input.userId ?? null,
+      userId,
     });
     const errorName = deriveHostedOnboardingTimingErrorName(error);
     finishHostedOnboardingTiming(handoffTiming, "failed", {
@@ -111,10 +112,10 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   // With consumed_at live, a racing ensure is harmless: consumed mailbox items
   // restage with a null reply target, and a gap invocation that imports only
   // already-consumed work finds nothing replyable and exits.
-  const directEnsureWake = directEnsureEligible && input.userId
+  const directEnsureWake = directEnsureEligible
     ? startHostedDirectEnsureWakeBestEffort({
         source: "linq",
-        userId: input.userId,
+        userId,
       })
     : null;
   if (directEnsureWake) {
@@ -130,9 +131,9 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({
     mailboxItemId,
     scheduleAfterResponse: input.scheduleAfterResponse,
-    source: input.source,
+    source,
     temporalSignalAcceptedAt,
-    userId: input.userId ?? null,
+    userId,
   });
 
   finishHostedOnboardingTiming(handoffTiming, "temporal-signaled", {

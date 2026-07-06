@@ -556,8 +556,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           // No checkpoint on the duplicate read: this transaction did not run
           // the append-path workspace upsert, so the retry keeps the legacy
           // signal path that repairs a missing workspace row.
-          wakeMailboxItemId: existingMailboxItem.id,
-          wakeUserId: existingMember.id,
+          wakeHandoffs: [{ eventId: input.event.event_id, mailboxItemId: existingMailboxItem.id, source: "linq", userId: existingMember.id }],
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
           duplicate: true,
@@ -670,13 +669,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
           ignored: false,
           reason: "wake-appended-active-member",
         },
-        wakeLinqChatId: summary.chatId,
-        wakeMailboxCheckpoint: {
-          lane: mailboxAppend.item.lane,
-          laneSeq: mailboxAppend.item.laneSeq,
-        },
-        wakeMailboxItemId: mailboxAppend.item.id,
-        wakeUserId: existingMember.id,
+        wakeHandoffs: [{
+          eventId: input.event.event_id, linqChatId: summary.chatId, mailboxItemId: mailboxAppend.item.id, source: "linq", userId: existingMember.id,
+          wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
+        }],
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
         dailyInboundCount: dailyState.inboundCount,
@@ -1122,12 +1118,12 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
           ok: true,
           reason: "duplicate-webhook-event",
         },
-        wakeLinqChatId: summary.chatId,
         // No checkpoint on the duplicate read: this transaction did not run
         // the append-path workspace upsert, so the retry keeps the legacy
         // signal path that repairs a missing workspace row.
-        wakeMailboxItemId: existingMailboxItem.id,
-        wakeUserId: input.route.containerMemberId,
+        wakeHandoffs: [{
+          eventId: input.event.event_id, linqChatId: summary.chatId, mailboxItemId: existingMailboxItem.id, source: "linq", userId: input.route.containerMemberId,
+        }],
         linqReadReceiptRouteAuthority: routeAuthority,
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
@@ -1222,13 +1218,10 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         ok: true,
         reason: "wake-appended-thread-route",
       },
-      wakeLinqChatId: summary.chatId,
-      wakeMailboxCheckpoint: {
-        lane: mailboxAppend.item.lane,
-        laneSeq: mailboxAppend.item.laneSeq,
-      },
-      wakeMailboxItemId: mailboxAppend.item.id,
-      wakeUserId: input.route.containerMemberId,
+      wakeHandoffs: [{
+        eventId: input.event.event_id, linqChatId: summary.chatId, mailboxItemId: mailboxAppend.item.id, source: "linq", userId: input.route.containerMemberId,
+        wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
+      }],
       linqReadReceiptRouteAuthority: routeAuthority,
     }),
     buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
@@ -1668,8 +1661,7 @@ function logHostedLinqWebhookPlannerDecisionAndReturn<T extends HostedOnboarding
     ...sanitizeHostedOnboardingStructuredLogDetails(details),
     desiredSideEffectCount: plan.desiredSideEffects.length,
     ...plannerResultLog,
-    wakeMailboxItemPresent: Boolean(plan.wakeMailboxItemId),
-    wakeUserPresent: Boolean(plan.wakeUserId),
+    wakeHandoffCount: plan.wakeHandoffs?.length ?? 0,
   });
 
   return plan;

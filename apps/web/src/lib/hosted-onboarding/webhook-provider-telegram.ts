@@ -46,6 +46,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   if (!summary) {
     return buildIgnoredTelegramWebhookPlan("unsupported-update");
   }
+  const eventId = buildHostedTelegramWebhookEventId(input.update);
 
   if (summary.isBotMessage) {
     return buildIgnoredTelegramWebhookPlan("own-message");
@@ -92,7 +93,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       message: buildHostedFamilyInviteAcceptedReplyText(),
       occurredAt: summary.occurredAt,
       route,
-      sourceEventId: buildHostedTelegramWebhookEventId(input.update),
+      sourceEventId: eventId,
       tx: input.prisma,
     });
     return {
@@ -103,8 +104,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       },
       ...(notification.mailboxItemId
         ? {
-            wakeMailboxItemId: notification.mailboxItemId,
-            wakeUserId: familyAcceptance.memberId,
+            wakeHandoffs: [{ eventId, mailboxItemId: notification.mailboxItemId, source: "telegram", userId: familyAcceptance.memberId }],
           }
         : {}),
     };
@@ -155,7 +155,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
 
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionTelegramConversationMessageWake({
-      eventId: buildHostedTelegramWebhookEventId(input.update),
+      eventId,
       occurredAt: summary.occurredAt,
       telegramMessage,
       userId: existingMember.id,
@@ -169,12 +169,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       ok: true,
       reason: "wake-appended-active-member",
     },
-    wakeMailboxCheckpoint: {
-      lane: mailboxAppend.item.lane,
-      laneSeq: mailboxAppend.item.laneSeq,
-    },
-    wakeMailboxItemId: mailboxAppend.item.id,
-    wakeUserId: existingMember.id,
+    wakeHandoffs: [{
+      eventId, mailboxItemId: mailboxAppend.item.id, source: "telegram", userId: existingMember.id,
+      wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
+    }],
   };
 }
 
