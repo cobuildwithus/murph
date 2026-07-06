@@ -476,7 +476,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     members: [],
   };
 
-  it("parses read and create_join_link requests and rejects other mutations", () => {
+  it("parses read, join-link, and join-offer requests and rejects other mutations", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_current",
     })).toEqual({
@@ -501,6 +501,19 @@ describe("parseHostedRuntimeGroupTool", () => {
         displayName: "Sunday sleep crew",
         kind: "friends",
         requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "post_join_offer",
+      joinOffer: {
+        intro: "Like this to join us.",
+        projectionKinds: ["sleep-times.v0", "activity-days.v0"],
+      },
+    })).toEqual({
+      action: "post_join_offer",
+      joinOffer: {
+        intro: "Like this to join us.",
+        projectionKinds: ["sleep-times.v0", "activity-days.v0"],
       },
     });
 
@@ -541,6 +554,12 @@ describe("parseHostedRuntimeGroupTool", () => {
         joinLink: { displayName: "   " },
       })
     ).toThrow(/must not be blank/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
+        joinOffer: { projectionKinds: ["profile-name.v0"] },
+      })
+    ).toThrow(/unsupported projection kind/u);
   });
 
   it("parses create_join_link responses", () => {
@@ -587,6 +606,40 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       })
     ).toThrow(/not allowed/u);
+  });
+
+  it("parses post_join_offer responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        status: "sent",
+      },
+    })).toEqual({
+      action: "post_join_offer",
+      result: {
+        group: PARSED_GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        status: "sent",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "send_failed",
+      },
+    })).toEqual({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "send_failed",
+      },
+    });
   });
 
   it("parses group tool responses with the typed member roster only", () => {

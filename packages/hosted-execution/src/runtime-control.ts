@@ -766,6 +766,7 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
 export type HostedRuntimeGroupToolAction =
   | "read_current"
   | "create_join_link"
+  | "post_join_offer"
   | "read_chat_participants"
   | "share_contact_card";
 
@@ -807,6 +808,13 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
   requestedVaultShareProjectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
 }
 
+export interface HostedRuntimeGroupPostJoinOfferRequest {
+  intro?: string | null;
+  // Closed over the individually selectable kinds; the offer always includes
+  // the membership-implied profile-name.v0 share in its deterministic copy.
+  projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
+}
+
 /**
  * Injected by the hosted runtime from the current wake's Linq delivery
  * context; never supplied by the model. The web handler asserts the authority
@@ -827,6 +835,11 @@ export interface HostedRuntimeGroupChatParticipant {
 export type HostedRuntimeGroupToolRequest =
   | { action: "read_current" }
   | { action: "create_join_link"; joinLink?: HostedRuntimeGroupCreateJoinLinkRequest | null }
+  | {
+      action: "post_join_offer";
+      joinOffer?: HostedRuntimeGroupPostJoinOfferRequest | null;
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
   | { action: "read_chat_participants"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
   | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null };
 
@@ -842,6 +855,12 @@ export type HostedRuntimeGroupToolResponse =
       action: "create_join_link";
       result:
         | { status: "ok"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "post_join_offer";
+      result:
+        | { status: "sent"; group: HostedRuntimeGroupSummary; joinUrl: string }
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
   | {

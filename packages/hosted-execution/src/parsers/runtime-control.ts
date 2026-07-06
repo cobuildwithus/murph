@@ -90,6 +90,7 @@ import {
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupKind,
+  type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupToolRequest,
@@ -738,6 +739,27 @@ export function parseHostedRuntimeGroupToolRequest(
       joinLink: parseHostedRuntimeGroupCreateJoinLinkRequest(record.joinLink),
     };
   }
+  if (action === "post_join_offer") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "joinOffer", "linqThread"]),
+      "Hosted runtime group tool post_join_offer request",
+    );
+    return {
+      action,
+      ...(record.joinOffer === undefined || record.joinOffer === null
+        ? {}
+        : { joinOffer: parseHostedRuntimeGroupPostJoinOfferRequest(record.joinOffer) }),
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool post_join_offer request linqThread",
+            ),
+          }),
+    };
+  }
   if (action === "read_chat_participants" || action === "share_contact_card") {
     assertAllowedObjectKeys(
       record,
@@ -770,6 +792,35 @@ function parseHostedRuntimeGroupToolLinqThreadContext(
       `${label} authority`,
     ),
     chatId: requireString(record.chatId, `${label} chatId`),
+  };
+}
+
+function parseHostedRuntimeGroupPostJoinOfferRequest(
+  value: unknown,
+): HostedRuntimeGroupPostJoinOfferRequest {
+  const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["intro", "projectionKinds"]),
+    "Hosted runtime group tool post_join_offer joinOffer",
+  );
+  const intro = readNullableString(
+    record.intro,
+    "Hosted runtime group tool post_join_offer intro",
+  );
+  if (intro !== null && intro.trim().length === 0) {
+    throw new TypeError("Hosted runtime group tool post_join_offer intro must not be blank.");
+  }
+  if (intro !== null && intro.length > 500) {
+    throw new TypeError("Hosted runtime group tool post_join_offer intro is too long.");
+  }
+  return {
+    intro,
+    projectionKinds: parseHostedRuntimeGroupProjectionKindArray(
+      record.projectionKinds,
+      "Hosted runtime group tool post_join_offer projectionKinds",
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    ),
   };
 }
 
@@ -860,6 +911,33 @@ export function parseHostedRuntimeGroupToolResponse(
     }
     if (status === "unavailable") {
       assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool create_join_link unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "post_join_offer") {
+    const result = requireObject(record.result, "Hosted runtime group tool post_join_offer response result");
+    const status = requireString(result.status, "Hosted runtime group tool post_join_offer response status");
+    if (status === "sent") {
+      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), "Hosted runtime group tool post_join_offer sent response result");
+      return {
+        action,
+        result: {
+          status,
+          group: parseHostedRuntimeGroupSummary(result.group),
+          joinUrl: requireString(result.joinUrl, "Hosted runtime group tool post_join_offer joinUrl"),
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool post_join_offer unavailable response result");
       return {
         action,
         result: {

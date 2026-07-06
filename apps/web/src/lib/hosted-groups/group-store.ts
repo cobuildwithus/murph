@@ -1,11 +1,12 @@
 import "server-only";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type { HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
 import { isHostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
 
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
+import { createHostedLinqMessageLookupKey } from "../hosted-onboarding/contact-privacy";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
@@ -14,6 +15,7 @@ import {
   generateHostedGroupJoinCode,
 } from "../hosted-onboarding/shared";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
+import { toHostedOnboardingLogIdSuffix } from "../hosted-onboarding/logging";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
@@ -75,8 +77,28 @@ export interface HostedGroupJoinAcceptanceTxResult
   vaultShareCleanupSignals: HostedVaultShareCleanupSignal[];
 }
 
+export interface HostedGroupJoinOfferBindingTxResult {
+  groupId: string;
+  messageIdSuffix: string | null;
+  messageLookupKey: string;
+  projectionKinds: HostedVaultShareProjectionKind[];
+}
+
+export interface HostedGroupJoinOfferAcceptanceTxResult
+  extends HostedGroupJoinAcceptanceTxResult {
+  joinCode: string;
+  selectedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+}
+
 export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
+
+const HOSTED_GROUP_JOIN_OFFER_CLEAR_DATA = {
+  joinOfferMessageIdSuffix: null,
+  joinOfferMessageLookupKey: null,
+  joinOfferPostedAt: null,
+  joinOfferProjectionKindsJson: Prisma.DbNull,
+} satisfies Prisma.HostedGroupUpdateInput;
 
 export async function ensureHostedGroupForThreadContainerTx(input: {
   tx: Prisma.TransactionClient;
@@ -222,7 +244,11 @@ export async function createOrReadHostedGroupJoinLinkTx(input: {
   }
   const updated = await input.tx.hostedGroup.update({
     where: { id: group.id },
-    data: { joinCode: generateHostedGroupJoinCode(), joinCodeCreatedAt: input.now },
+    data: {
+      ...HOSTED_GROUP_JOIN_OFFER_CLEAR_DATA,
+      joinCode: generateHostedGroupJoinCode(),
+      joinCodeCreatedAt: input.now,
+    },
     select: { joinCode: true },
   });
   if (!updated.joinCode) {
@@ -358,9 +384,155 @@ export async function acceptHostedGroupJoinCodeTx(input: {
       message: "This group link is no longer valid.",
     });
   }
+  return acceptHostedGroupJoinTx({
+    additiveOnly: false,
+    groupId: groupLookup.id,
+    memberId: input.memberId,
+    now: input.now,
+    policyProjectionKinds: null,
+    selectedVaultShareProjectionKinds: input.selectedVaultShareProjectionKinds ?? [],
+    tx: input.tx,
+  });
+}
+
+export async function recordHostedGroupJoinOfferTx(input: {
+  groupId: string;
+  messageId: string | null;
+  postedAt: Date;
+  projectionKinds: readonly HostedVaultShareProjectionKind[];
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinOfferBindingTxResult> {
+  const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
+  if (!messageLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_MESSAGE_ID_REQUIRED",
+      httpStatus: 502,
+      message: "Could not bind this group offer to a provider message.",
+      retryable: true,
+    });
+  }
+  const projectionKinds = normalizeHostedVaultShareProjectionKinds(input.projectionKinds);
+  await input.tx.hostedGroup.update({
+    where: { id: input.groupId },
+    data: {
+      joinOfferMessageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+      joinOfferMessageLookupKey: messageLookupKey,
+      joinOfferPostedAt: input.postedAt,
+      joinOfferProjectionKindsJson: toHostedGroupJoinOfferProjectionKindsJson(projectionKinds),
+    },
+  });
+
+  return {
+    groupId: input.groupId,
+    messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+    messageLookupKey,
+    projectionKinds,
+  };
+}
+
+export async function acceptHostedGroupJoinOfferTx(input: {
+  memberId: string;
+  messageLookupKey: string | null;
+  now: Date;
+  threadIdentityLookupKey: string | null;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinOfferAcceptanceTxResult> {
+  if (!input.threadIdentityLookupKey || !input.messageLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: false,
+    });
+  }
+  const groupLookup = await input.tx.hostedGroup.findUnique({
+    where: { joinOfferMessageLookupKey: input.messageLookupKey },
+    select: { id: true },
+  });
+  if (!groupLookup) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: false,
+    });
+  }
   await lockHostedGroupRow(input.tx, groupLookup.id);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: groupLookup.id },
+    select: {
+      id: true,
+      joinCode: true,
+      joinOfferMessageLookupKey: true,
+      joinOfferProjectionKindsJson: true,
+      runtimeMemberId: true,
+    },
+  });
+  if (!group?.joinCode || group.joinOfferMessageLookupKey !== input.messageLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: false,
+    });
+  }
+  if (!group.runtimeMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_NOT_ACTIVE",
+      httpStatus: 410,
+      message: "This group is no longer active.",
+      retryable: false,
+    });
+  }
+  const route = await input.tx.hostedThreadRoute.findFirst({
+    where: {
+      channel: "linq",
+      containerMemberId: group.runtimeMemberId,
+      threadIdentityLookupKey: input.threadIdentityLookupKey,
+    },
+    select: { containerMemberId: true },
+  });
+  if (!route) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: false,
+    });
+  }
+
+  const selectedVaultShareProjectionKinds = normalizeHostedVaultShareProjectionKinds(
+    group.joinOfferProjectionKindsJson,
+  );
+  const accepted = await acceptHostedGroupJoinTx({
+    additiveOnly: true,
+    groupId: group.id,
+    memberId: input.memberId,
+    now: input.now,
+    policyProjectionKinds: selectedVaultShareProjectionKinds,
+    selectedVaultShareProjectionKinds,
+    tx: input.tx,
+  });
+
+  return {
+    ...accepted,
+    joinCode: group.joinCode,
+    selectedVaultShareProjectionKinds,
+  };
+}
+
+async function acceptHostedGroupJoinTx(input: {
+  additiveOnly: boolean;
+  groupId: string;
+  memberId: string;
+  now: Date;
+  policyProjectionKinds: readonly HostedVaultShareProjectionKind[] | null;
+  selectedVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinAcceptanceTxResult> {
+  await lockHostedGroupRow(input.tx, input.groupId);
+  const group = await input.tx.hostedGroup.findUnique({
+    where: { id: input.groupId },
     select: { id: true, joinPolicyJson: true, runtimeMemberId: true },
   });
   if (!group) {
@@ -385,10 +557,12 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   assertHostedMemberNotSuspended(member);
 
   const selected = normalizeHostedVaultShareProjectionKinds(
-    input.selectedVaultShareProjectionKinds ?? [],
+    input.selectedVaultShareProjectionKinds,
   );
-  const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
-  const requestedSet = new Set(policy.requestedVaultShareProjectionKinds);
+  const requestedProjectionKinds = input.policyProjectionKinds
+    ? normalizeHostedVaultShareProjectionKinds(input.policyProjectionKinds)
+    : readHostedGroupJoinPolicy(group.joinPolicyJson).requestedVaultShareProjectionKinds;
+  const requestedSet = new Set(requestedProjectionKinds);
   for (const projectionKind of selected) {
     if (!requestedSet.has(projectionKind)) {
       throw hostedOnboardingError({
@@ -445,8 +619,8 @@ export async function acceptHostedGroupJoinCodeTx(input: {
     now: input.now,
   });
   grantedVaultShareProjectionKinds.push("profile-name.v0");
-  if (policy.requestedVaultShareProjectionKinds.length > 0) {
-    for (const projectionKind of policy.requestedVaultShareProjectionKinds) {
+  if (requestedProjectionKinds.length > 0) {
+    for (const projectionKind of requestedProjectionKinds) {
       if (selected.includes(projectionKind)) {
         await assertHostedGroupVaultShareGrantLimitTx(input.tx, {
           destinationMemberId: group.runtimeMemberId,
@@ -461,7 +635,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
           tx: input.tx,
         });
         grantedVaultShareProjectionKinds.push(projectionKind);
-      } else {
+      } else if (!input.additiveOnly) {
         const revoked = await revokeHostedVaultSharesWithCleanupTx({
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
@@ -545,6 +719,12 @@ async function mergeHostedGroupRequestedProjectionsTx(
 
 function toHostedGroupJoinPolicyJson(policy: ReturnType<typeof mergeHostedGroupJoinPolicy>): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(policy)) as Prisma.InputJsonValue;
+}
+
+function toHostedGroupJoinOfferProjectionKindsJson(
+  projectionKinds: readonly HostedVaultShareProjectionKind[],
+): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(normalizeHostedVaultShareProjectionKinds(projectionKinds))) as Prisma.InputJsonValue;
 }
 
 /**

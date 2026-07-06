@@ -22,10 +22,13 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
       "read_current",
       "create_join_link",
+      "post_join_offer",
       "read_chat_participants",
       "share_contact_card",
     ]);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.requestedVaultShareProjectionKinds.items.enum)
+      .toEqual([...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS]);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionKinds.items.enum)
       .toEqual([...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS]);
   });
 
@@ -45,7 +48,27 @@ describe("murph.group dynamic tool", () => {
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      intro: "Like this to join.",
+      projectionKinds: ["sleep-times.v0"],
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          intro: "Like this to join.",
+          projectionKinds: ["sleep-times.v0"],
+        },
+      },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
       action: "share_contact_card",
+      linqThread: { chatId: "chat_hijack" },
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
       linqThread: { chatId: "chat_hijack" },
     }))?.kind).toBe("invalid-group-arguments");
 
@@ -107,6 +130,11 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "create_join_link",
       requestedVaultShareProjectionKinds: ["all-health-data"],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      projectionKinds: ["all-health-data"],
     }))?.kind).toBe("invalid-group-arguments");
   });
 });

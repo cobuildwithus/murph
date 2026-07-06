@@ -81,6 +81,9 @@ import type {
 import {
   reconcileHostedThreadContainerParticipants,
 } from "../hosted-groups/group-tool";
+import {
+  handleHostedGroupJoinOfferReaction,
+} from "../hosted-groups/join-offer-reaction";
 import type {
   HostedOnboardingLinqGroupRosterReconcile,
 } from "./webhook-provider-linq-types";
@@ -153,6 +156,53 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       event,
       rawBody: input.rawBody,
     });
+    if (
+      providerEvent
+      && (event.event_type === "reaction.added" || event.event_type === "reaction.removed")
+    ) {
+      const prisma = input.prisma ?? getPrisma();
+      const providerResult = await ingestHostedLinqProviderEventDirect({
+        event: providerEvent,
+        prisma,
+      });
+      if (providerResult.duplicate) {
+        const response: HostedOnboardingLinqWebhookResponse = {
+          duplicate: true,
+          ignored: true,
+          ok: true,
+          reason: "duplicate-linq-provider-event",
+        };
+        responseReason = response.reason ?? null;
+        finishHostedOnboardingTiming(timing, "completed", {
+          duplicate: true,
+          eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+          eventType,
+          responseReason,
+        });
+        return response;
+      }
+      const reactionResult = await handleHostedGroupJoinOfferReaction({
+        event: providerEvent,
+        prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+        signal: input.signal,
+      });
+      const response: HostedOnboardingLinqWebhookResponse = {
+        ignored: reactionResult.status !== "accepted",
+        ok: true,
+        reason: reactionResult.status === "accepted"
+          ? "accepted-linq-group-join-offer-reaction"
+          : `skipped-linq-group-join-offer-reaction:${reactionResult.reason}`,
+      };
+      responseReason = response.reason ?? null;
+      finishHostedOnboardingTiming(timing, "completed", {
+        duplicate: false,
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+        eventType,
+        responseReason,
+      });
+      return response;
+    }
     if (providerEvent && event.event_type !== "message.received") {
       const prisma = input.prisma ?? getPrisma();
       const providerResult = await ingestHostedLinqProviderEventDirect({

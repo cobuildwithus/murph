@@ -163,11 +163,21 @@ export type HostedLinqFamilyInviteReplyPayload = {
   template: "family_invite_reply";
 };
 
+export type HostedLinqGroupJoinOfferAcceptedReplyPayload = {
+  chatId: string;
+  message: string;
+  occurredAt: string;
+  replyToMessageId: string | null;
+  sourceEventId: string;
+  template: "group_join_offer_accepted";
+};
+
 export type HostedLinqMessagePayload =
   | HostedLinqAiUsageQuotaPayload
   | HostedLinqConversationHomeRedirectPayload
   | HostedLinqDailyQuotaPayload
   | HostedLinqFamilyInviteReplyPayload
+  | HostedLinqGroupJoinOfferAcceptedReplyPayload
   | HostedLinqInviteMessagePayload;
 
 export type HostedLinqMessageSideEffect = {
@@ -233,6 +243,14 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       replyToMessageId?: string | null;
       sourceEventId: string;
       template: "family_invite_reply";
+    }
+  | {
+      chatId: string;
+      message: string;
+      occurredAt: string;
+      replyToMessageId?: string | null;
+      sourceEventId: string;
+      template: "group_join_offer_accepted";
     }
   | {
       assignedRecipientPhone: string;
@@ -881,6 +899,7 @@ async function buildHostedLinqSideEffectMessage(
         seed: effect.effectId,
       });
     case "family_invite_reply":
+    case "group_join_offer_accepted":
       return effect.payload.message;
     case "conversation_home_redirect": {
       const homeRecipientPhone = normalizePhoneNumber(effect.payload.homeRecipientPhone);
@@ -1023,6 +1042,15 @@ function buildHostedWebhookLinqMessagePayload(
         sourceEventId: input.sourceEventId,
         template: input.template,
       };
+    case "group_join_offer_accepted":
+      return {
+        chatId: input.chatId,
+        message: input.message,
+        occurredAt: input.occurredAt,
+        replyToMessageId,
+        sourceEventId: input.sourceEventId,
+        template: input.template,
+      };
     case "invite_signup":
       return {
         chatId: input.chatId,
@@ -1134,6 +1162,7 @@ async function claimHostedLinqNoticeForSideEffect(
       });
     case "conversation_home_redirect":
     case "family_invite_reply":
+    case "group_join_offer_accepted":
       return true;
   }
 }
@@ -1174,6 +1203,7 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
       case "invite_signin":
       case "conversation_home_redirect":
       case "family_invite_reply":
+      case "group_join_offer_accepted":
         return;
     }
   } catch (error) {
