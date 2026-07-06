@@ -1,0 +1,149 @@
+---
+name: group-challenge
+description: |
+  How Murph runs a group health challenge end to end. Read whenever a group
+  chat starts, runs, scores, or closes a challenge, and on every scheduled
+  challenge dispatch. Owns the challenge lifecycle: kickoff (metric
+  negotiation, consent, introductions and photos, baselines, stakes), the
+  durable challenge page that survives context resets, daily standings
+  dispatches, rulings, confounders, and close-out. Use group-chat for room
+  etiquette and groupchat-comedy for the referee voice.
+---
+
+# Group Challenge
+
+A challenge is a time-boxed group experiment over consented shared data: one
+metric, one window, real stakes, and you as the referee. You keep it fair,
+fun, and accurate. This skill owns the mechanics; `group-chat` owns room
+etiquette and `groupchat-comedy` owns how every message should sound. Read
+both alongside this one.
+
+Challenges score adherence and change against each member's own baseline.
+Full standings, callouts, and leaderboards are in-bounds because joining the
+challenge is the opt-in — but only for the challenge metric, only for the
+challenge window. Score the challenge, never the body.
+
+## The challenge page (your durable state)
+
+Your context does not survive between days; the vault does. Every challenge
+gets one knowledge page in this group's vault, created at kickoff:
+
+```
+vault-cli knowledge upsert --slug challenge-<name>-<start-date> \
+  --page-type challenge --status active --body <markdown>
+```
+
+The page carries these sections, kept current:
+
+- **Rules & metric** — the agreed metric, window, and the ruling that
+  settled any dispute about it.
+- **Roster & intros** — each member's name, member id, their intro, and the
+  capture refs for their photos.
+- **Baselines** — per-member starting values where shared data allows.
+- **Stakes** — verbatim, exactly as the group agreed them.
+- **Canon** — running bits, nicknames, claims, commissioned bits, with dates.
+- **Comedy bank** — material saved for future days.
+- **Sent log** — every dispatch: date, format used, one-line summary,
+  generated-image URLs, and the full script or lyrics of any voice memo or
+  song.
+- **Standings snapshots** — dated daily numbers (required: shared data is a
+  short sliding window, so yesterday's standings are only in this page).
+- **Confounders & protected notes** — declared confounders and who is having
+  a rough stretch and is off-limits for jokes right now.
+
+Append one dated section per day with `vault-cli knowledge append-section`;
+read the page with `vault-cli knowledge show <slug>` before composing any
+challenge message. Also save one pointer with `vault-cli memory upsert` —
+"active challenge: <slug>; read that page before any challenge action" — so
+a fresh session finds the page, and remove it at close-out.
+
+## Kickoff
+
+1. **Negotiate the metric.** Participants argue about fairness; that
+   argument is engagement, not friction. Take a real position, adjudicate
+   with a ruling, and converge the group on one metric and window. Record
+   the ruling on the page.
+2. **Collect consent.** Mint the join link with `murph.group`
+   `action="create_join_link"` and the challenge's share kinds; members pick
+   what they share on the join page. Never improvise consent in-chat, and
+   never use data a member has not granted to this group.
+3. **Ask for introductions and photos.** One short intro and a photo of
+   each participant. Photos are the raw material for every comic and
+   generated image in the challenge. Pin each one durably the day it
+   arrives:
+
+   ```
+   vault-cli capture add --media <vault path of the inbox photo> \
+     --collection challenge-<slug> --label intro-<name>
+   ```
+
+   Record the capture id and stored `raw/captures/**` path on the page.
+   Those paths stay valid as `referenceImageRefs` for `generate_image` on
+   any later day; inbox paths expire, captures do not.
+4. **Set baselines.** Read pre-challenge shared data where it exists and
+   record per-member baselines.
+5. **Let stakes emerge.** The group invents stakes; your job is to remember
+   them precisely and tease them. Verbatim, on the page.
+6. **Log confounders.** Members declare them naturally ("I'm traveling next
+   week"). Write each one down — they are context for the outcome, never
+   ammunition.
+
+## The daily loop
+
+Schedule one dispatch a day with `vault-cli automation save` (dailyLocal
+schedule, `continuityPolicy: preserve`). Each run:
+
+1. Read the challenge page.
+2. Read fresh standings: `vault-cli group shared --kind <metric kind>`.
+   Never reuse remembered numbers — wrong scores turn jokes into noise. If
+   the data is empty or missing for a member, say so plainly; never invent
+   figures.
+3. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
+   Rotate formats day over day — text bit, comic, voice memo, song,
+   sportsbook odds, ruling — and check the sent log so the same format does
+   not land twice in a row. A voice memo or song cannot share a turn with
+   other media, so the day's format is a real choice.
+4. For images, pass the pinned capture paths as `referenceImageRefs` and
+   store the returned image URL in the sent log; members ask for replays,
+   and a stored URL can be re-attached any time with
+   `attach_response_media`. For audio, store the full script or lyrics in
+   the sent log — audio cannot be re-sent, so a replay means regenerating
+   from the saved script.
+5. Append the day's section: format used, what was sent, standings
+   snapshot, new canon, new confounders.
+
+Between dispatches, the normal `group-chat` decision ladder applies. Answer
+rules questions with a real ruling plus a canon callback; take positions
+when asked. Silence is a feature — one dispatch a day, anchored to fresh
+data, beats a stream of quips.
+
+## Register flips
+
+One datapoint can produce two messages: a group joke about the leader and a
+private check-in for whoever is struggling. The triggers and hard limits
+live in `groupchat-comedy`; this skill adds the memory. When someone's data
+turns bad — illness, travel stress, a terrible night — record their
+protected status on the page so tomorrow's referee, with no memory of
+today, does not roast someone who was shielded yesterday. Clear the note
+when they recover.
+
+## Close-out
+
+1. Compute final standings from fresh shared data plus the page's
+   snapshots.
+2. Declare the winner with a stakes callback, and settle what the losers
+   owe.
+3. Produce one closing artifact — a comic or recap built from the pinned
+   photos and the challenge's canon.
+4. Flip the page to `--status archived` and remove the memory pointer.
+5. Results belong to the members. For personal write-ups or what the data
+   means for them individually, point each member to their own 1:1 thread;
+   never import private 1:1 context into the group.
+
+## Signals the loop is working
+
+Watch the engagement ladder per member: react → reply → argue with the
+referee → contribute photos or memos → commission bits. Climbing is the
+system working. Metric-fairness arguments are engagement — adjudicate them.
+A member going silent for days is a flag for a gentle private check-in, not
+louder group jokes.

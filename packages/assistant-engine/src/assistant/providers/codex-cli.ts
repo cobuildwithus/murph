@@ -209,7 +209,6 @@ export async function executeCodexAssistantTurnAttempt(
     codexHome: providerConfig.target.codexHome ?? undefined,
     configOverrides:
       codexConfigOverrides.length > 0 ? codexConfigOverrides : undefined,
-    loadAuthorizedReferenceImageRefs: input.loadAuthorizedReferenceImageRefs ?? null,
     env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
