@@ -93,6 +93,7 @@ describe("hosted local Codex image media delivery e2e", () => {
         mediaUrl: assistantMediaUrl,
         text: assistantReplyText,
       }),
+      { matchInputContains: "Can you send me the setup image?" },
     );
 
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(

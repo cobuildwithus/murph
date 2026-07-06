@@ -119,6 +119,7 @@ describe("hosted local onboarding follow-up e2e", () => {
         deliveryTarget: materializedChatId,
         text: accelerationReplyText,
       }),
+      { matchInputContains: "Please check the onboarding follow-up soon." },
     );
     const accelerationWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
@@ -158,7 +159,9 @@ describe("hosted local onboarding follow-up e2e", () => {
         privateSummary: "deliver onboarding follow-up",
         text: followupReminderText,
       }),
-    ]);
+    ], {
+      matchInputContains: followupTitle,
+    });
     const firstSendBaseline = countOutboundLinqMessageSends();
     const firstSendPromise = waitForAdditionalOutboundLinqSend({
       baselineCount: firstSendBaseline,
@@ -184,6 +187,7 @@ describe("hosted local onboarding follow-up e2e", () => {
       buildHostedAssistantCompleteOnboardingResponses({
         text: onboardingCompleteReplyText,
       }),
+      { matchInputContains: "I finished onboarding." },
     );
     const completionWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
@@ -217,6 +221,7 @@ describe("hosted local onboarding follow-up e2e", () => {
 
     requireScenario().queueAssistantResponses(
       buildHostedAssistantArchiveAndSkipResponses(),
+      { matchInputContains: followupTitle },
     );
     const secondSendBaseline = countOutboundLinqMessageSends();
     const secondProviderRequestBaseline = requireScenario().assistantProviderRequests.length;

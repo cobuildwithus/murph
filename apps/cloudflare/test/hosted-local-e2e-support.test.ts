@@ -164,6 +164,95 @@ describe("startAssistantProviderStubServer", () => {
     }
   });
 
+  it("does not pop scoped Responses API fixtures for unmatched fallback requests", async () => {
+    const responseState = {
+      queuedResponses: [
+        {
+          matchInputContains: "target message",
+          response: "target reply",
+        },
+      ],
+    };
+    const server = await startAssistantProviderStubServer({
+      fallbackResponseText: "fallback reply",
+      responseState,
+    });
+
+    try {
+      const baseUrl =
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`;
+      const backgroundResponse = await fetch(baseUrl, {
+        body: JSON.stringify({
+          input: [{ content: "background wake", role: "user" }],
+          model: "gpt-5.5",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+      const backgroundBody = await backgroundResponse.text();
+
+      expect(backgroundResponse.status).toBe(200);
+      expect(backgroundBody).toContain("fallback reply");
+      expect(responseState.queuedResponses).toHaveLength(1);
+
+      const targetResponse = await fetch(baseUrl, {
+        body: JSON.stringify({
+          input: [{ content: "please handle this target message", role: "user" }],
+          model: "gpt-5.5",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+      const targetBody = await targetResponse.text();
+
+      expect(targetResponse.status).toBe(200);
+      expect(targetBody).toContain("target reply");
+      expect(responseState.queuedResponses).toHaveLength(0);
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it("keeps unmatched scoped Responses API fixtures queued when fallback is disabled", async () => {
+    const responseState = {
+      queuedResponses: [
+        {
+          matchInputContains: "target message",
+          response: "target reply",
+        },
+      ],
+    };
+    const server = await startAssistantProviderStubServer({ responseState });
+
+    try {
+      const response = await fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            input: [{ content: "background wake", role: "user" }],
+            model: "gpt-5.5",
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      );
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({
+        error: "Assistant provider stub received a responses request without a queued response.",
+      });
+      expect(responseState.queuedResponses).toHaveLength(1);
+    } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
   it("caps recorded Responses API request bodies in diagnostic recorder mode", async () => {
     const requests: Array<{ body: string; method: string; url: string }> = [];
     const server = await startAssistantProviderStubServer({

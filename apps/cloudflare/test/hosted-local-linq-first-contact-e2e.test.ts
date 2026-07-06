@@ -207,7 +207,9 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       requireLinqStub().listObservedMessageIds(materializedChatId).length;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
     const requestCountBeforeReply = requireLinqStub().observedRequests.length;
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT]);
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT], {
+      matchInputContains: "hello mate",
+    });
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       directReplyUserId,
       materializedChatId,
@@ -312,6 +314,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
         progressText: progressToolAttemptText,
         text: progressToolFinalReplyText,
       }),
+      { matchInputContains: "Can you check this thread?" },
     );
 
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -400,7 +403,9 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
     const assistantProviderResponseCountBefore =
       countAssistantProviderResponsesApiRequests();
-    requireScenario().queueAssistantResponses([signupFollowupQuestionText]);
+    requireScenario().queueAssistantResponses([signupFollowupQuestionText], {
+      matchInputContains: "Hey mate yea",
+    });
 
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       duplicateWelcomeUserId,
@@ -490,7 +495,10 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
 
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT]);
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT], {
+      matchInputContains:
+        "I want to build more strength, improve endurance, and get fitter overall.",
+    });
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       fastReplyUserId,
       materializedChatId,
@@ -601,10 +609,13 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       "What's your name? And if you're comfortable sharing, your age and whether you're a guy or girl.";
     const assistantSecondReplyText =
       "Got it. I will remember that and we can work from those goals.";
-    requireScenario().queueAssistantResponses([
-      assistantQuestionText,
-      assistantSecondReplyText,
-    ]);
+    requireScenario().queueAssistantResponses([assistantQuestionText], {
+      matchInputContains: "yes",
+    });
+    requireScenario().queueAssistantResponses([assistantSecondReplyText], {
+      matchInputContains:
+        "You can call me River. I want to build strength, improve cholesterol, sleep better, and have more energy.",
+    });
 
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       postAssistantReplyUserId,
@@ -738,7 +749,9 @@ testControlsDescribe("hosted local Linq checkpoint replay e2e", () => {
       );
 
       const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
-      requireScenario().queueAssistantResponses([checkpointReplayReplyText]);
+      requireScenario().queueAssistantResponses([checkpointReplayReplyText], {
+        matchInputContains: "Can you help me with this?",
+      });
       const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
         checkpointReplayUserId,
         materializedChatId,
@@ -773,10 +786,13 @@ testControlsDescribe("hosted local Linq checkpoint replay e2e", () => {
       );
 
       const postRewindBaselineSendCount = requireLinqStub().countObservedSends(replyPath);
-      requireScenario().queueAssistantResponses([
-        checkpointReplayReplyText,
-        checkpointReplayReplyText,
-      ]);
+      requireScenario().queueAssistantResponses(
+        [
+          checkpointReplayReplyText,
+          checkpointReplayReplyText,
+        ],
+        { matchInputContains: "Also, can you repeat that?" },
+      );
       const secondWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
         checkpointReplayUserId,
         materializedChatId,
@@ -869,7 +885,9 @@ testControlsDescribe("hosted local Linq stale scheduled wake e2e", () => {
       );
       expect(Number.isFinite(preReplySeededWakeMs)).toBe(true);
       expect(preReplySeededWakeMs).toBeLessThanOrEqual(Date.now());
-      requireScenario().queueAssistantResponses([typingLoopReplyText]);
+      requireScenario().queueAssistantResponses([typingLoopReplyText], {
+        matchInputContains: "Can you help me with this?",
+      });
 
       const replyStartedAtMs = Date.now();
       const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(

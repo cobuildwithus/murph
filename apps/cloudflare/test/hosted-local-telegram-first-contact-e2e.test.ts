@@ -71,7 +71,9 @@ describe("hosted local Telegram auto-reply e2e", () => {
       userId,
     });
 
-    requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT]);
+    requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT], {
+      matchInputContains: "yo",
+    });
     const requestCountBeforeInbound = requireTelegramStub().observedRequests.length;
     await requireScenario().runWake(buildInboundTelegramWake(userId), userId);
 
@@ -143,7 +145,10 @@ describe("hosted local Telegram auto-reply e2e", () => {
       requireTelegramStub().createSendMessageMatcher(fastReplyUserId),
     );
 
-    requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT]);
+    requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT], {
+      matchInputContains:
+        "I want to build more strength, improve endurance, and get fitter overall.",
+    });
     await requireScenario().enqueueWake(
       buildInboundTelegramWake(fastReplyUserId, {
         eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_name`,
@@ -200,7 +205,9 @@ describe("hosted local Telegram auto-reply e2e", () => {
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("react_to_message", { reaction: "heart" }),
       reactionReplyText,
-    ]);
+    ], {
+      matchInputContains: "react to this with a heart",
+    });
     const expectedReactionPath = `/bot${hostedLocalTelegramRequestToken}/setMessageReaction`;
     const expectedSendPath = `/bot${hostedLocalTelegramRequestToken}/sendMessage`;
     const reactionMatcher = requireTelegramStub().createReactionMatcher(reactionUserId, {
@@ -282,7 +289,9 @@ describe("hosted local Telegram auto-reply e2e", () => {
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("react_to_message", { reaction: "heart" }),
       reactionReplyText,
-    ]);
+    ], {
+      matchInputContains: "try to react to this with a heart",
+    });
     const expectedReactionPath = `/bot${hostedLocalTelegramRequestToken}/setMessageReaction`;
     const expectedSendPath = `/bot${hostedLocalTelegramRequestToken}/sendMessage`;
     const reactionMatcher = requireTelegramStub().createReactionMatcher(reactionFailureUserId, {

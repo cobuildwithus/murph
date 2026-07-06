@@ -83,6 +83,7 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
         text: setupReplyText,
         threadId: buildTelegramThreadId(userId),
       }),
+      { matchInputContains: setupRequestText },
     );
 
     const expectedSendPath = `/bot${hostedLocalTelegramRequestToken}/sendMessage`;
@@ -126,7 +127,9 @@ describe("hosted local Telegram scheduled reminder e2e", () => {
         privateSummary: "deliver sleep reminder",
         text: reminderText,
       }),
-    ]);
+    ], {
+      matchInputContains: "Sleep reminder",
+    });
 
     const reminderSendBaselineCount = countScheduledReminderSendsWithoutNudge({
       expectedPath: expectedSendPath,

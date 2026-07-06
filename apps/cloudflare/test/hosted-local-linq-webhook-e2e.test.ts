@@ -73,7 +73,9 @@ describe("hosted local Linq webhook e2e", () => {
       text: "U can call me Rocket Man",
     });
 
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT]);
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT], {
+      matchInputContains: "U can call me Rocket Man",
+    });
     const webhookResponse = await postSignedLinqWebhook(webhookEvent);
     expect(webhookResponse.status).toBe(202);
     await expect(webhookResponse.json()).resolves.toMatchObject({
@@ -123,7 +125,10 @@ describe("hosted local Linq webhook e2e", () => {
       text: "I want to build more strength, improve endurance, and get fitter overall.",
     });
 
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT]);
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT], {
+      matchInputContains:
+        "I want to build more strength, improve endurance, and get fitter overall.",
+    });
     const firstResponse = await postSignedLinqWebhook(firstWebhook);
     const secondResponse = await postSignedLinqWebhook(secondWebhook);
 
@@ -186,7 +191,9 @@ describe("hosted local Linq webhook e2e", () => {
     });
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
 
-    requireScenario().queueAssistantResponses([hostedLinqPdfAssistantReplyText]);
+    requireScenario().queueAssistantResponses([hostedLinqPdfAssistantReplyText], {
+      matchInputContains: "lab-results.pdf",
+    });
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       materializedChatId,
@@ -289,7 +296,9 @@ describe("hosted local Linq webhook e2e", () => {
     });
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
 
-    requireScenario().queueAssistantResponses([hostedLinqImageAssistantReplyText]);
+    requireScenario().queueAssistantResponses([hostedLinqImageAssistantReplyText], {
+      matchInputContains: "outbox.png",
+    });
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       materializedChatId,

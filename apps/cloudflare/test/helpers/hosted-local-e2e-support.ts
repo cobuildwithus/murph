@@ -80,9 +80,37 @@ type HostedLocalAssistantProviderHeldTextResponse = {
 };
 
 export type HostedLocalAssistantProviderScriptedResponse =
+  | HostedLocalAssistantProviderScriptedResponsePayload
+  | ({
+      response: HostedLocalAssistantProviderScriptedResponsePayload;
+    } & HostedLocalAssistantProviderResponseScopeOptions);
+
+type HostedLocalAssistantProviderScriptedResponsePayload =
   | string
   | HostedLocalAssistantProviderFunctionCallResponse
   | HostedLocalAssistantProviderHeldTextResponse;
+
+export interface HostedLocalAssistantProviderResponseScopeOptions {
+  matchInputContains?: string | readonly string[] | null;
+}
+
+export function scopeHostedLocalAssistantProviderResponse(
+  scriptedResponse: HostedLocalAssistantProviderScriptedResponse,
+  scope: HostedLocalAssistantProviderResponseScopeOptions = {},
+): HostedLocalAssistantProviderScriptedResponse {
+  const existingScope = isScopedAssistantProviderScriptedResponse(scriptedResponse)
+    ? normalizeAssistantProviderResponseMatchers(scriptedResponse.matchInputContains)
+    : [];
+  const additionalScope = normalizeAssistantProviderResponseMatchers(scope.matchInputContains);
+  const response = normalizeHostedLocalAssistantProviderResponsePayload(
+    readHostedLocalAssistantProviderResponsePayload(scriptedResponse),
+  );
+  const matchInputContains = [...existingScope, ...additionalScope];
+
+  return matchInputContains.length > 0
+    ? { matchInputContains, response }
+    : response;
+}
 
 /**
  * Scripts a sandboxed shell execution through the real Codex app-server.
@@ -282,14 +310,132 @@ export function buildHostedAssistantNotificationDecisionResponse(input: {
 }
 
 function dequeueAssistantProviderResponse(input: {
+  requestBody?: string;
+  requestBodyJson?: unknown;
   fallbackResponseText?: string | null;
   responseState?: HostedLocalAssistantProviderStubState;
-}): HostedLocalAssistantProviderScriptedResponse | null {
-  return (
-    input.responseState?.queuedResponses.shift()
-    ?? input.fallbackResponseText
-    ?? null
+}): HostedLocalAssistantProviderScriptedResponsePayload | null {
+  const queuedResponses = input.responseState?.queuedResponses;
+  if (!queuedResponses || queuedResponses.length === 0) {
+    return input.fallbackResponseText ?? null;
+  }
+
+  const requestMatchText = buildAssistantProviderRequestMatchText({
+    body: input.requestBody,
+    bodyJson: input.requestBodyJson,
+  });
+  const responseIndex = queuedResponses.findIndex((scriptedResponse) =>
+    assistantProviderScriptedResponseMatchesRequest(scriptedResponse, requestMatchText)
   );
+  if (responseIndex < 0) {
+    return input.fallbackResponseText ?? null;
+  }
+
+  const scriptedResponse = queuedResponses.splice(responseIndex, 1)[0];
+  if (!scriptedResponse) {
+    return input.fallbackResponseText ?? null;
+  }
+
+  return readHostedLocalAssistantProviderResponsePayload(scriptedResponse);
+}
+
+function readHostedLocalAssistantProviderResponsePayload(
+  scriptedResponse: HostedLocalAssistantProviderScriptedResponse,
+): HostedLocalAssistantProviderScriptedResponsePayload {
+  return isScopedAssistantProviderScriptedResponse(scriptedResponse)
+    ? scriptedResponse.response
+    : scriptedResponse;
+}
+
+function normalizeHostedLocalAssistantProviderResponsePayload(
+  scriptedResponse: HostedLocalAssistantProviderScriptedResponsePayload,
+): HostedLocalAssistantProviderScriptedResponsePayload {
+  if (typeof scriptedResponse !== "string") {
+    return scriptedResponse;
+  }
+
+  const trimmed = scriptedResponse.trim();
+  if (!trimmed) {
+    throw new Error("Hosted local assistant stub responses must be non-empty.");
+  }
+
+  return trimmed;
+}
+
+function isScopedAssistantProviderScriptedResponse(
+  scriptedResponse: HostedLocalAssistantProviderScriptedResponse,
+): scriptedResponse is {
+  response: HostedLocalAssistantProviderScriptedResponsePayload;
+} & HostedLocalAssistantProviderResponseScopeOptions {
+  return (
+    typeof scriptedResponse === "object"
+    && scriptedResponse !== null
+    && "response" in scriptedResponse
+  );
+}
+
+function normalizeAssistantProviderResponseMatchers(
+  matchInputContains: string | readonly string[] | null | undefined,
+): string[] {
+  const matchers =
+    typeof matchInputContains === "string"
+      ? [matchInputContains]
+      : [...(matchInputContains ?? [])];
+  const normalized = matchers.map((matcher) => matcher.trim());
+  if (normalized.some((matcher) => matcher.length === 0)) {
+    throw new Error("Hosted local assistant stub response matchers must be non-empty.");
+  }
+
+  return normalized;
+}
+
+function assistantProviderScriptedResponseMatchesRequest(
+  scriptedResponse: HostedLocalAssistantProviderScriptedResponse,
+  requestMatchText: string,
+): boolean {
+  const matchInputContains = isScopedAssistantProviderScriptedResponse(scriptedResponse)
+    ? normalizeAssistantProviderResponseMatchers(scriptedResponse.matchInputContains)
+    : [];
+
+  return matchInputContains.length === 0
+    || matchInputContains.every((matcher) => requestMatchText.includes(matcher));
+}
+
+function buildAssistantProviderRequestMatchText(input: {
+  body?: string;
+  bodyJson?: unknown;
+}): string {
+  return [
+    input.body ?? "",
+    ...collectJsonStringValues(input.bodyJson),
+  ].join("\n");
+}
+
+function collectJsonStringValues(value: unknown): string[] {
+  const strings: string[] = [];
+
+  function visit(current: unknown): void {
+    if (typeof current === "string") {
+      strings.push(current);
+      return;
+    }
+
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        visit(item);
+      }
+      return;
+    }
+
+    if (current && typeof current === "object") {
+      for (const item of Object.values(current)) {
+        visit(item);
+      }
+    }
+  }
+
+  visit(value);
+  return strings;
 }
 
 function buildAssistantProviderResponsesApiStubResponse(input: {
@@ -321,7 +467,7 @@ function buildAssistantProviderResponsesApiStubResponse(input: {
 }
 
 async function prepareAssistantProviderScriptedResponse(
-  scriptedResponse: HostedLocalAssistantProviderScriptedResponse,
+  scriptedResponse: HostedLocalAssistantProviderScriptedResponsePayload,
 ): Promise<string | HostedLocalAssistantProviderFunctionCallResponse> {
   if (typeof scriptedResponse === "string" || "functionCall" in scriptedResponse) {
     return scriptedResponse;
@@ -665,6 +811,8 @@ export async function startAssistantProviderStubServer(input: {
 
       const scriptedResponse = dequeueAssistantProviderResponse({
         fallbackResponseText: input.fallbackResponseText,
+        requestBody: body,
+        requestBodyJson: bodyJson,
         responseState: input.responseState,
       });
       if (!scriptedResponse) {
@@ -747,6 +895,8 @@ export async function startAssistantProviderStubServer(input: {
 
       const scriptedResponse = dequeueAssistantProviderResponse({
         fallbackResponseText: input.fallbackResponseText,
+        requestBody: body,
+        requestBodyJson: bodyJson,
         responseState: input.responseState,
       });
       if (!scriptedResponse) {
