@@ -6,6 +6,9 @@ import {
 } from "@murphai/gateway-core";
 
 export const HOSTED_ASSISTANT_DELIVERY_KIND = "assistant.delivery" as const;
+// Must stay >= the hosted mailbox run import limit so one grouped auto-reply
+// can carry every answered conversation item through the side-effect payload.
+const HOSTED_ASSISTANT_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
 
 export const hostedAssistantDeliveryTargetKindValues =
   gatewayDeliveryTargetKindValues;
@@ -698,8 +701,10 @@ function parseHostedAssistantDeliveryAnsweredMailboxItemIds(
   if (!Array.isArray(value)) {
     throw new TypeError(`${label} must be an array.`);
   }
-  if (value.length > 40) {
-    throw new TypeError(`${label} must contain at most 40 entries.`);
+  if (value.length > HOSTED_ASSISTANT_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT) {
+    throw new TypeError(
+      `${label} must contain at most ${HOSTED_ASSISTANT_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT} entries.`,
+    );
   }
 
   return value.map((entry, index) => {

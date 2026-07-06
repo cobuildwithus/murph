@@ -666,6 +666,7 @@ describe('channel helper seams', () => {
       },
     )
     expect(sendLinq).toHaveBeenCalledWith({
+      answeredMailboxItemIds: [],
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
       idempotencyKey: 'idem-linq',
@@ -952,6 +953,7 @@ describe('channel helper seams', () => {
     )
 
     expect(sendLinq).toHaveBeenCalledWith({
+      answeredMailboxItemIds: [],
       directRecipientPhoneNumber: '+15550000001',
       fromPhoneNumber: '+15550000002',
       idempotencyKey: 'idem-text-first',
@@ -961,6 +963,7 @@ describe('channel helper seams', () => {
       targetKind: 'thread',
     })
     expect(sendLinqVoiceMemo).toHaveBeenCalledWith({
+      answeredMailboxItemIds: [],
       attachmentId: 'attachment_voice_1',
       replyToMessageId: 'reply-text',
       target: 'thread-linq-voice',
@@ -1010,6 +1013,7 @@ describe('channel helper seams', () => {
     )
 
     expect(sendLinqVoiceMemo).toHaveBeenCalledWith({
+      answeredMailboxItemIds: [],
       attachmentId: 'attachment_voice_1',
       replyToMessageId: 'reply-materialized',
       target: 'thread-linq-materialized',

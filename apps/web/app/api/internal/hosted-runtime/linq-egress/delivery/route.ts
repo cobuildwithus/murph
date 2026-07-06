@@ -31,7 +31,9 @@ import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_LINQ_EGRESS_DELIVERY_BODY_LIMIT_BYTES = 8 * 1024;
-const HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 40;
+// Must stay >= the hosted mailbox run import limit so one grouped auto-reply
+// can stamp every answered conversation item.
+const HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {

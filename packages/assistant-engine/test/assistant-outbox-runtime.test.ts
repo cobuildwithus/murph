@@ -153,6 +153,10 @@ describe('assistant outbox runtime', () => {
 
   it('persists answered mailbox item ids and defaults other sends to none', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-answered-mailbox-')
+    const groupedMailboxItemIds = Array.from(
+      { length: 45 },
+      (_, index) => `mailbox_item_grouped_${index}`,
+    )
 
     const replyIntent = await createIntent(vaultRoot, {
       answeredMailboxItemIds: [
@@ -169,6 +173,18 @@ describe('assistant outbox runtime', () => {
       sessionId: 'session-reminder-no-answered-mailbox',
       turnId: 'turn-reminder-no-answered-mailbox',
     })
+    const groupedAutoReply = await deliverAssistantOutboxMessage({
+      answeredMailboxItemIds: groupedMailboxItemIds,
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      message: 'grouped auto-reply with more than forty answered items',
+      sessionId: 'session-grouped-auto-reply',
+      threadId: 'linq-thread-grouped',
+      threadIsDirect: true,
+      turnId: 'turn-grouped-auto-reply',
+      turnTrigger: 'automation-auto-reply',
+      vault: vaultRoot,
+    })
 
     await expect(readAssistantOutboxIntent(vaultRoot, replyIntent.intentId))
       .resolves.toMatchObject({
@@ -181,6 +197,21 @@ describe('assistant outbox runtime', () => {
       .resolves.toMatchObject({
         answeredMailboxItemIds: [],
       })
+    expect(groupedAutoReply.kind).toBe('queued')
+    expect(groupedAutoReply.intent.answeredMailboxItemIds).toEqual(
+      groupedMailboxItemIds,
+    )
+    await expect(
+      createIntent(vaultRoot, {
+        answeredMailboxItemIds: Array.from(
+          { length: 101 },
+          (_, index) => `mailbox_item_too_many_${index}`,
+        ),
+        message: 'this should fail before truncating answered mailbox ids',
+        sessionId: 'session-too-many-answered-mailbox',
+        turnId: 'turn-too-many-answered-mailbox',
+      }),
+    ).rejects.toThrow('answered mailbox item ids exceed the 100 item limit')
   })
 
   it('persists auto-reply intent provenance when receipt repair has no receipt', async () => {
@@ -2275,6 +2306,76 @@ describe('assistant outbox runtime', () => {
     expect(ambiguous.intent.deliveryConfirmationPending).toBe(false)
     expect(ambiguous.intent.lastError?.code).toBe(
       'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    )
+  })
+
+  it('keeps accepted Linq consume-stamp failures on the existing outbox retry path', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-linq-consume-retry-')
+    const answeredMailboxItemIds = Array.from(
+      { length: 45 },
+      (_, index) => `mailbox_item_retry_${index}`,
+    )
+    const seeded = await createIntent(vaultRoot, {
+      answeredMailboxItemIds,
+      channel: 'linq',
+      message: 'accepted reply needs consume stamp',
+      sessionId: 'session-linq-consume-retry',
+      threadId: 'linq-thread-consume-retry',
+      turnId: 'turn-linq-consume-retry',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      new VaultCliError(
+        'ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED',
+        'Accepted Linq delivery outcome recording failed before consume state could be stored.',
+        { retryable: true },
+      ),
+    )
+
+    const failedReport = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:25:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(failedReport.intent.status).toBe('retryable')
+    expect(failedReport.intent.sentAt).toBeNull()
+    expect(failedReport.intent.answeredMailboxItemIds).toEqual(answeredMailboxItemIds)
+    expect(failedReport.intent.lastError?.code).toBe(
+      'ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED',
+    )
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        idempotencyKey: failedReport.intent.deliveryIdempotencyKey,
+        providerMessageId: 'provider-linq-consume-retry',
+        providerThreadId: 'linq-thread-consume-retry',
+        sentAt: '2026-04-08T04:26:00.000Z',
+        target: 'linq-thread-consume-retry',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: true,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const retry = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:26:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(retry.intent.status).toBe('sent')
+    expect(retry.intent.answeredMailboxItemIds).toEqual(answeredMailboxItemIds)
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds,
+        channel: 'linq',
+      }),
+      undefined,
     )
   })
 

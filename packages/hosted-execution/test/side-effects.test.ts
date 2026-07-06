@@ -483,6 +483,35 @@ describe("hosted assistant delivery contracts", () => {
     ).toThrow("Unsupported hosted assistant delivery kind");
   });
 
+  it("parses grouped assistant delivery payloads with more than forty answered mailbox item ids", () => {
+    const answeredMailboxItemIds = Array.from(
+      { length: 45 },
+      (_, index) => `mailbox_item_grouped_${index}`,
+    );
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-1",
+      effectId: "intent-1",
+      payload: createHostedAssistantDeliveryPayload({
+        answeredMailboxItemIds,
+      }),
+    });
+
+    expect(parseHostedAssistantDeliverySideEffect(effect).payload.answeredMailboxItemIds)
+      .toEqual(answeredMailboxItemIds);
+    expect(() =>
+      parseHostedAssistantDeliverySideEffect({
+        ...effect,
+        payload: {
+          ...effect.payload,
+          answeredMailboxItemIds: Array.from(
+            { length: 101 },
+            (_, index) => `mailbox_item_too_many_${index}`,
+          ),
+        },
+      }),
+    ).toThrow("answeredMailboxItemIds must contain at most 100 entries");
+  });
+
   it("compares hosted side-effect identities, attempts, failures, and receipts", () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe-1",

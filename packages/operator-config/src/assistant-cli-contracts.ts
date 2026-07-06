@@ -118,6 +118,9 @@ export const assistantTurnTimelineEventKindValues = [
   'turn.deferred',
   'turn.failed',
 ] as const
+// Must stay >= the hosted mailbox run import limit so one grouped auto-reply
+// cannot silently drop consume authority for answered items.
+export const ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100
 export const assistantAskResultStatusValues = ['completed'] as const
 export const assistantOnboardingStatusValues = ['open', 'completed'] as const
 export const assistantOnboardingCompletionReasonValues = [
@@ -810,7 +813,9 @@ export const assistantOutboxIntentSchema = z
     deliveryConfirmationPending: z.boolean().default(false),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
-    answeredMailboxItemIds: z.array(z.string().trim().min(1)).max(40).default([]),
+    answeredMailboxItemIds: z.array(z.string().trim().min(1))
+      .max(ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT)
+      .default([]),
     preparedDispatchToken: z.string().min(1).nullable().default(null),
     lastError: assistantDeliveryErrorSchema.nullable(),
   })

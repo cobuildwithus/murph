@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
+  ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT,
   type AssistantChannelDelivery,
   assistantChannelDeliverySchema,
   assistantOutboxIntentSchema,
@@ -2047,8 +2048,11 @@ function normalizeAssistantOutboxAnsweredMailboxItemIds(
     }
     seen.add(itemId)
     result.push(itemId)
-    if (result.length >= 40) {
-      break
+    if (result.length > ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT) {
+      throw new VaultCliError(
+        'ASSISTANT_OUTBOX_ANSWERED_MAILBOX_ITEM_IDS_TOO_MANY',
+        `Assistant outbox answered mailbox item ids exceed the ${ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT} item limit.`,
+      )
     }
   }
 

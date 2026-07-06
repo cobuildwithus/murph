@@ -218,7 +218,7 @@ describe("hosted runtime Linq delivery route", () => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
       answeredMailboxItemIds: Array.from(
-        { length: 41 },
+        { length: 101 },
         (_, index) => `mailbox_item_${index}`,
       ),
       attemptedAt: "2026-04-26T00:00:03.000Z",
@@ -232,6 +232,32 @@ describe("hosted runtime Linq delivery route", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
+  });
+
+  it("accepts grouped delivery outcomes with more than forty answered mailbox item ids", async () => {
+    const answeredMailboxItemIds = Array.from(
+      { length: 45 },
+      (_, index) => `mailbox_item_grouped_${index}`,
+    );
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds,
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerTarget: "+15550100001",
+      providerThreadId: "linq_chat_123",
+      target: "+15550100001",
+      targetKind: "participant",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds,
+      }),
+    );
   });
 
   it("does not carry answered mailbox item ids for failed delivery outcomes", async () => {
