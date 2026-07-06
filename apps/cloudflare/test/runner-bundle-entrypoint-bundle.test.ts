@@ -8,8 +8,27 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assertRunnerEntrypointBundleWithinBudgets,
   bundleRunnerContainerEntrypoint,
+  resolveRunnerEntrypointBundleBudgets,
   RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME,
 } from "../scripts/runner-bundle/bundle-entrypoint.js";
+
+// A metafile with a single container-entrypoint.js output sized to `entryBytes`
+// and no other chunks, so the total equals the entry size. Used to prove the
+// production budgets gate the entry chunk at the ratchet boundary.
+function entryOnlyMetafile(entryBytes: number): Metafile {
+  return {
+    inputs: { "dist/container-entrypoint.js": { bytes: 10, imports: [] } },
+    outputs: {
+      "dist-bundled/container-entrypoint.js": {
+        bytes: entryBytes,
+        entryPoint: "dist/container-entrypoint.js",
+        exports: [],
+        imports: [],
+        inputs: {},
+      },
+    },
+  };
+}
 
 const temporaryDirectories: string[] = [];
 
@@ -213,6 +232,37 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         totalBytes: 10_000,
       }),
     ).toEqual({ entryBytes: 2_000, totalBytes: 6_000 });
+  });
+
+  it("resolves the production budgets as the ratcheted entry baseline plus tolerance", () => {
+    const budgets = resolveRunnerEntrypointBundleBudgets();
+
+    // Entry = measured baseline (2,288,516B on 2026-07-06) + 48,000B noise
+    // band. Locking the exact value makes any silent change to the ratchet a
+    // failing, reviewed diff.
+    expect(budgets).toEqual({
+      entryBytes: 2_288_516 + 48_000,
+      totalBytes: 9_300_000,
+    });
+    // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling
+    // it replaced, so real boot-path creep can no longer hide in headroom.
+    expect(budgets.entryBytes).toBeLessThan(2_900_000);
+  });
+
+  it("gates the entry chunk at the production ratchet boundary", () => {
+    const { entryBytes } = resolveRunnerEntrypointBundleBudgets();
+
+    // At the boundary the default (production) budgets accept the bundle.
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(entryOnlyMetafile(entryBytes)),
+    ).toEqual({ entryBytes, totalBytes: entryBytes });
+
+    // One byte over the baseline + tolerance trips the assembly.
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(
+        entryOnlyMetafile(entryBytes + 1),
+      ),
+    ).toThrow(/entry chunk .* exceeds budget/);
   });
 
   it("rejects metafiles without a container-entrypoint.js entry output", () => {
