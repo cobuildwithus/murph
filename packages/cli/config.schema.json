@@ -1636,6 +1636,61 @@
             }
           }
         },
+        "group": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "shared": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "kind": {
+                          "description": "Optional projection-kind filter. Repeat --kind to build a single-metric leaderboard, e.g. --kind steps-days.v0.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "sleep-times.v0",
+                              "activity-days.v0",
+                              "workout-days.v0",
+                              "heart-rate-zones-days.v0",
+                              "steps-days.v0",
+                              "max-heart-rate-days.v0",
+                              "distance-days.v0",
+                              "active-calories-days.v0",
+                              "elevation-gain-days.v0",
+                              "floors-climbed-days.v0",
+                              "day-strain-days.v0",
+                              "workout-strain-days.v0",
+                              "activity-score-days.v0",
+                              "vo2-max-days.v0",
+                              "resting-heart-rate-days.v0",
+                              "hrv-days.v0"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "batch": {
           "type": "object",
           "additionalProperties": false,

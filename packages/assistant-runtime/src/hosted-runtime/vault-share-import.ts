@@ -7,44 +7,21 @@ import type {
   HostedExecutionVaultShareRevokeWake,
 } from "@murphai/hosted-execution/contracts";
 import {
+  compareSharedVaultShareRecords,
+  createEmptySharedVaultShareProjectionStore,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
-  HOSTED_VAULT_SHARE_PROJECTION_KINDS,
-  parseHostedVaultShareDeliveryRecord,
+  parseSharedVaultShareProjectionStore,
+  SHARED_VAULT_SHARE_PROJECTIONS_RELATIVE_PATH,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
+  type SharedVaultShareGrantorEntry,
+  type SharedVaultShareProjectionsFile,
+  type SharedVaultShareRecordEntry,
 } from "@murphai/hosted-execution/vault-share";
 import { writeJsonFileAtomic } from "@murphai/runtime-state/node";
 
 import type { HostedMailboxItemImportOutcome } from "./mailbox-import.ts";
-
-const SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA =
-  "murph.shared-vault-projections.v1";
-
-interface SharedVaultShareRecordEntry {
-  receivedEventId: string;
-  record: HostedVaultShareDeliveryRecord;
-  schema: typeof HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA;
-  shareId: string;
-}
-
-interface SharedVaultShareGrantorEntry {
-  grantorMemberId: string;
-  projectionKind: HostedVaultShareProjectionKind;
-  records: SharedVaultShareRecordEntry[];
-  shareId: string;
-  updatedAt: string;
-}
-
-interface SharedVaultShareProjectionEntry {
-  grantors: Record<string, SharedVaultShareGrantorEntry>;
-}
-
-interface SharedVaultShareProjectionsFile {
-  projections: Partial<Record<HostedVaultShareProjectionKind, SharedVaultShareProjectionEntry>>;
-  schema: typeof SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA;
-  updatedAt: string;
-}
 
 type SharedVaultShareProjectionStoreReadResult =
   | {
@@ -62,9 +39,10 @@ type SharedVaultShareProjectionStoreReadResult =
  * Destination-side landing for consented vault-share deliveries: a deterministic,
  * idempotent upsert of the shared record into one compact derived destination
  * workspace file. The file is bounded by projection kind, grantor, and the delivery
- * record cap, so repeated deliveries cannot grow the vault file tree. Promotion into
- * richer canonical entities is a future consumer of this file, not a change to this
- * boundary.
+ * record cap, so repeated deliveries cannot grow the vault file tree. The store shape
+ * and its parser are owned by `@murphai/hosted-execution/vault-share` so this writer and
+ * the `vault-cli group shared` reader can never drift; promotion into richer canonical
+ * entities remains a future consumer of this file, not a change to this boundary.
  */
 export async function importHostedVaultShareDeliveryWake(input: {
   vaultRoot: string;
@@ -210,13 +188,15 @@ function upsertSharedVaultShareRecord(
 ): void {
   const projection = store.projections[input.projectionKind] ?? { grantors: {} };
   const existingGrantor = projection.grantors[input.grantorMemberId];
-  const grantor = existingGrantor?.shareId === input.shareId ? existingGrantor : {
-    grantorMemberId: input.grantorMemberId,
-    projectionKind: input.projectionKind,
-    records: [],
-    shareId: input.shareId,
-    updatedAt: input.updatedAt,
-  };
+  const grantor: SharedVaultShareGrantorEntry = existingGrantor?.shareId === input.shareId
+    ? existingGrantor
+    : {
+        grantorMemberId: input.grantorMemberId,
+        projectionKind: input.projectionKind,
+        records: [],
+        shareId: input.shareId,
+        updatedAt: input.updatedAt,
+      };
 
   const nextRecord: SharedVaultShareRecordEntry = {
     receivedEventId: input.receivedEventId,
@@ -242,17 +222,6 @@ function upsertSharedVaultShareRecord(
   };
   store.projections[input.projectionKind] = projection;
   store.updatedAt = input.updatedAt;
-}
-
-function compareSharedVaultShareRecords(
-  left: SharedVaultShareRecordEntry,
-  right: SharedVaultShareRecordEntry,
-): number {
-  return (
-    right.record.occurredAt.localeCompare(left.record.occurredAt)
-    || right.record.recordKey.localeCompare(left.record.recordKey)
-    || right.receivedEventId.localeCompare(left.receivedEventId)
-  );
 }
 
 async function readSharedVaultShareProjectionStore(
@@ -306,14 +275,6 @@ async function readRepairableSharedVaultShareProjectionStore(
   };
 }
 
-function createEmptySharedVaultShareProjectionStore(): SharedVaultShareProjectionsFile {
-  return {
-    projections: {},
-    schema: SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA,
-    updatedAt: "1970-01-01T00:00:00.000Z",
-  };
-}
-
 async function writeSharedVaultShareProjectionStore(
   vaultRoot: string,
   store: SharedVaultShareProjectionsFile,
@@ -325,133 +286,7 @@ async function writeSharedVaultShareProjectionStore(
 }
 
 function resolveSharedVaultShareProjectionStorePath(vaultRoot: string): string {
-  return join(vaultRoot, "derived", "vault-share", "projections.json");
-}
-
-function parseSharedVaultShareProjectionStore(
-  value: unknown,
-): SharedVaultShareProjectionsFile | null {
-  if (!isPlainRecord(value)) {
-    return null;
-  }
-  if (value.schema !== SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA) {
-    return null;
-  }
-  if (typeof value.updatedAt !== "string") {
-    return null;
-  }
-  if (!isPlainRecord(value.projections)) {
-    return null;
-  }
-
-  const projections: Partial<Record<HostedVaultShareProjectionKind, SharedVaultShareProjectionEntry>> = {};
-  for (const projectionKind of HOSTED_VAULT_SHARE_PROJECTION_KINDS) {
-    const projectionValue = value.projections[projectionKind];
-    if (projectionValue === undefined) {
-      continue;
-    }
-    const projection = parseSharedVaultShareProjection(
-      projectionValue,
-      projectionKind,
-    );
-    if (!projection) {
-      return null;
-    }
-    projections[projectionKind] = projection;
-  }
-
-  return {
-    projections,
-    schema: SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA,
-    updatedAt: value.updatedAt,
-  };
-}
-
-function parseSharedVaultShareProjection(
-  value: unknown,
-  projectionKind: HostedVaultShareProjectionKind,
-): SharedVaultShareProjectionEntry | null {
-  if (!isPlainRecord(value) || !isPlainRecord(value.grantors)) {
-    return null;
-  }
-
-  const grantors: Record<string, SharedVaultShareGrantorEntry> = {};
-  for (const [grantorMemberId, grantorValue] of Object.entries(value.grantors)) {
-    const grantor = parseSharedVaultShareGrantor(
-      grantorValue,
-      projectionKind,
-    );
-    if (!grantor || grantor.grantorMemberId !== grantorMemberId) {
-      return null;
-    }
-    grantors[grantorMemberId] = grantor;
-  }
-
-  return { grantors };
-}
-
-function parseSharedVaultShareGrantor(
-  value: unknown,
-  projectionKind: HostedVaultShareProjectionKind,
-): SharedVaultShareGrantorEntry | null {
-  if (!isPlainRecord(value)) {
-    return null;
-  }
-  if (
-    typeof value.grantorMemberId !== "string"
-    || value.projectionKind !== projectionKind
-    || typeof value.shareId !== "string"
-    || typeof value.updatedAt !== "string"
-    || !Array.isArray(value.records)
-  ) {
-    return null;
-  }
-
-  const records: SharedVaultShareRecordEntry[] = [];
-  for (const record of value.records) {
-    const parsed = parseSharedVaultShareRecordEntry(record, projectionKind);
-    if (!parsed) {
-      return null;
-    }
-    records.push(parsed);
-  }
-
-  return {
-    grantorMemberId: value.grantorMemberId,
-    projectionKind,
-    records: records
-      .sort(compareSharedVaultShareRecords)
-      .slice(0, HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS),
-    shareId: value.shareId,
-    updatedAt: value.updatedAt,
-  };
-}
-
-function parseSharedVaultShareRecordEntry(
-  value: unknown,
-  projectionKind: HostedVaultShareProjectionKind,
-): SharedVaultShareRecordEntry | null {
-  if (!isPlainRecord(value)) {
-    return null;
-  }
-  if (
-    typeof value.receivedEventId !== "string"
-    || value.schema !== HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA
-    || typeof value.shareId !== "string"
-  ) {
-    return null;
-  }
-
-  try {
-    return {
-      receivedEventId: value.receivedEventId,
-      record: parseHostedVaultShareDeliveryRecord(value.record, projectionKind),
-      schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
-      shareId: value.shareId,
-    };
-  } catch {
-    return null;
-  }
+  return join(vaultRoot, SHARED_VAULT_SHARE_PROJECTIONS_RELATIVE_PATH);
 }
 
 function hasSafeVaultShareIdentifiers(input: {
@@ -473,13 +308,13 @@ function hasSafeVaultShareIdentifiers(input: {
   }
 }
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function hasNodeErrorCode(
   error: unknown,
   code: string,
 ): error is { code: unknown } {
-  return isPlainRecord(error) && error.code === code;
+  return (
+    typeof error === "object"
+    && error !== null
+    && (error as { code?: unknown }).code === code
+  );
 }

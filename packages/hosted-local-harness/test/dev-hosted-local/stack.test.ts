@@ -637,6 +637,8 @@ describe("hosted local dev stack", () => {
       "web",
       "pnpm",
       expect.arrayContaining([
+        "apps/web/scripts/dev-local.ts",
+        "--",
         "--hostname",
         "localhost",
         "--port",
@@ -647,6 +649,8 @@ describe("hosted local dev stack", () => {
       }),
       expect.any(Object),
     );
+    const devWebCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    expect(devWebCall?.[2]).not.toContain("start");
     expect(runCommand).toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "apps/web", "prisma:generate"],
@@ -1139,6 +1143,7 @@ describe("hosted local dev stack", () => {
       env: {
         ...process.env,
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
         MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
         MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
         MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
@@ -1158,6 +1163,19 @@ describe("hosted local dev stack", () => {
       expect.any(Object),
       expect.any(Object),
     );
+    const webCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    expect(webCall?.[2]).toEqual([
+      "--dir",
+      "apps/web",
+      "exec",
+      "next",
+      "start",
+      "--hostname",
+      "localhost",
+      "--port",
+      "31001",
+    ]);
+    expect(webCall?.[3]).not.toHaveProperty("MURPH_HOSTED_WEB_DEV_OWNER_PID");
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "cloudflare",
       expect.any(String),

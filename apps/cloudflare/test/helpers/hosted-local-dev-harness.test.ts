@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+
 import { afterEach, expect, it, vi } from "vitest";
 
 import {
@@ -9,6 +13,7 @@ import type { HostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hos
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
 } from "../hosted-execution-fixtures.ts";
+import { repoRoot } from "../../vitest.shared.js";
 
 const hostedLocalDevConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
@@ -109,6 +114,62 @@ it("passes the harness process pid to hosted web dev for orphan cleanup", async 
     }),
     pipeOutput: false,
   });
+});
+
+it("preserves a prebuilt production web dist across E2E prod stack stops", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const distSuffix = "preserve-prod-dist-test";
+  const distDir = path.join(repoRoot, "apps/web", `.next-smoke-${distSuffix}`);
+
+  await rm(distDir, { force: true, recursive: true });
+  await mkdir(distDir, { recursive: true });
+  await writeFile(path.join(distDir, "BUILD_ID"), "hosted-e2e-build\n", "utf8");
+
+  try {
+    const harness = await startHostedLocalDevHarness({
+      env: {
+        DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: distSuffix,
+      },
+      persistDirPrefix: "murph-hosted-local-test-",
+    });
+
+    await harness.stop();
+
+    expect(existsSync(path.join(distDir, "BUILD_ID"))).toBe(true);
+  } finally {
+    await rm(distDir, { force: true, recursive: true });
+  }
+});
+
+it("removes disposable hosted web smoke artifacts outside the E2E prod profile", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const distSuffix = "remove-dev-dist-test";
+  const distDir = path.join(repoRoot, "apps/web", `.next-smoke-${distSuffix}`);
+
+  await rm(distDir, { force: true, recursive: true });
+  await mkdir(distDir, { recursive: true });
+  await writeFile(path.join(distDir, "BUILD_ID"), "dev-smoke-build\n", "utf8");
+
+  try {
+    const harness = await startHostedLocalDevHarness({
+      env: {
+        DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: distSuffix,
+      },
+      persistDirPrefix: "murph-hosted-local-test-",
+    });
+
+    await harness.stop();
+
+    expect(existsSync(distDir)).toBe(false);
+  } finally {
+    await rm(distDir, { force: true, recursive: true });
+  }
 });
 
 it("fails fast when hosted completion reaches a terminal runner error", async () => {

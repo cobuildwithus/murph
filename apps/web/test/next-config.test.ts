@@ -169,14 +169,23 @@ test("hosted web dev smoke uses its own Next artifact directory", () => {
       PHASE_PRODUCTION_BUILD,
       createHostedWebSmokeEnvironment(createProcessEnv({})),
     ),
-    HOSTED_WEB_BUILD_DIST_DIR,
+    HOSTED_WEB_SMOKE_DIST_DIR,
   );
 });
 
-test("hosted web dev smoke can isolate concurrent runs with a dist-dir suffix", () => {
+test("hosted web smoke can isolate concurrent dev and production runs with a dist-dir suffix", () => {
   assert.equal(
     resolveHostedWebDistDir(
       PHASE_DEVELOPMENT_SERVER,
+      createHostedWebSmokeEnvironment(createProcessEnv({
+        NEXT_DIST_DIR_SUFFIX: "e2e-run",
+      })),
+    ),
+    `${HOSTED_WEB_SMOKE_DIST_DIR}-e2e-run`,
+  );
+  assert.equal(
+    resolveHostedWebDistDir(
+      PHASE_PRODUCTION_BUILD,
       createHostedWebSmokeEnvironment(createProcessEnv({
         NEXT_DIST_DIR_SUFFIX: "e2e-run",
       })),

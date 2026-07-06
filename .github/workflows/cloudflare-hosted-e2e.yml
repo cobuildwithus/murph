@@ -35,6 +35,8 @@ env:
   HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
   HOSTED_MAILBOX_FINGERPRINT_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
   NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
+  NEXT_DIST_DIR_MODE: smoke
+  NEXT_DIST_DIR_SUFFIX: hosted-e2e
   PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
   # The runner-bundle workspace build defaults to a fully serial
   # `--workspace-concurrency=1`; CI runners have 4 vCPUs, so build in parallel.
@@ -42,9 +44,9 @@ env:
 
 jobs:
   runner-bundle:
-    name: Build hosted runner bundle
+    name: Build hosted runner bundle and web dist
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -86,6 +88,24 @@ jobs:
         with:
           name: hosted-local-runner-bundle
           path: runner-bundle.tar.zst
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      # Build the hosted web production dist once and share it with every
+      # scenario job. The E2E stack serves this prebuilt smoke dist with
+      # `next start`, avoiding per-route Turbopack JIT during the scenarios.
+      - name: Build hosted web production dist
+        run: pnpm --dir apps/web build
+
+      - name: Pack hosted web dist artifact
+        run: tar --zstd -cf hosted-web-next-dist.tar.zst apps/web/.next-smoke-hosted-e2e
+
+      - name: Upload hosted web dist artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: hosted-web-next-dist
+          path: hosted-web-next-dist.tar.zst
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
@@ -191,6 +211,16 @@ jobs:
           tar --zstd -xf runner-bundle.tar.zst
           rm runner-bundle.tar.zst
 
+      - name: Download hosted web dist
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: hosted-web-next-dist
+
+      - name: Unpack hosted web dist
+        run: |
+          rm -rf apps/web/.next-smoke-hosted-e2e
+          tar --zstd -xf hosted-web-next-dist.tar.zst
+
       - name: Run hosted E2E scenarios
         env:
           MURPH_HOSTED_LOCAL_E2E_FAST_GATE: ${{ matrix.fastGate || '0' }}
@@ -199,6 +229,12 @@ jobs:
           set -euo pipefail
           mkdir -p .artifacts/cloudflare-hosted-e2e
           for scenario in ${{ matrix.scenarios }}; do
+            # Re-provision the prebuilt web dist before each scenario: each
+            # scenario is an independent full-stack run and the harness does not
+            # preserve the production dist across invocations, so `next start`
+            # must find a fresh build every time.
+            rm -rf apps/web/.next-smoke-hosted-e2e
+            tar --zstd -xf hosted-web-next-dist.tar.zst
             pnpm hosted-local e2e "$scenario" --no-bundle 2>&1 \
               | tee ".artifacts/cloudflare-hosted-e2e/$scenario.log"
           done
