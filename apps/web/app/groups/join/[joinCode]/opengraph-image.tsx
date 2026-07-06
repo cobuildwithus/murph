@@ -7,7 +7,7 @@ import {
   OG_SIZE,
 } from "../../../_og/og-shared";
 
-export const alt = "Join the group on Murph.";
+export const alt = "Join your people on Murph.";
 export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
@@ -19,8 +19,8 @@ export default async function GroupJoinOGImage() {
       <MurphHeroOg
         heroDataUri={heroDataUri}
         eyebrow="MURPH GROUP"
-        headline="Join the challenge."
-        subtext="Health experiments with friends. Your data stays yours."
+        headline="Join your people."
+        subtext="Get healthier together. You choose what you share."
       />
     ),
     { ...OG_SIZE, fonts }
