@@ -636,6 +636,7 @@ export async function processDueAssistantCronJobsLocal(
       result = await executeClaimedAssistantCronJob({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext: input.executionContext,
+        onEvent: input.onEvent,
         onTraceEvent: input.onTraceEvent,
         paths,
         shouldYield: input.shouldYield ?? null,
@@ -657,9 +658,9 @@ export async function processDueAssistantCronJobsLocal(
     }
     summary.processed += 1
 
-    if (result.run.status === 'succeeded') {
+    if (assistantCronRunCountsAsProcessSuccess(result.run)) {
       summary.succeeded += 1
-    } else if (result.run.status === 'failed') {
+    } else if (result.run.outcome === 'failed') {
       summary.failed += 1
     }
     emitAssistantCronJobCompletedEvent({
@@ -672,12 +673,20 @@ export async function processDueAssistantCronJobsLocal(
         assistantCronDeliveryRouteValidationProfileForExecutionContext(
           input.executionContext,
         ),
-      runStatus: result.run.status,
+      runOutcome: result.run.outcome,
       sourceKind: claimed.kind === 'canonical' ? claimed.source.kind : 'local',
     })
   }
 
   return summary
+}
+
+function assistantCronRunCountsAsProcessSuccess(
+  run: AssistantCronRunRecord,
+): boolean {
+  return run.outcome === 'delivered' ||
+    (run.outcome === 'no_op' &&
+      run.reason !== 'background_maintenance_non_replayable_work')
 }
 
 export { buildAssistantCronSchedule }
@@ -766,13 +775,13 @@ function emitAssistantCronJobCompletedEvent(input: {
   job: AssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
   routeValidationProfile: AssistantCronDeliveryRouteValidationProfile
-  runStatus: AssistantCronRunRecord['status']
+  runOutcome: AssistantCronRunRecord['outcome']
   sourceKind: string
 }): void {
   const safeDetails =
-    input.runStatus === 'skipped' && input.errorPresent
-      ? 'cron_job_skipped_error'
-      : resolveAssistantCronCompletedSafeDetails(input.runStatus)
+    input.runOutcome === 'skipped_gate' && input.errorPresent
+      ? 'cron_job_skipped_gate'
+      : resolveAssistantCronCompletedSafeDetails(input.runOutcome)
 
   input.onEvent?.({
     type: 'cron.job.completed',
@@ -795,7 +804,7 @@ function emitAssistantCronJobCompletedEvent(input: {
         input.job,
         input.routeValidationProfile,
       ),
-      runStatus: input.runStatus,
+      runOutcome: input.runOutcome,
       scheduleKind: input.job.schedule.kind,
       sourceKind: input.sourceKind,
     },
@@ -805,15 +814,21 @@ function emitAssistantCronJobCompletedEvent(input: {
 }
 
 function resolveAssistantCronCompletedSafeDetails(
-  status: AssistantCronRunRecord['status'],
+  outcome: AssistantCronRunRecord['outcome'],
 ): string {
-  switch (status) {
+  switch (outcome) {
+    case 'delivered':
+      return 'cron_job_delivered'
+    case 'delivery_pending':
+      return 'cron_job_delivery_pending'
+    case 'no_op':
+      return 'cron_job_no_op'
+    case 'expired':
+      return 'cron_job_expired'
+    case 'skipped_gate':
+      return 'cron_job_skipped_gate'
     case 'failed':
       return 'cron_job_enqueue_failed'
-    case 'skipped':
-      return 'cron_job_delivery_pending'
-    case 'succeeded':
-      return 'cron_job_enqueue_succeeded'
   }
 }
 

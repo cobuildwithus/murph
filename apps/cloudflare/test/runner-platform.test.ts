@@ -482,7 +482,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot: path.join(tempRoot, "durable"),
         ref,
-      })).rejects.toThrow(/data-key\/unwrap failed with HTTP 403/u);
+      })).rejects.toThrow(/data key unwrap request failed/u);
 
       expect(objectFetchCount).toBe(0);
     } finally {
@@ -3341,6 +3341,59 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("surfaces internal control-plane 403 response codes without stale authority labeling", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+        message: "Recipient must reply before another outbound message.",
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 403,
+    }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        providerFetchBaseUrls: [],
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+      },
+    );
+
+    let rejectedError: unknown;
+    try {
+      await hostedFetch(`http://web-control.worker${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`, {
+        body: "{}",
+        method: "POST",
+      });
+    } catch (error) {
+      rejectedError = error;
+    }
+
+    expect(isHostedRuntimeInternalAuthorityRejectedError(rejectedError)).toBe(false);
+    expect(rejectedError).toMatchObject({
+      code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+      name: "HostedRuntimeControlPlaneRejectedError",
+      reason: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+      responseStatus: 403,
+      status: 403,
+      statusCode: 403,
+    });
+    expect(rejectedError).toBeInstanceOf(Error);
+    expect((rejectedError as Error).message).toContain(
+      "Recipient must reply before another outbound message.",
+    );
+    expect((rejectedError as Error).message).not.toContain("Hosted invocation is stale");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("routes raw email reads through the Cloudflare internal effects port and attaches the invocation proxy token", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildTestHostedExecutionRuntimePlatform({
@@ -6136,7 +6189,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
-  it("classifies internal provider-effect 403 responses as stale invocation authority", async () => {
+  it("classifies internal provider-effect 403 responses as control-plane rejections", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       error: "Forbidden",
     }), {
@@ -6161,9 +6214,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(platform.effectsPort.getTelegramFile!({
       fileId: "telegram_file_123",
     })).rejects.toMatchObject({
-      code: "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY",
-      reason: "internal_authority_rejected",
-      status: 403,
+      code: "authorization_error",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

@@ -470,6 +470,36 @@ describe('assistant cron store filesystem edges', () => {
     ])
   })
 
+  it('reads legacy status-only cron run records as outcomes', async () => {
+    const paths = await createAssistantPaths('assistant-cron-schedule-store-runs-legacy-')
+    await mkdir(paths.cronRunsDirectory, { recursive: true })
+    await writeFile(
+      path.join(paths.cronRunsDirectory, 'cron_alpha.jsonl'),
+      `${JSON.stringify({
+        error: null,
+        finishedAt: '2026-04-08T10:01:00.000Z',
+        jobId: 'cron_alpha',
+        response: 'Delivered.',
+        responseLength: 'Delivered.'.length,
+        runId: 'cronrun_alpha_legacy',
+        schema: 'murph.assistant-cron-run.v1',
+        sessionId: null,
+        startedAt: '2026-04-08T10:00:00.000Z',
+        status: 'succeeded',
+        trigger: 'scheduled',
+      })}\n`,
+      'utf8',
+    )
+
+    await expect(readAssistantCronRuns(paths, 'cron_alpha')).resolves.toEqual([
+      expect.objectContaining({
+        outcome: 'delivered',
+        reason: 'legacy_succeeded',
+        status: 'succeeded',
+      }),
+    ])
+  })
+
   it('redacts older cron responses and prunes stale run history during maintenance', async () => {
     const paths = await createAssistantPaths('assistant-cron-schedule-store-retention-')
     await appendAssistantCronRun(paths, createCronRun({
@@ -641,6 +671,8 @@ function createCronRun(input: {
     error: null,
     finishedAt: input.finishedAt ?? '2026-04-08T10:01:00.000Z',
     jobId: input.jobId ?? 'cron_alpha',
+    outcome: 'delivered',
+    reason: 'sent',
     response: input.response ?? null,
     responseLength: input.response?.length ?? 0,
     runId: input.runId,
