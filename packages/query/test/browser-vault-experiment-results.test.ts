@@ -1193,6 +1193,132 @@ test("counts calendar-less browser running adherence from activity sessions by s
   assert.deepEqual(result.schedule?.cells, []);
 });
 
+test("counts calendar-less browser running adherence from manual sessions", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFN";
+  const slug = "manual-run-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Run",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_manual_run_1",
+          experimentId,
+          experimentSlug: slug,
+        }),
+        sessionEvent("2026-06-03", "completed", {
+          id: "evt_manual_run_2",
+          experimentId,
+          experimentSlug: slug,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 2);
+  assert.equal(result?.progress?.adherence.loggedSessions, 2);
+});
+
+test("counts mixed browser manual and device sessions for running adherence", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFG";
+  const slug = "mixed-run-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Run",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_mixed_manual_run_1",
+          experimentId,
+          experimentSlug: slug,
+        }),
+        activitySessionEvent({ id: "evt_mixed_device_run_1", date: "2026-06-03", activityType: "Running" }),
+        activitySessionEvent({ id: "evt_mixed_bike_1", date: "2026-06-05", activityType: "Cycling" }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 2);
+  assert.equal(result?.progress?.adherence.loggedSessions, 2);
+});
+
+test("uses canonical activity date for scheduled browser running adherence", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFH";
+  const slug = "run-date-boundary";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-02T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-07",
+            modality: "Run",
+            targetSessions: 7,
+            minimumUsefulSessions: 1,
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+          },
+        }),
+        activitySessionEvent({
+          id: "evt_run_boundary_1",
+          date: "2026-06-01",
+          occurredAt: "2026-06-01T01:30:00.000Z",
+          activityType: "Run",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, {
+    slug,
+  }, {
+    asOf: "2026-06-02T12:00:00.000Z",
+  });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 1);
+  assert.equal(result?.progress?.adherence.loggedSessions, 1);
+  assert.equal(
+    result?.schedule?.cells.find((cell) => cell.localDate === "2026-06-01")?.kind,
+    "completed",
+  );
+});
+
 test("does not synthesize legacy schedules for unsupported explicit metric adherence targets", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
@@ -1845,29 +1971,37 @@ function sessionEvent(
   sessionStatus: string,
   overrides: Partial<Pick<BrowserVaultEntity, "occurredAt">> & {
     attributes?: Record<string, unknown>;
+    experimentId?: string;
+    experimentSlug?: string;
+    id?: string;
+    title?: string;
   } = {},
 ): BrowserVaultEntity {
+  const experimentId = overrides.experimentId ?? "exp_sauna";
+  const experimentSlug = overrides.experimentSlug ?? "finnish-sauna-run";
+  const id = overrides.id ?? `evt_${date}_${sessionStatus}`;
+
   return {
     attributes: {
-      experimentId: "exp_sauna",
-      experimentSlug: "finnish-sauna-run",
+      experimentId,
+      experimentSlug,
       sessionStatus,
       ...overrides.attributes,
     },
     bodyPreview: null,
     date,
-    experimentSlug: "finnish-sauna-run",
+    experimentSlug,
     family: "event",
-    id: `evt_${date}_${sessionStatus}`,
+    id,
     kind: "intervention_session",
-    links: [{ targetId: "exp_sauna", type: "related" }],
-    lookupIds: [`evt_${date}_${sessionStatus}`],
+    links: [{ targetId: experimentId, type: "related" }],
+    lookupIds: [id],
     occurredAt: overrides.occurredAt ?? `${date}T13:00:00.000Z`,
     recordClass: "ledger",
     status: null,
     stream: null,
     tags: ["sauna"],
-    title: "Sauna session",
+    title: overrides.title ?? "Sauna session",
   };
 }
 

@@ -6,6 +6,7 @@ import {
   experimentProgressSnapshotSchema,
   safeParseContract,
   toLocalDayKey,
+  activityTextMatchesKind,
   type ExperimentFrontmatter,
   type ExperimentOutcome,
   type ExperimentProgressMetricSignal,
@@ -16,6 +17,9 @@ import { getExperiment, type VaultReadModel } from "./read-model.ts";
 import {
   buildExperimentAdherenceCalendar,
   countCompletedAdherenceSessions,
+  eventKindIsCandidateForEvidence,
+  resolveActivityEvidenceLocalDate,
+  resolveAdherenceEvidence,
   resolveExperimentAdherenceRollupTarget,
   resolveAdherenceObservationActivityKind,
   synthesizeLegacySessionAdherenceTargets,
@@ -243,7 +247,7 @@ interface ExperimentSummaryContext {
 
 type ExperimentFollowupContext = Pick<
   ExperimentSummaryContext,
-  "events" | "frontmatter" | "progressPhase"
+  "adherenceEvents" | "events" | "frontmatter" | "progressPhase"
 >;
 
 interface ExperimentMetricPointOptions {
@@ -492,8 +496,17 @@ function buildExperimentFollowupContext(
   }
 
   const frontmatter = requireExperimentFrontmatter(experiment);
+  const events = findExperimentEvents(vault, experiment, frontmatter, asOf);
+  const adherenceTargets = resolveAdherenceTargetsFromFrontmatter(frontmatter);
   return {
-    events: findExperimentEvents(vault, experiment, frontmatter, asOf),
+    adherenceEvents: findAdherenceEvidenceEvents({
+      asOf,
+      events,
+      frontmatter,
+      targets: adherenceTargets,
+      vault,
+    }),
+    events,
     frontmatter,
     progressPhase: resolveProgressPhase(frontmatter, asOf),
   };
@@ -718,7 +731,7 @@ function buildAdherenceObservations(
       case "linkedEventCount":
         const linkedEvidence = target.evidence;
         observations.push(...context.adherenceEvents
-          .filter((event) => event.kind === linkedEvidence.eventKind)
+          .filter((event) => eventKindIsCandidateForEvidence(event.kind, linkedEvidence))
           .map((event) => ({
             activityKind: resolveAdherenceObservationActivityKind({
               attributes: event.attributes as Record<string, unknown>,
@@ -726,11 +739,13 @@ function buildAdherenceObservations(
             evidenceId: event.entityId,
             eventKind: event.kind,
             localDate:
-              readStringAttribute(event, "scheduledLocalDate") ??
-              readStringAttribute(event, "sessionLocalDate") ??
-              (target.calendar && event.occurredAt
-                ? toLocalDayKey(new Date(event.occurredAt), target.calendar?.timeZone ?? "UTC")
-                : event.date ?? extractDate(event.occurredAt) ?? context.asOf),
+              event.kind === "activity_session"
+                ? resolveActivityEvidenceLocalDate(event) ?? context.asOf
+                : readStringAttribute(event, "scheduledLocalDate") ??
+                  readStringAttribute(event, "sessionLocalDate") ??
+                  (target.calendar && event.occurredAt
+                    ? toLocalDayKey(new Date(event.occurredAt), target.calendar?.timeZone ?? "UTC")
+                    : event.date ?? extractDate(event.occurredAt) ?? context.asOf),
             status: readExperimentSessionStatus(event),
             targetId: target.targetId,
           })));
@@ -1153,7 +1168,7 @@ function decideMissedLogDue(
     );
   }
 
-  if (hasSessionLogForDate(context.events, date)) {
+  if (hasSessionLogForDate(context, date)) {
     return buildFollowupBase(
       context,
       date,
@@ -1242,8 +1257,32 @@ function isWeeklyDigestDueOnDate(frontmatter: ExperimentFrontmatter, date: strin
   return daysBetweenInclusive(interventionStart, date) % 7 === 0;
 }
 
-function hasSessionLogForDate(events: readonly CanonicalEntity[], date: string): boolean {
-  return events.some((event) => event.kind === "intervention_session" && event.date === date);
+function hasSessionLogForDate(context: ExperimentFollowupContext, date: string): boolean {
+  if (context.events.some((event) => event.kind === "intervention_session" && event.date === date)) {
+    return true;
+  }
+
+  const evidence = resolveAdherenceEvidence(context.frontmatter.runPlan?.modality);
+  if (evidence.eventKind !== "activity_session" || !evidence.activityKind) {
+    return false;
+  }
+  const activityEvidenceKind = evidence.activityKind;
+
+  return context.adherenceEvents.some((event) => {
+    if (event.kind !== "activity_session") {
+      return false;
+    }
+
+    const eventDate = resolveActivityEvidenceLocalDate(event);
+    if (eventDate !== date) {
+      return false;
+    }
+
+    const activityKind = resolveAdherenceObservationActivityKind({
+      attributes: event.attributes as Record<string, unknown>,
+    });
+    return activityTextMatchesKind(activityKind, activityEvidenceKind);
+  });
 }
 
 function isDailyInterventionSchedule(frontmatter: ExperimentFrontmatter): boolean {
@@ -1751,7 +1790,7 @@ function findAdherenceEvidenceEvents(input: {
     if (event.kind !== "activity_session") {
       continue;
     }
-    const date = event.date ?? extractDate(event.occurredAt);
+    const date = resolveActivityEvidenceLocalDate(event);
     if (!date || date < interventionStart || date > effectiveEnd) {
       continue;
     }

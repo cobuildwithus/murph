@@ -645,6 +645,118 @@ test("experiment progress counts calendar-less running adherence from activity s
   assert.equal(progress.adherence.targetSessions, 24);
 });
 
+test("experiment progress counts manual sessions for device-observable running adherence", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFN";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-running-manual-adherence",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId,
+        slug: "manual-run-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Run",
+          targetSessions: 4,
+          minimumUsefulSessions: 2,
+        },
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE3AA",
+        occurredAt: "2026-06-01T13:00:00.000Z",
+        experimentId,
+        experimentSlug: "manual-run-block",
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE3AB",
+        occurredAt: "2026-06-03T13:00:00.000Z",
+        experimentId,
+        experimentSlug: "manual-run-block",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "manual-run-block", { asOf: "2026-06-09" });
+
+  assert.equal(progress.adherence.completedSessions, 2);
+});
+
+test("experiment progress counts mixed manual and device sessions for running adherence", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFG";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-running-mixed-adherence",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId,
+        slug: "mixed-run-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Run",
+          targetSessions: 4,
+          minimumUsefulSessions: 2,
+        },
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE3AC",
+        occurredAt: "2026-06-01T13:00:00.000Z",
+        experimentId,
+        experimentSlug: "mixed-run-block",
+      }),
+      makeActivitySession({ entityId: "evt_mixed_device_run_1", dayKey: "2026-06-03", activityType: "Running" }),
+      makeActivitySession({ entityId: "evt_mixed_bike_1", dayKey: "2026-06-05", activityType: "Cycling" }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "mixed-run-block", { asOf: "2026-06-09" });
+
+  assert.equal(progress.adherence.completedSessions, 2);
+});
+
+test("experiment progress uses canonical activity date for scheduled running adherence", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFH";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-running-date-boundary",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId,
+        slug: "run-date-boundary",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-07",
+          modality: "Run",
+          targetSessions: 7,
+          minimumUsefulSessions: 1,
+          schedule: {
+            kind: "dailyLocal",
+            localTime: "08:00",
+            timeZone: "America/New_York",
+          },
+        },
+      }),
+      makeActivitySession({
+        entityId: "evt_run_boundary_1",
+        dayKey: "2026-06-01",
+        occurredAt: "2026-06-01T01:30:00.000Z",
+        activityType: "Run",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "run-date-boundary", { asOf: "2026-06-02" });
+
+  assert.equal(progress.adherence.completedSessions, 1);
+});
+
 test("experiment analysis uses lab measurement anchors separately from run baseline windows", () => {
   const experiment = makeExperiment("completed", {
     experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFK",
@@ -1859,6 +1971,54 @@ test("experiment follow-up due skips missed-log when the date already has any se
   const decision = decideExperimentFollowupDue(vault, "sauna-rhr", {
     kind: "missed-log",
     date: "2026-04-10",
+  });
+
+  assert.equal(decision.action, "skip");
+  assert.equal(decision.reason, "session_already_logged");
+});
+
+test("experiment follow-up due skips missed-log when device activity already handled a run date", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFK",
+    slug: "daily-run",
+    runPlan: {
+      baselineStart: "2026-05-25",
+      baselineEnd: "2026-05-31",
+      interventionStart: "2026-06-01",
+      interventionEnd: "2026-06-14",
+      modality: "Run",
+      sessionsPerWeek: 7,
+      targetSessions: 14,
+      minimumUsefulSessions: 10,
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "08:00",
+        timeZone: "America/New_York",
+      },
+    },
+    assistantSupport: {
+      remindersEnabled: true,
+      missedLogFollowup: "default_on",
+      weeklyDigestEnabled: false,
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-device-activity",
+    metadata: { timezone: "America/New_York" },
+    entities: [
+      experiment,
+      makeActivitySession({
+        entityId: "evt_daily_run_device_1",
+        dayKey: "2026-06-03",
+        occurredAt: "2026-06-03T22:00:00.000Z",
+        activityType: "Running",
+      }),
+    ],
+  });
+
+  const decision = decideExperimentFollowupDue(vault, "daily-run", {
+    kind: "missed-log",
+    date: "2026-06-03",
   });
 
   assert.equal(decision.action, "skip");

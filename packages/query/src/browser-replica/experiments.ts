@@ -8,6 +8,8 @@ import {
 import {
   buildExperimentAdherenceCalendar,
   countCompletedAdherenceSessions,
+  eventKindIsCandidateForEvidence,
+  resolveActivityEvidenceLocalDate,
   resolveExperimentAdherenceRollupTarget,
   resolveAdherenceObservationActivityKind,
   synthesizeLegacySessionAdherenceTargets,
@@ -663,10 +665,7 @@ function selectAdherenceEvidenceEvents(input: {
     if (entity.family !== "event" || entity.kind !== "activity_session") {
       continue;
     }
-    const eventDate =
-      readEventLocalDate(entity, input.eventTimeZone) ??
-      entity.date ??
-      extractDate(entity.occurredAt);
+    const eventDate = resolveActivityEvidenceLocalDate(entity);
     if (!eventDate || eventDate < interventionStart || eventDate > effectiveEnd) {
       continue;
     }
@@ -1261,17 +1260,19 @@ function buildAdherenceObservations(
       case "linkedEventCount":
         const linkedEvidence = target.evidence;
         observations.push(...context.adherenceEvents
-          .filter((event) => event.kind === linkedEvidence.eventKind)
+          .filter((event) => eventKindIsCandidateForEvidence(event.kind, linkedEvidence))
           .map((event) => ({
             activityKind: resolveAdherenceObservationActivityKind({ attributes: event.attributes }),
             evidenceId: event.id,
             eventKind: event.kind,
             localDate:
-              readSessionEventLocalDate(event) ??
-              readEventLocalDate(event, target.calendar?.timeZone ?? context.eventTimeZone) ??
-              event.date ??
-              extractDate(event.occurredAt) ??
-              context.asOfDate,
+              event.kind === "activity_session"
+                ? resolveActivityEvidenceLocalDate(event) ?? context.asOfDate
+                : readSessionEventLocalDate(event) ??
+                  readEventLocalDate(event, target.calendar?.timeZone ?? context.eventTimeZone) ??
+                  event.date ??
+                  extractDate(event.occurredAt) ??
+                  context.asOfDate,
             status: readSessionScheduleStatus(event),
             targetId: target.targetId,
           })));

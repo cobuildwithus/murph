@@ -107,7 +107,7 @@ const DEVICE_OBSERVABLE_ACTIVITY_KINDS = [
   "elliptical",
 ] as const;
 
-type LinkedEventCountEvidence = Extract<ExperimentAdherenceEvidenceRule, { kind: "linkedEventCount" }>;
+export type LinkedEventCountEvidence = Extract<ExperimentAdherenceEvidenceRule, { kind: "linkedEventCount" }>;
 
 export interface AdherenceSessionCounts {
   completedSessions: number;
@@ -123,6 +123,28 @@ export function resolveAdherenceEvidence(
   return activityKind
     ? { eventKind: "activity_session", activityKind }
     : { eventKind: "intervention_session" };
+}
+
+export function eventKindIsCandidateForEvidence(
+  eventKind: string | null | undefined,
+  evidence: LinkedEventCountEvidence,
+): boolean {
+  if (!eventKind) {
+    return false;
+  }
+
+  if (evidence.eventKind === "activity_session") {
+    return eventKind === "activity_session" || eventKind === "intervention_session";
+  }
+
+  return eventKind === evidence.eventKind;
+}
+
+export function resolveActivityEvidenceLocalDate(event: {
+  date?: string | null;
+  occurredAt?: string | null;
+}): string | null {
+  return event.date ?? extractDate(event.occurredAt);
 }
 
 export function resolveAdherenceObservationActivityKind(input: {
@@ -583,15 +605,15 @@ function linkedEventObservationMatchesEvidence(
   observation: ExperimentAdherenceObservation,
   evidence: LinkedEventCountEvidence,
 ): boolean {
-  if (observation.eventKind !== evidence.eventKind) {
+  if (!eventKindIsCandidateForEvidence(observation.eventKind, evidence)) {
     return false;
   }
 
-  if (!evidence.activityKind) {
-    return true;
+  if (observation.eventKind === "activity_session" && evidence.activityKind) {
+    return activityTextMatchesKind(observation.activityKind, evidence.activityKind);
   }
 
-  return activityTextMatchesKind(observation.activityKind, evidence.activityKind);
+  return true;
 }
 
 function resolveDeviceObservableActivityKind(modality: string | null | undefined): string | null {
@@ -639,6 +661,10 @@ function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function extractDate(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.length >= 10 ? value.slice(0, 10) : null;
 }
 
 function emptyAdherenceSessionCounts(): AdherenceSessionCounts {
