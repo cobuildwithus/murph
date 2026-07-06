@@ -1,4 +1,4 @@
-import { HostedBillingStatus, type Prisma } from "@prisma/client";
+import { HostedBillingStatus, Prisma } from "@prisma/client";
 import type { HostedMailboxItem } from "@murphai/hosted-execution/runtime-control";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,7 +6,7 @@ import {
   ensureHostedThreadContainerRouteTx,
 } from "../src/lib/hosted-routing/thread-container-service";
 import {
-  readHostedThreadRouteByExternalThread,
+  readHostedThreadRouteByThreadIdentity,
 } from "../src/lib/hosted-routing/thread-route-store";
 import {
   createHostedExternalThreadIdentityLookupKey,
@@ -425,6 +425,20 @@ function createStatefulThreadRoutePrisma() {
         threadLookupKey: string;
       };
     }) => {
+      const duplicateIdentity = routes.some((route) =>
+        route.channel === data.channel
+        && route.threadIdentityLookupKey === data.threadIdentityLookupKey,
+      );
+      if (duplicateIdentity) {
+        throw new Prisma.PrismaClientKnownRequestError(
+          "Unique constraint failed on the fields: (`channel`,`threadIdentityLookupKey`)",
+          {
+            clientVersion: "test",
+            code: "P2002",
+            meta: { target: ["channel", "threadIdentityLookupKey"] },
+          },
+        );
+      }
       routes.push(data);
       return data;
     }),
@@ -785,8 +799,7 @@ describe("Linq explicit external-thread routing", () => {
         },
       });
       await expect(
-        readHostedThreadRouteByExternalThread({
-          accountLookupKeys: [currentAccountLookupKey, priorAccountLookupKey],
+        readHostedThreadRouteByThreadIdentity({
           channel: "linq",
           prisma: prisma as unknown as Prisma.TransactionClient,
           threadId: "chat_group_123",
@@ -972,7 +985,6 @@ describe("Linq explicit external-thread routing", () => {
             threadIsDirect: false,
           }),
           routeAuthority: expect.objectContaining({
-            accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
             channel: "linq",
             containerMemberId: "member_thread_container_123",
             threadId: "chat_group_123",
@@ -1037,10 +1049,37 @@ describe("Linq explicit external-thread routing", () => {
     });
   });
 
-  it("does not match a routed thread for another Linq recipient line with the same chat id", async () => {
+  it("routes a bound Linq group thread even when the delivering line differs", async () => {
     const prisma = createPrisma({
       routeAccountPhone: "+15550000000",
       routeContainerMemberId: "member_thread_container_123",
+    });
+    vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
+    vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
+      dayUtc: new Date("2026-06-24T00:00:00.000Z"),
+      inboundCount: 1,
+      memberId: "member_thread_container_123",
+      outboundCount: 0,
+      quotaReplySentAt: null,
+    } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+    });
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_group_other_line_123",
+        userId: "member_thread_container_123",
+      }),
     });
 
     const plan = await planHostedOnboardingLinqWebhook({
@@ -1051,11 +1090,30 @@ describe("Linq explicit external-thread routing", () => {
     });
 
     expect(plan.response).toMatchObject({
-      ignored: true,
+      ignored: false,
       ok: true,
-      reason: "thread-route-authority-mismatch",
+      reason: "wake-appended-thread-route",
     });
-    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(readSingleWakeHandoff(plan)).toMatchObject({
+      eventId: "evt_group_123",
+      linqChatId: "chat_group_123",
+      mailboxItemId: "mailbox_group_other_line_123",
+      source: "linq",
+      userId: "member_thread_container_123",
+    });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        message: expect.objectContaining({
+          accountLookupKey: createHostedPhoneLookupKey("+15559999999"),
+          routeAuthority: {
+            channel: "linq",
+            containerMemberId: "member_thread_container_123",
+            threadId: "chat_group_123",
+          },
+        }),
+      }),
+      tx: prisma,
+    });
   });
 
   it("does not treat routed Linq traffic as direct when directness is not attested", async () => {
@@ -1209,7 +1267,6 @@ describe("Linq explicit external-thread routing", () => {
       chatId: "chat_group_123",
       memberId: "member_thread_container_123",
       routeAuthority: {
-        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
         channel: "linq",
         containerMemberId: "member_thread_container_123",
         threadId: "chat_group_123",
@@ -1266,7 +1323,6 @@ describe("Linq explicit external-thread routing", () => {
       message: "Usage limit reached.",
       noticeCode: "edge_usage_limit_reached",
       routeAuthority: {
-        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
         channel: "linq",
         containerMemberId: "member_thread_container_123",
         threadId: "chat_group_123",
@@ -2030,13 +2086,13 @@ describe("Linq group chat concurrent provisioning race", () => {
       threadIdentityLookupKey,
       threadLookupKey,
     });
-    // The planner's two initial route lookups ran before the winner committed,
-    // so they miss; every later read observes the committed route.
+    // The planner's initial route lookup ran before the winner committed, so
+    // it misses; every later read observes the committed route.
     const statefulFindMany = prisma.hostedThreadRoute.findMany.getMockImplementation()!;
     let findManyCalls = 0;
     prisma.hostedThreadRoute.findMany.mockImplementation(async (args: never) => {
       findManyCalls += 1;
-      if (findManyCalls <= 2) {
+      if (findManyCalls <= 1) {
         return [];
       }
       return statefulFindMany(args);

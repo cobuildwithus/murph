@@ -1297,7 +1297,14 @@ function parseHostedRuntimeLinqExternalThreadRouteAuthority(
   }
 
   return {
-    accountLookupKey: requireString(record.accountLookupKey, `${label} accountLookupKey`),
+    ...(record.accountLookupKey === undefined
+      ? {}
+      : {
+          accountLookupKey: readOptionalNullableString(
+            record.accountLookupKey,
+            `${label} accountLookupKey`,
+          ),
+        }),
     channel,
     containerMemberId: requireString(record.containerMemberId, `${label} containerMemberId`),
     threadId: requireString(record.threadId, `${label} threadId`),

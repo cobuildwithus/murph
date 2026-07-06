@@ -134,7 +134,7 @@ async function readHostedLinqDeliveryRouteLineLookupKey(input: {
   memberId: string;
   prisma: ReturnType<typeof getPrisma>;
   routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority;
-}): Promise<string> {
+}): Promise<string | null> {
   if (input.routeAuthority.containerMemberId !== input.memberId) {
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_DELIVERY_ROUTE_BOUND_USER_MISMATCH",
@@ -144,11 +144,11 @@ async function readHostedLinqDeliveryRouteLineLookupKey(input: {
     });
   }
 
-  const route = await assertHostedThreadRouteEgressAuthority({
+  await assertHostedThreadRouteEgressAuthority({
     authority: input.routeAuthority,
     prisma: input.prisma,
   });
-  return route.accountLookupKey;
+  return input.routeAuthority.accountLookupKey?.trim() || null;
 }
 
 function parseAnsweredMailboxItemIds(value: unknown): string[] {

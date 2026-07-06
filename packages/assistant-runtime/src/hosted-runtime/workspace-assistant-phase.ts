@@ -234,18 +234,21 @@ function resolveHostedGroupToolLinqThreadContext(
     ) {
       continue;
     }
-    eligible.set(
-      JSON.stringify([
-        authority.channel,
-        authority.containerMemberId,
-        authority.accountLookupKey,
-        authority.threadId,
-      ]),
-      {
-        authority,
+    const routeKey = JSON.stringify([
+      authority.channel,
+      authority.containerMemberId,
+      authority.threadId,
+    ]);
+    if (!eligible.has(routeKey)) {
+      eligible.set(routeKey, {
+        authority: {
+          channel: authority.channel,
+          containerMemberId: authority.containerMemberId,
+          threadId: authority.threadId,
+        },
         chatId: authority.threadId,
-      },
-    );
+      });
+    }
   }
 
   // Two distinct route-authorized threads in one turn (for example around a

@@ -556,7 +556,14 @@ export function parseHostedExecutionExternalThreadRouteAuthority(
 ): HostedExecutionExternalThreadRouteAuthority {
   const record = requireObject(value, label);
   return {
-    accountLookupKey: requireString(record.accountLookupKey, `${label} accountLookupKey`),
+    ...(record.accountLookupKey === undefined
+      ? {}
+      : {
+          accountLookupKey: readOptionalNullableString(
+            record.accountLookupKey,
+            `${label} accountLookupKey`,
+          ),
+        }),
     channel: parseHostedExecutionExternalThreadRouteChannel(record.channel, `${label} channel`),
     containerMemberId: requireString(record.containerMemberId, `${label} containerMemberId`),
     threadId: requireString(record.threadId, `${label} threadId`),

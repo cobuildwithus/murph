@@ -233,7 +233,6 @@ describe("hosted execution wake builders", () => {
       service: "SMS",
     };
     const routeAuthority = {
-      accountLookupKey: "hbidx:phone:v1:account",
       channel: "linq" as const,
       containerMemberId: "user_123",
       threadId: "chat_123",
@@ -270,7 +269,6 @@ describe("hosted execution wake builders", () => {
       },
       phoneLookupKey: "phone_lookup_123",
       routeAuthority: {
-        accountLookupKey: "hbidx:phone:v1:account",
         channel: "linq",
         containerMemberId: "user_123",
         threadId: "chat_123",
