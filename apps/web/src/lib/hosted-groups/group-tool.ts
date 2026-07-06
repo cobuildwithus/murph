@@ -4,6 +4,7 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
+  type HostedRuntimeGroupToolAction,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -56,6 +57,20 @@ import {
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
 
+export type HostedRuntimeGroupToolAccessClassification =
+  | "owner_active"
+  | "participant_aware";
+
+export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
+  create_join_link: "owner_active",
+  read_chat_participants: "participant_aware",
+  read_current: "participant_aware",
+  share_contact_card: "owner_active",
+} as const satisfies Record<
+  HostedRuntimeGroupToolAction,
+  HostedRuntimeGroupToolAccessClassification
+>;
+
 export async function handleHostedRuntimeGroupTool(input: {
   memberId: string;
   request: HostedRuntimeGroupToolRequest;
@@ -104,6 +119,45 @@ export async function handleHostedRuntimeGroupTool(input: {
   };
 }
 
+type HostedRuntimeGroupOwnerActiveAccess =
+  | { status: "ok"; ownerMemberId: string }
+  | {
+      status: "unavailable";
+      unavailableReason:
+        | "not_group_runtime"
+        | "owner_unavailable"
+        | "runtime_inactive";
+    };
+
+async function readHostedRuntimeGroupOwnerActiveAccess(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedRuntimeGroupOwnerActiveAccess> {
+  const container = await input.prisma.hostedThreadContainer.findUnique({
+    where: { memberId: input.memberId },
+    select: {
+      member: {
+        select: { suspendedAt: true },
+      },
+      ownerMemberId: true,
+    },
+  });
+  if (!container) {
+    return { status: "unavailable", unavailableReason: "not_group_runtime" };
+  }
+  if (container.member.suspendedAt) {
+    return { status: "unavailable", unavailableReason: "runtime_inactive" };
+  }
+  if (!await readActiveHostedMemberAccess({
+    memberId: container.ownerMemberId,
+    prisma: input.prisma,
+  })) {
+    return { status: "unavailable", unavailableReason: "owner_unavailable" };
+  }
+
+  return { status: "ok", ownerMemberId: container.ownerMemberId };
+}
+
 async function handleHostedRuntimeGroupCreateJoinLink(input: {
   joinLink: HostedRuntimeGroupCreateJoinLinkRequest | null;
   memberId: string;
@@ -113,9 +167,6 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     result: { group: null, status: "unavailable", unavailableReason },
   });
 
-  if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
-    return unavailable("runtime_inactive");
-  }
   const publicBaseUrl = resolveHostedPublicBaseUrl();
   if (!publicBaseUrl) {
     return unavailable("join_links_unavailable");
@@ -124,22 +175,15 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
   const prisma = getPrisma();
   const now = new Date();
   const created = await prisma.$transaction(async (tx) => {
-    const container = await tx.hostedThreadContainer.findUnique({
-      where: { memberId: input.memberId },
-      select: { ownerMemberId: true },
+    const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+      memberId: input.memberId,
+      prisma: tx,
     });
-    if (!container) {
-      return { kind: "not_group_runtime" as const };
-    }
-    const owner = await tx.hostedMember.findUnique({
-      where: { id: container.ownerMemberId },
-      select: { suspendedAt: true },
-    });
-    if (!owner || owner.suspendedAt) {
-      return { kind: "owner_unavailable" as const };
+    if (ownerAccess.status !== "ok") {
+      return { kind: ownerAccess.unavailableReason };
     }
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
-      actorMemberId: container.ownerMemberId,
+      actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
       displayName: input.joinLink?.displayName ?? null,
       kind: input.joinLink?.kind ?? null,
@@ -148,7 +192,7 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
         input.joinLink?.requestedVaultShareProjectionKinds ?? [],
       tx,
     });
-    return { kind: "ok" as const, ownerMemberId: container.ownerMemberId, ...result };
+    return { kind: "ok" as const, ownerMemberId: ownerAccess.ownerMemberId, ...result };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   if (created.kind !== "ok") {
@@ -527,6 +571,15 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
     return unavailable(authorized.unavailableReason);
   }
 
+  const prisma = getPrisma();
+  const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+    memberId: input.memberId,
+    prisma,
+  });
+  if (ownerAccess.status !== "ok") {
+    return unavailable(ownerAccess.unavailableReason);
+  }
+
   let linePhoneNumber: string | null = null;
   let rosterPresent = false;
   try {
@@ -545,7 +598,6 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
     return unavailable("line_unresolved");
   }
 
-  const prisma = getPrisma();
   const reservation = await reserveHostedLinqContactCardShareAttempt({
     chatId: authorized.chatId,
     memberId: input.memberId,
