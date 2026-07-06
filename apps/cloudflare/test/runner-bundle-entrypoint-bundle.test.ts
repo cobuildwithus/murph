@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assertRunnerEntrypointBundleWithinBudgets,
   bundleRunnerContainerEntrypoint,
+  collectLazyRunnerEntrypointOutputPaths,
   resolveRunnerEntrypointBundleBudgets,
   RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME,
 } from "../scripts/runner-bundle/bundle-entrypoint.js";
@@ -25,6 +26,35 @@ function entryOnlyMetafile(entryBytes: number): Metafile {
         exports: [],
         imports: [],
         inputs: {},
+      },
+    },
+  };
+}
+
+function staticBootClosureMetafile(inputPath: string): Metafile {
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 600, imports: [] },
+      [inputPath]: { bytes: 5_000, imports: [] },
+    },
+    outputs: {
+      "dist-bundled/container-entrypoint.js": {
+        bytes: 2_000,
+        entryPoint: "dist/container-entrypoint.js",
+        exports: [],
+        imports: [{ kind: "import-statement", path: "./chunk-STATIC.js" }],
+        inputs: {
+          "dist/container-entrypoint.js": { bytesInOutput: 600 },
+        },
+      },
+      "dist-bundled/chunk-STATIC.js": {
+        bytes: 4_000,
+        entryPoint: undefined,
+        exports: [],
+        imports: [],
+        inputs: {
+          [inputPath]: { bytesInOutput: 4_000 },
+        },
       },
     },
   };
@@ -163,32 +193,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
   });
 
   it("rejects provider connector inputs from the static boot closure", () => {
-    const metafile: Metafile = {
-      inputs: {
-        "dist/container-entrypoint.js": { bytes: 600, imports: [] },
-        "node_modules/grammy/out/mod.js": { bytes: 5_000, imports: [] },
-      },
-      outputs: {
-        "dist-bundled/container-entrypoint.js": {
-          bytes: 2_000,
-          entryPoint: "dist/container-entrypoint.js",
-          exports: [],
-          imports: [{ kind: "import-statement", path: "./chunk-STATIC.js" }],
-          inputs: {
-            "dist/container-entrypoint.js": { bytesInOutput: 600 },
-          },
-        },
-        "dist-bundled/chunk-STATIC.js": {
-          bytes: 4_000,
-          entryPoint: undefined,
-          exports: [],
-          imports: [],
-          inputs: {
-            "node_modules/grammy/out/mod.js": { bytesInOutput: 4_000 },
-          },
-        },
-      },
-    };
+    const metafile = staticBootClosureMetafile("node_modules/grammy/out/mod.js");
 
     expect(() =>
       assertRunnerEntrypointBundleWithinBudgets(metafile, {
@@ -196,6 +201,36 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         totalBytes: 10_000,
       }),
     ).toThrow(/provider connector inputs in the static boot closure[\s\S]*node_modules\/grammy\/out\/mod\.js/);
+  });
+
+  it("rejects staged @murphai/inboxd connector inputs from the static boot closure", () => {
+    const inputPath =
+      ".deploy/runner-bundle/node_modules/@murphai/inboxd/dist/connectors/hosted-conversation.js";
+    const metafile = staticBootClosureMetafile(inputPath);
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, {
+        entryBytes: 10_000,
+        totalBytes: 10_000,
+      }),
+    ).toThrow(
+      /provider connector inputs in the static boot closure[\s\S]*\.deploy\/runner-bundle\/node_modules\/@murphai\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
+    );
+  });
+
+  it("rejects workspace @murphai/inboxd connector inputs from the static boot closure", () => {
+    const metafile = staticBootClosureMetafile(
+      "packages/inboxd/dist/connectors/hosted-conversation.js",
+    );
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, {
+        entryBytes: 10_000,
+        totalBytes: 10_000,
+      }),
+    ).toThrow(
+      /provider connector inputs in the static boot closure[\s\S]*packages\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
+    );
   });
 
   it("allows provider connector inputs behind dynamic imports", () => {
@@ -232,6 +267,74 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         totalBytes: 10_000,
       }),
     ).toEqual({ entryBytes: 2_000, totalBytes: 6_000 });
+  });
+
+  it("collects output chunks reachable only through dynamic imports", () => {
+    const metafile: Metafile = {
+      inputs: {
+        "dist/container-entrypoint.js": { bytes: 10, imports: [] },
+        "dist/static.js": { bytes: 10, imports: [] },
+        "dist/lazy.js": { bytes: 10, imports: [] },
+      },
+      outputs: {
+        "dist-bundled/container-entrypoint.js": {
+          bytes: 100,
+          entryPoint: "dist/container-entrypoint.js",
+          exports: [],
+          imports: [
+            { kind: "import-statement", path: "./static-STATIC.js" },
+            { kind: "dynamic-import", path: "./lazy-LAZY.js" },
+          ],
+          inputs: {
+            "dist/container-entrypoint.js": { bytesInOutput: 10 },
+          },
+        },
+        "dist-bundled/static-STATIC.js": {
+          bytes: 100,
+          entryPoint: undefined,
+          exports: [],
+          imports: [
+            { kind: "import-statement", path: "./static-shared-STATIC.js" },
+          ],
+          inputs: {
+            "dist/static.js": { bytesInOutput: 10 },
+          },
+        },
+        "dist-bundled/static-shared-STATIC.js": {
+          bytes: 100,
+          entryPoint: undefined,
+          exports: [],
+          imports: [],
+          inputs: {},
+        },
+        "dist-bundled/lazy-LAZY.js": {
+          bytes: 100,
+          entryPoint: "dist/lazy.js",
+          exports: [],
+          imports: [
+            { kind: "import-statement", path: "./lazy-shared-LAZY.js" },
+          ],
+          inputs: {
+            "dist/lazy.js": { bytesInOutput: 10 },
+          },
+        },
+        "dist-bundled/lazy-shared-LAZY.js": {
+          bytes: 100,
+          entryPoint: undefined,
+          exports: [],
+          imports: [],
+          inputs: {},
+        },
+      },
+    };
+
+    expect([...collectLazyRunnerEntrypointOutputPaths(
+      metafile,
+      "dist-bundled/container-entrypoint.js",
+    )].sort()).toEqual([
+      "dist-bundled/lazy-LAZY.js",
+      "dist-bundled/lazy-shared-LAZY.js",
+    ]);
   });
 
   it("resolves the production budgets as the ratcheted entry baseline plus tolerance", () => {

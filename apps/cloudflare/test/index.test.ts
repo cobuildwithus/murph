@@ -67,8 +67,11 @@ import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
@@ -1979,6 +1982,8 @@ describe("cloudflare worker routes", () => {
         orchestration: {
           temporalActivityStartedAtEpochMs: 1_776_999_999_000,
           temporalActivityRequestStartedAtEpochMs: 1_776_999_999_050,
+          runtimeControlAuthFinishedAtEpochMs: expect.any(Number),
+          runtimeControlAuthStartedAtEpochMs: expect.any(Number),
           cloudflareRouteReceivedAtEpochMs: expect.any(Number),
         },
         userId: "test-user",
@@ -2004,6 +2009,12 @@ describe("cloudflare worker routes", () => {
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
+              [HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER]:
+                "1777000000012",
+              [HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER]:
+                "1777000000010",
+              [HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER]:
+                "1777000000000",
             },
             method: "POST",
           }),
@@ -2022,6 +2033,11 @@ describe("cloudflare worker routes", () => {
         orchestrationAttemptId: "web-ingress-attempt-test",
         orchestration: {
           cloudflareRouteReceivedAtEpochMs: expect.any(Number),
+          directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+          runtimeControlAuthFinishedAtEpochMs: expect.any(Number),
+          runtimeControlAuthStartedAtEpochMs: expect.any(Number),
+          tokenAcquiredAtEpochMs: 1_777_000_000_010,
+          tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
           triggeredByWebDirect: true,
         },
         userId: "test-user",
@@ -2141,6 +2157,8 @@ describe("cloudflare worker routes", () => {
         orchestrationAttemptId: "orchestration-attempt-test",
         orchestration: {
           cloudflareRouteReceivedAtEpochMs: expect.any(Number),
+          runtimeControlAuthFinishedAtEpochMs: expect.any(Number),
+          runtimeControlAuthStartedAtEpochMs: expect.any(Number),
         },
         userId: "test-user",
       });

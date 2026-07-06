@@ -1,6 +1,7 @@
 import {
   recordHostedIngressAcceptedFromMailboxItem,
   recordHostedIngressAssistantInputStaged,
+  recordHostedIngressDirectEnsureTiming,
   recordHostedIngressProviderStarted,
   recordHostedIngressRuntimeMilestone,
   recordHostedIngressTemporalSignalAccepted,
@@ -204,6 +205,42 @@ describe("hosted runtime latency dashboard store", () => {
     expect(dashboard.stageLatencyMs.stagedToProviderStartP50).toBe(1_000);
   });
 
+  it("persists direct ensure web-clock timing before runtime staging", async () => {
+    const prisma = createLatencyWritePrisma({
+      mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-09T10:00:00.000Z")),
+    });
+
+    await expect(recordHostedIngressDirectEnsureTiming({
+      expectedUserId: "member_latency_1",
+      mailboxItemId: "mailbox_latency_1",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        orchestration: {
+          tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+          tokenAcquiredAtEpochMs: 1_777_000_000_010,
+          directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+          directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+        },
+      },
+      prisma,
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 1,
+      recorded: true,
+      unmatchedCount: 0,
+    });
+
+    expect(prisma.readTrace()?.phaseBreakdownJson).toEqual({
+      schemaVersion: 1,
+      orchestration: {
+        tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+        tokenAcquiredAtEpochMs: 1_777_000_000_010,
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+      },
+    });
+  });
+
   it("records provider start by assistant input even when a later runtime attempt handles it", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:10:20.000Z")),
@@ -315,6 +352,12 @@ describe("hosted runtime latency dashboard store", () => {
         orchestration: {
           temporalActivityStartedAtEpochMs: 1_777_000_000_000,
           temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+          tokenAcquireStartedAtEpochMs: 1_777_000_000_011,
+          tokenAcquiredAtEpochMs: 1_777_000_000_012,
+          directEnsureRequestStartedAtEpochMs: 1_777_000_000_013,
+          directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
+          runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
+          runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
           cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
           userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
           activeWakeStartedAtEpochMs: 1_777_000_000_040,
@@ -351,6 +394,12 @@ describe("hosted runtime latency dashboard store", () => {
       orchestration: {
         temporalActivityStartedAtEpochMs: 1_777_000_000_000,
         temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+        tokenAcquireStartedAtEpochMs: 1_777_000_000_011,
+        tokenAcquiredAtEpochMs: 1_777_000_000_012,
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_013,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
+        runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
+        runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
         userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
         activeWakeStartedAtEpochMs: 1_777_000_000_040,
@@ -387,6 +436,8 @@ describe("hosted runtime latency dashboard store", () => {
         schemaVersion: 1,
         orchestration: {
           temporalActivityStartedAtEpochMs: 999,
+          directEnsureResponseReceivedAtEpochMs: 999,
+          runtimeControlAuthFinishedAtEpochMs: 999,
           activeWakeAccepted: true,
           freshStartInvocationAcceptedAtEpochMs: 999,
         },
@@ -405,6 +456,12 @@ describe("hosted runtime latency dashboard store", () => {
       orchestration: {
         temporalActivityStartedAtEpochMs: 1_777_000_000_000,
         temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+        tokenAcquireStartedAtEpochMs: 1_777_000_000_011,
+        tokenAcquiredAtEpochMs: 1_777_000_000_012,
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_013,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
+        runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
+        runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
         userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
         activeWakeStartedAtEpochMs: 1_777_000_000_040,
@@ -451,6 +508,12 @@ describe("hosted runtime latency dashboard store", () => {
       orchestration: {
         temporalActivityStartedAtEpochMs: 1_777_000_000_000,
         temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+        tokenAcquireStartedAtEpochMs: 1_777_000_000_011,
+        tokenAcquiredAtEpochMs: 1_777_000_000_012,
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_013,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
+        runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
+        runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
         userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
         activeWakeStartedAtEpochMs: 1_777_000_000_040,

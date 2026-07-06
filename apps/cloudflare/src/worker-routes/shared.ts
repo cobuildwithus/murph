@@ -71,6 +71,10 @@ export interface WorkerRouteContext {
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
   requestText?: Promise<string>;
+  runtimeControlAuthTiming?: {
+    runtimeControlAuthFinishedAtEpochMs: number;
+    runtimeControlAuthStartedAtEpochMs: number;
+  };
   url: URL;
 }
 

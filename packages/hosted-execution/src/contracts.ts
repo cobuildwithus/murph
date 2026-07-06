@@ -97,7 +97,7 @@ export type HostedExecutionExternalThreadRouteChannel = Extract<
 >;
 
 export interface HostedExecutionExternalThreadRouteAuthority {
-  accountLookupKey: string;
+  accountLookupKey?: string | null;
   channel: HostedExecutionExternalThreadRouteChannel;
   containerMemberId: string;
   threadId: string;
@@ -541,6 +541,12 @@ export const HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER =
   "x-hosted-runtime-ensure-processing-activity-started-at-ms";
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER =
   "x-hosted-runtime-ensure-processing-request-started-at-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-token-acquire-started-at-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-token-acquired-at-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-direct-request-started-at-ms";
 
 export function assertHostedRuntimeProcessingTimeoutMs(
   value: number,

@@ -12,7 +12,7 @@ import {
 } from "@murphai/hosted-execution/parsers";
 
 import {
-  createHostedExternalThreadLookupKeyReadCandidates,
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
@@ -135,7 +135,6 @@ export async function recordHostedMemberLinqInboundEngagementTx(input: {
 export async function recordHostedThreadRouteLinqInboundEngagementTx(input: {
   chatId: string | null | undefined;
   occurredAt: Date | string;
-  linePhoneNumberLookupKey: string | null;
   memberId: string;
   now?: Date;
   prisma: HostedLinqEngagementClient;
@@ -147,12 +146,11 @@ export async function recordHostedThreadRouteLinqInboundEngagementTx(input: {
   if (!occurredAt) {
     return;
   }
-  const threadLookupKeys = createHostedExternalThreadLookupKeyReadCandidates({
-    accountLookupKey: input.linePhoneNumberLookupKey,
+  const threadIdentityLookupKeys = createHostedExternalThreadIdentityLookupKeyReadCandidates({
     channel: "linq",
     threadId: input.chatId,
   });
-  if (threadLookupKeys.length === 0) {
+  if (threadIdentityLookupKeys.length === 0) {
     return;
   }
 
@@ -160,7 +158,7 @@ export async function recordHostedThreadRouteLinqInboundEngagementTx(input: {
     where: {
       channel: "linq",
       containerMemberId: input.memberId,
-      threadLookupKey: { in: threadLookupKeys },
+      threadIdentityLookupKey: { in: threadIdentityLookupKeys },
       OR: [
         { lastInboundAt: null },
         { lastInboundAt: { lt: occurredAt } },
@@ -366,7 +364,7 @@ async function readHostedLinqCurrentInboundDecision(input: {
   memberId: string;
   now: Date;
   prisma: PrismaClient;
-  route: { accountLookupKey: string; lastInboundAt: Date | null } | null;
+  route: { lastInboundAt: Date | null } | null;
   routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
 }): Promise<HostedLinqRecentInboundDecision | null> {
@@ -448,7 +446,6 @@ async function readHostedLinqCurrentInboundDecision(input: {
   if (input.routeAuthority && input.route) {
     await recordHostedThreadRouteLinqInboundEngagementTx({
       chatId: proof.target,
-      linePhoneNumberLookupKey: input.route.accountLookupKey,
       memberId: input.memberId,
       now: input.now,
       occurredAt,

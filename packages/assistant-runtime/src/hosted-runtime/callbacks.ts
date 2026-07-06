@@ -1101,10 +1101,8 @@ function buildHostedAssistantLinqDeliveryContextFromPreparedIntent(input: {
     return null;
   }
   const routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority = {
-    accountLookupKey: authority.accountLookupKey,
+    ...authority,
     channel: "linq",
-    containerMemberId: authority.containerMemberId,
-    threadId: authority.threadId,
   };
 
   return {

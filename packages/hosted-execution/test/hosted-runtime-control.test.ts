@@ -868,6 +868,12 @@ describe("hosted runtime control contracts", () => {
       orchestration: {
         temporalActivityStartedAtEpochMs: 1_777_000_000_000,
         temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+        tokenAcquireStartedAtEpochMs: 1_777_000_000_011,
+        tokenAcquiredAtEpochMs: 1_777_000_000_012,
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_013,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
+        runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
+        runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
         userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
         activeWakeStartedAtEpochMs: 1_777_000_000_040,
@@ -993,6 +999,9 @@ describe("hosted runtime control contracts", () => {
     // numbers plus explicit booleans only.
     for (const unsafeOrchestration of [
       { temporalActivityStartedAtEpochMs: 1, requestUrl: 1 }, // unknown sub key
+      { tokenAcquireStartedAtEpochMs: -1 }, // web-side negative leaf
+      { directEnsureResponseReceivedAtEpochMs: 1.5 }, // web-side non-integer leaf
+      { runtimeControlAuthStartedAtEpochMs: "1777000000015" }, // CF-side string leaf
       { cloudflareRouteReceivedAtEpochMs: 1.5 }, // non-integer leaf
       { userRunnerEnsureStartedAtEpochMs: -1 }, // negative leaf
       { activeWakeAccepted: 1 }, // boolean leaf must stay boolean
@@ -1180,13 +1189,25 @@ describe("hosted runtime control contracts", () => {
       activeWakeAccepted: true,
       activeWakeFinishedAtEpochMs: 1_777_000_000_125,
       activeWakeStartedAtEpochMs: 1_777_000_000_100,
+      directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+      directEnsureResponseReceivedAtEpochMs: 1_777_000_000_132,
       extraLeaf: 1,
       freshStartRequestedAtEpochMs: -1,
       replacedStaleFence: "true",
+      runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
+      runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
+      tokenAcquiredAtEpochMs: 1_777_000_000_010,
+      tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
     })).toEqual({
       activeWakeAccepted: true,
       activeWakeFinishedAtEpochMs: 1_777_000_000_125,
       activeWakeStartedAtEpochMs: 1_777_000_000_100,
+      directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+      directEnsureResponseReceivedAtEpochMs: 1_777_000_000_132,
+      runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
+      runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
+      tokenAcquiredAtEpochMs: 1_777_000_000_010,
+      tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
     });
 
     expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
