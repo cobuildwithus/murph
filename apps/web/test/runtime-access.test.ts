@@ -1,14 +1,26 @@
-import type { Prisma } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  type Prisma,
+} from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { requireHostedRuntimeActiveAccessForUpdateTx } from "@/src/lib/hosted-mailbox/runtime-access";
 
-function buildRuntimeAccessTx(ownerReads: Array<string | null>): {
+function buildRuntimeAccessTx(
+  ownerReads: Array<string | null>,
+  input: {
+    ownerBillingStatus?: HostedBillingStatus;
+    participantActive?: boolean;
+  } = {},
+): {
   lockOrder: string[];
   tx: Prisma.TransactionClient & {
     $queryRaw: ReturnType<typeof vi.fn>;
     hostedMember: {
       findUnique: ReturnType<typeof vi.fn>;
+    };
+    hostedThreadContainerParticipant: {
+      findFirst: ReturnType<typeof vi.fn>;
     };
   };
 } {
@@ -36,11 +48,16 @@ function buildRuntimeAccessTx(ownerReads: Array<string | null>): {
         threadContainer: {
           owner: {
             accountGroupMemberships: [],
-            billingStatus: "active",
+            billingStatus: input.ownerBillingStatus ?? HostedBillingStatus.active,
             suspendedAt: null,
           },
         },
       })),
+    },
+    hostedThreadContainerParticipant: {
+      findFirst: vi.fn(async () => input.participantActive
+        ? { participantMemberId: "member_participant" }
+        : null),
     },
   };
 
@@ -50,6 +67,9 @@ function buildRuntimeAccessTx(ownerReads: Array<string | null>): {
       $queryRaw: ReturnType<typeof vi.fn>;
       hostedMember: {
         findUnique: ReturnType<typeof vi.fn>;
+      };
+      hostedThreadContainerParticipant: {
+        findFirst: ReturnType<typeof vi.fn>;
       };
     },
   };
@@ -74,6 +94,27 @@ describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
       "container-lock",
     ]);
     expect(tx.hostedMember.findUnique).toHaveBeenCalled();
+  });
+
+  it("allows a thread-container runtime through an active participant", async () => {
+    const { tx } = buildRuntimeAccessTx(["member_owner", "member_owner"], {
+      ownerBillingStatus: HostedBillingStatus.paused,
+      participantActive: true,
+    });
+
+    await expect(requireHostedRuntimeActiveAccessForUpdateTx("member_group_runtime", {
+      prisma: tx,
+    })).resolves.toBeUndefined();
+
+    expect(tx.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
+      select: {
+        participantMemberId: true,
+      },
+      where: expect.objectContaining({
+        containerMemberId: "member_group_runtime",
+        removedAt: null,
+      }),
+    });
   });
 
   it("fails closed when thread-container authority changes while locking", async () => {

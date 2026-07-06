@@ -49,6 +49,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
     'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
     'suspendedAt DateTime? @map("suspended_at")',
+    'threadContainerParticipations HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -502,6 +503,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedThreadContainerParticipantMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260706120000_hosted_thread_container_participant/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -581,6 +589,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260701153000_hosted_vault_share_active_indexes",
       "20260703160000_device_oauth_session_consumed_at",
       "20260705120000_hosted_mailbox_item_consumed_at",
+      "20260706120000_hosted_thread_container_participant",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -610,6 +619,25 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedThreadRoutesMigrationSql).not.toContain("thread_id_encrypted");
     expect(hostedThreadRoutesMigrationSql).not.toContain('"source"');
     expect(hostedThreadRoutesMigrationSql).not.toContain('"status"');
+    expect(hostedThreadContainerParticipantMigrationSql).toContain(
+      'CREATE TABLE "hosted_thread_container_participant"',
+    );
+    expect(hostedThreadContainerParticipantMigrationSql).toContain(
+      '"handle_lookup_key" TEXT NOT NULL',
+    );
+    expect(hostedThreadContainerParticipantMigrationSql).toContain(
+      'PRIMARY KEY ("container_member_id", "participant_member_id")',
+    );
+    expect(hostedThreadContainerParticipantMigrationSql).toContain(
+      'REFERENCES "hosted_thread_container"("member_id") ON DELETE CASCADE',
+    );
+    expect(hostedThreadContainerParticipantMigrationSql).toContain(
+      'REFERENCES "hosted_member"("id") ON DELETE CASCADE',
+    );
+    expect(hostedThreadContainerParticipantMigrationSql).not.toContain('"handle" TEXT');
+    expect(hostedThreadContainerParticipantMigrationSql).not.toMatch(
+      /"(?:raw_)?(?:message|body|payload)[^"]*"/iu,
+    );
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
     expect(schema).not.toContain("@@index([memberId, profileKey, updatedAt])");
     expect(singleMemberComputerProfileMigrationSql).toContain(

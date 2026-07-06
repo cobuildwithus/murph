@@ -324,7 +324,7 @@ export const assistantDeliverySourceSchema = z.discriminatedUnion('kind', [
 
 export const assistantExternalThreadRouteAuthoritySchema = z
   .object({
-    accountLookupKey: z.string().min(1),
+    accountLookupKey: z.string().min(1).nullable().optional(),
     channel: z.enum(['email', 'linq', 'telegram']),
     containerMemberId: z.string().min(1),
     threadId: z.string().min(1),

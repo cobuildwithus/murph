@@ -10,8 +10,11 @@ import type {
 import {
   assertHostedRuntimeProcessingTimeoutMs,
   HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRuntimeEnsureProcessingRequest,
@@ -143,6 +146,7 @@ export async function handleRuntimeEnsureProcessingRoute(
     orchestration = readRuntimeEnsureProcessingOrchestrationDiagnostics(
       context.request.headers,
       cloudflareRouteReceivedAtEpochMs,
+      context.runtimeControlAuthTiming ?? null,
       // Derived from the credential that authorized this request, never from
       // caller-supplied body fields.
       readPresentedWorkerRouteAuthorization(context.request) === "vercel-oidc",
@@ -202,6 +206,7 @@ export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): n
 function readRuntimeEnsureProcessingOrchestrationDiagnostics(
   headers: Headers,
   cloudflareRouteReceivedAtEpochMs: number,
+  runtimeControlAuthTiming: WorkerRouteContext["runtimeControlAuthTiming"] | null,
   triggeredByWebDirect: boolean,
 ): NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> {
   const temporalActivityStartedAtEpochMs = readOptionalEpochMsHeader(
@@ -212,6 +217,18 @@ function readRuntimeEnsureProcessingOrchestrationDiagnostics(
     headers,
     HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   );
+  const tokenAcquireStartedAtEpochMs = readOptionalEpochMsHeader(
+    headers,
+    HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
+  );
+  const tokenAcquiredAtEpochMs = readOptionalEpochMsHeader(
+    headers,
+    HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
+  );
+  const directEnsureRequestStartedAtEpochMs = readOptionalEpochMsHeader(
+    headers,
+    HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+  );
   return {
     cloudflareRouteReceivedAtEpochMs,
     ...(triggeredByWebDirect ? { triggeredByWebDirect } : {}),
@@ -219,6 +236,12 @@ function readRuntimeEnsureProcessingOrchestrationDiagnostics(
     ...(temporalActivityRequestStartedAtEpochMs === null ? {} : {
       temporalActivityRequestStartedAtEpochMs,
     }),
+    ...(tokenAcquireStartedAtEpochMs === null ? {} : { tokenAcquireStartedAtEpochMs }),
+    ...(tokenAcquiredAtEpochMs === null ? {} : { tokenAcquiredAtEpochMs }),
+    ...(directEnsureRequestStartedAtEpochMs === null
+      ? {}
+      : { directEnsureRequestStartedAtEpochMs }),
+    ...(runtimeControlAuthTiming ?? {}),
   };
 }
 

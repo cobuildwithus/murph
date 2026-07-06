@@ -134,7 +134,7 @@ async function readHostedLinqDeliveryRouteLineLookupKey(input: {
   memberId: string;
   prisma: ReturnType<typeof getPrisma>;
   routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority;
-}): Promise<string> {
+}): Promise<string | null> {
   if (input.routeAuthority.containerMemberId !== input.memberId) {
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_DELIVERY_ROUTE_BOUND_USER_MISMATCH",
@@ -144,11 +144,20 @@ async function readHostedLinqDeliveryRouteLineLookupKey(input: {
     });
   }
 
-  const route = await assertHostedThreadRouteEgressAuthority({
+  await assertHostedThreadRouteEgressAuthority({
     authority: input.routeAuthority,
     prisma: input.prisma,
   });
-  return route.accountLookupKey;
+  // This is a post-send delivery-OUTCOME callback (Cloudflare-runner
+  // authenticated), not a routing decision. Authorization is already bound to
+  // the DB route by channel + chatId + containerMemberId above; the returned
+  // line key is used only to attribute the recorded outcome to a Linq line's
+  // stats. Since a chat-id route is intentionally no longer line-pinned, the DB
+  // route carries no authoritative send line — the runner that performed the
+  // send is the source of truth for which line it used, so we read it from the
+  // (already authority-validated) request. A missing key is benign: the outcome
+  // still records without line attribution.
+  return input.routeAuthority.accountLookupKey?.trim() || null;
 }
 
 function parseAnsweredMailboxItemIds(value: unknown): string[] {

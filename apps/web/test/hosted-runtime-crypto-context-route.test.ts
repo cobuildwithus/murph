@@ -104,6 +104,46 @@ describe("hosted runtime crypto-context route", () => {
     });
   });
 
+  it("allows thread-container runtime context when an active participant keeps an inactive-owner group alive", async () => {
+    const prisma = createPrisma({
+      member: {
+        accountGroupMemberships: [],
+        billingStatus: "not_started",
+        suspendedAt: null,
+        threadContainer: {
+          owner: {
+            accountGroupMemberships: [],
+            billingStatus: "paused",
+            suspendedAt: null,
+          },
+        },
+      },
+      participantActive: true,
+      workspace: { userId: "member_crypto_1" },
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await route.POST(new Request("https://join.example.test/api/internal/hosted-runtime/crypto-context", {
+      method: "POST",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
+      select: {
+        participantMemberId: true,
+      },
+      where: expect.objectContaining({
+        containerMemberId: "member_crypto_1",
+        removedAt: null,
+      }),
+    });
+    expect(mocks.readHostedRuntimeCryptoContextForWorker).toHaveBeenCalledWith({
+      prisma,
+      userId: "member_crypto_1",
+    });
+  });
+
+
   it("rejects missing, inactive, or suspended hosted members before reading crypto roots", async () => {
     for (const member of [
       null,
@@ -172,11 +212,17 @@ type HostedMemberAccessFixture = {
 
 function createPrisma(input: {
   member: HostedMemberAccessFixture | null;
+  participantActive?: boolean;
   workspace: { userId: string } | null;
 }) {
   return {
     hostedMember: {
       findUnique: vi.fn().mockResolvedValue(input.member),
+    },
+    hostedThreadContainerParticipant: {
+      findFirst: vi.fn(async () => input.participantActive
+        ? { participantMemberId: "member_active_participant" }
+        : null),
     },
     hostedWorkspace: {
       findUnique: vi.fn().mockResolvedValue(input.workspace),

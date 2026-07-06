@@ -8,6 +8,7 @@ import {
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
@@ -1722,9 +1723,29 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       channel: "linq",
       threadId: "chat_123",
     });
-    if (!routeLookupKey) {
-      throw new Error("Expected test route lookup key.");
+    const routeIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_123",
+    });
+    if (!routeLookupKey || !routeIdentityLookupKey) {
+      throw new Error("Expected test route lookup keys.");
     }
+    const threadContainerAccessRecord = {
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-03-26T00:00:00.000Z"),
+      id: "member_thread_container_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+    };
+    const ownerAccessRecord = {
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-03-26T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+    };
     const prisma = asPrismaTransactionClient({
       hostedThreadRoute: {
         findMany: vi.fn()
@@ -1739,19 +1760,24 @@ describe("handleHostedOnboardingLinqWebhook", () => {
                   suspendedAt: null,
                   updatedAt: new Date("2026-03-26T00:00:00.000Z"),
                 },
-                owner: {
-                  billingStatus: HostedBillingStatus.active,
-                  createdAt: new Date("2026-03-26T00:00:00.000Z"),
-                  id: "member_owner_123",
-                  suspendedAt: null,
-                  updatedAt: new Date("2026-03-26T00:00:00.000Z"),
-                },
+                owner: ownerAccessRecord,
               },
               containerMemberId: "member_thread_container_123",
               threadLookupKey: routeLookupKey,
             },
           ])
           .mockResolvedValue([]),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...threadContainerAccessRecord,
+          threadContainer: {
+            owner: ownerAccessRecord,
+          },
+        }),
+      },
+      hostedThreadContainerParticipant: {
+        findFirst: vi.fn().mockResolvedValue(null),
       },
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -1788,8 +1814,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       1,
       expect.objectContaining({
         where: expect.objectContaining({
-          threadLookupKey: {
-            in: expect.arrayContaining([routeLookupKey]),
+          threadIdentityLookupKey: {
+            in: expect.arrayContaining([routeIdentityLookupKey]),
           },
         }),
       }),
@@ -1798,8 +1824,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       2,
       expect.objectContaining({
         where: expect.objectContaining({
-          threadLookupKey: {
-            in: expect.arrayContaining([routeLookupKey]),
+          threadIdentityLookupKey: {
+            in: expect.arrayContaining([routeIdentityLookupKey]),
           },
         }),
       }),

@@ -1392,6 +1392,10 @@ function buildAuthorizedLinqRouteFixture(input: {
     suspendedAt: null,
     updatedAt: new Date("2026-03-26T00:00:00.000Z"),
   };
+  const memberAccessState = {
+    ...memberState,
+    accountGroupMemberships: [],
+  };
 
   return {
     authority: {
@@ -1407,13 +1411,24 @@ function buildAuthorizedLinqRouteFixture(input: {
             channel: "linq",
             container: {
               member: memberState,
-              owner: memberState,
+              owner: memberAccessState,
             },
             containerMemberId: input.memberId,
             lastInboundAt: new Date("2026-03-26T11:59:00.000Z"),
             threadLookupKey,
           },
         ]),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...memberAccessState,
+          threadContainer: {
+            owner: memberAccessState,
+          },
+        }),
+      },
+      hostedThreadContainerParticipant: {
+        findFirst: vi.fn().mockResolvedValue(null),
       },
     },
   };

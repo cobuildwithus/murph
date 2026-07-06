@@ -3,10 +3,7 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 
-import {
-  hasActiveHostedMemberAccess,
-  hostedMemberAccessSelect,
-} from "../hosted-onboarding/member-access";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
@@ -22,21 +19,17 @@ interface HostedRuntimeActiveAccessOptions {
 }
 
 // Shared fail-closed gate for runtime surfaces: only members with active hosted
-// access and, for thread containers, active owner authority may wake or touch
-// runtime state.
+// access and, for thread containers, active owner or participant authority may
+// wake or touch runtime state.
 export async function requireHostedRuntimeActiveAccess(
   userId: string,
   options: HostedRuntimeActiveAccessOptions = {},
 ): Promise<void> {
   const prisma = options.prisma ?? getPrisma();
-  const member = await prisma.hostedMember.findUnique({
-    where: {
-      id: userId,
-    },
-    select: hostedMemberAccessSelect,
-  });
-
-  if (member && hasActiveHostedMemberAccess(member)) {
+  if (await readActiveHostedMemberAccess({
+    memberId: userId,
+    prisma,
+  })) {
     return;
   }
 

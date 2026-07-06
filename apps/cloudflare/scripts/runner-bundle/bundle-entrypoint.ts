@@ -49,11 +49,15 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 2_288_516;
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
+// The inboxd markers are path suffixes, not node_modules-anchored: workspace
+// package inputs appear as `node_modules/@murphai/inboxd/dist/...` in the
+// staged production assembly but as `packages/inboxd/dist/...` when bundling
+// straight from the repo checkout, and the guard must bite in both shapes.
 const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "node_modules/grammy/",
   "node_modules/node-fetch/",
-  "node_modules/@murphai/inboxd/dist/connectors/hosted-conversation.js",
-  "node_modules/@murphai/inboxd/dist/connectors/telegram/connector.js",
+  "/inboxd/dist/connectors/hosted-conversation.js",
+  "/inboxd/dist/connectors/telegram/connector.js",
 ] as const;
 
 export async function bundleRunnerContainerEntrypoint(
@@ -87,13 +91,23 @@ export async function bundleRunnerContainerEntrypoint(
   assertRunnerEntrypointBundleInputsStayExternal(
     Object.keys(buildResult.metafile.inputs),
   );
+  const entryOutputPath = findRunnerEntrypointBundleEntryOutputPath(
+    buildResult.metafile,
+  );
   const bundleBytes = assertRunnerEntrypointBundleWithinBudgets(
     buildResult.metafile,
   );
   console.log(
     `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance), total ${bundleBytes.totalBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET}B budget`,
   );
-  assertRunnerEntrypointBundleBoots({ bundleDir, bundleOutDir });
+  assertRunnerEntrypointBundleBoots({
+    bundleDir,
+    bundleOutDir,
+    lazyChunkOutputPaths: [...collectLazyRunnerEntrypointOutputPaths(
+      buildResult.metafile,
+      entryOutputPath,
+    )],
+  });
 }
 
 // Single source of truth for the production budgets: the entry chunk is the
@@ -136,20 +150,13 @@ export function assertRunnerEntrypointBundleWithinBudgets(
   const outputs = Object.entries(metafile.outputs);
   const totalBytes = outputs.reduce((sum, [, output]) => sum + output.bytes, 0);
 
-  // With code splitting, esbuild stamps `entryPoint` on dynamic-import
-  // chunks too; the real entry output keeps the entry file's plain name
-  // while shared and dynamic chunks carry content-hash suffixes.
-  const entryOutput = outputs.find(
-    ([outputPath, output]) =>
-      output.entryPoint !== undefined
-      && path.basename(outputPath) === "container-entrypoint.js",
-  );
-  if (!entryOutput) {
+  const entryPath = findRunnerEntrypointBundleEntryOutputPath(metafile);
+  const entryBytes = metafile.outputs[entryPath]?.bytes;
+  if (entryBytes === undefined) {
     throw new Error(
-      "runner entrypoint bundle metafile has no container-entrypoint.js entry-point output; cannot enforce the entry-chunk byte budget.",
+      `runner entrypoint bundle metafile is missing output ${entryPath}; cannot enforce the entry-chunk byte budget.`,
     );
   }
-  const [entryPath, { bytes: entryBytes }] = entryOutput;
   assertRunnerEntrypointBundleBootInputsAllowed(metafile, entryPath);
 
   const violations: string[] = [];
@@ -179,6 +186,23 @@ export function assertRunnerEntrypointBundleWithinBudgets(
       ...largestInputs,
     ].join("\n"),
   );
+}
+
+function findRunnerEntrypointBundleEntryOutputPath(metafile: Metafile): string {
+  // With code splitting, esbuild stamps `entryPoint` on dynamic-import
+  // chunks too; the real entry output keeps the entry file's plain name
+  // while shared and dynamic chunks carry content-hash suffixes.
+  const entryOutput = Object.entries(metafile.outputs).find(
+    ([outputPath, output]) =>
+      output.entryPoint !== undefined
+      && path.basename(outputPath) === "container-entrypoint.js",
+  );
+  if (!entryOutput) {
+    throw new Error(
+      "runner entrypoint bundle metafile has no container-entrypoint.js entry-point output; cannot enforce the entry-chunk byte budget.",
+    );
+  }
+  return entryOutput[0];
 }
 
 function assertRunnerEntrypointBundleBootInputsAllowed(
@@ -216,9 +240,44 @@ function assertRunnerEntrypointBundleBootInputsAllowed(
   }
 }
 
+type MetafileOutputImport = Metafile["outputs"][string]["imports"][number];
+
 function collectStaticRunnerEntrypointOutputPaths(
   metafile: Metafile,
   entryPath: string,
+): Set<string> {
+  return collectRunnerEntrypointOutputPaths(
+    metafile,
+    entryPath,
+    (imported) => imported.kind !== "dynamic-import",
+  );
+}
+
+export function collectLazyRunnerEntrypointOutputPaths(
+  metafile: Metafile,
+  entryPath: string,
+): Set<string> {
+  const staticOutputPaths = collectStaticRunnerEntrypointOutputPaths(
+    metafile,
+    entryPath,
+  );
+  const outputPaths = collectRunnerEntrypointOutputPaths(
+    metafile,
+    entryPath,
+    () => true,
+  );
+
+  for (const outputPath of staticOutputPaths) {
+    outputPaths.delete(outputPath);
+  }
+
+  return outputPaths;
+}
+
+function collectRunnerEntrypointOutputPaths(
+  metafile: Metafile,
+  entryPath: string,
+  shouldFollowImport: (imported: MetafileOutputImport) => boolean,
 ): Set<string> {
   const outputPaths = new Set<string>();
   const pending = [normalizeMetafilePath(entryPath)];
@@ -235,7 +294,7 @@ function collectStaticRunnerEntrypointOutputPaths(
       continue;
     }
     for (const imported of output.imports) {
-      if (imported.kind === "dynamic-import") {
+      if (!shouldFollowImport(imported)) {
         continue;
       }
       const importedOutputPath = resolveMetafileOutputImportPath(
@@ -276,19 +335,41 @@ function normalizeMetafilePath(inputPath: string): string {
 function assertRunnerEntrypointBundleBoots(input: {
   bundleDir: string;
   bundleOutDir: string;
+  lazyChunkOutputPaths: string[];
 }): void {
   const bundledEntryPath = path.join(
     input.bundleOutDir,
     "container-entrypoint.js",
   );
+  const lazyChunks = input.lazyChunkOutputPaths.map((outputPath) => {
+    const filePath = path.resolve(outputPath.split("/").join(path.sep));
+    const relativePath = path.relative(input.bundleOutDir, filePath);
+    return {
+      path: relativePath.startsWith("..") || path.isAbsolute(relativePath)
+        ? normalizeMetafilePath(outputPath)
+        : normalizeMetafilePath(relativePath),
+      url: pathToFileURL(filePath).href,
+    };
+  });
   // The entry path travels via env, not argv: with it in argv[1] the module's
   // own main-entrypoint guard would match during the probe import and start
-  // the container HTTP server on the assembling machine.
+  // the container HTTP server on the assembling machine. Lazy chunk paths use
+  // the same env channel so the probe still has no bundle target in argv.
   const probeSource = [
     "const entry = await import(process.env.RUNNER_ENTRYPOINT_BUNDLE_PROBE_PATH);",
     "if (typeof entry.startHostedContainerEntrypoint !== 'function') {",
     "  console.error('bundled container entrypoint is missing startHostedContainerEntrypoint');",
     "  process.exit(3);",
+    "}",
+    "const lazyChunks = JSON.parse(process.env.RUNNER_ENTRYPOINT_BUNDLE_PROBE_LAZY_CHUNKS ?? '[]');",
+    "for (const chunk of lazyChunks) {",
+    "  try {",
+    "    await import(chunk.url);",
+    "  } catch (error) {",
+    "    console.error(`bundled lazy chunk failed to evaluate: ${chunk.path}`);",
+    "    console.error(error instanceof Error ? `${error.name}: ${error.message}` : String(error));",
+    "    process.exit(4);",
+    "  }",
     "}",
     "process.exit(0);",
   ].join("\n");
@@ -301,6 +382,7 @@ function assertRunnerEntrypointBundleBoots(input: {
       env: {
         ...process.env,
         RUNNER_ENTRYPOINT_BUNDLE_PROBE_PATH: pathToFileURL(bundledEntryPath).href,
+        RUNNER_ENTRYPOINT_BUNDLE_PROBE_LAZY_CHUNKS: JSON.stringify(lazyChunks),
       },
       timeout: 60_000,
     },
