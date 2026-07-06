@@ -244,11 +244,19 @@ function renderAcceptCta(input: {
               ? "Joining by text works from the phone you use to send the message."
               : "Joining by text works from the phone this invite was sent to."}
           </p>
+          {unboundTelegramInviteLink}
         </>
       );
     }
 
-    return <FamilyInviteWebAcceptButton inviteCode={view.inviteCode} />;
+    return unboundTelegramInviteLink ? (
+      <>
+        <FamilyInviteWebAcceptButton inviteCode={view.inviteCode} />
+        {unboundTelegramInviteLink}
+      </>
+    ) : (
+      <FamilyInviteWebAcceptButton inviteCode={view.inviteCode} />
+    );
   }
 
   // Phone-bound or unbound-by-text: accept in Messages by sending the token.

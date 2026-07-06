@@ -117,6 +117,24 @@ test("renders the web accept path for authenticated email-bound invites", async 
   expect(markup).not.toContain("Continue in Messages");
 });
 
+test("keeps Telegram available for authenticated unbound invites without Messages", async () => {
+  mocks.readHostedFamilyInviteAcceptanceView.mockResolvedValue({
+    ...BASE_VIEW,
+    inviteCode: "CODETGWEB",
+    telegramInviteUrl: "https://t.me/withmurph_bot?start=family_CODETGWEB",
+    webAcceptable: true,
+  });
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({ authenticated: true });
+
+  const markup = await renderFamilyAcceptPage("CODETGWEB");
+
+  expect(mocks.webAcceptButtonProps).toEqual({ inviteCode: "CODETGWEB" });
+  expect(markup).toContain("Accept invite");
+  expect(markup).toContain("Continue in Telegram");
+  expect(markup).toContain("https://t.me/withmurph_bot?start=family_CODETGWEB");
+  expect(markup).not.toContain("Continue in Messages");
+});
+
 test("leads phone-bound invites with the Messages accept path, not Telegram", async () => {
   mocks.readHostedFamilyInviteAcceptanceView.mockResolvedValue(PHONE_BOUND_VIEW);
 
