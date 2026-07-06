@@ -30,12 +30,25 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // surface fails the assembly instead of silently regressing cold start.
 // Baselines measured from the real assembled bundle on 2026-07-06: total
 // 8,201,281B across 34 chunks, entry container-entrypoint.js 2,288,516B.
-// The entry budget is baseline + ~25% headroom (it gates cold-start parse).
-// The total ceiling is held at its prior 9,300,000B value: this change shrank
-// the bundle, so there is no reason to loosen the regression guard.
-// Investigate the listed largest inputs before raising either.
+//
+// The entry chunk gates cold-start parse, so it is ratcheted, not given
+// headroom: the guard holds it to the measured baseline plus a tight noise
+// band. Any growth past baseline + tolerance fails the assembly, so weight
+// can only land on the boot path as a reviewed edit to the baseline constant
+// below. When an increase is intentional, set the baseline to the measured
+// value the failure prints and say why in the same change.
+//
+// The total ceiling stays a fixed backstop at its prior 9,300,000B value (not
+// ratcheted): #397 shrank the bundle, so there is no reason to loosen it, and
+// dynamic (non-boot) chunk jitter should not force a baseline bump. Ratchet it
+// too if total creep becomes the concern. Investigate the listed largest
+// inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BYTES_BUDGET = 2_900_000;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 2_288_516;
+// Noise band above the baseline before the ratchet trips (~2%): absorbs
+// content-hash and minifier jitter without letting real boot-path weight land
+// silently. Keep it tight; it is a tolerance for noise, not feature headroom.
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "node_modules/grammy/",
   "node_modules/node-fetch/",
@@ -78,9 +91,25 @@ export async function bundleRunnerContainerEntrypoint(
     buildResult.metafile,
   );
   console.log(
-    `runner entrypoint bundle size: total ${bundleBytes.totalBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BYTES_BUDGET}B budget`,
+    `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance), total ${bundleBytes.totalBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET}B budget`,
   );
   assertRunnerEntrypointBundleBoots({ bundleDir, bundleOutDir });
+}
+
+// Single source of truth for the production budgets: the entry chunk is the
+// ratcheted baseline plus its noise tolerance, the total is the fixed ceiling.
+// Exported so a unit test can lock these values (the assembly path calls
+// assertRunnerEntrypointBundleWithinBudgets with this as the default).
+export function resolveRunnerEntrypointBundleBudgets(): {
+  entryBytes: number;
+  totalBytes: number;
+} {
+  return {
+    entryBytes:
+      RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES
+      + RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES,
+    totalBytes: RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET,
+  };
 }
 
 function assertRunnerEntrypointBundleInputsStayExternal(
@@ -101,10 +130,8 @@ function assertRunnerEntrypointBundleInputsStayExternal(
 // call site always uses the default budgets above.
 export function assertRunnerEntrypointBundleWithinBudgets(
   metafile: Metafile,
-  budgets: { entryBytes: number; totalBytes: number } = {
-    entryBytes: RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BYTES_BUDGET,
-    totalBytes: RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET,
-  },
+  budgets: { entryBytes: number; totalBytes: number }
+    = resolveRunnerEntrypointBundleBudgets(),
 ): { entryBytes: number; totalBytes: number } {
   const outputs = Object.entries(metafile.outputs);
   const totalBytes = outputs.reduce((sum, [, output]) => sum + output.bytes, 0);
@@ -148,7 +175,7 @@ export function assertRunnerEntrypointBundleWithinBudgets(
   throw new Error(
     [
       `runner entrypoint bundle exceeded its byte budget: ${violations.join("; ")}.`,
-      "Investigate the largest metafile inputs below before raising the budget (see baseline comment on the budget constants):",
+      "Investigate the largest metafile inputs below. If the growth is intended, update the matching baseline/budget constant to the measured value in the same change (see the baseline comment on the budget constants):",
       ...largestInputs,
     ].join("\n"),
   );
