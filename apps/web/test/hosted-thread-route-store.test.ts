@@ -149,6 +149,9 @@ describe("hosted thread route store", () => {
         lastInboundAt: new Date("2026-06-24T12:00:00.000Z"),
       },
     ]);
+    prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
+      ownerBillingStatus: "active",
+    }));
 
     await expect(
       assertHostedLinqRouteEgressAuthority({
@@ -209,6 +212,9 @@ describe("hosted thread route store", () => {
         lastInboundAt: null,
       },
     ]);
+    prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
+      ownerBillingStatus: "active",
+    }));
 
     await expect(
       assertHostedLinqRouteEgressAuthority({
@@ -299,13 +305,12 @@ describe("hosted thread route store", () => {
 
   it("authorizes egress when an active participant keeps an inactive-owner group alive", async () => {
     const prisma = createPrismaMock();
-    const threadLookupKey = createHostedExternalThreadLookupKey({
-      accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
       channel: "linq",
       threadId: "chat_group_abc",
     });
-    if (!threadLookupKey) {
-      throw new Error("Expected test thread lookup key.");
+    if (!threadIdentityLookupKey) {
+      throw new Error("Expected test thread identity lookup key.");
     }
     prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([
       {
@@ -328,7 +333,7 @@ describe("hosted thread route store", () => {
           },
         },
         containerMemberId: "member_container_123",
-        threadLookupKey,
+        threadIdentityLookupKey,
       },
     ]);
     prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
@@ -364,13 +369,12 @@ describe("hosted thread route store", () => {
 
   it("does not authorize egress when owner and projected participants are inactive", async () => {
     const prisma = createPrismaMock();
-    const threadLookupKey = createHostedExternalThreadLookupKey({
-      accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
       channel: "linq",
       threadId: "chat_group_abc",
     });
-    if (!threadLookupKey) {
-      throw new Error("Expected test thread lookup key.");
+    if (!threadIdentityLookupKey) {
+      throw new Error("Expected test thread identity lookup key.");
     }
     prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([
       {
@@ -393,7 +397,7 @@ describe("hosted thread route store", () => {
           },
         },
         containerMemberId: "member_container_123",
-        threadLookupKey,
+        threadIdentityLookupKey,
       },
     ]);
     prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
@@ -418,13 +422,12 @@ describe("hosted thread route store", () => {
 
   it("does not authorize egress for a suspended container even with an active participant", async () => {
     const prisma = createPrismaMock();
-    const threadLookupKey = createHostedExternalThreadLookupKey({
-      accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
       channel: "linq",
       threadId: "chat_group_abc",
     });
-    if (!threadLookupKey) {
-      throw new Error("Expected test thread lookup key.");
+    if (!threadIdentityLookupKey) {
+      throw new Error("Expected test thread identity lookup key.");
     }
     prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([
       {
@@ -447,7 +450,7 @@ describe("hosted thread route store", () => {
           },
         },
         containerMemberId: "member_container_123",
-        threadLookupKey,
+        threadIdentityLookupKey,
       },
     ]);
     prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
