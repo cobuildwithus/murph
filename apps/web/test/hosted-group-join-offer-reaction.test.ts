@@ -1,9 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createPrismaClient } from "@/src/lib/prisma";
+import {
+  createHostedExternalThreadIdentityLookupKey,
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedLinqMessageLookupKey,
+  createHostedLinqMessageLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinOfferTx: vi.fn(),
@@ -52,6 +60,13 @@ import {
   parseHostedLinqProviderEvent,
 } from "@/src/lib/hosted-onboarding/linq-provider-events";
 
+const TEST_KEYRING_ENTRIES = {
+  v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+  v2: "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+} as const;
+
+let restoreKeyring: (() => void) | null = null;
+
 describe("handleHostedGroupJoinOfferReaction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -60,6 +75,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
       groupId: "group_1",
       joinCode: "join_1",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
       membershipId: "membership_1",
       revokedVaultShareProjectionKinds: [],
       selectedVaultShareProjectionKinds: ["sleep-times.v0"],
@@ -72,6 +88,11 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.markHostedLinqDeliverySkippedTx.mockResolvedValue({ id: "hld_skip" });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
+  });
+
+  afterEach(() => {
+    restoreKeyring?.();
+    restoreKeyring = null;
   });
 
   it("accepts a live liked offer and dispatches the deterministic confirmation", async () => {
@@ -91,8 +112,12 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledWith(
       expect.objectContaining({
         memberId: "member_reactor",
-        messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
-        threadIdentityLookupKey: expect.stringMatching(/^hbidx:external-thread-identity:/u),
+        messageLookupKeyReadCandidates: expect.arrayContaining([
+          expect.stringMatching(/^hbidx:linq-message:/u),
+        ]),
+        threadIdentityLookupKeyReadCandidates: expect.arrayContaining([
+          expect.stringMatching(/^hbidx:external-thread-identity:/u),
+        ]),
       }),
     );
     expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith(
@@ -113,6 +138,73 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       }),
     );
     expect(mocks.markHostedLinqDeliverySkippedTx).not.toHaveBeenCalled();
+  });
+
+  it("uses read candidates for rotated offer lookup and keys confirmation to the stored offer row", async () => {
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+    const storedMessageLookupKey = createHostedLinqMessageLookupKey("msg_offer_123");
+    const storedThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_1",
+    });
+    if (!storedMessageLookupKey || !storedThreadIdentityLookupKey) {
+      throw new Error("Expected prior-version lookup keys.");
+    }
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
+    clearHostedOnboardingEnvCache();
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+      groupId: "group_1",
+      joinCode: "join_1",
+      messageLookupKey: storedMessageLookupKey,
+      membershipId: "membership_1",
+      revokedVaultShareProjectionKinds: [],
+      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+      vaultShareCleanupSignals: [],
+    });
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
+    });
+
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageLookupKeyReadCandidates: createHostedLinqMessageLookupKeyReadCandidates(
+          "msg_offer_123",
+        ),
+        threadIdentityLookupKeyReadCandidates:
+          createHostedExternalThreadIdentityLookupKeyReadCandidates({
+            channel: "linq",
+            threadId: "chat_group_1",
+          }),
+      }),
+    );
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        messageLookupKey: expect.anything(),
+        threadIdentityLookupKey: expect.anything(),
+      }),
+    );
+    const sideEffect = mocks.drainHostedLinqSideEffectsDirect.mock.calls[0]?.[0]
+      ?.sideEffects?.[0];
+    expect(sideEffect?.effectId).toBe(
+      buildExpectedGroupJoinOfferAcceptedEffectId({
+        memberId: "member_reactor",
+        offerMessageLookupKey: storedMessageLookupKey,
+      }),
+    );
   });
 
   it("records unsupported reactions as skipped without accepting or replying", async () => {
@@ -210,6 +302,57 @@ function parseReactionEvent(input: {
     throw new Error("Expected reaction provider event to parse.");
   }
   return parsed;
+}
+
+function configureHostedContactPrivacyKeyringForTest(input: {
+  currentVersion: string;
+  entries: Record<string, string>;
+}): () => void {
+  const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  const previousCurrentVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(input.entries)
+    .map(([version, key]) => `${version}:${key}`)
+    .join(",");
+  process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = input.currentVersion;
+  clearHostedOnboardingEnvCache();
+
+  return () => {
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", previousCurrentVersion);
+    clearHostedOnboardingEnvCache();
+  };
+}
+
+function clearHostedOnboardingEnvCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}
+
+function buildExpectedGroupJoinOfferAcceptedEffectId(input: {
+  memberId: string;
+  offerMessageLookupKey: string;
+}): string {
+  const hash = createHash("sha256")
+    .update(JSON.stringify({
+      memberId: input.memberId,
+      offerMessageLookupKey: input.offerMessageLookupKey,
+    }))
+    .digest("hex")
+    .slice(0, 32);
+  return `linq-group-join-offer-accepted:${hash}`;
 }
 
 function createPrismaStub(): PrismaClient {

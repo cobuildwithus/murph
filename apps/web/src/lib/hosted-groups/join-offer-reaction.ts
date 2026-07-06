@@ -18,7 +18,7 @@ import {
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
-import { createHostedExternalThreadIdentityLookupKey } from "../hosted-onboarding/contact-privacy";
+import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import { acceptHostedGroupJoinOfferTx } from "./group-store";
@@ -110,7 +110,12 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       reason: "join_links_unavailable",
     });
   }
-  const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+  const messageLookupKeyReadCandidates = normalizeLookupKeyCandidates(
+    input.event.messageLookupKeyReadCandidates.length > 0
+      ? input.event.messageLookupKeyReadCandidates
+      : [input.event.messageLookupKey],
+  );
+  const threadIdentityLookupKeyReadCandidates = createHostedExternalThreadIdentityLookupKeyReadCandidates({
     channel: "linq",
     threadId: input.event.linqChatId,
   });
@@ -120,9 +125,9 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     accepted = await input.prisma.$transaction(async (tx) =>
       acceptHostedGroupJoinOfferTx({
         memberId: member.id,
-        messageLookupKey: input.event.messageLookupKey,
+        messageLookupKeyReadCandidates,
         now: input.event.providerCreatedAt,
-        threadIdentityLookupKey,
+        threadIdentityLookupKeyReadCandidates,
         tx,
       }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch (error) {
@@ -164,7 +169,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           joinUrl,
           projectionKinds: accepted.selectedVaultShareProjectionKinds,
         }),
-        offerMessageLookupKey: input.event.messageLookupKey,
+        offerMessageLookupKey: accepted.messageLookupKey,
         occurredAt: input.event.providerCreatedAt.toISOString(),
         replyToMessageId: input.event.linqMessageId,
         sourceEventId: input.event.eventId,
@@ -175,6 +180,12 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   });
 
   return { status: "accepted", reason: "accepted" };
+}
+
+function normalizeLookupKeyCandidates(values: readonly (string | null | undefined)[]): string[] {
+  return [...new Set(values
+    .map((value) => value?.trim() ?? "")
+    .filter((value) => value.length > 0))];
 }
 
 function readHostedGroupJoinOfferReactionSkipReason(

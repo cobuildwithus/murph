@@ -1,8 +1,14 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
 
 import { createPrismaClient } from "@/src/lib/prisma";
+import {
+  createHostedExternalThreadIdentityLookupKey,
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedLinqMessageLookupKey,
+  createHostedLinqMessageLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
@@ -48,6 +54,18 @@ const JOIN_POLICY = {
   schema: "murph.hosted-group.join-policy.v1",
 };
 
+const TEST_KEYRING_ENTRIES = {
+  v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+  v2: "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+} as const;
+
+let restoreKeyring: (() => void) | null = null;
+
+afterEach(() => {
+  restoreKeyring?.();
+  restoreKeyring = null;
+});
+
 function createPrismaStub<T extends Record<string, unknown>>(delegates: T): PrismaClient & T {
   const prisma = createPrismaClient({
     databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
@@ -66,8 +84,10 @@ function buildTx(input?: {
   activeDestinationGrantCount?: number;
   activeGroupGrantCount?: number;
   existingMembershipId?: string | null;
+  offerMessageLookupKey?: string;
   revokedOfferAt?: Date | null;
   runtimeMemberId?: string | null;
+  threadIdentityLookupKey?: string;
 }): PrismaClient & {
   hostedGroup: {
     findUnique: ReturnType<typeof vi.fn>;
@@ -75,6 +95,7 @@ function buildTx(input?: {
   };
   hostedGroupJoinOffer: {
     create: ReturnType<typeof vi.fn>;
+    findFirst: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
@@ -111,12 +132,39 @@ function buildTx(input?: {
     },
     hostedGroupJoinOffer: {
       create: vi.fn(async () => ({})),
+      findFirst: vi.fn(async (args: {
+        where: { messageLookupKey?: string | { in?: string[] }; revokedAt?: null };
+      }) => {
+        const messageLookupKey = input?.offerMessageLookupKey ?? "hbidx:linq-message:v1:offer";
+        const lookup = args.where.messageLookupKey;
+        const matches = typeof lookup === "string"
+          ? lookup === messageLookupKey
+          : lookup?.in?.includes(messageLookupKey);
+        if (matches && (!("revokedAt" in args.where) || input?.revokedOfferAt == null)) {
+          return {
+            groupId: "group_1",
+            messageLookupKey,
+            projectionKindsJson: ["sleep-times.v0"],
+            revokedAt: input?.revokedOfferAt ?? null,
+            group: {
+              id: "group_1",
+              joinCode: "join_1",
+              runtimeMemberId: input?.runtimeMemberId === undefined
+                ? "member_group_runtime"
+                : input.runtimeMemberId,
+            },
+          };
+        }
+        return null;
+      }),
       findUnique: vi.fn(async (args: {
         where: { messageLookupKey?: string };
       }) => {
-        if (args.where.messageLookupKey === "hbidx:linq-message:v1:offer") {
+        const messageLookupKey = input?.offerMessageLookupKey ?? "hbidx:linq-message:v1:offer";
+        if (args.where.messageLookupKey === messageLookupKey) {
           return {
             groupId: "group_1",
+            messageLookupKey,
             projectionKindsJson: ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
@@ -145,7 +193,17 @@ function buildTx(input?: {
       findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
     },
     hostedThreadRoute: {
-      findFirst: vi.fn(async () => ({ containerMemberId: "member_group_runtime" })),
+      findFirst: vi.fn(async (args?: {
+        where?: { threadIdentityLookupKey?: string | { in?: string[] } };
+      }) => {
+        const threadIdentityLookupKey = input?.threadIdentityLookupKey
+          ?? "hbidx:external-thread-identity:v1:thread";
+        const lookup = args?.where?.threadIdentityLookupKey;
+        const matches = typeof lookup === "string"
+          ? lookup === threadIdentityLookupKey
+          : lookup?.in?.includes(threadIdentityLookupKey) ?? true;
+        return matches ? { containerMemberId: "member_group_runtime" } : null;
+      }),
     },
     hostedVaultShare: {
       count: vi.fn(async (args: {
@@ -411,9 +469,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinOfferTx({
       memberId: "member_grantor",
-      messageLookupKey: "hbidx:linq-message:v1:offer",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now,
-      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
     })).resolves.toMatchObject({
       alreadyMember: true,
@@ -429,10 +487,85 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       where: {
         channel: "linq",
         containerMemberId: "member_group_runtime",
-        threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+        threadIdentityLookupKey: {
+          in: ["hbidx:external-thread-identity:v1:thread"],
+        },
       },
     });
     expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+  });
+
+  it("accepts a join-offer reaction matched by prior-version message and thread identity lookup candidates", async () => {
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+    const storedMessageLookupKey = createHostedLinqMessageLookupKey("msg_offer_123");
+    const storedThreadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_1",
+    });
+    if (!storedMessageLookupKey || !storedThreadIdentityLookupKey) {
+      throw new Error("Expected prior-version lookup keys.");
+    }
+
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
+    clearHostedOnboardingEnvCache();
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      offerMessageLookupKey: storedMessageLookupKey,
+      threadIdentityLookupKey: storedThreadIdentityLookupKey,
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    const messageLookupKeyReadCandidates =
+      createHostedLinqMessageLookupKeyReadCandidates("msg_offer_123");
+    const threadIdentityLookupKeyReadCandidates =
+      createHostedExternalThreadIdentityLookupKeyReadCandidates({
+        channel: "linq",
+        threadId: "chat_group_1",
+      });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates,
+      now,
+      threadIdentityLookupKeyReadCandidates,
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+      joinCode: "join_1",
+      membershipId: "membership_created",
+      messageLookupKey: storedMessageLookupKey,
+      revokedVaultShareProjectionKinds: [],
+      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+    });
+
+    expect(tx.hostedGroupJoinOffer.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          messageLookupKey: {
+            in: expect.arrayContaining([
+              storedMessageLookupKey,
+              expect.stringMatching(/^hbidx:linq-message:v2:/u),
+            ]),
+          },
+        }),
+      }),
+    );
+    expect(tx.hostedThreadRoute.findFirst).toHaveBeenCalledWith({
+      select: { containerMemberId: true },
+      where: {
+        channel: "linq",
+        containerMemberId: "member_group_runtime",
+        threadIdentityLookupKey: {
+          in: expect.arrayContaining([
+            storedThreadIdentityLookupKey,
+            expect.stringMatching(/^hbidx:external-thread-identity:v2:/u),
+          ]),
+        },
+      },
+    });
   });
 
   it("rejects a revoked join offer distinctly from a missing offer", async () => {
@@ -442,9 +575,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinOfferTx({
       memberId: "member_grantor",
-      messageLookupKey: "hbidx:linq-message:v1:offer",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now: new Date("2026-07-01T00:06:00.000Z"),
-      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
     })).rejects.toMatchObject({
       code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
@@ -477,9 +610,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(acceptHostedGroupJoinOfferTx({
       memberId: "member_grantor",
-      messageLookupKey: firstOffer.messageLookupKey,
+      messageLookupKeyReadCandidates: [firstOffer.messageLookupKey],
       now,
-      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
     })).resolves.toMatchObject({
       alreadyMember: false,
@@ -663,6 +796,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
   };
   hostedGroupJoinOffer: {
     create: ReturnType<typeof vi.fn>;
+    findFirst: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
@@ -726,11 +860,31 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
         return offer
           ? {
               groupId: offer.groupId,
+              messageLookupKey: offer.messageLookupKey,
               projectionKindsJson: offer.projectionKindsJson,
               revokedAt: offer.revokedAt,
               group,
             }
           : null;
+      }),
+      findFirst: vi.fn(async (args: {
+        where: { messageLookupKey?: string | { in?: string[] }; revokedAt?: null };
+      }) => {
+        const lookup = args.where.messageLookupKey;
+        const offer = offers.find((entry) =>
+          typeof lookup === "string"
+            ? entry.messageLookupKey === lookup
+            : lookup?.in?.includes(entry.messageLookupKey));
+        if (!offer || ("revokedAt" in args.where && offer.revokedAt !== null)) {
+          return null;
+        }
+        return {
+          groupId: offer.groupId,
+          messageLookupKey: offer.messageLookupKey,
+          projectionKindsJson: offer.projectionKindsJson,
+          revokedAt: offer.revokedAt,
+          group,
+        };
       }),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
@@ -752,6 +906,43 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
       findUnique: vi.fn(async () => null),
     },
   });
+}
+
+function configureHostedContactPrivacyKeyringForTest(input: {
+  currentVersion: string;
+  entries: Record<string, string>;
+}): () => void {
+  const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  const previousCurrentVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(input.entries)
+    .map(([version, key]) => `${version}:${key}`)
+    .join(",");
+  process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = input.currentVersion;
+  clearHostedOnboardingEnvCache();
+
+  return () => {
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", previousCurrentVersion);
+    clearHostedOnboardingEnvCache();
+  };
+}
+
+function clearHostedOnboardingEnvCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
 }
 
 

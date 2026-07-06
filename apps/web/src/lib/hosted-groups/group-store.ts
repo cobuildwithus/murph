@@ -88,6 +88,7 @@ export interface HostedGroupJoinOfferBindingTxResult {
 export interface HostedGroupJoinOfferAcceptanceTxResult
   extends HostedGroupJoinAcceptanceTxResult {
   joinCode: string;
+  messageLookupKey: string;
   selectedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
 }
 
@@ -443,12 +444,21 @@ export async function recordHostedGroupJoinOfferTx(input: {
 
 export async function acceptHostedGroupJoinOfferTx(input: {
   memberId: string;
-  messageLookupKey: string | null;
+  messageLookupKeyReadCandidates: readonly string[];
   now: Date;
-  threadIdentityLookupKey: string | null;
+  threadIdentityLookupKeyReadCandidates: readonly string[];
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferAcceptanceTxResult> {
-  if (!input.threadIdentityLookupKey || !input.messageLookupKey) {
+  const messageLookupKeyReadCandidates = normalizeHostedGroupLookupKeyCandidates(
+    input.messageLookupKeyReadCandidates,
+  );
+  const threadIdentityLookupKeyReadCandidates = normalizeHostedGroupLookupKeyCandidates(
+    input.threadIdentityLookupKeyReadCandidates,
+  );
+  if (
+    messageLookupKeyReadCandidates.length === 0
+    || threadIdentityLookupKeyReadCandidates.length === 0
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
       httpStatus: 404,
@@ -456,8 +466,12 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       retryable: false,
     });
   }
-  const offerLookup = await input.tx.hostedGroupJoinOffer.findUnique({
-    where: { messageLookupKey: input.messageLookupKey },
+  const offerLookup = await input.tx.hostedGroupJoinOffer.findFirst({
+    where: {
+      messageLookupKey: {
+        in: messageLookupKeyReadCandidates,
+      },
+    },
     select: { groupId: true },
   });
   if (!offerLookup) {
@@ -469,10 +483,16 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     });
   }
   await lockHostedGroupRow(input.tx, offerLookup.groupId);
-  const offer = await input.tx.hostedGroupJoinOffer.findUnique({
-    where: { messageLookupKey: input.messageLookupKey },
+  const offer = await input.tx.hostedGroupJoinOffer.findFirst({
+    where: {
+      messageLookupKey: {
+        in: messageLookupKeyReadCandidates,
+      },
+      revokedAt: null,
+    },
     select: {
       groupId: true,
+      messageLookupKey: true,
       projectionKindsJson: true,
       revokedAt: true,
       group: {
@@ -485,14 +505,6 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     },
   });
   if (!offer) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
-      httpStatus: 404,
-      message: "This group offer is no longer active.",
-      retryable: false,
-    });
-  }
-  if (offer.revokedAt) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
       httpStatus: 410,
@@ -521,7 +533,9 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     where: {
       channel: "linq",
       containerMemberId: group.runtimeMemberId,
-      threadIdentityLookupKey: input.threadIdentityLookupKey,
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeyReadCandidates,
+      },
     },
     select: { containerMemberId: true },
   });
@@ -550,8 +564,17 @@ export async function acceptHostedGroupJoinOfferTx(input: {
   return {
     ...accepted,
     joinCode: group.joinCode,
+    messageLookupKey: offer.messageLookupKey,
     selectedVaultShareProjectionKinds,
   };
+}
+
+function normalizeHostedGroupLookupKeyCandidates(
+  values: readonly (string | null | undefined)[],
+): string[] {
+  return [...new Set(values
+    .map((value) => value?.trim() ?? "")
+    .filter((value) => value.length > 0))];
 }
 
 async function revokeHostedGroupJoinOffersTx(
