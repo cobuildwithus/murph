@@ -280,9 +280,50 @@ describe("hosted Family plan", () => {
         targetLabel: "Dad",
         targetPhoneHint: null,
         targetPhoneNumber: null,
+        targetTelegramUsername: "dad_username",
       },
       telegramBotUsername: "@withmurph_bot",
     })).toContain("Forward this Telegram invite link to Dad: https://t.me/withmurph_bot?start=family_invite_123");
+  });
+
+  it("does not build a Telegram deep link for label-only family invite replies", () => {
+    const replyText = buildHostedFamilyInviteReplyText({
+      invite: {
+        inviteCode: "invite_label",
+        targetEmail: null,
+        targetLabel: "Dad",
+        targetPhoneHint: null,
+        targetPhoneNumber: null,
+        targetTelegramUsername: null,
+      },
+      telegramBotUsername: "@withmurph_bot",
+    });
+
+    expect(replyText).not.toContain("https://t.me/");
+    expect(replyText).toContain("Telegram invite token: family_invite_label");
+  });
+
+  it("uses the web accept link for phone-bound family invite replies", () => {
+    const replyText = buildHostedFamilyInviteReplyText({
+      invite: {
+        inviteCode: "invite_phone",
+        targetEmail: null,
+        targetLabel: "Dad",
+        targetPhoneHint: "+48 6** *** ***",
+        targetPhoneNumber: "+48600000000",
+        targetTelegramUsername: null,
+      },
+      publicBaseUrl: "https://local.withmurph.ai:3443",
+      telegramBotUsername: "@withmurph_bot",
+    });
+
+    expect(replyText).toContain(
+      "Forward this Family invite link to Dad: https://local.withmurph.ai:3443/family/accept/invite_phone",
+    );
+    expect(replyText).toContain(
+      "When they open it they can join by text right from their phone.",
+    );
+    expect(replyText).not.toContain("for example on WhatsApp");
   });
 
   it("uses the web accept link for email-bound family invite replies", () => {
@@ -293,6 +334,7 @@ describe("hosted Family plan", () => {
         targetLabel: "Dad",
         targetPhoneHint: null,
         targetPhoneNumber: null,
+        targetTelegramUsername: null,
       },
       publicBaseUrl: "https://local.withmurph.ai:3443",
       telegramBotUsername: "@withmurph_bot",
@@ -365,7 +407,12 @@ describe("hosted Family plan", () => {
       },
     });
     expect(result.replyText).not.toContain("Forward this Telegram invite link");
-    expect(result.replyText).toContain("They need to send this token to Murph from that phone number");
+    expect(result.replyText).toContain(
+      "Forward this Family invite link to dad: https://local.withmurph.ai:3443/family/accept/",
+    );
+    expect(result.replyText).toContain(
+      "When they open it they can join by text right from their phone.",
+    );
     expect(result.replyText).toContain("you cannot see their private Murph conversations");
   });
 

@@ -200,6 +200,25 @@ function renderAcceptCta(input: {
 
   // Already signed in as an invite-bound identity: one tap, no re-verification.
   if (input.authenticated && view.webAcceptable) {
+    if (input.messagesAcceptHref) {
+      return (
+        <>
+          <FamilyInviteWebAcceptButton inviteCode={view.inviteCode} />
+          <Button
+            render={<a href={input.messagesAcceptHref} />}
+            nativeButton={false}
+            size="xl"
+            variant="secondary"
+          >
+            Continue in Messages
+          </Button>
+          <p className="text-xs leading-5 text-muted-foreground">
+            Joining by text works from the phone this invite was sent to.
+          </p>
+        </>
+      );
+    }
+
     return <FamilyInviteWebAcceptButton inviteCode={view.inviteCode} />;
   }
 

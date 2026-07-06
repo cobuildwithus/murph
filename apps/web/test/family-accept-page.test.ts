@@ -146,7 +146,11 @@ test("uses the one-tap web accept path for authenticated phone-bound invites", a
 
   expect(mocks.webAcceptButtonProps).toEqual({ inviteCode: "CODEPHONE" });
   expect(markup).toContain("Accept invite");
-  expect(markup).not.toContain("Continue in Messages");
+  expect(markup).toContain("Continue in Messages");
+  expect(markup).toContain("sms:+15551230000?body=family_CODEPHONE");
+  expect(markup).toContain(
+    "Joining by text works from the phone this invite was sent to.",
+  );
 });
 
 test("continues in Telegram only for Telegram-bound invites", async () => {

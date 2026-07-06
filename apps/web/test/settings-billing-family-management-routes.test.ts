@@ -85,6 +85,7 @@ beforeEach(async () => {
     status: "pending",
     targetLabel: "Mom",
     targetPhoneHint: "+48 6** *** ***",
+    targetTelegramUsername: null,
   });
   mocks.buildHostedFamilyInviteAcceptUrl.mockReturnValue(
     "https://app.murph.test/family/accept/NEWCODE",
@@ -161,6 +162,17 @@ test("issues a family invite and returns safe share links", async () => {
 });
 
 test("returns a Telegram share link only for a Telegram-bound invite", async () => {
+  mocks.issueHostedFamilyInviteTx.mockResolvedValueOnce({
+    channel: "family",
+    expiresAt: new Date("2026-07-01T00:00:00.000Z"),
+    id: "inv_new",
+    inviteCode: "NEWCODE",
+    status: "pending",
+    targetLabel: "Uncle",
+    targetPhoneHint: null,
+    targetTelegramUsername: "uncle",
+  });
+
   const response = await inviteRoute.POST(
     inviteRequest({ targetLabel: "Uncle", targetTelegramUsername: "@uncle" }),
   );
@@ -170,6 +182,36 @@ test("returns a Telegram share link only for a Telegram-bound invite", async () 
   expect(payload.invite.telegramInviteUrl).toBe(
     "https://t.me/withmurph_bot?start=family_NEWCODE",
   );
+});
+
+test("does not return a Telegram share link when the stored invite is not Telegram-bound", async () => {
+  mocks.issueHostedFamilyInviteTx.mockResolvedValueOnce({
+    channel: "family",
+    expiresAt: new Date("2026-07-01T00:00:00.000Z"),
+    id: "inv_new",
+    inviteCode: "NEWCODE",
+    status: "pending",
+    targetLabel: "Uncle",
+    targetPhoneHint: "+48 6** *** ***",
+    targetTelegramUsername: null,
+  });
+
+  const response = await inviteRoute.POST(
+    inviteRequest({
+      targetLabel: "Uncle",
+      targetPhoneNumber: "+48600000000",
+      targetTelegramUsername: " ",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  const payload = (await response.json()) as { invite: { telegramInviteUrl: string | null } };
+  expect(payload.invite.telegramInviteUrl).toBeNull();
+  expect(mocks.resolveHostedFamilyTelegramInviteUrl).toHaveBeenCalledWith({
+    inviteCode: "NEWCODE",
+    isTelegramBound: false,
+    telegramBotUsername: "withmurph_bot",
+  });
 });
 
 test("adds one paid seat and retries when the plan is full", async () => {
@@ -191,6 +233,7 @@ test("adds one paid seat and retries when the plan is full", async () => {
       status: "pending",
       targetLabel: "Dad",
       targetPhoneHint: "+48 6** *** ***",
+      targetTelegramUsername: null,
     });
 
   const response = await inviteRoute.POST(
@@ -224,6 +267,7 @@ test("reuses a concurrently-created invite on the pre-buy re-check (no purchase)
       status: "pending",
       targetLabel: "Dad",
       targetPhoneHint: "+48 6** *** ***",
+      targetTelegramUsername: null,
     });
 
   const response = await inviteRoute.POST(
@@ -255,6 +299,7 @@ test("uses a seat freed before the purchase instead of buying another", async ()
       status: "pending",
       targetLabel: "Dad",
       targetPhoneHint: "+48 6** *** ***",
+      targetTelegramUsername: null,
     });
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
     billingActive: true,

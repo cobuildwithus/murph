@@ -3155,7 +3155,12 @@ export function buildHostedFamilyInviteAcceptUrl(input: {
 
 export function buildHostedFamilyInviteReplyText(input: {
   invite: Pick<HostedAccountGroupInvitePrivateSnapshot,
-    "inviteCode" | "targetEmail" | "targetLabel" | "targetPhoneHint" | "targetPhoneNumber"
+    | "inviteCode"
+    | "targetEmail"
+    | "targetLabel"
+    | "targetPhoneHint"
+    | "targetPhoneNumber"
+    | "targetTelegramUsername"
   >;
   publicBaseUrl?: string | null;
   telegramBotUsername?: string | null;
@@ -3168,12 +3173,21 @@ export function buildHostedFamilyInviteReplyText(input: {
   const telegramBotUsername = normalizeMurphTelegramUsername(input.telegramBotUsername);
 
   if (input.invite.targetPhoneNumber) {
-    lines.push(
-      `Invite token for ${input.invite.targetPhoneHint ?? "their phone"}: ${inviteToken}`,
-    );
-    lines.push(
-      "They need to send this token to Murph from that phone number, for example on WhatsApp.",
-    );
+    const acceptUrl = buildHostedFamilyInviteAcceptUrl({
+      inviteCode: input.invite.inviteCode,
+      publicBaseUrl: input.publicBaseUrl ?? null,
+    });
+    if (acceptUrl) {
+      lines.push(`Forward this Family invite link to ${targetLabel}: ${acceptUrl}`);
+      lines.push("When they open it they can join by text right from their phone.");
+    } else {
+      lines.push(
+        `Invite token for ${input.invite.targetPhoneHint ?? "their phone"}: ${inviteToken}`,
+      );
+      lines.push(
+        "They need to send this token to Murph from that phone number, for example on WhatsApp.",
+      );
+    }
   } else if (input.invite.targetEmail) {
     const acceptUrl = buildHostedFamilyInviteAcceptUrl({
       inviteCode: input.invite.inviteCode,
@@ -3185,7 +3199,7 @@ export function buildHostedFamilyInviteReplyText(input: {
     } else {
       lines.push(`Family invite code for ${input.invite.targetEmail}: ${inviteToken}`);
     }
-  } else if (telegramBotUsername) {
+  } else if (telegramBotUsername && input.invite.targetTelegramUsername !== null) {
     lines.push(
       `Forward this Telegram invite link to ${targetLabel}: ${buildHostedFamilyTelegramInviteUrl({
         botUsername: telegramBotUsername,

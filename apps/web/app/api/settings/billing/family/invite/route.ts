@@ -104,7 +104,7 @@ export const POST = withJsonError(async (request: Request) => {
       targetPhoneHint: invite.targetPhoneHint,
       telegramInviteUrl: resolveHostedFamilyTelegramInviteUrl({
         inviteCode: invite.inviteCode,
-        isTelegramBound: targetTelegramUsername !== null,
+        isTelegramBound: invite.targetTelegramUsername !== null,
         telegramBotUsername,
       }),
     },
