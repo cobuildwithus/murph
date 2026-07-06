@@ -57,9 +57,13 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       },
     });
 
-    await groupTool.request({ action: "post_join_offer" });
+    await groupTool.request({
+      action: "post_join_offer",
+      joinOffer: { projectionKinds: ["sleep-times.v0"] },
+    });
     expect(request).toHaveBeenLastCalledWith({
       action: "post_join_offer",
+      joinOffer: { projectionKinds: ["sleep-times.v0"] },
       linqThread: {
         authority: ROUTE_AUTHORITY,
         chatId: "chat_group_1",
@@ -140,5 +144,14 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({ action: "read_chat_participants" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
+
+    await groupTool.request({
+      action: "post_join_offer",
+      joinOffer: { projectionKinds: ["sleep-times.v0"] },
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "post_join_offer",
+      joinOffer: { projectionKinds: ["sleep-times.v0"] },
+    });
   });
 });

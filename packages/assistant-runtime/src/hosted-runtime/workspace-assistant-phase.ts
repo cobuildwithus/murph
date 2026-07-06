@@ -215,7 +215,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
         input.linqDeliveryContexts,
       );
       return await input.groupToolPort.request(
-        linqThread ? { action: request.action, linqThread } : { action: request.action },
+        linqThread ? { ...request, linqThread } : request,
       );
     },
   };
