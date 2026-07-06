@@ -198,9 +198,28 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .artifacts/cloudflare-hosted-e2e
+          # Bounded retry for a transient class only: the full hosted stack (web
+          # + Temporal worker + workerd runner container + Codex + Postgres) on a
+          # single runner intermittently exhausts runner memory at cold start,
+          # OOM-killing the Codex subprocess (exit 137 / ASSISTANT_CODEX_FAILED)
+          # so a reply is never produced. That is transient and clears on a fresh
+          # attempt; a real regression fails deterministically on every attempt,
+          # so a small retry cannot hide it. Per-attempt logs are all uploaded.
+          max_attempts=3
           for scenario in ${{ matrix.scenarios }}; do
-            pnpm hosted-local e2e "$scenario" --no-bundle 2>&1 \
-              | tee ".artifacts/cloudflare-hosted-e2e/$scenario.log"
+            attempt=1
+            while true; do
+              if pnpm hosted-local e2e "$scenario" --no-bundle 2>&1 \
+                  | tee ".artifacts/cloudflare-hosted-e2e/$scenario.attempt-$attempt.log"; then
+                break
+              fi
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "hosted E2E scenario '$scenario' failed after $attempt attempts" >&2
+                exit 1
+              fi
+              echo "hosted E2E scenario '$scenario' attempt $attempt failed; retrying (transient cold-start OOM class)" >&2
+              attempt=$((attempt + 1))
+            done
           done
 
       - name: Upload hosted E2E logs
