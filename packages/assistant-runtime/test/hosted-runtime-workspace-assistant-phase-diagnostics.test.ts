@@ -84,7 +84,13 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 
 vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
   runHostedAssistantAutomationLane: mocks.runHostedAssistantAutomationLane,
-  runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
+}));
+
+vi.mock("../src/hosted-runtime/device-sync-maintenance-import.ts", () => ({
+  isHostedDeviceSyncMaintenanceModuleLoadError: vi.fn(() => false),
+  loadHostedDeviceSyncMaintenanceModule: vi.fn(async () => ({
+    runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
+  })),
 }));
 
 vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
