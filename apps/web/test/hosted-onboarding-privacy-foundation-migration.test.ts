@@ -510,6 +510,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGroupJoinOfferMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260706130000_hosted_group_join_offer/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -638,6 +645,18 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedThreadContainerParticipantMigrationSql).not.toContain('"handle" TEXT');
     expect(hostedThreadContainerParticipantMigrationSql).not.toMatch(
       /"(?:raw_)?(?:message|body|payload)[^"]*"/iu,
+    );
+    expect(hostedGroupJoinOfferMigrationSql).toContain(
+      'CREATE TABLE "hosted_group_join_offer"',
+    );
+    expect(hostedGroupJoinOfferMigrationSql).toContain('"message_lookup_key" TEXT NOT NULL');
+    expect(hostedGroupJoinOfferMigrationSql).toContain('"projection_kinds_json" JSONB NOT NULL');
+    expect(hostedGroupJoinOfferMigrationSql).toContain('"revoked_at" TIMESTAMP(3)');
+    expect(hostedGroupJoinOfferMigrationSql).toContain(
+      'REFERENCES "hosted_group"("id")',
+    );
+    expect(hostedGroupJoinOfferMigrationSql).not.toContain(
+      'ALTER TABLE "hosted_group"',
     );
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
     expect(schema).not.toContain("@@index([memberId, profileKey, updatedAt])");

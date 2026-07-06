@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import type { HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
 
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
@@ -30,6 +30,7 @@ type HostedGroupJoinOfferReactionSkipReason =
   | "member_inactive"
   | "missing_reaction_context"
   | "no_offer_match"
+  | "offer_revoked"
   | "not_a_member"
   | "reaction_removed"
   | "unsupported_reaction";
@@ -184,6 +185,9 @@ function readHostedGroupJoinOfferReactionSkipReason(
   }
   if (error.code === "HOSTED_CONSENT_REQUIRED") {
     return "launch_consent_missing";
+  }
+  if (error.code === "HOSTED_GROUP_JOIN_OFFER_REVOKED") {
+    return "offer_revoked";
   }
   if (
     error.code === "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND"

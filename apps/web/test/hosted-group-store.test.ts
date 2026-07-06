@@ -66,11 +66,17 @@ function buildTx(input?: {
   activeDestinationGrantCount?: number;
   activeGroupGrantCount?: number;
   existingMembershipId?: string | null;
+  revokedOfferAt?: Date | null;
   runtimeMemberId?: string | null;
 }): PrismaClient & {
   hostedGroup: {
     findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
+  };
+  hostedGroupJoinOffer: {
+    create: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
   };
   hostedThreadRoute: {
     findFirst: ReturnType<typeof vi.fn>;
@@ -84,20 +90,15 @@ function buildTx(input?: {
     $queryRaw: vi.fn(async () => []),
     hostedGroup: {
       findUnique: vi.fn(async (args: {
-        where: { id?: string; joinCode?: string; joinOfferMessageLookupKey?: string };
+        where: { id?: string; joinCode?: string };
       }) => {
         if (args.where.joinCode) {
-          return { id: "group_1" };
-        }
-        if (args.where.joinOfferMessageLookupKey) {
           return { id: "group_1" };
         }
         if (args.where.id) {
           return {
             id: "group_1",
             joinCode: "join_1",
-            joinOfferMessageLookupKey: "hbidx:linq-message:v1:offer",
-            joinOfferProjectionKindsJson: ["sleep-times.v0"],
             joinPolicyJson: JOIN_POLICY,
             runtimeMemberId: input?.runtimeMemberId === undefined
               ? "member_group_runtime"
@@ -107,6 +108,29 @@ function buildTx(input?: {
         return null;
       }),
       update: vi.fn(async () => ({})),
+    },
+    hostedGroupJoinOffer: {
+      create: vi.fn(async () => ({})),
+      findUnique: vi.fn(async (args: {
+        where: { messageLookupKey?: string };
+      }) => {
+        if (args.where.messageLookupKey === "hbidx:linq-message:v1:offer") {
+          return {
+            groupId: "group_1",
+            projectionKindsJson: ["sleep-times.v0"],
+            revokedAt: input?.revokedOfferAt ?? null,
+            group: {
+              id: "group_1",
+              joinCode: "join_1",
+              runtimeMemberId: input?.runtimeMemberId === undefined
+                ? "member_group_runtime"
+                : input.runtimeMemberId,
+            },
+          };
+        }
+        return null;
+      }),
+      updateMany: vi.fn(async () => ({ count: 0 })),
     },
     hostedGroupMember: {
       create: vi.fn(async () => ({ id: "membership_created" })),
@@ -366,14 +390,15 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       projectionKinds: ["sleep-times.v0"],
     });
 
-    expect(tx.hostedGroup.update).toHaveBeenCalledWith({
+    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledWith({
       data: {
-        joinOfferMessageIdSuffix: expect.stringContaining("123"),
-        joinOfferMessageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
-        joinOfferPostedAt: postedAt,
-        joinOfferProjectionKindsJson: ["sleep-times.v0"],
+        groupId: "group_1",
+        id: expect.stringMatching(/^hgrpjo_/u),
+        messageIdSuffix: expect.stringContaining("123"),
+        messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+        postedAt,
+        projectionKindsJson: ["sleep-times.v0"],
       },
-      where: { id: "group_1" },
     });
   });
 
@@ -408,6 +433,73 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       },
     });
     expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects a revoked join offer distinctly from a missing offer", async () => {
+    const tx = buildTx({
+      revokedOfferAt: new Date("2026-07-01T00:05:00.000Z"),
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      now: new Date("2026-07-01T00:06:00.000Z"),
+      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
+      httpStatus: 410,
+    });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+  });
+
+  it("accepts an older visible offer after a newer offer is posted", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const firstPostedAt = new Date("2026-07-01T00:00:00.000Z");
+    const secondPostedAt = new Date("2026-07-01T00:05:00.000Z");
+    const now = new Date("2026-07-01T00:06:00.000Z");
+
+    const firstOffer = await recordHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      messageId: "msg_offer_a",
+      postedAt: firstPostedAt,
+      projectionKinds: ["sleep-times.v0"],
+      tx,
+    });
+    await recordHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      messageId: "msg_offer_b",
+      postedAt: secondPostedAt,
+      projectionKinds: ["activity-days.v0"],
+      tx,
+    });
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKey: firstOffer.messageLookupKey,
+      now,
+      threadIdentityLookupKey: "hbidx:external-thread-identity:v1:thread",
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+      joinCode: "join_1",
+      membershipId: "membership_created",
+      revokedVaultShareProjectionKinds: [],
+      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+    });
+
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionKind: "sleep-times.v0",
+      tx,
+    });
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
+      expect.objectContaining({ projectionKind: "activity-days.v0" }),
+    );
   });
 });
 
@@ -475,13 +567,16 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       data: {
         joinCode: expect.any(String),
         joinCodeCreatedAt: now,
-        joinOfferMessageIdSuffix: null,
-        joinOfferMessageLookupKey: null,
-        joinOfferPostedAt: null,
-        joinOfferProjectionKindsJson: Prisma.DbNull,
       },
       select: { joinCode: true },
       where: { id: "group_1" },
+    });
+    expect(tx.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
+      data: { revokedAt: now },
+      where: {
+        groupId: "group_1",
+        revokedAt: null,
+      },
     });
   });
 });
@@ -494,6 +589,9 @@ function buildGroupLinkTx(input: {
     create: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
+  };
+  hostedGroupJoinOffer: {
+    updateMany: ReturnType<typeof vi.fn>;
   };
   hostedGroupMember: {
     upsert: ReturnType<typeof vi.fn>;
@@ -534,6 +632,9 @@ function buildGroupLinkTx(input: {
       }),
       update: vi.fn(async () => ({ joinCode: "join_created" })),
     },
+    hostedGroupJoinOffer: {
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
     hostedGroupMember: {
       upsert: vi.fn(async () => undefined),
     },
@@ -552,6 +653,103 @@ function buildGroupLinkTx(input: {
         memberId: "member_group_runtime",
         ownerMemberId: input.ownerMemberId,
       })),
+    },
+  });
+}
+
+function buildStatefulJoinOfferTx(): PrismaClient & {
+  hostedGroup: {
+    findUnique: ReturnType<typeof vi.fn>;
+  };
+  hostedGroupJoinOffer: {
+    create: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
+  };
+  hostedThreadRoute: {
+    findFirst: ReturnType<typeof vi.fn>;
+  };
+  hostedVaultShare: {
+    count: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
+  };
+} {
+  const group = {
+    id: "group_1",
+    joinCode: "join_1",
+    joinPolicyJson: {
+      requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
+      schema: "murph.hosted-group.join-policy.v1",
+    },
+    runtimeMemberId: "member_group_runtime",
+  };
+  const offers: Array<{
+    groupId: string;
+    messageLookupKey: string;
+    projectionKindsJson: Prisma.InputJsonValue;
+    revokedAt: Date | null;
+  }> = [];
+
+  return createPrismaStub({
+    $queryRaw: vi.fn(async () => []),
+    hostedGroup: {
+      findUnique: vi.fn(async (args: {
+        where: { id?: string };
+      }) => {
+        if (args.where.id) {
+          return { ...group };
+        }
+        return null;
+      }),
+    },
+    hostedGroupJoinOffer: {
+      create: vi.fn(async (args: {
+        data: {
+          groupId: string;
+          messageLookupKey: string;
+          projectionKindsJson: Prisma.InputJsonValue;
+        };
+      }) => {
+        offers.push({
+          groupId: args.data.groupId,
+          messageLookupKey: args.data.messageLookupKey,
+          projectionKindsJson: args.data.projectionKindsJson,
+          revokedAt: null,
+        });
+        return {};
+      }),
+      findUnique: vi.fn(async (args: {
+        where: { messageLookupKey?: string };
+      }) => {
+        const offer = offers.find((entry) =>
+          entry.messageLookupKey === args.where.messageLookupKey);
+        return offer
+          ? {
+              groupId: offer.groupId,
+              projectionKindsJson: offer.projectionKindsJson,
+              revokedAt: offer.revokedAt,
+              group,
+            }
+          : null;
+      }),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+    },
+    hostedGroupMember: {
+      create: vi.fn(async () => ({ id: "membership_created" })),
+      findUnique: vi.fn(async () => null),
+    },
+    hostedMember: {
+      findUnique: vi.fn(async () => ({ suspendedAt: null })),
+    },
+    hostedThreadContainer: {
+      findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+    },
+    hostedThreadRoute: {
+      findFirst: vi.fn(async () => ({ containerMemberId: "member_group_runtime" })),
+    },
+    hostedVaultShare: {
+      count: vi.fn(async () => 0),
+      findUnique: vi.fn(async () => null),
     },
   });
 }

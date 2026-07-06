@@ -11,6 +11,7 @@ import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   generateHostedGroupId,
+  generateHostedGroupJoinOfferId,
   generateHostedGroupMemberId,
   generateHostedGroupJoinCode,
 } from "../hosted-onboarding/shared";
@@ -92,13 +93,6 @@ export interface HostedGroupJoinOfferAcceptanceTxResult
 
 export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
-
-const HOSTED_GROUP_JOIN_OFFER_CLEAR_DATA = {
-  joinOfferMessageIdSuffix: null,
-  joinOfferMessageLookupKey: null,
-  joinOfferPostedAt: null,
-  joinOfferProjectionKindsJson: Prisma.DbNull,
-} satisfies Prisma.HostedGroupUpdateInput;
 
 export async function ensureHostedGroupForThreadContainerTx(input: {
   tx: Prisma.TransactionClient;
@@ -242,10 +236,13 @@ export async function createOrReadHostedGroupJoinLinkTx(input: {
   if (group.joinCode) {
     return { joinCode: group.joinCode };
   }
+  await revokeHostedGroupJoinOffersTx(input.tx, {
+    groupId: group.id,
+    now: input.now,
+  });
   const updated = await input.tx.hostedGroup.update({
     where: { id: group.id },
     data: {
-      ...HOSTED_GROUP_JOIN_OFFER_CLEAR_DATA,
       joinCode: generateHostedGroupJoinCode(),
       joinCodeCreatedAt: input.now,
     },
@@ -412,13 +409,27 @@ export async function recordHostedGroupJoinOfferTx(input: {
     });
   }
   const projectionKinds = normalizeHostedVaultShareProjectionKinds(input.projectionKinds);
-  await input.tx.hostedGroup.update({
+  await lockHostedGroupRow(input.tx, input.groupId);
+  const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
+    select: { joinCode: true },
+  });
+  if (!group?.joinCode) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: false,
+    });
+  }
+  await input.tx.hostedGroupJoinOffer.create({
     data: {
-      joinOfferMessageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
-      joinOfferMessageLookupKey: messageLookupKey,
-      joinOfferPostedAt: input.postedAt,
-      joinOfferProjectionKindsJson: toHostedGroupJoinOfferProjectionKindsJson(projectionKinds),
+      id: generateHostedGroupJoinOfferId(),
+      groupId: input.groupId,
+      messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+      messageLookupKey,
+      postedAt: input.postedAt,
+      projectionKindsJson: toHostedGroupJoinOfferProjectionKindsJson(projectionKinds),
     },
   });
 
@@ -445,11 +456,11 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       retryable: false,
     });
   }
-  const groupLookup = await input.tx.hostedGroup.findUnique({
-    where: { joinOfferMessageLookupKey: input.messageLookupKey },
-    select: { id: true },
+  const offerLookup = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { messageLookupKey: input.messageLookupKey },
+    select: { groupId: true },
   });
-  if (!groupLookup) {
+  if (!offerLookup) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
       httpStatus: 404,
@@ -457,18 +468,40 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       retryable: false,
     });
   }
-  await lockHostedGroupRow(input.tx, groupLookup.id);
-  const group = await input.tx.hostedGroup.findUnique({
-    where: { id: groupLookup.id },
+  await lockHostedGroupRow(input.tx, offerLookup.groupId);
+  const offer = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { messageLookupKey: input.messageLookupKey },
     select: {
-      id: true,
-      joinCode: true,
-      joinOfferMessageLookupKey: true,
-      joinOfferProjectionKindsJson: true,
-      runtimeMemberId: true,
+      groupId: true,
+      projectionKindsJson: true,
+      revokedAt: true,
+      group: {
+        select: {
+          id: true,
+          joinCode: true,
+          runtimeMemberId: true,
+        },
+      },
     },
   });
-  if (!group?.joinCode || group.joinOfferMessageLookupKey !== input.messageLookupKey) {
+  if (!offer) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: false,
+    });
+  }
+  if (offer.revokedAt) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
+      httpStatus: 410,
+      message: "This group offer has been revoked.",
+      retryable: false,
+    });
+  }
+  const group = offer.group;
+  if (!group?.joinCode) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
       httpStatus: 404,
@@ -502,7 +535,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
   }
 
   const selectedVaultShareProjectionKinds = normalizeHostedVaultShareProjectionKinds(
-    group.joinOfferProjectionKindsJson,
+    offer.projectionKindsJson,
   );
   const accepted = await acceptHostedGroupJoinTx({
     additiveOnly: true,
@@ -519,6 +552,21 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     joinCode: group.joinCode,
     selectedVaultShareProjectionKinds,
   };
+}
+
+async function revokeHostedGroupJoinOffersTx(
+  tx: Prisma.TransactionClient,
+  input: { groupId: string; now: Date },
+): Promise<void> {
+  await tx.hostedGroupJoinOffer.updateMany({
+    where: {
+      groupId: input.groupId,
+      revokedAt: null,
+    },
+    data: {
+      revokedAt: input.now,
+    },
+  });
 }
 
 async function acceptHostedGroupJoinTx(input: {

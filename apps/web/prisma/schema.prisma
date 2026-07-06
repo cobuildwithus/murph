@@ -1041,19 +1041,30 @@ model HostedGroup {
   joinCode          String?             @unique @map("join_code")
   joinCodeCreatedAt DateTime?           @map("join_code_created_at")
   joinPolicyJson    Json?               @map("join_policy_json")
-  joinOfferMessageLookupKey String?     @unique @map("join_offer_message_lookup_key")
-  joinOfferMessageIdSuffix  String?     @map("join_offer_message_id_suffix")
-  joinOfferProjectionKindsJson Json?     @map("join_offer_projection_kinds_json")
-  joinOfferPostedAt DateTime?           @map("join_offer_posted_at")
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
   owner             HostedMember        @relation("HostedGroupOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
   runtimeMember     HostedMember?       @relation("HostedGroupRuntimeMember", fields: [runtimeMemberId], references: [id], onDelete: SetNull)
   members           HostedGroupMember[]
+  joinOffers        HostedGroupJoinOffer[]
 
   @@index([ownerMemberId])
   @@index([kind])
   @@map("hosted_group")
+}
+
+model HostedGroupJoinOffer {
+  id                  String      @id
+  groupId             String      @map("group_id")
+  messageLookupKey    String      @unique @map("message_lookup_key")
+  messageIdSuffix     String?     @map("message_id_suffix")
+  projectionKindsJson Json        @map("projection_kinds_json")
+  postedAt            DateTime    @map("posted_at")
+  revokedAt           DateTime?   @map("revoked_at")
+  group               HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, revokedAt, postedAt])
+  @@map("hosted_group_join_offer")
 }
 
 model HostedGroupMember {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const mocks = vi.hoisted(() => ({
@@ -135,6 +136,35 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       expect.objectContaining({
         failureCode: "HOSTED_GROUP_JOIN_OFFER_REACTION_SKIPPED",
         reason: "unsupported_reaction",
+        template: "group_join_offer_accepted",
+      }),
+    );
+  });
+
+  it("records revoked offers as a distinct skip reason", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
+      httpStatus: 410,
+      message: "This group offer has been revoked.",
+      retryable: false,
+    }));
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "offer_revoked",
+      status: "ignored",
+    });
+
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqDeliverySkippedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "offer_revoked",
         template: "group_join_offer_accepted",
       }),
     );
