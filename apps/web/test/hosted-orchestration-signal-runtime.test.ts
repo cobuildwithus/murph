@@ -13,18 +13,23 @@ import {
 
 const mocks = vi.hoisted(() => {
   const hostedMemberFindUnique = vi.fn();
+  const hostedThreadContainerParticipantFindFirst = vi.fn();
 
   return {
     appendHostedMailboxEnvelopeTx: vi.fn(),
     ensureHostedWorkspace: vi.fn(),
     getPrisma: vi.fn(),
     hostedMemberFindUnique,
+    hostedThreadContainerParticipantFindFirst,
     prisma: {
       $transaction: vi.fn(async (callback: (tx: unknown) => unknown) =>
         await callback({ kind: "tx" })
       ),
       hostedMember: {
         findUnique: hostedMemberFindUnique,
+      },
+      hostedThreadContainerParticipant: {
+        findFirst: hostedThreadContainerParticipantFindFirst,
       },
       hostedAccountGroupMembership: {
         count: vi.fn(async () => 0),
@@ -85,6 +90,7 @@ describe("hosted runtime Temporal signaling", () => {
     mocks.getPrisma.mockReturnValue(mocks.prisma);
     mocks.ensureHostedWorkspace.mockResolvedValue(buildHostedWorkspaceRecord());
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord());
+    mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
     });

@@ -78,6 +78,12 @@ import {
 import type {
   HostedWebhookWakeHandoff,
 } from "./webhook-service-types";
+import {
+  reconcileHostedThreadContainerParticipants,
+} from "../hosted-groups/group-tool";
+import type {
+  HostedOnboardingLinqGroupRosterReconcile,
+} from "./webhook-provider-linq-types";
 
 export {
   handleHostedStripeWebhook,
@@ -319,6 +325,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       wakeUserPresent: Boolean(plan.wakeHandoffs?.some((handoff) => handoff.userId)),
     });
 
+    await reconcileHostedLinqGroupRostersAfterCommitBestEffort({
+      reconciles: plan.postCommitGroupRosterReconciles ?? [],
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
+
     if (plan.desiredSideEffects.length > 0) {
       await drainHostedLinqSideEffectsDirect({
         currentInboundReply,
@@ -482,6 +493,40 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
 function normalizeHostedLinqReadReceiptChatId(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
+}
+
+async function reconcileHostedLinqGroupRostersAfterCommitBestEffort(input: {
+  reconciles: readonly HostedOnboardingLinqGroupRosterReconcile[];
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): Promise<void> {
+  if (input.reconciles.length === 0) {
+    return;
+  }
+
+  const run = async () => {
+    for (const reconcile of input.reconciles) {
+      try {
+        await reconcileHostedThreadContainerParticipants({
+          chatId: reconcile.chatId,
+          containerMemberId: reconcile.containerMemberId,
+          prisma: getPrisma(),
+        });
+      } catch (error) {
+        console.warn("Hosted Linq group roster post-commit reconcile failed.", {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          chatIdSuffix: toHostedOnboardingLogIdSuffix(reconcile.chatId),
+          containerMemberIdSuffix: toHostedOnboardingLogIdSuffix(reconcile.containerMemberId),
+        });
+      }
+    }
+  };
+
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(run);
+    return;
+  }
+
+  await run();
 }
 
 function buildHostedLinqCurrentInboundReplyProof(
