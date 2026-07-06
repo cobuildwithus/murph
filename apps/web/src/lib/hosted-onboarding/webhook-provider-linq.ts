@@ -1344,8 +1344,9 @@ async function planHostedLinqGroupChatWebhook(input: {
     return ignored("group-chat-not-home-line");
   }
 
+  let createdContainerMemberId: string | null = null;
   try {
-    await ensureHostedThreadContainerRouteTx({
+    const ensureResult = await ensureHostedThreadContainerRouteTx({
       accountLookupKey,
       accountLookupKeys: input.threadRouteAccountLookupKeys,
       channel: "linq",
@@ -1354,6 +1355,9 @@ async function planHostedLinqGroupChatWebhook(input: {
       prisma: input.prisma,
       threadId: summary.chatId,
     });
+    createdContainerMemberId = ensureResult.created
+      ? ensureResult.containerMemberId
+      : null;
   } catch (error) {
     if (
       !isHostedOnboardingError(error)
@@ -1377,12 +1381,26 @@ async function planHostedLinqGroupChatWebhook(input: {
     return ignored("group-chat-provision-unavailable");
   }
 
-  return planHostedLinqExplicitThreadRouteWebhook({
+  const plan = await planHostedLinqExplicitThreadRouteWebhook({
     context: input.context,
     event: input.event,
     prisma: input.prisma,
     route,
   });
+  if (createdContainerMemberId && route.containerMemberId === createdContainerMemberId) {
+    return {
+      ...plan,
+      postCommitGroupRosterReconciles: [
+        ...(plan.postCommitGroupRosterReconciles ?? []),
+        {
+          chatId: summary.chatId,
+          containerMemberId: route.containerMemberId,
+        },
+      ],
+    };
+  }
+
+  return plan;
 }
 
 async function planHostedLinqInboundAdmissionDenied(input: {
