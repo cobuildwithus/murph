@@ -11,6 +11,7 @@ import {
   assistantCronRunRecordSchema,
   type AssistantCronJob,
   type AssistantCronRunRecord,
+  type AssistantCronRunOutcome,
   type AssistantCronTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -20,7 +21,10 @@ import {
 } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
-import { computeAssistantAutomationRetryAt } from '../automation/shared.js'
+import {
+  computeAssistantAutomationRetryAt,
+  type AssistantRunEvent,
+} from '../automation/shared.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -406,6 +410,7 @@ export async function executeClaimedAssistantCronJob(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
   job: ResolvedAssistantCronJob
+  onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   paths: AssistantStatePaths
   shouldYield?: (() => boolean) | null
@@ -428,7 +433,8 @@ export async function executeClaimedAssistantCronJob(input: {
   let errorText: string | null = null
   let errorCode: string | null = null
   let foregroundYielded = false
-  let status: AssistantCronRunRecord['status'] = 'failed'
+  let outcome: AssistantCronRunOutcome = 'failed'
+  let reason = 'unhandled'
   let pendingDeliveryIntentId: string | null = null
   // Preemptible background maintenance has exactly one yield owner: the
   // maintenance cancellation below. Wiring the generic foreground poller too
@@ -499,11 +505,18 @@ export async function executeClaimedAssistantCronJob(input: {
         : null
 
     if (deviceActivityAuthority.error !== null) {
-      status = 'skipped'
+      outcome = 'skipped_gate'
+      reason = 'device_activity_authority_stale'
       errorText = deviceActivityAuthority.error
     } else if (staleError) {
-      status = 'skipped'
-      errorText = staleError
+      outcome = 'expired'
+      reason = 'late_occurrence'
+      errorText = staleError.message
+      emitAssistantCronOccurrenceExpiredEvent({
+        job: input.job,
+        latenessMinutes: staleError.latenessMinutes,
+        onEvent: input.onEvent,
+      })
     } else {
       const onboardingSkipError =
         await resolveResearchOrientedManagedAutomationOnboardingSkipError({
@@ -512,7 +525,10 @@ export async function executeClaimedAssistantCronJob(input: {
         })
 
       if (onboardingSkipError !== null) {
-        status = 'skipped'
+        outcome = 'skipped_gate'
+        reason = onboardingSkipError === ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR
+          ? 'onboarding_open'
+          : 'onboarding_unreadable'
         errorText = onboardingSkipError
       } else if (
         input.job.kind === 'canonical' &&
@@ -537,7 +553,8 @@ export async function executeClaimedAssistantCronJob(input: {
           jobName: claimedJob.name,
           shouldYield: input.shouldYield ?? null,
         })
-        status = 'succeeded'
+        outcome = 'no_op'
+        reason = 'scheduled_log'
       } else {
         // Background maintenance never delivers (exact-skip policy), so a
         // stale or unresolvable route must not block the memory work.
@@ -594,7 +611,8 @@ export async function executeClaimedAssistantCronJob(input: {
           }
         }
         if (lifecycleSkipReason !== null) {
-          status = 'skipped'
+          outcome = 'skipped_gate'
+          reason = 'lifecycle_precondition'
           errorText = lifecycleSkipReason
         } else {
           if (yieldCancellation.shouldYield()) {
@@ -671,9 +689,15 @@ export async function executeClaimedAssistantCronJob(input: {
               input.shouldYield?.() === true)
           if (result.deliveryOutcome?.kind === 'queued') {
             pendingDeliveryIntentId = result.deliveryOutcome.intentId
-            status = 'skipped'
+            outcome = 'delivery_pending'
+            reason = 'delivery_pending'
           } else {
-            status = 'succeeded'
+            outcome = result.deliveryOutcome?.kind === 'sent'
+              ? 'delivered'
+              : 'no_op'
+            reason = result.deliveryOutcome?.kind === 'sent'
+              ? 'sent'
+              : 'no_delivery'
             // Background maintenance success is terminal even when foreground
             // input arrived during the turn: the provider work (including any
             // memory writes) already happened, so treating it as yielded would
@@ -708,7 +732,8 @@ export async function executeClaimedAssistantCronJob(input: {
       errorCode = backgroundMaintenanceYielded
         ? ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELDED_CODE
         : error instanceof VaultCliError ? error.code : null
-      status = 'skipped'
+      outcome = 'no_op'
+      reason = 'background_maintenance_non_replayable_work'
     } else if (backgroundMaintenanceYielded) {
       if (yieldCancellation.yieldRequested()) {
         await releaseClaimedAssistantCronJobAfterBackgroundMaintenanceYield({
@@ -719,7 +744,8 @@ export async function executeClaimedAssistantCronJob(input: {
       } else {
         errorText = errorMessage(error)
         errorCode = error instanceof VaultCliError ? error.code : null
-        status = 'failed'
+        outcome = 'failed'
+        reason = errorCode ?? 'background_maintenance_yield_failed'
       }
     } else {
       const yieldedError =
@@ -732,11 +758,13 @@ export async function executeClaimedAssistantCronJob(input: {
         foregroundYielded = true
         errorText = ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR
         errorCode = 'ASSISTANT_CRON_FOREGROUND_YIELDED'
+        reason = 'foreground_yielded'
       } else {
         errorText = errorMessage(error)
         errorCode = error instanceof VaultCliError ? error.code : null
+        reason = errorCode ?? 'error'
       }
-      status = 'failed'
+      outcome = 'failed'
     }
   } finally {
     foregroundPreemption.dispose()
@@ -749,7 +777,12 @@ export async function executeClaimedAssistantCronJob(input: {
     runId: cryptoRandomRunId(),
     jobId: claimedJob.jobId,
     trigger: input.trigger,
-    status,
+    outcome,
+    reason: normalizeAssistantCronRunReason(reason),
+    status: legacyAssistantCronRunStatusForOutcome({
+      outcome,
+      reason: normalizeAssistantCronRunReason(reason),
+    }),
     startedAt,
     finishedAt,
     sessionId,
@@ -779,10 +812,7 @@ export async function executeClaimedAssistantCronJob(input: {
         foregroundYielded,
         responseSessionId: sessionId,
         pendingDeliveryIntentId,
-        run: {
-          ...run,
-          status,
-        },
+        run,
       })
       let removedAfterRun = false
 
@@ -823,10 +853,7 @@ export async function executeClaimedAssistantCronJob(input: {
     const updatedRuntimeState = finalizeCanonicalAssistantCronRuntimeAfterRun({
       finishedAt,
       foregroundYielded,
-      run: {
-        ...run,
-        status,
-      },
+      run,
       runtimeState: currentRuntimeState,
       responseSessionId: usesSessionPin ? sessionId : null,
       pendingDeliveryIntentId,
@@ -1069,7 +1096,7 @@ function finalizeAssistantCronJobAfterRun(input: {
     })
   }
 
-  if (input.run.status === 'skipped' && input.pendingDeliveryIntentId !== null) {
+  if (input.run.outcome === 'delivery_pending' && input.pendingDeliveryIntentId !== null) {
     return assistantCronJobSchema.parse({
       ...input.job,
       target: shouldAutoBindSession
@@ -1128,8 +1155,10 @@ function assistantCronRunConsumedOccurrence(
   pendingDeliveryIntentId: string | null,
 ): boolean {
   return (
-    run.status === 'succeeded' ||
-    (run.status === 'skipped' && pendingDeliveryIntentId === null)
+    run.outcome === 'delivered' ||
+    run.outcome === 'no_op' ||
+    run.outcome === 'expired' ||
+    run.outcome === 'skipped_gate'
   )
 }
 
@@ -1180,7 +1209,7 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
     }
   }
 
-  if (input.run.status === 'skipped' && input.pendingDeliveryIntentId !== null) {
+  if (input.run.outcome === 'delivery_pending' && input.pendingDeliveryIntentId !== null) {
     return {
       ...input.runtimeState,
       sessionId: input.responseSessionId ?? input.runtimeState.sessionId,
@@ -1314,11 +1343,36 @@ function truncateAssistantCronResponse(response: string | null): string | null {
   return response.slice(0, ASSISTANT_CRON_MAX_RESPONSE_LENGTH)
 }
 
+function legacyAssistantCronRunStatusForOutcome(input: {
+  outcome: AssistantCronRunOutcome
+  reason: string
+}): string {
+  switch (input.outcome) {
+    case 'delivered':
+      return 'succeeded'
+    case 'no_op':
+      return input.reason === 'background_maintenance_non_replayable_work'
+        ? 'skipped'
+        : 'succeeded'
+    case 'delivery_pending':
+    case 'expired':
+    case 'skipped_gate':
+      return 'skipped'
+    case 'failed':
+      return 'failed'
+  }
+}
+
+function normalizeAssistantCronRunReason(reason: string): string {
+  const normalized = reason.trim().replace(/\s+/gu, '_').slice(0, 120)
+  return normalized.length > 0 ? normalized : 'unknown'
+}
+
 function resolveStaleAssistantCronNotificationError(input: {
   job: AssistantCronJob
   nowIso: string
   occurrenceAt: string
-}): string | null {
+}): { latenessMinutes: number; message: string } | null {
   if (input.job.scheduledLog) {
     return null
   }
@@ -1335,7 +1389,54 @@ function resolveStaleAssistantCronNotificationError(input: {
   }
 
   const lateMinutes = Math.floor(ageMs / 60_000)
-  return `${ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR} Scheduled occurrence was ${lateMinutes} minute(s) late.`
+  return {
+    latenessMinutes: lateMinutes,
+    message:
+      `${ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR} Scheduled occurrence was ${lateMinutes} minute(s) late.`,
+  }
+}
+
+function emitAssistantCronOccurrenceExpiredEvent(input: {
+  job: ResolvedAssistantCronJob
+  latenessMinutes: number
+  onEvent?: (event: AssistantRunEvent) => void
+}): void {
+  const automationSlug = resolveAssistantCronAutomationSlug(input.job)
+  if (!automationSlug) {
+    return
+  }
+
+  input.onEvent?.({
+    type: 'cron.occurrence.expired',
+    details: 'scheduled occurrence expired before delivery',
+    safeDetails: 'cron_occurrence_expired',
+    failureContext: {
+      automationSlug,
+      latenessMinutes: input.latenessMinutes,
+    },
+    providerKind: 'status',
+    providerState: 'completed',
+  })
+}
+
+function resolveAssistantCronAutomationSlug(
+  job: ResolvedAssistantCronJob,
+): string | null {
+  if (job.kind !== 'canonical' || job.source.kind !== 'automation') {
+    return null
+  }
+
+  return normalizeAssistantCronAutomationSlug(job.source.slug) ??
+    normalizeAssistantCronAutomationSlug(job.job.name)
+}
+
+function normalizeAssistantCronAutomationSlug(value: string | null | undefined): string | null {
+  const normalized = value
+    ?.trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+  return normalized && normalized.length > 0 ? normalized : null
 }
 
 function assistantCronExecutionDeliveryTargetProfile(input: {

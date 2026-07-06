@@ -1920,6 +1920,20 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      deliveryOutcome: {
+        delivery: {
+          channel: 'telegram',
+          sentAt: '2026-04-08T12:00:05.000Z',
+          target: 'room-1',
+          targetKind: 'thread',
+        },
+        intentId: 'outbox_run_now',
+        kind: 'sent',
+        media: [],
+        session: {
+          sessionId: 'session-run-now',
+        },
+      },
       response: 'Done.',
       session: {
         sessionId: 'session-run-now',
@@ -1931,6 +1945,8 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })
 
+    expect(result.run.outcome).toBe('delivered')
+    expect(result.run.reason).toBe('sent')
     expect(result.run.status).toBe('succeeded')
     expect(result.removedAfterRun).toBe(true)
     expect(findCanonicalAutomation(vaultRoot, canonicalJob.jobId)?.status).toBe(
@@ -3271,6 +3287,8 @@ describe('assistant cron runtime orchestration', () => {
       jobId: canonicalJob.jobId,
       runs: [
         expect.objectContaining({
+          outcome: 'no_op',
+          reason: 'no_delivery',
           response: 'Skipped because no delivery was required.',
           status: 'succeeded',
         }),
@@ -3336,6 +3354,8 @@ describe('assistant cron runtime orchestration', () => {
           error: expect.stringContaining(
             'Assistant cron notification expired before delivery.',
           ),
+          outcome: 'expired',
+          reason: 'late_occurrence',
           response: null,
           status: 'skipped',
         }),
@@ -3345,12 +3365,20 @@ describe('assistant cron runtime orchestration', () => {
       expect.arrayContaining([
         expect.objectContaining({
           failureContext: expect.objectContaining({
+            automationSlug: 'expired-one-shot-reminder',
+            latenessMinutes: 240,
+          }),
+          safeDetails: 'cron_occurrence_expired',
+          type: 'cron.occurrence.expired',
+        }),
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
             errorPresent: true,
-            runStatus: 'skipped',
+            runOutcome: 'expired',
             scheduleKind: 'at',
             sourceKind: 'automation',
           }),
-          safeDetails: 'cron_job_skipped_error',
+          safeDetails: 'cron_job_expired',
           type: 'cron.job.completed',
         }),
       ]),
@@ -3409,7 +3437,7 @@ describe('assistant cron runtime orchestration', () => {
           failureContext: expect.objectContaining({
             errorCode: 'ASSISTANT_CODEX_USAGE_LIMIT',
             errorPresent: true,
-            runStatus: 'failed',
+            runOutcome: 'failed',
             scheduleKind: 'at',
             sourceKind: 'automation',
           }),
@@ -4836,7 +4864,7 @@ describe('assistant cron runtime orchestration', () => {
             failureContext: expect.objectContaining({
               errorCode: 'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
               errorPresent: true,
-              runStatus: 'failed',
+              runOutcome: 'failed',
             }),
             type: 'cron.job.completed',
           }),
@@ -4919,7 +4947,7 @@ describe('assistant cron runtime orchestration', () => {
         expect.objectContaining({
           failureContext: expect.objectContaining({
             routeConfigured: true,
-            runStatus: 'succeeded',
+            runOutcome: 'no_op',
           }),
           type: 'cron.job.completed',
         }),
@@ -5473,7 +5501,7 @@ describe('assistant cron runtime orchestration', () => {
         expect.objectContaining({
           failureContext: expect.objectContaining({
             routeConfigured: true,
-            runStatus: 'skipped',
+            runOutcome: 'delivery_pending',
             scheduleKind: 'dailyLocal',
             sourceKind: 'automation',
           }),

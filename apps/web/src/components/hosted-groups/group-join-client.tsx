@@ -1,5 +1,6 @@
 "use client";
 
+import { Check } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import type { HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
@@ -9,7 +10,7 @@ import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
 import { Button } from "@/src/components/ui/button";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import { cn } from "@/src/lib/utils";
 
 export interface GroupJoinPermissionDisplay {
   description: string;
@@ -20,7 +21,7 @@ export interface GroupJoinPermissionDisplay {
 export function GroupJoinSignInButton() {
   const [open, setOpen] = useState(false);
 
-  function handleCompleted(_payload: HostedPrivyCompletionPayload) {
+  function handleCompleted() {
     navigateHostedAuthRedirect(readCurrentGroupJoinPath());
   }
 
@@ -44,6 +45,7 @@ export function GroupJoinSignInButton() {
 export function GroupJoinAcceptForm(props: {
   activeVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
   alreadyActiveMember: boolean;
+  groupName: string;
   joinCode: string;
   permissions: readonly GroupJoinPermissionDisplay[];
 }) {
@@ -90,11 +92,14 @@ export function GroupJoinAcceptForm(props: {
 
   if (status === "joined") {
     return (
-      <div className="flex flex-col gap-3">
-        <p className="text-sm font-medium text-foreground">
-          {props.alreadyActiveMember ? "Your group permissions are saved." : "You're in this Murph group."}
+      <div className="flex flex-col items-center gap-4 text-center">
+        <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Check className="size-6" strokeWidth={2.5} />
+        </div>
+        <p className="text-base font-medium text-foreground">
+          {props.alreadyActiveMember ? "Your sharing is updated." : `You're in ${props.groupName}.`}
         </p>
-        <Button type="button" size="xl" onClick={() => router.push("/home")}>
+        <Button type="button" size="xl" onClick={() => router.push("/home")} className="w-full">
           Open Murph
         </Button>
       </div>
@@ -102,31 +107,50 @@ export function GroupJoinAcceptForm(props: {
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       {props.permissions.length > 0 ? (
-        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-4">
+        <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <h2 className="text-base font-semibold text-foreground">
-              Optional permissions requested by this group
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              You can join either way. You can change these choices later from this link.
+            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              Optional sharing
+            </span>
+            <p className="text-[13px] leading-5 text-muted-foreground">
+              You can join either way, and change this anytime from this link.
             </p>
           </div>
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2.5">
             {props.permissions.map((permission) => {
               const checked = selected.has(permission.projectionKind);
               return (
-                <label key={permission.projectionKind} className="flex gap-3 rounded-xl border border-border p-3">
+                <label
+                  key={permission.projectionKind}
+                  className={cn(
+                    "flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-colors",
+                    checked
+                      ? "border-primary bg-primary/[0.06]"
+                      : "border-border bg-card hover:border-primary/40",
+                  )}
+                >
                   <input
                     type="checkbox"
-                    className="mt-1 size-4 shrink-0"
+                    className="sr-only"
                     checked={checked}
                     onChange={() => togglePermission(permission.projectionKind)}
                   />
-                  <span className="flex flex-col gap-1">
-                    <span className="text-sm font-medium text-foreground">{permission.label}</span>
-                    <span className="text-sm leading-5 text-muted-foreground">
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                      checked
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-muted-foreground/50",
+                    )}
+                  >
+                    {checked ? <Check className="size-3.5" strokeWidth={3} /> : null}
+                  </span>
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-sm font-semibold text-foreground">{permission.label}</span>
+                    <span className="text-[13px] leading-5 text-muted-foreground">
                       {permission.description}
                     </span>
                   </span>
@@ -145,12 +169,12 @@ export function GroupJoinAcceptForm(props: {
           disabled={status === "submitting"}
         >
           {status === "submitting"
-            ? "Saving..."
+            ? props.alreadyActiveMember
+              ? "Saving..."
+              : "Joining..."
             : props.alreadyActiveMember
-              ? "Save group permissions"
-              : selectedVaultShareProjectionKinds.length > 0
-                ? "Join group"
-                : "Join group without sharing"}
+              ? "Save changes"
+              : `Join ${props.groupName}`}
         </Button>
         {errorMessage ? (
           <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">

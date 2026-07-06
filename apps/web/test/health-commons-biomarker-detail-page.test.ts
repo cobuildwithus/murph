@@ -401,7 +401,7 @@ describe("BiomarkerPage", () => {
         images: [
           expect.objectContaining({
             height: 630,
-            url: "/opengraph-image",
+            url: "/biomarkers/resting-heart-rate/opengraph-image",
             width: 1200,
           }),
         ],
@@ -412,7 +412,7 @@ describe("BiomarkerPage", () => {
         images: [
           expect.objectContaining({
             height: 630,
-            url: "/opengraph-image",
+            url: "/biomarkers/resting-heart-rate/opengraph-image",
             width: 1200,
           }),
         ],
