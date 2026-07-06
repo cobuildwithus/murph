@@ -18,12 +18,24 @@ export async function generateMetadata({
     return {};
   }
 
+  const ogImage = {
+    alt: `${biomarker.title}, a Murph biomarker.`,
+    height: 630,
+    type: "image/png",
+    url: `/biomarkers/${encodeURIComponent(biomarkerId)}/opengraph-image`,
+    width: 1200,
+  } as const;
+
   return createMurphPageMetadata({
     description: biomarker.summary,
     openGraph: {
+      images: [ogImage],
       type: "article",
     },
     title: `${biomarker.title} | Murph Biomarkers`,
+    twitter: {
+      images: [ogImage],
+    },
   });
 }
 

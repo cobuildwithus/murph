@@ -395,8 +395,11 @@ test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed",
   });
 });
 
-test("JoinInvitePage keeps route copy and inherits the shared Open Graph image", async () => {
-  const { metadata } = await import("../app/join/[inviteCode]/page");
+test("JoinInvitePage keeps route copy and uses a dedicated Open Graph image", async () => {
+  const { generateMetadata } = await import("../app/join/[inviteCode]/page");
+  const metadata = await generateMetadata({
+    params: Promise.resolve({ inviteCode: "invite-code" }),
+  });
 
   expect(metadata.title).toBe("Murph invite");
   expect(metadata.description).toBe(
@@ -405,7 +408,7 @@ test("JoinInvitePage keeps route copy and inherits the shared Open Graph image",
   expect(metadata.openGraph?.title).toBe("Murph invite");
   expect(metadata.openGraph?.images).toEqual([
     expect.objectContaining({
-      url: "/opengraph-image",
+      url: "/join/invite-code/opengraph-image",
       width: 1200,
       height: 630,
     }),
@@ -413,14 +416,14 @@ test("JoinInvitePage keeps route copy and inherits the shared Open Graph image",
   expect(metadata.twitter?.title).toBe("Murph invite");
   expect(metadata.twitter?.images).toEqual([
     expect.objectContaining({
-      url: "/opengraph-image",
+      url: "/join/invite-code/opengraph-image",
       width: 1200,
       height: 630,
     }),
   ]);
   expect(
     existsSync(new URL("../app/join/[inviteCode]/opengraph-image.tsx", import.meta.url))
-  ).toBe(false);
+  ).toBe(true);
 });
 
 test("JoinInviteSuccessPage keeps the shared preview image and setup copy", async () => {

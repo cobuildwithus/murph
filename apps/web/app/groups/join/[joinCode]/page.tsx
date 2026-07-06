@@ -15,13 +15,30 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
-export const metadata: Metadata = {
-  ...createMurphPageMetadata({
-    title: "Join group — Murph",
-    description: "Join a Murph group.",
-  }),
-  robots: { follow: false, index: false },
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ joinCode: string }>;
+}): Promise<Metadata> {
+  const { joinCode } = await params;
+  const ogImage = {
+    alt: "Join the group on Murph.",
+    height: 630,
+    type: "image/png",
+    url: `/groups/join/${encodeURIComponent(joinCode)}/opengraph-image`,
+    width: 1200,
+  } as const;
+
+  return {
+    ...createMurphPageMetadata({
+      title: "Join group · Murph",
+      description: "Join a Murph group.",
+      openGraph: { images: [ogImage] },
+      twitter: { images: [ogImage] },
+    }),
+    robots: { follow: false, index: false },
+  };
+}
 
 export default async function GroupJoinPage({
   params,

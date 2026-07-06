@@ -5,22 +5,23 @@ import {
   MurphHeroOg,
   OG_CONTENT_TYPE,
   OG_SIZE,
-} from "../../../_og/og-shared";
+} from "../_og/og-shared";
 
-export const alt = "You’re invited to Murph Family.";
+export const alt = "Murph — the AI referee for health challenges.";
 export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 
-export default async function FamilyInviteOGImage() {
+export default async function PitchOGImage() {
   const { fonts, heroDataUri } = await loadMurphHeroOgAssets();
 
   return new ImageResponse(
     (
       <MurphHeroOg
         heroDataUri={heroDataUri}
-        eyebrow="MURPH FAMILY"
-        headline="You’re invited."
-        subtext="Your own private health assistant, covered by someone you know."
+        eyebrow="MURPH"
+        headline={"The AI referee for\nhealth challenges."}
+        headlineFontSize={68}
+        subtext="Turn any group chat into a step bet, sleep experiment, or friend challenge."
       />
     ),
     { ...OG_SIZE, fonts }
