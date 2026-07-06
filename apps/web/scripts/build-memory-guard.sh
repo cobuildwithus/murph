@@ -135,6 +135,11 @@ report_cgroup_memory() {
     printf '[apps/web build memory guard] cgroup memory.events: %s\n' "$memory_events" >&2
   fi
 
+  if [[ -n "$oom_kill_count" && "$oom_kill_count" -gt 0 ]]; then
+    printf '[apps/web build memory guard] cgroup cap breach: memory.events oom_kill=%s; failing the guard regardless of build exit status.\n' "$oom_kill_count" >&2
+    return 1
+  fi
+
   if [[ "$wrapped_status" -ne 0 ]]; then
     if [[ -n "$oom_kill_count" ]]; then
       printf '[apps/web build memory guard] wrapped command exited with status %s; exit 137 usually means the cgroup cap OOM-killed the build (memory.events oom_kill=%s).\n' "$wrapped_status" "$oom_kill_count" >&2
@@ -182,6 +187,7 @@ cgroup_created=1
 
 write_cgroup_file "$memory_cap_bytes" "$cgroup_dir/memory.max" "memory.max"
 write_cgroup_file 0 "$cgroup_dir/memory.swap.max" "memory.swap.max"
+write_cgroup_file 1 "$cgroup_dir/memory.oom.group" "memory.oom.group"
 
 if [[ ! -r "$memory_peak_file" ]]; then
   fail "cannot read ${memory_peak_file}; memory peak accounting is unavailable."
