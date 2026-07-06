@@ -27,6 +27,12 @@ rationale, not a live mechanism.
 - Model-supplied tool arguments are requests, never authority. Delivery targets, thread ids, member ids, and scopes are injected server-side from the current wake's proven authority and re-asserted at the durable boundary.
 - If authority is missing, stale, ambiguous, or mismatched, fail closed or fall back to the narrower safe flow. Provider success and container identity are not authorization.
 
+## User Reply Primacy
+
+- Every accepted inbound user message creates a durable obligation to reply. The obligation survives crashes, restarts, deploys, and runner replacement, and it clears only on a delivered reply or an explicitly recorded product-policy non-reply decision (such as the AI usage gate or a suppression with a decision record). Silence is never a valid terminal state.
+- Replying to the user's current message outranks everything else the system could do. Background work, maintenance, checkpoints, cleanup, cost controls, and internal gates yield to or fail toward the reply path; a gate or dependency outage on that path must still end in a user-visible outcome — a reply or a policy message — never a dropped message.
+- The obligation is at-least-once; delivery is at-most-once through the stable-identity and transport-matched-consumption rules. From accept to delivery there is terminal evidence (delivered, superseded, or suppressed-with-reason) that a restarted or replayed runtime keys on, so recovery always knows whether the user is still waiting.
+
 ## Product-Critical Flow Preservation
 
 - Do not fix safety, reliability, privacy, auth, or review findings by disabling, silently dropping, or degrading an existing user-critical flow unless the user explicitly asks for that product change. User-critical flows include onboarding, signup and welcome delivery, replies to a current inbound message, billing and access transitions, authentication, device/data sync, and privacy or safety controls.
