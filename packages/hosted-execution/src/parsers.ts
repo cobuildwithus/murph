@@ -555,6 +555,8 @@ export function parseHostedExecutionExternalThreadRouteAuthority(
   label = "Hosted execution external thread route authority",
 ): HostedExecutionExternalThreadRouteAuthority {
   const record = requireObject(value, label);
+  // Phase 1 deploy skew: readers tolerate missing accountLookupKey while
+  // emitters keep sending it until both web and runner readers are rolled out.
   return {
     ...(record.accountLookupKey === undefined
       ? {}

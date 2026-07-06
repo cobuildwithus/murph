@@ -124,6 +124,7 @@ describe("parseHostedExecutionEvent", () => {
           },
           phoneLookupKey: "hbidx:phone:v1:sender",
           routeAuthority: {
+            accountLookupKey: "hbidx:phone:v1:account",
             channel: "linq",
             containerMemberId: "member_container_123",
             threadId: "chat_123",
@@ -135,6 +136,7 @@ describe("parseHostedExecutionEvent", () => {
     ).toMatchObject({
       message: {
         routeAuthority: {
+          accountLookupKey: "hbidx:phone:v1:account",
           channel: "linq",
           containerMemberId: "member_container_123",
           threadId: "chat_123",

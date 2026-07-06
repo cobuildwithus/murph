@@ -1073,7 +1073,9 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     );
   }
 
+  const currentLineAccountLookupKey = createHostedPhoneLookupKey(input.context.recipientPhoneNumber);
   const routeAuthority = buildHostedLinqThreadRouteEgressAuthority({
+    accountLookupKey: currentLineAccountLookupKey,
     route: input.route,
     threadId: summary.chatId,
   });
@@ -1152,7 +1154,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     return admissionPlan;
   }
 
-  const currentLineAccountLookupKey = createHostedPhoneLookupKey(input.context.recipientPhoneNumber);
   const mailboxWake = buildHostedLinqConversationWakeForMailbox({
     ...(currentLineAccountLookupKey ? { accountLookupKey: currentLineAccountLookupKey } : {}),
     eventId: input.event.event_id,
@@ -1566,10 +1567,12 @@ function normalizeHostedLinqFirstContactAdmissionService(
 }
 
 function buildHostedLinqThreadRouteEgressAuthority(input: {
+  accountLookupKey?: string | null;
   route: HostedThreadRouteSnapshot;
   threadId: string;
 }): HostedLinqThreadRouteEgressAuthority {
   return {
+    ...(input.accountLookupKey ? { accountLookupKey: input.accountLookupKey } : {}),
     channel: "linq",
     containerMemberId: input.route.containerMemberId,
     threadId: input.threadId,

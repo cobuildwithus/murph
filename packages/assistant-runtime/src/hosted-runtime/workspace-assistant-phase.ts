@@ -242,6 +242,9 @@ function resolveHostedGroupToolLinqThreadContext(
     if (!eligible.has(routeKey)) {
       eligible.set(routeKey, {
         authority: {
+          ...(authority.accountLookupKey === undefined
+            ? {}
+            : { accountLookupKey: authority.accountLookupKey }),
           channel: authority.channel,
           containerMemberId: authority.containerMemberId,
           threadId: authority.threadId,

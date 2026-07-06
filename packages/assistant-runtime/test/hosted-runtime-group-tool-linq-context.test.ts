@@ -4,6 +4,7 @@ import { createHostedGroupToolWithLinqThreadContext } from "../src/hosted-runtim
 import type { HostedAssistantLinqDeliveryContext } from "../src/hosted-runtime/linq-delivery-context.ts";
 
 const ROUTE_AUTHORITY = {
+  accountLookupKey: "hplk_current_line",
   channel: "linq" as const,
   containerMemberId: "member_container",
   threadId: "chat_group_1",

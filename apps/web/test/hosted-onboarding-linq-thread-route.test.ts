@@ -985,6 +985,7 @@ describe("Linq explicit external-thread routing", () => {
             threadIsDirect: false,
           }),
           routeAuthority: expect.objectContaining({
+            accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
             channel: "linq",
             containerMemberId: "member_thread_container_123",
             threadId: "chat_group_123",
@@ -1106,6 +1107,7 @@ describe("Linq explicit external-thread routing", () => {
         message: expect.objectContaining({
           accountLookupKey: createHostedPhoneLookupKey("+15559999999"),
           routeAuthority: {
+            accountLookupKey: createHostedPhoneLookupKey("+15559999999"),
             channel: "linq",
             containerMemberId: "member_thread_container_123",
             threadId: "chat_group_123",
@@ -1267,6 +1269,7 @@ describe("Linq explicit external-thread routing", () => {
       chatId: "chat_group_123",
       memberId: "member_thread_container_123",
       routeAuthority: {
+        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
         channel: "linq",
         containerMemberId: "member_thread_container_123",
         threadId: "chat_group_123",
@@ -1323,6 +1326,7 @@ describe("Linq explicit external-thread routing", () => {
       message: "Usage limit reached.",
       noticeCode: "edge_usage_limit_reached",
       routeAuthority: {
+        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
         channel: "linq",
         containerMemberId: "member_thread_container_123",
         threadId: "chat_group_123",

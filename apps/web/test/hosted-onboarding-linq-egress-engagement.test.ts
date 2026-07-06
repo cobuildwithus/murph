@@ -593,6 +593,7 @@ describe("hosted Linq egress engagement", () => {
       chatId: "chat-a",
       memberId: "member-1",
       routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:account",
         channel: "linq",
         containerMemberId: "member-1",
         threadId: "chat-a",
