@@ -25,11 +25,23 @@ export async function generateMetadata({
     return {};
   }
 
+  const ogImage = {
+    alt: `${shell.title}, a Murph experiment.`,
+    height: 630,
+    type: "image/png",
+    url: `/experiments/${encodeURIComponent(experimentId)}/opengraph-image`,
+    width: 1200,
+  } as const;
+
   return createMurphPageMetadata({
-    title: `${shell.title} — Murph Experiments`,
+    title: `${shell.title} | Murph Experiments`,
     description: shell.description,
     openGraph: {
+      images: [ogImage],
       type: "article",
+    },
+    twitter: {
+      images: [ogImage],
     },
   });
 }

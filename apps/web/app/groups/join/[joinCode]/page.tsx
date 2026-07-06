@@ -15,13 +15,30 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
-export const metadata: Metadata = {
-  ...createMurphPageMetadata({
-    title: "Join group — Murph",
-    description: "Join a Murph group.",
-  }),
-  robots: { follow: false, index: false },
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ joinCode: string }>;
+}): Promise<Metadata> {
+  const { joinCode } = await params;
+  const ogImage = {
+    alt: "Join your people on Murph.",
+    height: 630,
+    type: "image/png",
+    url: `/groups/join/${encodeURIComponent(joinCode)}/opengraph-image`,
+    width: 1200,
+  } as const;
+
+  return {
+    ...createMurphPageMetadata({
+      title: "Join group · Murph",
+      description: "Join a Murph group.",
+      openGraph: { images: [ogImage] },
+      twitter: { images: [ogImage] },
+    }),
+    robots: { follow: false, index: false },
+  };
+}
 
 export default async function GroupJoinPage({
   params,
@@ -36,7 +53,7 @@ export default async function GroupJoinPage({
   });
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center gap-6 px-6 py-16">
+    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-8 px-6 py-16">
       {renderGroupJoin({ authenticated: auth.authenticated, joinCode, view })}
     </main>
   );
@@ -57,35 +74,50 @@ function renderGroupJoin(input: {
     );
   }
 
-  const groupName = view.displayName ?? describeGroupKind(view.kind);
+  const displayName = view.displayName?.trim() || null;
+  const groupName = displayName ?? describeGroupKind(view.kind);
   const alreadyActiveMember = view.viewerMembershipStatus === "active";
+  const memberLabel = view.memberCount === 1 ? "1 member" : `${view.memberCount} members`;
+  const eyebrow = `${kindNoun(view.kind)} · ${memberLabel}`;
+  const avatarInitial = (displayName ?? kindNoun(view.kind)).charAt(0).toUpperCase();
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
+      <header className="flex flex-col items-center gap-4 text-center">
+        <div className="flex size-[76px] items-center justify-center rounded-full bg-[#d4c4a8] font-serif text-[2rem] font-semibold text-[#2d3436]">
+          {avatarInitial}
+        </div>
+        <div className="flex flex-col items-center gap-2.5">
+          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.13em] text-muted-foreground">
+            {eyebrow}
+          </span>
+          <h1 className="font-serif text-[2rem] leading-[1.05] font-semibold tracking-tight text-balance text-foreground">
+            {alreadyActiveMember ? `You're in ${groupName}` : `Join ${groupName}`}
+          </h1>
+          <p className="max-w-[20rem] text-pretty text-[15px] leading-relaxed text-muted-foreground">
+            Get healthier with people you trust. You choose exactly what you share.
+          </p>
+        </div>
+      </header>
+
       <div className="flex flex-col gap-3">
-        <h1 className="font-serif text-3xl font-semibold tracking-tight text-balance text-foreground">
-          {alreadyActiveMember ? `You're in ${groupName}` : `Join ${groupName}`}
-        </h1>
-        <ul className="flex flex-col gap-1.5 text-sm text-pretty text-muted-foreground">
-          <li>Joining this group adds you as a member, and this group&apos;s Murph will know you by your name.</li>
-          <li>It does not share your private Murph chats, health data, vault data, account data, or email settings.</li>
-          <li>Any health permissions below are optional. You choose exactly what to share.</li>
-        </ul>
-        <p className="text-xs text-muted-foreground">
-          {view.memberCount === 1 ? "1 active member" : `${view.memberCount} active members`}
-        </p>
+        <ClarityRow label="Shared" text="Your name, plus anything you choose below." />
+        <div className="h-px bg-border" />
+        <ClarityRow label="Private" text="Your Murph chats, health data, and vault. Always." />
       </div>
 
       {input.authenticated ? (
         <GroupJoinAcceptForm
           activeVaultShareProjectionKinds={view.activeVaultShareProjectionKinds}
           alreadyActiveMember={alreadyActiveMember}
+          groupName={groupName}
           joinCode={input.joinCode}
           permissions={view.requestedVaultShareProjections}
         />
       ) : (
         <div className="flex flex-col gap-2">
           <GroupJoinSignInButton />
-          <p className="text-xs leading-5 text-muted-foreground">
+          <p className="text-center text-xs leading-5 text-muted-foreground">
             Sign in or create a private Murph account, and we&apos;ll bring you back here.
           </p>
         </div>
@@ -94,25 +126,47 @@ function renderGroupJoin(input: {
   );
 }
 
+function ClarityRow(props: { label: string; text: string }) {
+  return (
+    <div className="flex gap-4">
+      <span className="w-[74px] shrink-0 pt-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+        {props.label}
+      </span>
+      <p className="text-sm leading-relaxed text-foreground">{props.text}</p>
+    </div>
+  );
+}
+
+function kindNoun(kind: string): string {
+  switch (kind) {
+    case "couple": return "Couple";
+    case "family": return "Family";
+    case "friends": return "Friends";
+    case "household": return "Household";
+    case "team": return "Team";
+    default: return "Group";
+  }
+}
+
 function describeGroupKind(kind: string): string {
   switch (kind) {
-    case "couple": return "this couple group";
-    case "family": return "this family group";
-    case "friends": return "this friends group";
-    case "household": return "this household group";
-    case "team": return "this team group";
-    default: return "this Murph group";
+    case "couple": return "this couple";
+    case "family": return "this family";
+    case "friends": return "this circle";
+    case "household": return "this household";
+    case "team": return "this team";
+    default: return "this group";
   }
 }
 
 function GroupJoinMessage(props: { body: string; title: string }) {
   return (
-    <div className="flex flex-col gap-3">
-      <h1 className="font-serif text-3xl font-semibold tracking-tight text-balance text-foreground">
+    <div className="flex flex-col items-center gap-4 text-center">
+      <h1 className="font-serif text-[1.75rem] font-semibold tracking-tight text-balance text-foreground">
         {props.title}
       </h1>
-      <p className="text-sm text-pretty text-muted-foreground">{props.body}</p>
-      <Button render={<Link href="/home" />} nativeButton={false} size="xl">
+      <p className="max-w-sm text-pretty text-sm text-muted-foreground">{props.body}</p>
+      <Button render={<Link href="/home" />} nativeButton={false} size="xl" className="mt-2 w-full">
         Open Murph
       </Button>
     </div>

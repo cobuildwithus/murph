@@ -113,17 +113,17 @@ beforeEach(() => {
 });
 
 test("PitchPage metadata and route entrypoint render the deck landmark", () => {
-  assert.equal(pitchMetadata.title, "Murph — Pitch");
+  assert.equal(pitchMetadata.title, "Murph · Pitch");
   assert.equal(
     pitchMetadata.description,
     "Murph turns group chats into health challenges. The AI referee for step bets, sleep experiments, and friend challenges across iMessage, WhatsApp, and Telegram.",
   );
   assert.deepEqual(pitchMetadata.openGraph?.images, [
     {
-      alt: "Murph — Wearable data, made useful.",
+      alt: "Murph, the AI referee for health challenges.",
       height: 630,
       type: "image/png",
-      url: "/opengraph-image",
+      url: "/pitch/opengraph-image",
       width: 1200,
     },
   ]);
