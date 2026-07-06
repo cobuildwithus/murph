@@ -67,6 +67,8 @@ import {
 
 const CONVERSATION_PROJECTION_FAILED_REASON =
   "conversation-import.projection-failed";
+const CONVERSATION_MODULE_LOAD_FAILED_REASON =
+  "conversation-import.module-load-failed";
 const CONVERSATION_ATTACHMENT_EVIDENCE_FAILED_REASON =
   "conversation-import.attachment-evidence-failed";
 const CONVERSATION_PROJECTION_UPDATE_FAILED_REASON =
@@ -83,11 +85,22 @@ const ATTACHMENT_EVIDENCE_PARTIAL_REASON =
   "attachment.evidence_partial";
 const ASSISTANT_INPUT_SOURCE_METADATA_TEXT_MAX_LENGTH = 512;
 const RUNTIME_WAKE_NOTIFY_STALE_SKEW_TOLERANCE_MS = 5_000;
+const CONVERSATION_MODULE_LOAD_FAILED_CODE =
+  "conversation-module-load-failed";
 
 type HostedConversationEventsModule = typeof import("./events/conversation.ts");
 
 let hostedConversationEventsModulePromise:
   Promise<HostedConversationEventsModule> | null = null;
+
+class HostedConversationEventsModuleLoadError extends Error {
+  readonly code = CONVERSATION_MODULE_LOAD_FAILED_CODE;
+
+  constructor(cause: unknown) {
+    super("Failed to load hosted conversation events module.", { cause });
+    this.name = "HostedConversationEventsModuleLoadError";
+  }
+}
 
 export type HostedConversationMailboxPayloadDecodeResult =
   | {
@@ -723,7 +736,7 @@ function loadHostedConversationEventsModule(): Promise<HostedConversationEventsM
       if (hostedConversationEventsModulePromise === modulePromise) {
         hostedConversationEventsModulePromise = null;
       }
-      throw error;
+      throw new HostedConversationEventsModuleLoadError(error);
     });
     hostedConversationEventsModulePromise = modulePromise;
   }
@@ -839,6 +852,9 @@ function readHostedConversationProjectionFailureReason(
   }
 
   const errorCode = readHostedConversationFailureCode(error);
+  if (errorCode === CONVERSATION_MODULE_LOAD_FAILED_CODE) {
+    return CONVERSATION_MODULE_LOAD_FAILED_REASON;
+  }
   if (errorCode === "inbox-not-initialized") {
     return CONVERSATION_INBOX_RUNTIME_UNAVAILABLE_REASON;
   }
@@ -857,6 +873,9 @@ function readHostedConversationAttachmentEvidenceFailureReason(
   }
 
   const errorCode = readHostedConversationFailureCode(error);
+  if (errorCode === CONVERSATION_MODULE_LOAD_FAILED_CODE) {
+    return CONVERSATION_MODULE_LOAD_FAILED_REASON;
+  }
   if (errorCode === "inbox-not-initialized") {
     return CONVERSATION_INBOX_RUNTIME_UNAVAILABLE_REASON;
   }
