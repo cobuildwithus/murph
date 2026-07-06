@@ -106,6 +106,18 @@ const DEVICE_OBSERVABLE_ACTIVITY_KINDS = [
   "strength",
   "elliptical",
 ] as const;
+const GENERIC_ACTIVITY_KIND_TOKENS = new Set([
+  "workout",
+  "activity",
+  "activity-session",
+  "session",
+  "exercise",
+  "cardio",
+  "fitness",
+  "general",
+  "other",
+  "unknown",
+]);
 
 export type LinkedEventCountEvidence = Extract<ExperimentAdherenceEvidenceRule, { kind: "linkedEventCount" }>;
 
@@ -152,7 +164,7 @@ export function resolveAdherenceObservationActivityKind(input: {
 }): string | null {
   for (const candidate of listActivityKindCandidates(input.attributes)) {
     const normalized = normalizeActivityKindToken(candidate);
-    if (normalized) {
+    if (normalized && !GENERIC_ACTIVITY_KIND_TOKENS.has(normalized)) {
       return normalized;
     }
   }

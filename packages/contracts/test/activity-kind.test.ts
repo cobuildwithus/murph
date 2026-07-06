@@ -11,9 +11,9 @@ describe("activity kind matching", () => {
     expect(activityTextMatchesKind("Morning run", "running")).toBe(true);
     expect(activityTextMatchesKind("Trail Run", "running")).toBe(true);
     expect(activityTextMatchesKind("Ride", "cycling")).toBe(true);
-    expect(activityTextMatchesKind("riding", "cycling")).toBe(true);
     expect(activityTextMatchesKind("Virtual Ride", "cycling")).toBe(true);
     expect(activityTextMatchesKind("Gravel Ride", "cycling")).toBe(true);
+    expect(activityTextMatchesKind("Horseback Riding", "cycling")).toBe(false);
     expect(activityTextMatchesKind("Weightlifting", "strength")).toBe(true);
     expect(activityTextMatchesKind("Cycling", "running")).toBe(false);
   });

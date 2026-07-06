@@ -380,6 +380,7 @@ function makeActivitySession(input: {
   occurredAt?: string;
   sportName?: string;
   title?: string;
+  workout?: Record<string, unknown>;
 }): CanonicalEntity {
   return makeEntity({
     entityId: input.entityId,
@@ -391,7 +392,8 @@ function makeActivitySession(input: {
     title: input.title ?? input.activityType,
     attributes: {
       activityType: input.activityType,
-      sportName: input.sportName ?? input.activityType,
+      ...(input.sportName === undefined ? {} : { sportName: input.sportName }),
+      ...(input.workout === undefined ? {} : { workout: input.workout }),
     },
   });
 }
@@ -675,6 +677,69 @@ test("experiment progress counts cycling adherence from provider ride activity s
   const progress = summarizeExperimentProgress(vault, "cycling-block", { asOf: "2026-06-09" });
 
   assert.equal(progress.adherence.completedSessions, 1);
+});
+
+test("experiment progress classifies nested workout sport before generic activity labels", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-nested-workout-run-adherence",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFR",
+        slug: "nested-workout-run-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Run",
+          targetSessions: 4,
+          minimumUsefulSessions: 2,
+        },
+      }),
+      makeActivitySession({
+        entityId: "evt_workout_run_1",
+        dayKey: "2026-06-02",
+        activityType: "workout",
+        workout: { sportName: "Run" },
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "nested-workout-run-block", { asOf: "2026-06-09" });
+
+  assert.equal(progress.adherence.completedSessions, 1);
+});
+
+test("experiment progress ignores fully generic activity sessions for running adherence", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-generic-workout-adherence",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFS",
+        slug: "generic-workout-run-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Run",
+          targetSessions: 4,
+          minimumUsefulSessions: 2,
+        },
+      }),
+      makeActivitySession({
+        entityId: "evt_generic_workout_1",
+        dayKey: "2026-06-02",
+        activityType: "workout",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "generic-workout-run-block", { asOf: "2026-06-09" });
+
+  assert.equal(progress.adherence.completedSessions, 0);
 });
 
 test("experiment progress counts manual sessions for device-observable running adherence", () => {
