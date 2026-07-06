@@ -17,9 +17,15 @@ import type {
 // into this vault's conversation, so "pipeline-written media family" is the
 // consent fact that authorizes reuse in image generation. Confidentiality
 // across relationships is owned by vault separation (each 1:1 and each group
-// is its own runtime and vault), not by this check; this check keeps document
-// scans (raw/documents/**), bank/, derived/, and other non-media vault files
-// out of the images.edits egress.
+// is its own runtime and vault), not by this check; this check blocks DIRECT
+// reference of document scans (raw/documents/**), bank/, derived/, and other
+// non-media vault files by a confused or injected model. It is a
+// misreference guardrail, not a wall against deliberate re-materialization:
+// the agent holds shell and capture authority inside its own vault, so no
+// within-vault path check can stop it from copying bytes into an authorized
+// family — just as it can already read any vault file into its own provider
+// -bound context. Do not "harden" this by coupling capture or other product
+// surfaces to image authority; the hard boundary lives at the vault seam.
 const AUTHORIZED_REFERENCE_IMAGE_PATH_PREFIXES = [
   `${RAW_INBOX_DIRECTORY}/`,
   `${RAW_CAPTURES_DIRECTORY}/`,
