@@ -209,6 +209,26 @@ test("shows Messages, web sign-in, and Telegram options for a label-only invite"
   expect(markup).not.toContain("Open this invite from the chat where you received it");
 });
 
+test("shows web sign-in and Telegram for an unbound invite without a Messages line", async () => {
+  mocks.readHostedFamilyInviteAcceptanceView.mockResolvedValue({
+    ...BASE_VIEW,
+    inviteCode: "CODEUNBOUND",
+    telegramInviteUrl: "https://t.me/withmurph_bot?start=family_CODEUNBOUND",
+    webAcceptable: true,
+  });
+
+  const markup = await renderFamilyAcceptPage("CODEUNBOUND");
+
+  expect(markup).toContain("Sign in to join");
+  expect(markup).toContain("Continue in Telegram");
+  expect(markup).toContain("https://t.me/withmurph_bot?start=family_CODEUNBOUND");
+  expect(markup).not.toContain("Continue in Messages");
+  expect(mocks.signInButtonProps).toEqual({
+    bindingLabel: "your phone number or email address",
+    description: "Sign in with your own phone number or email address. We'll bring you back here.",
+  });
+});
+
 async function renderFamilyAcceptPage(inviteCode: string): Promise<string> {
   const { default: FamilyAcceptPage } = await import("../app/family/accept/[inviteCode]/page");
 

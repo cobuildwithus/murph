@@ -213,6 +213,17 @@ function renderAcceptCta(input: {
   const webSignInDescriptionProps = input.webSignInDescription
     ? { description: input.webSignInDescription }
     : {};
+  const unboundTelegramInviteLink = isFullyUnbound && view.telegramInviteUrl ? (
+    <Button
+      render={<a href={view.telegramInviteUrl} />}
+      nativeButton={false}
+      size="sm"
+      variant="link"
+      className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-foreground"
+    >
+      Continue in Telegram
+    </Button>
+  ) : null;
 
   // Already signed in with an acceptable identity: one tap, no re-verification.
   if (input.authenticated && view.webAcceptable) {
@@ -261,17 +272,7 @@ function renderAcceptCta(input: {
             {...webSignInDescriptionProps}
           />
         ) : null}
-        {isFullyUnbound && view.telegramInviteUrl ? (
-          <Button
-            render={<a href={view.telegramInviteUrl} />}
-            nativeButton={false}
-            size="sm"
-            variant="link"
-            className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-foreground"
-          >
-            Continue in Telegram
-          </Button>
-        ) : null}
+        {unboundTelegramInviteLink}
       </>
     );
   }
@@ -289,6 +290,7 @@ function renderAcceptCta(input: {
           {input.webSignInDescription ??
             `Sign in with the ${input.webBindingLabel} this invite was sent to, and we'll bring you back here.`}
         </p>
+        {unboundTelegramInviteLink}
       </>
     );
   }

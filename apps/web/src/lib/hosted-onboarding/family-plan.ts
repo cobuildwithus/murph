@@ -2913,9 +2913,29 @@ export async function acceptHostedFamilyInviteTx(input: {
     });
   }
 
-  if (
+  const phoneBindingMatches = Boolean(
     invite.targetPhoneLookupKey &&
-    !hostedPhoneLookupKeyMatchesValue(input.phoneNumber, invite.targetPhoneLookupKey)
+    hostedPhoneLookupKeyMatchesValue(input.phoneNumber, invite.targetPhoneLookupKey),
+  );
+  const emailBindingMatches = Boolean(
+    invite.targetEmailLookupKey &&
+    hostedEmailLookupKeyMatchesValue(input.email, invite.targetEmailLookupKey),
+  );
+  const telegramUsernameWasPresented =
+    Object.prototype.hasOwnProperty.call(input, "telegramUsername");
+  const telegramBindingMatches = Boolean(
+    telegramUsernameWasPresented &&
+    invite.targetTelegramUsernameLookupKey &&
+    hostedTelegramUsernameLookupKeyMatchesValue(
+      input.telegramUsername,
+      invite.targetTelegramUsernameLookupKey,
+    ),
+  );
+
+  if (
+    normalizeNullableString(input.phoneNumber) &&
+    invite.targetPhoneLookupKey &&
+    !phoneBindingMatches
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
@@ -2925,8 +2945,9 @@ export async function acceptHostedFamilyInviteTx(input: {
   }
 
   if (
+    normalizeNullableString(input.email) &&
     invite.targetEmailLookupKey &&
-    !hostedEmailLookupKeyMatchesValue(input.email, invite.targetEmailLookupKey)
+    !emailBindingMatches
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
@@ -2936,13 +2957,37 @@ export async function acceptHostedFamilyInviteTx(input: {
   }
 
   if (
-    Object.prototype.hasOwnProperty.call(input, "telegramUsername") &&
+    telegramUsernameWasPresented &&
     invite.targetTelegramUsernameLookupKey &&
-    !hostedTelegramUsernameLookupKeyMatchesValue(
-      input.telegramUsername,
-      invite.targetTelegramUsernameLookupKey,
-    )
+    !telegramBindingMatches
   ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+      httpStatus: 403,
+      message: "This family invite was sent to a different Telegram username.",
+    });
+  }
+
+  if (
+    !isFullyUnbound &&
+    !phoneBindingMatches &&
+    !emailBindingMatches &&
+    !telegramBindingMatches
+  ) {
+    if (invite.targetPhoneLookupKey) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+        httpStatus: 403,
+        message: "This family invite was sent to a different phone number.",
+      });
+    }
+    if (invite.targetEmailLookupKey) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
+        httpStatus: 403,
+        message: "This family invite was sent to a different email address.",
+      });
+    }
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
       httpStatus: 403,
