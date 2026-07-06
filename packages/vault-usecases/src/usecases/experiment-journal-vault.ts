@@ -677,7 +677,7 @@ function hydrateRunPlanAdherenceTargets(
   }
 
   const [adherenceTarget] = synthesizeLegacySessionAdherenceTargets({ runPlan })
-  if (!adherenceTarget) {
+  if (!adherenceTarget?.calendar) {
     return runPlan
   }
 
