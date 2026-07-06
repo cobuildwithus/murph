@@ -198,9 +198,12 @@ Per `agent-docs/references/hosted-temporal-orchestration.md:232-263` (this
 would be the repo's first patch retirement):
 1. `deprecatePatch(...)` intermediate once pre-patch histories have drained
    (per-user workflows recycle via continue-as-new, so drain is observable).
-2. Then delete the branch, the runtime seam, the patch-id constant,
-   `recordDirectMailboxProcessingSummary`, and the guard-required replay
-   test/fixture in the same change (`hosted-temporal:guard` pins them).
+2. Phase 1 deletes the branch, the runtime seam,
+   `recordDirectMailboxProcessingSummary`, and the pre-patch replay
+   test/fixture while keeping the patch-id constant for the `deprecatePatch`
+   marker. `hosted-temporal:guard` pins that marker during the intermediate
+   window. A later Phase 2 removes the marker and patch-id constant after
+   deprecatePatch-window histories drain.
 
 #### Part 2b — wake-field triple collapse (net deletion)
 
@@ -253,9 +256,9 @@ Touch: `webhook-service-types.ts:17-26`;
   rapid-double-webhook scenario and the Linq delivery E2E, 2 consecutive green
   runs; prod readback of `hosted_mailbox_item.consumed_at` after accepted
   delivery.
-- PR 2: workflow replay tests per the patch procedure + Temporal
-  orchestration E2E; full webhook owner suites for the wake-field
-  collapse.
+- PR 2: Phase 1 package tests plus `hosted-temporal:guard` for the
+  `deprecatePatch` marker, then Temporal orchestration E2E; full webhook owner
+  suites for the wake-field collapse.
 - Each PR: c1 (codex gpt-5.5 xhigh) deep-review rounds to completion.
 
 ## Deletion ledger (running total)
@@ -263,7 +266,7 @@ Touch: `webhook-service-types.ts:17-26`;
 | PR | Deleted | Added |
 | --- | --- | --- |
 | 1 | checkpoint ack block, consume route+port+compat wiring, dead lag export, every-message admission pre-read (relocated) | one nullable item stamp, one intent/report field, one idempotent store update, restored direct-wake lines in Part 1b (stateless hint; no new state/concepts) |
-| 2 | legacy patch branch, runtime seam, patch constant, direct-summary recorder, replay fixture+test, four legacy wake plan fields + parallel consumers | `deprecatePatch` intermediate (itself later deleted) |
+| 2 | legacy patch branch, runtime seam, direct-summary recorder, replay fixture+test, four legacy wake plan fields + parallel consumers; later Phase 2 removes the patch constant | `deprecatePatch` intermediate (itself later deleted) |
 
 Plan-level collapse already banked: the original PR C ("demote workflow to
 recheck-only": delay timer, second patch marker, new replay fixture) was

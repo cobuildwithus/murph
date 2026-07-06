@@ -34,12 +34,13 @@ payloads, prompts, transcripts, provider responses, secrets, local paths, or
 direct user identifiers. The durable rule lives in
 `agent-docs/references/hosted-temporal-orchestration.md`.
 
-This package includes a CI replay gate for the reconciliation-before-mailbox
-patch: `test/hosted-user-runtime-replay.test.ts` runs
-`Worker.runReplayHistory` against a synthetic pre-patch mailbox history in
-`test/fixtures/replay/` that scheduled `ensureRuntimeProcessing` directly. The
-root `hosted-temporal:guard` check fails if that replay test, fixture, or CI
-package-coverage entry is removed.
+The reconciliation-before-mailbox patch is in the `deprecatePatch()` phase: the
+pre-patch direct-mailbox branch and replay fixture were removed only after the
+production pre-patch histories drained. Keep the `deprecatePatch()` marker and
+patch id in `src/workflows/hosted-user-runtime.ts` until a later removal phase
+confirms the deprecatePatch-window histories have drained. The root
+`hosted-temporal:guard` check fails if that marker or CI package-coverage entry
+is removed early.
 
 The current per-user workflow is a hard cut. It is not replay-compatible with
 histories that recorded the old demand Activity or legacy direct signals. Before
