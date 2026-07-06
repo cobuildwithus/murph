@@ -30,6 +30,35 @@ function entryOnlyMetafile(entryBytes: number): Metafile {
   };
 }
 
+function staticBootClosureMetafile(inputPath: string): Metafile {
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 600, imports: [] },
+      [inputPath]: { bytes: 5_000, imports: [] },
+    },
+    outputs: {
+      "dist-bundled/container-entrypoint.js": {
+        bytes: 2_000,
+        entryPoint: "dist/container-entrypoint.js",
+        exports: [],
+        imports: [{ kind: "import-statement", path: "./chunk-STATIC.js" }],
+        inputs: {
+          "dist/container-entrypoint.js": { bytesInOutput: 600 },
+        },
+      },
+      "dist-bundled/chunk-STATIC.js": {
+        bytes: 4_000,
+        entryPoint: undefined,
+        exports: [],
+        imports: [],
+        inputs: {
+          [inputPath]: { bytesInOutput: 4_000 },
+        },
+      },
+    },
+  };
+}
+
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -163,32 +192,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
   });
 
   it("rejects provider connector inputs from the static boot closure", () => {
-    const metafile: Metafile = {
-      inputs: {
-        "dist/container-entrypoint.js": { bytes: 600, imports: [] },
-        "node_modules/grammy/out/mod.js": { bytes: 5_000, imports: [] },
-      },
-      outputs: {
-        "dist-bundled/container-entrypoint.js": {
-          bytes: 2_000,
-          entryPoint: "dist/container-entrypoint.js",
-          exports: [],
-          imports: [{ kind: "import-statement", path: "./chunk-STATIC.js" }],
-          inputs: {
-            "dist/container-entrypoint.js": { bytesInOutput: 600 },
-          },
-        },
-        "dist-bundled/chunk-STATIC.js": {
-          bytes: 4_000,
-          entryPoint: undefined,
-          exports: [],
-          imports: [],
-          inputs: {
-            "node_modules/grammy/out/mod.js": { bytesInOutput: 4_000 },
-          },
-        },
-      },
-    };
+    const metafile = staticBootClosureMetafile("node_modules/grammy/out/mod.js");
 
     expect(() =>
       assertRunnerEntrypointBundleWithinBudgets(metafile, {
@@ -196,6 +200,36 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         totalBytes: 10_000,
       }),
     ).toThrow(/provider connector inputs in the static boot closure[\s\S]*node_modules\/grammy\/out\/mod\.js/);
+  });
+
+  it("rejects staged @murphai/inboxd connector inputs from the static boot closure", () => {
+    const inputPath =
+      ".deploy/runner-bundle/node_modules/@murphai/inboxd/dist/connectors/hosted-conversation.js";
+    const metafile = staticBootClosureMetafile(inputPath);
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, {
+        entryBytes: 10_000,
+        totalBytes: 10_000,
+      }),
+    ).toThrow(
+      /provider connector inputs in the static boot closure[\s\S]*\.deploy\/runner-bundle\/node_modules\/@murphai\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
+    );
+  });
+
+  it("rejects workspace @murphai/inboxd connector inputs from the static boot closure", () => {
+    const metafile = staticBootClosureMetafile(
+      "packages/inboxd/dist/connectors/hosted-conversation.js",
+    );
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, {
+        entryBytes: 10_000,
+        totalBytes: 10_000,
+      }),
+    ).toThrow(
+      /provider connector inputs in the static boot closure[\s\S]*packages\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
+    );
   });
 
   it("allows provider connector inputs behind dynamic imports", () => {

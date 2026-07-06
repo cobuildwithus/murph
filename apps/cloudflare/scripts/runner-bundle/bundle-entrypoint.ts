@@ -49,11 +49,15 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 2_288_516;
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
+// The inboxd markers are path suffixes, not node_modules-anchored: workspace
+// package inputs appear as `node_modules/@murphai/inboxd/dist/...` in the
+// staged production assembly but as `packages/inboxd/dist/...` when bundling
+// straight from the repo checkout, and the guard must bite in both shapes.
 const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "node_modules/grammy/",
   "node_modules/node-fetch/",
-  "node_modules/@murphai/inboxd/dist/connectors/hosted-conversation.js",
-  "node_modules/@murphai/inboxd/dist/connectors/telegram/connector.js",
+  "/inboxd/dist/connectors/hosted-conversation.js",
+  "/inboxd/dist/connectors/telegram/connector.js",
 ] as const;
 
 export async function bundleRunnerContainerEntrypoint(

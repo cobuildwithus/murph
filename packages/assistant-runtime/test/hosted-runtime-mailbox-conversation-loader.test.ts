@@ -26,6 +26,13 @@ type MailboxConversationImportInput = Parameters<
   MailboxConversationImportModule["importHostedConversationMailboxItem"]
 >[0];
 
+class HostedConversationInboxProjectionError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "HostedConversationInboxProjectionError";
+  }
+}
+
 afterEach(() => {
   vi.doUnmock(CONVERSATION_MODULE_PATH);
   vi.resetModules();
@@ -53,12 +60,6 @@ test("lazy conversation events import retries after rejection while preserving p
         },
       }),
     );
-  class HostedConversationInboxProjectionError extends Error {
-    constructor(message: string, options?: { cause?: unknown }) {
-      super(message, options);
-      this.name = "HostedConversationInboxProjectionError";
-    }
-  }
 
   vi.doMock(CONVERSATION_MODULE_PATH, async () => {
     const moduleLoad = moduleLoads[moduleLoadCount];
@@ -79,7 +80,8 @@ test("lazy conversation events import retries after rejection while preserving p
 
   const firstOutcome = await firstImport;
   assert.equal(firstOutcome.status, "imported");
-  assert.equal(firstOutcome.reasonCode, "conversation-import.projection-failed");
+  assert.equal(firstOutcome.reasonCode, "conversation-import.module-load-failed");
+  assert.notEqual(firstOutcome.reasonCode, "conversation-import.projection-failed");
   assert.equal(importHostedConversationMessageWakeIntoLocalInbox.mock.calls.length, 0);
 
   const secondImport = importHostedConversationMailboxItem(
@@ -115,6 +117,38 @@ test("lazy conversation events import retries after rejection while preserving p
   assert.equal(memoizedOutcome.reasonCode ?? null, null);
   assert.equal(moduleLoadCount, 2);
   assert.equal(importHostedConversationMessageWakeIntoLocalInbox.mock.calls.length, 3);
+});
+
+test("successfully loaded conversation projection failures stay projection failures", async () => {
+  vi.resetModules();
+  let moduleLoadCount = 0;
+  const importHostedConversationMessageWakeIntoLocalInbox =
+    vi.fn<ConversationEventsModule["importHostedConversationMessageWakeIntoLocalInbox"]>(
+      async () => {
+        throw new HostedConversationInboxProjectionError(
+          "synthetic projection failure after module load",
+        );
+      },
+    );
+
+  vi.doMock(CONVERSATION_MODULE_PATH, () => {
+    moduleLoadCount += 1;
+    return {
+      HostedConversationInboxProjectionError,
+      importHostedConversationMessageWakeIntoLocalInbox,
+    };
+  });
+
+  const { importHostedConversationMailboxItem } =
+    await import("../src/hosted-runtime/mailbox-conversation-import.ts");
+  const outcome = await importHostedConversationMailboxItem(
+    createImportInput("005"),
+  );
+
+  assert.equal(outcome.status, "imported");
+  assert.equal(outcome.reasonCode, "conversation-import.projection-failed");
+  assert.equal(moduleLoadCount, 1);
+  assert.equal(importHostedConversationMessageWakeIntoLocalInbox.mock.calls.length, 1);
 });
 
 function createImportInput(
