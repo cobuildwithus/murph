@@ -665,10 +665,8 @@ export async function readHostedGrowthDashboard(
 }
 
 /**
- * Family paid groups use HostedAccountGroupBillingRef.currentBillingPhase === "paid".
- * The family-plan reconciliation paths write that marker only for active family
- * subscriptions whose active members fit the billed seat count; over-seat active
- * subscriptions leave the group outside the paid phase.
+ * Paying metrics use paid billing phase, active billing status, and unsuspended
+ * rows. Family paid groups also require at least one billed seat.
  */
 export async function captureHostedGrowthDailySnapshot(
   now: Date,
@@ -736,6 +734,7 @@ async function readCurrentHostedGrowthMetrics(
             currentBillingPhase: "paid",
           },
         },
+        billingStatus: HostedBillingStatus.active,
         suspendedAt: null,
       },
     }),
@@ -769,6 +768,7 @@ async function readCurrentHostedGrowthMetrics(
             currentBillingPhase: "paid",
           },
         },
+        billingStatus: HostedBillingStatus.active,
         suspendedAt: null,
       },
     }),

@@ -419,7 +419,30 @@ describe("hosted ops growth metrics", () => {
     expect(mocks.requireVercelCronRequest).toHaveBeenCalledWith(request);
     expect(mocks.getPrisma).toHaveBeenCalledTimes(1);
     expect(mocks.hostedGrowthDailySnapshot.upsert).toHaveBeenCalledTimes(1);
+    expect.soft(mocks.hostedMember.findMany.mock.calls[0]?.[0]).toMatchObject({
+      where: {
+        billingRef: {
+          is: {
+            currentBillingPhase: "paid",
+          },
+        },
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+      },
+    });
     expect(mocks.hostedAccountGroup.findMany.mock.calls[0]?.[0]).toMatchObject({
+      where: {
+        billingRef: {
+          is: {
+            billedSeatCount: {
+              gte: 1,
+            },
+            currentBillingPhase: "paid",
+          },
+        },
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+      },
       select: {
         memberships: {
           where: {
