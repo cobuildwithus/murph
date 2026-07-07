@@ -607,6 +607,7 @@ export async function sendAssistantNotificationLocal(
             throw error
           }
         })()
+        committedDeliveryOutcomeKind = committedDeliveryOutcome.kind
         if (
           input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
           assistantNotificationDeliveryAcceptedFirstContact({
@@ -630,7 +631,6 @@ export async function sendAssistantNotificationLocal(
             operation: 'status snapshot refresh',
           })
         })
-        committedDeliveryOutcomeKind = committedDeliveryOutcome.kind
 
         return {
           decision: {

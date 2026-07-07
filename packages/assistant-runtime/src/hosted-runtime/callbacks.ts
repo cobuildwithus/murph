@@ -1686,7 +1686,10 @@ function queueHostedLinqTypingStopAfterFailedOrSkippedDelivery(input: {
   outcome: HostedAssistantDeliveryOutcome | null;
   providerFetch: typeof fetch | null;
 }): void {
-  if (input.outcome?.deliveryStatus === "sent") {
+  // This skips the recent-inbound send guard intentionally: typing_stop carries
+  // no message content, targets only the bound outbox delivery context, and
+  // cannot exist for guard-blocked routes because typing start is guard-gated.
+  if (!hostedAssistantDeliveryOutcomeShouldStopLinqTyping(input.outcome)) {
     return;
   }
   if (isHostedAssistantReactionOnlyEffect(input.assistantDeliveryEffect)) {
@@ -1713,6 +1716,13 @@ function queueHostedLinqTypingStopAfterFailedOrSkippedDelivery(input: {
     env: input.linqEnv,
     fetchImplementation: input.providerFetch,
   }).catch(() => undefined);
+}
+
+function hostedAssistantDeliveryOutcomeShouldStopLinqTyping(
+  outcome: HostedAssistantDeliveryOutcome | null,
+): boolean {
+  return outcome?.deliveryStatus === "failed"
+    || outcome?.deliveryStatus === "failed_ambiguous";
 }
 
 function resolveHostedLinqTypingStopTarget(input: {
@@ -2086,20 +2096,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       wake: input.wake,
     }));
   } catch (error) {
-    queueHostedLinqTypingStopAfterFailedOrSkippedDelivery({
-      assistantDeliveryEffect: input.assistantDeliveryEffect,
-      linqDeliveryContexts,
-      linqEnv: input.linqEnv,
-      outcome: null,
-      providerFetch: input.providerFetch,
-    });
-    if (input.preparedDispatch && shouldResetHostedPreparedDeliveryOnPreProviderAbort({
-      assistantDeliveryEffect: input.assistantDeliveryEffect,
-      error,
-      mirrorState,
-      providerDispatchEntered,
-      signal: input.signal,
-    })) {
+    const resetPreparedDelivery =
+      input.preparedDispatch !== null
+      && shouldResetHostedPreparedDeliveryOnPreProviderAbort({
+        assistantDeliveryEffect: input.assistantDeliveryEffect,
+        error,
+        mirrorState,
+        providerDispatchEntered,
+        signal: input.signal,
+      });
+    if (input.preparedDispatch && resetPreparedDelivery) {
       await resetAssistantOutboxPreparedDispatchById({
         deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
         deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
@@ -2110,6 +2116,22 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           ? { restoreDispatchState: input.preparedDispatch.previousDispatchState }
           : {}),
         vault: input.vaultRoot,
+      });
+    } else if (readHostedAssistantDeliveryRetryableFlag(error) !== true) {
+      const deliveryError = normalizeAssistantDeliveryError(error);
+      queueHostedLinqTypingStopAfterFailedOrSkippedDelivery({
+        assistantDeliveryEffect: input.assistantDeliveryEffect,
+        linqDeliveryContexts,
+        linqEnv: input.linqEnv,
+        outcome: buildHostedAssistantDeliveryOutcome({
+          deliveryErrorCode: deliveryError.code,
+          deliveryErrorDetails: normalizeHostedAssistantDeliveryErrorDetails(deliveryError),
+          deliveryErrorMessage: deliveryError.message,
+          deliveryStatus: "failed",
+          effect: input.assistantDeliveryEffect,
+          retryable: false,
+        }),
+        providerFetch: input.providerFetch,
       });
     }
     const enrichedError = attachHostedAssistantDeliveryDispatchDetails(error, {
