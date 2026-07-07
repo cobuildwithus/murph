@@ -27,11 +27,18 @@ const MOBILE_MENU_ROW =
 
 export function StickyNav({
   authenticated,
+  darkTop = false,
   githubStarCount = null,
   preloadAuthPanel = false,
   splitUnauthenticatedAuth = true,
 }: {
   authenticated: boolean;
+  /**
+   * Set when the page's hero sits directly under the nav on a dark surface, so
+   * the unscrolled nav uses light text and the dark-background logo instead of
+   * the default light-hero (dark text) treatment.
+   */
+  darkTop?: boolean;
   githubStarCount?: number | null;
   preloadAuthPanel?: boolean;
   splitUnauthenticatedAuth?: boolean;
@@ -64,6 +71,11 @@ export function StickyNav({
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  // The nav sits on a dark surface either once scrolled (dark backdrop appears)
+  // or when the page declares its top hero is dark. Text, logo, and auth
+  // controls key off this; only the nav's own background keys off `scrolled`.
+  const onDark = scrolled || darkTop;
+
   return (
     <nav
       className={`fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-5 py-4 transition-[background-color,backdrop-filter] duration-300 sm:px-10 lg:px-16 ${
@@ -85,7 +97,7 @@ export function StickyNav({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={scrolled ? "/logo-dark.svg" : "/logo.svg"}
+          src={onDark ? "/logo-dark.svg" : "/logo.svg"}
           alt="Murph"
           width={107}
           height={24}
@@ -98,7 +110,7 @@ export function StickyNav({
             key={href}
             href={href}
             className={`hidden text-sm transition-colors md:block ${
-              scrolled
+              onDark
                 ? "text-white/75 hover:text-white"
                 : "text-[#2d3436]/80 hover:text-[#2d3436]"
             }`}
@@ -116,7 +128,7 @@ export function StickyNav({
               : "Star Murph on GitHub"
           }
           className={`hidden items-center gap-1.5 text-sm transition-colors md:inline-flex ${
-            scrolled
+            onDark
               ? "text-white/75 hover:text-white"
               : "text-[#2d3436]/80 hover:text-[#2d3436]"
           }`}
@@ -136,7 +148,7 @@ export function StickyNav({
           authLabel="Dashboard"
           authenticated={authenticated}
           context="nav"
-          {...(scrolled ? { onDarkSurface: true } : {})}
+          {...(onDark ? { onDarkSurface: true } : {})}
           {...(preloadAuthPanel ? { preloadAuthPanel: true } : {})}
           splitUnauthenticated={splitUnauthenticatedAuth}
         />
@@ -144,7 +156,7 @@ export function StickyNav({
           <DrawerTrigger
             aria-label="Open menu"
             className={`inline-flex size-9 items-center justify-center rounded-lg transition-colors md:hidden ${
-              scrolled
+              onDark
                 ? "text-white/85 hover:bg-white/10"
                 : "text-[#2d3436]/85 hover:bg-[#2d3436]/[0.06]"
             }`}
