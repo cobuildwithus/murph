@@ -28,6 +28,10 @@ export function formatHostedDeviceSyncSourceLabel(sourceProviderSlug: string): s
   const normalized = sourceProviderSlug.trim().toLowerCase().replace(/_/gu, "-");
 
   switch (normalized) {
+    case "apple-health":
+    case "apple-health-kit":
+    case "apple-healthkit":
+      return "Apple Health";
     case "whoop":
       return formatDeviceSyncProviderLabel("whoop");
     default:

@@ -207,7 +207,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "apple-health",
     label: "Apple Health",
-    routes: [unavailableRoute("Apple Health is a mobile/local device flow, not hosted Junction Link.")],
+    routes: [junctionSdkRoute("apple_health_kit")],
   },
   {
     connectSourceId: "health-connect",

@@ -132,13 +132,18 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />27 of 27 sources</);
+  assert.match(markup, />28 of 28 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
   assert.doesNotMatch(markup, /Health data source from the Just Cobuild priority catalog/u);
 
   const sources = [
+    {
+      assetPath: "/brand-logos/connect/apple-health.png",
+      description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
+      name: "Apple Health",
+    },
     {
       assetPath: "/brand-logos/connect/whoop.svg",
       description: "Recovery, strain, sleep, heart rate, and daily readiness from Whoop.",
@@ -276,16 +281,17 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     },
   ];
 
-  assert.equal(sources.length, 27);
+  assert.equal(sources.length, 28);
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length);
   assert.match(markup, /disabled=""/);
+  assert.match(markup, /aria-label="Apple Health connection is not available yet"/);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
+  assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
   assert.doesNotMatch(markup, /Coming soon/u);
   assert.doesNotMatch(markup, /Not connected/u);
   assert.doesNotMatch(markup, />Connected</u);
-  assert.doesNotMatch(markup, />Apple Health</u);
   assert.doesNotMatch(markup, />Health Connect</u);
   assert.doesNotMatch(markup, />Samsung Health</u);
   assert.doesNotMatch(markup, />Freestyle Libre BLE</u);
@@ -294,6 +300,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.doesNotMatch(markup, />OneTouch</u);
   assert.doesNotMatch(markup, />Manual</u);
   assert.doesNotMatch(markup, /Whoop V2/u);
+  assert.ok(sourceHeadingIndex(markup, "Apple Health") < sourceHeadingIndex(markup, "Garmin"));
   assert.ok(sourceHeadingIndex(markup, "Garmin") < sourceHeadingIndex(markup, "Fitbit"));
   assert.ok(sourceHeadingIndex(markup, "Fitbit") < sourceHeadingIndex(markup, "Google Fit"));
   assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Strava"));
@@ -489,7 +496,8 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, JUNCTION_DEFAULT_PROVIDER_FILTER.length);
-  assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
+  assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 1);
+  assert.match(markup, /aria-label="Apple Health connection is not available yet"/u);
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Samsung Health</u);
 
@@ -670,6 +678,110 @@ test("ConnectPage marks direct and Junction upstream sources connected from host
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
 
+test("ConnectPage marks iOS Apple Health Junction SDK source connected from hosted state", async () => {
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_apple_health",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Apple Health",
+            resourceCount: 4,
+            sourceProviderSlug: "apple_health_kit",
+            status: "connected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Apple Health connected/u);
+  assert.match(markup, /aria-label="Disconnect Apple Health"/u);
+  assert.doesNotMatch(markup, /aria-label="Connect Apple Health"/u);
+  assert.equal(markup.match(/data-connection-state="connected"/gu)?.length, 1);
+  assert.ok(sourceHeadingIndex(markup, "Apple Health") < sourceHeadingIndex(markup, "Garmin"));
+});
+
+test("ConnectPage avoids source-specific disconnects for multi-source Junction accounts", async () => {
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_multi_source",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Apple Health",
+            resourceCount: 4,
+            sourceProviderSlug: "apple_health_kit",
+            status: "connected",
+          },
+          {
+            providerLabel: "WHOOP",
+            resourceCount: 3,
+            sourceProviderSlug: "whoop_v2",
+            status: "connected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Apple Health connected/u);
+  assert.match(markup, /Whoop connected/u);
+  assert.equal(markup.match(/data-connection-state="connected"/gu)?.length, 2);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Apple Health"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Whoop"/u);
+});
+
+test("ConnectPage shows mobile-managed guidance for Apple Health reconnect states without web target", async () => {
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_apple_health",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Apple Health",
+            requiresReconnect: true,
+            resourceCount: 4,
+            sourceProviderSlug: "apple_health_kit",
+            status: "error",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Apple Health needs reconnect/u);
+  assert.match(
+    markup,
+    /Apple Health needs attention from the connected app before Murph can keep syncing it\./u,
+  );
+  assert.match(markup, /aria-label="Disconnect Apple Health"/u);
+  assert.match(markup, /data-connection-state="needs-access"/u);
+  assert.doesNotMatch(markup, /aria-label="Apple Health connection is not available yet"/u);
+  assert.doesNotMatch(markup, /Please reconnect Apple Health to resume syncing\./u);
+});
+
 test("ConnectPage ignores disconnected Junction upstream projections on active connections", async () => {
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
@@ -840,6 +952,84 @@ test("ConnectPage lets active state win when duplicate rows mention the same sou
   );
 });
 
+test("ConnectPage maps Apple Health Junction upstream slugs to the visible source", async () => {
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+
+  for (const sourceProviderSlug of ["apple_health_kit", "apple_health"]) {
+    assert.deepEqual(
+      resolveConnectSourceConnectionStates([{ id: "apple-health" }], [
+        {
+          connectionId: "dsc_junction_apple_health",
+          provider: "junction",
+          state: "active",
+          upstreamSources: [
+            {
+              providerLabel: "Apple Health",
+              resourceCount: 4,
+              sourceProviderSlug,
+              status: "connected",
+            },
+          ],
+        },
+      ]),
+      [{
+        connectionId: "dsc_junction_apple_health",
+        connectProvider: "junction",
+        connectTarget: null,
+        requiresReconnect: false,
+        sourceId: "apple-health",
+        state: "active",
+      }],
+    );
+  }
+});
+
+test("ConnectPage withholds Junction connection ids from multi-source upstream projections", async () => {
+  const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
+
+  assert.deepEqual(
+    resolveConnectSourceConnectionStates([{ id: "apple-health" }, { id: "whoop" }], [
+      {
+        connectionId: "dsc_junction_multi_source",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Apple Health",
+            resourceCount: 4,
+            sourceProviderSlug: "apple_health_kit",
+            status: "connected",
+          },
+          {
+            providerLabel: "WHOOP",
+            resourceCount: 3,
+            sourceProviderSlug: "whoop_v2",
+            status: "connected",
+          },
+        ],
+      },
+    ]),
+    [
+      {
+        connectionId: null,
+        connectProvider: "junction",
+        connectTarget: null,
+        requiresReconnect: false,
+        sourceId: "apple-health",
+        state: "active",
+      },
+      {
+        connectionId: null,
+        connectProvider: "junction",
+        connectTarget: null,
+        requiresReconnect: false,
+        sourceId: "whoop",
+        state: "active",
+      },
+    ],
+  );
+});
+
 test("ConnectPage preserves reconnect action on active source matches", async () => {
   const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
 
@@ -941,7 +1131,7 @@ test("ConnectPage keeps healthy Junction child sources connected when another ch
     ]),
     [
       {
-        connectionId: "dsc_junction_multi",
+        connectionId: null,
         connectProvider: "junction",
         connectTarget: "whoop",
         requiresReconnect: true,
@@ -949,7 +1139,7 @@ test("ConnectPage keeps healthy Junction child sources connected when another ch
         state: "active",
       },
       {
-        connectionId: "dsc_junction_multi",
+        connectionId: null,
         connectProvider: "junction",
         connectTarget: null,
         requiresReconnect: false,
@@ -1001,7 +1191,7 @@ test("ConnectPage gives each reconnect-required Junction child its own target", 
     ]),
     [
       {
-        connectionId: "dsc_junction_multi",
+        connectionId: null,
         connectProvider: "junction",
         connectTarget: "whoop",
         requiresReconnect: true,
@@ -1009,7 +1199,7 @@ test("ConnectPage gives each reconnect-required Junction child its own target", 
         state: "active",
       },
       {
-        connectionId: "dsc_junction_multi",
+        connectionId: null,
         connectProvider: "junction",
         connectTarget: "garmin",
         requiresReconnect: true,

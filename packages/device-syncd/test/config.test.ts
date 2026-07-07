@@ -242,7 +242,7 @@ test("Junction default provider filter excludes non-Link connect routes", () => 
     "accuchek_ble",
     "contour_ble",
     "onetouch_ble",
-    "apple_health",
+    "apple_health_kit",
     "health_connect",
     "samsung_health",
   ]) {

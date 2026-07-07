@@ -540,7 +540,7 @@ test("Junction provider exposes primitive handlers without OAuth compatibility m
 });
 
 test("Junction default provider filter covers hosted Link connect routes", () => {
-  assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 32);
+  assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 33);
 
   assert.deepEqual(
     JUNCTION_LINK_PROVIDER_SLUGS,
@@ -558,6 +558,7 @@ test("Junction default provider filter covers hosted Link connect routes", () =>
     "accuchek_ble",
     "contour_ble",
     "onetouch_ble",
+    "apple_health_kit",
   ]) {
     assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes(providerSlug), false);
   }
@@ -567,13 +568,16 @@ test("Junction default provider filter covers hosted Link connect routes", () =>
   assert.equal(resolveJunctionTarget("accuchek_ble")?.connectMode, "junction_sdk");
   assert.equal(resolveJunctionTarget("contour_ble")?.connectMode, "junction_sdk");
   assert.equal(resolveJunctionTarget("onetouch_ble")?.connectMode, "junction_sdk");
+  assert.equal(resolveJunctionTarget("apple_health_kit")?.connectMode, "junction_sdk");
 
   assert.equal(resolveJunctionConnectTargetForSourceId("dexcom-g6-and-older"), "dexcom");
   assert.equal(resolveJunctionConnectTargetForSourceId("dexcom"), "dexcom_v3");
   assert.equal(resolveJunctionConnectTargetForSourceId("mapmyfitness"), "map_my_fitness");
   assert.equal(resolveJunctionConnectTargetForSourceId("accuchek"), "accuchek_ble");
   assert.equal(resolveJunctionConnectTargetForSourceId("onetouch"), "onetouch_ble");
+  assert.equal(resolveJunctionConnectTargetForSourceId("apple-health"), "apple_health_kit");
   assert.equal(resolveJunctionConnectSourceLabel("accuchek_ble"), "Accu-Chek");
+  assert.equal(resolveJunctionConnectSourceLabel("apple_health_kit"), "Apple Health");
 });
 
 test("Junction empty historical backfill records progress and stores the retry wake in metadata", async () => {
