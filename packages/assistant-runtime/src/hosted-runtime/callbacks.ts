@@ -2416,11 +2416,7 @@ function createHostedAssistantLinqSendDependency(input: {
         threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
       }),
     });
-    try {
-      await assertHostedDeliveryLiveNow(input);
-    } catch (error) {
-      throw markHostedDeliveryMayHaveSucceeded(error);
-    }
+    await assertHostedDeliveryLiveNow(input);
     return result;
   };
 }
@@ -2636,11 +2632,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
       }),
     });
-    try {
-      await assertHostedDeliveryLiveNow(input);
-    } catch (error) {
-      throw markHostedDeliveryMayHaveSucceeded(error);
-    }
+    await assertHostedDeliveryLiveNow(input);
     return result;
   };
 }
