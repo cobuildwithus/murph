@@ -11998,6 +11998,9 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_foreground_preempt_system",
+            budget: {
+              maxMailboxItems: 1,
+            },
             idleCheckpointDelayMs,
             leaseGeneration: "9",
             userId: TEST_USER_ID,
@@ -12050,19 +12053,37 @@ describe("hosted workspace runtime entrypoint", () => {
               const systemRedactedStatus: HostedRuntimeRedactedJson = {
                 hostedSystemMailboxRecorded: 1,
               };
-              mailboxItems.push(createMailboxItem({
-                id: "mailbox_item_entrypoint_foreground_preempt_conversation",
-                laneSeq: "1",
-                occurredAt: "2026-04-27T00:00:01.000Z",
-              }));
-              runtimeWakeSignal.notify();
-              await waitUntil(() => {
-                assert.ok(events.includes(
-                  "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation",
-                ));
-              });
               return {
                 afterCheckpoint: async () => {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_foreground_preempt_system_deferred",
+                    kind: "device-sync.wake",
+                    lane: "system",
+                    laneSeq: "2",
+                    occurredAt: "2026-04-27T00:00:01.000Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                  await waitUntil(() => {
+                    assert.ok(fetchRequests.some((request) =>
+                      request.requestId.includes(":runtime-wake:")
+                      && request.requestId.includes(":system")
+                      && request.lanes.some((lane) =>
+                        lane.lane === "system" && lane.importedSeq === "1"
+                      )
+                    ));
+                  });
+
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_foreground_preempt_conversation",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:02.000Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                  await waitUntil(() => {
+                    assert.ok(events.includes(
+                      "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation",
+                    ));
+                  });
                   events.push("system.afterCheckpoint");
                   return {
                     checkpointReason: "system_mailbox_receipt" as const,
@@ -12071,6 +12092,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     redactedStatus: systemRedactedStatus,
                   };
                 },
+                afterCheckpointKeepsForegroundImportLoop: true,
                 checkpointReason: "system_mailbox_receipt" as const,
                 nextWakeAt: systemFollowUpWakeAt,
                 nextWakeReason: "device-sync.reconcile",
@@ -12112,12 +12134,22 @@ describe("hosted workspace runtime entrypoint", () => {
           request.lanes.some((lane) => lane.lane === "conversation")
         ),
       );
+      assert.ok(
+        fetchRequests.some((request) =>
+          request.requestId.includes(":runtime-wake:")
+          && request.requestId.includes(":system")
+          && request.lanes.some((lane) =>
+            lane.lane === "system" && lane.importedSeq === "1"
+          )
+        ),
+      );
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[0]?.nextWakeAt, systemFollowUpWakeAt);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
-      assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, systemFollowUpWakeAt);
+      const checkpointWakeAt = checkpointRequests[0]?.nextWakeAt ?? null;
+      assert.notEqual(checkpointWakeAt, null);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
+      assert.equal(result.status, "budget_exhausted");
+      assert.equal(result.nextWakeAt, checkpointWakeAt);
     } finally {
       runtimeAbortController.abort();
       await removeTempRoot(vaultRoot);

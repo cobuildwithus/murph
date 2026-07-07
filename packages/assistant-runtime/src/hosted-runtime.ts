@@ -2000,8 +2000,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         let passResult = await runSingleForegroundPass(wakeInput);
         // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
         while (
-          !mailboxBudgetExhausted()
-          && passResult.latestMailboxImport !== passResult.initialMailboxImport
+          passResult.latestMailboxImport !== passResult.initialMailboxImport
           && hostedMailboxImportHasAssistantInputWork(
             passResult.latestMailboxImport,
           )
