@@ -48,8 +48,11 @@ vi.mock("@murphai/assistant-engine", async () => {
   };
 });
 
-vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
-  runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
+vi.mock("../src/hosted-runtime/device-sync-maintenance-import.ts", () => ({
+  isHostedDeviceSyncMaintenanceModuleLoadError: vi.fn(() => false),
+  loadHostedDeviceSyncMaintenanceModule: vi.fn(async () => ({
+    runHostedDeviceSyncWakeLane: mocks.runHostedDeviceSyncWakeLane,
+  })),
 }));
 
 import { executeHostedMailboxEvent } from "../src/hosted-runtime/events.ts";

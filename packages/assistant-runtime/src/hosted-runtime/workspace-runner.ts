@@ -906,12 +906,17 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         runtimePassDiagnostics: input.input.runtimePassDiagnostics ?? null,
         runtimeWakeNotifiedAtEpochMs: notification.notifiedAtEpochMs,
       });
+      const foregroundConversationImportItem =
+        input.input.foregroundImportItem ?? input.input.importItem;
       try {
         const result = await importHostedMailboxForWorkspaceRunner({
           checkpointRequestBuilder: input.checkpointRequestBuilder,
           checkpointReason: "active_turn_input",
           deferCheckpoint: true,
-          importItem: input.input.foregroundImportItem ?? input.input.importItem,
+          importItem: (item, context) =>
+            item.item.lane === "conversation"
+              ? foregroundConversationImportItem(item, context)
+              : input.input.importItem(item, context),
           importItemContext: {
             latencyMilestones,
           },

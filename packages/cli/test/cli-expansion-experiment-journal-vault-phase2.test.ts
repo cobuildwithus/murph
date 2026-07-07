@@ -2522,7 +2522,7 @@ test.sequential(
         level: 'low',
         reasons: [
           'Primary biomarker coverage is insufficient for a strong before-and-after read.',
-          'Completed session count stayed below the minimum useful target.',
+          'Logged session count stayed below the minimum useful target.',
           'Context and confounder logs were present during the run.',
         ],
       })

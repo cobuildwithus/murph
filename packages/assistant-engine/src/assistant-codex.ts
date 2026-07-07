@@ -429,9 +429,6 @@ export interface CodexAppServerTurnInput {
   }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
-  loadAuthorizedReferenceImageRefs?:
-    | (() => Promise<ReadonlyMap<string, { sha256: string }>>)
-    | null
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
@@ -612,7 +609,6 @@ export async function executeCodexAppServerTurn(
   const preparedInput: CodexAppServerPreparedTurnInput = {
     ...normalizedInput,
     args,
-    loadAuthorizedReferenceImageRefs: input.loadAuthorizedReferenceImageRefs ?? null,
     codexCommand,
     env: childEnv,
     fetchImpl: input.fetchImpl ?? fetch,
@@ -2917,8 +2913,6 @@ async function runCodexAppServerTurnOnProcess(
       abortSignal: input.abortSignal
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
         : dynamicToolAbortController.signal,
-      loadAuthorizedReferenceImageRefs:
-        input.loadAuthorizedReferenceImageRefs ?? null,
       codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
       env: input.env,
       fetchImpl: input.fetchImpl,

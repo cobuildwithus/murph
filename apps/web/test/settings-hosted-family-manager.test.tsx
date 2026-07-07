@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   act,
   createElement,
+  type ChangeEvent,
   type HTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
@@ -62,6 +63,30 @@ vi.mock("@/src/components/ui/input", () => ({
     }),
 }));
 
+vi.mock("@/src/components/ui/phone-number-input", () => ({
+  PhoneNumberInput: ({
+    id,
+    value,
+    onPhoneNumberChange,
+  }: {
+    id: string;
+    value: string;
+    onPhoneNumberChange: (value: string) => void;
+  }) =>
+    createElement("input", {
+      id,
+      value,
+      onChange: (event: ChangeEvent<HTMLInputElement>) =>
+        onPhoneNumberChange(event.currentTarget.value),
+      onInput: (event: ChangeEvent<HTMLInputElement>) =>
+        onPhoneNumberChange(event.currentTarget.value),
+    }),
+}));
+
+vi.mock("@/src/hooks/use-mobile", () => ({
+  useIsMobile: () => false,
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requestHostedOnboardingJson.mockResolvedValue({
@@ -92,6 +117,7 @@ test("HostedFamilyManager keeps the created invite visible for manual sharing", 
     try {
       await clickButton(container, window, "Invite member");
       assert.match(container.textContent ?? "", /Murph won't message them/);
+      assertInviteFieldOrder(container);
 
       await act(async () => {
         setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
@@ -283,4 +309,17 @@ function setInputValue(
   descriptor?.set?.call(input, value);
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
   input.dispatchEvent(new window.Event("change", { bubbles: true }));
+}
+
+function assertInviteFieldOrder(container: HTMLElement) {
+  const text = container.textContent ?? "";
+  const phoneIndex = text.indexOf("Phone number (optional)");
+  const emailIndex = text.indexOf("Email (optional)");
+  const telegramIndex = text.indexOf("Telegram username (optional)");
+  const nameIndex = text.indexOf("Name (optional)");
+
+  assert.ok(phoneIndex >= 0, "Expected phone field");
+  assert.ok(emailIndex > phoneIndex, "Expected email after phone");
+  assert.ok(telegramIndex > emailIndex, "Expected Telegram after email");
+  assert.ok(nameIndex > telegramIndex, "Expected name after Telegram");
 }

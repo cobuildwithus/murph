@@ -2,12 +2,14 @@
 
 import { Check, Copy, Loader2, Minus } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
+import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
+import { usePhoneCountryCode } from "@/src/components/hosted-onboarding/phone-country-code-client-provider";
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import {
@@ -19,6 +21,8 @@ import {
 } from "@/src/components/ui/dialog";
 import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
+import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
+import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/shared";
 import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
@@ -80,6 +84,23 @@ type PendingAction =
 
 const DIALOG_CLASS =
   "max-w-md gap-6 border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7";
+const DEFAULT_INVITE_PHONE_COUNTRY_CODE = "US";
+
+function resolveInvitePhoneCountryOption(value: string | null | undefined) {
+  const normalized = value?.trim().toUpperCase() ?? null;
+  const option =
+    (normalized
+      ? HOSTED_PHONE_COUNTRY_OPTIONS.find((candidate) => candidate.code === normalized)
+      : null)
+    ?? HOSTED_PHONE_COUNTRY_OPTIONS.find(
+      (candidate) => candidate.code === DEFAULT_INVITE_PHONE_COUNTRY_CODE,
+    )
+    ?? HOSTED_PHONE_COUNTRY_OPTIONS[0];
+  if (!option) {
+    throw new Error("Phone country options are empty.");
+  }
+  return option;
+}
 
 export function HostedFamilyStartButton(props: {
   block?: boolean;
@@ -152,6 +173,10 @@ export function HostedFamilyManager(props: {
 }) {
   const router = useRouter();
   const [inviteOpen, setInviteOpen] = useState(false);
+  const phoneCountryCodeHint = usePhoneCountryCode();
+  const [phoneCountryCode, setPhoneCountryCode] = useState(() =>
+    resolveInvitePhoneCountryOption(phoneCountryCodeHint).code
+  );
   const [label, setLabel] = useState("");
   const [phone, setPhone] = useState("");
   const [telegram, setTelegram] = useState("");
@@ -168,10 +193,18 @@ export function HostedFamilyManager(props: {
   const [seatError, setSeatError] = useState<string | null>(null);
 
   const seatsFull = props.seats.remaining <= 0;
+  const selectedPhoneCountry = useMemo(
+    () => resolveInvitePhoneCountryOption(phoneCountryCode),
+    [phoneCountryCode],
+  );
+  const normalizedPhone = useMemo(
+    () => normalizePhoneNumberForCountry(phone, selectedPhoneCountry.dialCode),
+    [phone, selectedPhoneCountry.dialCode],
+  );
   const planCanGrow = props.billingActive && seatsFull && props.seats.billed < props.seats.max;
   // A seat is only auto-added for invites the server can dedup on retry, so the
   // paid CTA (and the addSeatIfNeeded flag) require a phone, email, or Telegram.
-  const hasStableTarget = Boolean(phone.trim() || email.trim() || telegram.trim());
+  const hasStableTarget = Boolean(normalizedPhone || email.trim() || telegram.trim());
   const inviteWillAddSeat = planCanGrow && hasStableTarget;
   const inviteNeedsStableTargetForSeat = planCanGrow && !hasStableTarget;
   const inviteSubmitDisabled = isInviting || inviteNeedsStableTargetForSeat;
@@ -196,6 +229,10 @@ export function HostedFamilyManager(props: {
       setInviteError("Add a phone number, email, Telegram username, or name.");
       return;
     }
+    if (phone.trim() && !normalizedPhone) {
+      setInviteError(`Enter a valid phone number for ${selectedPhoneCountry.label}.`);
+      return;
+    }
     setInviteError(null);
     setCreatedInvite(null);
     setCreatedInviteCopied(false);
@@ -211,7 +248,7 @@ export function HostedFamilyManager(props: {
           addSeatIfNeeded: inviteWillAddSeat,
           targetEmail: email.trim() || undefined,
           targetLabel: label.trim() || undefined,
-          targetPhoneNumber: phone.trim() || undefined,
+          targetPhoneNumber: normalizedPhone ?? undefined,
           targetTelegramUsername: telegram.trim() || undefined,
         },
         url: "/api/settings/billing/family/invite",
@@ -516,7 +553,7 @@ export function HostedFamilyManager(props: {
                       Send this invite to {createdInvite.targetLabel ?? createdInvite.targetPhoneHint ?? "your family member"}.
                     </p>
                     <p className="mt-1 text-xs leading-5 text-[#736a58]">
-                      The contact info you added just makes sure the right person can accept it. Murph hasn&apos;t sent them anything.
+                      With a contact, only that person can use it. With no contact, whoever has the link can join. Murph hasn&apos;t sent them anything.
                     </p>
                   </div>
                 </div>
@@ -546,24 +583,16 @@ export function HostedFamilyManager(props: {
             <>
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="family-invite-label">Name (optional)</Label>
-                  <Input
-                    id="family-invite-label"
-                    value={label}
-                    onChange={(event) => setLabel(event.target.value)}
-                    placeholder="Mom"
-                    autoComplete="off"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
                   <Label htmlFor="family-invite-phone">Phone number (optional)</Label>
-                  <Input
+                  <PhoneNumberInput
                     id="family-invite-phone"
-                    value={phone}
-                    onChange={(event) => setPhone(event.target.value)}
-                    placeholder="+1 555 000 1234"
-                    inputMode="tel"
                     autoComplete="off"
+                    inputName="family-invite-phone"
+                    options={HOSTED_PHONE_COUNTRY_OPTIONS}
+                    selectedCountry={selectedPhoneCountry}
+                    value={phone}
+                    onCountryChange={setPhoneCountryCode}
+                    onPhoneNumberChange={setPhone}
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -588,8 +617,18 @@ export function HostedFamilyManager(props: {
                     autoComplete="off"
                   />
                 </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="family-invite-label">Name (optional)</Label>
+                  <Input
+                    id="family-invite-label"
+                    value={label}
+                    onChange={(event) => setLabel(event.target.value)}
+                    placeholder="Mom"
+                    autoComplete="off"
+                  />
+                </div>
                 <p className="text-xs leading-5 text-[#736a58]">
-                  This info just makes sure the right person can accept the invite. You&apos;ll send the link yourself.
+                  With a contact, only that person can use the invite. With no contact, anyone who has the link can join. You&apos;ll send the link yourself.
                 </p>
                 {inviteWillAddSeat ? (
                   <p

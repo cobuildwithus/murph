@@ -16,7 +16,7 @@ import {
 import {
   acceptHostedFamilyInviteFromPhoneTx,
   buildHostedFamilyInviteAcceptedReplyText,
-  parseHostedFamilyInviteStartToken,
+  resolveHostedFamilyInviteTokenForInbound,
 } from "./family-plan";
 import {
   ensureHostedMemberForPendingLinqParticipantContactTx,
@@ -414,7 +414,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   };
 
-  const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(summary.text) !== null;
+  const familyInviteTokenPresent = await resolveHostedFamilyInviteTokenForInbound({
+    prisma: input.prisma,
+    text: summary.text,
+  }) !== null;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
   let familyHomeLineAssignedAt: Date | null = null;
   let familyHomeRecipientPhone: string | null = recipientPhoneNumber;

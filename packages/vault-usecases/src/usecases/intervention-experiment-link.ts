@@ -25,7 +25,7 @@ export interface InterventionExperimentLinkResult
   mode: 'auto' | 'explicit'
 }
 
-interface ExperimentCandidate extends InterventionExperimentLinkTarget {
+export interface ExperimentCandidate extends InterventionExperimentLinkTarget {
   entity: QueryCanonicalEntity
   frontmatter: ExperimentFrontmatter
 }
@@ -356,7 +356,7 @@ function assertExperimentCanBeLinked(input: {
   }
 }
 
-function assertExperimentMatchesIntervention(input: {
+export function assertExperimentMatchesIntervention(input: {
   experiment: ExperimentCandidate
   interventionType: string
 }) {

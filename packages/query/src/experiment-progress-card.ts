@@ -109,8 +109,12 @@ function buildCardPhase(
 function buildCardSessions(
   adherence: ExperimentProgressSummary["adherence"],
 ): ExperimentProgressCardData["sessions"] {
+  const loggedSessions =
+    adherence.loggedSessions ??
+    adherence.completedSessions + (adherence.partialSessions ?? 0);
+
   return {
-    logged: Math.max(0, adherence.completedSessions),
+    logged: Math.max(0, loggedSessions),
     target:
       adherence.targetSessions !== null && adherence.targetSessions >= 1
         ? adherence.targetSessions

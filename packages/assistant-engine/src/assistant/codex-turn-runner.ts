@@ -88,12 +88,6 @@ import type {
   AssistantCodexTurnExecutionProfile,
   AssistantCodexTurnThreadScopeProfile,
 } from './codex-turn/planning.js'
-import {
-  collectAuthorizedTurnAttachmentImageRefs,
-} from '../assistant-codex/turn-attachment-image-refs.js'
-import {
-  readAssistantAcceptedTurnInputJournal,
-} from './active-turn-input-journal.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
@@ -464,21 +458,6 @@ async function executeAssistantCodexAttempt(input: {
         developerInstructions: attemptPlan.routePlan.developerInstructions,
         dynamicTools: attemptPlan.routePlan.dynamicTools,
         env: attemptEnv,
-        // Re-read the accepted-input journal at every generate_image call so
-        // live-steered attachments accepted after the provider attempt started
-        // are still recognized as authorized for this turn. The pre-attempt
-        // executionPlan.acceptedInputItems is a snapshot and would miss them.
-        loadAuthorizedReferenceImageRefs: async () => {
-          const journal = await readAssistantAcceptedTurnInputJournal(
-            executionPlan.input.vault,
-            executionPlan.turnId,
-          )
-          return collectAuthorizedTurnAttachmentImageRefs({
-            acceptedInputItems:
-              journal?.inputs ?? executionPlan.acceptedInputItems ?? null,
-            vault: executionPlan.input.vault,
-          })
-        },
         generatedImageUploader:
           executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
         hostedToolContext: executionPlan.hostedToolContext ?? null,
