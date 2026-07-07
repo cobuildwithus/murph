@@ -34,6 +34,7 @@ import {
   type AssistantInputProjectionStatus,
   type InboxCaptureAttachmentLike,
   normalizeAssistantInputFileName,
+  notifyAssistantActiveTurnInputAvailableForInputIds,
   type UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
@@ -361,6 +362,11 @@ export async function importHostedConversationMailboxItem(input: {
       runtime: input.runtime,
       runtimeAttemptId: input.runtimeAttemptId ?? null,
       wake: decoded.wake,
+    });
+    await notifyAssistantActiveTurnInputAvailableForInputIds({
+      inputIds: [stagedInput.inputId],
+      ...(input.signal ? { signal: input.signal } : {}),
+      vault: input.vaultRoot,
     });
   }
 
