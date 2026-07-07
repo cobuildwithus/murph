@@ -1114,7 +1114,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     expect(pipelineClose).toHaveBeenCalledTimes(1);
   });
 
-  it("passes the abort signal to parser drain and treats drain-boundary aborts as retryable", async () => {
+  it("keeps the abort signal out of parser drain and propagates post-drain aborts", async () => {
     const abortController = new AbortController();
     const abortReason = new DOMException("Stop requested.", "AbortError");
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -1175,9 +1175,8 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
 
     expect(drain).toHaveBeenCalledWith({
       captureId: "capture_abort_at_parser_drain",
-      signal: abortController.signal,
     });
-    expect(observedDrainSignals).toEqual([abortController.signal]);
+    expect(observedDrainSignals).toEqual([null]);
     expect(mocks.createInboxParserService).toHaveBeenCalledTimes(1);
     expect(logRequests).toHaveLength(0);
     expect(pipelineClose).toHaveBeenCalledTimes(1);

@@ -168,9 +168,6 @@ async function drainHostedConversationParsers(input: {
       vaultRoot: input.vaultRoot,
     });
   } catch (error) {
-    if (isHostedConversationProjectionAbortError(error, input.signal ?? null)) {
-      throw readHostedConversationProjectionAbortReason(error, input.signal ?? null);
-    }
     return await logHostedConversationParserRetryFailure({
       captureId: input.captureId,
       error,
@@ -179,55 +176,16 @@ async function drainHostedConversationParsers(input: {
     });
   }
 
+  assertHostedConversationProjectionLive(input.signal ?? null);
+  // The parser drain is not abort-safe: a cooperative abort can terminalize
+  // the claimed parse job. Let the bounded parser pipeline finish, then land
+  // hosted preemption at the post-drain liveness boundary.
+  let results: Awaited<ReturnType<typeof parserService.drain>>;
   try {
-    assertHostedConversationProjectionLive(input.signal ?? null);
-    const results = await parserService.drain({
+    results = await parserService.drain({
       captureId: input.captureId,
-      ...(input.signal ? { signal: input.signal } : {}),
-    });
-    assertHostedConversationProjectionLive(input.signal ?? null);
-    const failedResults = results.filter((result) => result.status === "failed");
-    const observedFailedJobs = input.runtime.listAttachmentParseJobs({
-      captureId: input.captureId,
-      state: "failed",
-    });
-    const parserFailures = collectHostedParserFailures({
-      failedJobs: observedFailedJobs,
-      failedResults,
-    });
-    if (parserFailures.length > 0) {
-      await writeHostedRuntimeLogBestEffort({
-        entry: {
-          component: "mailbox",
-          errorCode: "parser_jobs_failed",
-          eventCode: "mailbox.parser_jobs_failed",
-          level: "warn",
-          phase: "import",
-          redactedJson: {
-            captureIdPresent: Boolean(input.captureId),
-            errorCode: "parser_jobs_failed",
-            errorCodes: compactHostedRuntimeLogCodes(
-              parserFailures.map((failure) => failure.errorCode ?? "parser_failed"),
-            ),
-            nextWakeAtPresent: false,
-            safeErrorMessage: "One or more hosted conversation parser jobs failed.",
-            parserFailed: parserFailures.length,
-            parserObservedFailedJobs: observedFailedJobs.length,
-            parserProcessed: results.length,
-            parserSucceeded: results.length - failedResults.length,
-          },
-        },
-        platform: input.platform,
-      });
-    }
-    return createHostedConversationParserMetrics({
-      nextWakeAt: null,
-      parserProcessed: results.length,
     });
   } catch (error) {
-    if (isHostedConversationProjectionAbortError(error, input.signal ?? null)) {
-      throw readHostedConversationProjectionAbortReason(error, input.signal ?? null);
-    }
     return await logHostedConversationParserRetryFailure({
       captureId: input.captureId,
       error,
@@ -235,6 +193,45 @@ async function drainHostedConversationParsers(input: {
       safeFallbackMessage: "Hosted conversation parser drain failed.",
     });
   }
+  assertHostedConversationProjectionLive(input.signal ?? null);
+  const failedResults = results.filter((result) => result.status === "failed");
+  const observedFailedJobs = input.runtime.listAttachmentParseJobs({
+    captureId: input.captureId,
+    state: "failed",
+  });
+  const parserFailures = collectHostedParserFailures({
+    failedJobs: observedFailedJobs,
+    failedResults,
+  });
+  if (parserFailures.length > 0) {
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        component: "mailbox",
+        errorCode: "parser_jobs_failed",
+        eventCode: "mailbox.parser_jobs_failed",
+        level: "warn",
+        phase: "import",
+        redactedJson: {
+          captureIdPresent: Boolean(input.captureId),
+          errorCode: "parser_jobs_failed",
+          errorCodes: compactHostedRuntimeLogCodes(
+            parserFailures.map((failure) => failure.errorCode ?? "parser_failed"),
+          ),
+          nextWakeAtPresent: false,
+          safeErrorMessage: "One or more hosted conversation parser jobs failed.",
+          parserFailed: parserFailures.length,
+          parserObservedFailedJobs: observedFailedJobs.length,
+          parserProcessed: results.length,
+          parserSucceeded: results.length - failedResults.length,
+        },
+      },
+      platform: input.platform,
+    });
+  }
+  return createHostedConversationParserMetrics({
+    nextWakeAt: null,
+    parserProcessed: results.length,
+  });
 }
 
 async function logHostedConversationParserRetryFailure(input: {
