@@ -193,7 +193,6 @@ async function drainHostedConversationParsers(input: {
       safeFallbackMessage: "Hosted conversation parser drain failed.",
     });
   }
-  assertHostedConversationProjectionLive(input.signal ?? null);
   const failedResults = results.filter((result) => result.status === "failed");
   const observedFailedJobs = input.runtime.listAttachmentParseJobs({
     captureId: input.captureId,
@@ -228,6 +227,10 @@ async function drainHostedConversationParsers(input: {
       platform: input.platform,
     });
   }
+  // Failed-job warnings are durable once drained, so emit them before landing
+  // a hosted preemption abort: a retried import skips drain when no jobs are
+  // pending and would otherwise never log these terminal parser failures.
+  assertHostedConversationProjectionLive(input.signal ?? null);
   return createHostedConversationParserMetrics({
     nextWakeAt: null,
     parserProcessed: results.length,
