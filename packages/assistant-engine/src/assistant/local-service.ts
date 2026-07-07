@@ -135,6 +135,9 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
+import {
+  stripAssistantReplyBubbleDelimiters,
+} from './reply-bubbles.js'
 import type {
   AssistantMessageInput,
   AssistantDeliveryOutcome,
@@ -1359,8 +1362,8 @@ export async function sendAssistantMessageLocal(
             media: segment.media ?? [],
           })
         }
-        const precedingResponses = precedingResponseSegments.map(
-          (segment) => segment.response,
+        const precedingResponses = precedingResponseSegments.map((segment) =>
+          stripAssistantReplyBubbleDelimiters(segment.response)
         )
         const providerResumeStateAction = resolveProviderResumeStateAction({
           codexThreadHistoryUnsafe:
@@ -1377,9 +1380,13 @@ export async function sendAssistantMessageLocal(
           })
         }
         const noReplySelected = providerResult.finalAction?.kind === 'none'
-        const finalResponseText = noReplySelected
+        const rawFinalResponseText = noReplySelected
           ? null
           : resolveAssistantProviderFinalResponseText(providerResult)
+        const finalResponseText =
+          rawFinalResponseText === null
+            ? null
+            : stripAssistantReplyBubbleDelimiters(rawFinalResponseText)
         const assistantTranscriptText = resolveAssistantProviderTranscriptText({
           media: providerResult.responseMedia,
           response: finalResponseText,
@@ -1495,7 +1502,7 @@ export async function sendAssistantMessageLocal(
             ? await dispatchAssistantReply({
                 input: currentInput,
                 media: providerResult.responseMedia ?? [],
-                response: finalResponseText,
+                response: rawFinalResponseText ?? '',
                 session: deliverySession,
                 sharedPlan,
                 turnId: currentUserTurn.turnId,

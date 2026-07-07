@@ -432,6 +432,54 @@ test('sendAssistantMessageLocal delivers pre-steer final answers before the fina
   ).toEqual(['Answer one.', 'Answer two.'])
 })
 
+test('sendAssistantMessageLocal strips reply bubble delimiters from persisted and returned text', async () => {
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        precedingResponseSegments: [
+          {
+            response: 'Preceding one.\n---\nPreceding two.',
+            media: [],
+          },
+        ],
+        response: 'Final one.\n---\nFinal two?',
+        session,
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'First question',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        response: 'Preceding one.\n---\nPreceding two.',
+      }),
+    ])
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
+    .toBe('Final one.\n---\nFinal two?')
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.precedingAssistantTranscriptTexts,
+  ).toEqual(['Preceding one.\n\nPreceding two.'])
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+  ).toBe('Final one.\n\nFinal two?')
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.response)
+    .toBe('Final one.\n\nFinal two?')
+  expect(result.response).toBe('Final one.\n\nFinal two?')
+})
+
 test('sendAssistantMessageLocal preserves real same-text preceding answers', async () => {
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
 
