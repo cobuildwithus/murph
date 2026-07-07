@@ -37,6 +37,14 @@ import { normalizePhoneNumber } from "./phone";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 type HostedLinqEgressEngagementKind = "first_contact" | "requires_recent_inbound";
+type HostedMemberLinqRouteLastInboundResult =
+  | {
+      lastInboundAt: Date | null;
+      matched: true;
+    }
+  | {
+      matched: false;
+    };
 
 export const HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS = 28;
 const HOSTED_LINQ_RECENT_INBOUND_WINDOW_MS =
@@ -70,8 +78,8 @@ export function decideHostedLinqRecentInbound(input: {
 }): HostedLinqRecentInboundDecision {
   const now = input.now ?? new Date();
   const lastInboundAt = input.lastInboundAt;
-  if (!lastInboundAt) {
-    return { allowed: false, lastInboundAt: null, reason: "missing_inbound" };
+  if (lastInboundAt === null) {
+    return { allowed: true, lastInboundAt: null };
   }
   if (lastInboundAt.getTime() > now.getTime() + HOSTED_LINQ_FUTURE_INBOUND_SKEW_MS) {
     return { allowed: false, lastInboundAt, reason: "stale_inbound" };
@@ -202,15 +210,20 @@ export async function readHostedLinqSideEffectRecentInboundDecision(input: {
   }
 
   if (!memberId) {
-    return decideHostedLinqRecentInbound({ lastInboundAt: null, now });
+    return { allowed: false, lastInboundAt: null, reason: "missing_inbound" };
+  }
+
+  const routeLastInbound = await readHostedMemberLinqRouteLastInboundAt({
+    chatId: input.payload.chatId,
+    memberId,
+    prisma: input.prisma,
+  });
+  if (!routeLastInbound.matched) {
+    return { allowed: false, lastInboundAt: null, reason: "missing_inbound" };
   }
 
   return decideHostedLinqRecentInbound({
-    lastInboundAt: await readHostedMemberLinqRouteLastInboundAt({
-      chatId: input.payload.chatId,
-      memberId,
-      prisma: input.prisma,
-    }),
+    lastInboundAt: routeLastInbound.lastInboundAt,
     now,
   });
 }
@@ -302,20 +315,28 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     });
     fallbackRecipientPhone = input.fromPhoneNumber ?? null;
   }
-  const decision = route
-    ? decideHostedLinqRecentInbound({
+  let decision: HostedLinqRecentInboundDecision;
+  if (route) {
+    decision = decideHostedLinqRecentInbound({
       lastInboundAt: route.lastInboundAt,
       now,
-    })
-    : decideHostedLinqRecentInbound({
-      lastInboundAt: await readHostedMemberLinqRouteLastInboundAt({
-        chatId: fallbackChatId,
-        memberId: input.memberId,
-        prisma: input.prisma,
-        recipientPhone: fallbackRecipientPhone,
-      }),
-      now,
     });
+  } else {
+    const routeLastInbound = await readHostedMemberLinqRouteLastInboundAt({
+      chatId: fallbackChatId,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      recipientPhone: fallbackRecipientPhone,
+    });
+    if (routeLastInbound.matched) {
+      decision = decideHostedLinqRecentInbound({
+        lastInboundAt: routeLastInbound.lastInboundAt,
+        now,
+      });
+    } else {
+      decision = { allowed: false, lastInboundAt: null, reason: "missing_inbound" };
+    }
+  }
 
   if (decision.allowed) {
     return;
@@ -726,7 +747,7 @@ async function readHostedMemberLinqRouteLastInboundAt(input: {
   memberId: string;
   prisma: HostedLinqEngagementClient;
   recipientPhone?: string | null;
-}): Promise<Date | null> {
+}): Promise<HostedMemberLinqRouteLastInboundResult> {
   const chatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.chatId);
   const recipientPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(input.recipientPhone);
   const routing = await input.prisma.hostedMemberRouting.findUnique({
@@ -742,33 +763,33 @@ async function readHostedMemberLinqRouteLastInboundAt(input: {
   });
 
   if (!routing) {
-    return null;
+    return { matched: false };
   }
 
   if (
     routing.linqChatLookupKey
     && chatLookupKeys.includes(routing.linqChatLookupKey)
   ) {
-    return routing.linqLastInboundAt;
+    return { lastInboundAt: routing.linqLastInboundAt, matched: true };
   }
   if (
     routing.pendingLinqChatLookupKey
     && chatLookupKeys.includes(routing.pendingLinqChatLookupKey)
   ) {
-    return routing.pendingLinqLastInboundAt;
+    return { lastInboundAt: routing.pendingLinqLastInboundAt, matched: true };
   }
   if (
     routing.linqRecipientPhoneLookupKey
     && recipientPhoneLookupKeys.includes(routing.linqRecipientPhoneLookupKey)
   ) {
-    return routing.linqLastInboundAt;
+    return { lastInboundAt: routing.linqLastInboundAt, matched: true };
   }
   if (
     routing.pendingLinqRecipientPhoneLookupKey
     && recipientPhoneLookupKeys.includes(routing.pendingLinqRecipientPhoneLookupKey)
   ) {
-    return routing.pendingLinqLastInboundAt;
+    return { lastInboundAt: routing.pendingLinqLastInboundAt, matched: true };
   }
 
-  return null;
+  return { matched: false };
 }
