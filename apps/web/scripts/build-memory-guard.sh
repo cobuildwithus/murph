@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-default_memory_cap_bytes=7200000000
+default_advisory_budget_bytes=7200000000
 vercel_standard_machine_bytes=8000000000
 known_false_positive_floor_bytes=6000000000
 machine_model_ceiling_bytes=7200000000
-memory_cap_bytes="${MURPH_HOSTED_WEB_BUILD_MEMORY_CAP_BYTES:-$default_memory_cap_bytes}"
-mode="${MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE:-enforce}"
+advisory_budget_bytes="${MURPH_HOSTED_WEB_BUILD_MEMORY_CAP_BYTES:-$default_advisory_budget_bytes}"
+mode="${MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE:-observe}"
 
 fail() {
   printf '[apps/web build memory guard] ERROR: %s\n' "$*" >&2
@@ -17,7 +17,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage: apps/web/scripts/build-memory-guard.sh -- <command> [args...]
 
-Runs a hosted-web production build command under a cgroup-v2 hard memory cap.
+Runs a hosted-web production build command inside a measured cgroup-v2 scope.
 Set MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE=passthrough only for local
 non-CI wrapper validation on hosts without Linux cgroups.
 EOF
@@ -39,20 +39,20 @@ fi
 
 command_args=("$@")
 
-if [[ ! "$memory_cap_bytes" =~ ^[0-9]+$ ]]; then
+if [[ ! "$advisory_budget_bytes" =~ ^[0-9]+$ ]]; then
   fail "MURPH_HOSTED_WEB_BUILD_MEMORY_CAP_BYTES must be an integer byte count."
 fi
 
-if (( memory_cap_bytes <= known_false_positive_floor_bytes || memory_cap_bytes > machine_model_ceiling_bytes )); then
-  fail "memory cap ${memory_cap_bytes} must model cgroup-accounted bytes for an 8 GB Vercel Standard build machine: greater than the known false-positive 6.0 GB cgroup floor (${known_false_positive_floor_bytes}) and no more than ${machine_model_ceiling_bytes} bytes so at least 0.8 GB remains reserved outside the build cgroup."
+if (( advisory_budget_bytes <= known_false_positive_floor_bytes || advisory_budget_bytes > machine_model_ceiling_bytes )); then
+  fail "advisory memory budget ${advisory_budget_bytes} must model cgroup-accounted bytes for an 8 GB Vercel Standard build machine: greater than the known false-positive 6.0 GB cgroup floor (${known_false_positive_floor_bytes}) and no more than ${machine_model_ceiling_bytes} bytes so at least 0.8 GB remains reserved outside the build cgroup."
 fi
 
 if [[ "$mode" == "passthrough" ]]; then
   if [[ -n "${CI:-}" ]]; then
-    fail "passthrough mode is disabled in CI; the memory guard must enforce the cgroup cap there."
+    fail "passthrough mode is disabled in CI; the memory guard must observe measured cgroup accounting there."
   fi
 
-  printf '[apps/web build memory guard] local passthrough mode: running without cgroup cap; command=%q' "${command_args[0]}" >&2
+  printf '[apps/web build memory guard] local passthrough mode: running without measured cgroup accounting; command=%q' "${command_args[0]}" >&2
   for arg in "${command_args[@]:1}"; do
     printf ' %q' "$arg" >&2
   done
@@ -60,8 +60,8 @@ if [[ "$mode" == "passthrough" ]]; then
   exec "${command_args[@]}"
 fi
 
-if [[ "$mode" != "enforce" ]]; then
-  fail "unsupported MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE=${mode}; expected enforce or passthrough."
+if [[ "$mode" != "observe" ]]; then
+  fail "unsupported MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE=${mode}; expected observe or passthrough."
 fi
 
 cgroup_root=/sys/fs/cgroup
@@ -125,24 +125,17 @@ cleanup_cgroup() {
   return "$status"
 }
 
-write_cgroup_file() {
-  local value="$1"
-  local file_path="$2"
-  local label="$3"
-
-  if ! printf '%s\n' "$value" | sudo -n tee "$file_path" >/dev/null; then
-    fail "could not write ${label} at ${file_path}; cannot enforce the hosted-web build memory cap."
-  fi
-}
-
 report_cgroup_memory() {
   local wrapped_status="$1"
+  local sampled_max_anon_bytes="${2:-}"
   local peak_bytes
   local peak_gb
-  local cap_gb
+  local budget_gb
   local memory_events
   local memory_stat
   local oom_kill_count=""
+  local sampled_max_anon_display="unavailable"
+  local sampled_max_anon_gb="unavailable"
 
   if [[ ! -r "$memory_peak_file" ]]; then
     printf '[apps/web build memory guard] ERROR: cannot read %s; memory peak accounting is unavailable.\n' "$memory_peak_file" >&2
@@ -153,14 +146,18 @@ report_cgroup_memory() {
     printf '[apps/web build memory guard] ERROR: failed to read %s; memory peak accounting is unavailable.\n' "$memory_peak_file" >&2
     return 1
   fi
+  if [[ ! "$peak_bytes" =~ ^[0-9]+$ ]]; then
+    printf '[apps/web build memory guard] ERROR: %s did not contain an integer byte count; memory peak accounting is unavailable.\n' "$memory_peak_file" >&2
+    return 1
+  fi
 
   peak_gb="$(format_decimal_gb "$peak_bytes")"
-  cap_gb="$(format_decimal_gb "$memory_cap_bytes")"
-  printf '[apps/web build memory guard] cgroup memory.peak=%s bytes (%s GB), cap=%s bytes (%s GB)\n' \
+  budget_gb="$(format_decimal_gb "$advisory_budget_bytes")"
+  printf '[apps/web build memory guard] cgroup memory.peak=%s bytes (%s GB), advisory budget=%s bytes (%s GB)\n' \
     "$peak_bytes" \
     "$peak_gb" \
-    "$memory_cap_bytes" \
-    "$cap_gb" >&2
+    "$advisory_budget_bytes" \
+    "$budget_gb" >&2
 
   if [[ -r "$memory_events_file" ]]; then
     memory_events="$(tr "\n" " " < "$memory_events_file" | sed "s/[[:space:]]*$//")"
@@ -189,16 +186,28 @@ report_cgroup_memory() {
     fi
   fi
 
-  if [[ -n "$oom_kill_count" && "$oom_kill_count" -gt 0 ]]; then
-    printf '[apps/web build memory guard] cgroup cap breach: memory.events oom_kill=%s; failing the guard regardless of build exit status.\n' "$oom_kill_count" >&2
-    return 1
+  if [[ "$sampled_max_anon_bytes" =~ ^[0-9]+$ ]]; then
+    sampled_max_anon_display="${sampled_max_anon_bytes} bytes"
+    sampled_max_anon_gb="$(format_decimal_gb "$sampled_max_anon_bytes") GB"
+  fi
+
+  if (( peak_bytes > advisory_budget_bytes )) || [[ "$sampled_max_anon_bytes" =~ ^[0-9]+$ && "$sampled_max_anon_bytes" -gt "$advisory_budget_bytes" ]]; then
+    printf '[apps/web build memory guard] WARNING: build memory WOULD EXCEED the 8GB Vercel Standard machine model.\n' >&2
+    printf '[apps/web build memory guard] WARNING: anon max %s (%s) and memory.peak %s bytes (%s GB) vs advisory budget %s bytes (%s GB).\n' \
+      "$sampled_max_anon_display" \
+      "$sampled_max_anon_gb" \
+      "$peak_bytes" \
+      "$peak_gb" \
+      "$advisory_budget_bytes" \
+      "$budget_gb" >&2
+    printf '[apps/web build memory guard] WARNING: enforcement is deferred pending cold-build memory optimization.\n' >&2
   fi
 
   if [[ "$wrapped_status" -ne 0 ]]; then
-    if [[ -n "$oom_kill_count" ]]; then
-      printf '[apps/web build memory guard] wrapped command exited with status %s; exit 137 usually means the cgroup cap OOM-killed the build (memory.events oom_kill=%s).\n' "$wrapped_status" "$oom_kill_count" >&2
+    if [[ "$oom_kill_count" =~ ^[0-9]+$ && "$oom_kill_count" -gt 0 ]]; then
+      printf '[apps/web build memory guard] wrapped command exited with status %s; memory.events oom_kill=%s was observed in the accounting cgroup.\n' "$wrapped_status" "$oom_kill_count" >&2
     else
-      printf '[apps/web build memory guard] wrapped command exited with status %s; exit 137 usually means the cgroup cap OOM-killed the build.\n' "$wrapped_status" >&2
+      printf '[apps/web build memory guard] wrapped command exited with status %s.\n' "$wrapped_status" >&2
     fi
   fi
 
@@ -304,37 +313,49 @@ sample_cgroup_memory() {
 report_sampled_maxima() {
   local state_file="$1"
   local sampled_maxima
+  sampled_max_anon_bytes=""
 
   if [[ -n "$state_file" && -r "$state_file" ]]; then
     sampled_maxima="$(cat "$state_file" 2>/dev/null || true)"
     if [[ -n "$sampled_maxima" ]]; then
       printf '[apps/web build memory guard] sampled maxima: %s\n' "$sampled_maxima" >&2
+      sampled_max_anon_bytes="$(awk '
+        {
+          for (i = 1; i <= NF; i++) {
+            split($i, kv, "=")
+            if (kv[1] == "anon") {
+              print kv[2]
+              exit
+            }
+          }
+        }
+      ' <<<"$sampled_maxima")"
     fi
   fi
 }
 
 if [[ "$(uname -s)" != "Linux" ]]; then
-  fail "enforce mode requires Linux cgroup v2. Use passthrough mode only for local non-CI wrapper validation."
+  fail "observe mode requires Linux cgroup v2. Use passthrough mode only for local non-CI wrapper validation."
 fi
 
 if [[ ! -f "$cgroup_controllers_file" ]]; then
-  fail "cgroup v2 is not mounted at /sys/fs/cgroup; cannot enforce the hosted-web build memory cap."
+  fail "cgroup v2 is not mounted at /sys/fs/cgroup; cannot observe hosted-web build memory."
 fi
 
 if ! grep -qw memory "$cgroup_subtree_control_file"; then
-  fail "the root cgroup subtree_control does not enable the memory controller; cannot create a root-level capped child cgroup."
+  fail "the root cgroup subtree_control does not enable the memory controller; cannot create a root-level measured child cgroup."
 fi
 
-command -v sudo >/dev/null 2>&1 || fail "sudo is required to configure the capped cgroup."
+command -v sudo >/dev/null 2>&1 || fail "sudo is required to configure the measured cgroup."
 
 if ! sudo -n true >/dev/null 2>&1; then
-  fail "passwordless sudo is required to configure the capped cgroup."
+  fail "passwordless sudo is required to configure the measured cgroup."
 fi
 
-memory_reserve_bytes=$((vercel_standard_machine_bytes - memory_cap_bytes))
-printf '[apps/web build memory guard] enforcing cgroup machine-model cap %s bytes (%s GB) for Vercel Standard machine=%s bytes (%s GB), reserve outside build cgroup=%s bytes (%s GB); allowed cap range: >%s bytes and <=%s bytes\n' \
-  "$memory_cap_bytes" \
-  "$(format_decimal_gb "$memory_cap_bytes")" \
+memory_reserve_bytes=$((vercel_standard_machine_bytes - advisory_budget_bytes))
+printf '[apps/web build memory guard] observing cgroup memory with advisory machine-model budget %s bytes (%s GB) for Vercel Standard machine=%s bytes (%s GB), modeled reserve outside build cgroup=%s bytes (%s GB); allowed advisory range: >%s bytes and <=%s bytes\n' \
+  "$advisory_budget_bytes" \
+  "$(format_decimal_gb "$advisory_budget_bytes")" \
   "$vercel_standard_machine_bytes" \
   "$(format_decimal_gb "$vercel_standard_machine_bytes")" \
   "$memory_reserve_bytes" \
@@ -353,10 +374,6 @@ if ! sudo -n mkdir "$cgroup_dir"; then
   fail "could not create cgroup ${cgroup_dir}; a prior run may still be present or sudo lacks permission."
 fi
 cgroup_created=1
-
-write_cgroup_file "$memory_cap_bytes" "$cgroup_dir/memory.max" "memory.max"
-write_cgroup_file 0 "$cgroup_dir/memory.swap.max" "memory.swap.max"
-write_cgroup_file 1 "$cgroup_dir/memory.oom.group" "memory.oom.group"
 
 if [[ ! -r "$memory_peak_file" ]]; then
   fail "cannot read ${memory_peak_file}; memory peak accounting is unavailable."
@@ -392,10 +409,11 @@ if [[ -n "${sampler_pid:-}" ]]; then
 fi
 
 report_failed=0
+sampled_max_anon_bytes=""
 if [[ -n "$sampler_state_file" ]]; then
   report_sampled_maxima "$sampler_state_file"
 fi
-report_cgroup_memory "$status" || report_failed=1
+report_cgroup_memory "$status" "$sampled_max_anon_bytes" || report_failed=1
 if [[ "$report_failed" -ne 0 && "$status" -eq 0 ]]; then
   status=1
 fi

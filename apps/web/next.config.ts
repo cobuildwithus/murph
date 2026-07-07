@@ -64,11 +64,10 @@ const require = createRequire(import.meta.url);
 export const WORKSPACE_SOURCE_PACKAGE_NAMES = HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
 export const HOSTED_WEB_NEXT_TSCONFIG_PATH = "./tsconfig.next.json";
 export const HOSTED_WEB_PRODUCTION_BUILD_CPUS = 2;
-// Bound Turbopack's cold-compile anonymous-memory ramp so the production build
-// fits the 8 GB standard Vercel builder with margin. On 2026-07-07 the sampler
-// measured the 4 GiB heap limit ramping past 7 GB anon before OOM; 3 GiB forces
-// earlier GC at the cost of slightly more GC/compile time.
-export const HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES = 3 * 1024 * 1024 * 1024;
+// Bound Turbopack's compilation heap so the production build stays under the
+// 8 GB standard Vercel builder. Turbopack is the peak-memory driver; worker
+// count (`cpus`) does not affect it because this app is mostly SSR routes.
+export const HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES = 4 * 1024 * 1024 * 1024;
 export const HOSTED_WEB_WORKFLOW_OPTIONS = {
   workflows: {
     lazyDiscovery: true,

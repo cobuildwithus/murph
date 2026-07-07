@@ -75,7 +75,7 @@ if [[ "$hosted_web_build_memory_guard" != "0" && "$hosted_web_build_memory_guard
 fi
 
 if [[ "$hosted_web_build_memory_guard_default" == "1" && "$hosted_web_build_memory_guard" == "0" ]]; then
-  verify_log "WARNING: hosted-web build memory guard DISABLED via MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0 on Linux CI; the Vercel Standard-machine memory budget is NOT being enforced for this build"
+  verify_log "WARNING: hosted-web build memory guard DISABLED via MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0 on Linux CI; the Vercel Standard-machine memory budget is NOT being measured for this build"
 fi
 
 run_timed_step() {
@@ -299,7 +299,7 @@ if [[ "$verify_step_parallel" != "1" ]]; then
 fi
 
 if [[ "$hosted_web_build_memory_guard" == "1" ]]; then
-  verify_log "run next build serially because the memory guard owns a capped cgroup"
+  verify_log "run next build serially because the memory guard owns the measured cgroup scope"
   run_timed_step "next build" run_next_build
 fi
 

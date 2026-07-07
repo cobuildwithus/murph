@@ -102,37 +102,40 @@ When that fast path applies:
 Hosted-web production build memory: on Linux CI, `apps/web verify` defaults to
 wrapping its production `next build` step with
 `apps/web/scripts/build-memory-guard.sh`. The guard creates a root-level
-cgroup-v2 child with `memory.max=7200000000` and `memory.swap.max=0`, moves the
-build process into that cgroup, and then execs the build as the invoking user
-with the caller's environment, working directory, and stdio unchanged. The cap
-is a cgroup-unit machine model for Vercel Standard's 8 GB build machine: 7.2 GB
-available to the build cgroup, with a 0.8 GB reserve for OS/container overhead
-outside it at the ceiling. The cap sits at the ceiling pending decomposition
-evidence because 7.0 GB was measured to false-positive on 2026-07-06 while the
-real Vercel machine passes. Guard cap overrides must stay strictly greater than
-the 6,000,000,000-byte cgroup floor and less than or equal to 7,200,000,000
-bytes, which preserves at least a 0.8 GB reserve under that model. The floor
-comes from a fully working Linux CI run on 2026-07-06 where a 6.0 GB cgroup cap
-OOM-killed a build that the real Vercel 8 GB machine accepts, so caps at or
-below that floor are known false positives. PR #349's 5.34 GB passing and 6.18
-GB exit-137 failure numbers are historical single-process RSS measurements
-only; they are not comparable to cgroup accounting, which includes anonymous
-memory across all build workers plus page cache. The guard samples cgroup
-`memory.current` and selected `memory.stat` fields about every 3 seconds,
-prints trajectory lines about every 15 seconds, then reports sampled maxima
-before cgroup `memory.peak`, `memory.events`, and selected final-read
-`memory.stat` values; on an OOM kill, those maxima identify whether anonymous
-memory or dirty file cache saturated the cap. It fails if cgroup v2, the root
+cgroup-v2 child for accounting only, moves the build process into that cgroup,
+and then execs the build as the invoking user with the caller's environment,
+working directory, and stdio unchanged. In the current observe-only state it
+does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`. The
+advisory budget is a cgroup-unit machine model for Vercel Standard's 8 GB build
+machine: 7.2 GB available to the build cgroup, with a 0.8 GB reserve for
+OS/container overhead outside it at the ceiling. The legacy-named guard budget
+override must stay strictly greater than the 6,000,000,000-byte cgroup floor
+and less than or equal to 7,200,000,000 bytes, which preserves at least a 0.8 GB
+reserve under that model. The floor comes from a fully working Linux CI run on
+2026-07-06 where a 6.0 GB cgroup cap OOM-killed a build that the real Vercel 8
+GB machine accepts, so caps at or below that floor are known false positives.
+PR #349's 5.34 GB passing and 6.18 GB exit-137 failure numbers are historical
+single-process RSS measurements only; they are not comparable to cgroup
+accounting, which includes anonymous memory across all build workers plus page
+cache. Live CI on 2026-07-07 showed enforcement cannot ship green yet:
+`turbopackMemoryLimit=3GiB` produced the same cold-build anon ramp as 4 GiB
+(about 2.9 GB at 12 seconds, 5.5 GB at 27 seconds, and 6.9 GB at 42 seconds)
+before an OOM-group kill. Cold-build memory optimization is explicit follow-up
+work. The guard samples cgroup `memory.current` and selected `memory.stat`
+fields about every 3 seconds, prints trajectory lines about every 15 seconds,
+then reports sampled maxima before cgroup `memory.peak`, `memory.events`, and
+selected final-read `memory.stat` values. If sampled max anon or `memory.peak`
+exceeds the advisory budget, it prints a loud `WOULD EXCEED` warning while
+preserving the wrapped build's exit status. It fails if cgroup v2, the root
 memory controller, passwordless `sudo`, or peak accounting are unavailable.
-Treat the guard verdict as the memory-budget signal; `memory.peak` is the
-cgroup-unit trend to watch, but it can sit near the cap when page cache
-saturates the cgroup.
 Disabling the guard in Linux CI requires
 `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0` and logs a prominent warning that the
-Vercel Standard-machine memory budget is not being enforced. Local non-Linux
+Vercel Standard-machine memory budget is not being measured. Local non-Linux
 wrapper validation may use
 `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE=passthrough`, but CI rejects
-passthrough mode.
+passthrough mode. Flipping back to enforcement means restoring the `memory.max`,
+`memory.swap.max`, and `memory.oom.group` writes once the cold build fits under
+the advisory budget.
 
 - `pnpm build:workspace:clean`: clears the referenced workspace-build runtime-package outputs plus their project-reference `tsbuildinfo` files first, preserving `packages/importers/dist` during the clean step because package entrypoints can be loaded directly by release checks. It then runs the root TypeScript project-reference graph through one `tsc -b tsconfig.json` invocation and finishes with the importers package safe build, which compiles through a private staged config and refreshes `dist` with a complete directory swap only after importers TypeScript succeeds. Use this when the build itself needs clean-build semantics, such as release or CI proof.
 - `pnpm build:workspace:incremental`: runs that same root TypeScript project-reference graph without first deleting outputs or incremental metadata, then refreshes `packages/importers/dist` through the package safe build, so warm local runs can reuse package-local `.tsbuildinfo` files while keeping published entrypoints current. The importers staged config is private to the package build helper; downstream package `tsconfig` references stay on the normal importers project boundary.

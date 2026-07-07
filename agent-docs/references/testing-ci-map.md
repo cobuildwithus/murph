@@ -22,34 +22,35 @@ Last verified: 2026-07-06
 
 - Linux CI `apps/web verify` invocations default to wrapping the hosted-web production
   `next build` step with `apps/web/scripts/build-memory-guard.sh`. The guard
-  creates a root-level cgroup-v2 child with a default 7,200,000,000-byte
-  `memory.max`, disables swap with `memory.swap.max=0`, and moves the build
+  creates a root-level cgroup-v2 child for accounting only and moves the build
   process into that cgroup while keeping the build itself on the invoking user,
-  environment, cwd, and stdio. The cap is a cgroup-unit model of Vercel
-  Standard's 8 GB build machine: 7.2 GB available to the build cgroup and a
-  0.8 GB reserve for OS/container overhead outside it at the ceiling. The cap
-  sits at the ceiling pending decomposition evidence because 7.0 GB was measured
-  to false-positive on 2026-07-06 while the real Vercel machine passes. Guard
-  cap overrides must stay strictly above the 6,000,000,000-byte
-  known-false-positive cgroup floor and at or below 7,200,000,000 bytes,
-  preserving at least a 0.8 GB reserve under the 8 GB machine model. The floor
-  comes from the fully working 2026-07-06 Linux CI run where a 6.0 GB cgroup cap
-  OOM-killed a build that Vercel's real 8 GB Standard machine accepts. PR #349's
-  5.34 GB passing and 6.18 GB exit-137 failure numbers are historical
-  single-process RSS measurements only, not cgroup cap bounds; cgroup accounting
-  includes anonymous memory across all build workers plus page cache. The guard
-  samples cgroup `memory.current` and selected `memory.stat` fields about every
-  3 seconds, prints trajectory lines about every 15 seconds, then reports
-  sampled maxima before cgroup `memory.peak`, `memory.events`, and selected
-  final-read `memory.stat` values; on an OOM kill, those maxima identify whether
-  anonymous memory or dirty file cache saturated the cap. It fails loudly if
-  cgroup v2, the root memory controller, passwordless `sudo`, or
-  peak-accounting machinery is unavailable, and treats the pass/fail verdict as
-  the memory-budget signal.
-  `memory.peak` remains the cgroup-unit trend to watch, but can read near the
-  cap when page cache saturates the cgroup. Disabling the guard in Linux CI requires
-  `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0` and logs a prominent warning that the
-  Vercel Standard-machine memory budget is not being enforced.
+  environment, cwd, and stdio. It does not currently write `memory.max`,
+  `memory.swap.max`, or `memory.oom.group`. The advisory budget is a cgroup-unit
+  model of Vercel Standard's 8 GB build machine: 7.2 GB available to the build
+  cgroup and a 0.8 GB reserve for OS/container overhead outside it at the
+  ceiling. The legacy-named guard budget override must stay strictly above the
+  6,000,000,000-byte known-false-positive cgroup floor and at or below
+  7,200,000,000 bytes, preserving at least a 0.8 GB reserve under the 8 GB
+  machine model. The floor comes from the fully working 2026-07-06 Linux CI run
+  where a 6.0 GB cgroup cap OOM-killed a build that Vercel's real 8 GB Standard
+  machine accepts. PR #349's 5.34 GB passing and 6.18 GB exit-137 failure
+  numbers are historical single-process RSS measurements only, not cgroup cap
+  bounds; cgroup accounting includes anonymous memory across all build workers
+  plus page cache. Live CI on 2026-07-07 showed the hard limit cannot ship green
+  yet: `turbopackMemoryLimit=3GiB` matched the 4 GiB cold-build anon ramp,
+  rising about 2.9 GB at 12 seconds, 5.5 GB at 27 seconds, and 6.9 GB at 42
+  seconds before an OOM-group kill. The guard samples cgroup `memory.current`
+  and selected `memory.stat` fields about every 3 seconds, prints trajectory
+  lines about every 15 seconds, then reports sampled maxima before cgroup
+  `memory.peak`, `memory.events`, and selected final-read `memory.stat` values.
+  If sampled max anon or `memory.peak` exceeds the advisory budget, it prints a
+  loud `WOULD EXCEED` warning while preserving the wrapped build's exit status.
+  It fails loudly if cgroup v2, the root memory controller, passwordless `sudo`,
+  or peak-accounting machinery is unavailable. Disabling the guard in Linux CI
+  requires `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0` and logs a prominent warning
+  that the Vercel Standard-machine memory budget is not being measured. Flipping
+  back to enforcement means restoring the `memory.max`, `memory.swap.max`, and
+  `memory.oom.group` writes once the cold build fits under the advisory budget.
 - `.github/workflows/repo-hygiene.yml` runs the tracked private/build artifact guard on GitHub-hosted `ubuntu-24.04`.
 - `.github/workflows/host-support.yml` runs a host-support matrix on GitHub-hosted `ubuntu-24.04` and `macos-latest`, installing with `pnpm install --frozen-lockfile`, building the workspace, preparing `pnpm build:test-runtime:prepared`, and then exercising the focused built-runtime CLI host-support suite (`packages/cli/test/setup-cli.test.ts` and `packages/cli/test/inbox-service-boundaries.test.ts`) with `MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1` on both hosts. The macOS host leg serializes package-script workspace builds so sibling `tsc -b --force` package scripts do not rewrite shared project-reference declarations at once while the Linux leg keeps the normal package-build fanout. The workflow also carries deterministic CI-only hosted-web build placeholders for `DATABASE_URL`, hosted device routing, contact privacy, hosted mailbox fingerprinting, and the public Privy app id so its Linux release shards can finish `apps/web verify` without inheriting production secrets.
 - The same workflow also preserves the Ubuntu `pnpm release:check` surface without running it as one long job: release metadata/build/typecheck, package coverage shards, app verification, and fixture coverage run as parallel jobs, then a final `Release checks (ubuntu)` aggregator preserves the required-check name. This keeps Linux bootstrap and release packaging exercised in CI while avoiding the serial package-coverage wall clock.
