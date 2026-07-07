@@ -795,7 +795,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           memberId: true,
           pendingLinqChatIdEncrypted: true,
           pendingLinqChatLookupKey: true,
-          pendingLinqLastInboundAt: true,
           pendingLinqParticipantContactEncrypted: true,
           pendingLinqParticipantContactKind: true,
           pendingLinqParticipantContactLookupKey: true,
