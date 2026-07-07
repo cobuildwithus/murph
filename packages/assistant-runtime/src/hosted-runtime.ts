@@ -891,13 +891,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const mailboxBudget = createHostedWorkspaceMailboxImportBudget(
       input.request.budget?.maxMailboxItems,
     );
-    const foregroundMailboxBudget = createHostedWorkspaceMailboxImportBudget(
-      resolveHostedWorkspaceForegroundMailboxLimit(input.request.budget?.maxMailboxItems),
-    );
-    const mailboxBudgetExhausted = () =>
-      mailboxBudget.exhausted || foregroundMailboxBudget.exhausted;
+    const mailboxBudgetExhausted = () => mailboxBudget.exhausted;
     let hostedCliBridgeMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
       null;
+    const createMailboxImportContext = (
+      context: HostedWorkspaceRunnerMailboxImportContext | undefined,
+    ): HostedWorkspaceRuntimeJobImportContext => ({
+      recordMessagingReturnTarget: (target) => {
+        hostedCliBridgeMessagingReturnTarget = target;
+      },
+      latencyMilestones: mergeHostedRuntimeLatencyTraceStagedMilestones(
+        initialAssistantInputLatencyMilestones,
+        context?.latencyMilestones ?? null,
+      ),
+      onConversationInputStaged: context?.onConversationInputStaged ?? null,
+      runtimeAttemptId: input.request.attemptId,
+      signal: context?.signal ?? runtimeAbortController.signal,
+    });
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
       mailboxBudget.importItem(
         item,
@@ -907,41 +917,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           assertRuntimeNotAborted();
           return outcome;
         },
-        {
-          recordMessagingReturnTarget: (target) => {
-            hostedCliBridgeMessagingReturnTarget = target;
-          },
-          latencyMilestones: mergeHostedRuntimeLatencyTraceStagedMilestones(
-            initialAssistantInputLatencyMilestones,
-            context?.latencyMilestones ?? null,
-          ),
-          onConversationInputStaged: context?.onConversationInputStaged ?? null,
-          runtimeAttemptId: input.request.attemptId,
-          signal: context?.signal ?? runtimeAbortController.signal,
-        },
+        createMailboxImportContext(context),
       );
-    const importForegroundMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
-      foregroundMailboxBudget.importItem(
-        item,
-        async (importItem, context) => {
-          assertRuntimeNotAborted();
-          const outcome = await options.importItem(importItem, context);
-          assertRuntimeNotAborted();
-          return outcome;
-        },
-        {
-          recordMessagingReturnTarget: (target) => {
-            hostedCliBridgeMessagingReturnTarget = target;
-          },
-          latencyMilestones: mergeHostedRuntimeLatencyTraceStagedMilestones(
-            initialAssistantInputLatencyMilestones,
-            context?.latencyMilestones ?? null,
-          ),
-          onConversationInputStaged: context?.onConversationInputStaged ?? null,
-          runtimeAttemptId: input.request.attemptId,
-          signal: context?.signal ?? runtimeAbortController.signal,
-        },
-      );
+    const importForegroundMailboxItem: HostedWorkspaceRunnerInput["importItem"] = async (
+      item,
+      context,
+    ) => {
+      assertRuntimeNotAborted();
+      const outcome = await options.importItem(item, createMailboxImportContext(context));
+      assertRuntimeNotAborted();
+      return outcome;
+    };
     emitPhaseLog({
       input,
       requestId,
@@ -1048,7 +1034,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       checkpointRequestBuilder,
       expectedUserId: input.request.userId,
       foregroundImportItem: importForegroundMailboxItem,
-      foregroundLimitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
@@ -1147,7 +1132,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
     emitPhaseLog({
       details: {
-        foregroundMailboxLimitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
         initialMailboxImportLanes: [...initialMailboxImportPlan.lanes],
         mailboxLimitPerLane: mailboxBudget.fetchLimitPerLane,
       },
@@ -2055,7 +2039,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           importItemContext: initialMailboxImportContext,
           input: baseRunnerInput,
           lanes: input.lanes,
-          limitPerLane: input.limitPerLane ?? foregroundMailboxBudget.fetchLimitPerLane,
+          limitPerLane: input.limitPerLane ?? mailboxBudget.fetchLimitPerLane,
           requestId:
             `${requestId}:${input.requestIdKind}-foreground-import:${idleWakeOrdinal + 1}${
               input.requestIdLane ? `:${input.requestIdLane}` : ""
@@ -2838,7 +2822,6 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
 }
 
 const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
-const DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT = 10;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
 const activeHostedRuntimeDeferredUsageCaptures =
   new Set<HostedWorkspaceRunnerDeferredUsageCapture>();
@@ -3810,16 +3793,6 @@ function assertWorkspaceRunUserMatchesRequest(input: {
 
 function resolveHostedWorkspaceRunMailboxLimit(value: number | null | undefined): number {
   return value ?? 50;
-}
-
-function resolveHostedWorkspaceForegroundMailboxLimit(value: number | null | undefined): number {
-  return Math.max(
-    1,
-    Math.min(
-      DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT,
-      resolveHostedWorkspaceRunMailboxLimit(value),
-    ),
-  );
 }
 
 function resolveHostedWorkspaceRunMailboxFetchLimit(importLimit: number): number {

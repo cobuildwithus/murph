@@ -273,7 +273,6 @@ export interface HostedWorkspaceRunnerInput {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   expectedUserId: string;
   foregroundImportItem?: HostedWorkspaceRunnerMailboxImportItem | null;
-  foregroundLimitPerLane?: number | null;
   importItem: HostedWorkspaceRunnerMailboxImportItem;
   initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
@@ -982,7 +981,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               },
               input: input.input,
               lanes: ["conversation"],
-              limitPerLane: input.input.foregroundLimitPerLane ?? input.input.limitPerLane,
+              limitPerLane: input.input.limitPerLane,
               requestId: `${requestId}:conversation`,
               signal: conversationImportSignal.signal,
             });

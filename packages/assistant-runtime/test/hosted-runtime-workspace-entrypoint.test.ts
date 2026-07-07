@@ -7841,7 +7841,7 @@ describe("hosted workspace runtime entrypoint", () => {
   });
 
   test("foreground runtime wake imports conversation input after initial mailbox budget exhaustion", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-budget-"));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-direct-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -7851,7 +7851,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const mailboxItems = Array.from({ length: 13 }, (_, index) => {
       const seq = String(index + 1);
       return createMailboxItem({
-        id: `mailbox_item_entrypoint_foreground_budget_${seq.padStart(3, "0")}`,
+        id: `mailbox_item_entrypoint_foreground_direct_${seq.padStart(3, "0")}`,
         laneSeq: seq,
       });
     });
@@ -7878,7 +7878,7 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               snapshotRef: createBundleRef({
                 hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/foreground-budget.bundle.json",
+                key: "users/bundles/member-synthetic/foreground-direct.bundle.json",
                 size: 640,
               }),
             };
@@ -7920,7 +7920,7 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase() {
             events.push("assistant");
             mailboxItems.push(createMailboxItem({
-              id: "mailbox_item_entrypoint_foreground_budget_014",
+              id: "mailbox_item_entrypoint_foreground_direct_014",
               laneSeq: "14",
               occurredAt: "2026-04-27T00:00:14.000Z",
             }));
@@ -7938,7 +7938,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "12"]);
-      assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [13, 11]);
+      assert.deepEqual(fetchRequests.map((request) => request.limitPerLane), [13, 13]);
       assert.deepEqual(
         events.filter((event) => event.startsWith("import:")),
         expectedImportedSeqs.map((seq) => `import:${seq}`),
@@ -7984,9 +7984,9 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("late runtime wake imports conversation input with the foreground budget after foreground loop stop", async () => {
+  test("late runtime wake imports conversation input after foreground loop stop", async () => {
     const vaultRoot = await mkdtemp(
-      path.join(tmpdir(), "murph-runtime-late-foreground-budget-"),
+      path.join(tmpdir(), "murph-runtime-late-foreground-direct-"),
     );
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -7995,7 +7995,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const mailboxItems = Array.from({ length: 13 }, (_, index) => {
       const seq = String(index + 1);
       return createMailboxItem({
-        id: `mailbox_item_entrypoint_late_foreground_budget_${seq.padStart(3, "0")}`,
+        id: `mailbox_item_entrypoint_late_foreground_direct_${seq.padStart(3, "0")}`,
         laneSeq: seq,
       });
     });
@@ -8027,7 +8027,7 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               snapshotRef: createBundleRef({
                 hash: "d".repeat(64),
-                key: "users/bundles/member-synthetic/late-foreground-budget.bundle.json",
+                key: "users/bundles/member-synthetic/late-foreground-direct.bundle.json",
                 size: 640,
               }),
             };
@@ -8058,7 +8058,7 @@ describe("hosted workspace runtime entrypoint", () => {
             if (assistantPhaseCalls === 1) {
               await input.prepareAutoReplyDelivery?.();
               mailboxItems.push(createMailboxItem({
-                id: "mailbox_item_entrypoint_late_foreground_budget_014",
+                id: "mailbox_item_entrypoint_late_foreground_direct_014",
                 laneSeq: "14",
                 occurredAt: "2026-04-27T00:00:14.000Z",
               }));
@@ -8082,7 +8082,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(
         fetchRequests.some((request) =>
           readConversationImportedSeq(request) === "12"
-          && request.limitPerLane === 11
+          && request.limitPerLane === 13
         ),
       );
       assert.ok(events.includes("assistant:2:14"));
@@ -8097,7 +8097,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("foreground mailbox budget admits rapid follow-ups after the initial import", async () => {
+  test("foreground direct import admits rapid follow-ups after the initial import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-replay-budget-"));
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -8212,6 +8212,104 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
         }),
       ]);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("foreground conversation import is not capped across a long active invocation", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-uncapped-"));
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const importedSeqs: string[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_foreground_uncapped_001",
+        laneSeq: "1",
+      }),
+    ];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_foreground_uncapped",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/foreground-uncapped.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            importedSeqs.push(item.item.laneSeq);
+            events.push(`import:${item.item.laneSeq}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            logRequests,
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            events.push("assistant");
+            for (let seq = 2; seq <= 12; seq += 1) {
+              const laneSeq = String(seq);
+              mailboxItems.push(createMailboxItem({
+                id: `mailbox_item_entrypoint_foreground_uncapped_${laneSeq.padStart(3, "0")}`,
+                laneSeq,
+                occurredAt: `2026-04-27T00:00:${laneSeq.padStart(2, "0")}.000Z`,
+              }));
+              runtimeWakeSignal.notify();
+              await waitUntil(() => {
+                assert.ok(importedSeqs.includes(laneSeq));
+              }, 5_000);
+            }
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(
+        importedSeqs,
+        Array.from({ length: 12 }, (_, index) => String(index + 1)),
+      );
+      assert.equal(fetchRequests.length, 12);
+      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), [
+        "0",
+        ...Array.from({ length: 11 }, (_, index) => String(index + 1)),
+      ]);
+      assert.ok(events.includes("snapshot:idle_shutdown:12"));
+      assert.equal(result.status, "idle");
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "12");
+      expect(JSON.stringify(logRequests)).not.toContain("budget.mailbox_items");
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -16896,6 +16994,9 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             },
             vaultRoot,
+            async runAssistantPhase() {
+              return { progressed: false };
+            },
           },
         ),
         15_000,
