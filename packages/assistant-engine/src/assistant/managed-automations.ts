@@ -382,7 +382,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- If the feed is unavailable, invalid, or empty, do not fabricate updates; fall back to the feature discovery kind.',
       '- Choose 2-3 items using only context Murph already has for normal assistance: connected providers and channels, active experiments and automations, recurring request categories, and features the user already uses.',
       '- Skip items already covered in a prior ledger section.',
-      '- Do not inspect raw health values solely to personalize product news.',
+      '- Do not inspect raw health values solely to personalize product news, and do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to judge relevance.',
       '- Prefer user-fit, practical benefit, editorial priority, and novelty. Do not pad with weak matches; one strong item beats stretching to fill 2-3 slots.',
       '- Use the canonical title, summary, URL, and tryIt fields from the feed, and verify each selected item has a concrete reason it may interest this user.',
       '',

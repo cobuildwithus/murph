@@ -289,7 +289,7 @@ function buildAssistantConnectedAppsGuidanceText(): string {
 function buildAssistantProductFeedbackGuidanceText(): string {
   return [
     "Product feedback:",
-    "- When `murph.submit_product_feedback` is available, capture explicit Murph product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction. Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known, then continue helping. Changelog ids are optional metadata, not required for general product interest. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.",
+    "- When `murph.submit_product_feedback` is available, capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction. Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known, then continue helping. Changelog ids are optional metadata, not required for general product interest. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.",
   ].join("\n");
 }
 
