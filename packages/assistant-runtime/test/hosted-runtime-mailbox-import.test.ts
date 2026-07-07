@@ -1488,6 +1488,41 @@ describe("hosted mailbox import loop", () => {
     assert.equal(serialized.includes("source_cursor"), false);
   });
 
+  test("quarantines unknown future mailbox kinds and advances the lane", async () => {
+    const item = createMailboxItem({
+      id: "mailbox_item_system_future_kind",
+      kind: "future.mailbox.kind" as HostedMailboxItem["kind"],
+      lane: "system",
+      laneSeq: "1",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [item],
+    });
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        throw new Error("Import should not run for an unknown mailbox kind.");
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_future_kind",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(result.blocked, [
+      {
+        itemId: "mailbox_item_system_future_kind",
+        lane: "system",
+        reasonCode: "route.unsupported_kind",
+        retryable: false,
+        seq: "1",
+      },
+    ]);
+    assert.equal(result.state.watermarks.system, "1");
+  });
+
   test("quarantines invalid sequence metadata instead of throwing from prefix checks", async () => {
     const item = createMailboxItem({
       id: "mailbox_item_conversation_bad_seq",

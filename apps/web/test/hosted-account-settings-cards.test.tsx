@@ -1,9 +1,27 @@
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
+
+import { renderClientComponent } from "./render-client-component";
+
+vi.mock("next/dynamic", () => ({
+  default: () => function MockHostedSettingsIdentityLinkDialog(
+    props: { initialMode?: string; onOpenChange?: (open: boolean) => void },
+  ) {
+    return React.createElement("div", {
+      "data-link-mode": props.initialMode ?? "",
+    },
+    `identity link ${props.initialMode ?? ""}`,
+    React.createElement("button", {
+      "data-close-link-dialog": "true",
+      onClick: () => props.onOpenChange?.(false),
+      type: "button",
+    }, "Close"));
+  },
+}));
 
 describe("HostedAccountSettingsCards", () => {
   test("shows the SMS Murph link only after the member has linked a phone", () => {
@@ -35,7 +53,7 @@ describe("HostedAccountSettingsCards", () => {
     );
 
     expect(markup).not.toContain("Murph contact");
-    expect(markup).not.toContain("Pick a look and save the updated card.");
+    expect(markup).not.toContain("Pick a new look for Murph in your contacts.");
   });
 
   test("shows Murph contact customization with an assigned Murph text line", () => {
@@ -47,7 +65,7 @@ describe("HostedAccountSettingsCards", () => {
     );
 
     expect(markup).toContain("Murph contact");
-    expect(markup).toContain("Pick a look and save the updated card.");
+    expect(markup).toContain("Pick a new look for Murph in your contacts.");
     expect(markup).toContain("Customize");
   });
 
@@ -60,7 +78,7 @@ describe("HostedAccountSettingsCards", () => {
     );
 
     expect(markup).toContain("Murph contact");
-    expect(markup).toContain("Pick a look and save the updated card.");
+    expect(markup).toContain("Pick a new look for Murph in your contacts.");
     expect(markup).toContain("Customize");
   });
 
@@ -131,6 +149,73 @@ describe("HostedAccountSettingsCards", () => {
 
     expect(markup).toContain("Connected");
     expect(markup).not.toContain("Telegram user 456");
+  });
+
+  test("opens the email link dialog when the add-email deep link is present on first mount", async () => {
+    const rendered = await renderClientComponent(
+      React.createElement(HostedAccountSettingsCards, {
+        account: makeAccountSnapshot({ phoneNumber: null }),
+        openEmailLink: true,
+      }),
+      {
+        location: {
+          href: "https://app.example.test/settings?addEmail=true",
+        },
+        requireButton: false,
+      },
+    );
+
+    expect(rendered.container.querySelector("[data-link-mode]")?.getAttribute("data-link-mode"))
+      .toBe("email");
+
+    await rendered.cleanup();
+  });
+
+  test("opens the email link dialog when the add-email deep link appears after mount", async () => {
+    const account = makeAccountSnapshot({ phoneNumber: null });
+    const rendered = await renderClientComponent(
+      React.createElement(HostedAccountSettingsCards, {
+        account,
+        openEmailLink: false,
+      }),
+      {
+        location: {
+          href: "https://app.example.test/settings?addEmail=true",
+        },
+        requireButton: false,
+      },
+    );
+
+    expect(rendered.container.querySelector("[data-link-mode]")).toBeNull();
+
+    await rendered.rerender(
+      React.createElement(HostedAccountSettingsCards, {
+        account,
+        openEmailLink: true,
+      }),
+    );
+
+    expect(rendered.container.querySelector("[data-link-mode]")?.getAttribute("data-link-mode"))
+      .toBe("email");
+
+    const closeButton = rendered.container.querySelector("[data-close-link-dialog]");
+    expect(closeButton).toBeInstanceOf(rendered.window.HTMLButtonElement);
+    await React.act(async () => {
+      (closeButton as HTMLButtonElement | null)?.click();
+    });
+
+    expect(rendered.container.querySelector("[data-link-mode]")).toBeNull();
+
+    await rendered.rerender(
+      React.createElement(HostedAccountSettingsCards, {
+        account,
+        openEmailLink: true,
+      }),
+    );
+
+    expect(rendered.container.querySelector("[data-link-mode]")).toBeNull();
+
+    await rendered.cleanup();
   });
 });
 

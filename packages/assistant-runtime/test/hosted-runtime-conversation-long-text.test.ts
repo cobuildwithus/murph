@@ -51,6 +51,7 @@ test("hosted conversation import preserves long message text for the agent while
 
     const runtime = await openInboxRuntime({ vaultRoot });
     try {
+      assert.ok(result.capture);
       const capture = runtime.getCapture(result.capture.captureId);
       assert.ok(capture);
       assert.equal(capture.text, fullText);

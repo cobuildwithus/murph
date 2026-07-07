@@ -9,10 +9,14 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
 import type { HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
+import {
+  assertHostedMemberNotSuspended,
+} from "../hosted-onboarding/entitlement";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
@@ -46,6 +50,7 @@ import {
   type HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
 import {
+  signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
@@ -56,6 +61,7 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   readHostedGroupByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
+  revokeHostedGroupMemberEmailShareTx,
 } from "./group-store";
 import {
   normalizeHostedVaultShareProjectionKinds,
@@ -74,6 +80,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   post_join_offer: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
+  revoke_own_email_share: "participant_aware",
   share_contact_card: "owner_active",
 } as const satisfies Record<
   HostedRuntimeGroupToolAction,
@@ -110,6 +117,13 @@ export async function handleHostedRuntimeGroupTool(input: {
     return handleHostedRuntimeGroupShareContactCard({
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
+    });
+  }
+
+  if (input.request.action === "revoke_own_email_share") {
+    return handleHostedRuntimeGroupRevokeOwnEmailShare({
+      memberId: input.memberId,
+      selfOptOut: input.request.selfOptOut ?? null,
     });
   }
 
@@ -173,6 +187,97 @@ async function readHostedRuntimeGroupOwnerActiveAccess(input: {
   }
 
   return { status: "ok", ownerMemberId: container.ownerMemberId };
+}
+
+async function handleHostedRuntimeGroupRevokeOwnEmailShare(input: {
+  memberId: string;
+  selfOptOut: HostedRuntimeGroupToolSelfOptOutContext | null;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "revoke_own_email_share",
+    result: { status: "unavailable", unavailableReason },
+  });
+
+  if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
+    return unavailable("runtime_inactive");
+  }
+  if (!input.selfOptOut) {
+    return unavailable("sender_unavailable");
+  }
+
+  const prisma = getPrisma();
+  let participant: Awaited<ReturnType<typeof lookupSelfOptOutParticipantMember>> | null;
+  try {
+    participant = await lookupSelfOptOutParticipantMember({
+      context: input.selfOptOut,
+      prisma,
+    });
+  } catch {
+    return unavailable("membership_lookup_unavailable");
+  }
+  if (!participant) {
+    return unavailable("member_unresolved");
+  }
+  try {
+    assertHostedMemberNotSuspended(participant.core);
+  } catch {
+    return unavailable("member_unavailable");
+  }
+  if (!await readActiveHostedMemberAccess({
+    memberId: participant.core.id,
+    prisma,
+  })) {
+    return unavailable("member_unavailable");
+  }
+
+  const now = new Date();
+  const revoked = await prisma.$transaction(async (tx) => revokeHostedGroupMemberEmailShareTx({
+    groupRuntimeMemberId: input.memberId,
+    memberId: participant.core.id,
+    now,
+    tx,
+  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  if (revoked.kind !== "ok") {
+    return unavailable(revoked.kind);
+  }
+
+  await signalVaultShareCleanupRuntimesBestEffort(revoked.vaultShareCleanupSignals);
+
+  return {
+    action: "revoke_own_email_share",
+    result: revoked.revokedCount > 0
+      ? { revokedCount: 1, status: "revoked" }
+      : { revokedCount: 0, status: "already_removed" },
+  };
+}
+
+async function lookupSelfOptOutParticipantMember(input: {
+  context: HostedRuntimeGroupToolSelfOptOutContext;
+  prisma: ReturnType<typeof getPrisma>;
+}) {
+  if (input.context.source === "email") {
+    return null;
+  }
+
+  return await lookupParticipantMemberByHandle({
+    handle: input.context.senderHandle,
+    prisma: input.prisma,
+  });
+}
+
+async function signalVaultShareCleanupRuntimesBestEffort(
+  signals: readonly { mailboxItemId: string; memberId: string }[],
+): Promise<void> {
+  await Promise.all(signals.map(async (signal) => {
+    try {
+      await signalHostedMailboxAppendRuntime({
+        expectedUserId: signal.memberId,
+        mailboxItemId: signal.mailboxItemId,
+      });
+    } catch {
+      // The revoke mailbox item is durable; the destination runtime will observe it later.
+    }
+  }));
 }
 
 async function handleHostedRuntimeGroupCreateJoinLink(input: {

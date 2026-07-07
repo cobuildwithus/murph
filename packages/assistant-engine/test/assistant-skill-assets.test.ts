@@ -155,6 +155,31 @@ describe('assistant skill assets', () => {
     }
   })
 
+  it('keeps group newsletter setup and opt-out behavior in the group-chat skill', async () => {
+    const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
+    expect(groupChatSkill).toBeTruthy()
+    if (!groupChatSkill) return
+
+    const raw = await readSkillFile(groupChatSkill)
+    expect(raw).toContain('vault-cli automation save')
+    expect(raw).toContain('Use exactly `--slug group-health-newsletter`')
+    expect(raw).toContain('Any other slug will not be able to send')
+    expect(raw).toContain('vault-cli automation set-status group-health-newsletter --status archived')
+    expect(raw).toContain('--schedule-cron "0 9 * * 0"')
+    expect(raw).toContain('--continuity-policy fresh')
+    expect(raw).toContain('next natural cron occurrence')
+    expect(raw).toContain('Never create an')
+    expect(raw).toContain('never call `murph.newsletter` `send` right after')
+    expect(raw).toContain('/settings?addEmail=true')
+    expect(raw).toContain('nobody has enabled email sharing')
+    expect(raw).toContain('action="revoke_own_email_share"')
+    expect(raw).toContain('group-email.v0')
+    expect(raw).not.toContain('nudge them in the group')
+    expect(raw).toContain('post a join offer scoped to')
+    expect(raw).toContain('`group-email.v0` so a like grants it')
+    expect(raw).toContain('never repeatedly re-offer')
+  })
+
   it('builds stable symbolic skill file references', () => {
     expect(MURPH_ASSISTANT_SKILLS_ROOT_REF).toBe('$MURPH_ASSISTANT_SKILLS_ROOT')
     expect(buildAssistantSkillFileRef('murph-onboarding')).toBe(

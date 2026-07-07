@@ -8,6 +8,7 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  createHostedEmailGroupReplyAliasRoute,
   createHostedEmailUserReplyAliasRoute,
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
@@ -37,6 +38,7 @@ export { isHostedEmailPublicSenderAddress } from "./route-addressing.ts";
 
 export interface HostedEmailInboundRoute {
   authorization: "direct-public-sender" | "signed-reply-alias";
+  groupId: string | null;
   identityId: string;
   routeAddress: string;
   userId: string;
@@ -75,6 +77,7 @@ export async function resolveHostedEmailIngressRoute(input: HostedEmailRouteCall
 export async function createHostedEmailUserAddress(input: {
   config: HostedEmailConfig;
   fetchImpl?: typeof fetch;
+  groupId?: string | null;
   userId: string;
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlAllowHttpHosts?: readonly string[];
@@ -83,6 +86,19 @@ export async function createHostedEmailUserAddress(input: {
   if (!input.config.domain || !input.config.signingSecret || !input.config.fromAddress) {
     throw new Error("Hosted email addressing is not configured.");
   }
+  const groupId = typeof input.groupId === "string" && input.groupId.trim()
+    ? input.groupId.trim()
+    : null;
+  if (groupId) {
+    const replyAlias = await createHostedEmailGroupReplyAliasRoute({
+      domain: input.config.domain,
+      groupId,
+      localPart: input.config.localPart,
+      signingSecret: input.config.signingSecret,
+    });
+    return replyAlias.address;
+  }
+
   if (!input.webCallbackSigning || !input.webControlBaseUrl) {
     throw new Error("Hosted email route registration callback is not configured.");
   }
@@ -191,6 +207,7 @@ export async function resolveHostedEmailInboundRoute(
   const userId = await resolveHostedEmailRouteUserId({
     aliasKey: token.aliasKey,
     context: input,
+    groupId: token.groupId ?? null,
   });
   if (!userId) {
     return null;
@@ -198,6 +215,7 @@ export async function resolveHostedEmailInboundRoute(
 
   return {
     authorization: "signed-reply-alias",
+    groupId: token.groupId ?? null,
     identityId: configuredSender,
     routeAddress: candidate.address,
     userId,
@@ -221,6 +239,7 @@ async function resolveHostedEmailPublicSenderIngressRoute(
   const userId = await resolveHostedEmailRouteUserId({
     aliasKey: null,
     context: input,
+    groupId: null,
   });
   if (!userId) {
     return null;
@@ -228,6 +247,7 @@ async function resolveHostedEmailPublicSenderIngressRoute(
 
   return {
     authorization: "direct-public-sender",
+    groupId: null,
     identityId: configuredSender,
     routeAddress: input.to,
     userId,
@@ -242,9 +262,11 @@ async function resolveHostedEmailRouteUserId(input: {
     webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
     webControlBaseUrl?: string | null;
   };
+  groupId: string | null;
 }): Promise<string | null> {
   if (
     input.aliasKey === null
+    && input.groupId === null
     && !isHostedEmailAuthenticatedSenderVerdictAccepted(input.context.authenticatedSender)
   ) {
     return null;
@@ -265,7 +287,14 @@ async function resolveHostedEmailRouteUserId(input: {
       baseUrl: input.context.webControlBaseUrl,
       body: JSON.stringify(input.aliasKey
         ? { aliasKey: input.aliasKey }
-        : {
+        : input.groupId
+          ? {
+            envelopeFrom: input.context.envelopeFrom ?? null,
+            groupId: input.groupId,
+            hasRepeatedHeaderFrom: input.context.hasRepeatedHeaderFrom === true,
+            headerFrom: input.context.headerFrom ?? null,
+          }
+          : {
             authenticatedSender: input.context.authenticatedSender ?? null,
             envelopeFrom: input.context.envelopeFrom ?? null,
             hasRepeatedHeaderFrom: input.context.hasRepeatedHeaderFrom === true,

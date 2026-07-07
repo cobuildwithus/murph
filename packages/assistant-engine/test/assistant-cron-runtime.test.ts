@@ -3206,6 +3206,423 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('withholds first newsletter send authority until the opt-out window elapses', async () => {
+    async function runOccurrence(occurrenceAt: string) {
+      vi.setSystemTime(new Date(occurrenceAt))
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-newsletter-authority-',
+      )
+      getVaultAutomationStore(vaultRoot).push({
+        automationId: 'automation-newsletter-window',
+        continuityPolicy: 'fresh',
+        createdAt: '2026-07-06T10:00:00.000Z',
+        instructions: 'Compose the group health newsletter.',
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: 'group-chat-1',
+          identityId: null,
+          participantId: null,
+          threadId: 'group-chat-1',
+        },
+        schedule: {
+          kind: 'cron',
+          expression: '0 * * * *',
+        },
+        slug: 'group-health-newsletter',
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: 'Group Health Newsletter',
+        updatedAt: '2026-07-06T10:00:00.000Z',
+      })
+
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+      if (!source) {
+        throw new Error('Expected newsletter automation source.')
+      }
+      if (source.kind !== 'automation') {
+        throw new Error('Expected newsletter automation source.')
+      }
+      const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      const runtimeState = {
+        ...resolveCanonicalRuntimeState(source, runtimeStore),
+        state: {
+          ...resolveCanonicalRuntimeState(source, runtimeStore).state,
+          pendingOccurrenceAt: occurrenceAt,
+        },
+      }
+      await writeAssistantCronCanonicalRuntimeStore(paths, {
+        jobs: [runtimeState],
+        version: 1,
+      })
+      const claimed = await claimResolvedAssistantCronJob({
+        job: {
+          kind: 'canonical',
+          source,
+          runtimeState,
+          job: projectCanonicalAssistantCronJob({
+            source,
+            runtimeState,
+          }),
+        },
+        paths,
+      })
+
+      const result = await executeClaimedAssistantCronJob({
+        job: claimed,
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+      expect(result.run.status).toBe('succeeded')
+      const input = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+        | { scheduledAutomationAuthority?: unknown }
+        | undefined
+      if (!input) {
+        throw new Error('Expected scheduled notification input.')
+      }
+      return input.scheduledAutomationAuthority ?? null
+    }
+
+    vi.useFakeTimers()
+    try {
+      await expect(
+        runOccurrence('2026-07-06T11:59:59.999Z'),
+      ).resolves.toBeNull()
+      await expect(
+        runOccurrence('2026-07-06T12:00:00.000Z'),
+      ).resolves.toEqual({
+        automationId: 'automation-newsletter-window',
+        occurrenceAt: '2026-07-06T12:00:00.000Z',
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('only grants scheduled newsletter send authority for cron schedules', async () => {
+    async function runSchedule(schedule: AutomationSchedule) {
+      vi.setSystemTime(new Date('2026-07-06T12:00:00.000Z'))
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-newsletter-schedule-kind-',
+      )
+      getVaultAutomationStore(vaultRoot).push({
+        automationId: 'automation-newsletter-schedule-kind',
+        continuityPolicy: 'fresh',
+        createdAt: '2026-07-06T10:00:00.000Z',
+        instructions: 'Compose the group health newsletter.',
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: 'group-chat-1',
+          identityId: null,
+          participantId: null,
+          threadId: 'group-chat-1',
+        },
+        schedule,
+        slug: 'group-health-newsletter',
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: 'Group Health Newsletter',
+        updatedAt: '2026-07-06T10:00:00.000Z',
+      })
+
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+      if (!source) {
+        throw new Error('Expected newsletter automation source.')
+      }
+      if (source.kind !== 'automation') {
+        throw new Error('Expected newsletter automation source.')
+      }
+      const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      const resolvedRuntimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+      const runtimeState = {
+        ...resolvedRuntimeState,
+        state: {
+          ...resolvedRuntimeState.state,
+          pendingOccurrenceAt: '2026-07-06T12:00:00.000Z',
+        },
+      }
+      await writeAssistantCronCanonicalRuntimeStore(paths, {
+        jobs: [runtimeState],
+        version: 1,
+      })
+      const claimed = await claimResolvedAssistantCronJob({
+        job: {
+          kind: 'canonical',
+          source,
+          runtimeState,
+          job: projectCanonicalAssistantCronJob({
+            source,
+            runtimeState,
+          }),
+        },
+        paths,
+      })
+
+      const result = await executeClaimedAssistantCronJob({
+        job: claimed,
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+      expect(result.run.status).toBe('succeeded')
+      const input = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+        | { scheduledAutomationAuthority?: unknown }
+        | undefined
+      if (!input) {
+        throw new Error('Expected scheduled notification input.')
+      }
+      return input.scheduledAutomationAuthority ?? null
+    }
+
+    vi.useFakeTimers()
+    try {
+      await expect(
+        runSchedule({ kind: 'cron', expression: '0 * * * *' }),
+      ).resolves.toEqual({
+        automationId: 'automation-newsletter-schedule-kind',
+        occurrenceAt: '2026-07-06T12:00:00.000Z',
+      })
+      await expect(
+        runSchedule({ kind: 'at', at: '2026-07-06T12:00:00.000Z' }),
+      ).resolves.toBeNull()
+      await expect(
+        runSchedule({ kind: 'every', everyMs: 3_600_000 }),
+      ).resolves.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fails and preserves a scheduled newsletter occurrence when every email recipient fails', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-12T13:00:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-newsletter-send-failed-',
+      )
+      getVaultAutomationStore(vaultRoot).push({
+        automationId: 'automation-newsletter-send-failed',
+        continuityPolicy: 'fresh',
+        createdAt: '2026-07-06T10:00:00.000Z',
+        instructions: 'Compose and send the group health newsletter.',
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: 'group-chat-1',
+          identityId: null,
+          participantId: null,
+          threadId: 'group-chat-1',
+        },
+        schedule: {
+          kind: 'cron',
+          expression: '0 13 * * 0',
+        },
+        slug: 'group-health-newsletter',
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: 'Group Health Newsletter',
+        updatedAt: '2026-07-06T10:00:00.000Z',
+      })
+      const occurrenceAt = '2026-07-12T13:00:00.000Z'
+      const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+      if (!source) {
+        throw new Error('Expected newsletter automation source.')
+      }
+      if (source.kind !== 'automation') {
+        throw new Error('Expected newsletter automation source.')
+      }
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const runtimeState = {
+        ...resolveCanonicalRuntimeState(source, await readAssistantCronCanonicalRuntimeStore(paths)),
+        state: {
+          ...resolveCanonicalRuntimeState(
+            source,
+            await readAssistantCronCanonicalRuntimeStore(paths),
+          ).state,
+          pendingOccurrenceAt: occurrenceAt,
+        },
+      }
+      await writeAssistantCronCanonicalRuntimeStore(paths, {
+        jobs: [runtimeState],
+        version: 1,
+      })
+      const claimed = await claimResolvedAssistantCronJob({
+        job: {
+          kind: 'canonical',
+          source,
+          runtimeState,
+          job: projectCanonicalAssistantCronJob({
+            source,
+            runtimeState,
+          }),
+        },
+        paths,
+      })
+      cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+        decision: {
+          kind: 'send_message',
+          privateSummary: 'Newsletter delivery failed.',
+          text: 'Newsletter delivery failed.',
+        },
+        postTurnDeliveryExpectations: {
+          newsletterSendResult: {
+            status: 'unavailable',
+            unavailableReason: 'send_failed',
+          },
+        },
+        response: 'Newsletter delivery failed.',
+        session: {
+          sessionId: 'session-newsletter-send-failed',
+        },
+      })
+
+      const result = await executeClaimedAssistantCronJob({
+        job: claimed,
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(result.run.status).toBe('failed')
+      expect(result.run.error).toBe(
+        'Group health newsletter email send failed for every recipient.',
+      )
+      const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      const current = currentStore.jobs.find((record) => record.jobId === source.automationId)
+      expect(current?.state.pendingOccurrenceAt).toBe(occurrenceAt)
+      expect(current?.state.retryAfterAt).toBe('2026-07-12T13:00:30.000Z')
+      expect(current?.state.consecutiveFailures).toBe(1)
+      expect(current?.state.lastFailedAt).toBe('2026-07-12T13:00:00.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    {
+      label: 'partial newsletter delivery',
+      newsletterSendResult: {
+        failedRecipientCount: 1,
+        participantCount: 3,
+        sentRecipientCount: 2,
+        skippedNoEmailMemberIds: [],
+        status: 'partial_failure' as const,
+      },
+    },
+    {
+      label: 'newsletter with no recipients',
+      newsletterSendResult: {
+        participantCount: 0,
+        skippedNoEmailMemberIds: ['member_without_email'],
+        status: 'no_recipients' as const,
+      },
+    },
+  ])('succeeds a scheduled newsletter occurrence after $label', async ({ newsletterSendResult }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-12T13:00:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-newsletter-send-succeeded-',
+      )
+      getVaultAutomationStore(vaultRoot).push({
+        automationId: 'automation-newsletter-send-succeeded',
+        continuityPolicy: 'fresh',
+        createdAt: '2026-07-06T10:00:00.000Z',
+        instructions: 'Compose and send the group health newsletter.',
+        route: {
+          channel: 'linq',
+          deliverySource: null,
+          deliveryTarget: 'group-chat-1',
+          identityId: null,
+          participantId: null,
+          threadId: 'group-chat-1',
+        },
+        schedule: {
+          kind: 'cron',
+          expression: '0 13 * * 0',
+        },
+        slug: 'group-health-newsletter',
+        status: 'active',
+        summary: null,
+        tags: ['assistant', 'scheduled'],
+        title: 'Group Health Newsletter',
+        updatedAt: '2026-07-06T10:00:00.000Z',
+      })
+      const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+      if (!source) {
+        throw new Error('Expected newsletter automation source.')
+      }
+      if (source.kind !== 'automation') {
+        throw new Error('Expected newsletter automation source.')
+      }
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const baseRuntimeState = resolveCanonicalRuntimeState(
+        source,
+        await readAssistantCronCanonicalRuntimeStore(paths),
+      )
+      const runtimeState = {
+        ...baseRuntimeState,
+        state: {
+          ...baseRuntimeState.state,
+          pendingOccurrenceAt: '2026-07-12T13:00:00.000Z',
+        },
+      }
+      await writeAssistantCronCanonicalRuntimeStore(paths, {
+        jobs: [runtimeState],
+        version: 1,
+      })
+      const claimed = await claimResolvedAssistantCronJob({
+        job: {
+          kind: 'canonical',
+          source,
+          runtimeState,
+          job: projectCanonicalAssistantCronJob({
+            source,
+            runtimeState,
+          }),
+        },
+        paths,
+      })
+      cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+        decision: {
+          kind: 'send_message',
+          privateSummary: 'Newsletter handled.',
+          text: 'Newsletter handled.',
+        },
+        postTurnDeliveryExpectations: {
+          newsletterSendResult,
+        },
+        response: 'Newsletter handled.',
+        session: {
+          sessionId: 'session-newsletter-send-succeeded',
+        },
+      })
+
+      const result = await executeClaimedAssistantCronJob({
+        job: claimed,
+        paths,
+        trigger: 'scheduled',
+        vault: vaultRoot,
+      })
+
+      expect(result.run.status).toBe('succeeded')
+      const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
+      const current = currentStore.jobs.find((record) => record.jobId === source.automationId)
+      expect(current?.state.pendingOccurrenceAt).toBeNull()
+      expect(current?.state.consecutiveFailures).toBe(0)
+      expect(current?.state.lastFailedAt).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('uses standard service tier for hosted scheduled notification retries', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T08:20:00.000Z'))

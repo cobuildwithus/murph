@@ -9,8 +9,16 @@ import {
   emitHostedExecutionStructuredLog,
   sanitizeHostedExecutionStructuredLogText,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
+  parseHostedEmailGroupRecipientsCallbackResponse,
+} from "@murphai/hosted-execution/hosted-email";
 
-import type { HostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
+import type {
+  HostedEmailDeliverySummary,
+  HostedEmailSendRequest,
+  HostedEmailSendResult,
+} from "@murphai/assistant-runtime/hosted-email";
 import {
   createHostedEmailThreadTarget,
   ensureHostedEmailReplySubject,
@@ -26,6 +34,9 @@ import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.t
 import type { WorkerSendEmailBindingLike } from "../worker-contracts.ts";
 import type { HostedEmailConfig } from "./config.ts";
 import { createHostedEmailUserAddress } from "./routes.ts";
+import {
+  fetchHostedExecutionWebControlPlaneResponse,
+} from "../web-control-plane.ts";
 
 // Display name shown by mail clients instead of the raw sender address. The
 // SMTP envelope sender stays the bare address so Cloudflare's sender checks
@@ -48,9 +59,7 @@ export async function sendHostedEmailMessage(input: {
   webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
   webControlAllowHttpHosts?: readonly string[];
   webControlBaseUrl?: string | null;
-}): Promise<{
-  target: string;
-}> {
+}): Promise<HostedEmailSendResult> {
   if (!input.config.domain || !input.config.signingSecret) {
     throw new Error("Hosted email routing is not configured.");
   }
@@ -60,17 +69,36 @@ export async function sendHostedEmailMessage(input: {
 
   const preflight = assertSupportedHostedEmailSendRequest(input.request);
 
+  const groupId = resolveHostedEmailSendGroupId({
+    existingThreadTarget: preflight.existingThreadTarget,
+    target: input.request.target,
+    targetKind: input.request.targetKind,
+  });
   const replyAddress = await createHostedEmailUserAddress({
     config: input.config,
     fetchImpl: input.fetchImpl,
+    groupId,
     userId: input.userId,
     webCallbackSigning: input.webCallbackSigning,
     ...(input.webControlAllowHttpHosts ? { webControlAllowHttpHosts: input.webControlAllowHttpHosts } : {}),
     webControlBaseUrl: input.webControlBaseUrl,
   });
+  const groupRecipients = groupId
+    ? await resolveHostedEmailGroupRecipients({
+        fetchImpl: input.fetchImpl,
+        groupId,
+        userId: input.userId,
+        webCallbackSigning: input.webCallbackSigning,
+        ...(input.webControlAllowHttpHosts ? { webControlAllowHttpHosts: input.webControlAllowHttpHosts } : {}),
+        webControlBaseUrl: input.webControlBaseUrl,
+      })
+    : null;
   const prepared = await prepareHostedEmailSend({
     config: input.config,
     existingThreadTarget: preflight.existingThreadTarget,
+    groupId,
+    groupRecipients,
+    html: input.request.html ?? null,
     idempotencyKey: input.request.idempotencyKey ?? null,
     message: input.request.message,
     replyToMessageId: input.request.replyToMessageId ?? null,
@@ -80,14 +108,16 @@ export async function sendHostedEmailMessage(input: {
     targetKind: input.request.targetKind,
   });
 
-  await sendHostedEmailMimeMessage({
+  const delivery = await sendPreparedHostedEmailMimeMessages({
     binding: input.emailBinding,
+    continueOnFailure: prepared.isGroupDelivery,
     fromAddress: prepared.fromAddress,
     mimeMessage: prepared.mimeMessage,
-    recipient: prepared.recipient,
+    recipients: prepared.recipients,
   });
 
   return {
+    delivery,
     target: serializeHostedEmailThreadTarget(prepared.threadTarget),
   };
 }
@@ -98,8 +128,13 @@ function assertSupportedHostedEmailSendRequest(
   existingThreadTarget: HostedEmailThreadTarget | null;
 } {
   if (request.targetKind !== "explicit" && request.targetKind !== "thread") {
+    if (request.targetKind === "group") {
+      return {
+        existingThreadTarget: null,
+      };
+    }
     throw new HostedEmailSendValidationError(
-      "Hosted email delivery requires an explicit recipient or a serialized thread target.",
+      "Hosted email delivery requires an explicit recipient, group id, or serialized thread target.",
     );
   }
 
@@ -118,10 +153,16 @@ function assertSupportedHostedEmailSendRequest(
     );
   }
 
+  const groupThreadTarget =
+    existingThreadTarget?.targetKind === "group" && existingThreadTarget.groupId
+      ? existingThreadTarget
+      : null;
   const primaryRecipient = existingThreadTarget
-    ? existingThreadTarget.to[0] ?? null
+    ? groupThreadTarget
+      ? null
+      : existingThreadTarget.to[0] ?? null
     : normalizeHostedEmailAddressList([request.target])[0] ?? null;
-  if (!primaryRecipient) {
+  if (!primaryRecipient && !groupThreadTarget) {
     throw new HostedEmailSendValidationError(
       "Hosted email delivery requires at least one recipient email address.",
     );
@@ -130,6 +171,21 @@ function assertSupportedHostedEmailSendRequest(
   return {
     existingThreadTarget,
   };
+}
+
+function resolveHostedEmailSendGroupId(input: {
+  existingThreadTarget: HostedEmailThreadTarget | null;
+  target: string;
+  targetKind: HostedEmailSendRequest["targetKind"];
+}): string | null {
+  if (input.targetKind === "group") {
+    return normalizeHostedEmailDeliveryGroupId(input.target);
+  }
+  if (input.targetKind === "thread" && input.existingThreadTarget?.targetKind === "group") {
+    return input.existingThreadTarget.groupId;
+  }
+
+  return null;
 }
 
 async function sendHostedEmailMimeMessage(input: {
@@ -173,9 +229,85 @@ async function sendHostedEmailMimeMessage(input: {
   }
 }
 
+async function sendPreparedHostedEmailMimeMessages(input: {
+  binding: WorkerSendEmailBindingLike;
+  continueOnFailure: boolean;
+  fromAddress: string;
+  mimeMessage: string;
+  recipients: readonly string[];
+}): Promise<HostedEmailDeliverySummary> {
+  let failedCount = 0;
+  let sentCount = 0;
+  for (const recipient of input.recipients) {
+    try {
+      await sendHostedEmailMimeMessage({
+        binding: input.binding,
+        fromAddress: input.fromAddress,
+        mimeMessage: input.mimeMessage,
+        recipient,
+      });
+      sentCount += 1;
+    } catch (error) {
+      failedCount += 1;
+      if (!input.continueOnFailure) {
+        throw error;
+      }
+    }
+  }
+
+  return {
+    failedCount,
+    sentCount,
+    skippedCount: 0,
+    status: failedCount === 0
+      ? "sent"
+      : sentCount === 0
+        ? "failed"
+        : "partial_failure",
+  };
+}
+
+async function resolveHostedEmailGroupRecipients(input: {
+  fetchImpl?: typeof fetch;
+  groupId: string;
+  userId: string;
+  webCallbackSigning?: HostedWebCallbackSigningEnvironment | null;
+  webControlAllowHttpHosts?: readonly string[];
+  webControlBaseUrl?: string | null;
+}): Promise<string[]> {
+  if (!input.webCallbackSigning || !input.webControlBaseUrl) {
+    throw new Error("Hosted group email recipient callback is not configured.");
+  }
+
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    ...(input.webControlAllowHttpHosts ? { allowHttpHosts: input.webControlAllowHttpHosts } : {}),
+    baseUrl: input.webControlBaseUrl,
+    body: JSON.stringify({
+      groupId: input.groupId,
+    }),
+    boundUserId: input.userId,
+    callbackSigning: input.webCallbackSigning,
+    fetchImpl: input.fetchImpl,
+    method: "POST",
+    path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
+    timeoutMs: 1_500,
+  });
+  if (!response.ok) {
+    throw new Error(`Hosted group email recipient callback failed with HTTP ${response.status}.`);
+  }
+
+  const payload = parseHostedEmailGroupRecipientsCallbackResponse(await response.json());
+  return normalizeHostedEmailAddressList(
+    payload.recipients.map((recipient) => recipient.address),
+  );
+}
+
 async function prepareHostedEmailSend(input: {
   config: HostedEmailConfig;
   existingThreadTarget: HostedEmailThreadTarget | null;
+  groupId: string | null;
+  groupRecipients: readonly string[] | null;
+  html: string | null;
   idempotencyKey: string | null;
   message: string;
   replyToMessageId: string | null;
@@ -185,8 +317,9 @@ async function prepareHostedEmailSend(input: {
   targetKind: HostedEmailSendRequest["targetKind"];
 }): Promise<{
   fromAddress: string;
+  isGroupDelivery: boolean;
   mimeMessage: string;
-  recipient: string;
+  recipients: string[];
   threadTarget: HostedEmailThreadTarget;
 }> {
   const fromAddress = normalizeHostedEmailAddress(input.config.fromAddress);
@@ -199,15 +332,30 @@ async function prepareHostedEmailSend(input: {
   const replyToMessageId = normalizeHostedEmailMessageReference(input.replyToMessageId)
     ?? existingThreadTarget?.lastMessageId
     ?? null;
+  const isGroupDelivery = Boolean(input.groupId);
 
-  // Hosted email stays owner-only by default. Even when inbound normalization
-  // captured reply-all participants, outbound replies collapse back to the
-  // primary recipient so send retries remain atomic.
-  const primaryRecipient = existingThreadTarget
-    ? existingThreadTarget.to[0] ?? null
-    : normalizeHostedEmailAddressList([input.target])[0] ?? null;
-  const to = [primaryRecipient];
+  // Direct/thread email stays owner-only by default. Group newsletters are the
+  // explicit shared-thread exception, with recipients resolved by web at send time.
+  const groupRecipients = normalizeHostedEmailAddressList(input.groupRecipients ?? []);
+  const primaryRecipient = resolveHostedEmailPrimaryRecipient({
+    existingThreadTarget,
+    groupRecipients,
+    isGroupDelivery,
+    target: input.target,
+  });
+  const to: string[] = isGroupDelivery
+    ? [...groupRecipients]
+    : primaryRecipient
+      ? [primaryRecipient]
+      : [];
   const cc: string[] = [];
+  if (!primaryRecipient || to.length === 0) {
+    throw new HostedEmailSendValidationError(
+      isGroupDelivery
+        ? "Hosted group email delivery requires at least one authorized recipient."
+        : "Hosted email delivery requires at least one recipient email address.",
+    );
+  }
 
   if (existingThreadTarget && requestedSubject) {
     throw new HostedEmailSendValidationError(
@@ -225,21 +373,31 @@ async function prepareHostedEmailSend(input: {
   const previousReferences = uniqueHostedEmailMessageReferences([
     ...(existingThreadTarget?.references ?? []),
     replyToMessageId,
+    input.targetKind === "group"
+      ? await createHostedEmailThreadRootReference({
+          fromAddress,
+          idempotencyKey: input.idempotencyKey,
+        })
+      : null,
   ]);
   const threadTarget = createHostedEmailThreadTarget({
-    cc,
+    cc: isGroupDelivery ? [] : cc,
+    groupId: isGroupDelivery ? input.groupId : null,
     lastMessageId: messageId,
     references: uniqueHostedEmailMessageReferences([
       ...previousReferences,
       messageId,
     ]),
     subject,
-    to,
+    targetKind: isGroupDelivery ? "group" : "explicit",
+    to: isGroupDelivery ? [] : to,
   });
 
   return {
     fromAddress,
+    isGroupDelivery,
     mimeMessage: buildRawMimeMessage({
+      bodyHtml: input.html,
       bodyText: input.message,
       cc,
       fromAddress,
@@ -250,12 +408,29 @@ async function prepareHostedEmailSend(input: {
       subject,
       to,
     }),
-    recipient: primaryRecipient,
+    recipients: to,
     threadTarget,
   };
 }
 
+function resolveHostedEmailPrimaryRecipient(input: {
+  existingThreadTarget: HostedEmailThreadTarget | null;
+  groupRecipients: readonly string[];
+  isGroupDelivery: boolean;
+  target: string;
+}): string | null {
+  if (input.isGroupDelivery) {
+    return input.groupRecipients[0] ?? null;
+  }
+  if (input.existingThreadTarget) {
+    return input.existingThreadTarget.to[0] ?? null;
+  }
+
+  return normalizeHostedEmailAddressList([input.target])[0] ?? null;
+}
+
 function buildRawMimeMessage(input: {
+  bodyHtml: string | null;
   bodyText: string;
   cc: string[];
   fromAddress: string;
@@ -279,9 +454,30 @@ function buildRawMimeMessage(input: {
       ? formatMimeHeaderLine("References", input.references.join(" "))
       : null,
     "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="utf-8"',
-    "Content-Transfer-Encoding: base64",
+    input.bodyHtml
+      ? formatMimeHeaderLine("Content-Type", `multipart/alternative; boundary="${createMimeBoundary(input.messageId)}"`)
+      : 'Content-Type: text/plain; charset="utf-8"',
+    input.bodyHtml ? null : "Content-Transfer-Encoding: base64",
   ].filter((value): value is string => value !== null);
+
+  if (input.bodyHtml) {
+    const boundary = createMimeBoundary(input.messageId);
+    const parts = [
+      `--${boundary}`,
+      'Content-Type: text/plain; charset="utf-8"',
+      "Content-Transfer-Encoding: base64",
+      "",
+      wrapMimeBase64(encodeUtf8Base64(input.bodyText)),
+      `--${boundary}`,
+      'Content-Type: text/html; charset="utf-8"',
+      "Content-Transfer-Encoding: base64",
+      "",
+      wrapMimeBase64(encodeUtf8Base64(input.bodyHtml)),
+      `--${boundary}--`,
+      "",
+    ];
+    return `${headers.join("\r\n")}\r\n\r\n${parts.join("\r\n")}`;
+  }
 
   return `${headers.join("\r\n")}\r\n\r\n${wrapMimeBase64(
     encodeUtf8Base64(input.bodyText),
@@ -302,6 +498,18 @@ async function createHostedEmailMessageId(input: {
   return `<hosted.${Date.now().toString(36)}.${randomHostedEmailKey()}@${domain}>`;
 }
 
+async function createHostedEmailThreadRootReference(input: {
+  fromAddress: string;
+  idempotencyKey: string | null;
+}): Promise<string | null> {
+  const idempotencyKey = input.idempotencyKey?.trim() ?? "";
+  if (idempotencyKey.length === 0) {
+    return null;
+  }
+  const domain = input.fromAddress.split("@")[1] ?? "localhost";
+  return `<hosted-thread.${await sha256HostedEmailHex(`${input.fromAddress}\u0000${idempotencyKey}`)}@${domain}>`;
+}
+
 function normalizeHostedEmailMessageReference(value: string | null): string | null {
   const trimmed = value?.trim() ?? "";
   if (trimmed.length === 0) {
@@ -311,6 +519,15 @@ function normalizeHostedEmailMessageReference(value: string | null): string | nu
     throw new HostedEmailSendValidationError(
       "Hosted email reply message id contains an unsafe line break.",
     );
+  }
+
+  return trimmed;
+}
+
+function normalizeHostedEmailDeliveryGroupId(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed || /[\r\n]/u.test(trimmed)) {
+    return null;
   }
 
   return trimmed;
@@ -335,6 +552,10 @@ async function sha256HostedEmailHex(value: string): Promise<string> {
 
 function wrapMimeBase64(value: string): string {
   return value.replace(/.{1,76}/gu, "$&\r\n").trimEnd();
+}
+
+function createMimeBoundary(messageId: string): string {
+  return `hosted-alt-${messageId.replace(/[^A-Za-z0-9]/gu, "").slice(0, 40) || randomHostedEmailKey()}`;
 }
 
 function encodeUtf8Base64(value: string): string {
