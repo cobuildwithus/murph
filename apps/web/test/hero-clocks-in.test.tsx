@@ -67,7 +67,7 @@ test("HeroClocksIn renders the reduced-motion group seed", async () => {
   assert.match(text, /walk challenge starts tomorrow\. loser buys steak dinner/);
   assert.match(text, /Baselines are set from everyone's wearables/);
   assert.match(text, /Saturday 9:02 AM/);
-  assert.match(text, /ok who's actually winning this thing/);
+  assert.match(text, /no shot you guys are keeping up with me this week/);
   assert.match(text, /Walk challenge · Day 5 of 7/);
   assert.match(text, /Standings, day 5 of 7\. Maya is one sunrise walk/);
   assert.match(text, /Weekly newsletter · Sunday 8:02 AM/);
@@ -125,7 +125,7 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
   );
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(550);
+    await vi.advanceTimersByTimeAsync(750);
   });
 
   // The group is a fresh conversation: the private exchange must be gone.
@@ -146,7 +146,7 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
   });
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(3_200);
+    await vi.advanceTimersByTimeAsync(3_400);
   });
 
   assert.ok(

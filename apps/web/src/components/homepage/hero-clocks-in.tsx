@@ -341,7 +341,7 @@ const GROUP_MESSAGES = {
   murphKickoff:
     "Baselines are set from everyone's wearables. I keep score, standings drop daily, and the winner gets dinner. Good luck.",
   timestamp: "Saturday 9:02 AM",
-  theoQuestion: "ok who's actually winning this thing",
+  theoQuestion: "no shot you guys are keeping up with me this week 😤",
   murphStandings:
     "Standings, day 5 of 7. Maya is one sunrise walk from taking the lead. Theo, bold words for a man who logged 11 minutes yesterday.",
   mayaReply: "😂 not the sunrise walk pressure",
@@ -452,9 +452,12 @@ const USER_BUBBLE_AT = 1400;
 const TYPING_AT = 2200;
 const REPLY_AT = 3600;
 const CYCLE_LENGTH = 7800;
-const COMPOSE_SHEET_UP_AT = 900;
-const GROUP_SWAP_AT = 1400;
-const GROUP_FACES_LAUNCH_AT = 2300;
+// Give the final act-1 reply breathing room before the compose sheet covers
+// it (auto path only; a direct person-floater click starts the sheet fast).
+const GROUP_SEQUENCE_BREATHER = 1900;
+const COMPOSE_SHEET_UP_AT = 700;
+const GROUP_SWAP_AT = 1600;
+const GROUP_FACES_LAUNCH_AT = 2600;
 const GROUP_FACE_FLIGHT_MS = 1400;
 // Members fly in as one quick burst: barely staggered so the group forms
 // together instead of trickling in one by one.
@@ -463,13 +466,13 @@ const GROUP_LAST_CHIP_AT =
   GROUP_FACES_LAUNCH_AT +
   (GROUP_MEMBERS.length - 1) * GROUP_JOIN_STAGGER +
   GROUP_FACE_FLIGHT_MS;
-const COMPOSE_SHEET_REVEAL_AT = GROUP_LAST_CHIP_AT + 1000;
-const COMPOSE_SHEET_FADE_MS = 250;
-const GROUP_KICKOFF_USER_AT = COMPOSE_SHEET_REVEAL_AT + 600;
-const GROUP_KICKOFF_TYPING_AT = COMPOSE_SHEET_REVEAL_AT + 1400;
-const GROUP_KICKOFF_REPLY_AT = COMPOSE_SHEET_REVEAL_AT + 2600;
-const GROUP_TIMESTAMP_AT = COMPOSE_SHEET_REVEAL_AT + 5200;
-const GROUP_BEATS_START_AT = COMPOSE_SHEET_REVEAL_AT + 6000;
+const COMPOSE_SHEET_REVEAL_AT = GROUP_LAST_CHIP_AT + 900;
+const COMPOSE_SHEET_FADE_MS = 350;
+const GROUP_KICKOFF_USER_AT = COMPOSE_SHEET_REVEAL_AT + 300;
+const GROUP_KICKOFF_TYPING_AT = COMPOSE_SHEET_REVEAL_AT + 1100;
+const GROUP_KICKOFF_REPLY_AT = COMPOSE_SHEET_REVEAL_AT + 2300;
+const GROUP_TIMESTAMP_AT = COMPOSE_SHEET_REVEAL_AT + 4900;
+const GROUP_BEATS_START_AT = COMPOSE_SHEET_REVEAL_AT + 5700;
 const GROUP_BEAT_GAP = 6500;
 const MAX_ITEMS = 30;
 
@@ -947,7 +950,10 @@ export function HeroClocksIn({
         setTyping(false);
         appendItems(buildExchangeReplyItems(ex));
         if (cycleRef.current >= AUTO_RUN_EXCHANGES.length) {
-          startGroupSequence({ allowAfterEngaged: false });
+          queue(
+            () => startGroupSequence({ allowAfterEngaged: false }),
+            GROUP_SEQUENCE_BREATHER,
+          );
         }
       }, REPLY_AT);
 
@@ -1124,9 +1130,17 @@ export function HeroClocksIn({
         .hero-typing-dot {
           animation: hero-typing-bounce 1.2s ease-in-out infinite;
         }
+        @keyframes hero-caret-blink {
+          0%, 45% { opacity: 1; }
+          50%, 95% { opacity: 0; }
+          100% { opacity: 1; }
+        }
+        .hero-compose-caret {
+          animation: hero-caret-blink 1.1s step-end infinite;
+        }
         .hero-scroller::-webkit-scrollbar { display: none; }
         @media (prefers-reduced-motion: reduce) {
-          .hero-floater, .hero-floater--active, .hero-msg-in, .hero-typing-dot {
+          .hero-floater, .hero-floater--active, .hero-msg-in, .hero-typing-dot, .hero-compose-caret {
             animation: none !important;
           }
           .hero-compose-sheet, .hero-copy-layer, .hero-header-layer {
@@ -1430,35 +1444,42 @@ function ComposeSheet({
     <div
       aria-hidden={state !== "up"}
       className={cn(
-        "hero-compose-sheet pointer-events-none absolute inset-x-0 bottom-0 top-0 z-30 rounded-t-[14px] border-t border-[#c4a882]/25 bg-[#f5f0e8] shadow-[0_-10px_24px_-22px_rgba(45,52,54,0.75)] transition-[opacity,transform] ease-out",
+        "hero-compose-sheet pointer-events-none absolute inset-x-0 bottom-0 top-0 z-30 rounded-t-[18px] bg-[#faf6ee] shadow-[0_-12px_32px_-18px_rgba(45,52,54,0.45)] ring-1 ring-inset ring-[#c4a882]/15 transition-[opacity,transform]",
         state === "up" &&
-          "translate-y-0 opacity-100 duration-[420ms]",
+          "translate-y-0 opacity-100 duration-[520ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
         state === "pending" &&
-          "translate-y-full opacity-100 duration-[420ms]",
+          "translate-y-full opacity-100 duration-[520ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
         state === "leaving" &&
-          "translate-y-0 opacity-0 duration-[250ms]",
+          "translate-y-3 opacity-0 duration-[350ms] ease-in",
       )}
     >
-      <div className="relative flex h-[38px] items-center justify-center border-b border-[#c4a882]/15 px-3">
-        <p className="text-[12px] font-semibold tracking-tight text-[#2d3436]">
+      <div className="relative flex h-[52px] items-center justify-center px-4">
+        <p className="text-[15px] font-semibold tracking-tight text-[#2d3436]">
           New Message
         </p>
         <button
           type="button"
           tabIndex={-1}
           aria-label="Close new message composer"
-          className="absolute right-3 top-1/2 flex size-[22px] -translate-y-1/2 items-center justify-center rounded-full bg-[#2d3436]/10 text-[12px] font-semibold leading-none text-[#2d3436]"
+          className="absolute right-3 top-1/2 flex size-[30px] -translate-y-1/2 items-center justify-center rounded-full bg-[#2d3436]/[0.08]"
         >
-          ×
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path
+              d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5"
+              stroke="#2d3436"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          </svg>
         </button>
       </div>
 
-      <div className="px-3 pt-2">
-        <div className="relative flex min-h-[36px] w-full items-center gap-1.5 rounded-[12px] bg-white/70 py-1.5 pl-2.5 pr-8 ring-1 ring-inset ring-[#c4a882]/20">
-          <span className="shrink-0 text-[10px] font-medium text-[#736a58]">
+      <div className="px-3.5">
+        <div className="relative flex min-h-[44px] w-full flex-wrap items-center gap-1.5 rounded-[18px] bg-white/75 py-2 pl-4 pr-10 ring-1 ring-inset ring-[#c4a882]/20">
+          <span className="shrink-0 text-[13px] leading-none text-[#736a58]/80">
             To:
           </span>
-          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             <RecipientChip
               avatarSrc={murphHeadshotSrc}
               label="Murph"
@@ -1470,14 +1491,25 @@ function ComposeSheet({
                 label={member.name}
               />
             ))}
+            <span
+              aria-hidden="true"
+              className="hero-compose-caret h-[16px] w-[1.5px] shrink-0 rounded-full bg-[#5a6e32]"
+            />
           </div>
           <button
             type="button"
             tabIndex={-1}
             aria-label="Add recipient"
-            className="absolute right-2 top-1/2 flex size-[20px] -translate-y-1/2 items-center justify-center rounded-full bg-[#2d3436]/10 text-[14px] font-semibold leading-none text-[#2d3436]"
+            className="absolute right-2.5 top-1/2 flex size-[26px] -translate-y-1/2 items-center justify-center rounded-full bg-[#2d3436]/[0.08]"
           >
-            +
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path
+                d="M6 1.2V10.8M1.2 6H10.8"
+                stroke="#2d3436"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+            </svg>
           </button>
         </div>
       </div>
@@ -1495,11 +1527,11 @@ function RecipientChip({
   return (
     <span
       data-hero-recipient-chip={label}
-      className="hero-msg-in inline-flex h-[24px] shrink-0 items-center gap-1 rounded-full border border-[#c4a882]/25 bg-white py-0.5 pl-1 pr-2 text-[11px] font-medium tracking-tight text-[#2d3436]"
+      className="hero-msg-in inline-flex h-[28px] shrink-0 items-center gap-1.5 rounded-full border border-[#c4a882]/25 bg-white py-0.5 pl-1 pr-2.5 text-[12.5px] font-medium tracking-tight text-[#2d3436]"
     >
       <span
         aria-hidden="true"
-        className="size-[16px] rounded-full bg-cover bg-center ring-1 ring-[#c4a882]/25"
+        className="size-[20px] rounded-full bg-cover bg-center ring-1 ring-[#c4a882]/25"
         style={{ backgroundImage: `url('${avatarSrc}')` }}
       />
       {label}
