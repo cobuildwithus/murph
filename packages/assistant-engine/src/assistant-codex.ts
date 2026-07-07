@@ -167,6 +167,10 @@ const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   'assistant.codex.app_server_timing'
+const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
+  'murph.assistant-codex-transport-diagnostics.v1'
+const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_TYPE =
+  'assistant.codex.transport_diagnostics'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
 // Bound on distinct subagent threads whose token usage is tracked per parent
 // turn. Far above any sane spawn fan-out; threads past the cap are counted
@@ -2075,6 +2079,175 @@ function isCodexTurnCompletedMethod(method: string | null): boolean {
   return method === 'turn/completed' || method === 'turn.completed'
 }
 
+type CodexTransportDiagnosticSource = {
+  additionalDetails: string | null
+  message: string
+  sourceMethod: 'error' | 'warning'
+  threadIdPresent: boolean
+  turnIdPresent: boolean
+  willRetry: boolean | null
+}
+
+function buildCodexTransportDiagnosticsTraceEvent(input: {
+  codexThreadId: string | null
+  message: CodexRpcMessage
+  method: string | null
+  providerActionCount: number
+  turnId: string | null
+}): Record<string, unknown> | null {
+  const source = readCodexTransportDiagnosticSource(input.message, input.method)
+  if (!source) {
+    return null
+  }
+
+  const diagnosticText = [source.message, source.additionalDetails]
+    .filter((value): value is string => typeof value === 'string')
+    .join('\n')
+    .slice(0, 4096)
+  const normalizedText = diagnosticText.toLowerCase()
+  const retryProgress = readCodexTransportRetryProgress(diagnosticText)
+  const fallbackActivated =
+    normalizedText.includes('falling back from websockets to https transport')
+  const idleTimeout =
+    normalizedText.includes('idle timeout waiting for websocket') ||
+    normalizedText.includes('idle timeout waiting for sse')
+  const streamDisconnected =
+    normalizedText.includes('stream disconnected') ||
+    normalizedText.includes('response stream disconnected')
+
+  if (!fallbackActivated && !idleTimeout && !streamDisconnected && !retryProgress) {
+    return null
+  }
+
+  const transport = normalizedText.includes('websocket')
+    ? 'websocket'
+    : normalizedText.includes('https') ||
+        normalizedText.includes('http') ||
+        normalizedText.includes('sse')
+      ? 'http'
+      : 'unknown'
+  const eventKind = fallbackActivated
+    ? 'transport-fallback'
+    : idleTimeout
+      ? 'stream-idle-timeout'
+      : retryProgress
+        ? 'stream-retry'
+        : 'stream-disconnected'
+
+  return {
+    schema: CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
+    type: CODEX_TRANSPORT_DIAGNOSTICS_TRACE_TYPE,
+    codexTransportAdditionalDetailsPresent: source.additionalDetails !== null,
+    codexTransportErrorMessageLength: diagnosticText.length,
+    codexTransportErrorMessagePresent: source.message.length > 0,
+    codexTransportEventKind: eventKind,
+    codexTransportFallbackActivated: fallbackActivated,
+    codexTransportIdleTimeout: idleTimeout,
+    codexTransportProviderActionCount: input.providerActionCount,
+    codexTransportRetryCount: retryProgress?.retryCount ?? null,
+    codexTransportRetryMax: retryProgress?.retryMax ?? null,
+    codexTransportSourceMethod: source.sourceMethod,
+    codexTransportStreamDisconnected: streamDisconnected,
+    codexTransportThreadIdPresent:
+      source.threadIdPresent || input.codexThreadId !== null,
+    codexTransportTransport: transport,
+    codexTransportTurnIdPresent: source.turnIdPresent || input.turnId !== null,
+    codexTransportWillRetry: source.willRetry,
+  }
+}
+
+function readCodexTransportDiagnosticSource(
+  message: CodexRpcMessage,
+  method: string | null,
+): CodexTransportDiagnosticSource | null {
+  const params = readCodexRecordField(message, 'params')
+  if (method === 'warning') {
+    const warningMessage = readCodexStringField(params, 'message')
+    if (!warningMessage) {
+      return null
+    }
+    return {
+      additionalDetails: null,
+      message: warningMessage,
+      sourceMethod: 'warning',
+      threadIdPresent: readCodexStringField(params, 'threadId') !== null,
+      turnIdPresent: false,
+      willRetry: null,
+    }
+  }
+
+  if (method !== 'error') {
+    return null
+  }
+
+  const error = readCodexRecordField(params, 'error')
+  const errorMessage = readCodexStringField(error, 'message')
+  if (!errorMessage) {
+    return null
+  }
+
+  return {
+    additionalDetails: readCodexStringField(error, 'additionalDetails'),
+    message: errorMessage,
+    sourceMethod: 'error',
+    threadIdPresent: readCodexStringField(params, 'threadId') !== null,
+    turnIdPresent: readCodexStringField(params, 'turnId') !== null,
+    willRetry: readCodexBooleanField(params, 'willRetry'),
+  }
+}
+
+function readCodexTransportRetryProgress(
+  value: string,
+): { retryCount: number; retryMax: number } | null {
+  const match = /\bReconnecting\.\.\.\s+(\d+)\/(\d+)\b/iu.exec(value)
+  if (!match) {
+    return null
+  }
+
+  const retryCount = Number(match[1])
+  const retryMax = Number(match[2])
+  return Number.isSafeInteger(retryCount) &&
+    retryCount >= 0 &&
+    Number.isSafeInteger(retryMax) &&
+    retryMax >= 0
+    ? { retryCount, retryMax }
+    : null
+}
+
+function readCodexRecordField(
+  value: unknown,
+  key: string,
+): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  const fieldValue = (value as Record<string, unknown>)[key]
+  return fieldValue && typeof fieldValue === 'object' && !Array.isArray(fieldValue)
+    ? fieldValue as Record<string, unknown>
+    : null
+}
+
+function readCodexStringField(
+  value: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  const fieldValue = value?.[key]
+  if (typeof fieldValue !== 'string') {
+    return null
+  }
+
+  const normalized = fieldValue.trim()
+  return normalized.length > 0 ? normalized : null
+}
+
+function readCodexBooleanField(
+  value: Record<string, unknown> | null,
+  key: string,
+): boolean | null {
+  const fieldValue = value?.[key]
+  return typeof fieldValue === 'boolean' ? fieldValue : null
+}
+
 async function runCodexAppServerTurnOnProcess(
   codexProcess: CodexAppServerProcess,
   input: CodexAppServerPreparedTurnInput,
@@ -3081,6 +3254,26 @@ async function runCodexAppServerTurnOnProcess(
       normalizedEvent,
       rawEvent: message,
     })
+    const transportDiagnosticsTraceEvent = input.onTraceEvent
+      ? buildCodexTransportDiagnosticsTraceEvent({
+          codexThreadId,
+          message,
+          method,
+          providerActionCount,
+          turnId,
+        })
+      : null
+    if (transportDiagnosticsTraceEvent) {
+      try {
+        input.onTraceEvent?.({
+          codexThreadId: null,
+          rawEvent: transportDiagnosticsTraceEvent,
+          updates: [],
+        })
+      } catch {
+        // Transport diagnostics are metadata-only and must not block turns.
+      }
+    }
     const providerActionKey = extractCodexProviderActionKey(normalizedEvent)
     if (providerActionKey && !providerActionItemIds.has(providerActionKey)) {
       providerActionItemIds.add(providerActionKey)

@@ -44,6 +44,7 @@ import {
 import {
   buildHostedCodexConfigToml,
   HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
+  HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
 } from "../src/hosted-runtime/codex-config.ts";
 import {
@@ -77,6 +78,15 @@ test("hosted Codex memory diagnostics expose only safe config metadata", () => {
     codexOperatorMemoryMinRolloutIdleHours: 1,
     codexOperatorMemoryMode: "codex-native-operator-context",
     codexOperatorMemoryUseMemories: true,
+  });
+});
+
+test("hosted Codex provider transport diagnostics expose only safe config metadata", () => {
+  assert.deepEqual(HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS, {
+    codexProviderRequestMaxRetries: 4,
+    codexProviderStreamIdleTimeoutMs: 90_000,
+    codexProviderStreamMaxRetries: 5,
+    codexProviderTransportMode: "codex-native-provider-transport",
   });
 });
 
@@ -161,6 +171,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /wire_api = "responses"/u);
   assert.match(config, /^supports_websockets = true$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /\[features\]\nplugins = false\nmulti_agent_v2 = true\nmemories = true/u);
@@ -386,6 +397,7 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /requires_openai_auth = false/u);
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
+  assert.match(config, /stream_idle_timeout_ms = 90000/u);
   assert.match(config, /request_max_retries = 4/u);
   assert.match(config, /stream_max_retries = 5/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
@@ -1274,6 +1286,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       'base_url = "https://api.openai.com/v1"',
       'env_key = "OPENAI_API_KEY"',
       'wire_api = "responses"',
+      "stream_idle_timeout_ms = 90000",
       "requires_openai_auth = false",
       "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",

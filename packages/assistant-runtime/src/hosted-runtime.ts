@@ -50,6 +50,7 @@ import {
 } from "./hosted-runtime/environment.ts";
 import {
   HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
+  HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
 } from "./hosted-runtime/codex-config.ts";
 import {
@@ -1113,6 +1114,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         codexEffectiveModelProviderId:
           hostedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
         ...HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
+        ...HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
         runtimeEnvKeyCount: Object.keys(hostedCodexRuntime.runtimeEnv).length,
         voiceMemoElevenLabsApiKeyConfigured:
           hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "ELEVENLABS_API_KEY"),

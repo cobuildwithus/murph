@@ -445,6 +445,12 @@ describe("hosted workspace runtime entrypoint", () => {
         codexPrepareDoneLog?.details.codexEffectiveModelProviderId,
         "hosted-openai",
       );
+      expect(codexPrepareDoneLog?.details).toEqual(expect.objectContaining({
+        codexProviderRequestMaxRetries: 4,
+        codexProviderStreamIdleTimeoutMs: 90_000,
+        codexProviderStreamMaxRetries: 5,
+        codexProviderTransportMode: "codex-native-provider-transport",
+      }));
       expect(phaseLogs.every((entry) =>
         typeof entry.details.runtimeElapsedMs === "number"
       )).toBe(true);

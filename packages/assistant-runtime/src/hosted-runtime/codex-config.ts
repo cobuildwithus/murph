@@ -72,6 +72,7 @@ const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 5;
+const HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
 const HOSTED_CODEX_OPERATOR_MEMORY_CONFIG = {
   disableOnExternalContext: false,
   featureEnabled: true,
@@ -106,6 +107,13 @@ export const HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS = {
   codexOperatorMemoryMode: "codex-native-operator-context",
   codexOperatorMemoryUseMemories:
     HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.useMemories,
+} as const;
+export const HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS = {
+  codexProviderRequestMaxRetries: HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
+  codexProviderStreamIdleTimeoutMs:
+    HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
+  codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
+  codexProviderTransportMode: "codex-native-provider-transport",
 } as const;
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
@@ -521,6 +529,7 @@ export function buildHostedCodexConfigToml(input: {
     ...(input.provider.supportsWebSockets
       ? ["supports_websockets = true"]
       : []),
+    `stream_idle_timeout_ms = ${HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS}`,
     "requires_openai_auth = false",
     ...(input.writeProviderRetryDefaults
       ? [
