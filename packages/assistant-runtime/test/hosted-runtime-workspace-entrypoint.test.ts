@@ -448,7 +448,7 @@ describe("hosted workspace runtime entrypoint", () => {
       expect(codexPrepareDoneLog?.details).toEqual(expect.objectContaining({
         codexProviderRequestMaxRetries: 4,
         codexProviderStreamIdleTimeoutMs: 90_000,
-        codexProviderStreamMaxRetries: 5,
+        codexProviderStreamMaxRetries: 0,
         codexProviderTransportMode: "codex-native-provider-transport",
       }));
       expect(phaseLogs.every((entry) =>
