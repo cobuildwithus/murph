@@ -488,7 +488,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
       buildFamilyInviteAcceptedResponse({
         chatId: summary.chatId,
         memberId: familyAcceptance.memberId,
-        message: buildHostedFamilyInviteAcceptedReplyText(),
+        message: buildHostedFamilyInviteAcceptedReplyText({
+          memberId: familyAcceptance.memberId,
+        }),
         messageId: summary.messageId,
         occurredAt,
         sourceEventId: input.event.event_id,

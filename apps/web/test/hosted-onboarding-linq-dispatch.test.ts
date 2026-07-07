@@ -2873,6 +2873,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.buildHostedFamilyInviteAcceptedReplyText).toHaveBeenCalledWith({
+      memberId: "member_family",
+    });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
       chatId: "chat_123",
       idempotencyKey: "linq-message:evt_family_linq",
@@ -3389,6 +3392,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.buildHostedFamilyInviteAcceptedReplyText).toHaveBeenLastCalledWith({
+      memberId: "member_family",
+    });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenLastCalledWith({
       chatId: "chat_123",
       idempotencyKey: "linq-message:evt_family_linq_retry",
