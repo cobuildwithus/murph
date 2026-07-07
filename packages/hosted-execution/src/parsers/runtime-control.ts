@@ -84,6 +84,7 @@ import {
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
@@ -792,16 +793,36 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
   const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
   assertAllowedObjectKeys(
     record,
-    new Set(["projectionKinds"]),
+    new Set(["messageTemplate", "projectionKinds"]),
     "Hosted runtime group tool post_join_offer joinOffer",
   );
+  const messageTemplate = record.messageTemplate === undefined || record.messageTemplate === null
+    ? null
+    : parseHostedRuntimeGroupJoinOfferMessageTemplate(record.messageTemplate);
   return {
+    ...(messageTemplate === null ? {} : { messageTemplate }),
     projectionKinds: parseHostedRuntimeGroupProjectionKindArray(
       record.projectionKinds,
       "Hosted runtime group tool post_join_offer projectionKinds",
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
     ),
   };
+}
+
+function parseHostedRuntimeGroupJoinOfferMessageTemplate(value: unknown): string {
+  const template = requireString(
+    value,
+    "Hosted runtime group tool post_join_offer messageTemplate",
+  ).trim().replace(/\s+/gu, " ");
+  if (
+    template.length === 0
+    || template.length > HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH
+  ) {
+    throw new TypeError(
+      `Hosted runtime group tool post_join_offer messageTemplate must be between 1 and ${HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH} characters.`,
+    );
+  }
+  return template;
 }
 
 function parseHostedRuntimeGroupToolSelfOptOutContext(

@@ -4,6 +4,7 @@ import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
@@ -328,7 +329,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer tells people to like the server-owned offer message, then liking grants membership plus only the posted permission snapshot. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -374,7 +375,14 @@ export const MURPH_GROUP_TOOL = {
           enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
         },
         description:
-          'Optional bounded health projections that liking the server-owned offer message will grant as a fixed snapshot. The server copy always states that profile display name is shared too.',
+          'Optional bounded health projections that liking the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that profile display name is shared too.',
+      },
+      messageTemplate: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
+        description:
+          'Required for action="post_join_offer". Write one short natural group-chat message, not a fixed script. Mention that liking or reacting to this message joins the group. Include {{join_url}} exactly once where the server should insert the exact join URL, and {{share_scope}} exactly once where the server should insert the exact shared-scope phrase. Do not include any other URL.',
       },
     },
     required: ['action'],
@@ -748,6 +756,20 @@ const generateImageArgumentsSchema = z
   })
   .strict()
 
+const GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = '{{join_url}}'
+const GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = '{{share_scope}}'
+
+function hasUsableGroupJoinOfferPlaceholders(messageTemplate: string): boolean {
+  return (
+    messageTemplate.includes(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
+    && messageTemplate.indexOf(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
+      === messageTemplate.lastIndexOf(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
+    && messageTemplate.includes(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
+    && messageTemplate.indexOf(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
+      === messageTemplate.lastIndexOf(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
+  )
+}
+
 const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
@@ -767,6 +789,15 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('post_join_offer'),
+      messageTemplate: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH)
+        .refine(hasUsableGroupJoinOfferPlaceholders, {
+          message:
+            'post_join_offer messageTemplate must contain {{join_url}} exactly once and {{share_scope}} exactly once',
+        }),
       projectionKinds: z
         .array(z.enum(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS))
         .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length)
@@ -2843,16 +2874,14 @@ function parseGroupArguments(
   }
   if (parsed.data.action === 'post_join_offer') {
     const joinOffer = {
+      messageTemplate: parsed.data.messageTemplate,
       ...(parsed.data.projectionKinds !== undefined
         ? { projectionKinds: parsed.data.projectionKinds }
         : {}),
     }
     return {
       ok: true,
-      request:
-        Object.keys(joinOffer).length > 0
-          ? { action: 'post_join_offer', joinOffer }
-          : { action: 'post_join_offer' },
+      request: { action: 'post_join_offer', joinOffer },
     }
   }
   if (

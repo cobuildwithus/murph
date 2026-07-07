@@ -175,7 +175,10 @@ On each scheduled run:
 
 If a member never granted email sharing and expresses interest, or the group
 asks how someone can join the newsletter, post a join offer scoped to
-`group-email.v0` so a like grants it; never repeatedly re-offer to someone who
+`group-email.v0` so a like grants it. For the join offer, write a short natural
+`messageTemplate` in your own words, not a fixed script; mention that liking or
+reacting to this message joins, include `{{join_url}}` exactly once, and include
+`{{share_scope}}` exactly once; never repeatedly re-offer to someone who
 declined.
 
 If a member asks to be removed from the newsletter in the group chat, call

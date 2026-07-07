@@ -56,6 +56,10 @@ describe("murph.group dynamic tool", () => {
       .toEqual([...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS]);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionKinds.items.enum)
       .toEqual([...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS]);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
+      .toContain("{{join_url}}");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
+      .toContain("{{share_scope}}");
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
@@ -75,12 +79,16 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       projectionKinds: ["sleep-times.v0"],
     }))).toEqual({
       kind: "group",
       request: {
         action: "post_join_offer",
         joinOffer: {
+          messageTemplate:
+            "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
           projectionKinds: ["sleep-times.v0"],
         },
       },
@@ -100,6 +108,8 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       linqThread: { chatId: "chat_hijack" },
     }))?.kind).toBe("invalid-group-arguments");
 
@@ -170,12 +180,22 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       intro: "Like this to join.",
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       projectionKinds: ["all-health-data"],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate: "React here to join. Details: {{join_url}}.",
+      projectionKinds: ["sleep-times.v0"],
     }))?.kind).toBe("invalid-group-arguments");
   });
 });

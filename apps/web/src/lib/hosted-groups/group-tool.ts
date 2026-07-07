@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupPostJoinOfferRequest,
@@ -70,6 +71,9 @@ import {
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
+
+const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
+const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
 
 export type HostedRuntimeGroupToolAccessClassification =
   | "owner_active"
@@ -371,6 +375,15 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   const projectionKinds = normalizeHostedVaultShareProjectionKinds(
     input.joinOffer?.projectionKinds ?? [],
   );
+  const messageTemplate = normalizeHostedGroupJoinOfferMessageTemplate(
+    input.joinOffer?.messageTemplate ?? null,
+  );
+  if (
+    !messageTemplate
+    || !isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate)
+  ) {
+    return unavailable("join_offer_message_template_unavailable");
+  }
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
       memberId: input.memberId,
@@ -402,6 +415,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
+    messageTemplate,
     projectionKinds,
   });
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
@@ -447,24 +461,50 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
 function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
+  messageTemplate: string;
   projectionKinds: readonly HostedVaultShareProjectionKind[];
 }): string {
-  return [
-    "Like this message to join this Murph group.",
-    renderHostedGroupJoinOfferScopeSentence(input.projectionKinds),
-    `You can manage what you share anytime from the join page: ${input.joinUrl}`,
-  ].join(" ");
+  return input.messageTemplate
+    .replace(
+      HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+      renderHostedGroupJoinOfferShareScope(input.projectionKinds),
+    )
+    .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, input.joinUrl);
 }
 
-function renderHostedGroupJoinOfferScopeSentence(
+function normalizeHostedGroupJoinOfferMessageTemplate(
+  messageTemplate: string | null,
+): string | null {
+  if (messageTemplate === null) return null;
+  const normalized = messageTemplate.trim().replace(/\s+/gu, " ");
+  if (
+    normalized.length === 0
+    || normalized.length > HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
+function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): boolean {
+  return (
+    messageTemplate.includes(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
+    && messageTemplate.indexOf(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
+      === messageTemplate.lastIndexOf(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
+    && messageTemplate.includes(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
+    && messageTemplate.indexOf(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
+      === messageTemplate.lastIndexOf(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
+  );
+}
+
+function renderHostedGroupJoinOfferShareScope(
   projectionKinds: readonly HostedVaultShareProjectionKind[],
 ): string {
   const labels = projectHostedVaultShareProjectionDisplays(projectionKinds)
     .map((display) => display.label.toLowerCase());
-  const scope = labels.length > 0
+  return labels.length > 0
     ? `your Murph profile name and ${formatHumanList(labels)}`
     : "your Murph profile name";
-  return `Liking this shares ${scope} with this group.`;
 }
 
 function formatHumanList(values: readonly string[]): string {

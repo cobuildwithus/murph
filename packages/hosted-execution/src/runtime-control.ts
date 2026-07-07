@@ -777,6 +777,7 @@ export const HOSTED_RUNTIME_GROUP_KINDS = [
 export type HostedRuntimeGroupKind = (typeof HOSTED_RUNTIME_GROUP_KINDS)[number];
 
 export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
+export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
 
 export interface HostedRuntimeGroupMemberSummary {
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
@@ -804,8 +805,11 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 }
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
-  // Closed over the individually selectable kinds; the offer always includes
-  // the membership-implied profile-name.v0 share in its deterministic copy.
+  // Model-authored natural group-chat message with server-filled
+  // {{join_url}} and {{share_scope}} placeholders.
+  messageTemplate?: string | null;
+  // Closed over the individually selectable kinds; the server-filled share
+  // scope always includes the membership-implied profile-name.v0 share.
   projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
 }
 

@@ -648,6 +648,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "post_join_offer",
         joinOffer: {
+          messageTemplate:
+            "React here and you're in. Joining shares {{share_scope}} with this group; manage it at {{join_url}}.",
           projectionKinds: ["sleep-times.v0"],
         },
         linqThread: LINQ_THREAD,
@@ -673,26 +675,13 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       expect.objectContaining({
         chatId: "chat_group_1",
         idempotencyKey: expect.stringMatching(/^group-join-offer:hgrp_123:/u),
-        message: expect.not.stringContaining("Want in on the sleep check-in?"),
+        message:
+          "React here and you're in. Joining shares your Murph profile name and recent sleep timing with this group; manage it at https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: expect.stringContaining("Like this message to join this Murph group."),
-      }),
-    );
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: expect.stringContaining(
-          "Liking this shares your Murph profile name and recent sleep timing with this group.",
-        ),
-      }),
-    );
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: expect.stringContaining(
-          "You can manage what you share anytime from the join page: https://www.withmurph.ai/groups/join/abc123",
-        ),
+        message: expect.not.stringContaining("Like this message to join this Murph group."),
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -710,6 +699,24 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
+  it("does not create or send a join offer without the required message template", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "post_join_offer", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "join_offer_message_template_unavailable",
+      },
+    });
+
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
   it("does not bind an offer when the provider omits the sent message id", async () => {
     mocks.sendHostedLinqChatMessage.mockResolvedValue({
       chatId: "chat_group_1",
@@ -718,7 +725,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
-      request: { action: "post_join_offer", linqThread: LINQ_THREAD },
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+        },
+        linqThread: LINQ_THREAD,
+      },
     })).resolves.toEqual({
       action: "post_join_offer",
       result: {

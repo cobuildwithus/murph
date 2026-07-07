@@ -75,11 +75,19 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({
       action: "post_join_offer",
-      joinOffer: { projectionKinds: ["sleep-times.v0"] },
+      joinOffer: {
+        messageTemplate:
+          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+        projectionKinds: ["sleep-times.v0"],
+      },
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "post_join_offer",
-      joinOffer: { projectionKinds: ["sleep-times.v0"] },
+      joinOffer: {
+        messageTemplate:
+          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+        projectionKinds: ["sleep-times.v0"],
+      },
       linqThread: {
         authority: ROUTE_AUTHORITY,
         chatId: "chat_group_1",
@@ -109,8 +117,20 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       ],
     });
 
-    await groupTool.request({ action: "post_join_offer" });
-    expect(request).toHaveBeenLastCalledWith({ action: "post_join_offer" });
+    await groupTool.request({
+      action: "post_join_offer",
+      joinOffer: {
+        messageTemplate:
+          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      },
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "post_join_offer",
+      joinOffer: {
+        messageTemplate:
+          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      },
+    });
   });
 
   it("dedupes repeated contexts for the same thread and skips non-iMessage or direct contexts", async () => {
@@ -169,11 +189,19 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({
       action: "post_join_offer",
-      joinOffer: { projectionKinds: ["sleep-times.v0"] },
+      joinOffer: {
+        messageTemplate:
+          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+        projectionKinds: ["sleep-times.v0"],
+      },
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "post_join_offer",
-      joinOffer: { projectionKinds: ["sleep-times.v0"] },
+      joinOffer: {
+        messageTemplate:
+          "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+        projectionKinds: ["sleep-times.v0"],
+      },
     });
   });
 

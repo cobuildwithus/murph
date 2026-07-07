@@ -563,11 +563,14 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
       joinOffer: {
+        messageTemplate:
+          "  React here to join. Shares {{share_scope}}. Page: {{join_url}}.  ",
         projectionKinds: ["group-email.v0"],
       },
     })).toEqual({
       action: "post_join_offer",
       joinOffer: {
+        messageTemplate: "React here to join. Shares {{share_scope}}. Page: {{join_url}}.",
         projectionKinds: ["group-email.v0"],
       },
     });
@@ -628,6 +631,12 @@ describe("parseHostedRuntimeGroupTool", () => {
         joinOffer: { intro: "Like this to join us." },
       })
     ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
+        joinOffer: { messageTemplate: "   " },
+      })
+    ).toThrow(/messageTemplate must be between/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "post_join_offer",
