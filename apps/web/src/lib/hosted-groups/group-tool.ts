@@ -84,6 +84,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   create_join_link: "owner_active",
   post_join_offer: "owner_active",
+  preflight_set_chat_avatar: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
   revoke_own_email_share: "participant_aware",
@@ -131,6 +132,13 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "set_chat_avatar") {
     return handleHostedRuntimeGroupSetChatAvatar({
       groupChatIconUrl: input.request.groupChatIconUrl,
+      linqThread: input.request.linqThread ?? null,
+      memberId: input.memberId,
+    });
+  }
+
+  if (input.request.action === "preflight_set_chat_avatar") {
+    return handleHostedRuntimeGroupSetChatAvatarPreflight({
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
@@ -524,30 +532,22 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
     result: { status: "unavailable", unavailableReason },
   });
 
+  const access = await checkHostedRuntimeGroupSetChatAvatarAccess({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if (access.status !== "ok") {
+    return unavailable(access.unavailableReason);
+  }
+
   const groupChatIconUrl = normalizeHostedGroupChatIconUrl(input.groupChatIconUrl);
   if (!groupChatIconUrl) {
     return unavailable("group_chat_icon_url_unavailable");
   }
 
-  const authorized = await authorizeHostedRuntimeGroupLinqThread({
-    linqThread: input.linqThread,
-    memberId: input.memberId,
-  });
-  if ("unavailableReason" in authorized) {
-    return unavailable(authorized.unavailableReason);
-  }
-
-  const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
-    memberId: input.memberId,
-    prisma: getPrisma(),
-  });
-  if (ownerAccess.status !== "ok") {
-    return unavailable(ownerAccess.unavailableReason);
-  }
-
   try {
     await updateHostedLinqChatAvatar({
-      chatId: authorized.chatId,
+      chatId: access.chatId,
       groupChatIconUrl,
     });
   } catch {
@@ -556,8 +556,53 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
 
   return {
     action: "set_chat_avatar",
+    result: { status: "requested" },
+  };
+}
+
+async function handleHostedRuntimeGroupSetChatAvatarPreflight(input: {
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const access = await checkHostedRuntimeGroupSetChatAvatarAccess(input);
+  if (access.status !== "ok") {
+    return {
+      action: "preflight_set_chat_avatar",
+      result: { status: "unavailable", unavailableReason: access.unavailableReason },
+    };
+  }
+
+  return {
+    action: "preflight_set_chat_avatar",
     result: { status: "ok" },
   };
+}
+
+type HostedRuntimeGroupSetChatAvatarAccess =
+  | { status: "ok"; chatId: string }
+  | { status: "unavailable"; unavailableReason: string };
+
+async function checkHostedRuntimeGroupSetChatAvatarAccess(input: {
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupSetChatAvatarAccess> {
+  const authorized = await authorizeHostedRuntimeGroupLinqThread({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if ("unavailableReason" in authorized) {
+    return { status: "unavailable", unavailableReason: authorized.unavailableReason };
+  }
+
+  const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+    memberId: input.memberId,
+    prisma: getPrisma(),
+  });
+  if (ownerAccess.status !== "ok") {
+    return { status: "unavailable", unavailableReason: ownerAccess.unavailableReason };
+  }
+
+  return { status: "ok", chatId: authorized.chatId };
 }
 
 function buildHostedGroupJoinOfferMessage(input: {

@@ -196,6 +196,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       create_join_link: "owner_active",
       post_join_offer: "owner_active",
+      preflight_set_chat_avatar: "owner_active",
       read_chat_participants: "participant_aware",
       read_current: "participant_aware",
       revoke_own_email_share: "participant_aware",
@@ -768,7 +769,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       },
     })).resolves.toEqual({
       action: "set_chat_avatar",
-      result: { status: "ok" },
+      result: { status: "requested" },
     });
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
@@ -778,6 +779,24 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       chatId: "chat_group_1",
       groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
     });
+  });
+
+  it("preflights group avatar access without updating Linq", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "preflight_set_chat_avatar",
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "preflight_set_chat_avatar",
+      result: { status: "ok" },
+    });
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
+      expect.objectContaining({ authority: LINQ_THREAD.authority }),
+    );
+    expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
   });
 
   it("does not update the group avatar when the owner lacks active access", async () => {

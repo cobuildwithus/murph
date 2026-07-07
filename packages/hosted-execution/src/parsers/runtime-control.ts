@@ -774,7 +774,24 @@ export function parseHostedRuntimeGroupToolRequest(
               record.linqThread,
               "Hosted runtime group tool set_chat_avatar request linqThread",
             ),
-          }),
+      }),
+    };
+  }
+  if (action === "preflight_set_chat_avatar") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqThread"]),
+      "Hosted runtime group tool preflight_set_chat_avatar request",
+    );
+    if (record.linqThread === undefined || record.linqThread === null) {
+      return { action };
+    }
+    return {
+      action,
+      linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+        record.linqThread,
+        "Hosted runtime group tool preflight_set_chat_avatar request linqThread",
+      ),
     };
   }
   if (action === "read_chat_participants" || action === "share_contact_card") {
@@ -1121,12 +1138,31 @@ export function parseHostedRuntimeGroupToolResponse(
   if (action === "set_chat_avatar") {
     const result = requireObject(record.result, "Hosted runtime group tool set_chat_avatar response result");
     const status = requireString(result.status, "Hosted runtime group tool set_chat_avatar response status");
-    if (status === "ok") {
-      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool set_chat_avatar ok response result");
+    if (status === "ok" || status === "requested") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool set_chat_avatar accepted response result");
       return { action, result: { status } };
     }
     if (status === "unavailable") {
       assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool set_chat_avatar unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+        },
+      };
+    }
+  }
+
+  if (action === "preflight_set_chat_avatar") {
+    const result = requireObject(record.result, "Hosted runtime group tool preflight_set_chat_avatar response result");
+    const status = requireString(result.status, "Hosted runtime group tool preflight_set_chat_avatar response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool preflight_set_chat_avatar ok response result");
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool preflight_set_chat_avatar unavailable response result");
       return {
         action,
         result: {

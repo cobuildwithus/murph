@@ -608,6 +608,11 @@ describe("parseHostedRuntimeGroupTool", () => {
       groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "preflight_set_chat_avatar",
+    })).toEqual({
+      action: "preflight_set_chat_avatar",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "revoke_own_email_share",
       selfOptOut: {
         senderHandle: "person@example.test",
@@ -826,6 +831,18 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "set_chat_avatar",
       result: {
+        status: "requested",
+      },
+    })).toEqual({
+      action: "set_chat_avatar",
+      result: {
+        status: "requested",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "set_chat_avatar",
+      result: {
         status: "ok",
       },
     })).toEqual({
@@ -858,6 +875,34 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       })
     ).toThrow(/not allowed/u);
+  });
+
+  it("parses preflight_set_chat_avatar responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "preflight_set_chat_avatar",
+      result: {
+        status: "ok",
+      },
+    })).toEqual({
+      action: "preflight_set_chat_avatar",
+      result: {
+        status: "ok",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "preflight_set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    })).toEqual({
+      action: "preflight_set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    });
   });
 
   it("parses post_join_offer responses", () => {

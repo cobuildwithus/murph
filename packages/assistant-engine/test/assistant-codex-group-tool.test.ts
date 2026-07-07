@@ -352,10 +352,16 @@ describe("murph.group dynamic tool", () => {
         ),
       );
 
-      const groupRequest = vi.fn<GroupToolRequest>(async (request) => ({
-        action: "set_chat_avatar",
-        result: { status: "ok" },
-      }));
+      const groupRequest = vi.fn<GroupToolRequest>(async (request) =>
+        request.action === "preflight_set_chat_avatar"
+          ? {
+              action: "preflight_set_chat_avatar",
+              result: { status: "ok" },
+            }
+          : {
+              action: "set_chat_avatar",
+              result: { status: "requested" },
+            });
       const uploadGeneratedImage = vi.fn(async (
         input: AssistantHostedGeneratedImageUploadInput,
       ) => ({
@@ -388,10 +394,13 @@ describe("murph.group dynamic tool", () => {
       expect(result.rpcResult.success).toBe(true);
       expect(readGroupToolPayload(result)).toEqual({
         action: "set_chat_avatar",
-        result: { status: "ok" },
+        result: { status: "requested" },
       });
       expect(result.responseMediaPatch).toBeUndefined();
-      expect(groupRequest).toHaveBeenCalledWith({
+      expect(groupRequest).toHaveBeenNthCalledWith(1, {
+        action: "preflight_set_chat_avatar",
+      });
+      expect(groupRequest).toHaveBeenNthCalledWith(2, {
         action: "set_chat_avatar",
         groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
       });
@@ -409,6 +418,69 @@ describe("murph.group dynamic tool", () => {
         }),
       );
       expect(uploadGeneratedImage.mock.calls[0]?.[0].metadata).not.toHaveProperty("sourceRef");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not upload a user-sent avatar image when group avatar preflight fails", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
+    try {
+      await mkdir(join(vaultRoot, "raw", "inbox"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "raw", "inbox", "avatar.png"),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      );
+
+      const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+        action: "preflight_set_chat_avatar",
+        result: {
+          status: "unavailable",
+          unavailableReason: "linq_thread_unavailable",
+        },
+      }));
+      const uploadGeneratedImage = vi.fn(async (
+        input: AssistantHostedGeneratedImageUploadInput,
+      ) => ({
+        alt: input.alt,
+        kind: "image" as const,
+        source: input.source,
+        url: "https://imagedelivery.net/account/avatar/public",
+      }));
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "set_chat_avatar",
+        avatarSource: "image_ref",
+        imageRef: "raw/inbox/avatar.png",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedGeneratedImageUploader: { uploadGeneratedImage },
+        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(result.rpcResult.success).toBe(true);
+      expect(readGroupToolPayload(result)).toEqual({
+        action: "set_chat_avatar",
+        result: {
+          status: "unavailable",
+          unavailableReason: "linq_thread_unavailable",
+        },
+      });
+      expect(groupRequest).toHaveBeenCalledOnce();
+      expect(groupRequest).toHaveBeenCalledWith({ action: "preflight_set_chat_avatar" });
+      expect(uploadGeneratedImage).not.toHaveBeenCalled();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

@@ -12,6 +12,7 @@ import {
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupToolRequest,
+  type HostedRuntimeGroupToolResponse,
   type HostedRuntimeNewsletterParticipantSummary,
   type HostedRuntimeNewsletterScheduledAuthority,
   type HostedRuntimeNewsletterToolRequest,
@@ -370,7 +371,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", update the current hosted group database display name with action="update_display_name", update the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". update_display_name changes only Murph\'s database group label, not the upstream iMessage/SMS chat title. set_chat_avatar changes the upstream iMessage group icon for the current route-authorized group chat after preparing a hosted image URL. A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", update the current hosted group database display name with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". update_display_name changes only Murph\'s database group label, not the upstream iMessage/SMS chat title. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL. A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -2157,6 +2158,23 @@ async function executeGroupTool(input: {
   let request: HostedRuntimeGroupToolRequest
   let usageDraft: AssistantProviderUsageDraft | null = null
   if (isPreparedGroupAvatarRequest(input.request)) {
+    let preflight: Extract<HostedRuntimeGroupToolResponse, { action: 'preflight_set_chat_avatar' }>
+    try {
+      const preflightResult = await groupTool.request({ action: 'preflight_set_chat_avatar' })
+      if (preflightResult.action !== 'preflight_set_chat_avatar') {
+        return toolTextResult(false, 'group avatar update is unavailable for this turn')
+      }
+      preflight = preflightResult
+    } catch {
+      return toolTextResult(false, 'group avatar update is unavailable for this turn')
+    }
+    if (preflight.result.status !== 'ok') {
+      return toolTextResult(true, safeToolPayloadText({
+        action: 'set_chat_avatar',
+        result: preflight.result,
+      }))
+    }
+
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
       env: input.env,

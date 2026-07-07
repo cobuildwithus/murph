@@ -764,6 +764,7 @@ export type HostedRuntimeGroupToolAction =
   | "update_display_name"
   | "create_join_link"
   | "post_join_offer"
+  | "preflight_set_chat_avatar"
   | "read_chat_participants"
   | "set_chat_avatar"
   | "share_contact_card"
@@ -868,6 +869,10 @@ export type HostedRuntimeGroupToolRequest =
       joinOffer?: HostedRuntimeGroupPostJoinOfferRequest | null;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
+  | {
+      action: "preflight_set_chat_avatar";
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
   | { action: "read_chat_participants"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
   | {
       action: "set_chat_avatar";
@@ -914,6 +919,13 @@ export type HostedRuntimeGroupToolResponse =
     }
   | {
       action: "set_chat_avatar";
+      result:
+        | { status: "requested" }
+        | { status: "ok" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "preflight_set_chat_avatar";
       result:
         | { status: "ok" }
         | { status: "unavailable"; unavailableReason: string };

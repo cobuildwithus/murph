@@ -18,7 +18,11 @@ image-reference, and image-upload primitives.
   iMessage group chat only.
 - Support generated avatars and exact reuse of user-sent JPG/PNG/WebP image
   refs using existing resolver/upload primitives.
-- Keep Linq provider egress in the web-owned group tool boundary.
+- Preflight web-owned route and owner-active authority before resolving,
+  generating, or uploading avatar media.
+- Keep Linq provider egress in the web-owned group tool boundary and report
+  accepted avatar mutations as provider-requested rather than confirmed final
+  application.
 - Add focused parser, assistant, runtime-injection, web handler, and Linq client
   tests.
 

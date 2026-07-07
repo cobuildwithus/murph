@@ -86,6 +86,15 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       },
     });
 
+    await groupTool.request({ action: "preflight_set_chat_avatar" });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "preflight_set_chat_avatar",
+      linqThread: {
+        authority: ROUTE_AUTHORITY,
+        chatId: "chat_group_1",
+      },
+    });
+
     await groupTool.request({
       action: "post_join_offer",
       joinOffer: {
@@ -217,6 +226,9 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       action: "set_chat_avatar",
       groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
     });
+
+    await groupTool.request({ action: "preflight_set_chat_avatar" });
+    expect(request).toHaveBeenLastCalledWith({ action: "preflight_set_chat_avatar" });
 
     await groupTool.request({
       action: "post_join_offer",
