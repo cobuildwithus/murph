@@ -35,7 +35,7 @@ describe("HostedAccountSettingsCards", () => {
     );
 
     expect(markup).not.toContain("Murph contact");
-    expect(markup).not.toContain("Pick a look and save the updated card.");
+    expect(markup).not.toContain("Pick a new look for Murph in your contacts.");
   });
 
   test("shows Murph contact customization with an assigned Murph text line", () => {
@@ -47,7 +47,7 @@ describe("HostedAccountSettingsCards", () => {
     );
 
     expect(markup).toContain("Murph contact");
-    expect(markup).toContain("Pick a look and save the updated card.");
+    expect(markup).toContain("Pick a new look for Murph in your contacts.");
     expect(markup).toContain("Customize");
   });
 
@@ -60,7 +60,7 @@ describe("HostedAccountSettingsCards", () => {
     );
 
     expect(markup).toContain("Murph contact");
-    expect(markup).toContain("Pick a look and save the updated card.");
+    expect(markup).toContain("Pick a new look for Murph in your contacts.");
     expect(markup).toContain("Customize");
   });
 
