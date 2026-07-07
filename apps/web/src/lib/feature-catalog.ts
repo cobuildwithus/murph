@@ -25,9 +25,9 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "group-challenge-referee",
     title: "Group challenge referee",
     summary:
-      "Murph can run a challenge in the group chat you already have. It helps settle the metric, keeps standings moving, varies the daily check-in, and closes with the result.",
+      "A bet with your friends is the most fun way to actually do the thing: loser buys dinner, or does the forfeit the group picks. Murph referees so the trash talk stays fun: fair scoring across everyone's different devices, daily standings in the chat, and a clear winner when the stakes come due.",
     details:
-      "Useful when a challenge would otherwise need one person to chase updates, keep rules straight, and make the group care after day two.",
+      "Challenge state lives on a knowledge page in the group's vault, so rules, stakes, and standings survive any reset.",
     relevanceTags: ["groups", "challenges", "messaging"],
     priority: 5,
     tryIt: {
@@ -42,7 +42,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "group-chat-murph",
     title: "Murph in group chats",
     summary:
-      "Add Murph to an iMessage group and it can participate in the room, understand who said what, and decide when a reply, reaction, or silence fits.",
+      "Your group chat is already where the fun happens; Murph just makes it better at it. Add Murph to the room and it can hype the group, settle arguments with actual data, react at the right moments, and stay quiet when the chat does not need it.",
     details:
       "Murph can create a join link so someone can sign in and join the room. Joining alone does not share anyone's health data.",
     relevanceTags: ["groups", "messaging", "imessage"],
@@ -58,7 +58,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "family-private-accounts",
     title: "Private family accounts",
     summary:
-      "A family owner can sponsor Murph for household members at a lower per-person price than the standard individual plan, while each person keeps a private account. The owner cannot read another member's chats, vault, or health data.",
+      "Give Murph to your parents or partner without becoming their tech support or seeing their private stuff. You cover the household at a lower per-person price than separate plans, and each person gets a private Murph that is fully theirs.",
     relevanceTags: ["family", "privacy", "plans"],
     priority: 4,
     tryIt: {
@@ -73,7 +73,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "connect-wearables",
     title: "Connect wearable data",
     summary:
-      "Murph can use connected wearable data from sources like WHOOP, Oura, and Garmin to answer questions about sleep, activity, workouts, recovery, and experiment progress.",
+      "You already paid for the ring or the strap; most of what it learns just sits in a dashboard. Connect it and you can finally ask real questions: why you slept badly, whether the training is working, what changed since you started that new habit.",
     relevanceTags: ["wearables", "data", "assistant"],
     priority: 5,
     tryIt: {
@@ -88,7 +88,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "meal-app-imports",
     title: "Meal app imports",
     summary:
-      "Meals logged in apps like MyFitnessPal or Cronometer can flow into Murph with ingredients and nutrition, ready for questions about food alongside training and sleep.",
+      "If you already log meals in MyFitnessPal or Cronometer, that effort should buy you more than a calorie count. Murph pulls your meals in and connects them to the rest of your life: sleep, training, energy, the afternoon crash you keep blaming on work.",
     relevanceTags: ["nutrition", "meals", "wearables"],
     priority: 4,
     tryIt: {
@@ -104,7 +104,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "food-label-lookup",
     title: "Food label lookup",
     summary:
-      "Murph can look up nutrition labels for branded foods and use the label instead of guessing when product identity, ingredients, allergens, or serving facts matter.",
+      "Was that yogurt actually high protein, or did the front of the package just say so? Murph reads the real label for branded foods, so answers about servings, allergens, and macros come from the package, not a guess.",
     relevanceTags: ["food", "nutrition", "data"],
     priority: 5,
     tryIt: {
@@ -119,7 +119,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "food-contaminant-checks",
     title: "Contaminant checks on foods you eat",
     summary:
-      "Ask about a food or brand you eat and Murph can check whether that exact product has been flagged in third-party contaminant testing, like heavy metals, and how concerning the result looks.",
+      "The protein powder or snack you buy every month may have shown up in third-party testing for heavy metals. Ask Murph about a specific product and find out whether it has ever been flagged and how worried to actually be, before you buy the next tub.",
     relevanceTags: ["food", "safety", "data"],
     priority: 5,
     tryIt: {
@@ -133,7 +133,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "supplement-label-lookup",
     title: "Supplement label lookup",
     summary:
-      "Murph can look up supplement labels by brand, ingredient, or product name, then ground ingredient and dose questions in the label it found.",
+      "Half the supplement aisle is the same ingredient at different doses and prices. Murph pulls the label for the exact product, so you know what is actually in the bottle and whether the dose matches what the research used.",
     relevanceTags: ["supplements", "nutrition", "data"],
     priority: 5,
     tryIt: {
@@ -148,7 +148,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "health-record-import",
     title: "Health record import",
     summary:
-      "Share a lab report, visit summary, medication list, imaging report, or other health document and Murph can file the useful facts into your vault with the raw evidence preserved.",
+      "Walk into your next appointment already knowing your trend. Text Murph a lab PDF or visit summary and it gets filed for good, so what your LDL was last year becomes a question you just ask instead of a folder you dig through.",
     relevanceTags: ["vault", "health", "records"],
     priority: 5,
     tryIt: {
@@ -164,7 +164,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "personal-experiments",
     title: "Personal experiments",
     summary:
-      "Murph can help you choose a bounded health experiment, set a baseline, track adherence and confounders, and review what changed afterward.",
+      "You have been wondering for months whether the magnesium, the earlier dinners, or the cold room actually helps. Murph helps you settle it: one change, a real baseline, a couple of honest weeks, and an answer about your body instead of a vibe.",
     details:
       "For an active experiment, Murph can share a compact progress readout with trends, movers, a session timeline, and likely confounders.",
     relevanceTags: ["experiments", "protocols", "health"],
@@ -180,7 +180,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "scheduled-reminders",
     title: "Scheduled reminders",
     summary:
-      "Murph can set scheduled nudges for routines, supplements, workouts, and experiment support, with the reminder continuing in the conversation where it started.",
+      "Follow-through is easier when the nudge comes from the conversation you already live in, sounds like a person, and can hear you back. Murph reminds you about routines, supplements, and workouts, and when you reply, it is already mid-conversation.",
     relevanceTags: ["reminders", "automations", "messaging"],
     priority: 4,
     tryIt: {
@@ -194,7 +194,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "activity-triggered-automations",
     title: "Activity-triggered automations",
     summary:
-      "Murph can run an automation after a matching wearable activity, such as a one-line recovery prompt after each logged workout.",
+      "The best time for a check-in is the moment the thing happens, not that evening. Murph can respond to what your wearable records, like a one-line recovery note right after each workout, so it feels less like an app and more like a coach who noticed.",
     relevanceTags: ["automations", "wearables", "reminders"],
     priority: 4,
     tryIt: {
@@ -209,7 +209,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "sleep-review-followups",
     title: "Morning sleep and recovery check-ins",
     summary:
-      "After your wearable syncs a night of sleep, Murph can follow up in the morning to talk through how you slept and what your recovery means for the day ahead.",
+      "Someone noticing how you slept and telling you what it means for today is a small luxury. Once your wearable syncs the night, Murph can check in each morning: what happened, why it might have happened, and how hard to push today.",
     relevanceTags: ["sleep", "wearables", "automations"],
     priority: 4,
     tryIt: {
@@ -224,7 +224,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "exercise-image-demos",
     title: "Exercise demos with images",
     summary:
-      "Murph can introduce unfamiliar movements with a few images and a short safety stop rule instead of dumping a long exercise plan.",
+      "Nobody wants to be the person squinting at their phone mid-gym trying to decode a movement. Ask Murph about an unfamiliar exercise and you get a few clear images and a simple stop-if rule, so you walk in knowing what you are doing.",
     relevanceTags: ["exercise", "images", "coaching"],
     priority: 4,
     tryIt: {
@@ -239,7 +239,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "pain-and-rehab-help",
     title: "Pain and rehab help",
     summary:
-      "Mention a strain, ache, or rehab program and Murph can reason through red flags, exercise selection, dosing, follow-up, and progression in a clinical-style flow.",
+      "A sore knee at 11pm usually ends in an hour of scary search results. Tell Murph instead and it works through it calmly, the way a good clinician would: what would be a red flag, what to try this week, how much, and when to push further.",
     relevanceTags: ["rehab", "pain", "health"],
     priority: 4,
     tryIt: {
@@ -253,7 +253,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "chronic-condition-experiments",
     title: "Chronic condition experiments",
     summary:
-      "For chronic illness, chronic pain, and at-home self-management questions, Murph can help frame a low-risk experiment or a clinician discussion prompt without treating a symptom as a verdict.",
+      "Living with a chronic condition means running experiments on yourself anyway; you are just doing them untracked. Murph helps you make one small change testable, or turns the pattern you suspect into a sharper question for your clinician.",
     relevanceTags: ["health", "chronic-illness", "experiments"],
     priority: 4,
     tryIt: {
@@ -267,7 +267,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "red-light-dose-guidance",
     title: "Red light dose guidance",
     summary:
-      "If you use red light therapy, Murph can ask for the panel and distance, then reason from dose and irradiance instead of giving a generic session length.",
+      "If you own a red light panel, the difference between a useful session and wasted time is dose, not vibes. Tell Murph your panel and distance and it works out what a session is actually delivering and how long to sit.",
     relevanceTags: ["recovery", "skills", "health"],
     priority: 3,
     tryIt: {
@@ -282,7 +282,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "voice-memo-replies",
     title: "Voice memo replies",
     summary:
-      "Murph can reply with a generated voice memo on supported channels when a spoken summary would fit better than text.",
+      "Some updates are nicer to hear than read: press play on your week's recap while you make coffee. On channels that support audio, Murph can answer with a spoken voice memo instead of a wall of text.",
     relevanceTags: ["voice", "messaging", "media"],
     priority: 4,
     tryIt: {
@@ -297,7 +297,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "image-generation",
     title: "Image generation in chat",
     summary:
-      "Murph can create images directly in conversation, from quick illustrations to workout visuals or a poster for a group activity.",
+      "Sometimes the answer that lands is a picture: a poster for tonight's workout, a visual for the group challenge, a quick illustration of the plan. Murph makes images right in the conversation, ready to share.",
     details:
       "A sketch, product photo, room photo, or style reference you send can be used as context for the next generated image.",
     relevanceTags: ["images", "media", "assistant"],
@@ -313,7 +313,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "pdfs-in-chat",
     title: "PDFs in chat",
     summary:
-      "Murph can author a clean PDF from chat, such as a one-page workout plan, training recap, or lab-results summary.",
+      "Hand your doctor a clean one-pager instead of scrolling your phone in the exam room. Ask Murph and it turns your training week or lab history into a tidy PDF you can print, forward, or bring to the appointment.",
     relevanceTags: ["documents", "pdf", "assistant"],
     priority: 5,
     tryIt: {
@@ -327,7 +327,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "song-generation",
     title: "Songs in chat",
     summary:
-      "Murph can create a short generated song and share it in the conversation when a playful audio reply fits.",
+      "Your group's inside joke deserves a soundtrack. Murph can turn tonight's workout, the challenge kickoff, or whatever the chat is laughing about into a short original song, which is a surprisingly effective way to get people moving.",
     relevanceTags: ["voice", "media", "assistant"],
     priority: 4,
     tryIt: {
@@ -342,7 +342,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "email-channel-replies",
     title: "Email Murph",
     summary:
-      "Murph can reply by email in the same thread, so longer context, files, and asynchronous questions can stay in email instead of moving back to chat.",
+      "Some things are just easier over email: a long lab report, a slow question, an attachment. Email Murph and the answer comes back in the same thread, so the paperwork side of your health has a place to live.",
     relevanceTags: ["email", "channels", "messaging"],
     priority: 4,
     tryIt: {
@@ -356,7 +356,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "connected-apps",
     title: "Connected apps",
     summary:
-      "Connect apps like Gmail, Outlook, Google Drive, OneDrive, Dropbox, Notion, Todoist, or Google Tasks and Murph can use them when you ask.",
+      "Murph gets more useful when it can actually reach your stuff. Connect Gmail, Google Drive, Notion, Todoist, and more, and asking becomes doing: the note gets written, the doc gets pulled, the task gets added.",
     details:
       "Useful for drafting a note to your trainer from Gmail, saving a meal plan to Notion, pulling a lab PDF from Drive, or adding supplement refills to your task list.",
     relevanceTags: ["integrations", "automation", "tools"],
@@ -373,7 +373,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "calendar-event-creation",
     title: "Calendar event creation",
     summary:
-      "With a connected Google or Outlook calendar, Murph can block workout time, add a doctor or dentist appointment, or protect a wind-down hour, with the title, time, location, and notes you described.",
+      "The workout that is on your calendar is the one that happens. Mention it once and Murph puts it there through your connected Google or Outlook calendar: the training block, the dentist appointment, the wind-down hour nobody else can book over.",
     details:
       "Calendar writes stay scoped to the event you asked for. Murph does not add surprise invites or online meeting rooms by default.",
     relevanceTags: ["integrations", "calendar", "automation"],
@@ -391,7 +391,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "supplement-ordering",
     title: "Murph can order your supplements",
     summary:
-      "Running low on a supplement? Murph can get the reorder ready online, like your usual magnesium on Amazon, and pause for you to confirm before anything is placed.",
+      "Running out of creatine is how a two-month streak ends. Tell Murph you are low and the reorder is ready before you forget, like your usual magnesium on Amazon, paused for you to confirm before anything is placed.",
     relevanceTags: ["supplements", "orders", "automation"],
     priority: 5,
     tryIt: {
@@ -405,7 +405,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "browser-automation",
     title: "Browser tasks with handoff",
     summary:
-      "Murph can handle website tasks for your health life, like booking a dentist or doctor appointment, filling out a patient intake form, or tracking down a product, then pause for you to sign in or confirm anything final.",
+      "That website errand you have been putting off for two weeks, the dentist booking page, the intake form, takes Murph a few minutes. Hand it over and it works the site for you, pausing whenever a login or final confirmation should be yours.",
     relevanceTags: ["browser", "automation", "handoff"],
     priority: 5,
     tryIt: {
@@ -420,7 +420,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "phone-calls",
     title: "Phone calls on your behalf",
     summary:
-      "After you approve a compact call brief, Murph can place an outbound phone call for tasks like pharmacy refills, clinic intake, reservations, or quick check-ins, then summarize the outcome.",
+      "The pharmacy call you keep not making. Approve a short brief and Murph makes the call, waits on hold, asks the thing, and tells you how it went, whether that is a refill check, clinic intake, or a reservation.",
     relevanceTags: ["phone-calls", "voice", "tools"],
     priority: 4,
     tryIt: {
@@ -434,7 +434,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "live-weather",
     title: "Live weather",
     summary:
-      "Murph can check current weather and near-term forecasts when weather matters for a run, walk, travel day, or outdoor plan.",
+      "Know before you lace up. Murph checks the sky when it matters, so the long run, the walk, or the travel day gets planned around the forecast instead of surprised by it.",
     relevanceTags: ["weather", "tools", "assistant"],
     priority: 3,
     tryIt: {
