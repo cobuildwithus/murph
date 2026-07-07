@@ -341,25 +341,48 @@ describe('applyMurphManagedAutomations', () => {
     }
 
     expect(seed.schedule.expression).toBe('30 11 * * 4')
-    expect(seed.instructions).toContain('/api/changelog?days=7&featureLimit=70&improvementLimit=10')
-    expect(seed.instructions).toContain('2-3 shipped Murph updates')
-    expect(seed.instructions).toContain('Selection budget: choose 2-3 items')
+    expect(seed.title).toBe('Murph product notes')
+    expect(seed.summary).toBe('A personalized note alternating what is new in Murph with things Murph can do for you.')
+    expect(seed.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
+    expect(seed.instructions).toContain('/api/feature-catalog')
+    expect(seed.instructions).toContain('Read `vault-cli knowledge show murph-product-notes`')
+    expect(seed.instructions).toContain('choose the feature discovery kind')
+    expect(seed.instructions).toContain('last recorded changelog means feature discovery now')
+    expect(seed.instructions).toContain('last recorded feature discovery means changelog now')
+    expect(seed.instructions).toContain('Use `murph-product-notes` as the only ledger')
+    expect(seed.instructions).toContain('vault-cli knowledge append-section murph-product-notes YYYY-MM-DD')
+    expect(seed.instructions).toContain('Fallback is allowed at most once')
+    expect(seed.instructions).toContain('never fall back from a fallback')
+    expect(seed.instructions).toContain('If both kinds are unavailable, invalid, empty, or below bar')
+    expect(seed.instructions).toContain('record only this run\'s kind and the chosen item ids')
+    expect(seed.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
+    expect(seed.instructions).toContain('another run already recorded today\'s note')
+    expect(seed.instructions).toContain('Do not append again and do not switch kinds')
+    expect(seed.instructions).toContain('2-3 recently shipped Murph updates')
+    expect(seed.instructions).toContain('2-3 things Murph can already do')
     expect(seed.instructions).toContain('Do not pad with weak matches')
-    expect(seed.instructions).toContain('Drop anything that is merely generally new')
-    expect(seed.instructions).toContain('scheduled announcement text-only')
+    expect(seed.instructions).toContain('Drop items the user is already using')
+    expect(seed.instructions).toContain('context already surfaced for ordinary assistance')
+    expect(seed.instructions).toContain('Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used')
+    expect(seed.instructions).toContain('Drop items already pitched in a ledger section from roughly the last three months')
+    expect(seed.instructions).toContain('Keep this scheduled note text-only')
     expect(seed.instructions).not.toContain('Choose 3-7 items')
     expect(seed.instructions).not.toContain('murph.attach_response_media')
     expect(seed.instructions).not.toContain('visual digest')
     expect(seed.instructions).not.toContain('links.digestCardTemplate')
     expect(seed.instructions).toContain('murph.submit_product_feedback')
-    expect(seed.instructions).toContain('another feature in mind')
+    expect(seed.instructions).toContain('if there is something else they wish Murph could do')
     expect(seed.instructions).toContain('clear inferred workflow friction')
+    expect(seed.instructions).toContain('interest in shipped changelog or catalog items')
     expect(seed.instructions).toContain('Speculative:')
     expect(seed.instructions).toContain('Murph-observed:')
     expect(seed.instructions).toContain('Do not log vague low-confidence guesses')
     expect(seed.instructions).toContain('concise product-only summary')
     expect(seed.instructions).toContain('tags, topics, raw user wording')
     expect(seed.instructions).not.toContain('kind/topic')
+    expect(seed.instructions).toContain(
+      '{"kind":"skip","privateSummary":"No product note cleared the send bar."}',
+    )
     expect(findNextAssistantCronOccurrence(
       seed.schedule.expression,
       new Date('2026-06-22T12:00:00.000Z'),
@@ -605,7 +628,8 @@ describe('applyMurphManagedAutomations', () => {
       route: defaultRoute,
       slug: 'weekly-product-updates',
       status: 'active',
-      title: 'This week in Murph',
+      summary: 'A personalized note alternating what is new in Murph with things Murph can do for you.',
+      title: 'Murph product notes',
     })
     expect(productUpdatesRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.productUpdates)
     expect(productUpdatesRecord?.tags).toContain(
@@ -614,13 +638,28 @@ describe('applyMurphManagedAutomations', () => {
     expect(productUpdatesRecord?.tags).not.toContain(
       ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
     )
-    expect(productUpdatesRecord?.instructions).toContain('2-3 shipped Murph updates')
-    expect(productUpdatesRecord?.instructions).toContain('Selection budget: choose 2-3 items')
+    expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
+    expect(productUpdatesRecord?.instructions).toContain('/api/feature-catalog')
+    expect(productUpdatesRecord?.instructions).toContain('Read `vault-cli knowledge show murph-product-notes`')
+    expect(productUpdatesRecord?.instructions).toContain('choose the feature discovery kind')
+    expect(productUpdatesRecord?.instructions).toContain('Use `murph-product-notes` as the only ledger')
+    expect(productUpdatesRecord?.instructions).toContain('vault-cli knowledge append-section murph-product-notes YYYY-MM-DD')
+    expect(productUpdatesRecord?.instructions).toContain('Fallback is allowed at most once')
+    expect(productUpdatesRecord?.instructions).toContain('never fall back from a fallback')
+    expect(productUpdatesRecord?.instructions).toContain('If both kinds are unavailable, invalid, empty, or below bar')
+    expect(productUpdatesRecord?.instructions).toContain('record only this run\'s kind and the chosen item ids')
+    expect(productUpdatesRecord?.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
+    expect(productUpdatesRecord?.instructions).toContain('another run already recorded today\'s note')
+    expect(productUpdatesRecord?.instructions).toContain('Do not append again and do not switch kinds')
+    expect(productUpdatesRecord?.instructions).toContain('2-3 recently shipped Murph updates')
+    expect(productUpdatesRecord?.instructions).toContain('2-3 things Murph can already do')
     expect(productUpdatesRecord?.instructions).toContain('Do not pad with weak matches')
-    expect(productUpdatesRecord?.instructions).toContain('Drop anything that is merely generally new')
+    expect(productUpdatesRecord?.instructions).toContain('Drop items the user is already using')
+    expect(productUpdatesRecord?.instructions).toContain('context already surfaced for ordinary assistance')
+    expect(productUpdatesRecord?.instructions).toContain('Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used')
     expect(productUpdatesRecord?.instructions).not.toContain('Choose 3-7 items')
     expect(productUpdatesRecord?.instructions).toContain(
-      '{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}',
+      '{"kind":"skip","privateSummary":"No product note cleared the send bar."}',
     )
     expect(productUpdatesRecord?.instructions).not.toContain('finish_without_reply')
     expect(
@@ -754,6 +793,43 @@ describe('applyMurphManagedAutomations', () => {
       managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)
         ?.instructions,
     ).not.toContain('Wednesday at 7:30 PM local time')
+  })
+
+  it('updates existing weekly product notes instructions without rewriting the spread cadence', async () => {
+    const existingSchedule = EXPECTED_MANAGED_SPREAD_CRONS.productUpdates
+    managedAutomationMocks.records.set(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'OLD weekly product updates instructions with changelog-only behavior.',
+      route: defaultRoute,
+      schedule: existingSchedule,
+      slug: 'weekly-product-updates',
+      status: 'active',
+      summary: 'Old weekly product updates.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Weekly product updates',
+    })
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-20T12:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 3,
+      skipped: 0,
+      updated: 1,
+    })
+    const productUpdatesRecord = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    )
+    expect(productUpdatesRecord?.schedule).toBe(existingSchedule)
+    expect(productUpdatesRecord?.instructions).toContain('/api/feature-catalog')
+    expect(productUpdatesRecord?.instructions).toContain('record only this run\'s kind and the chosen item ids')
+    expect(productUpdatesRecord?.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
+    expect(productUpdatesRecord?.instructions).toContain('Do not append again and do not switch kinds')
+    expect(productUpdatesRecord?.instructions).not.toContain('OLD weekly product updates instructions')
   })
 
   it('preserves an existing device activity cadence on managed reconciliation', async () => {
