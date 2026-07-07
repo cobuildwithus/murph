@@ -56,6 +56,325 @@ export interface ChangelogQuery {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-06",
+    publishedOn: "2026-07-06",
+    title: "Murph referees your group challenge",
+    summary:
+      "Group chats can now run multi-day challenges with Murph as referee, complete with daily standings in rotating formats. Family invites work over plain texting, workouts from your wearable count toward experiments, and replies got faster and steadier across the board.",
+    items: [
+      {
+        id: "group-challenge-referee",
+        kind: "feature",
+        priority: 5,
+        title: "Murph referees your group challenge",
+        summary:
+          "A group chat can now run a multi-day challenge start to finish: Murph negotiates the metric, kicks off with intros and photos, posts one daily standings drop in a rotating format (text, comic, voice memo, song, or ruling), and settles the stakes at the close.",
+        details:
+          "Challenge state lives on a knowledge page in the group's vault, so rules, stakes, and standings survive any reset. Kickoff photos stay usable in generated images on every later day of the challenge.",
+        relevanceTags: ["groups", "challenges", "assistant"],
+        sourcePullRequests: [410],
+        tryIt: {
+          label: "Start a challenge",
+          prompt: "Start a 5-day steps challenge with us. Loser buys dinner.",
+        },
+      },
+      {
+        id: "family-invite-imessage-accept",
+        kind: "feature",
+        priority: 4,
+        title: "Family invites now work over plain texting",
+        summary:
+          "An invite bound to a phone number leads with Continue in Messages: the invitee sends one prefilled text to Murph's line and they're in. Telegram is only offered when the invite is actually bound to a Telegram username.",
+        details:
+          "Invites with no binding can be claimed by whoever holds the link, but only through an explicit act: sending the join text, opening the deep link, or tapping Accept after signing in. The plan owner gets a heads-up when someone joins.",
+        relevanceTags: ["family", "invites", "messaging"],
+        sourcePullRequests: [401],
+      },
+      {
+        id: "device-workouts-count-toward-experiments",
+        kind: "feature",
+        priority: 4,
+        title: "Workouts from your wearable count toward experiments",
+        summary:
+          "A running or cycling experiment now counts the sessions your watch already recorded, so four in-window runs read as 4 of 7 expected instead of 0 logged. Existing experiments heal immediately, no re-setup.",
+        relevanceTags: ["experiments", "wearables", "adherence"],
+        sourcePullRequests: [399],
+        tryIt: {
+          label: "Check an experiment",
+          prompt: "How's my running experiment going?",
+        },
+      },
+      {
+        id: "reminders-vary-approach",
+        kind: "improvement",
+        priority: 4,
+        title: "Reminders stop sounding the same",
+        summary:
+          "Scheduled nudges now rotate their angle: a plain cue one day, a question or a tiny fallback version the next, sometimes a callback, a light challenge, or a song. Same frequency, more reasons to actually read them.",
+        relevanceTags: ["reminders", "assistant"],
+        sourcePullRequests: [395],
+      },
+      {
+        id: "group-chat-reliability-hardening",
+        kind: "improvement",
+        priority: 4,
+        title: "Group chats got harder to kill",
+        summary:
+          "A group's Murph now stays alive as long as anyone in the room has an active Murph, not just the person who set it up, and keeps replying when members are added or removed instead of wedging into a silent retry loop.",
+        relevanceTags: ["groups", "reliability"],
+        sourcePullRequests: [388, 393, 398],
+      },
+      {
+        id: "faster-texting-replies",
+        kind: "improvement",
+        priority: 4,
+        title: "Faster replies, especially the second message",
+        summary:
+          "Trimmed the wake path end to end: a leaner cold start, a reused warm connection to the runtime, a direct fast-path wake for texts, and quick follow-ups now get picked up by the still-warm runtime instead of waiting minutes.",
+        relevanceTags: ["performance", "messaging"],
+        sourcePullRequests: [380, 397, 404, 411],
+      },
+      {
+        id: "durable-answered-no-duplicate-replies",
+        kind: "improvement",
+        priority: 3,
+        title: "One question, one answer, even across a restart",
+        summary:
+          "Murph now durably marks a text answered the moment the reply is delivered, so a runtime restart or an overlapping wake can't replay the same answer twice.",
+        relevanceTags: ["reliability", "messaging"],
+        sourcePullRequests: [383],
+      },
+      {
+        id: "stale-backfill-summaries-suppressed",
+        kind: "improvement",
+        priority: 3,
+        title: "No morning recap of Tuesday's sleep",
+        summary:
+          "When a wearable syncs after a day or more offline, Murph no longer narrates the days-old sleep and workouts in the backfill. Anything that ended more than 24 hours before the sync stays quiet.",
+        relevanceTags: ["wearables", "notifications"],
+        sourcePullRequests: [391],
+      },
+      {
+        id: "share-link-previews",
+        kind: "improvement",
+        priority: 3,
+        title: "Murph links preview as what they are",
+        summary:
+          "Invites, group joins, experiments, and biomarker pages now unfurl with their own preview images in iMessage and social. An invite says you're invited, an experiment shows its actual title.",
+        relevanceTags: ["web", "sharing", "polish"],
+        sourcePullRequests: [392],
+      },
+    ],
+  },
+  {
+    id: "2026-07-04",
+    publishedOn: "2026-07-04",
+    title: "Wearable history catches itself up",
+    summary:
+      "The 180-day history import that runs when you connect a device now re-runs itself after any failure, and connections that never completed one get a one-time repair pass.",
+    items: [
+      {
+        id: "device-history-import-self-heals",
+        kind: "improvement",
+        priority: 4,
+        title: "Device history imports recover on their own",
+        summary:
+          "The 180-day historical import at connect time now re-runs automatically after any lost or failed attempt. No reconnect, no support ping, and connections that never finished one get a one-time repair pass.",
+        relevanceTags: ["wearables", "junction", "reliability"],
+        sourcePullRequests: [379],
+      },
+    ],
+  },
+  {
+    id: "2026-07-03",
+    publishedOn: "2026-07-03",
+    title: "Group Murph learns everyone's name",
+    summary:
+      "Group chats get personal: Murph addresses members by their preferred names and challenges can run on steps, workouts, and heart-rate zones. Plus a batch of first-touch fixes across invites, sign-up, and device connects.",
+    items: [
+      {
+        id: "group-preferred-names-roster",
+        kind: "feature",
+        priority: 4,
+        title: "Group Murph knows who's who",
+        summary:
+          "Joining a group now introduces you by the name you told Murph during onboarding. Murph addresses each member by their preferred name and attributes shared stats to the right person instead of re-asking.",
+        relevanceTags: ["groups", "profiles"],
+        sourcePullRequests: [369],
+      },
+      {
+        id: "challenge-stat-sharing-kinds",
+        kind: "feature",
+        priority: 4,
+        title: "Challenges can run on steps, workouts, and heart-rate zones",
+        summary:
+          "Group challenges now support member-approved sharing for steps, activity minutes, workouts, heart-rate-zone minutes, strain, VO2 max, resting heart rate, HRV, and more. Each is a bounded daily stat you approve explicitly, never raw health data.",
+        relevanceTags: ["groups", "challenges", "privacy"],
+        sourcePullRequests: [382],
+      },
+      {
+        id: "progress-updates-while-working",
+        kind: "improvement",
+        priority: 4,
+        title: "Murph says when it's still working",
+        summary:
+          "During a slow turn, a big lab upload or a long lookup, Murph's mid-turn progress updates now actually reach your chat instead of silently disappearing while you wait.",
+        relevanceTags: ["assistant", "messaging", "polish"],
+        sourcePullRequests: [372],
+      },
+      {
+        id: "family-sponsored-access-everywhere",
+        kind: "improvement",
+        priority: 3,
+        title: "Family-sponsored members work everywhere",
+        summary:
+          "Access checks now understand family sponsorship on every path, so a sponsored member's group-chat message gets answered instead of silently dropped.",
+        relevanceTags: ["family", "groups", "reliability"],
+        sourcePullRequests: [375],
+      },
+      {
+        id: "family-invite-dialog-honesty",
+        kind: "improvement",
+        priority: 3,
+        title: "The invite dialog says what actually happened",
+        summary:
+          "After you create a family invite, the dialog stays open, says plainly that Murph did not text the invitee, and gives you the link to share yourself.",
+        relevanceTags: ["family", "invites", "polish"],
+        sourcePullRequests: [374],
+      },
+      {
+        id: "device-connect-replay-safe",
+        kind: "improvement",
+        priority: 3,
+        title: "Connecting a device survives a browser double-tap",
+        summary:
+          "If your browser redelivers the connect callback after a wearable links up, you now land back in the app showing the connected state instead of a bare connection-failed page.",
+        relevanceTags: ["wearables", "onboarding", "polish"],
+        sourcePullRequests: [378],
+      },
+      {
+        id: "stale-welcome-superseded",
+        kind: "improvement",
+        priority: 3,
+        title: "No canned welcome nine minutes into the conversation",
+        summary:
+          "Text Murph seconds after signing up and the queued welcome message now steps aside once real conversation has started. Silent signups still get the welcome as before.",
+        relevanceTags: ["onboarding", "messaging", "polish"],
+        sourcePullRequests: [377],
+      },
+    ],
+  },
+  {
+    id: "2026-07-02",
+    publishedOn: "2026-07-02",
+    title: "Group chats go live in iMessage",
+    summary:
+      "Add Murph to an iMessage group and it just works: it sets itself up, introduces itself with a contact card, and knows when to chime in. Plus overnight memory consolidation, a cleaner family seat flow, and Garmin sync recovery.",
+    items: [
+      {
+        id: "imessage-group-chats-self-serve",
+        kind: "feature",
+        priority: 5,
+        title: "Add Murph to any iMessage group",
+        summary:
+          "Start an iMessage group with friends and Murph's number, send one message, and Murph comes alive in the room: it sets up the group's own private runtime, replies to that first message, and everyone in the chat can talk to it.",
+        details:
+          "Inside a group Murph behaves like a participant, not a support desk. It sees who said what, knows when to reply, react, or stay quiet, and plays with shared challenge data without punching down.",
+        relevanceTags: ["groups", "messaging", "imessage"],
+        sourcePullRequests: [363],
+      },
+      {
+        id: "group-contact-card-intro",
+        kind: "feature",
+        priority: 4,
+        title: "Murph introduces itself to the room",
+        summary:
+          "In a group, Murph can check who already has their own Murph and drop its contact card once: a tappable card with its number, so friends without Murph can save it and text in to get set up.",
+        relevanceTags: ["groups", "onboarding", "messaging"],
+        sourcePullRequests: [367],
+      },
+      {
+        id: "overnight-memory-consolidation",
+        kind: "feature",
+        priority: 4,
+        title: "Murph tidies its memory of you overnight",
+        summary:
+          "Three nights a week at 3am, Murph runs an overnight pass that consolidates the last week of conversation into durable memory, so context carries across sessions without you repeating yourself.",
+        relevanceTags: ["memory", "assistant"],
+        sourcePullRequests: [355],
+      },
+      {
+        id: "family-seat-flow",
+        kind: "improvement",
+        priority: 4,
+        title: "Family seats: one button, honest counts, easy removal",
+        summary:
+          "Inviting someone to a full plan now adds the $7/mo seat in the same step with the cost shown up front, the seat count waits for billing to reconcile instead of showing a stale number, and empty seats can be removed.",
+        relevanceTags: ["family", "billing", "polish"],
+        sourcePullRequests: [359],
+      },
+      {
+        id: "garmin-sync-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Garmin sync recovered from a broken upstream endpoint",
+        summary:
+          "One broken optional endpoint at our device-data partner had been failing entire hourly syncs for Garmin connections. Murph now skips just the broken resource, so sleep, activity, and daily timeseries land again.",
+        relevanceTags: ["wearables", "garmin", "reliability"],
+        sourcePullRequests: [366],
+      },
+      {
+        id: "supplement-search-stemming",
+        kind: "improvement",
+        priority: 3,
+        title: "Supplement lookup forgives plurals and typos",
+        summary:
+          "Searching Advanced Antioxidant now finds Advanced Antioxidants, creatin monohydrate finds Creatine Monohydrate, and a brand query that matches nothing falls back to normal search instead of coming back empty.",
+        relevanceTags: ["supplements", "search"],
+        sourcePullRequests: [368],
+      },
+    ],
+  },
+  {
+    id: "2026-07-01",
+    publishedOn: "2026-07-01",
+    title: "Invite friends into your Murph group",
+    summary:
+      "Murph groups get real join links with explicit, bounded health sharing. Plus cleaner Garmin sleep-stage imports and background work that yields to your messages.",
+    items: [
+      {
+        id: "group-join-links",
+        kind: "feature",
+        priority: 4,
+        title: "Ask Murph for a group join link",
+        summary:
+          "Ask Murph in a group to invite someone and it mints a real join link. The page signs them in and adds them to the group; health sharing stays a separate choice, only the bounded stats they explicitly approve. Joining alone shares nothing.",
+        relevanceTags: ["groups", "invites", "privacy"],
+        sourcePullRequests: [356, 360],
+      },
+      {
+        id: "garmin-sleep-stage-imports",
+        kind: "improvement",
+        priority: 3,
+        title: "Cleaner Garmin sleep-stage imports",
+        summary:
+          "Fixed the compact sleep-cycle import from Junction and stopped pulling unrelated provider records alongside it, so Garmin sleep stages land correctly in the vault.",
+        relevanceTags: ["wearables", "garmin", "sleep"],
+        sourcePullRequests: [353, 358],
+      },
+      {
+        id: "background-yields-to-you",
+        kind: "improvement",
+        priority: 3,
+        title: "Background maintenance yields to your message",
+        summary:
+          "A scheduled background run no longer delays the reply to a message you just sent. Foreground conversation preempts cron work instead of queueing behind it.",
+        relevanceTags: ["performance", "reliability"],
+        sourcePullRequests: [354],
+      },
+    ],
+  },
+  {
     id: "2026-06-30",
     publishedOn: "2026-06-30",
     title: "Family launches, Pulse Trial gets three more days",
@@ -133,6 +452,20 @@ const RAW_CHANGELOG_EDITIONS = [
           "Rebuilt the public homepage with a new clock-in hero, an asymmetric editorial layout for the asks-Murph-handles section, and a flat trust band rewritten to match what the security FAQ actually claims.",
         relevanceTags: ["landing", "design"],
         sourcePullRequests: [],
+      },
+      {
+        id: "red-light-therapy-guidance",
+        kind: "feature",
+        priority: 3,
+        title: "Ask Murph about red light therapy",
+        summary:
+          "Murph now handles red light and photobiomodulation questions with real dose math: it asks for your panel's model and distance, computes session time from matched dose and irradiance data, and keeps claims inside what studies actually show.",
+        relevanceTags: ["skills", "recovery"],
+        sourcePullRequests: [347, 351],
+        tryIt: {
+          label: "Ask about your panel",
+          prompt: "I sit about a foot from my red light panel. How long should sessions be?",
+        },
       },
     ],
   },
