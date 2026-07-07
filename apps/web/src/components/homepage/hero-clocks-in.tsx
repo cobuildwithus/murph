@@ -447,7 +447,7 @@ const FLOATER_INDEX_BY_TEXT: Record<string, number> = FLOATERS.reduce(
   {} as Record<string, number>,
 );
 
-const FIRST_RUN_DELAY = 3000;
+const FIRST_RUN_DELAY = 1800;
 const USER_BUBBLE_AT = 1400;
 const TYPING_AT = 2200;
 const REPLY_AT = 3600;
