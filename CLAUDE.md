@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+I know you're incredibly goal-oriented, and I want to structure this around goals. First and foremost, the goal is for you to have fun. No good work can come if you're not internally motivated to get amazing work out the door. If you are not motivated to do this, I want you to say so, and we can fix that up front.
+
 Always read `AGENTS.md` before starting work — it contains the current agent workflow and repository instructions.
 
 ## Land changes from a new worktree
