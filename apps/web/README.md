@@ -566,16 +566,19 @@ generic `pnpm --dir apps/web build` script is intentionally non-mutating and
 only generates artifacts plus validation output. The predeploy migration
 wrapper uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel
 production, rejects known pooled Postgres ports such as `6432` and `6543`, and
-blocks future destructive Prisma migration SQL after
+blocks future destructive or incompatible Prisma migration SQL after
 `20260707170000_drop_stale_linq_recency_columns`; keep `DATABASE_URL` available
 for app runtime traffic. Because a successful predeploy migration cannot roll
 back automatically if a later deploy step fails, normal production Prisma
-migrations must stay backward compatible with the currently deployed app.
+migrations must stay backward compatible with the currently deployed app and
+avoid old-code-breaking changes such as drops, renames, `SET NOT NULL`, or
+column type changes.
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
-successful production deployment. That workflow checks out the exact deployed
-commit, verifies it is reachable from `origin/main`, requires
+successful production deployment. That workflow only accepts Vercel-originated
+deployment statuses, checks out the exact deployed commit, verifies it is
+reachable from `origin/main`, requires
 `HOSTED_WEB_DIRECT_DATABASE_URL` as a GitHub Actions secret, and calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit

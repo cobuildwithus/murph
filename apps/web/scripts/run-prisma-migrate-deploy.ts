@@ -11,13 +11,23 @@ const KNOWN_POOLER_PORTS = new Set(["6432", "6543"]);
 export const hostedWebPrismaPredeployDestructiveMigrationBaseline =
   "20260707170000_drop_stale_linq_recency_columns";
 
-const destructivePredeploySqlPatterns = [
+const incompatiblePredeploySqlPatterns = [
   { label: "DROP COLUMN", pattern: /\bDROP\s+COLUMN\b/iu },
   { label: "DROP CONSTRAINT", pattern: /\bDROP\s+CONSTRAINT\b/iu },
   { label: "DROP INDEX", pattern: /\bDROP\s+INDEX\b/iu },
   { label: "DROP TABLE", pattern: /\bDROP\s+TABLE\b/iu },
   { label: "DROP TYPE", pattern: /\bDROP\s+TYPE\b/iu },
   { label: "DROP VIEW", pattern: /\bDROP\s+(?:MATERIALIZED\s+)?VIEW\b/iu },
+  { label: "RENAME COLUMN", pattern: /\bRENAME\s+COLUMN\b/iu },
+  { label: "RENAME TABLE", pattern: /\bALTER\s+TABLE\b[\s\S]*?\bRENAME\s+TO\b/iu },
+  {
+    label: "ALTER COLUMN SET NOT NULL",
+    pattern: /\bALTER\s+COLUMN\b[\s\S]{0,240}?\bSET\s+NOT\s+NULL\b/iu,
+  },
+  {
+    label: "ALTER COLUMN TYPE",
+    pattern: /\bALTER\s+COLUMN\b[\s\S]{0,240}?\b(?:SET\s+DATA\s+)?TYPE\b/iu,
+  },
 ] as const;
 
 export const hostedWebPrismaMigrateDeployCommand = {
@@ -132,7 +142,7 @@ export async function assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
     .join(", ");
 
   throw new Error(
-    `Destructive hosted web Prisma migration(s) cannot run in the predeploy Prisma path after ${hostedWebPrismaPredeployDestructiveMigrationBaseline}: ${summary}. Move contract SQL to apps/web/prisma/contract-migrations so it runs after the production deployment is promoted.`,
+    `Destructive or incompatible hosted web Prisma migration(s) cannot run in the predeploy Prisma path after ${hostedWebPrismaPredeployDestructiveMigrationBaseline}: ${summary}. Move contract SQL to apps/web/prisma/contract-migrations so it runs after the production deployment is promoted.`,
   );
 }
 
@@ -152,7 +162,7 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
 
     const sqlPath = path.join(migrationsDir, entry.name, "migration.sql");
     const sql = stripSqlComments(await readFile(sqlPath, "utf8"));
-    const destructivePattern = destructivePredeploySqlPatterns.find(({ pattern }) =>
+    const destructivePattern = incompatiblePredeploySqlPatterns.find(({ pattern }) =>
       pattern.test(sql),
     );
 

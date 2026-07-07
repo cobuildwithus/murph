@@ -132,6 +132,16 @@ describe("hosted web production migration guard", () => {
         "20260707170002_drop_contract_column",
         'ALTER TABLE "hosted_member_routing" DROP COLUMN "contract_value";',
       );
+      await writeMigrationSql(
+        migrationsDir,
+        "20260707170003_rename_contract_column",
+        'ALTER TABLE "hosted_member_routing" RENAME COLUMN "expand_value" TO "contract_value";',
+      );
+      await writeMigrationSql(
+        migrationsDir,
+        "20260707170004_set_not_null",
+        'ALTER TABLE "hosted_member_routing" ALTER COLUMN "contract_value" SET NOT NULL;',
+      );
 
       const destructiveMigrations =
         await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
@@ -145,6 +155,14 @@ describe("hosted web production migration guard", () => {
           {
             migrationId: "20260707170002_drop_contract_column",
             reason: "DROP COLUMN",
+          },
+          {
+            migrationId: "20260707170003_rename_contract_column",
+            reason: "RENAME COLUMN",
+          },
+          {
+            migrationId: "20260707170004_set_not_null",
+            reason: "ALTER COLUMN SET NOT NULL",
           },
         ],
       );
@@ -181,7 +199,7 @@ describe("hosted web production migration guard", () => {
             },
             { prismaMigrationsDir: migrationsDir },
           ),
-        /Destructive hosted web Prisma migration/u,
+        /Destructive or incompatible hosted web Prisma migration/u,
       );
       assert.equal(commandRan, false);
     } finally {
@@ -428,6 +446,8 @@ describe("hosted web production migration guard", () => {
 
     assert.match(workflow, /deployment_status/u);
     assert.match(workflow, /github\.event\.deployment_status\.state == 'success'/u);
+    assert.match(workflow, /deployment_status\.creator\.login == 'vercel\[bot\]'/u);
+    assert.match(workflow, /deployment\.creator\.login == 'vercel\[bot\]'/u);
     assert.match(workflow, /github\.event\.deployment\.sha/u);
     assert.match(workflow, /fetch-depth: 0/u);
     assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOYED_SHA\}" origin\/main/u);
