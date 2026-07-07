@@ -1236,6 +1236,69 @@ for (const scenario of [
     ],
   },
   {
+    name: "prefers a same-date device run over a manual activity run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGK",
+    slug: "same-date-manual-activity-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      makeActivitySession({
+        entityId: "evt_same_date_manual_activity_run_1",
+        dayKey: "2026-06-01",
+        activityType: "Running",
+        source: "manual",
+      }),
+      makeActivitySession({
+        entityId: "evt_same_date_device_activity_run_1",
+        dayKey: "2026-06-01",
+        activityType: "Running",
+        source: "device",
+      }),
+    ],
+  },
+  {
+    name: "counts a manual activity run when it is the only evidence",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGP",
+    slug: "manual-activity-only-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      makeActivitySession({
+        entityId: "evt_manual_activity_only_run_1",
+        dayKey: "2026-06-01",
+        activityType: "Running",
+        source: "manual",
+      }),
+    ],
+  },
+  {
+    name: "suppresses only one non-device done row for one same-date device run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGM",
+    slug: "same-date-one-device-two-non-device-runs",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      makeActivitySession({
+        entityId: "evt_one_device_two_non_device_manual_activity",
+        dayKey: "2026-06-01",
+        activityType: "Running",
+        source: "manual",
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE3BK",
+        occurredAt: "2026-06-01T15:00:00.000Z",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGM",
+        experimentSlug: "same-date-one-device-two-non-device-runs",
+      }),
+      makeActivitySession({
+        entityId: "evt_one_device_two_non_device_device_activity",
+        dayKey: "2026-06-01",
+        activityType: "Running",
+        source: "device",
+      }),
+    ],
+  },
+  {
     name: "counts different-date manual and sensed runs separately",
     experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGB",
     slug: "different-date-manual-device-run",
@@ -1436,6 +1499,55 @@ test("experiment adherence calendar suppresses same-date manual fallback when a 
   assert.equal(calendar?.cells[0]?.status, "satisfied");
   assert.equal(calendar?.cells[0]?.observedCount, 1);
   assert.deepEqual(calendar?.cells[0]?.evidenceIds, ["evt_calendar_same_date_device_run_1"]);
+  assert.equal(card.sessions.logged, 1);
+});
+
+test("experiment adherence calendar suppresses same-date manual activity when a device run matches", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJGN";
+  const slug = "calendar-same-date-manual-activity-device-run";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-calendar-same-date-manual-activity-device-run",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId,
+        slug,
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-01",
+          modality: "Run",
+          targetSessions: 1,
+          minimumUsefulSessions: 1,
+          schedule: {
+            kind: "dailyLocal",
+            localTime: "08:00",
+            timeZone: "America/New_York",
+          },
+        },
+      }),
+      makeActivitySession({
+        entityId: "evt_calendar_same_date_manual_activity_run_1",
+        dayKey: "2026-06-01",
+        activityType: "Running",
+        source: "manual",
+      }),
+      makeActivitySession({
+        entityId: "evt_calendar_same_date_device_activity_run_1",
+        dayKey: "2026-06-01",
+        activityType: "Running",
+        source: "device",
+      }),
+    ],
+  });
+
+  const calendar = collectExperimentAdherenceCalendar(vault, slug, { asOf: "2026-06-03" });
+  const { card } = buildExperimentProgressCard(vault, slug, { asOf: "2026-06-03" });
+
+  assert.equal(calendar?.cells[0]?.status, "satisfied");
+  assert.equal(calendar?.cells[0]?.observedCount, 1);
+  assert.deepEqual(calendar?.cells[0]?.evidenceIds, ["evt_calendar_same_date_device_activity_run_1"]);
   assert.equal(card.sessions.logged, 1);
 });
 

@@ -30,6 +30,7 @@ export interface ExperimentAdherenceObservation {
   eventKind?: string | null;
   localDate: string;
   metricKey?: string | null;
+  source?: string | null;
   status?: "completed" | "partial" | "missed" | "skipped" | null;
   targetId?: string | null;
   value?: number | null;
@@ -665,10 +666,7 @@ function suppressManualActivityDuplicates(
 
   const deviceCountsByLocalDate = new Map<string, number>();
   for (const observation of observations) {
-    if (
-      observation.eventKind === "activity_session" &&
-      linkedEventObservationMatchesEvidence(observation, evidence)
-    ) {
+    if (isDeviceEquivalentActivityObservation(observation)) {
       deviceCountsByLocalDate.set(
         observation.localDate,
         (deviceCountsByLocalDate.get(observation.localDate) ?? 0) + 1,
@@ -682,9 +680,7 @@ function suppressManualActivityDuplicates(
 
   return observations.filter((observation) => {
     if (
-      observation.eventKind !== "intervention_session" ||
-      observation.status === "missed" ||
-      observation.status === "skipped"
+      !isSuppressibleNonDeviceDoneObservation(observation)
     ) {
       return true;
     }
@@ -697,6 +693,37 @@ function suppressManualActivityDuplicates(
     deviceCountsByLocalDate.set(observation.localDate, remainingSuppressions - 1);
     return false;
   });
+}
+
+function isDeviceEquivalentActivityObservation(
+  observation: ExperimentAdherenceObservation,
+): boolean {
+  if (observation.eventKind !== "activity_session") {
+    return false;
+  }
+  const source = normalizeObservationSource(observation.source);
+  return source !== "manual" && source !== "derived";
+}
+
+function isSuppressibleNonDeviceDoneObservation(
+  observation: ExperimentAdherenceObservation,
+): boolean {
+  if (observation.status !== "completed" && observation.status !== "partial") {
+    return false;
+  }
+  if (observation.eventKind === "intervention_session") {
+    return true;
+  }
+  if (observation.eventKind !== "activity_session") {
+    return false;
+  }
+  const source = normalizeObservationSource(observation.source);
+  return source === "manual" || source === "derived";
+}
+
+function normalizeObservationSource(source: string | null | undefined): string | null {
+  const normalized = source?.trim().toLowerCase();
+  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 function resolveDeviceObservableActivityKind(modality: string | null | undefined): string | null {

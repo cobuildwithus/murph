@@ -423,6 +423,11 @@ it('skips when the run was stopped early (endedOn before interventionEnd)', asyn
 
   expect(result.kind).toBe('skip')
   expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
 })
 
 it('skips when assistant support opts out of scheduled summaries', async () => {
@@ -442,6 +447,11 @@ it('skips when assistant support opts out of scheduled summaries', async () => {
 
   expect(result.kind).toBe('skip')
   expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
 })
 
 it('skips when the run is no longer in an active or completed state', async () => {
@@ -458,6 +468,62 @@ it('skips when the run is no longer in an active or completed state', async () =
 
   expect(result.kind).toBe('skip')
   expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
+})
+
+it('does not archive the activity nudge when final results are not due yet', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult({
+      ...eligibleFrontmatter,
+      runPlan: { interventionStart: '2026-04-08', interventionEnd: '2026-08-01' },
+    }),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    now: '2026-07-07T12:00:00.000Z',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'skip', reason: 'experiment is still running' })
+  expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).not.toHaveBeenCalled()
+})
+
+it('does not block a terminal skip verdict when activity nudge archive fails', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult({
+      ...eligibleFrontmatter,
+      assistantSupport: { notificationStyle: 'skip_by_default' },
+    }),
+  )
+  coreMocks.patchAutomation
+    .mockReset()
+    .mockRejectedValue(new Error('archive failed'))
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({
+    kind: 'skip',
+    reason: 'assistant support opts out of scheduled summaries',
+  })
+  expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
 })
 
 it('skips when the authoritative lookup proves absence (not_found)', async () => {

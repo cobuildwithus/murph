@@ -794,6 +794,7 @@ function buildAdherenceObservations(
                   (target.calendar && event.occurredAt
                     ? toLocalDayKey(new Date(event.occurredAt), target.calendar?.timeZone ?? "UTC")
                     : event.date ?? extractDate(event.occurredAt) ?? context.asOf),
+            source: readStringAttribute(event, "source"),
             status: readExperimentSessionStatus(event),
             targetId: target.targetId,
           })));

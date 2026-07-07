@@ -224,6 +224,7 @@ export type ExperimentLifecyclePreconditionResult =
  */
 export async function runExperimentLifecycleOutcomePrecondition(input: {
   automationId: string
+  now?: Date | string
   tags: readonly string[]
   vault: string
 }): Promise<ExperimentLifecyclePreconditionResult> {
@@ -264,7 +265,15 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
     throw error
   }
 
+  const archiveActivityNudge = async (): Promise<void> => {
+    await archiveExperimentActivityNudgeAutomation({
+      experimentSlug: experiment.slug,
+      vaultRoot: input.vault,
+    })
+  }
+
   if (experiment.status !== 'active' && experiment.status !== 'completed') {
+    await archiveActivityNudge()
     return {
       kind: 'skip',
       reason: `experiment status is ${experiment.status}; final review not eligible`,
@@ -276,7 +285,12 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
     return { kind: 'skip', reason: 'experiment has no intervention end date' }
   }
 
+  if (experiment.status === 'active' && currentIsoDate(input.now) <= interventionEnd) {
+    return { kind: 'skip', reason: 'experiment is still running' }
+  }
+
   if (experiment.endedOn && experiment.endedOn < interventionEnd) {
+    await archiveActivityNudge()
     return {
       kind: 'skip',
       reason: 'experiment was stopped before its intervention end',
@@ -284,6 +298,7 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
   }
 
   if (experiment.assistantSupport?.notificationStyle === 'skip_by_default') {
+    await archiveActivityNudge()
     return {
       kind: 'skip',
       reason: 'assistant support opts out of scheduled summaries',
@@ -296,12 +311,17 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
     asOf: interventionEnd,
     requestId: null,
   })
-  await archiveExperimentActivityNudgeAutomation({
-    experimentSlug: experiment.slug,
-    vaultRoot: input.vault,
-  })
+  await archiveActivityNudge()
 
   return { kind: 'continue' }
+}
+
+function currentIsoDate(now: Date | string | undefined): string {
+  const date = now instanceof Date ? now : new Date(now ?? Date.now())
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError('Experiment lifecycle precondition received an invalid current date.')
+  }
+  return date.toISOString().slice(0, 10)
 }
 
 async function archiveExperimentActivityNudgeAutomation(input: {
@@ -318,7 +338,8 @@ async function archiveExperimentActivityNudgeAutomation(input: {
     if (isVaultError(error) && error.code === 'VAULT_AUTOMATION_MISSING') {
       return
     }
-    // Best-effort cleanup: outcome persistence is the durable precondition.
+    // Deliberate best-effort cleanup: final-results delivery outranks nudge
+    // cleanup, and the prompt plus nudge self-archive remain later backstops.
     void error
   }
 }

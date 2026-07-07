@@ -222,7 +222,7 @@ describe('experiment onboarding skill guidance', () => {
       'Do not ask the user to log sessions, do not create per-session "log it" reminders',
     )
     expect(raw).toContain(
-      'do not log a manual session for any workout the wearable synced or will sync',
+      'do not save the workout through any other logging surface either; the wearable record is the log',
     )
     expect(raw).toContain(
       'Your runs count automatically from your WHOOP. No need to tell me when you run.',
@@ -274,7 +274,7 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain('sessions the user says the wearable missed')
     expect(raw).not.toContain('and corrections')
     expect(raw).toContain(
-      'Never write a manual session for a workout that synced or will sync',
+      'Never save a synced workout through any logging surface',
     )
     expect(raw).toContain(
       'if the wearable later backfills a missed workout, counting automatically prefers the sensed record, so no cleanup is needed',
