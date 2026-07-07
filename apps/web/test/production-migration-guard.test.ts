@@ -184,6 +184,66 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("keeps existing hosted web Prisma migration history exempt", async () => {
+    await assert.doesNotReject(() =>
+      assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
+        path.join(appRoot, "prisma", "migrations"),
+      ),
+    );
+  });
+
+  test("blocks newly introduced backdated destructive Prisma migrations", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    let commandRan = false;
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        hostedWebPrismaPredeployDestructiveMigrationBaseline,
+        'ALTER TABLE "hosted_member_routing" DROP COLUMN "legacy_value";',
+      );
+      await writeMigrationSql(
+        migrationsDir,
+        "20260707165959_drop_contract_column",
+        'ALTER TABLE "hosted_member_routing" DROP COLUMN "contract_value";',
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId, reason }) => ({
+          migrationId,
+          reason,
+        })),
+        [
+          {
+            migrationId: "20260707165959_drop_contract_column",
+            reason: "DROP COLUMN",
+          },
+        ],
+      );
+      await assert.rejects(
+        () =>
+          runHostedWebPrismaMigrateDeploy(
+            {
+              DIRECT_DATABASE_URL: "postgresql://direct.example.com:5432/app",
+            },
+            async () => {
+              commandRan = true;
+            },
+            { prismaMigrationsDir: migrationsDir },
+          ),
+        /Destructive or incompatible hosted web Prisma migration/u,
+      );
+      assert.equal(commandRan, false);
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("stops Prisma deploy before the database when a future destructive migration is present", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
