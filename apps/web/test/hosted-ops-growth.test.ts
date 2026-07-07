@@ -342,6 +342,18 @@ describe("hosted ops growth metrics", () => {
     expect(mocks.requireVercelCronRequest).toHaveBeenCalledWith(request);
     expect(mocks.getPrisma).toHaveBeenCalledTimes(1);
     expect(mocks.hostedGrowthDailySnapshot.upsert).toHaveBeenCalledTimes(1);
+    expect(mocks.hostedAccountGroup.findMany.mock.calls[0]?.[0]).toMatchObject({
+      select: {
+        memberships: {
+          where: {
+            member: {
+              suspendedAt: null,
+            },
+            status: "active",
+          },
+        },
+      },
+    });
     expect(
       mocks.requireVercelCronRequest.mock.invocationCallOrder[0],
     ).toBeLessThan(

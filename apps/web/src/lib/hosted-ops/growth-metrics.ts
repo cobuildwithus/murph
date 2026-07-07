@@ -742,6 +742,9 @@ async function readCurrentHostedGrowthMetrics(
             memberId: true,
           },
           where: {
+            member: {
+              suspendedAt: null,
+            },
             status: "active",
           },
         },
