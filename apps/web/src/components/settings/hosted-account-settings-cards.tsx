@@ -2,7 +2,7 @@
 
 import { Mail, Phone, Send } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-card-picker";
 import { Button } from "@/src/components/ui/button";
@@ -14,6 +14,7 @@ import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-helpers";
 
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
+const ADD_EMAIL_QUERY_KEY = "addEmail";
 
 const HostedSettingsIdentityLinkDialog = dynamic(
   () => import("./hosted-settings-identity-link-dialog").then((mod) => mod.HostedSettingsIdentityLinkDialog),
@@ -26,12 +27,30 @@ const HostedSettingsIdentityLinkDialog = dynamic(
 export function HostedAccountSettingsCards({
   account,
   murphPhoneNumber,
+  openEmailLink = false,
 }: {
   account: HostedAccountSettingsSnapshot;
   murphPhoneNumber?: string | null;
+  openEmailLink?: boolean;
 }) {
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
-  const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(null);
+  const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(
+    openEmailLink ? "email" : null,
+  );
+  const [previousOpenEmailLink, setPreviousOpenEmailLink] = useState(openEmailLink);
+
+  if (previousOpenEmailLink !== openEmailLink) {
+    setPreviousOpenEmailLink(openEmailLink);
+    if (openEmailLink) {
+      setLinkMode("email");
+    }
+  }
+
+  useEffect(() => {
+    if (openEmailLink) {
+      stripAddEmailQueryParam();
+    }
+  }, [openEmailLink]);
 
   const phoneNumber = account.phone.number;
   const phoneVerified = Boolean(account.phone.verifiedAt);
@@ -131,10 +150,11 @@ export function HostedAccountSettingsCards({
       {contactPickerOpen ? (
         <MurphContactCardPicker
           copy={{
-            description: "Pick a look and save the updated card.",
-            primaryAction: "Save updated card",
+            description:
+              "iPhone only applies the photo when the card is saved as a new contact. Delete your current Murph contact first, then save this one fresh.",
+            primaryAction: "Save new card",
             secondaryAction: "Close",
-            title: "Customize Murph contact",
+            title: "Pick a new look",
           }}
           onAddToContacts={() => setContactPickerOpen(false)}
           onOpenChange={setContactPickerOpen}
@@ -144,6 +164,16 @@ export function HostedAccountSettingsCards({
       ) : null}
     </>
   );
+}
+
+function stripAddEmailQueryParam() {
+  if (typeof window === "undefined" || typeof window.location.href !== "string") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.delete(ADD_EMAIL_QUERY_KEY);
+  window.history?.replaceState?.({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function SettingsRow(props: {

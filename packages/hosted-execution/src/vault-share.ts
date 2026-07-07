@@ -66,6 +66,7 @@ export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS = [
 ] as const satisfies readonly HostedVaultShareDailyMetricProjectionSpec[];
 
 export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
+  "group-email.v0",
   "profile-name.v0",
   "sleep-times.v0",
   "workout-days.v0",
@@ -79,6 +80,7 @@ export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
  * name is what joining means), never requested as an optional health permission.
  */
 export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
+  "group-email.v0",
   "sleep-times.v0",
   "activity-days.v0",
   "workout-days.v0",

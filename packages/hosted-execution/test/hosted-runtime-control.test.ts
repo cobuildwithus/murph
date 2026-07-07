@@ -107,6 +107,7 @@ describe("hosted runtime control contracts", () => {
       "member.channels.updated",
       "assistant.notification.requested",
       "device-sync.wake",
+      "group-newsletter.email-needed",
       "vault-share.delivery",
       "vault-share.revoke",
       "runtime.manual-requested",

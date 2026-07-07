@@ -65,6 +65,14 @@ test("hosted email thread targets serialize, normalize, and parse deterministica
     to: ["friend@example.test", "team@example.test"],
   }));
   assert.equal(parsed?.schema, HOSTED_EMAIL_THREAD_TARGET_SCHEMA);
+  assert.equal(
+    (parsed as typeof parsed & { targetKind?: string } | null)?.targetKind,
+    "explicit",
+  );
+  assert.equal(
+    (parsed as typeof parsed & { groupId?: string | null } | null)?.groupId,
+    null,
+  );
   assert.equal(parseHostedEmailThreadTarget(""), null);
   assert.equal(parseHostedEmailThreadTarget("not-a-target"), null);
   assert.equal(parseHostedEmailThreadTarget("hostedmail:not-json"), null);
@@ -87,6 +95,27 @@ test("hosted email thread targets serialize, normalize, and parse deterministica
     ),
     null,
   );
+  const unknownTargetKind = parseHostedEmailThreadTarget(
+    `hostedmail:${Buffer.from(JSON.stringify({
+      cc: [],
+      groupId: "group_legacy",
+      lastMessageId: "<last@example.test>",
+      references: ["<last@example.test>"],
+      schema: HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
+      subject: "Legacy fallback",
+      targetKind: "not-a-target-kind",
+      to: ["Owner@example.test"],
+    })).toString("base64url")}`,
+  );
+  assert.equal(
+    (unknownTargetKind as typeof unknownTargetKind & { targetKind?: string } | null)?.targetKind,
+    "explicit",
+  );
+  assert.equal(
+    (unknownTargetKind as typeof unknownTargetKind & { groupId?: string | null } | null)?.groupId,
+    null,
+  );
+  assert.deepEqual(unknownTargetKind?.to, ["owner@example.test"]);
 });
 
 test("hosted email reference chains and reply subjects normalize edge cases", () => {

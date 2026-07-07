@@ -10,7 +10,10 @@ import {
   type ParsedEmailMessage,
 } from "@murphai/inboxd/connectors/email/parsed";
 import {
+  createHostedEmailThreadTarget,
   HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH,
+  redactHostedGroupEmailPromptText,
+  serializeHostedEmailThreadTarget,
   type HostedEmailAuthenticatedSenderVerdict,
 } from "@murphai/runtime-state";
 import {
@@ -222,16 +225,19 @@ export async function handleHostedEmailIngress(
       userId: route.userId,
     });
   });
-  const threadTarget = buildParsedEmailThreadTarget({
-    accountAddress: route.identityId,
+  const threadTarget = buildHostedEmailIngressThreadTarget({
     message: parsedMessage,
-    selfAddresses: [route.routeAddress],
+    route,
   });
   const threadKey = resolveParsedEmailThreadKey({
     message: parsedMessage,
     rawMessageKey,
   });
-  const promptProjection = buildHostedEmailPromptProjection(parsedMessage);
+  const isGroupRoute = Boolean(route.groupId);
+  const promptProjection = buildHostedEmailPromptProjection({
+    message: parsedMessage,
+    redactedForGroup: isGroupRoute,
+  });
 
   await appendHostedEmailIngressWakeInWeb({
     ...(environment.hostedWebAllowHttpHosts
@@ -241,21 +247,37 @@ export async function handleHostedEmailIngress(
     body: {
       ...promptProjection,
       eventId,
-      identityId: route.identityId,
-      messageId: normalizeHostedEmailPromptMetadataScalar(
-        parsedMessage.messageId,
-        HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS,
-      ),
+      identityId: isGroupRoute ? null : route.identityId,
+      ...(isGroupRoute
+        ? {}
+        : {
+            messageId: normalizeHostedEmailPromptMetadataScalar(
+              parsedMessage.messageId,
+              HOSTED_EMAIL_PROMPT_MESSAGE_ID_MAX_CHARS,
+            ),
+          }),
       occurredAt,
       rawMessageKey,
-      selfAddress: normalizeHostedEmailPromptMetadataScalar(
-        route.routeAddress,
-        HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS,
-      ),
-      threadKey: normalizeHostedEmailPromptMetadataScalar(
-        threadKey,
-        HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS,
-      ),
+      ...(isGroupRoute
+        ? {}
+        : {
+            selfAddress: normalizeHostedEmailPromptMetadataScalar(
+              route.routeAddress,
+              HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS,
+            ),
+          }),
+      ...(isGroupRoute
+        ? {}
+        : {
+            threadKey: normalizeHostedEmailPromptMetadataScalar(
+              threadKey,
+              HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS,
+            ),
+          }),
+      // Group wakes keep only the exact threadTarget needed for reply
+      // threading. Prompt fields above omit To/Cc/self address, summarize From,
+      // and redact Subject/body/attachment names before the wake leaves the
+      // Worker; the runtime also skips raw group email inbox projection.
       threadTarget: normalizeHostedEmailPromptMetadataScalar(
         threadTarget,
         HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS,
@@ -279,9 +301,41 @@ const HOSTED_EMAIL_PROMPT_THREAD_KEY_MAX_CHARS = 512;
 const HOSTED_EMAIL_PROMPT_THREAD_TARGET_MAX_CHARS =
   HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH;
 
-function buildHostedEmailPromptProjection(
-  message: ParsedEmailMessage,
-): {
+function buildHostedEmailIngressThreadTarget(input: {
+  message: ParsedEmailMessage;
+  route: {
+    groupId: string | null;
+    identityId: string;
+    routeAddress: string;
+  };
+}): string {
+  if (input.route.groupId) {
+    return serializeHostedEmailThreadTarget(
+      createHostedEmailThreadTarget({
+        groupId: input.route.groupId,
+        lastMessageId: input.message.messageId,
+        references: [
+          ...input.message.references,
+          input.message.inReplyTo,
+          input.message.messageId,
+        ].filter((value): value is string => Boolean(value && value.trim())),
+        subject: redactHostedGroupEmailPromptText(input.message.subject),
+        targetKind: "group",
+      }),
+    );
+  }
+
+  return buildParsedEmailThreadTarget({
+    accountAddress: input.route.identityId,
+    message: input.message,
+    selfAddresses: [input.route.routeAddress],
+  });
+}
+
+function buildHostedEmailPromptProjection(input: {
+  message: ParsedEmailMessage;
+  redactedForGroup: boolean;
+}): {
   attachmentSummaries?: HostedExecutionEmailAttachmentSummary[];
   cc?: string[];
   from?: string | null;
@@ -289,8 +343,15 @@ function buildHostedEmailPromptProjection(
   textPreview?: string | null;
   to?: string[];
 } {
+  const { message } = input;
+  const promptText = input.redactedForGroup
+    ? redactHostedGroupEmailPromptText(message.text)
+    : message.text;
+  const promptSubject = input.redactedForGroup
+    ? redactHostedGroupEmailPromptText(message.subject)
+    : message.subject;
   const textPreview = normalizeHostedEmailPromptScalar(
-    message.text,
+    promptText,
     HOSTED_EMAIL_PROMPT_TEXT_PREVIEW_MAX_CHARS,
   );
   if (!textPreview) {
@@ -299,32 +360,72 @@ function buildHostedEmailPromptProjection(
 
   const attachmentSummaries = message.attachments
     .slice(0, HOSTED_EMAIL_PROMPT_ATTACHMENT_MAX_COUNT)
-    .map((attachment): HostedExecutionEmailAttachmentSummary => ({
-      contentType: normalizeHostedEmailPromptScalar(
-        attachment.contentType,
-        HOSTED_EMAIL_PROMPT_CONTENT_TYPE_MAX_CHARS,
-      ),
-      fileName: normalizeHostedEmailPromptScalar(
-        attachment.fileName,
-        HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS,
-      ),
-      sizeBytes: null,
-    }));
+    .map((attachment): HostedExecutionEmailAttachmentSummary => {
+      const promptFileName = input.redactedForGroup
+        ? redactHostedGroupEmailPromptText(attachment.fileName)
+        : attachment.fileName;
+      return {
+        contentType: normalizeHostedEmailPromptScalar(
+          attachment.contentType,
+          HOSTED_EMAIL_PROMPT_CONTENT_TYPE_MAX_CHARS,
+        ),
+        fileName: normalizeHostedEmailPromptScalar(
+          promptFileName,
+          HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS,
+        ),
+        sizeBytes: null,
+      };
+    });
+
+  const sharedProjection = {
+    ...(attachmentSummaries.length > 0 ? { attachmentSummaries } : {}),
+    subject: normalizeHostedEmailPromptScalar(
+      promptSubject,
+      HOSTED_EMAIL_PROMPT_SUBJECT_MAX_CHARS,
+    ),
+    textPreview,
+  };
+
+  if (input.redactedForGroup) {
+    return {
+      ...sharedProjection,
+      from: buildHostedGroupEmailSenderSummary(message.from),
+    };
+  }
 
   return {
-    ...(attachmentSummaries.length > 0 ? { attachmentSummaries } : {}),
+    ...sharedProjection,
     cc: normalizeHostedEmailPromptList(message.cc, HOSTED_EMAIL_PROMPT_ADDRESS_MAX_COUNT),
     from: normalizeHostedEmailPromptScalar(
       message.from,
       HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS,
     ),
-    subject: normalizeHostedEmailPromptScalar(
-      message.subject,
-      HOSTED_EMAIL_PROMPT_SUBJECT_MAX_CHARS,
-    ),
-    textPreview,
     to: normalizeHostedEmailPromptList(message.to, HOSTED_EMAIL_PROMPT_ADDRESS_MAX_COUNT),
   };
+}
+
+function buildHostedGroupEmailSenderSummary(value: string | null | undefined): string {
+  const displayName = normalizeHostedEmailPromptScalar(
+    extractHostedEmailDisplayName(value),
+    HOSTED_EMAIL_PROMPT_FILE_NAME_MAX_CHARS,
+  );
+  if (displayName && !HOSTED_EMAIL_ADDRESS_PATTERN.test(displayName)) {
+    return `Email reply from group participant: ${displayName}`;
+  }
+  return "Email reply from group participant";
+}
+
+const HOSTED_EMAIL_ADDRESS_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu;
+
+function extractHostedEmailDisplayName(value: string | null | undefined): string | null {
+  const normalized = value?.replace(/\s+/gu, " ").trim() ?? "";
+  const angleIndex = normalized.indexOf("<");
+  if (angleIndex <= 0) {
+    return null;
+  }
+
+  const candidate = normalized.slice(0, angleIndex).trim().replace(/^"|"$/gu, "");
+  return candidate.length > 0 ? candidate : null;
 }
 
 function normalizeHostedEmailPromptList(

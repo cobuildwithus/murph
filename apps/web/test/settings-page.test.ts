@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   HostedAccountSettingsCards: vi.fn((props: {
     account: unknown;
     murphPhoneNumber?: string | null;
+    openEmailLink?: boolean;
   }) =>
     React.createElement(
       "div",
@@ -257,7 +258,9 @@ test("SettingsPage reads the app session and persisted account settings into the
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  const markup = renderToStaticMarkup(await SettingsPage());
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ addEmail: "true" }),
+  }));
 
   assert.match(markup, /Hosted billing settings/);
   assert.match(markup, /Hosted account settings \+15550100001/);
@@ -311,6 +314,7 @@ test("SettingsPage reads the app session and persisted account settings into the
   expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
     account: accountSnapshot,
     murphPhoneNumber: "+15550100001",
+    openEmailLink: true,
   }), undefined);
   expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,

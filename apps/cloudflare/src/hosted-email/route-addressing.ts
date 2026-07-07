@@ -32,7 +32,7 @@ export function parseHostedEmailRouteCandidate(
     return null;
   }
 
-  if (!/^[A-Za-z0-9-]+$/u.test(normalized)) {
+  if (!/^[A-Za-z0-9_-]+$/u.test(normalized)) {
     return null;
   }
 
