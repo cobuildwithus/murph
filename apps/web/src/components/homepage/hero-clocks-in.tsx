@@ -74,9 +74,9 @@ type TextItem = SoloTextItem | MemberTextItem;
 type CardItem = { kind: "card"; id: number; result: ExperimentResult };
 type BloodworkItem = { kind: "bloodwork"; id: number; result: BloodworkResult };
 type OrderItem = { kind: "order"; id: number; result: OrderResult };
-type SystemItem = { kind: "system"; id: number; text: string };
 type ChallengeItem = { kind: "challenge"; id: number };
 type NewsletterItem = { kind: "newsletter"; id: number };
+type TimestampItem = { kind: "timestamp"; id: number; text: string };
 type ContactItem = {
   kind: "contact";
   id: number;
@@ -88,9 +88,9 @@ type StreamItem =
   | CardItem
   | BloodworkItem
   | OrderItem
-  | SystemItem
   | ChallengeItem
   | NewsletterItem
+  | TimestampItem
   | ContactItem;
 
 type Exchange = {
@@ -337,6 +337,10 @@ const HERO_COPY = {
 } as const;
 
 const GROUP_MESSAGES = {
+  userKickoff: "walk challenge starts tomorrow. loser buys steak dinner 🥩",
+  murphKickoff:
+    "Baselines are set from everyone's wearables. I keep score, standings drop daily, and the winner gets dinner. Good luck.",
+  timestamp: "Saturday 9:02 AM",
   theoQuestion: "ok who's actually winning this thing",
   murphStandings:
     "Standings, day 5 of 7. Maya is one sunrise walk from taking the lead. Theo, bold words for a man who logged 11 minutes yesterday.",
@@ -448,12 +452,28 @@ const USER_BUBBLE_AT = 1400;
 const TYPING_AT = 2200;
 const REPLY_AT = 3600;
 const CYCLE_LENGTH = 7800;
+const COMPOSE_SHEET_UP_AT = 900;
+const GROUP_SWAP_AT = 1400;
+const GROUP_FACES_LAUNCH_AT = 2300;
+const GROUP_FACE_FLIGHT_MS = 1400;
 // Members fly in as one quick burst: barely staggered so the group forms
 // together instead of trickling in one by one.
 const GROUP_JOIN_STAGGER = 450;
-const GROUP_JOIN_LINE_AT = 900;
+const GROUP_LAST_CHIP_AT =
+  GROUP_FACES_LAUNCH_AT +
+  (GROUP_MEMBERS.length - 1) * GROUP_JOIN_STAGGER +
+  GROUP_FACE_FLIGHT_MS;
+const COMPOSE_SHEET_REVEAL_AT = GROUP_LAST_CHIP_AT + 1000;
+const COMPOSE_SHEET_FADE_MS = 250;
+const GROUP_KICKOFF_USER_AT = COMPOSE_SHEET_REVEAL_AT + 600;
+const GROUP_KICKOFF_TYPING_AT = COMPOSE_SHEET_REVEAL_AT + 1400;
+const GROUP_KICKOFF_REPLY_AT = COMPOSE_SHEET_REVEAL_AT + 2600;
+const GROUP_TIMESTAMP_AT = COMPOSE_SHEET_REVEAL_AT + 5200;
+const GROUP_BEATS_START_AT = COMPOSE_SHEET_REVEAL_AT + 6000;
 const GROUP_BEAT_GAP = 6500;
 const MAX_ITEMS = 30;
+
+type ComposeSheetState = "hidden" | "pending" | "up" | "leaving";
 
 export function HeroClocksIn({
   authenticated,
@@ -471,6 +491,8 @@ export function HeroClocksIn({
   const [typing, setTyping] = useState(false);
   const [composerValue, setComposerValue] = useState("");
   const [groupMode, setGroupModeState] = useState(false);
+  const [composeSheet, setComposeSheet] =
+    useState<ComposeSheetState>("hidden");
   const [usedFloaters, setUsedFloaters] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -509,6 +531,7 @@ export function HeroClocksIn({
 
   const cancelScheduledDemo = () => {
     cancelledRef.current = true;
+    setComposeSheet("hidden");
     clearScheduledDemo();
   };
 
@@ -589,18 +612,35 @@ export function HeroClocksIn({
   }) => {
     if (groupSequenceStartedRef.current) return;
     groupSequenceStartedRef.current = true;
+    setComposeSheet("pending");
+
+    queue(
+      () => {
+        setComposeSheet("up");
+      },
+      COMPOSE_SHEET_UP_AT,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => {
+        // The group is a NEW conversation, not an audience added to the
+        // private 1:1 thread: clear the personal history under the compose
+        // sheet so none of the user's private health talk travels with it.
+        setItems([]);
+        setTyping(false);
+        setGroupMode(true);
+      },
+      GROUP_SWAP_AT,
+      { allowAfterEngaged },
+    );
 
     GROUP_MEMBERS.forEach((member, index) => {
       const idx = FLOATER_INDEX_BY_TEXT[member.name.toLowerCase()] ?? null;
-      const startsAt = index * GROUP_JOIN_STAGGER;
+      const startsAt = GROUP_FACES_LAUNCH_AT + index * GROUP_JOIN_STAGGER;
 
       queue(
         () => {
-          // The group is a NEW conversation, not an audience added to the
-          // private 1:1 thread: clear the personal history so nothing the
-          // user just discussed with Murph reads as visible to joiners.
-          if (index === 0) setItems([]);
-          setGroupMode(true);
           setActiveIdx(idx);
         },
         startsAt,
@@ -611,20 +651,78 @@ export function HeroClocksIn({
         () => {
           markFloaterUsed(idx);
           setActiveIdx((current) => (current === idx ? null : current));
-          appendItems([
-            {
-              kind: "system",
-              id: nextId(),
-              text: `${member.name} joined the conversation`,
-            },
-          ]);
         },
-        startsAt + GROUP_JOIN_LINE_AT,
+        startsAt + GROUP_FACE_FLIGHT_MS,
         { allowAfterEngaged },
       );
     });
 
-    const beatsStart = GROUP_MEMBERS.length * GROUP_JOIN_STAGGER + 1100;
+    queue(
+      () => {
+        setComposeSheet("leaving");
+      },
+      COMPOSE_SHEET_REVEAL_AT,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => {
+        setComposeSheet("hidden");
+      },
+      COMPOSE_SHEET_REVEAL_AT + COMPOSE_SHEET_FADE_MS,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => {
+        appendItems([
+          {
+            kind: "text",
+            id: nextId(),
+            from: "user",
+            text: GROUP_MESSAGES.userKickoff,
+          },
+        ]);
+      },
+      GROUP_KICKOFF_USER_AT,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => setTyping(true),
+      GROUP_KICKOFF_TYPING_AT,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => {
+        setTyping(false);
+        appendItems([
+          {
+            kind: "text",
+            id: nextId(),
+            from: "murph",
+            text: GROUP_MESSAGES.murphKickoff,
+          },
+        ]);
+      },
+      GROUP_KICKOFF_REPLY_AT,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => {
+        appendItems([
+          {
+            kind: "timestamp",
+            id: nextId(),
+            text: GROUP_MESSAGES.timestamp,
+          },
+        ]);
+      },
+      GROUP_TIMESTAMP_AT,
+      { allowAfterEngaged },
+    );
 
     queue(
       () => {
@@ -638,7 +736,7 @@ export function HeroClocksIn({
           },
         ]);
       },
-      beatsStart,
+      GROUP_BEATS_START_AT,
       { allowAfterEngaged },
     );
 
@@ -654,7 +752,7 @@ export function HeroClocksIn({
           },
         ]);
       },
-      beatsStart + GROUP_BEAT_GAP,
+      GROUP_BEATS_START_AT + GROUP_BEAT_GAP,
       { allowAfterEngaged },
     );
 
@@ -670,7 +768,7 @@ export function HeroClocksIn({
           },
         ]);
       },
-      beatsStart + GROUP_BEAT_GAP * 2,
+      GROUP_BEATS_START_AT + GROUP_BEAT_GAP * 2,
       { allowAfterEngaged },
     );
 
@@ -685,7 +783,7 @@ export function HeroClocksIn({
           },
         ]);
       },
-      beatsStart + GROUP_BEAT_GAP * 3,
+      GROUP_BEATS_START_AT + GROUP_BEAT_GAP * 3,
       { allowAfterEngaged },
     );
 
@@ -701,7 +799,7 @@ export function HeroClocksIn({
           },
         ]);
       },
-      beatsStart + GROUP_BEAT_GAP * 3 + 1100,
+      GROUP_BEATS_START_AT + GROUP_BEAT_GAP * 3 + 1100,
       { allowAfterEngaged },
     );
   };
@@ -746,6 +844,7 @@ export function HeroClocksIn({
       queue(
         () => {
           groupSequenceStartedRef.current = true;
+          setComposeSheet("hidden");
           setGroupMode(true);
           setUsedFloaters((prev) => {
             const next = new Set(prev);
@@ -753,6 +852,23 @@ export function HeroClocksIn({
             return next;
           });
           setItems([
+            {
+              kind: "text",
+              id: nextId(),
+              from: "user",
+              text: GROUP_MESSAGES.userKickoff,
+            },
+            {
+              kind: "text",
+              id: nextId(),
+              from: "murph",
+              text: GROUP_MESSAGES.murphKickoff,
+            },
+            {
+              kind: "timestamp",
+              id: nextId(),
+              text: GROUP_MESSAGES.timestamp,
+            },
             {
               kind: "text",
               id: nextId(),
@@ -767,7 +883,26 @@ export function HeroClocksIn({
               from: "murph",
               text: GROUP_MESSAGES.murphStandings,
             },
+            {
+              kind: "text",
+              id: nextId(),
+              from: "member",
+              sender: GROUP_MEMBERS[1],
+              text: GROUP_MESSAGES.mayaReply,
+            },
+            {
+              kind: "text",
+              id: nextId(),
+              from: "user",
+              text: GROUP_MESSAGES.userNewsletterQuestion,
+            },
             { kind: "newsletter", id: nextId() },
+            {
+              kind: "text",
+              id: nextId(),
+              from: "murph",
+              text: GROUP_MESSAGES.murphNewsletter,
+            },
           ]);
         },
         0,
@@ -811,9 +946,14 @@ export function HeroClocksIn({
       queue(() => {
         setTyping(false);
         appendItems(buildExchangeReplyItems(ex));
+        if (cycleRef.current >= AUTO_RUN_EXCHANGES.length) {
+          startGroupSequence({ allowAfterEngaged: false });
+        }
       }, REPLY_AT);
 
-      queue(runCycle, CYCLE_LENGTH);
+      if (cycleRef.current < AUTO_RUN_EXCHANGES.length) {
+        queue(runCycle, CYCLE_LENGTH);
+      }
     };
 
     queue(runCycle, FIRST_RUN_DELAY);
@@ -833,6 +973,10 @@ export function HeroClocksIn({
 
     engagedRef.current = true;
     cancelDemoRef.current?.();
+    if (!groupMode) {
+      groupSequenceStartedRef.current = false;
+    }
+    setComposeSheet("hidden");
     setComposerValue("");
 
     appendItems([
@@ -925,7 +1069,9 @@ export function HeroClocksIn({
     ) : (
       <IMessageLogo className="size-[18px]" />
     );
-  const activeCopy = groupMode ? HERO_COPY.act2 : HERO_COPY.act1;
+  const composeSheetMembers = GROUP_MEMBERS.filter((member) =>
+    usedFloaters.has(member.name),
+  );
 
   return (
     <section className="relative min-h-svh overflow-hidden bg-[#f5f0e8]">
@@ -983,7 +1129,7 @@ export function HeroClocksIn({
           .hero-floater, .hero-floater--active, .hero-msg-in, .hero-typing-dot {
             animation: none !important;
           }
-          .hero-copy-layer, .hero-header-layer {
+          .hero-compose-sheet, .hero-copy-layer, .hero-header-layer {
             transition: none !important;
           }
         }
@@ -994,7 +1140,9 @@ export function HeroClocksIn({
           if (usedFloaters.has(f.text)) return null;
           const isActive = activeIdx === i;
           const isPerson = Boolean(f.member);
-          const isDisabled = isActive || (isPerson && groupMode);
+          const isDisabled =
+            isActive ||
+            (isPerson && (composeSheet !== "hidden" || groupMode));
           const floaterStyle: FloaterStyle = {
             top: f.top,
             bottom: f.bottom,
@@ -1052,16 +1200,18 @@ export function HeroClocksIn({
 
       <div className="relative z-10 mx-auto grid min-h-svh max-w-[1280px] grid-cols-1 items-center gap-6 px-5 pt-20 pb-10 sm:gap-10 sm:px-10 sm:pb-16 lg:grid-cols-12 lg:gap-20 lg:px-16 lg:pt-24">
         <div className="relative z-10 lg:col-span-7">
-          <h1 className="sr-only">{`${activeCopy.line1} ${activeCopy.line2}`}</h1>
+          <h1 className="sr-only">{`${HERO_COPY.act1.line1} ${HERO_COPY.act1.line2}`}</h1>
           <div className="grid">
             <HeroCopyLayer
               active={!groupMode}
               ariaHidden={groupMode}
+              inactiveClassName="-translate-y-7"
               copy={HERO_COPY.act1}
             />
             <HeroCopyLayer
               active={groupMode}
               ariaHidden={!groupMode}
+              inactiveClassName="translate-y-7"
               copy={HERO_COPY.act2}
             />
           </div>
@@ -1082,7 +1232,7 @@ export function HeroClocksIn({
             <div className="lg:absolute lg:left-1/2 lg:top-1/2 lg:w-[340px] lg:-translate-x-1/2 lg:-translate-y-1/2">
               <PhoneShell>
                 <StatusBar />
-                <div className="relative">
+                <div className="relative overflow-hidden">
                   <div className="absolute inset-x-0 top-0 z-20">
                     <ChatHeader
                       groupMode={groupMode}
@@ -1104,9 +1254,6 @@ export function HeroClocksIn({
                     >
                       <div className="flex min-h-full flex-col justify-end gap-2 px-3.5 pb-4 pt-[72px]">
                         {items.map((it, i) => {
-                          if (it.kind === "system") {
-                            return <SystemLine key={it.id} text={it.text} />;
-                          }
                           if (it.kind === "card") {
                             return (
                               <div key={it.id} className="hero-msg-in shrink-0">
@@ -1162,6 +1309,11 @@ export function HeroClocksIn({
                               </div>
                             );
                           }
+                          if (it.kind === "timestamp") {
+                            return (
+                              <TimestampSeparator key={it.id} text={it.text} />
+                            );
+                          }
                           const next = items[i + 1];
                           const prev = items[i - 1];
                           const isTail =
@@ -1192,6 +1344,13 @@ export function HeroClocksIn({
                       </div>
                     </div>
                   </div>
+                  {composeSheet !== "hidden" ? (
+                    <ComposeSheet
+                      members={composeSheetMembers}
+                      murphHeadshotSrc={murphHeadshotSrc}
+                      state={composeSheet}
+                    />
+                  ) : null}
                 </div>
                 <Composer
                   value={composerValue}
@@ -1217,13 +1376,13 @@ export function HeroClocksIn({
   );
 }
 
-// Visual crossfade layers stacked in one grid cell so height is the max of
-// both variants (zero layout shift). The document's single h1 lives outside
-// as a stable sr-only element, so the accessible heading survives the swap.
+// Visual layers are stacked in one grid cell so height is the max of both
+// variants. The document's single h1 stays stable outside the roll.
 function HeroCopyLayer({
   active,
   ariaHidden,
   copy,
+  inactiveClassName,
 }: {
   active: boolean;
   ariaHidden: boolean;
@@ -1232,13 +1391,16 @@ function HeroCopyLayer({
     line2: string;
     paragraph: string;
   };
+  inactiveClassName: string;
 }) {
   return (
     <div
       aria-hidden={ariaHidden}
       className={cn(
-        "hero-copy-layer col-start-1 row-start-1 transition-opacity duration-500 ease-out",
-        active ? "opacity-100" : "pointer-events-none opacity-0",
+        "hero-copy-layer col-start-1 row-start-1 transition-[opacity,transform] duration-[700ms] ease-[cubic-bezier(0.16,1,0.3,1)]",
+        active
+          ? "translate-y-0 opacity-100"
+          : cn("pointer-events-none opacity-0", inactiveClassName),
       )}
     >
       <div className="font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-black">
@@ -1252,6 +1414,96 @@ function HeroCopyLayer({
         {copy.paragraph}
       </p>
     </div>
+  );
+}
+
+function ComposeSheet({
+  members,
+  murphHeadshotSrc,
+  state,
+}: {
+  members: ReadonlyArray<GroupMember>;
+  murphHeadshotSrc: MurphHeadshotSrc;
+  state: ComposeSheetState;
+}) {
+  return (
+    <div
+      aria-hidden={state !== "up"}
+      className={cn(
+        "hero-compose-sheet pointer-events-none absolute inset-x-0 bottom-0 top-0 z-30 rounded-t-[14px] border-t border-[#c4a882]/25 bg-[#f5f0e8] shadow-[0_-10px_24px_-22px_rgba(45,52,54,0.75)] transition-[opacity,transform] ease-out",
+        state === "up" &&
+          "translate-y-0 opacity-100 duration-[420ms]",
+        state === "pending" &&
+          "translate-y-full opacity-100 duration-[420ms]",
+        state === "leaving" &&
+          "translate-y-0 opacity-0 duration-[250ms]",
+      )}
+    >
+      <div className="relative flex h-[38px] items-center justify-center border-b border-[#c4a882]/15 px-3">
+        <p className="text-[12px] font-semibold tracking-tight text-[#2d3436]">
+          New Message
+        </p>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Close new message composer"
+          className="absolute right-3 top-1/2 flex size-[22px] -translate-y-1/2 items-center justify-center rounded-full bg-[#2d3436]/10 text-[12px] font-semibold leading-none text-[#2d3436]"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="px-3 pt-2">
+        <div className="relative flex min-h-[36px] w-full items-center gap-1.5 rounded-[12px] bg-white/70 py-1.5 pl-2.5 pr-8 ring-1 ring-inset ring-[#c4a882]/20">
+          <span className="shrink-0 text-[10px] font-medium text-[#736a58]">
+            To:
+          </span>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+            <RecipientChip
+              avatarSrc={murphHeadshotSrc}
+              label="Murph"
+            />
+            {members.map((member) => (
+              <RecipientChip
+                key={member.id}
+                avatarSrc={member.avatarSrc}
+                label={member.name}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="Add recipient"
+            className="absolute right-2 top-1/2 flex size-[20px] -translate-y-1/2 items-center justify-center rounded-full bg-[#2d3436]/10 text-[14px] font-semibold leading-none text-[#2d3436]"
+          >
+            +
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RecipientChip({
+  avatarSrc,
+  label,
+}: {
+  avatarSrc: string;
+  label: string;
+}) {
+  return (
+    <span
+      data-hero-recipient-chip={label}
+      className="hero-msg-in inline-flex h-[24px] shrink-0 items-center gap-1 rounded-full border border-[#c4a882]/25 bg-white py-0.5 pl-1 pr-2 text-[11px] font-medium tracking-tight text-[#2d3436]"
+    >
+      <span
+        aria-hidden="true"
+        className="size-[16px] rounded-full bg-cover bg-center ring-1 ring-[#c4a882]/25"
+        style={{ backgroundImage: `url('${avatarSrc}')` }}
+      />
+      {label}
+    </span>
   );
 }
 
@@ -1715,10 +1967,10 @@ function MessageTail({
   );
 }
 
-function SystemLine({ text }: { text: string }) {
+function TimestampSeparator({ text }: { text: string }) {
   return (
-    <div className="hero-msg-in flex justify-center">
-      <p className="max-w-[82%] rounded-full bg-[#2d3436]/10 px-3 py-1 text-center text-[10px] font-medium leading-[1.35] tracking-tight text-[#736a58]">
+    <div className="hero-msg-in flex justify-center py-1.5">
+      <p className="text-center text-[9.5px] font-medium leading-none tracking-tight text-[#736a58]">
         {text}
       </p>
     </div>

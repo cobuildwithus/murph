@@ -64,6 +64,9 @@ test("HeroClocksIn renders the reduced-motion group seed", async () => {
 
   const text = view.container.textContent ?? "";
   assert.equal(view.container.querySelectorAll("h1").length, 1);
+  assert.match(text, /walk challenge starts tomorrow\. loser buys steak dinner/);
+  assert.match(text, /Baselines are set from everyone's wearables/);
+  assert.match(text, /Saturday 9:02 AM/);
   assert.match(text, /ok who's actually winning this thing/);
   assert.match(text, /Walk challenge · Day 5 of 7/);
   assert.match(text, /Standings, day 5 of 7\. Maya is one sunrise walk/);
@@ -108,7 +111,21 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
 
   await act(async () => {
     theoButton.click();
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(950);
+  });
+
+  assert.match(view.container.textContent ?? "", /New Message/);
+  assert.match(view.container.textContent ?? "", /To:/);
+  assert.equal(
+    view.container.querySelectorAll("[data-hero-recipient-chip]").length,
+    1,
+  );
+  assert.ok(
+    view.container.querySelector('[data-hero-recipient-chip="Murph"]'),
+  );
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(550);
   });
 
   // The group is a fresh conversation: the private exchange must be gone.
@@ -116,6 +133,8 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
     view.container.textContent ?? "",
     /How are my steps this week\?/,
   );
+  assert.match(view.container.textContent ?? "", /4 People/);
+  assert.match(view.container.textContent ?? "", /Murph keeps score\./);
 
   const saunaButton = view.container.querySelector<HTMLButtonElement>(
     'button[aria-label="Ask Murph about Sauna"]',
@@ -127,7 +146,21 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
   });
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(13_100);
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+
+  assert.ok(
+    view.container.querySelector('[data-hero-recipient-chip="Theo"]'),
+  );
+  assert.ok(
+    view.container.querySelector('[data-hero-recipient-chip="Maya"]'),
+  );
+  assert.ok(
+    view.container.querySelector('[data-hero-recipient-chip="Sam"]'),
+  );
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(14_000);
   });
 
   assert.match(view.container.textContent ?? "", /Walk challenge · Day 5 of 7/);
