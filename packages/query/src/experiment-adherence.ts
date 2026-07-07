@@ -655,7 +655,15 @@ function missingCell(input: {
     return cell(expectation, "scheduled", null, 0, input.observations, "The planned target is not due yet.");
   }
 
-  const missingPolicy = expectation.target.evidence.missing;
+  let missingPolicy = expectation.target.evidence.missing;
+  if (
+    missingPolicy === "assumed_after_grace" &&
+    expectation.target.evidence.kind === "linkedEventCount" &&
+    expectation.target.evidence.eventKind !== "intervention_session"
+  ) {
+    // Persisted targets predating the schema guard must not assume evidence outside manual intervention sessions.
+    missingPolicy = "missed_after_grace";
+  }
   if (missingPolicy === "assumed_after_grace") {
     return cell(expectation, "assumed", 1, 0, input.observations, "No log needed. Assumed done on schedule.");
   }

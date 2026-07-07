@@ -205,6 +205,40 @@ test("assumes missing non-sensable linked-event adherence after grace", () => {
   assert.equal(result.targets[0]?.assumedCount, 1);
 });
 
+test("grades stale activity assumed-after-grace targets as missed", () => {
+  const target: ExperimentAdherenceTarget = {
+    targetId: "running",
+    label: "Running",
+    phase: "intervention",
+    calendar: {
+      kind: "daily",
+      timeZone: "America/New_York",
+      targetCountPerDay: 1,
+    },
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "activity_session",
+      activityKind: "running",
+      missing: "assumed_after_grace",
+    },
+    grace: { hours: 0 },
+  };
+
+  const result = buildExperimentAdherenceCalendar({
+    asOf: "2026-04-11T12:00:00.000Z",
+    observations: [],
+    targets: [target],
+    windows,
+  });
+
+  const missedCell = result.cells.find((cell) => cell.localDate === "2026-04-10");
+  assert.equal(missedCell?.status, "missed");
+  assert.equal(missedCell?.score, 0);
+  assert.equal(missedCell?.reason, "No target evidence was logged after the grace window.");
+  assert.equal(result.targets[0]?.assumedCount, 0);
+  assert.equal(result.targets[0]?.missedCount, 3);
+});
+
 test("keeps missing metric-threshold evidence unknown when configured that way", () => {
   const target: ExperimentAdherenceTarget = {
     targetId: "step-floor",

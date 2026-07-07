@@ -1377,16 +1377,21 @@ function hasAssumedAfterGraceCalendarSessionTarget(
 ): boolean {
   const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
   const targets = rollupTarget ? [rollupTarget] : context.adherenceTargets;
-  return targets.some((target) =>
-    target.evidence.kind === "linkedEventCount" &&
+  const windows = buildWindowSummary(context.frontmatter);
+  const plannedCalendarTargets = targets.filter((target) =>
     target.calendar !== undefined &&
-    target.evidence.missing === "assumed_after_grace" &&
     experimentAdherenceTargetPlansDate({
       localDate: date,
       target,
-      windows: buildWindowSummary(context.frontmatter),
+      windows,
     })
   );
+
+  return plannedCalendarTargets.length > 0 &&
+    plannedCalendarTargets.every((target) =>
+      target.evidence.kind === "linkedEventCount" &&
+      target.evidence.missing === "assumed_after_grace"
+    );
 }
 
 function decideWeeklyDigestDue(

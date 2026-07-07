@@ -1990,6 +1990,17 @@ export const experimentAdherenceTargetSchema = z
         path: ["calendar"],
       });
     }
+    if (
+      target.evidence.kind === "linkedEventCount" &&
+      target.evidence.missing === "assumed_after_grace" &&
+      target.evidence.eventKind !== "intervention_session"
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "assumed_after_grace requires intervention_session evidence.",
+        path: ["evidence", "missing"],
+      });
+    }
   });
 
 export const experimentAdherenceTargetsSchema = uniqueArray(experimentAdherenceTargetSchema, {

@@ -3335,6 +3335,84 @@ test("experiment follow-up due skips assumed calendar missed-log dates only afte
   assert.equal(dueDecision.window.sessionDate, "2026-04-10");
 });
 
+test("experiment follow-up due assumes only dates where all planned calendar targets are assumed", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1MXTG",
+    slug: "mixed-calendar-targets",
+    runPlan: {
+      baselineStart: "2026-04-01",
+      baselineEnd: "2026-04-07",
+      interventionStart: "2026-04-08",
+      interventionEnd: "2026-04-12",
+      targetSessions: 5,
+      minimumUsefulSessions: 3,
+      adherenceTargets: [
+        {
+          targetId: "sauna",
+          label: "Sauna",
+          phase: "intervention",
+          calendar: {
+            kind: "explicitDates",
+            timeZone: "America/New_York",
+            dates: [
+              { localDate: "2026-04-10" },
+              { localDate: "2026-04-11" },
+            ],
+          },
+          evidence: {
+            kind: "linkedEventCount",
+            eventKind: "intervention_session",
+            missing: "assumed_after_grace",
+          },
+        },
+        {
+          targetId: "manual-session",
+          label: "Manual session",
+          phase: "intervention",
+          calendar: {
+            kind: "explicitDates",
+            timeZone: "America/New_York",
+            dates: [
+              { localDate: "2026-04-10" },
+            ],
+          },
+          evidence: {
+            kind: "linkedEventCount",
+            eventKind: "intervention_session",
+            missing: "missed_after_grace",
+          },
+        },
+      ],
+    },
+    assistantSupport: {
+      remindersEnabled: true,
+      missedLogFollowup: "default_on",
+      weeklyDigestEnabled: false,
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-mixed-calendar-targets",
+    metadata: { timezone: "America/New_York" },
+    entities: [experiment],
+  });
+
+  const sharedDateDecision = decideExperimentFollowupDue(vault, "mixed-calendar-targets", {
+    kind: "missed-log",
+    date: "2026-04-10",
+  });
+  const assumedOnlyDateDecision = decideExperimentFollowupDue(vault, "mixed-calendar-targets", {
+    kind: "missed-log",
+    date: "2026-04-11",
+  });
+
+  assert.equal(sharedDateDecision.action, "notify");
+  assert.equal(sharedDateDecision.reason, "planned_session_log_missing");
+  assert.equal(sharedDateDecision.window.sessionDate, "2026-04-10");
+  assert.equal(assumedOnlyDateDecision.action, "skip");
+  assert.equal(assumedOnlyDateDecision.reason, "session_assumed");
+  assert.equal(assumedOnlyDateDecision.window.sessionDate, "2026-04-11");
+});
+
 test("experiment follow-up due skips missed-log when the date already has any session log", () => {
   const experiment = makeExperiment("active", {
     runPlan: {
