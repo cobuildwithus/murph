@@ -348,7 +348,6 @@ const GROUP_MESSAGES = {
   murphStandings:
     "Standings, day 5 of 7. Maya is one sunrise walk from taking the lead. Theo, bold words for a man who logged 11 minutes yesterday.",
   mayaReply: "😂 not the sunrise walk pressure",
-  murphRoastIntro: "made the group a little anthem for week one",
   sundayTimestamp: "Sunday 8:02 AM",
   murphNewsletter: "This week's wins just landed in everyone's inbox.",
 } as const;
@@ -785,13 +784,13 @@ export function HeroClocksIn({
     queue(
       () => {
         appendItems([
-          { kind: "challenge", id: nextId() },
           {
             kind: "text",
             id: nextId(),
             from: "murph",
             text: GROUP_MESSAGES.murphStandings,
           },
+          { kind: "challenge", id: nextId() },
         ]);
       },
       GROUP_BEATS_START_AT + GROUP_BEAT_GAP,
@@ -817,12 +816,6 @@ export function HeroClocksIn({
     queue(
       () => {
         appendItems([
-          {
-            kind: "text",
-            id: nextId(),
-            from: "murph",
-            text: GROUP_MESSAGES.murphRoastIntro,
-          },
           { kind: "audio", id: nextId(), src: CHALLENGE_ROAST_AUDIO_SRC },
         ]);
       },
@@ -838,13 +831,13 @@ export function HeroClocksIn({
             id: nextId(),
             text: GROUP_MESSAGES.sundayTimestamp,
           },
-          { kind: "newsletter", id: nextId() },
           {
             kind: "text",
             id: nextId(),
             from: "murph",
             text: GROUP_MESSAGES.murphNewsletter,
           },
+          { kind: "newsletter", id: nextId() },
         ]);
       },
       GROUP_BEATS_START_AT + GROUP_BEAT_GAP * 4,
@@ -924,13 +917,13 @@ export function HeroClocksIn({
               sender: GROUP_MEMBERS[0],
               text: GROUP_MESSAGES.theoQuestion,
             },
-            { kind: "challenge", id: nextId() },
             {
               kind: "text",
               id: nextId(),
               from: "murph",
               text: GROUP_MESSAGES.murphStandings,
             },
+            { kind: "challenge", id: nextId() },
             {
               kind: "text",
               id: nextId(),
@@ -938,25 +931,19 @@ export function HeroClocksIn({
               sender: GROUP_MEMBERS[1],
               text: GROUP_MESSAGES.mayaReply,
             },
-            {
-              kind: "text",
-              id: nextId(),
-              from: "murph",
-              text: GROUP_MESSAGES.murphRoastIntro,
-            },
             { kind: "audio", id: nextId(), src: CHALLENGE_ROAST_AUDIO_SRC },
             {
               kind: "timestamp",
               id: nextId(),
               text: GROUP_MESSAGES.sundayTimestamp,
             },
-            { kind: "newsletter", id: nextId() },
             {
               kind: "text",
               id: nextId(),
               from: "murph",
               text: GROUP_MESSAGES.murphNewsletter,
             },
+            { kind: "newsletter", id: nextId() },
           ]);
         },
         0,
@@ -1388,7 +1375,7 @@ export function HeroClocksIn({
                             return (
                               <div
                                 key={it.id}
-                                className="hero-msg-in mr-auto w-full max-w-[86%] shrink-0 rounded-[17px] bg-white p-1.5"
+                                className="hero-msg-in mr-auto w-full max-w-[86%] shrink-0"
                               >
                                 <VoiceMemoPlayer src={it.src} />
                               </div>

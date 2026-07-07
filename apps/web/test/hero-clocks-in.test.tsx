@@ -70,7 +70,6 @@ test("HeroClocksIn renders the reduced-motion group seed", async () => {
   assert.match(text, /no shot you guys are keeping up with me this week/);
   assert.match(text, /Walk challenge · Day 5 of 7/);
   assert.match(text, /Standings, day 5 of 7\. Maya is one sunrise walk/);
-  assert.match(text, /made the group a little anthem for week one/);
   assert.ok(view.container.querySelector('audio[src="/audio/one-foot-two-foot.mp3"]'));
   assert.match(text, /Sunday 8:02 AM/);
   assert.match(text, /Weekly newsletter · Sunday 8:02 AM/);
