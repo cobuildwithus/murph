@@ -69,7 +69,7 @@ export default async function HostedOpsGrowthPage() {
 
       <section aria-labelledby="growth-summary-title" className="flex flex-col gap-4">
         <SectionHeading
-          description="Headline values use live rows. MRR week over week uses the closest snapshot from six to eight days ago."
+          description="Headline values use live rows. MRR week over week uses the closest snapshot from six to eight days ago. Conversion counts trials whose member is paid today."
           id="growth-summary-title"
           title="Current growth"
         />
@@ -231,7 +231,7 @@ export default async function HostedOpsGrowthPage() {
 
       <section aria-labelledby="growth-cohort-title" className="flex flex-col gap-4">
         <SectionHeading
-          description="Pulse trial cohorts by start week. Immature rows are not treated as failed conversions."
+          description="Pulse trial cohorts by start week. Converted means the member is currently paid, so churned conversions leave old cohorts. Immature rows are not treated as failed conversions."
           id="growth-cohort-title"
           title="Trial cohorts"
         />

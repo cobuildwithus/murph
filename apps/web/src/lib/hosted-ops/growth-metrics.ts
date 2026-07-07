@@ -308,6 +308,13 @@ export function calculateHostedTrialMetrics(input: {
       continue;
     }
 
+    if (
+      row.billingRef.currentTrialEndsAt !== null &&
+      row.billingRef.currentTrialEndsAt <= input.windowEnd
+    ) {
+      continue;
+    }
+
     trialingMembers += 1;
     if (
       row.billingRef.currentTrialEndsAt !== null &&

@@ -200,6 +200,15 @@ describe("hosted ops growth metrics", () => {
           billingRef: {
             currentBillingPhase: "trial",
             currentCheckoutOffer: null,
+            currentTrialEndsAt: addUtcDays(now, -1),
+          },
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+        },
+        {
+          billingRef: {
+            currentBillingPhase: "trial",
+            currentCheckoutOffer: null,
             currentTrialEndsAt: addUtcDays(now, 1),
           },
           billingStatus: HostedBillingStatus.canceled,
