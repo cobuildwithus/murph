@@ -1343,6 +1343,44 @@ test("counts browser cycling adherence from provider ride activity sessions", ()
   assert.equal(result?.progress?.adherence.loggedSessions, 1);
 });
 
+test("counts browser generic workout modality from any activity sessions", () => {
+  const slug = "generic-workout-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_generic_workout_block",
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "cardio",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        activitySessionEvent({ id: "evt_generic_workout_ride", date: "2026-06-02", activityType: "Cycling" }),
+        activitySessionEvent({ id: "evt_generic_workout_strength", date: "2026-06-04", activityType: "Strength" }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const evidence = result?.adherence?.targets[0]?.evidence;
+
+  assert.ok(result);
+  assert.equal(result.progress?.adherence.completedSessions, 2);
+  assert.equal(result.progress?.adherence.loggedSessions, 2);
+  assert.equal(evidence?.kind, "linkedEventCount");
+  if (evidence?.kind === "linkedEventCount") {
+    assert.equal(evidence.eventKind, "activity_session");
+    assert.equal(evidence.activityKind, undefined);
+  }
+});
+
 test("counts browser running adherence after replica skips generic activity type for nested sport", async () => {
   const slug = "nested-workout-run-block";
   const replica = await createBrowserVaultReplica({

@@ -378,14 +378,27 @@ function makeSession(input: {
 
 function makeActivitySession(input: {
   activityType: string;
+  dataOrigin?: Record<string, unknown>;
   dayKey: string;
   entityId: string;
+  externalRef?: Record<string, unknown>;
   name?: string;
   occurredAt?: string;
+  provider?: string;
+  source?: string;
   sportName?: string;
   title?: string;
   workout?: Record<string, unknown>;
 }): CanonicalEntity {
+  const externalRef = input.externalRef ??
+    (input.provider
+      ? {
+          resourceId: input.entityId,
+          resourceType: "activity_session",
+          system: input.provider,
+        }
+      : undefined);
+
   return makeEntity({
     entityId: input.entityId,
     family: "event",
@@ -396,7 +409,10 @@ function makeActivitySession(input: {
     title: input.title ?? input.activityType,
     attributes: {
       activityType: input.activityType,
+      ...(input.dataOrigin === undefined ? {} : { dataOrigin: input.dataOrigin }),
+      ...(externalRef === undefined ? {} : { externalRef }),
       ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.provider === undefined && input.source === undefined ? {} : { source: input.source ?? "device" }),
       ...(input.sportName === undefined ? {} : { sportName: input.sportName }),
       ...(input.workout === undefined ? {} : { workout: input.workout }),
     },
@@ -557,6 +573,7 @@ test("experiment progress summarizes adherence, coverage, confounders, and remin
     targetSessions: 6,
   });
   assert.deepEqual(progress.dataCoverage, {
+    activityProviders: [],
     baselineDaysAvailable: 3,
     interventionDaysAvailable: 3,
     primaryBiomarkerKey: "biomarker:resting-heart-rate",
@@ -615,6 +632,86 @@ test("experiment progress summarizes adherence, coverage, confounders, and remin
     reason: "Logged sessions are behind the current target pace.",
     shouldNotifyUser: true,
   });
+});
+
+test("experiment data coverage keeps wearable summaries separate from activity capability", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-sleep-recovery-only-coverage",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGA",
+        slug: "sleep-recovery-only",
+        runPlan: {
+          baselineStart: "2026-04-01",
+          baselineEnd: "2026-04-07",
+          interventionStart: "2026-04-08",
+          interventionEnd: "2026-04-21",
+          modality: "sleep",
+          targetSessions: 14,
+          minimumUsefulSessions: 7,
+        },
+        analysisPlan: {
+          primaryBiomarkerKey: "biomarker:sleep-score",
+          desiredDirection: "increase",
+        },
+      }),
+      makeObservation({
+        entityId: "evt_sleep_score_summary",
+        dayKey: "2026-04-02",
+        metric: "sleep-score",
+        occurredAt: "2026-04-02T06:00:00.000Z",
+        unit: "score",
+        value: 82,
+      }),
+      makeObservation({
+        entityId: "evt_recovery_score_summary",
+        dayKey: "2026-04-09",
+        metric: "recovery-score",
+        occurredAt: "2026-04-09T06:00:00.000Z",
+        unit: "score",
+        value: 71,
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "sleep-recovery-only", { asOf: "2026-04-10" });
+
+  assert.deepEqual(progress.dataCoverage.activityProviders, []);
+  assert.deepEqual(progress.dataCoverage.wearableProviders, ["whoop"]);
+});
+
+test("experiment data coverage reports activity provider capability from vault activity sessions", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-activity-provider-capability",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGB",
+        slug: "fresh-run-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Run",
+          targetSessions: 24,
+          minimumUsefulSessions: 12,
+        },
+      }),
+      makeActivitySession({
+        entityId: "evt_whoop_old_run",
+        dayKey: "2026-04-12",
+        activityType: "Running",
+        provider: "whoop",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "fresh-run-block", { asOf: "2026-06-09" });
+
+  assert.deepEqual(progress.dataCoverage.activityProviders, ["whoop"]);
+  assert.deepEqual(progress.dataCoverage.wearableProviders, []);
 });
 
 test("experiment progress counts calendar-less running adherence from activity sessions by sport", () => {
@@ -687,6 +784,37 @@ test("experiment progress counts cycling adherence from provider ride activity s
   const progress = summarizeExperimentProgress(vault, "cycling-block", { asOf: "2026-06-09" });
 
   assert.equal(progress.adherence.completedSessions, 1);
+});
+
+test("experiment progress counts any activity session for generic workout modality", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-generic-workout-adherence",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGC",
+        slug: "generic-workout-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Workout",
+          targetSessions: 4,
+          minimumUsefulSessions: 2,
+        },
+      }),
+      makeActivitySession({ entityId: "evt_generic_workout_ride", dayKey: "2026-06-02", activityType: "Cycling" }),
+      makeActivitySession({ entityId: "evt_generic_workout_strength", dayKey: "2026-06-04", activityType: "Strength" }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "generic-workout-block", { asOf: "2026-06-09" });
+
+  assert.deepEqual(progress.adherence.evidence, {
+    eventKind: "activity_session",
+  });
+  assert.equal(progress.adherence.completedSessions, 2);
 });
 
 test("experiment progress classifies nested workout sport before generic activity labels", () => {
@@ -1437,6 +1565,7 @@ test("experiment analysis uses lab measurement anchors separately from run basel
     interventionStart: "2026-05-09",
   });
   assert.deepEqual(progress.dataCoverage, {
+    activityProviders: [],
     baselineDaysAvailable: 1,
     interventionDaysAvailable: 1,
     primaryBiomarkerKey: "biomarker:ldl-c",
@@ -3068,6 +3197,7 @@ test("buildExperimentProgressCard uses display-grade metric samples for movers",
     asOf: "2026-06-06",
   });
   assert.deepEqual(progress.dataCoverage, {
+    activityProviders: [],
     baselineDaysAvailable: 3,
     interventionDaysAvailable: 3,
     primaryBiomarkerKey: "biomarker:sleep-efficiency",

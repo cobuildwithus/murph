@@ -1,12 +1,14 @@
 import {
   EXPERIMENT_OUTCOME_SCHEMA_VERSION,
   EXPERIMENT_PROGRESS_SCHEMA_VERSION,
+  deviceDataOriginSchema,
   experimentFrontmatterSchema,
   experimentOutcomeSchema,
   experimentProgressSnapshotSchema,
   safeParseContract,
   toLocalDayKey,
   activityTextMatchesKind,
+  type DeviceDataOrigin,
   type ExperimentFrontmatter,
   type ExperimentOutcome,
   type ExperimentProgressMetricSignal,
@@ -46,10 +48,17 @@ import {
 } from "./metrics/index.ts";
 import { buildMetricProjection } from "./metrics/projection.ts";
 import { summarizeWearableDay, type WearableDaySummary } from "./wearables.ts";
+import { readWearableExternalRef } from "./wearables/observation.ts";
+import {
+  inferJunctionWearableDataOriginFromExternalRef,
+  resolveWearablePublicSourceProvider,
+} from "./wearables/origin.ts";
+import type { WearableExternalRef } from "./wearables/types.ts";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
 
 const MAX_EXPERIMENT_ANALYSIS_WINDOW_DAYS = 366;
+const MAX_DATA_COVERAGE_PROVIDERS = 20;
 
 export type ExperimentProgressPhase =
   | "planned"
@@ -138,6 +147,7 @@ export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
   };
   confounders: string[];
   dataCoverage: {
+    activityProviders: string[];
     baselineDaysAvailable: number;
     interventionDaysAvailable: number;
     primaryBiomarkerKey?: string | null;
@@ -316,6 +326,7 @@ export function summarizeExperimentProgress(
     frontmatter: context.frontmatter,
     signals,
     summariesByDate: context.summariesByDate,
+    vault,
   });
   const setupReadiness = buildSetupReadiness(context.frontmatter);
   const analysisReadiness = buildAnalysisReadiness(context.frontmatter);
@@ -835,6 +846,7 @@ function buildCoverageSummary(input: {
   progressPhase: ExperimentProgressPhase;
   signals: readonly ExperimentMetricResult[];
   summariesByDate: Map<string, WearableDaySummary | null>;
+  vault: VaultReadModel;
 }): ExperimentProgressSummary["dataCoverage"] {
   const primaryMetricDaysAvailable =
     (input.primarySignal?.baselineDayCount ?? 0) +
@@ -883,11 +895,13 @@ function buildCoverageSummary(input: {
     status = "insufficient";
   }
 
-  const wearableProviders = [...new Set(
+  const activityProviders = buildActivityProviderCoverage(input.vault);
+  const wearableProviders = normalizeDataCoverageProviderList(
     [...input.summariesByDate.values()].flatMap((summary) => summary?.providers ?? []),
-  )].sort((left, right) => left.localeCompare(right));
+  );
 
   return {
+    activityProviders,
     baselineDaysAvailable: input.baselineDaysAvailable,
     interventionDaysAvailable: input.interventionDaysAvailable,
     primaryBiomarkerKey: input.primarySignal?.biomarkerKey ?? null,
@@ -895,6 +909,64 @@ function buildCoverageSummary(input: {
     status,
     wearableProviders,
   };
+}
+
+function buildActivityProviderCoverage(vault: VaultReadModel): string[] {
+  return normalizeDataCoverageProviderList(
+    vault.events.flatMap((event) => {
+      if (event.kind !== "activity_session") {
+        return [];
+      }
+
+      const provider = resolveActivitySessionProviderCoverageLabel(event);
+      return provider ? [provider] : [];
+    }),
+  );
+}
+
+function resolveActivitySessionProviderCoverageLabel(event: CanonicalEntity): string | null {
+  const externalRef = readWearableExternalRef(event.attributes.externalRef);
+  const dataOrigin = readActivitySessionDataOrigin(event.attributes.dataOrigin, externalRef);
+  const provider = resolveWearablePublicSourceProvider({
+    dataOrigin,
+    externalRef,
+    provider: externalRef?.system,
+  }, {
+    suppressJunctionSourceInstanceFallback: true,
+  });
+
+  if (provider && provider !== "unknown" && provider !== "manual") {
+    return provider;
+  }
+
+  const source = readCoverageString(event.attributes.source);
+  if (
+    source === "device" ||
+    dataOrigin !== null ||
+    (externalRef !== null && externalRef.system !== "manual")
+  ) {
+    return "wearable";
+  }
+
+  return null;
+}
+
+function readActivitySessionDataOrigin(
+  value: unknown,
+  externalRef: WearableExternalRef | null,
+): DeviceDataOrigin | null {
+  const parsed = deviceDataOriginSchema.safeParse(value);
+  return parsed.success ? parsed.data : inferJunctionWearableDataOriginFromExternalRef(externalRef);
+}
+
+function normalizeDataCoverageProviderList(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right))
+    .slice(0, MAX_DATA_COVERAGE_PROVIDERS);
+}
+
+function readCoverageString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
 }
 
 function summarizeSignalDayCoverage(signals: readonly ExperimentMetricResult[]) {

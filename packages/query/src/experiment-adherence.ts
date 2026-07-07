@@ -106,6 +106,17 @@ const DEVICE_OBSERVABLE_ACTIVITY_KINDS = [
   "strength",
   "elliptical",
 ] as const;
+// Modality terms classify run plans; observation tokens below classify sensed event labels.
+const GENERIC_WORKOUT_MODALITIES = new Set([
+  "workout",
+  "workouts",
+  "exercise",
+  "training",
+  "cardio",
+  "fitness",
+  "movement",
+  "activity",
+]);
 const GENERIC_ACTIVITY_KIND_TOKENS = new Set([
   "workout",
   "activity",
@@ -132,9 +143,16 @@ export function resolveAdherenceEvidence(
   modality: string | null | undefined,
 ): { eventKind: "activity_session" | "intervention_session"; activityKind?: string } {
   const activityKind = resolveDeviceObservableActivityKind(modality);
-  return activityKind
-    ? { eventKind: "activity_session", activityKind }
-    : { eventKind: "intervention_session" };
+  if (activityKind) {
+    return { eventKind: "activity_session", activityKind };
+  }
+
+  const normalizedModality = normalizeActivityKindToken(modality);
+  if (normalizedModality && GENERIC_WORKOUT_MODALITIES.has(normalizedModality)) {
+    return { eventKind: "activity_session" };
+  }
+
+  return { eventKind: "intervention_session" };
 }
 
 export function eventKindIsCandidateForEvidence(
