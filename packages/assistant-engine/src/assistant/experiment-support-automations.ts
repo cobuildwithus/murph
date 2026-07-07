@@ -55,15 +55,19 @@ export async function buildExperimentLifecycleSeeds(
 }
 
 async function resolveVaultTimeZone(vaultRoot: string): Promise<string> {
+  return (await resolveVaultTimeZoneOrNull(vaultRoot)) ?? 'UTC'
+}
+
+async function resolveVaultTimeZoneOrNull(vaultRoot: string): Promise<string | null> {
   try {
     const { metadata } = await loadVault({ vaultRoot })
     if (isValidIanaTimeZone(metadata.timezone)) {
       return metadata.timezone
     }
   } catch {
-    // Best-effort: fall through to the UTC default below.
+    // Best-effort: the caller decides whether UTC fallback is appropriate.
   }
-  return 'UTC'
+  return null
 }
 
 /** Kept for the existing managed-automations call site. */
@@ -285,8 +289,15 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
     return { kind: 'skip', reason: 'experiment has no intervention end date' }
   }
 
-  if (experiment.status === 'active' && currentIsoDate(input.now) <= interventionEnd) {
-    return { kind: 'skip', reason: 'experiment is still running' }
+  if (experiment.status === 'active') {
+    const currentLocalDate = await currentExperimentLocalIsoDate({
+      experiment,
+      now: input.now,
+      vaultRoot: input.vault,
+    })
+    if (currentLocalDate !== null && currentLocalDate <= interventionEnd) {
+      return { kind: 'skip', reason: 'experiment is still running' }
+    }
   }
 
   if (experiment.endedOn && experiment.endedOn < interventionEnd) {
@@ -316,12 +327,43 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
   return { kind: 'continue' }
 }
 
-function currentIsoDate(now: Date | string | undefined): string {
+async function currentExperimentLocalIsoDate(input: {
+  experiment: ExperimentFrontmatter
+  now: Date | string | undefined
+  vaultRoot: string
+}): Promise<string | null> {
+  const date = currentInstant(input.now)
+  const timeZone = await resolveExperimentPreconditionTimeZone(
+    input.experiment,
+    input.vaultRoot,
+  )
+  if (!timeZone) {
+    return null
+  }
+  return formatTimeZoneDateTimeParts(date, timeZone).dayKey
+}
+
+async function resolveExperimentPreconditionTimeZone(
+  experiment: ExperimentFrontmatter,
+  vaultRoot: string,
+): Promise<string | null> {
+  const runTimeZone = experiment.runPlan?.schedule?.timeZone
+  if (runTimeZone && isValidIanaTimeZone(runTimeZone)) {
+    return runTimeZone
+  }
+  const vaultTimeZone = await resolveVaultTimeZoneOrNull(vaultRoot)
+  if (!vaultTimeZone) {
+    return null
+  }
+  return resolveExperimentTimeZone(experiment, vaultTimeZone)
+}
+
+function currentInstant(now: Date | string | undefined): Date {
   const date = now instanceof Date ? now : new Date(now ?? Date.now())
   if (Number.isNaN(date.getTime())) {
     throw new TypeError('Experiment lifecycle precondition received an invalid current date.')
   }
-  return date.toISOString().slice(0, 10)
+  return date
 }
 
 async function archiveExperimentActivityNudgeAutomation(input: {

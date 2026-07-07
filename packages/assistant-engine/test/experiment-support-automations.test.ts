@@ -293,6 +293,16 @@ const eligibleFrontmatter = {
   runPlan: { interventionStart: '2026-04-08', interventionEnd: '2026-04-28' },
 }
 
+function eligibleFrontmatterInTimeZone(timeZone: string) {
+  return {
+    ...eligibleFrontmatter,
+    runPlan: {
+      ...eligibleFrontmatter.runPlan,
+      schedule: { kind: 'dailyLocal' as const, localTime: '09:00', timeZone },
+    },
+  }
+}
+
 it('persists the deterministic outcome with a pinned asOf for an eligible final-results run', async () => {
   resetPreconditionMocks()
   vaultServicesMocks.showExperiment.mockResolvedValue(
@@ -325,6 +335,99 @@ it('persists the deterministic outcome with a pinned asOf for an eligible final-
   expect(
     vaultServicesMocks.writeExperimentOutcome.mock.invocationCallOrder[0],
   ).toBeLessThan(coreMocks.patchAutomation.mock.invocationCallOrder[0] ?? 0)
+})
+
+it('continues at the Auckland final-results fire instant using the experiment local day', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatterInTimeZone('Pacific/Auckland')),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    now: '2026-04-28T21:00:00.000Z',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith({
+    vault: '/tmp/lifecycle-precondition/vault',
+    lookup: FINAL_RESULTS_EXPERIMENT_ID,
+    asOf: '2026-04-28',
+    requestId: null,
+  })
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
+})
+
+it('keeps the still-running guard on the Auckland intervention-end local day', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatterInTimeZone('Pacific/Auckland')),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    now: '2026-04-27T21:00:00.000Z',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'skip', reason: 'experiment is still running' })
+  expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).not.toHaveBeenCalled()
+})
+
+it('continues at the New York final-results fire instant', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatterInTimeZone('America/New_York')),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    now: '2026-04-29T13:00:00.000Z',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({ asOf: '2026-04-28', lookup: FINAL_RESULTS_EXPERIMENT_ID }),
+  )
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
+})
+
+it('does not skip when the experiment timezone cannot be resolved at precondition time', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatter),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    now: '2026-04-28T12:00:00.000Z',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({ asOf: '2026-04-28', lookup: FINAL_RESULTS_EXPERIMENT_ID }),
+  )
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
 })
 
 it('treats a missing activity nudge automation as a successful final-results precondition cleanup', async () => {
@@ -480,7 +583,11 @@ it('does not archive the activity nudge when final results are not due yet', asy
   vaultServicesMocks.showExperiment.mockResolvedValue(
     buildShowExperimentResult({
       ...eligibleFrontmatter,
-      runPlan: { interventionStart: '2026-04-08', interventionEnd: '2026-08-01' },
+      runPlan: {
+        interventionStart: '2026-04-08',
+        interventionEnd: '2026-08-01',
+        schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' },
+      },
     }),
   )
 
