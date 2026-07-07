@@ -909,41 +909,62 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       const foregroundConversationImportItem =
         input.input.foregroundImportItem ?? input.input.importItem;
       try {
-        const result = await importHostedMailboxForWorkspaceRunner({
+        const handleForegroundImportResult = async (
+          result: HostedMailboxImportCheckpointResult,
+        ) => {
+          if (shouldRecordHostedForegroundMailboxImportResult(result)) {
+            input.checkpointRequestBuilder.recordCheckpointResult(result);
+          }
+          markHostedMailboxImportDirtyIfNeeded(input.checkpointRequestBuilder, result);
+          await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+            checkpointRequestBuilder: input.checkpointRequestBuilder,
+            input: input.input,
+            phase: "active_turn_input",
+            signal: outerSignal,
+          });
+          if (hasHostedMailboxImportForegroundConversationWork(result)) {
+            input.onForegroundConversationWorkObserved?.();
+          }
+          await notifyHostedActiveTurnInputForMailboxImport({
+            input: input.input,
+            result,
+            signal: outerSignal,
+          });
+        };
+        const conversationResult = await importHostedMailboxForWorkspaceRunner({
           checkpointRequestBuilder: input.checkpointRequestBuilder,
           checkpointReason: "active_turn_input",
           deferCheckpoint: true,
-          importItem: (item, context) =>
-            item.item.lane === "conversation"
-              ? foregroundConversationImportItem(item, context)
-              : input.input.importItem(item, context),
+          importItem: foregroundConversationImportItem,
           importItemContext: {
             latencyMilestones,
           },
           input: input.input,
-          lanes: ["system", "conversation"],
+          lanes: ["conversation"],
           limitPerLane: input.input.foregroundLimitPerLane ?? input.input.limitPerLane,
-          requestId,
+          requestId: `${requestId}:conversation`,
           signal: outerSignal,
         });
-        if (shouldRecordHostedForegroundMailboxImportResult(result)) {
-          input.checkpointRequestBuilder.recordCheckpointResult(result);
+        await handleForegroundImportResult(conversationResult);
+        if (hasHostedMailboxImportForegroundConversationWork(conversationResult)) {
+          continue;
         }
-        markHostedMailboxImportDirtyIfNeeded(input.checkpointRequestBuilder, result);
-        await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+
+        const systemResult = await importHostedMailboxForWorkspaceRunner({
           checkpointRequestBuilder: input.checkpointRequestBuilder,
+          checkpointReason: "active_turn_input",
+          deferCheckpoint: true,
+          importItem: input.input.importItem,
+          importItemContext: {
+            latencyMilestones,
+          },
           input: input.input,
-          phase: "active_turn_input",
+          lanes: ["system"],
+          limitPerLane: input.input.limitPerLane,
+          requestId: `${requestId}:system`,
           signal: outerSignal,
         });
-        if (hasHostedMailboxImportForegroundConversationWork(result)) {
-          input.onForegroundConversationWorkObserved?.();
-        }
-        await notifyHostedActiveTurnInputForMailboxImport({
-          input: input.input,
-          result,
-          signal: outerSignal,
-        });
+        await handleForegroundImportResult(systemResult);
       } catch (error) {
         if (outerSignal?.aborted) {
           break;
