@@ -182,10 +182,25 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /font-serif text-\[clamp\(2\.25rem,4\.8vw,4\.25rem\)\][^"]* text-black/,
   );
-  assert.match(markup, /<span class="block">Health is<\/span>/);
-  assert.match(markup, /<span class="block">overwhelming\.<\/span>/);
+  assert.match(markup, /<span class="block">Health is overwhelming\.<\/span>/);
   assert.match(markup, /Murph makes it easy\./);
-  assert.match(markup, /Murph is your personal health assistant\. Wearables, bloodwork/);
+  assert.equal((markup.match(/<h1\b/g) ?? []).length, 1);
+  assert.match(
+    markup,
+    /<h1 class="sr-only">Health is overwhelming\. Murph makes it easy\.<\/h1>/,
+  );
+  assert.match(
+    markup,
+    /Murph is your personal health assistant\. Wearables, bloodwork/,
+  );
+  assert.match(markup, /Get healthy with your people\./);
+  assert.match(markup, /Murph keeps score\./);
+  assert.match(markup, /referees the week/);
+  assert.match(markup, /Better together/);
+  assert.match(markup, /Do it with your people\./);
+  assert.match(markup, /Walk challenge · Day 5 of 7/);
+  assert.match(markup, /Weekly newsletter · Sunday 8:02 AM/);
+  assert.match(markup, /Your personal health assistant, too\./);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
     markup,
@@ -201,6 +216,13 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /murph chat/);
   assert.match(markup, /Do I need a wearable\?/);
   assert.match(markup, /No\. A wearable can add useful signals/);
+  assert.match(markup, /Can I do challenges with friends and family\?/);
+  assert.match(
+    markup,
+    /Scoring is adherence and change against your own baseline, never raw body stats\./,
+  );
+  assert.match(markup, /What does the group actually see\?/);
+  assert.match(markup, /Everything else stays private by default\./);
   assert.match(markup, /Murph uses AI-assisted review of published studies/);
   assert.match(markup, /Research may be incomplete, mixed, or not applicable to your situation/);
   assert.doesNotMatch(markup, /GPT-5\.5 Pro/);
@@ -244,7 +266,7 @@ test("HomePage metadata keeps the root route as the canonical landing URL", asyn
 
   expect(metadata.title).toBe("Murph — Discover what actually makes you healthier");
   expect(metadata.description).toBe(
-    "Your personal health assistant. Sync your biomarkers, pick a protocol, see what actually makes you healthier.",
+    "Your health assistant for you and your people. Run health challenges with friends, get a weekly family health newsletter, and discover what actually makes you healthier.",
   );
   expect(metadata.alternates?.canonical).toBe("/");
   expect(metadata.openGraph?.images).toEqual([
@@ -261,6 +283,12 @@ test("HomePage metadata keeps the root route as the canonical landing URL", asyn
       height: 630,
     }),
   ]);
+  expect(metadata.openGraph?.description).toBe(
+    "Text Murph over iMessage. Run health challenges with friends, get a weekly family health newsletter, and see what actually makes you healthier.",
+  );
+  expect(metadata.twitter?.description).toBe(
+    "Text Murph over iMessage. Run health challenges with friends, get a weekly family health newsletter, and see what actually makes you healthier.",
+  );
 });
 
 test("HomePage keeps the final CTA consistent for authenticated sessions", async () => {
