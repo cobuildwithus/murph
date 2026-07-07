@@ -1656,6 +1656,63 @@ for (const scenario of [
     ],
   },
   {
+    name: "counts a surplus same-date done manual run beside one sensed run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGG",
+    slug: "browser-same-date-surplus-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_surplus_manual_run_1a",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGG",
+        experimentSlug: "browser-same-date-surplus-manual-device-run",
+        occurredAt: "2026-06-01T13:00:00.000Z",
+      }),
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_surplus_manual_run_1b",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGG",
+        experimentSlug: "browser-same-date-surplus-manual-device-run",
+        occurredAt: "2026-06-01T15:00:00.000Z",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_surplus_device_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+    ],
+  },
+  {
+    name: "lets two same-date sensed runs suppress two done manual rows",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGH",
+    slug: "browser-same-date-two-manual-two-device-runs",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_pair_manual_run_1a",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGH",
+        experimentSlug: "browser-same-date-two-manual-two-device-runs",
+        occurredAt: "2026-06-01T13:00:00.000Z",
+      }),
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_pair_manual_run_1b",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGH",
+        experimentSlug: "browser-same-date-two-manual-two-device-runs",
+        occurredAt: "2026-06-01T15:00:00.000Z",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_pair_device_run_1a",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_pair_device_run_1b",
+        date: "2026-06-01",
+        activityType: "Run",
+      }),
+    ],
+  },
+  {
     name: "counts different-date manual and sensed runs separately",
     experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGB",
     slug: "browser-different-date-manual-device-run",
@@ -1690,6 +1747,26 @@ for (const scenario of [
         id: "evt_browser_same_date_device_run_2b",
         date: "2026-06-01",
         activityType: "Run",
+      }),
+    ],
+  },
+  {
+    name: "keeps a same-date missed manual annotation beside one sensed run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGI",
+    slug: "browser-same-date-missed-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    expectedMissedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "missed", {
+        id: "evt_browser_same_date_missed_manual_run_1",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGI",
+        experimentSlug: "browser-same-date-missed-manual-device-run",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_missed_device_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
       }),
     ],
   },
@@ -1729,6 +1806,7 @@ for (const scenario of [
 ] satisfies Array<{
   events: BrowserVaultEntity[];
   expectedCompletedSessions: number;
+  expectedMissedSessions?: number;
   experimentId: string;
   modality: string;
   name: string;
@@ -1761,6 +1839,7 @@ for (const scenario of [
 
     assert.equal(result?.progress?.adherence.completedSessions, scenario.expectedCompletedSessions);
     assert.equal(result?.progress?.adherence.loggedSessions, scenario.expectedCompletedSessions);
+    assert.equal(result?.progress?.adherence.missedSessions ?? 0, scenario.expectedMissedSessions ?? 0);
   });
 }
 
@@ -1808,6 +1887,62 @@ test("browser adherence calendar suppresses same-date manual fallback when a sen
 
   assert.equal(result?.schedule?.completedSessions, 1);
   assert.deepEqual(cell?.evidenceIds, ["evt_browser_calendar_same_date_device_run_1"]);
+});
+
+test("browser adherence calendar keeps surplus same-date manual evidence after one sensed run", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QKGJ";
+  const slug = "browser-calendar-same-date-surplus-manual-device-run";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-03T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-01",
+            modality: "Run",
+            targetSessions: 1,
+            minimumUsefulSessions: 1,
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+          },
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_browser_calendar_surplus_manual_run_1a",
+          experimentId,
+          experimentSlug: slug,
+          occurredAt: "2026-06-01T13:00:00.000Z",
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_browser_calendar_surplus_manual_run_1b",
+          experimentId,
+          experimentSlug: slug,
+          occurredAt: "2026-06-01T15:00:00.000Z",
+        }),
+        activitySessionEvent({
+          id: "evt_browser_calendar_surplus_device_run_1",
+          date: "2026-06-01",
+          activityType: "Running",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const cell = result?.schedule?.cells.find((entry) => entry.localDate === "2026-06-01");
+
+  assert.equal(cell?.kind, "completed");
+  assert.deepEqual(cell?.evidenceIds, [
+    "evt_browser_calendar_surplus_manual_run_1b",
+    "evt_browser_calendar_surplus_device_run_1",
+  ]);
 });
 
 test("uses canonical activity date for scheduled browser running adherence", () => {

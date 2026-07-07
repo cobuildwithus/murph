@@ -648,24 +648,40 @@ function suppressManualActivityDuplicates(
     return observations;
   }
 
-  const deviceMatchedLocalDates = new Set<string>();
+  const deviceCountsByLocalDate = new Map<string, number>();
   for (const observation of observations) {
     if (
       observation.eventKind === "activity_session" &&
       linkedEventObservationMatchesEvidence(observation, evidence)
     ) {
-      deviceMatchedLocalDates.add(observation.localDate);
+      deviceCountsByLocalDate.set(
+        observation.localDate,
+        (deviceCountsByLocalDate.get(observation.localDate) ?? 0) + 1,
+      );
     }
   }
 
-  if (deviceMatchedLocalDates.size === 0) {
+  if (deviceCountsByLocalDate.size === 0) {
     return observations;
   }
 
-  return observations.filter((observation) =>
-    observation.eventKind !== "intervention_session" ||
-    !deviceMatchedLocalDates.has(observation.localDate)
-  );
+  return observations.filter((observation) => {
+    if (
+      observation.eventKind !== "intervention_session" ||
+      observation.status === "missed" ||
+      observation.status === "skipped"
+    ) {
+      return true;
+    }
+
+    const remainingSuppressions = deviceCountsByLocalDate.get(observation.localDate) ?? 0;
+    if (remainingSuppressions <= 0) {
+      return true;
+    }
+
+    deviceCountsByLocalDate.set(observation.localDate, remainingSuppressions - 1);
+    return false;
+  });
 }
 
 function resolveDeviceObservableActivityKind(modality: string | null | undefined): string | null {
