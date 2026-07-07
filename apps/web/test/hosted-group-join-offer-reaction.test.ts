@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
@@ -15,11 +13,8 @@ import {
 
 const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinOfferTx: vi.fn(),
-  drainHostedLinqSideEffectsDirect: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
-  markHostedLinqDeliverySkippedTx: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
-  resolveHostedPublicBaseUrl: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -30,30 +25,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   lookupHostedMemberIdentityByPhoneNumber: mocks.lookupHostedMemberIdentityByPhoneNumber,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
-  markHostedLinqDeliverySkippedTx: mocks.markHostedLinqDeliverySkippedTx,
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-transport", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/webhook-transport")
-  >("@/src/lib/hosted-onboarding/webhook-transport");
-  return {
-    ...actual,
-    drainHostedLinqSideEffectsDirect: mocks.drainHostedLinqSideEffectsDirect,
-  };
-});
-
-vi.mock("@/src/lib/hosted-web/public-url", () => ({
-  resolveHostedPublicBaseUrl: mocks.resolveHostedPublicBaseUrl,
-}));
-
 import {
-  buildHostedGroupJoinOfferAcceptedReply,
   handleHostedGroupJoinOfferReaction,
 } from "@/src/lib/hosted-groups/join-offer-reaction";
 import {
@@ -81,13 +57,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       selectedVaultShareProjectionKinds: ["sleep-times.v0"],
       vaultShareCleanupSignals: [],
     });
-    mocks.drainHostedLinqSideEffectsDirect.mockResolvedValue(undefined);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_reactor", suspendedAt: null },
     });
-    mocks.markHostedLinqDeliverySkippedTx.mockResolvedValue({ id: "hld_skip" });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
-    mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
   });
 
   afterEach(() => {
@@ -95,7 +68,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     restoreKeyring = null;
   });
 
-  it("accepts a live liked offer and dispatches the deterministic confirmation", async () => {
+  it("accepts a live liked offer without sending a confirmation reply", async () => {
     const event = parseReactionEvent({
       reactionType: "like",
     });
@@ -120,71 +93,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
-    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith(
-      expect.objectContaining({
-        currentInboundReply: {
-          chatId: "chat_group_1",
-          messageId: "msg_offer_123",
-        },
-        sideEffects: [
-          expect.objectContaining({
-            payload: expect.objectContaining({
-              message: "Added you to this Murph group. Sharing your Murph profile name and recent sleep timing with this group. Manage what you share anytime: https://www.withmurph.ai/groups/join/join_1",
-              replyToMessageId: "msg_offer_123",
-              template: "group_join_offer_accepted",
-            }),
-          }),
-        ],
-      }),
-    );
-    expect(mocks.markHostedLinqDeliverySkippedTx).not.toHaveBeenCalled();
   });
 
-  it("accepts a group-email scoped liked offer with the email sharing display label", async () => {
-    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue({
-      alreadyMember: true,
-      grantedVaultShareProjectionKinds: ["group-email.v0"],
-      groupId: "group_1",
-      joinCode: "join_1",
-      messageLookupKey: "hbidx:linq-message:v1:offer",
-      membershipId: "membership_1",
-      revokedVaultShareProjectionKinds: [],
-      selectedVaultShareProjectionKinds: ["group-email.v0"],
-      vaultShareCleanupSignals: [],
-    });
-    const event = parseReactionEvent({
-      reactionType: "like",
-    });
-    const prisma = createPrismaStub();
-
-    await expect(handleHostedGroupJoinOfferReaction({
-      event,
-      prisma,
-    })).resolves.toEqual({
-      reason: "accepted",
-      status: "accepted",
-    });
-
-    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        memberId: "member_reactor",
-      }),
-    );
-    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sideEffects: [
-          expect.objectContaining({
-            payload: expect.objectContaining({
-              message: expect.stringContaining("email address"),
-              template: "group_join_offer_accepted",
-            }),
-          }),
-        ],
-      }),
-    );
-  });
-
-  it("uses read candidates for rotated offer lookup and keys confirmation to the stored offer row", async () => {
+  it("uses read candidates for rotated offer lookup", async () => {
     restoreKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
       entries: { ...TEST_KEYRING_ENTRIES },
@@ -241,14 +152,6 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         threadIdentityLookupKey: expect.anything(),
       }),
     );
-    const sideEffect = mocks.drainHostedLinqSideEffectsDirect.mock.calls[0]?.[0]
-      ?.sideEffects?.[0];
-    expect(sideEffect?.effectId).toBe(
-      buildExpectedGroupJoinOfferAcceptedEffectId({
-        memberId: "member_reactor",
-        offerMessageLookupKey: storedMessageLookupKey,
-      }),
-    );
   });
 
   it("records unsupported reactions as skipped without accepting or replying", async () => {
@@ -267,14 +170,6 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
-    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
-    expect(mocks.markHostedLinqDeliverySkippedTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        failureCode: "HOSTED_GROUP_JOIN_OFFER_REACTION_SKIPPED",
-        reason: "unsupported_reaction",
-        template: "group_join_offer_accepted",
-      }),
-    );
   });
 
   it("records revoked offers as a distinct skip reason", async () => {
@@ -297,25 +192,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       status: "ignored",
     });
 
-    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
-    expect(mocks.markHostedLinqDeliverySkippedTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reason: "offer_revoked",
-        template: "group_join_offer_accepted",
-      }),
-    );
-  });
-
-  it("keeps confirmation copy deterministic and free of em dashes", () => {
-    const message = buildHostedGroupJoinOfferAcceptedReply({
-      joinUrl: "https://www.withmurph.ai/groups/join/join_1",
-      projectionKinds: ["sleep-times.v0"],
-    });
-
-    expect(message).toBe(
-      "Added you to this Murph group. Sharing your Murph profile name and recent sleep timing with this group. Manage what you share anytime: https://www.withmurph.ai/groups/join/join_1",
-    );
-    expect(message).not.toContain("—");
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
   });
 });
 
@@ -383,20 +260,6 @@ function restoreEnvValue(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
-}
-
-function buildExpectedGroupJoinOfferAcceptedEffectId(input: {
-  memberId: string;
-  offerMessageLookupKey: string;
-}): string {
-  const hash = createHash("sha256")
-    .update(JSON.stringify({
-      memberId: input.memberId,
-      offerMessageLookupKey: input.offerMessageLookupKey,
-    }))
-    .digest("hex")
-    .slice(0, 32);
-  return `linq-group-join-offer-accepted:${hash}`;
 }
 
 function createPrismaStub(): PrismaClient {

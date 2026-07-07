@@ -168,8 +168,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       const reactionResult = await handleHostedGroupJoinOfferReaction({
         event: providerEvent,
         prisma,
-        scheduleAfterResponse: input.scheduleAfterResponse,
-        signal: input.signal,
       });
       const response: HostedOnboardingLinqWebhookResponse = {
         duplicate: providerResult.duplicate || undefined,

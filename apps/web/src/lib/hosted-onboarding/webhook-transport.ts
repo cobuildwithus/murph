@@ -154,21 +154,11 @@ export type HostedLinqFamilyInviteReplyPayload = {
   template: "family_invite_reply";
 };
 
-export type HostedLinqGroupJoinOfferAcceptedReplyPayload = {
-  chatId: string;
-  message: string;
-  occurredAt: string;
-  replyToMessageId: string | null;
-  sourceEventId: string;
-  template: "group_join_offer_accepted";
-};
-
 export type HostedLinqMessagePayload =
   | HostedLinqAiUsageQuotaPayload
   | HostedLinqConversationHomeRedirectPayload
   | HostedLinqDailyQuotaPayload
   | HostedLinqFamilyInviteReplyPayload
-  | HostedLinqGroupJoinOfferAcceptedReplyPayload
   | HostedLinqInviteMessagePayload;
 
 export type HostedLinqMessageSideEffect = {
@@ -228,16 +218,6 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       template: "family_invite_reply";
     }
   | {
-      chatId: string;
-      memberId: string;
-      message: string;
-      offerMessageLookupKey: string;
-      occurredAt: string;
-      replyToMessageId?: string | null;
-      sourceEventId: string;
-      template: "group_join_offer_accepted";
-    }
-  | {
       assignedRecipientPhone: string;
       inviteId: string;
       memberId: string;
@@ -290,30 +270,7 @@ function buildHostedWebhookLinqMessageEffectId(
     return buildHostedLinqConversationHomeRedirectEffectId(input);
   }
 
-  if (input.template === "group_join_offer_accepted") {
-    return buildHostedGroupJoinOfferAcceptedEffectId(input);
-  }
-
   return `linq-message:${input.sourceEventId}`;
-}
-
-function buildHostedGroupJoinOfferAcceptedEffectId(
-  input: Extract<
-    CreateHostedWebhookLinqMessageSideEffectInput,
-    { template: "group_join_offer_accepted" }
-  >,
-): string {
-  const memberId = input.memberId.trim();
-  const offerMessageLookupKey = input.offerMessageLookupKey.trim();
-  if (!memberId || !offerMessageLookupKey) {
-    return `linq-message:${input.sourceEventId}`;
-  }
-
-  const hash = sha256Hex(JSON.stringify({
-    memberId,
-    offerMessageLookupKey,
-  })).slice(0, 32);
-  return `linq-group-join-offer-accepted:${hash}`;
 }
 
 // One redirect per wrong Linq chat + home line + member. If the member's home
@@ -496,7 +453,6 @@ async function sendHostedLinqSideEffect(
     if (
       effect.payload.template === "invite_signup"
       || effect.payload.template === "invite_signup_fallback"
-      || effect.payload.template === "group_join_offer_accepted"
     ) {
       await deliveryAttemptTask;
       await markHostedLinqDeliveryFailedBestEffort({
@@ -835,7 +791,6 @@ async function buildHostedLinqSideEffectMessage(
         seed: effect.effectId,
       });
     case "family_invite_reply":
-    case "group_join_offer_accepted":
       return effect.payload.message;
     case "conversation_home_redirect": {
       const homeRecipientPhone = normalizePhoneNumber(effect.payload.homeRecipientPhone);
@@ -976,15 +931,6 @@ function buildHostedWebhookLinqMessagePayload(
         sourceEventId: input.sourceEventId,
         template: input.template,
       };
-    case "group_join_offer_accepted":
-      return {
-        chatId: input.chatId,
-        message: input.message,
-        occurredAt: input.occurredAt,
-        replyToMessageId,
-        sourceEventId: input.sourceEventId,
-        template: input.template,
-      };
     case "invite_signup":
       return {
         chatId: input.chatId,
@@ -1084,20 +1030,6 @@ async function claimHostedLinqNoticeForSideEffect(
     case "conversation_home_redirect":
     case "family_invite_reply":
       return true;
-    case "group_join_offer_accepted": {
-      const target = readHostedLinqSideEffectDeliveryTarget(effect.payload);
-      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
-        idempotencyKey: effect.effectId,
-        linqChatId: target.linqChatId,
-        phoneNumber: target.phoneNumber,
-        prisma,
-        source: "hosted_webhook_side_effect",
-        sourceRef: effect.effectId,
-        targetKind: target.targetKind,
-        template: effect.payload.template,
-      });
-      return claim.claimed;
-    }
   }
 }
 
@@ -1137,7 +1069,6 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
       case "invite_signin":
       case "conversation_home_redirect":
       case "family_invite_reply":
-      case "group_join_offer_accepted":
         return;
     }
   } catch (error) {
