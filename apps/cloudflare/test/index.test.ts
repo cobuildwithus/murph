@@ -56,6 +56,7 @@ import {
 } from "../src/storage-paths.ts";
 import type {
   UserRunnerDurableObjectStubLike,
+  WorkerExecutionContext,
   WorkerEnvironmentSource,
 } from "../src/worker-routes/shared.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
@@ -1990,16 +1991,26 @@ describe("cloudflare worker routes", () => {
       });
     });
 
-    it("accepts web-plane OIDC runtime ensure-processing requests and stamps the direct-wake trigger", async () => {
+    it("acks web-plane OIDC runtime ensure-processing requests early and schedules the Durable Object call", async () => {
+      let resolveEnsure!: (value: {
+        action: "woken";
+        kind: "runtime_processing_accepted";
+        recommendedRecheckAt: string;
+        runtimeAttemptId: string;
+      }) => void;
+      const ensurePromise = new Promise<{
+        action: "woken";
+        kind: "runtime_processing_accepted";
+        recommendedRecheckAt: string;
+        runtimeAttemptId: string;
+      }>((resolve) => {
+        resolveEnsure = resolve;
+      });
       const stub = createUserRunnerStub({
-        ensureRuntimeProcessingForUser: vi.fn(async () => ({
-          action: "woken" as const,
-          kind: "runtime_processing_accepted" as const,
-          recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
-          runtimeAttemptId: "runtime-attempt-test",
-        })),
+        ensureRuntimeProcessingForUser: vi.fn(() => ensurePromise),
       });
       const env = createWorkerEnv(stub);
+      const execution = createWorkerExecutionContextForTest();
 
       const response = await worker.fetch(
         await signControlRequest(
@@ -2020,15 +2031,15 @@ describe("cloudflare worker routes", () => {
           }),
         ),
         env,
+        execution.ctx,
       );
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(202);
       await expect(response.json()).resolves.toEqual({
-        action: "woken",
-        kind: "runtime_processing_accepted",
-        recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
-        runtimeAttemptId: "runtime-attempt-test",
+        accepted: true,
       });
+      expect(execution.waitUntil).toHaveBeenCalledTimes(1);
+      expect(execution.waitUntilPromises).toHaveLength(1);
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
         orchestrationAttemptId: "web-ingress-attempt-test",
         orchestration: {
@@ -2042,6 +2053,60 @@ describe("cloudflare worker routes", () => {
         },
         userId: "test-user",
       });
+      resolveEnsure({
+        action: "woken",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
+        runtimeAttemptId: "runtime-attempt-test",
+      });
+      await expect(execution.waitUntilPromises[0]).resolves.toEqual({
+        action: "woken",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
+        runtimeAttemptId: "runtime-attempt-test",
+      });
+    });
+
+    it("logs web-plane OIDC waitUntil ensure-processing failures without rethrowing", async () => {
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
+      const stub = createUserRunnerStub({
+        ensureRuntimeProcessingForUser: vi.fn(async () => {
+          throw new Error("direct ensure failed");
+        }),
+      });
+      const env = createWorkerEnv(stub);
+      const execution = createWorkerExecutionContextForTest();
+
+      const response = await worker.fetch(
+        await signControlRequest(
+          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+            body: JSON.stringify({
+              orchestrationAttemptId: "web-ingress-attempt-test",
+            }),
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }),
+        ),
+        env,
+        execution.ctx,
+      );
+
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({
+        accepted: true,
+      });
+      expect(execution.waitUntilPromises).toHaveLength(1);
+      await expect(execution.waitUntilPromises[0]).resolves.toBeUndefined();
+      expect(errorLog).toHaveBeenCalledTimes(1);
+      const serializedErrorLogs = errorLog.mock.calls
+        .map(([payload]) => String(payload))
+        .join("\n");
+      expect(serializedErrorLogs).toContain("runtime-ensure-processing-waituntil-failed");
+      expect(serializedErrorLogs).toContain("/internal/users/<REDACTED_USER>/runtime/ensure-processing");
+      expect(serializedErrorLogs).toContain("direct ensure failed");
     });
 
     it("rejects runtime ensure-processing requests whose only credential is an invalid OIDC bearer", async () => {
@@ -3336,6 +3401,22 @@ type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult>;
 };
+
+function createWorkerExecutionContextForTest(): {
+  ctx: WorkerExecutionContext;
+  waitUntil: ReturnType<typeof vi.fn>;
+  waitUntilPromises: Promise<unknown>[];
+} {
+  const waitUntilPromises: Promise<unknown>[] = [];
+  const waitUntil = vi.fn((promise: Promise<unknown>) => {
+    waitUntilPromises.push(promise);
+  });
+  return {
+    ctx: { waitUntil },
+    waitUntil,
+    waitUntilPromises,
+  };
+}
 
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
   return {
