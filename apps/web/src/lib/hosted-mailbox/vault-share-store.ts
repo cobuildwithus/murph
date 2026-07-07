@@ -6,12 +6,14 @@ import {
   buildHostedExecutionVaultShareDeliveryWake,
 } from "@murphai/hosted-execution";
 import {
+  buildHostedVaultShareProjectionScopeKey,
   buildHostedVaultShareDeliveryDedupeKey,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   isHostedVaultShareCurrentStateProjectionKind,
-  isHostedVaultShareProjectionKind,
+  parseHostedVaultShareProjectionScope,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
+  type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
@@ -28,14 +30,19 @@ export interface ActiveHostedVaultShare {
   grantorMemberId: string;
   id: string;
   projectionKind: HostedVaultShareProjectionKind;
+  projectionScope: HostedVaultShareProjectionScope;
+  projectionScopeKey: string;
 }
 
 export async function findActiveHostedVaultShares(input: {
   grantorMemberId: string;
   prisma?: PrismaClient;
-  projectionKind: HostedVaultShareProjectionKind;
+  projectionScope: HostedVaultShareProjectionScope;
 }): Promise<ActiveHostedVaultShare[]> {
   const prisma = input.prisma ?? getPrisma();
+  const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
+    input.projectionScope,
+  );
   const rows = await prisma.hostedVaultShare.findMany({
     orderBy: { createdAt: "asc" },
     select: {
@@ -43,40 +50,46 @@ export async function findActiveHostedVaultShares(input: {
       grantorMemberId: true,
       id: true,
       projectionKind: true,
+      projectionScopeJson: true,
+      projectionScopeKey: true,
     },
     where: {
       grantorMemberId: input.grantorMemberId,
-      projectionKind: input.projectionKind,
+      projectionScopeKey,
       status: "granted",
     },
   });
 
   return rows.flatMap((row) => {
-    // The query already filters on a registry kind; this narrows the Prisma string column
-    // back to the closed registry without a cast and drops anything unexpected.
-    if (!isHostedVaultShareProjectionKind(row.projectionKind)) {
+    const projectionScope = parseHostedVaultShareRowProjectionScope(row);
+    if (!projectionScope) {
       return [];
     }
+    const rowScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
 
     return [{
       destinationMemberId: row.destinationMemberId,
       grantorMemberId: row.grantorMemberId,
       id: row.id,
-      projectionKind: row.projectionKind,
+      projectionKind: projectionScope.projectionKind,
+      projectionScope,
+      projectionScopeKey: rowScopeKey,
     }];
   });
 }
 
-export async function readDeliverableHostedVaultShareProjectionKinds(input: {
+export async function readDeliverableHostedVaultShareProjectionScopes(input: {
   grantorMemberId: string;
   prisma?: PrismaClient;
-}): Promise<HostedVaultShareProjectionKind[]> {
+}): Promise<HostedVaultShareProjectionScope[]> {
   const prisma = input.prisma ?? getPrisma();
   const rows = await prisma.hostedVaultShare.findMany({
-    distinct: ["projectionKind"],
-    orderBy: { projectionKind: "asc" },
+    distinct: ["projectionScopeKey"],
+    orderBy: { projectionScopeKey: "asc" },
     select: {
       projectionKind: true,
+      projectionScopeJson: true,
+      projectionScopeKey: true,
     },
     where: {
       destination: activeHostedMemberAccessWhere(),
@@ -85,13 +98,9 @@ export async function readDeliverableHostedVaultShareProjectionKinds(input: {
     },
   });
 
-  return rows.flatMap((row) => {
-    if (!isHostedVaultShareProjectionKind(row.projectionKind)) {
-      return [];
-    }
-
-    return [row.projectionKind];
-  });
+  return rows
+    .map(parseHostedVaultShareRowProjectionScope)
+    .filter((scope): scope is HostedVaultShareProjectionScope => scope !== null);
 }
 
 export interface DeliverHostedVaultShareRecordsResult {
@@ -103,6 +112,8 @@ type HostedVaultShareAuthorityRow = {
   grantorMemberId: string;
   id: string;
   projectionKind: string;
+  projectionScopeJson: unknown;
+  projectionScopeKey: string;
   status: string;
 };
 
@@ -152,6 +163,7 @@ export async function deliverHostedVaultShareRecords(input: {
         delivery: {
           grantorMemberId: share.grantorMemberId,
           projectionKind: share.projectionKind,
+          projectionScope: share.projectionScope,
           record,
           schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
           shareId: share.id,
@@ -160,6 +172,7 @@ export async function deliverHostedVaultShareRecords(input: {
           recordKey: record.recordKey,
           recordRevision: deriveHostedVaultShareRecordRevision({
             projectionKind: share.projectionKind,
+            projectionScopeKey: share.projectionScopeKey,
             record,
           }),
           shareId: share.id,
@@ -206,6 +219,8 @@ async function readGrantedHostedVaultShareForUpdateTx(input: {
       id,
       grantor_member_id AS "grantorMemberId",
       projection_kind AS "projectionKind",
+      projection_scope_json AS "projectionScopeJson",
+      projection_scope_key AS "projectionScopeKey",
       destination_member_id AS "destinationMemberId",
       status
     FROM hosted_vault_share
@@ -220,6 +235,7 @@ async function readGrantedHostedVaultShareForUpdateTx(input: {
     || row.grantorMemberId !== input.share.grantorMemberId
     || row.destinationMemberId !== input.share.destinationMemberId
     || row.projectionKind !== input.share.projectionKind
+    || row.projectionScopeKey !== input.share.projectionScopeKey
   ) {
     return null;
   }
@@ -229,6 +245,7 @@ async function readGrantedHostedVaultShareForUpdateTx(input: {
 
 function deriveHostedVaultShareRecordRevision(input: {
   projectionKind: HostedVaultShareProjectionKind;
+  projectionScopeKey: string;
   record: HostedVaultShareDeliveryRecord;
 }): string {
   const canonicalRecord = JSON.stringify({
@@ -241,6 +258,7 @@ function deriveHostedVaultShareRecordRevision(input: {
       ? null
       : input.record.occurredAt,
     projectionKind: input.projectionKind,
+    projectionScopeKey: input.projectionScopeKey,
     recordKey: input.record.recordKey,
     schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
     sourceRevision: input.record.sourceRevision ?? null,
@@ -249,4 +267,26 @@ function deriveHostedVaultShareRecordRevision(input: {
     .update(canonicalRecord)
     .digest("base64url")
     .slice(0, 32);
+}
+
+function parseHostedVaultShareRowProjectionScope(row: {
+  projectionKind: string;
+  projectionScopeJson: unknown;
+  projectionScopeKey: string;
+}): HostedVaultShareProjectionScope | null {
+  try {
+    const scope = parseHostedVaultShareProjectionScope(
+      row.projectionScopeJson ?? row.projectionKind,
+      "Hosted vault-share row projection scope",
+    );
+    if (
+      scope.projectionKind !== row.projectionKind
+      || buildHostedVaultShareProjectionScopeKey(scope) !== row.projectionScopeKey
+    ) {
+      return null;
+    }
+    return scope;
+  } catch {
+    return null;
+  }
 }

@@ -25,14 +25,31 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   deliverHostedVaultShareRecords,
-  readDeliverableHostedVaultShareProjectionKinds,
+  readDeliverableHostedVaultShareProjectionScopes,
 } from "@/src/lib/hosted-mailbox/vault-share-store";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  hostedVaultShareProjectionKindToScope,
+} from "@murphai/hosted-execution/vault-share";
+
+const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
+const SLEEP_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
+const ACTIVE_CALORIES_SCOPE = hostedVaultShareProjectionKindToScope(
+  "active-calories-days.v0",
+);
+const ACTIVE_CALORIES_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(
+  ACTIVE_CALORIES_SCOPE,
+);
+const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
+const PROFILE_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
 
 const SHARE = {
   destinationMemberId: "member_referee",
   grantorMemberId: "member_grantor",
   id: "share_1",
   projectionKind: "sleep-times.v0" as const,
+  projectionScope: SLEEP_SCOPE,
+  projectionScopeKey: SLEEP_SCOPE_KEY,
 };
 
 function nightRecord(date: string, nextDate: string): {
@@ -69,6 +86,8 @@ function shareAuthorityRow(
     grantorMemberId: string;
     id: string;
     projectionKind: string;
+    projectionScope: unknown;
+    projectionScopeKey: string;
   },
   status: "granted" | "revoked" = "granted",
 ): {
@@ -76,6 +95,8 @@ function shareAuthorityRow(
   grantorMemberId: string;
   id: string;
   projectionKind: string;
+  projectionScopeJson: unknown;
+  projectionScopeKey: string;
   status: string;
 } {
   return {
@@ -83,6 +104,8 @@ function shareAuthorityRow(
     grantorMemberId: share.grantorMemberId,
     id: share.id,
     projectionKind: share.projectionKind,
+    projectionScopeJson: share.projectionScope,
+    projectionScopeKey: share.projectionScopeKey,
     status,
   };
 }
@@ -98,7 +121,13 @@ function fakePrisma(
   } as unknown as PrismaClient;
 }
 
-function fakeProjectionKindPrisma(rows: Array<{ projectionKind: string }>): {
+function fakeProjectionScopePrisma(
+  rows: Array<{
+    projectionKind: string;
+    projectionScopeJson: unknown;
+    projectionScopeKey: string;
+  }>,
+): {
   findMany: ReturnType<typeof vi.fn>;
   prisma: PrismaClient;
 } {
@@ -113,28 +142,45 @@ function fakeProjectionKindPrisma(rows: Array<{ projectionKind: string }>): {
   };
 }
 
-describe("readDeliverableHostedVaultShareProjectionKinds", () => {
+describe("readDeliverableHostedVaultShareProjectionScopes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("reads distinct granted projection kinds with active destination access", async () => {
-    const { findMany, prisma } = fakeProjectionKindPrisma([
-      { projectionKind: "activity-days.v0" },
-      { projectionKind: "unknown.v0" },
-      { projectionKind: "profile-name.v0" },
+  it("reads distinct granted projection scopes with active destination access", async () => {
+    const activityScope = hostedVaultShareProjectionKindToScope("activity-days.v0");
+    const { findMany, prisma } = fakeProjectionScopePrisma([
+      {
+        projectionKind: "activity-days.v0",
+        projectionScopeJson: activityScope,
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(activityScope),
+      },
+      {
+        projectionKind: "unknown.v0",
+        projectionScopeJson: { projectionKind: "unknown.v0" },
+        projectionScopeKey: "unknown.v0",
+      },
+      {
+        projectionKind: "profile-name.v0",
+        projectionScopeJson: PROFILE_SCOPE,
+        projectionScopeKey: PROFILE_SCOPE_KEY,
+      },
     ]);
 
-    const result = await readDeliverableHostedVaultShareProjectionKinds({
+    const result = await readDeliverableHostedVaultShareProjectionScopes({
       grantorMemberId: "member_grantor",
       prisma,
     });
 
-    expect(result).toEqual(["activity-days.v0", "profile-name.v0"]);
+    expect(result).toEqual([activityScope, PROFILE_SCOPE]);
     expect(findMany).toHaveBeenCalledWith({
-      distinct: ["projectionKind"],
-      orderBy: { projectionKind: "asc" },
-      select: { projectionKind: true },
+      distinct: ["projectionScopeKey"],
+      orderBy: { projectionScopeKey: "asc" },
+      select: {
+        projectionKind: true,
+        projectionScopeJson: true,
+        projectionScopeKey: true,
+      },
       where: {
         destination: expect.objectContaining({
           OR: expect.any(Array),
@@ -204,6 +250,7 @@ describe("deliverHostedVaultShareRecords", () => {
       delivery: {
         grantorMemberId: "member_grantor",
         projectionKind: "sleep-times.v0",
+        projectionScope: SLEEP_SCOPE,
         record: FIRST_RECORD,
         schema: "murph.vault-share.delivery.v1",
         shareId: "share_1",
@@ -253,7 +300,12 @@ describe("deliverHostedVaultShareRecords", () => {
   });
 
   it("appends a later source revision even when a corrected metric returns to an earlier value", async () => {
-    const metricShare = { ...SHARE, projectionKind: "active-calories-days.v0" as const };
+    const metricShare = {
+      ...SHARE,
+      projectionKind: "active-calories-days.v0" as const,
+      projectionScope: ACTIVE_CALORIES_SCOPE,
+      projectionScopeKey: ACTIVE_CALORIES_SCOPE_KEY,
+    };
     const prisma = fakePrisma([shareAuthorityRow(metricShare, "granted")]);
     const seenEventIds = new Set<string>();
     mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input) => {
@@ -306,7 +358,12 @@ describe("deliverHostedVaultShareRecords", () => {
     // occurredAt must dedupe instead of minting a fresh mailbox dedupe key, while a
     // changed name still appends a new revision.
     const prisma = fakePrisma([
-      shareAuthorityRow({ ...SHARE, projectionKind: "profile-name.v0" }, "granted"),
+      shareAuthorityRow({
+        ...SHARE,
+        projectionKind: "profile-name.v0",
+        projectionScope: PROFILE_SCOPE,
+        projectionScopeKey: PROFILE_SCOPE_KEY,
+      }, "granted"),
     ]);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       inserted: true,
@@ -325,7 +382,12 @@ describe("deliverHostedVaultShareRecords", () => {
         record("2026-03-15T12:34:56.000Z", "Theo"),
         record("2026-03-15T12:34:56.000Z", "Odin"),
       ],
-      share: { ...SHARE, projectionKind: "profile-name.v0" },
+      share: {
+        ...SHARE,
+        projectionKind: "profile-name.v0",
+        projectionScope: PROFILE_SCOPE,
+        projectionScopeKey: PROFILE_SCOPE_KEY,
+      },
     });
 
     const eventIds = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(

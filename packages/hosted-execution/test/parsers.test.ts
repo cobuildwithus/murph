@@ -526,6 +526,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     kind: "friends",
     memberCount: 3,
     requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+    requestedVaultShareProjectionScopes: [{ projectionKind: "sleep-times.v0" }],
     status: "active",
   };
   const PARSED_GROUP_SUMMARY = {
@@ -561,14 +562,27 @@ describe("parseHostedRuntimeGroupTool", () => {
       joinLink: {
         displayName: "Sunday sleep crew",
         kind: "friends",
-        requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
+        requestedVaultShareProjectionScopes: [
+          { projectionKind: "sleep-times.v0" },
+          {
+            projectionKind: "activity-minutes-days.v1",
+            selector: { activityKind: "running" },
+          },
+        ],
       },
     })).toEqual({
       action: "create_join_link",
       joinLink: {
         displayName: "Sunday sleep crew",
         kind: "friends",
-        requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
+        requestedVaultShareProjectionKinds: null,
+        requestedVaultShareProjectionScopes: [
+          { projectionKind: "sleep-times.v0" },
+          {
+            projectionKind: "activity-minutes-days.v1",
+            selector: { activityKind: "running" },
+          },
+        ],
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
@@ -576,13 +590,14 @@ describe("parseHostedRuntimeGroupTool", () => {
       joinOffer: {
         messageTemplate:
           "  React here to join. Shares {{share_scope}}. Page: {{join_url}}.  ",
-        projectionKinds: ["group-email.v0"],
+        projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
     })).toEqual({
       action: "post_join_offer",
       joinOffer: {
         messageTemplate: "React here to join. Shares {{share_scope}}. Page: {{join_url}}.",
-        projectionKinds: ["group-email.v0"],
+        projectionKinds: null,
+        projectionScopes: [{ projectionKind: "group-email.v0" }],
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
@@ -637,17 +652,23 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "create_join_link",
-        joinLink: { requestedVaultShareProjectionKinds: ["all-health-data"] },
+        joinLink: { requestedVaultShareProjectionScopes: [{ projectionKind: "all-health-data" }] },
       })
-    ).toThrow(/unsupported projection kind/u);
-    // Membership-implied, never requestable: the join-link request contract is closed
-    // over the individually selectable kinds.
+    ).toThrow(/unsupported projection scope/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "create_join_link",
-        joinLink: { requestedVaultShareProjectionKinds: ["profile-name.v0"] },
+        joinLink: { requestedVaultShareProjectionScopes: [{ projectionKind: "activity-minutes-days.v1" }] },
       })
-    ).toThrow(/unsupported projection kind/u);
+    ).toThrow(/unsupported projection scope/u);
+    // Membership-implied, never requestable: the join-link request contract is closed
+    // over the individually selectable scopes.
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [{ projectionKind: "profile-name.v0" }] },
+      })
+    ).toThrow(/unsupported projection scope/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "create_join_link",
@@ -669,9 +690,9 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "post_join_offer",
-        joinOffer: { projectionKinds: ["profile-name.v0"] },
+        joinOffer: { projectionScopes: [{ projectionKind: "profile-name.v0" }] },
       })
-    ).toThrow(/unsupported projection kind/u);
+    ).toThrow(/unsupported projection scope/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "revoke_own_email_share",
@@ -834,12 +855,17 @@ describe("parseHostedRuntimeGroupTool", () => {
           members: [
             {
               grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+              grantedVaultShareProjectionScopes: [
+                { projectionKind: "profile-name.v0" },
+                { projectionKind: "sleep-times.v0" },
+              ],
               handle: "+15551110000",
               memberId: "member_owner_123",
               role: "owner",
             },
             {
               grantedVaultShareProjectionKinds: [],
+              grantedVaultShareProjectionScopes: [],
               handle: null,
               memberId: "member_joiner_456",
               role: "member",
@@ -856,12 +882,17 @@ describe("parseHostedRuntimeGroupTool", () => {
           members: [
             {
               grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+              grantedVaultShareProjectionScopes: [
+                { projectionKind: "profile-name.v0" },
+                { projectionKind: "sleep-times.v0" },
+              ],
               handle: "+15551110000",
               memberId: "member_owner_123",
               role: "owner",
             },
             {
               grantedVaultShareProjectionKinds: [],
+              grantedVaultShareProjectionScopes: [],
               handle: null,
               memberId: "member_joiner_456",
               role: "member",

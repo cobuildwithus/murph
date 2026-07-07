@@ -12,7 +12,7 @@ import {
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
-import type { HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
+import type { HostedVaultShareProjectionScope } from "@murphai/hosted-execution/vault-share";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
@@ -66,7 +66,7 @@ import {
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
 import {
-  normalizeHostedVaultShareProjectionKinds,
+  normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
 } from "./join-policy";
 
@@ -346,14 +346,19 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     if (ownerAccess.status !== "ok") {
       return { kind: ownerAccess.unavailableReason };
     }
+    const requestedVaultShareProjectionScopes =
+      normalizeHostedVaultShareProjectionScopes(
+        input.joinLink?.requestedVaultShareProjectionScopes
+          ?? input.joinLink?.requestedVaultShareProjectionKinds
+          ?? [],
+      );
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
       displayName: input.joinLink?.displayName ?? null,
       kind: input.joinLink?.kind ?? null,
       now,
-      requestedVaultShareProjectionKinds:
-        input.joinLink?.requestedVaultShareProjectionKinds ?? [],
+      requestedVaultShareProjectionScopes,
       tx,
     });
     return { kind: "ok" as const, ownerMemberId: ownerAccess.ownerMemberId, ...result };
@@ -410,8 +415,10 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const projectionKinds = normalizeHostedVaultShareProjectionKinds(
-    input.joinOffer?.projectionKinds ?? [],
+  const projectionScopes = normalizeHostedVaultShareProjectionScopes(
+    input.joinOffer?.projectionScopes
+      ?? input.joinOffer?.projectionKinds
+      ?? [],
   );
   const messageTemplate = normalizeHostedGroupJoinOfferMessageTemplate(
     input.joinOffer?.messageTemplate ?? null,
@@ -434,7 +441,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
       now,
-      requestedVaultShareProjectionKinds: projectionKinds,
+      requestedVaultShareProjectionScopes: projectionScopes,
       tx,
     });
     return { kind: "ok" as const, ownerMemberId: ownerAccess.ownerMemberId, ...result };
@@ -454,7 +461,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
     messageTemplate,
-    projectionKinds,
+    projectionScopes,
   });
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
@@ -476,7 +483,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
         groupId: created.group.id,
         messageId: sent.messageId,
         postedAt: now,
-        projectionKinds,
+        projectionScopes,
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -500,12 +507,12 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
   messageTemplate: string;
-  projectionKinds: readonly HostedVaultShareProjectionKind[];
+  projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
   return input.messageTemplate
     .replace(
       HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
-      renderHostedGroupJoinOfferShareScope(input.projectionKinds),
+      renderHostedGroupJoinOfferScopeSentence(input.projectionScopes),
     )
     .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, input.joinUrl);
 }
@@ -535,10 +542,10 @@ function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): b
   );
 }
 
-function renderHostedGroupJoinOfferShareScope(
-  projectionKinds: readonly HostedVaultShareProjectionKind[],
+function renderHostedGroupJoinOfferScopeSentence(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): string {
-  const labels = projectHostedVaultShareProjectionDisplays(projectionKinds)
+  const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
     .map((display) => display.label.toLowerCase());
   return labels.length > 0
     ? `your Murph profile name and ${formatHumanList(labels)}`

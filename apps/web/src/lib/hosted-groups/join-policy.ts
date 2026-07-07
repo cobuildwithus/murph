@@ -1,8 +1,13 @@
 import "server-only";
 
 import {
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  parseHostedVaultShareProjectionScope,
   type HostedVaultShareProjectionKind,
+  type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
 type HostedVaultShareSelectableProjectionKind =
@@ -21,6 +26,8 @@ export const HOSTED_GROUP_JOIN_POLICY_SCHEMA =
 
 export interface HostedGroupJoinPolicy {
   schema: typeof HOSTED_GROUP_JOIN_POLICY_SCHEMA;
+  requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
+  /** Compatibility view for fixed-kind callers. Prefer requestedVaultShareProjectionScopes. */
   requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
 }
 
@@ -28,6 +35,8 @@ export interface HostedVaultShareProjectionDisplay {
   description: string;
   label: string;
   projectionKind: HostedVaultShareProjectionKind;
+  projectionScope: HostedVaultShareProjectionScope;
+  projectionScopeKey: string;
 }
 
 const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectableProjectionKind, {
@@ -122,7 +131,12 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
 };
 
 const MAX_JOIN_POLICY_PROJECTIONS =
-  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length;
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length;
+const SELECTABLE_SCOPE_KEYS = new Set(
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) =>
+    buildHostedVaultShareProjectionScopeKey(scope)
+  ),
+);
 
 export function readHostedGroupJoinPolicy(value: unknown): HostedGroupJoinPolicy {
   if (!value || typeof value !== "object") {
@@ -132,19 +146,16 @@ export function readHostedGroupJoinPolicy(value: unknown): HostedGroupJoinPolicy
   if (record.schema !== HOSTED_GROUP_JOIN_POLICY_SCHEMA) {
     return emptyHostedGroupJoinPolicy();
   }
-  return {
-    schema: HOSTED_GROUP_JOIN_POLICY_SCHEMA,
-    requestedVaultShareProjectionKinds: normalizeHostedVaultShareProjectionKinds(
-      record.requestedVaultShareProjectionKinds,
+  return hostedGroupJoinPolicyFromScopes(
+    normalizeHostedVaultShareProjectionScopes(
+      record.requestedVaultShareProjectionScopes
+        ?? record.requestedVaultShareProjectionKinds,
     ),
-  };
+  );
 }
 
 export function emptyHostedGroupJoinPolicy(): HostedGroupJoinPolicy {
-  return {
-    schema: HOSTED_GROUP_JOIN_POLICY_SCHEMA,
-    requestedVaultShareProjectionKinds: [],
-  };
+  return hostedGroupJoinPolicyFromScopes([]);
 }
 
 /**
@@ -171,27 +182,96 @@ export function normalizeHostedVaultShareProjectionKinds(
   return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.filter((kind) => seen.has(kind));
 }
 
+export function normalizeHostedVaultShareProjectionScopes(
+  value: unknown,
+): HostedVaultShareProjectionScope[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  for (const entry of value) {
+    let scope: HostedVaultShareProjectionScope;
+    try {
+      scope = parseHostedVaultShareProjectionScope(
+        entry,
+        "Hosted group join policy projection scope",
+      );
+    } catch {
+      continue;
+    }
+    const scopeKey = buildHostedVaultShareProjectionScopeKey(scope);
+    if (!SELECTABLE_SCOPE_KEYS.has(scopeKey)) {
+      continue;
+    }
+    seen.add(scopeKey);
+    if (seen.size > MAX_JOIN_POLICY_PROJECTIONS) {
+      break;
+    }
+  }
+  return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.filter((scope) =>
+    seen.has(buildHostedVaultShareProjectionScopeKey(scope))
+  );
+}
+
 export function mergeHostedGroupJoinPolicy(input: {
   existing: unknown;
-  requestedVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
+  requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
 }): HostedGroupJoinPolicy {
   const existing = readHostedGroupJoinPolicy(input.existing);
-  return {
-    schema: HOSTED_GROUP_JOIN_POLICY_SCHEMA,
-    requestedVaultShareProjectionKinds: normalizeHostedVaultShareProjectionKinds([
-      ...existing.requestedVaultShareProjectionKinds,
-      ...input.requestedVaultShareProjectionKinds,
+  return hostedGroupJoinPolicyFromScopes(
+    normalizeHostedVaultShareProjectionScopes([
+      ...existing.requestedVaultShareProjectionScopes,
+      ...input.requestedVaultShareProjectionScopes,
     ]),
-  };
+  );
 }
 
 export function projectHostedVaultShareProjectionDisplays(
-  projectionKinds: readonly HostedVaultShareProjectionKind[],
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): HostedVaultShareProjectionDisplay[] {
-  return normalizeHostedVaultShareProjectionKinds(projectionKinds)
-    .filter(isHostedVaultShareSelectableProjectionKind)
-    .map((projectionKind) => ({
-      projectionKind,
-      ...HOSTED_VAULT_SHARE_PROJECTION_DISPLAY[projectionKind],
-    }));
+  return normalizeHostedVaultShareProjectionScopes(projectionScopes)
+    .map((projectionScope) => {
+      const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+      return {
+        projectionKind: projectionScope.projectionKind,
+        projectionScope,
+        projectionScopeKey,
+        ...hostedVaultShareProjectionScopeDisplay(projectionScope),
+      };
+    });
+}
+
+function hostedGroupJoinPolicyFromScopes(
+  requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[],
+): HostedGroupJoinPolicy {
+  return {
+    schema: HOSTED_GROUP_JOIN_POLICY_SCHEMA,
+    requestedVaultShareProjectionKinds: [
+      ...new Set(requestedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
+    ],
+    requestedVaultShareProjectionScopes,
+  };
+}
+
+function hostedVaultShareProjectionScopeDisplay(
+  projectionScope: HostedVaultShareProjectionScope,
+): { description: string; label: string } {
+  if (projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND) {
+    const label = formatHostedVaultShareActivityKindLabel(
+      projectionScope.selector.activityKind,
+    );
+    return {
+      label: `Recent ${label} minutes`,
+      description:
+        `Allows this group to receive your recent daily ${label}-minute totals as bounded shared records.`,
+    };
+  }
+  if (!isHostedVaultShareSelectableProjectionKind(projectionScope.projectionKind)) {
+    throw new TypeError("Vault-share projection scope is not selectable.");
+  }
+  return HOSTED_VAULT_SHARE_PROJECTION_DISPLAY[projectionScope.projectionKind];
+}
+
+function formatHostedVaultShareActivityKindLabel(activityKind: string): string {
+  return activityKind.replace(/-/gu, " ");
 }

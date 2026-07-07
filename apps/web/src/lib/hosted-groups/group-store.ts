@@ -1,8 +1,14 @@
 import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
-import type { HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
-import { isHostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  hostedVaultShareProjectionKindToScope,
+  isHostedVaultShareFixedProjectionKind,
+  parseHostedVaultShareProjectionScope,
+  type HostedVaultShareProjectionKind,
+  type HostedVaultShareProjectionScope,
+} from "@murphai/hosted-execution/vault-share";
 
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
@@ -21,7 +27,7 @@ import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
   grantHostedVaultShareTx,
-  readActiveHostedVaultShareProjectionKinds,
+  readActiveHostedVaultShareProjectionScopes,
   revokeHostedVaultSharesWithCleanupTx,
   type HostedVaultShareCleanupSignal,
 } from "../hosted-vault-share/share-grant-store";
@@ -29,6 +35,7 @@ import {
   emptyHostedGroupJoinPolicy,
   mergeHostedGroupJoinPolicy,
   normalizeHostedVaultShareProjectionKinds,
+  normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
   readHostedGroupJoinPolicy,
   type HostedVaultShareProjectionDisplay,
@@ -39,6 +46,7 @@ export type HostedGroupsReadClient = PrismaClient | Prisma.TransactionClient;
 
 export interface HostedGroupMemberRosterEntry {
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   handle: string | null;
   memberId: string;
   role: string;
@@ -51,11 +59,13 @@ export interface HostedGroupSummary {
   memberCount: number;
   members: HostedGroupMemberRosterEntry[];
   requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   status: string;
 }
 
 export interface HostedGroupJoinView {
   activeVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  activeVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   displayName: string | null;
   id: string;
   kind: string;
@@ -68,9 +78,11 @@ export interface HostedGroupJoinView {
 export interface HostedGroupJoinAcceptanceResult {
   alreadyMember: boolean;
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   groupId: string;
   membershipId: string;
   revokedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  revokedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
 }
 
 export interface HostedGroupJoinAcceptanceTxResult
@@ -83,6 +95,7 @@ export interface HostedGroupJoinOfferBindingTxResult {
   messageIdSuffix: string | null;
   messageLookupKey: string;
   projectionKinds: HostedVaultShareProjectionKind[];
+  projectionScopes: HostedVaultShareProjectionScope[];
 }
 
 export interface HostedGroupJoinOfferAcceptanceTxResult
@@ -90,6 +103,7 @@ export interface HostedGroupJoinOfferAcceptanceTxResult
   joinCode: string;
   messageLookupKey: string;
   selectedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  selectedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
 }
 
 export type HostedGroupMemberEmailShareRevocationTxResult =
@@ -110,6 +124,10 @@ export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
 const DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_KINDS = [
   "group-email.v0",
 ] as const satisfies readonly HostedVaultShareProjectionKind[];
+const DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_SCOPES =
+  DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_KINDS.map((projectionKind) =>
+    hostedVaultShareProjectionKindToScope(projectionKind)
+  );
 
 export async function ensureHostedGroupForThreadContainerTx(input: {
   tx: Prisma.TransactionClient;
@@ -117,6 +135,7 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
   displayName?: string | null;
   kind?: HostedGroupKind | string | null;
   now: Date;
+  requestedVaultShareProjectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   requestedVaultShareProjectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
 }): Promise<HostedGroupSummary> {
   await lockHostedThreadContainerRow(input.tx, input.containerMemberId);
@@ -139,11 +158,12 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     });
   }
 
-  const requested = normalizeHostedVaultShareProjectionKinds(
-    input.requestedVaultShareProjectionKinds ?? [],
+  const requested = normalizeHostedVaultShareProjectionScopes(
+    input.requestedVaultShareProjectionScopes
+      ?? fixedProjectionKindsToScopes(input.requestedVaultShareProjectionKinds ?? []),
   );
-  const createdRequested = normalizeHostedVaultShareProjectionKinds([
-    ...DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_KINDS,
+  const createdRequested = normalizeHostedVaultShareProjectionScopes([
+    ...DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_SCOPES,
     ...requested,
   ]);
   const existing = await input.tx.hostedGroup.findUnique({
@@ -165,7 +185,7 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     if (createdRequested.length > 0) {
       await mergeHostedGroupRequestedProjectionsTx(input.tx, {
         groupId: existing.id,
-        requestedVaultShareProjectionKinds: createdRequested,
+        requestedVaultShareProjectionScopes: createdRequested,
       });
     }
     const summary = await readHostedGroupSummaryById(input.tx, existing.id);
@@ -184,10 +204,11 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
       id: generateHostedGroupId(),
       displayName: normalizeHostedGroupDisplayName(input.displayName ?? null),
       joinPolicyJson: createdRequested.length > 0
-        ? {
+        ? toHostedGroupJoinPolicyJson({
             ...emptyHostedGroupJoinPolicy(),
-            requestedVaultShareProjectionKinds: createdRequested,
-          }
+            requestedVaultShareProjectionKinds: createdRequested.map((scope) => scope.projectionKind),
+            requestedVaultShareProjectionScopes: createdRequested,
+          })
         : undefined,
       kind: normalizeHostedGroupKind(input.kind),
       ownerMemberId: container.ownerMemberId,
@@ -329,6 +350,7 @@ export async function createHostedGroupJoinLinkForOwnedThreadContainerTx(input: 
   displayName?: string | null;
   kind?: HostedGroupKind | string | null;
   now: Date;
+  requestedVaultShareProjectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   requestedVaultShareProjectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
 }): Promise<{
   group: HostedGroupSummary;
@@ -359,8 +381,8 @@ export async function createHostedGroupJoinLinkForOwnedThreadContainerTx(input: 
     displayName: input.displayName ?? null,
     kind: input.kind ?? null,
     now: input.now,
-    requestedVaultShareProjectionKinds:
-      input.requestedVaultShareProjectionKinds ?? [],
+    requestedVaultShareProjectionKinds: input.requestedVaultShareProjectionKinds ?? [],
+    requestedVaultShareProjectionScopes: input.requestedVaultShareProjectionScopes ?? null,
     tx: input.tx,
   });
   const link = await createOrReadHostedGroupJoinLinkTx({
@@ -404,23 +426,26 @@ export async function readHostedGroupJoinView(input: {
   }
 
   const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
-  const activeVaultShareProjectionKinds = input.memberId && group.runtimeMemberId
-    ? await readActiveHostedVaultShareProjectionKinds({
+  const activeVaultShareProjectionScopes = input.memberId && group.runtimeMemberId
+    ? await readActiveHostedVaultShareProjectionScopes({
         destinationMemberId: group.runtimeMemberId,
         grantorMemberId: input.memberId,
         prisma,
-        projectionKinds: policy.requestedVaultShareProjectionKinds,
+        projectionScopes: policy.requestedVaultShareProjectionScopes,
       })
     : [];
 
   return {
-    activeVaultShareProjectionKinds,
+    activeVaultShareProjectionKinds: activeVaultShareProjectionScopes.map((scope) =>
+      scope.projectionKind
+    ),
+    activeVaultShareProjectionScopes,
     displayName: group.displayName,
     id: group.id,
     kind: group.kind,
     memberCount: group._count.members,
     requestedVaultShareProjections: projectHostedVaultShareProjectionDisplays(
-      policy.requestedVaultShareProjectionKinds,
+      policy.requestedVaultShareProjectionScopes,
     ),
     status: "active",
     viewerMembershipStatus: group.members.length > 0 ? "active" : null,
@@ -432,6 +457,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   joinCode: string;
   memberId: string;
   now: Date;
+  selectedVaultShareProjectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   selectedVaultShareProjectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
 }): Promise<HostedGroupJoinAcceptanceTxResult> {
   const groupLookup = await input.tx.hostedGroup.findUnique({
@@ -450,8 +476,10 @@ export async function acceptHostedGroupJoinCodeTx(input: {
     groupId: groupLookup.id,
     memberId: input.memberId,
     now: input.now,
-    policyProjectionKinds: null,
-    selectedVaultShareProjectionKinds: input.selectedVaultShareProjectionKinds ?? [],
+    policyProjectionScopes: null,
+    selectedVaultShareProjectionScopes:
+      input.selectedVaultShareProjectionScopes
+      ?? fixedProjectionKindsToScopes(input.selectedVaultShareProjectionKinds ?? []),
     tx: input.tx,
   });
 }
@@ -460,7 +488,8 @@ export async function recordHostedGroupJoinOfferTx(input: {
   groupId: string;
   messageId: string | null;
   postedAt: Date;
-  projectionKinds: readonly HostedVaultShareProjectionKind[];
+  projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
+  projectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferBindingTxResult> {
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
@@ -472,7 +501,12 @@ export async function recordHostedGroupJoinOfferTx(input: {
       retryable: true,
     });
   }
-  const projectionKinds = normalizeHostedVaultShareProjectionKinds(input.projectionKinds);
+  const projectionScopes = normalizeHostedVaultShareProjectionScopes(
+    input.projectionScopes && input.projectionScopes.length > 0
+      ? input.projectionScopes
+      : fixedProjectionKindsToScopes(input.projectionKinds ?? []),
+  );
+  const projectionKinds = [...new Set(projectionScopes.map((scope) => scope.projectionKind))];
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
@@ -493,7 +527,7 @@ export async function recordHostedGroupJoinOfferTx(input: {
       messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
       messageLookupKey,
       postedAt: input.postedAt,
-      projectionKindsJson: toHostedGroupJoinOfferProjectionKindsJson(projectionKinds),
+      projectionKindsJson: toHostedGroupJoinOfferProjectionScopesJson(projectionScopes),
     },
   });
 
@@ -502,6 +536,7 @@ export async function recordHostedGroupJoinOfferTx(input: {
     messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
     messageLookupKey,
     projectionKinds,
+    projectionScopes,
   };
 }
 
@@ -611,16 +646,19 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     });
   }
 
-  const selectedVaultShareProjectionKinds = normalizeHostedVaultShareProjectionKinds(
+  const selectedVaultShareProjectionScopes = normalizeHostedVaultShareProjectionScopes(
     offer.projectionKindsJson,
   );
+  const selectedVaultShareProjectionKinds = [
+    ...new Set(selectedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
+  ];
   const accepted = await acceptHostedGroupJoinTx({
     additiveOnly: true,
     groupId: group.id,
     memberId: input.memberId,
     now: input.now,
-    policyProjectionKinds: selectedVaultShareProjectionKinds,
-    selectedVaultShareProjectionKinds,
+    policyProjectionScopes: selectedVaultShareProjectionScopes,
+    selectedVaultShareProjectionScopes,
     tx: input.tx,
   });
 
@@ -629,6 +667,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     joinCode: group.joinCode,
     messageLookupKey: offer.messageLookupKey,
     selectedVaultShareProjectionKinds,
+    selectedVaultShareProjectionScopes,
   };
 }
 
@@ -660,8 +699,8 @@ async function acceptHostedGroupJoinTx(input: {
   groupId: string;
   memberId: string;
   now: Date;
-  policyProjectionKinds: readonly HostedVaultShareProjectionKind[] | null;
-  selectedVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
+  policyProjectionScopes: readonly HostedVaultShareProjectionScope[] | null;
+  selectedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinAcceptanceTxResult> {
   await lockHostedGroupRow(input.tx, input.groupId);
@@ -690,15 +729,20 @@ async function acceptHostedGroupJoinTx(input: {
   }
   assertHostedMemberNotSuspended(member);
 
-  const selected = normalizeHostedVaultShareProjectionKinds(
-    input.selectedVaultShareProjectionKinds,
+  const selected = normalizeHostedVaultShareProjectionScopes(
+    input.selectedVaultShareProjectionScopes,
   );
-  const requestedProjectionKinds = input.policyProjectionKinds
-    ? normalizeHostedVaultShareProjectionKinds(input.policyProjectionKinds)
-    : readHostedGroupJoinPolicy(group.joinPolicyJson).requestedVaultShareProjectionKinds;
-  const requestedSet = new Set(requestedProjectionKinds);
-  for (const projectionKind of selected) {
-    if (!requestedSet.has(projectionKind)) {
+  const requestedProjectionScopes = input.policyProjectionScopes
+    ? normalizeHostedVaultShareProjectionScopes(input.policyProjectionScopes)
+    : readHostedGroupJoinPolicy(group.joinPolicyJson).requestedVaultShareProjectionScopes;
+  const requestedSet = new Set(
+    requestedProjectionScopes.map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),
+  );
+  const selectedSet = new Set(
+    selected.map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),
+  );
+  for (const projectionScope of selected) {
+    if (!requestedSet.has(buildHostedVaultShareProjectionScopeKey(projectionScope))) {
       throw hostedOnboardingError({
         code: "HOSTED_GROUP_PERMISSION_NOT_REQUESTED",
         httpStatus: 400,
@@ -746,6 +790,8 @@ async function acceptHostedGroupJoinTx(input: {
 
   const grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
   const revokedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
+  const grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[] = [];
+  const revokedVaultShareProjectionScopes: HostedVaultShareProjectionScope[] = [];
   const vaultShareCleanupSignals: HostedVaultShareCleanupSignal[] = [];
   await grantHostedGroupMembershipProfileNameTx(input.tx, {
     groupRuntimeMemberId: group.runtimeMemberId,
@@ -753,33 +799,37 @@ async function acceptHostedGroupJoinTx(input: {
     now: input.now,
   });
   grantedVaultShareProjectionKinds.push("profile-name.v0");
-  if (requestedProjectionKinds.length > 0) {
-    for (const projectionKind of requestedProjectionKinds) {
-      if (selected.includes(projectionKind)) {
+  grantedVaultShareProjectionScopes.push(hostedVaultShareProjectionKindToScope("profile-name.v0"));
+  if (requestedProjectionScopes.length > 0) {
+    for (const projectionScope of requestedProjectionScopes) {
+      const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+      if (selectedSet.has(projectionScopeKey)) {
         await assertHostedGroupVaultShareGrantLimitTx(input.tx, {
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
-          projectionKind,
+          projectionScope,
         });
         await grantHostedVaultShareTx({
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
           now: input.now,
-          projectionKind,
+          projectionScope,
           tx: input.tx,
         });
-        grantedVaultShareProjectionKinds.push(projectionKind);
+        grantedVaultShareProjectionKinds.push(projectionScope.projectionKind);
+        grantedVaultShareProjectionScopes.push(projectionScope);
       } else if (!input.additiveOnly) {
         const revoked = await revokeHostedVaultSharesWithCleanupTx({
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
           now: input.now,
-          projectionKinds: [projectionKind],
+          projectionScopes: [projectionScope],
           tx: input.tx,
         });
         vaultShareCleanupSignals.push(...revoked.cleanupSignals);
         if (revoked.revokedCount > 0) {
-          revokedVaultShareProjectionKinds.push(projectionKind);
+          revokedVaultShareProjectionKinds.push(projectionScope.projectionKind);
+          revokedVaultShareProjectionScopes.push(projectionScope);
         }
       }
     }
@@ -788,9 +838,11 @@ async function acceptHostedGroupJoinTx(input: {
   return {
     alreadyMember,
     grantedVaultShareProjectionKinds,
+    grantedVaultShareProjectionScopes,
     groupId: group.id,
     membershipId,
     revokedVaultShareProjectionKinds,
+    revokedVaultShareProjectionScopes,
     vaultShareCleanupSignals,
   };
 }
@@ -835,7 +887,7 @@ export async function revokeHostedGroupMemberEmailShareTx(input: {
     destinationMemberId: group.runtimeMemberId,
     grantorMemberId: input.memberId,
     now: input.now,
-    projectionKinds: ["group-email.v0"],
+    projectionScopes: [hostedVaultShareProjectionKindToScope("group-email.v0")],
     tx: input.tx,
   });
 
@@ -871,7 +923,7 @@ async function mergeHostedGroupRequestedProjectionsTx(
   tx: Prisma.TransactionClient,
   input: {
     groupId: string;
-    requestedVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
+    requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   },
 ): Promise<void> {
   const group = await tx.hostedGroup.findUnique({
@@ -879,7 +931,7 @@ async function mergeHostedGroupRequestedProjectionsTx(
     select: { joinPolicyJson: true, runtimeMemberId: true },
   });
   if (!group) throw hostedOnboardingError({ code: "HOSTED_GROUP_NOT_FOUND", httpStatus: 404, message: "Hosted group not found." });
-  if (input.requestedVaultShareProjectionKinds.length > 0) {
+  if (input.requestedVaultShareProjectionScopes.length > 0) {
     if (!group.runtimeMemberId) {
       throw hostedOnboardingError({
         code: "HOSTED_GROUP_RUNTIME_REQUIRED",
@@ -891,12 +943,12 @@ async function mergeHostedGroupRequestedProjectionsTx(
   }
   const merged = mergeHostedGroupJoinPolicy({
     existing: group.joinPolicyJson,
-    requestedVaultShareProjectionKinds: input.requestedVaultShareProjectionKinds,
+    requestedVaultShareProjectionScopes: input.requestedVaultShareProjectionScopes,
   });
   await tx.hostedGroup.update({
     where: { id: input.groupId },
     data: {
-      joinPolicyJson: merged.requestedVaultShareProjectionKinds.length > 0
+      joinPolicyJson: merged.requestedVaultShareProjectionScopes.length > 0
         ? toHostedGroupJoinPolicyJson(merged)
         : undefined,
     },
@@ -907,10 +959,40 @@ function toHostedGroupJoinPolicyJson(policy: ReturnType<typeof mergeHostedGroupJ
   return JSON.parse(JSON.stringify(policy)) as Prisma.InputJsonValue;
 }
 
-function toHostedGroupJoinOfferProjectionKindsJson(
-  projectionKinds: readonly HostedVaultShareProjectionKind[],
+function toHostedGroupJoinOfferProjectionScopesJson(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(normalizeHostedVaultShareProjectionKinds(projectionKinds))) as Prisma.InputJsonValue;
+  return JSON.parse(JSON.stringify(normalizeHostedVaultShareProjectionScopes(projectionScopes))) as Prisma.InputJsonValue;
+}
+
+function fixedProjectionKindsToScopes(
+  projectionKinds: readonly HostedVaultShareProjectionKind[],
+): HostedVaultShareProjectionScope[] {
+  return normalizeHostedVaultShareProjectionKinds(projectionKinds)
+    .filter(isHostedVaultShareFixedProjectionKind)
+    .map((projectionKind) => hostedVaultShareProjectionKindToScope(projectionKind));
+}
+
+function parseHostedGroupVaultShareRowProjectionScope(row: {
+  projectionKind: string;
+  projectionScopeJson: unknown;
+  projectionScopeKey: string;
+}): HostedVaultShareProjectionScope | null {
+  try {
+    const scope = parseHostedVaultShareProjectionScope(
+      row.projectionScopeJson ?? row.projectionKind,
+      "Hosted group vault-share row projection scope",
+    );
+    if (
+      scope.projectionKind !== row.projectionKind
+      || buildHostedVaultShareProjectionScopeKey(scope) !== row.projectionScopeKey
+    ) {
+      return null;
+    }
+    return scope;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -924,7 +1006,7 @@ async function grantHostedGroupMembershipProfileNameTx(
 ): Promise<void> {
   await grantHostedGroupMembershipProjectionTx(tx, {
     ...input,
-    projectionKind: "profile-name.v0",
+    projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
   });
 }
 
@@ -934,7 +1016,7 @@ async function grantHostedGroupMembershipEmailTx(
 ): Promise<void> {
   await grantHostedGroupMembershipProjectionTx(tx, {
     ...input,
-    projectionKind: "group-email.v0",
+    projectionScope: hostedVaultShareProjectionKindToScope("group-email.v0"),
   });
 }
 
@@ -944,19 +1026,19 @@ async function grantHostedGroupMembershipProjectionTx(
     groupRuntimeMemberId: string;
     memberId: string;
     now: Date;
-    projectionKind: HostedVaultShareProjectionKind;
+    projectionScope: HostedVaultShareProjectionScope;
   },
 ): Promise<void> {
   await assertHostedGroupVaultShareGrantLimitTx(tx, {
     destinationMemberId: input.groupRuntimeMemberId,
     grantorMemberId: input.memberId,
-    projectionKind: input.projectionKind,
+    projectionScope: input.projectionScope,
   });
   await grantHostedVaultShareTx({
     destinationMemberId: input.groupRuntimeMemberId,
     grantorMemberId: input.memberId,
     now: input.now,
-    projectionKind: input.projectionKind,
+    projectionScope: input.projectionScope,
     tx,
   });
 }
@@ -980,6 +1062,7 @@ async function readHostedGroupSummaryById(
     },
   });
   if (!group) return null;
+  const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
   return {
     displayName: group.displayName,
     id: group.id,
@@ -989,8 +1072,8 @@ async function readHostedGroupSummaryById(
       members: group.members,
       runtimeMemberId: group.runtimeMemberId,
     }),
-    requestedVaultShareProjectionKinds:
-      readHostedGroupJoinPolicy(group.joinPolicyJson).requestedVaultShareProjectionKinds,
+    requestedVaultShareProjectionKinds: policy.requestedVaultShareProjectionKinds,
+    requestedVaultShareProjectionScopes: policy.requestedVaultShareProjectionScopes,
     status: "active",
   };
 }
@@ -1012,7 +1095,7 @@ async function readHostedGroupMemberRoster(
     return [];
   }
 
-  const grantsByMemberId = new Map<string, HostedVaultShareProjectionKind[]>();
+  const grantsByMemberId = new Map<string, HostedVaultShareProjectionScope[]>();
   if (input.runtimeMemberId) {
     const grants = await prisma.hostedVaultShare.findMany({
       where: {
@@ -1020,15 +1103,21 @@ async function readHostedGroupMemberRoster(
         grantorMemberId: { in: input.members.map((member) => member.memberId) },
         status: "granted",
       },
-      select: { grantorMemberId: true, projectionKind: true },
+      select: {
+        grantorMemberId: true,
+        projectionKind: true,
+        projectionScopeJson: true,
+        projectionScopeKey: true,
+      },
     });
     for (const grant of grants) {
-      if (!isHostedVaultShareProjectionKind(grant.projectionKind)) {
+      const scope = parseHostedGroupVaultShareRowProjectionScope(grant);
+      if (!scope) {
         continue;
       }
-      const kinds = grantsByMemberId.get(grant.grantorMemberId) ?? [];
-      kinds.push(grant.projectionKind);
-      grantsByMemberId.set(grant.grantorMemberId, kinds);
+      const scopes = grantsByMemberId.get(grant.grantorMemberId) ?? [];
+      scopes.push(scope);
+      grantsByMemberId.set(grant.grantorMemberId, scopes);
     }
   }
 
@@ -1037,8 +1126,13 @@ async function readHostedGroupMemberRoster(
       memberId: member.memberId,
       prisma,
     });
+    const grantedVaultShareProjectionScopes =
+      grantsByMemberId.get(member.memberId) ?? [];
     return {
-      grantedVaultShareProjectionKinds: grantsByMemberId.get(member.memberId) ?? [],
+      grantedVaultShareProjectionKinds: [
+        ...new Set(grantedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
+      ],
+      grantedVaultShareProjectionScopes,
       handle: identity?.phoneNumber ?? null,
       memberId: member.memberId,
       role: member.role,
@@ -1068,15 +1162,16 @@ async function assertHostedGroupVaultShareGrantLimitTx(
   input: {
     destinationMemberId: string;
     grantorMemberId: string;
-    projectionKind: HostedVaultShareProjectionKind;
+    projectionScope: HostedVaultShareProjectionScope;
   },
 ): Promise<void> {
+  const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(input.projectionScope);
   const existing = await tx.hostedVaultShare.findUnique({
     where: {
-      grantorMemberId_projectionKind_destinationMemberId: {
+      grantorMemberId_projectionScopeKey_destinationMemberId: {
         destinationMemberId: input.destinationMemberId,
         grantorMemberId: input.grantorMemberId,
-        projectionKind: input.projectionKind,
+        projectionScopeKey,
       },
     },
     select: { status: true },
@@ -1089,7 +1184,7 @@ async function assertHostedGroupVaultShareGrantLimitTx(
   const activeGroupGrantCount = await tx.hostedVaultShare.count({
     where: {
       grantorMemberId: input.grantorMemberId,
-      projectionKind: input.projectionKind,
+      projectionScopeKey,
       status: "granted",
     },
   });
@@ -1107,7 +1202,7 @@ async function assertHostedGroupVaultShareGrantLimitTx(
   const activeDestinationGrantCount = await tx.hostedVaultShare.count({
     where: {
       destinationMemberId: input.destinationMemberId,
-      projectionKind: input.projectionKind,
+      projectionScopeKey,
       status: "granted",
     },
   });

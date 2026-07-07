@@ -51,7 +51,7 @@ import type {
 import type {
   HostedVaultShareDeliverRequest,
   HostedVaultShareDeliverResponse,
-  HostedVaultShareProjectionKind,
+  HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import type {
   HostedWorkspaceSnapshotV2Aad,
@@ -466,7 +466,7 @@ export interface HostedRuntimeActionApprovalPort {
 }
 
 export interface HostedRuntimeVaultSharePort {
-  listActiveProjectionKinds(): Promise<HostedVaultShareProjectionKind[]>;
+  listActiveProjectionScopes(): Promise<HostedVaultShareProjectionScope[]>;
   deliver(
     request: HostedVaultShareDeliverRequest,
   ): Promise<HostedVaultShareDeliverResponse>;

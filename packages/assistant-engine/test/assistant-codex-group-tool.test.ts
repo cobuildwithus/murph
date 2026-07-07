@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
-  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA,
 } from "@murphai/hosted-execution/vault-share";
 import { describe, expect, it, vi } from "vitest";
@@ -53,10 +54,22 @@ describe("murph.group dynamic tool", () => {
       "share_contact_card",
       "revoke_own_email_share",
     ]);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.requestedVaultShareProjectionKinds.items.enum)
-      .toEqual([...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS]);
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionKinds.items.enum)
-      .toEqual([...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS]);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.requestedVaultShareProjectionScopes.maxItems)
+      .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.maxItems)
+      .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
+    expect(
+      MURPH_GROUP_TOOL
+        .inputSchema
+        .properties
+        .projectionScopes
+        .items
+        .properties
+        .selector
+        .properties
+        .activityKind
+        .enum,
+    ).toEqual([...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS]);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("{{join_url}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
@@ -82,7 +95,7 @@ describe("murph.group dynamic tool", () => {
       action: "post_join_offer",
       messageTemplate:
         "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
-      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))).toEqual({
       kind: "group",
       request: {
@@ -90,7 +103,7 @@ describe("murph.group dynamic tool", () => {
         joinOffer: {
           messageTemplate:
             "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
-          projectionKinds: ["sleep-times.v0"],
+          projectionScopes: [{ projectionKind: "sleep-times.v0" }],
         },
       },
     });
@@ -180,7 +193,13 @@ describe("murph.group dynamic tool", () => {
       action: "create_join_link",
       displayName: "Sunday sleep crew",
       kind: "friends",
-      requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
+      requestedVaultShareProjectionScopes: [
+        { projectionKind: "sleep-times.v0" },
+        {
+          projectionKind: "activity-minutes-days.v1",
+          selector: { activityKind: "running" },
+        },
+      ],
     }));
 
     expect(request).toEqual({
@@ -190,7 +209,13 @@ describe("murph.group dynamic tool", () => {
         joinLink: {
           displayName: "Sunday sleep crew",
           kind: "friends",
-          requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
+          requestedVaultShareProjectionScopes: [
+            { projectionKind: "sleep-times.v0" },
+            {
+              projectionKind: "activity-minutes-days.v1",
+              selector: { activityKind: "running" },
+            },
+          ],
         },
       },
     });
@@ -215,7 +240,12 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "create_join_link",
-      requestedVaultShareProjectionKinds: ["all-health-data"],
+      requestedVaultShareProjectionScopes: [{ projectionKind: "all-health-data" }],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "create_join_link",
+      requestedVaultShareProjectionScopes: [{ projectionKind: "activity-minutes-days.v1" }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
@@ -229,13 +259,13 @@ describe("murph.group dynamic tool", () => {
       action: "post_join_offer",
       messageTemplate:
         "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
-      projectionKinds: ["all-health-data"],
+      projectionScopes: [{ projectionKind: "all-health-data" }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
       messageTemplate: "React here to join. Details: {{join_url}}.",
-      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))?.kind).toBe("invalid-group-arguments");
   });
 });

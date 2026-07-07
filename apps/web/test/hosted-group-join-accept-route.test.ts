@@ -1,6 +1,8 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
-import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
+import {
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+} from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinCodeTx: vi.fn(),
@@ -97,7 +99,7 @@ test("signals destination cleanup wakes after a group permission revoke without 
     joinCode: "JOIN123",
     memberId: "member_grantor",
     now: expect.any(Date),
-    selectedVaultShareProjectionKinds: [],
+    selectedVaultShareProjectionScopes: [],
     tx: { tx: true },
   });
   expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
@@ -110,7 +112,7 @@ test("signals destination cleanup wakes after a group permission revoke without 
 test("accepts the full closed set of selectable vault-share permissions", async () => {
   const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
     body: JSON.stringify({
-      selectedVaultShareProjectionKinds: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+      selectedVaultShareProjectionScopes: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
     }),
     headers: {
       "content-type": "application/json",
@@ -128,7 +130,7 @@ test("accepts the full closed set of selectable vault-share permissions", async 
     joinCode: "JOIN123",
     memberId: "member_grantor",
     now: expect.any(Date),
-    selectedVaultShareProjectionKinds: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    selectedVaultShareProjectionScopes: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
     tx: { tx: true },
   });
 });

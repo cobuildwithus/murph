@@ -1099,6 +1099,8 @@ model HostedVaultShare {
   id                  String       @id
   grantorMemberId     String       @map("grantor_member_id")
   projectionKind      String       @map("projection_kind")
+  projectionScopeKey   String       @map("projection_scope_key")
+  projectionScopeJson  Json?        @map("projection_scope_json")
   destinationMemberId String       @map("destination_member_id")
   status              String       @default("granted")
   grantedAt           DateTime     @map("granted_at")
@@ -1108,7 +1110,7 @@ model HostedVaultShare {
   grantor             HostedMember @relation("VaultShareGrantor", fields: [grantorMemberId], references: [id], onDelete: Cascade)
   destination         HostedMember @relation("VaultShareDestination", fields: [destinationMemberId], references: [id], onDelete: Cascade)
 
-  @@unique([grantorMemberId, projectionKind, destinationMemberId])
+  @@unique([grantorMemberId, projectionScopeKey, destinationMemberId])
   @@map("hosted_vault_share")
 }
 

@@ -12095,8 +12095,8 @@ describe("hosted workspace runtime entrypoint", () => {
               items: mailboxItems,
             }),
             vaultSharePort: {
-              async listActiveProjectionKinds() {
-                return ["sleep-times.v0"];
+              async listActiveProjectionScopes() {
+                return [{ projectionKind: "sleep-times.v0" }];
               },
               async deliver() {
                 events.push("vault-share.deliver:start");
@@ -12243,8 +12243,8 @@ describe("hosted workspace runtime entrypoint", () => {
               ],
             }),
             vaultSharePort: {
-              async listActiveProjectionKinds() {
-                return ["sleep-times.v0"];
+              async listActiveProjectionScopes() {
+                return [{ projectionKind: "sleep-times.v0" }];
               },
               async deliver() {
                 vaultShareDeliverCalls += 1;
@@ -16887,6 +16887,14 @@ describe("hosted workspace runtime entrypoint", () => {
                 workspace: createWorkspaceState({ version: "0" }),
               }),
             }),
+            async runAssistantPhase() {
+              return {
+                progressed: false,
+                redactedStatus: {
+                  hostedAssistantProgressed: false,
+                },
+              };
+            },
             vaultRoot,
           },
         ),
