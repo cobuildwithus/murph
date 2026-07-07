@@ -3,6 +3,7 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeEnsureProcessingRequest,
+  HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
@@ -143,14 +144,45 @@ export async function handleRuntimeEnsureProcessingRoute(
       requireJsonObject(payload.trim() ? JSON.parse(payload) : {}),
     );
     commandTimeoutMs = readRuntimeEnsureProcessingCommandTimeoutMs(context.request.headers);
+    const authorizationKind = readPresentedWorkerRouteAuthorization(context.request);
     orchestration = readRuntimeEnsureProcessingOrchestrationDiagnostics(
       context.request.headers,
       cloudflareRouteReceivedAtEpochMs,
       context.runtimeControlAuthTiming ?? null,
       // Derived from the credential that authorized this request, never from
       // caller-supplied body fields.
-      readPresentedWorkerRouteAuthorization(context.request) === "vercel-oidc",
+      authorizationKind === "vercel-oidc",
     );
+    if (authorizationKind === "vercel-oidc") {
+      const executionCtx = context.executionCtx;
+      if (!executionCtx) {
+        throw new Error("Worker execution context is required for direct runtime ensure-processing.");
+      }
+
+      executionCtx.waitUntil(
+        runRuntimeEnsureProcessingForUser({
+          commandTimeoutMs,
+          context,
+          ensureRequest,
+          orchestration,
+          userId,
+        }).catch((error: unknown) => {
+          emitHostedExecutionStructuredLog({
+            component: "worker",
+            details: buildWorkerRouteLogDetails({
+              reason: "runtime-ensure-processing-waituntil-failed",
+              routeName: "runtime-ensure-processing",
+            }, context.request, userId),
+            error,
+            level: "error",
+            message: "Hosted worker runtime ensure-processing waitUntil task failed.",
+            phase: "failed",
+            userId,
+          });
+        }),
+      );
+      return json({ accepted: true }, 202);
+    }
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",
@@ -171,13 +203,29 @@ export async function handleRuntimeEnsureProcessingRoute(
     }, classified.status);
   }
 
-  const stub = context.env.USER_RUNNER.getByName(userId);
-  return json(await stub.ensureRuntimeProcessingForUser({
-    ...ensureRequest,
-    ...(commandTimeoutMs === null ? {} : { commandTimeoutMs }),
+  return json(await runRuntimeEnsureProcessingForUser({
+    commandTimeoutMs,
+    context,
+    ensureRequest,
     orchestration,
     userId,
   }));
+}
+
+function runRuntimeEnsureProcessingForUser(input: {
+  commandTimeoutMs: number | null;
+  context: WorkerRouteContext;
+  ensureRequest: HostedRuntimeEnsureProcessingRequest;
+  orchestration: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]>;
+  userId: string;
+}): Promise<HostedRuntimeEnsureProcessingResponse> {
+  const stub = input.context.env.USER_RUNNER.getByName(input.userId);
+  return stub.ensureRuntimeProcessingForUser({
+    ...input.ensureRequest,
+    ...(input.commandTimeoutMs === null ? {} : { commandTimeoutMs: input.commandTimeoutMs }),
+    orchestration: input.orchestration,
+    userId: input.userId,
+  });
 }
 
 export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {

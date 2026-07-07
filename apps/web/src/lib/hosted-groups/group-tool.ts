@@ -4,11 +4,13 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
+  type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupToolAction,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
+import type { HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
@@ -19,6 +21,7 @@ import {
   type HostedLinqChatHandleSummary,
   isHostedLinqAttachmentSendPrepareFailure,
   sendHostedLinqAttachmentMessage,
+  sendHostedLinqChatMessage,
 } from "../hosted-onboarding/linq-client";
 import {
   buildMurphHostedLinqContactCardVcf,
@@ -52,7 +55,12 @@ import { buildHostedGroupJoinUrl } from "./group-links";
 import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   readHostedGroupByRuntimeMemberId,
+  recordHostedGroupJoinOfferTx,
 } from "./group-store";
+import {
+  normalizeHostedVaultShareProjectionKinds,
+  projectHostedVaultShareProjectionDisplays,
+} from "./join-policy";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
@@ -63,6 +71,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   create_join_link: "owner_active",
+  post_join_offer: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
   share_contact_card: "owner_active",
@@ -84,6 +93,14 @@ export async function handleHostedRuntimeGroupTool(input: {
 
   if (input.request.action === "read_chat_participants") {
     return handleHostedRuntimeGroupReadChatParticipants({
+      linqThread: input.request.linqThread ?? null,
+      memberId: input.memberId,
+    });
+  }
+
+  if (input.request.action === "post_join_offer") {
+    return handleHostedRuntimeGroupPostJoinOffer({
+      joinOffer: input.request.joinOffer ?? null,
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
@@ -220,6 +237,136 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     action: "create_join_link",
     result: { group: created.group, joinUrl, status: "ok" },
   };
+}
+
+async function handleHostedRuntimeGroupPostJoinOffer(input: {
+  joinOffer: HostedRuntimeGroupPostJoinOfferRequest | null;
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "post_join_offer",
+    result: { group: null, status: "unavailable", unavailableReason },
+  });
+
+  const publicBaseUrl = resolveHostedPublicBaseUrl();
+  if (!publicBaseUrl) {
+    return unavailable("join_links_unavailable");
+  }
+  const authorized = await authorizeHostedRuntimeGroupLinqThread({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if ("unavailableReason" in authorized) {
+    return unavailable(authorized.unavailableReason);
+  }
+
+  const prisma = getPrisma();
+  const now = new Date();
+  const projectionKinds = normalizeHostedVaultShareProjectionKinds(
+    input.joinOffer?.projectionKinds ?? [],
+  );
+  const created = await prisma.$transaction(async (tx) => {
+    const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    if (ownerAccess.status !== "ok") {
+      return { kind: ownerAccess.unavailableReason };
+    }
+    const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: ownerAccess.ownerMemberId,
+      containerMemberId: input.memberId,
+      now,
+      requestedVaultShareProjectionKinds: projectionKinds,
+      tx,
+    });
+    return { kind: "ok" as const, ownerMemberId: ownerAccess.ownerMemberId, ...result };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  if (created.kind !== "ok") {
+    return unavailable(created.kind);
+  }
+
+  const joinUrl = buildHostedGroupJoinUrl({
+    joinCode: created.joinCode,
+    publicBaseUrl,
+  });
+  if (!joinUrl) {
+    return unavailable("join_links_unavailable");
+  }
+
+  const message = buildHostedGroupJoinOfferMessage({
+    joinUrl,
+    projectionKinds,
+  });
+  let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
+  try {
+    sent = await sendHostedLinqChatMessage({
+      chatId: authorized.chatId,
+      idempotencyKey: `group-join-offer:${created.group.id}:${now.toISOString()}`,
+      message,
+    });
+  } catch {
+    return unavailable("send_failed");
+  }
+  if (!sent.messageId) {
+    return unavailable("provider_message_unavailable");
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await recordHostedGroupJoinOfferTx({
+        groupId: created.group.id,
+        messageId: sent.messageId,
+        postedAt: now,
+        projectionKinds,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch {
+    return unavailable("offer_binding_failed");
+  }
+
+  try {
+    await signalHostedRuntimeMaintenanceRuntime({ userId: created.ownerMemberId });
+  } catch {
+    // The group and offer binding are durable; owner runtime maintenance can
+    // catch up on its next organic wake.
+  }
+
+  return {
+    action: "post_join_offer",
+    result: { group: created.group, joinUrl, status: "sent" },
+  };
+}
+
+function buildHostedGroupJoinOfferMessage(input: {
+  joinUrl: string;
+  projectionKinds: readonly HostedVaultShareProjectionKind[];
+}): string {
+  return [
+    "Like this message to join this Murph group.",
+    renderHostedGroupJoinOfferScopeSentence(input.projectionKinds),
+    `You can manage what you share anytime from the join page: ${input.joinUrl}`,
+  ].join(" ");
+}
+
+function renderHostedGroupJoinOfferScopeSentence(
+  projectionKinds: readonly HostedVaultShareProjectionKind[],
+): string {
+  const labels = projectHostedVaultShareProjectionDisplays(projectionKinds)
+    .map((display) => display.label.toLowerCase());
+  const scope = labels.length > 0
+    ? `your Murph profile name and ${formatHumanList(labels)}`
+    : "your Murph profile name";
+  return `Liking this shares ${scope} with this group.`;
+}
+
+function formatHumanList(values: readonly string[]): string {
+  if (values.length === 0) return "";
+  if (values.length === 1) return values[0] ?? "";
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
 }
 
 type HostedRuntimeGroupLinqThreadAuthorization =

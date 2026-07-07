@@ -34,9 +34,11 @@ import {
   resolveHostedAssistantLocalDevEnv,
   resolveHostedAssistantProviderMode,
   resolveHostedLocalSmokeWebEnv,
+  scopeHostedLocalAssistantProviderResponse,
   startAssistantProviderStubServer,
   stopHttpStubServer,
   type HostedLocalAssistantProviderMode,
+  type HostedLocalAssistantProviderResponseScopeOptions,
   type HostedLocalAssistantProviderScriptedResponse,
   type HostedLocalAssistantProviderStubRequest,
   type HostedLocalAssistantProviderStubState,
@@ -118,6 +120,7 @@ export interface HostedLocalFullStackScenario {
   }): Promise<void>;
   queueAssistantResponses(
     responses: readonly HostedLocalAssistantProviderScriptedResponse[],
+    scope?: HostedLocalAssistantProviderResponseScopeOptions,
   ): void;
   runWake(
     wake: HostedExecutionWake,
@@ -378,19 +381,11 @@ export async function startHostedLocalFullStackScenario(input: {
           userId,
         }),
       runtimeEnv: scenarioRuntimeEnv,
-      queueAssistantResponses: (responses) => {
+      queueAssistantResponses: (responses, scope) => {
         for (const response of responses) {
-          if (typeof response !== "string") {
-            assistantProviderStubState.queuedResponses.push(response);
-            continue;
-          }
-
-          const trimmed = response.trim();
-          if (!trimmed) {
-            throw new Error("Hosted local assistant stub responses must be non-empty.");
-          }
-
-          assistantProviderStubState.queuedResponses.push(trimmed);
+          assistantProviderStubState.queuedResponses.push(
+            scopeHostedLocalAssistantProviderResponse(response, scope),
+          );
         }
       },
       runWake: async (wake, userId, runInput) =>

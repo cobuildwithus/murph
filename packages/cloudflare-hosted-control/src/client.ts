@@ -82,9 +82,17 @@ export interface CloudflareHostedControlClient {
     onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
     orchestrationAttemptId: string;
     userId: string;
-  }): Promise<HostedRuntimeEnsureProcessingResponse>;
+  }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
 }
+
+export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
+  accepted: true;
+}
+
+export type CloudflareHostedControlRuntimeEnsureProcessingResponse =
+  | HostedRuntimeEnsureProcessingResponse
+  | CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck;
 
 export interface CloudflareHostedControlRuntimeEnsureProcessingTiming {
   directEnsureRequestStartedAtEpochMs: number;
@@ -197,7 +205,7 @@ export function createCloudflareHostedControlClient(
         getAuthorizationHeader,
         label: "runtime ensure-processing",
         onRuntimeEnsureProcessingTiming: input.onTiming,
-        parse: parseHostedRuntimeEnsureProcessingResponse,
+        parse: parseCloudflareHostedControlRuntimeEnsureProcessingResponse,
         path: buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId),
         request: {
           body: JSON.stringify({
@@ -504,6 +512,19 @@ function parseHostedRunnerStatusForExpectedUser(
   }
 
   return status;
+}
+
+function parseCloudflareHostedControlRuntimeEnsureProcessingResponse(
+  value: unknown,
+): CloudflareHostedControlRuntimeEnsureProcessingResponse {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    if (record.accepted === true) {
+      return { accepted: true };
+    }
+  }
+
+  return parseHostedRuntimeEnsureProcessingResponse(value);
 }
 
 function assertHostedBrowserVaultReplicaRefMatches(
