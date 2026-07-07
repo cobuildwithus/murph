@@ -92,8 +92,9 @@ callback-able moments. Track it; it compounds.
 - Audio rewards ENERGY and surprise; deadpan reframes that kill in text
   underperform in audio (field result). If the bit is subtle, send text.
   If it's audio, make it a performance: shock, escalation, character.
-- Keep memos short. Save generated audio so you can resend on request —
-  members ask for replays of good ones.
+- Keep memos short. Generated audio cannot be re-sent later — save the
+  full script in your durable notes and regenerate from it when members
+  ask for replays of good ones (they will).
 - Members will send voice memos back; respond in kind when you can.
 
 ## Register flips (the most important section)

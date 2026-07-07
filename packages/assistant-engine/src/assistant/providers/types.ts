@@ -125,9 +125,6 @@ export interface AssistantProviderTurn {
   showThinkingTraces?: boolean
   systemPrompt?: string | null
   progressDelivery?: AssistantProgressDelivery | null
-  loadAuthorizedReferenceImageRefs?:
-    | (() => Promise<ReadonlyMap<string, { sha256: string }>>)
-    | null
   hostedToolContext?: AssistantHostedToolContext | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   turnContextPrompt?: string | null

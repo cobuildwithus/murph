@@ -97,7 +97,7 @@ export type HostedExecutionExternalThreadRouteChannel = Extract<
 >;
 
 export interface HostedExecutionExternalThreadRouteAuthority {
-  accountLookupKey: string;
+  accountLookupKey?: string | null;
   channel: HostedExecutionExternalThreadRouteChannel;
   containerMemberId: string;
   threadId: string;

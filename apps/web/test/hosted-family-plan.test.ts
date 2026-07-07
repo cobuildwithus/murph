@@ -18,6 +18,9 @@ const cryptoRootMocks = vi.hoisted(() => ({
 const identityMocks = vi.hoisted(() => ({
   ensureHostedMemberForPhoneTx: vi.fn(),
 }));
+const mailboxMocks = vi.hoisted(() => ({
+  appendHostedMailboxEnvelopeTx: vi.fn(),
+}));
 const runtimeMocks = vi.hoisted(() => ({
   requireHostedOnboardingPublicBaseUrl: vi.fn(),
   requireHostedStripeApi: vi.fn(),
@@ -40,6 +43,9 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   ensureHostedMemberForPhoneTx: identityMocks.ensureHostedMemberForPhoneTx,
+}));
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mailboxMocks.appendHostedMailboxEnvelopeTx,
 }));
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: runtimeMocks.requireHostedOnboardingPublicBaseUrl,
@@ -72,6 +78,7 @@ import {
   writeHostedAccountGroupStripeBillingTx,
   parseHostedFamilyInviteStartToken,
   readHostedFamilyAccessForMember,
+  resolveHostedFamilyInviteTokenForInbound,
   removeHostedFamilyMemberTx,
   updateHostedFamilySeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
@@ -110,6 +117,9 @@ type FamilyPlanTxMock = Prisma.TransactionClient & {
     create: MockFn;
     findUnique: MockFn;
     update: MockFn;
+  };
+  hostedMemberIdentity: Prisma.TransactionClient["hostedMemberIdentity"] & {
+    findUnique: MockFn;
   };
   hostedMemberBillingRef: Prisma.TransactionClient["hostedMemberBillingRef"] & {
     findUnique: MockFn;
@@ -167,6 +177,9 @@ describe("hosted Family plan", () => {
       hostedExecutionEventId: "member.activated:family",
       memberId,
     }));
+    mailboxMocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      item: { id: "mailbox_item_owner_notification" },
+    });
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
       subscriptionItems: {
         update: vi.fn().mockResolvedValue({
@@ -252,7 +265,56 @@ describe("hosted Family plan", () => {
     })).toBe("https://t.me/withmurph_bot?start=family_invite_123");
     expect(parseHostedFamilyInviteStartToken("/start family_invite_123")).toBe("invite_123");
     expect(parseHostedFamilyInviteStartToken("family_invite_123")).toBe("invite_123");
+    expect(
+      parseHostedFamilyInviteStartToken(
+        "Hi Murph, joining the family plan (code family_invite_123)",
+      ),
+    ).toBe("invite_123");
+    expect(parseHostedFamilyInviteStartToken("code family_invite_123.")).toBe("invite_123");
+    expect(parseHostedFamilyInviteStartToken("hello")).toBeNull();
+    expect(parseHostedFamilyInviteStartToken("prefamily_invite_123")).toBeNull();
+    expect(parseHostedFamilyInviteStartToken("family_invite_123_extra")).toBe(
+      "invite_123_extra",
+    );
     expect(parseHostedFamilyInviteStartToken("@dad_username")).toBeNull();
+  });
+
+  it("resolves inbound family invite tokens only when the invite row exists", async () => {
+    const tx = createTxMock();
+
+    await expect(resolveHostedFamilyInviteTokenForInbound({
+      prisma: tx,
+      text: "Hi Murph, joining the family plan (code family_invite_123)",
+    })).resolves.toBe("invite_123");
+    expect(tx.hostedAccountGroupInvite.findUnique).toHaveBeenLastCalledWith({
+      select: {
+        id: true,
+      },
+      where: {
+        inviteCode: "invite_123",
+      },
+    });
+
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(null);
+
+    await expect(resolveHostedFamilyInviteTokenForInbound({
+      prisma: tx,
+      text: "sending the family_photos album now",
+    })).resolves.toBeNull();
+    expect(tx.hostedAccountGroupInvite.findUnique).toHaveBeenLastCalledWith({
+      select: {
+        id: true,
+      },
+      where: {
+        inviteCode: "photos",
+      },
+    });
+
+    await expect(resolveHostedFamilyInviteTokenForInbound({
+      prisma: tx,
+      text: "hello",
+    })).resolves.toBeNull();
+    expect(tx.hostedAccountGroupInvite.findUnique).toHaveBeenCalledTimes(2);
   });
 
   it("builds short hosted Family checkout links from Stripe checkout URLs", () => {
@@ -280,9 +342,74 @@ describe("hosted Family plan", () => {
         targetLabel: "Dad",
         targetPhoneHint: null,
         targetPhoneNumber: null,
+        targetTelegramUsername: "dad_username",
       },
       telegramBotUsername: "@withmurph_bot",
     })).toContain("Forward this Telegram invite link to Dad: https://t.me/withmurph_bot?start=family_invite_123");
+  });
+
+  it("uses the web accept link for label-only family invite replies", () => {
+    const replyText = buildHostedFamilyInviteReplyText({
+      invite: {
+        inviteCode: "invite_label",
+        targetEmail: null,
+        targetLabel: "Dad",
+        targetPhoneHint: null,
+        targetPhoneNumber: null,
+        targetTelegramUsername: null,
+      },
+      publicBaseUrl: "https://local.withmurph.ai:3443",
+      telegramBotUsername: "@withmurph_bot",
+    });
+
+    expect(replyText).not.toContain("https://t.me/");
+    expect(replyText).toContain(
+      "Forward this Family invite link to Dad: https://local.withmurph.ai:3443/family/accept/invite_label",
+    );
+    expect(replyText).toContain(
+      "Whoever opens it can join, so it is best sent directly to them.",
+    );
+  });
+
+  it("falls back to a token for label-only family invite replies without a public base URL", () => {
+    const replyText = buildHostedFamilyInviteReplyText({
+      invite: {
+        inviteCode: "invite_label",
+        targetEmail: null,
+        targetLabel: "Dad",
+        targetPhoneHint: null,
+        targetPhoneNumber: null,
+        targetTelegramUsername: null,
+      },
+      publicBaseUrl: null,
+      telegramBotUsername: "@withmurph_bot",
+    });
+
+    expect(replyText).not.toContain("https://t.me/");
+    expect(replyText).toContain("Family invite token: family_invite_label");
+  });
+
+  it("uses the web accept link for phone-bound family invite replies", () => {
+    const replyText = buildHostedFamilyInviteReplyText({
+      invite: {
+        inviteCode: "invite_phone",
+        targetEmail: null,
+        targetLabel: "Dad",
+        targetPhoneHint: "+48 6** *** ***",
+        targetPhoneNumber: "+48600000000",
+        targetTelegramUsername: null,
+      },
+      publicBaseUrl: "https://local.withmurph.ai:3443",
+      telegramBotUsername: "@withmurph_bot",
+    });
+
+    expect(replyText).toContain(
+      "Forward this Family invite link to Dad: https://local.withmurph.ai:3443/family/accept/invite_phone",
+    );
+    expect(replyText).toContain(
+      "When they open it they can join by text right from their phone.",
+    );
+    expect(replyText).not.toContain("for example on WhatsApp");
   });
 
   it("uses the web accept link for email-bound family invite replies", () => {
@@ -293,6 +420,7 @@ describe("hosted Family plan", () => {
         targetLabel: "Dad",
         targetPhoneHint: null,
         targetPhoneNumber: null,
+        targetTelegramUsername: null,
       },
       publicBaseUrl: "https://local.withmurph.ai:3443",
       telegramBotUsername: "@withmurph_bot",
@@ -365,7 +493,12 @@ describe("hosted Family plan", () => {
       },
     });
     expect(result.replyText).not.toContain("Forward this Telegram invite link");
-    expect(result.replyText).toContain("They need to send this token to Murph from that phone number");
+    expect(result.replyText).toContain(
+      "Forward this Family invite link to dad: https://local.withmurph.ai:3443/family/accept/",
+    );
+    expect(result.replyText).toContain(
+      "When they open it they can join by text right from their phone.",
+    );
     expect(result.replyText).toContain("you cannot see their private Murph conversations");
   });
 
@@ -666,6 +799,106 @@ describe("hosted Family plan", () => {
     });
   });
 
+  it("accepts a phone plus Telegram invite from the matching Telegram username", async () => {
+    const tx = createTxMock();
+    const invite = createPendingInvite({
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
+    });
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(invite)
+      .mockResolvedValueOnce(invite);
+
+    await expect(acceptHostedFamilyInviteFromTelegramTx({
+      telegramThreadId: "123",
+      telegramUserId: "456",
+      telegramUsername: "mom_user",
+      text: "/start family_invite_phone",
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      status: "active",
+    });
+
+    expect(tx.hostedMember.create).toHaveBeenCalled();
+    expect(tx.hostedMemberRouting.upsert).toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        memberId: expect.stringMatching(/^hbm_/u),
+      }),
+    }));
+  });
+
+  it("accepts a phone plus Telegram invite from the matching phone webhook sender", async () => {
+    const now = new Date("2026-06-18T12:30:00.000Z");
+    const tx = createTxMock();
+    const invite = createPendingInvite({
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
+    });
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(invite)
+      .mockResolvedValueOnce(invite);
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      now,
+      phoneNumber: "+48 600 000 000",
+      text: "family_invite_phone",
+      tx,
+    })).resolves.toMatchObject({
+      memberId: "member_mom",
+      status: "active",
+    });
+
+    expect(identityMocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
+      phoneNumber: "+48 600 000 000",
+      phoneNumberVerifiedAt: now,
+      prisma: tx,
+    });
+  });
+
+  it("rejects a phone plus Telegram invite from the wrong Telegram username", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
+    }));
+
+    await expect(acceptHostedFamilyInviteFromTelegramTx({
+      now: new Date("2026-06-18T12:00:00.000Z"),
+      telegramThreadId: "123",
+      telegramUserId: "456",
+      telegramUsername: "other_user",
+      text: "/start family_invite_phone",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+    });
+
+    expect(tx.hostedMember.create).not.toHaveBeenCalled();
+    expect(tx.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects a phone plus Telegram invite from the wrong phone webhook sender", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
+    }));
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      phoneNumber: "+48 700 000 000",
+      text: "family_invite_phone",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+    });
+
+    expect(identityMocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+  });
+
   it("accepts email-bound invites only from the invited email address", async () => {
     const tx = createTxMock();
 
@@ -700,23 +933,197 @@ describe("hosted Family plan", () => {
     });
   });
 
-  it("blocks web acceptance of an invite with no phone or email binding", async () => {
+  it("accepts an email plus Telegram invite from the matching web email", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
+      targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
+    }));
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      email: "MOM@example.com",
+      inviteCode: "invite_phone",
+      requireWebBinding: true,
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      status: "active",
+    });
+  });
+
+  it("accepts an email plus Telegram invite from the matching Telegram username", async () => {
+    const tx = createTxMock();
+    const invite = createPendingInvite({
+      targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
+    });
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(invite)
+      .mockResolvedValueOnce(invite);
+
+    await expect(acceptHostedFamilyInviteFromTelegramTx({
+      telegramThreadId: "123",
+      telegramUserId: "456",
+      telegramUsername: "mom_user",
+      text: "/start family_invite_phone",
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      status: "active",
+    });
+    expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        memberId: expect.stringMatching(/^hbm_/u),
+      }),
+    }));
+  });
+
+  it("rejects an email plus Telegram invite on web when no session identity matches", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
+      targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
+    }));
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      email: "someone-else@example.com",
+      inviteCode: "invite_phone",
+      phoneNumber: "+48 600 000 000",
+      requireWebBinding: true,
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
+    });
+
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("accepts an unbound invite via web with any signed-in member identity", async () => {
     const tx = createTxMock();
 
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
-      ...createPendingInvite(),
-      targetEmailLookupKey: null,
-      targetPhoneLookupKey: null,
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      phoneNumber: "+48 600 000 000",
+      requireWebBinding: true,
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      role: "member",
+      status: "active",
+    });
+  });
+
+  it("notifies the owner when an unbound invite is claimed", async () => {
+    const tx = createTxMock();
+    tx.hostedMemberIdentity.findUnique.mockResolvedValueOnce({
+      maskedPhoneNumberHint: "+1 *** *** 1111",
+      memberId: "member_owner",
+      phoneLookupKey: createHostedPhoneLookupKey("+15550001111"),
+      phoneNumberEncrypted: "encrypted:+15550001111",
+      phoneNumberVerifiedAt: new Date("2026-06-18T12:00:00.000Z"),
+      privyUserIdEncrypted: null,
+      privyUserLookupKey: null,
+      signupPhoneCodeSendAttemptId: null,
+      signupPhoneCodeSendAttemptStartedAt: null,
+      signupPhoneCodeSentAt: null,
+      signupPhoneNumberEncrypted: null,
+      walletAddressEncrypted: null,
+      walletChainType: null,
+      walletCreatedAt: null,
+      walletProvider: null,
+    });
+    tx.hostedMemberRouting.findUnique.mockResolvedValueOnce({
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      linqHomeLineAssignedAt: new Date("2026-06-18T12:00:00.000Z"),
+      linqRecipientPhoneEncrypted: "encrypted:+15559990000",
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15559990000"),
+      memberId: "member_owner",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqLastInboundAt: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      replyAliasLookupKey: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
     });
 
     await expect(acceptHostedFamilyInviteTx({
       acceptedMemberId: "member_mom",
       inviteCode: "invite_phone",
+      phoneNumber: "+48 600 000 000",
+      tx,
+    })).resolves.toMatchObject({
+      memberId: "member_mom",
+      status: "active",
+    });
+
+    expect(mailboxMocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    const appendInput = mailboxMocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0];
+    expect(appendInput).toEqual(expect.objectContaining({ tx }));
+    expect(JSON.stringify(appendInput?.envelope)).toContain(
+      "Mom just joined your family plan.",
+    );
+    expect(JSON.stringify(appendInput?.envelope)).toContain("member_owner");
+  });
+
+  it("rejects web acceptance of a Telegram-only invite", async () => {
+    const tx = createTxMock();
+
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
+      ...createPendingInvite(),
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
+    });
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      phoneNumber: "+48 600 000 000",
       requireWebBinding: true,
       tx,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
     });
+  });
+
+  it("accepts an unbound invite from a new phone and binds the sender phone", async () => {
+    const now = new Date("2026-06-18T12:30:00.000Z");
+    const tx = createTxMock();
+    const unboundInvite = createPendingInvite({
+      targetEmailLookupKey: null,
+      targetPhoneLookupKey: null,
+      targetTelegramUsernameLookupKey: null,
+    });
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce(unboundInvite)
+      .mockResolvedValueOnce(unboundInvite);
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      now,
+      phoneNumber: "+48 600 000 000",
+      text: "family_invite_phone",
+      tx,
+    })).resolves.toMatchObject({
+      memberId: "member_mom",
+    });
+
+    expect(identityMocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
+      phoneNumber: "+48 600 000 000",
+      phoneNumberVerifiedAt: now,
+      prisma: tx,
+    });
+    expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalled();
   });
 
   it("marks WhatsApp family invite phone acceptance as provider-verified", async () => {
@@ -801,6 +1208,24 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
       targetPhoneLookupKey: null,
       targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@alice"),
+    }));
+
+    await expect(acceptHostedFamilyInviteFromPhoneTx({
+      phoneNumber: "+48 600 000 000",
+      text: "family_invite_phone",
+      tx,
+    })).resolves.toBeNull();
+
+    expect(identityMocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not let WhatsApp claim an email-bound invite", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
+      targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
+      targetPhoneLookupKey: null,
     }));
 
     await expect(acceptHostedFamilyInviteFromPhoneTx({
@@ -907,7 +1332,7 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.update).not.toHaveBeenCalled();
   });
 
-  it("does not create membership when another accept already claimed the invite", async () => {
+  it("keeps unbound double-claim single-winner when another accept already claimed it", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
     tx.hostedAccountGroupInvite.updateMany.mockResolvedValueOnce({ count: 0 });
@@ -2561,6 +2986,9 @@ function createTxMock(input: {
         id: "member_owner",
         suspendedAt: null,
       }),
+    },
+    hostedMemberIdentity: {
+      findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedMemberBillingRef: {
       findUnique: vi.fn().mockResolvedValue(null),

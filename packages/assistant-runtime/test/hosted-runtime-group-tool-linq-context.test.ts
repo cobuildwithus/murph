@@ -4,7 +4,7 @@ import { createHostedGroupToolWithLinqThreadContext } from "../src/hosted-runtim
 import type { HostedAssistantLinqDeliveryContext } from "../src/hosted-runtime/linq-delivery-context.ts";
 
 const ROUTE_AUTHORITY = {
-  accountLookupKey: "hplk_account",
+  accountLookupKey: "hplk_current_line",
   channel: "linq" as const,
   containerMemberId: "member_container",
   threadId: "chat_group_1",
@@ -107,6 +107,12 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       linqDeliveryContexts: [
         buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
         buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
+        buildLinqDeliveryContext({
+          routeAuthority: {
+            ...ROUTE_AUTHORITY,
+            accountLookupKey: "hplk_legacy_other_line",
+          },
+        }),
         buildLinqDeliveryContext({
           routeAuthority: { ...ROUTE_AUTHORITY, threadId: "chat_sms_group" },
           service: "sms",

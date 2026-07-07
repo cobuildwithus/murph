@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  parseHostedExecutionExternalThreadRouteAuthority,
   parseHostedExecutionEvent,
   parseHostedExecutionWake,
   parseHostedRuntimeFamilyPlanToolRequest,
@@ -141,6 +142,30 @@ describe("parseHostedExecutionEvent", () => {
           threadId: "chat_123",
         },
       },
+    });
+  });
+
+  it("parses legacy external thread route authorities that still carry account lookup keys", () => {
+    expect(parseHostedExecutionExternalThreadRouteAuthority({
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq",
+      containerMemberId: "member_container_123",
+      threadId: "chat_123",
+    })).toEqual({
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq",
+      containerMemberId: "member_container_123",
+      threadId: "chat_123",
+    });
+
+    expect(parseHostedExecutionExternalThreadRouteAuthority({
+      channel: "linq",
+      containerMemberId: "member_container_123",
+      threadId: "chat_123",
+    })).toEqual({
+      channel: "linq",
+      containerMemberId: "member_container_123",
+      threadId: "chat_123",
     });
   });
 
@@ -726,7 +751,6 @@ describe("parseHostedRuntimeGroupTool", () => {
 
   const LINQ_THREAD = {
     authority: {
-      accountLookupKey: "hplk_account",
       channel: "linq",
       containerMemberId: "member_container",
       threadId: "chat_group_1",
@@ -746,6 +770,25 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "share_contact_card",
       linqThread: LINQ_THREAD,
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_chat_participants",
+      linqThread: {
+        ...LINQ_THREAD,
+        authority: {
+          accountLookupKey: "hplk_account",
+          ...LINQ_THREAD.authority,
+        },
+      },
+    })).toEqual({
+      action: "read_chat_participants",
+      linqThread: {
+        ...LINQ_THREAD,
+        authority: {
+          accountLookupKey: "hplk_account",
+          ...LINQ_THREAD.authority,
+        },
+      },
     });
 
     expect(() =>

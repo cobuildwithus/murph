@@ -599,7 +599,7 @@ function hostedLinqRouteBindingAuthorityMatchesCurrentRoute(input: {
   return input.routing?.pendingLinqParticipantContact?.lookupKey === input.authority.contact.lookupKey;
 }
 
-function startOfUtcDay(value: Date): Date {
+export function startOfUtcDay(value: Date): Date {
   return new Date(Date.UTC(
     value.getUTCFullYear(),
     value.getUTCMonth(),

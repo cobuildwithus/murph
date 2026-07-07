@@ -8,6 +8,7 @@ import {
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
@@ -192,6 +193,7 @@ const mocks = vi.hoisted(() => {
     }),
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
+    resolveHostedFamilyInviteTokenForInbound: vi.fn(),
   };
 
   return state;
@@ -328,11 +330,15 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/family-plan")>(
     "@/src/lib/hosted-onboarding/family-plan",
   );
+  mocks.resolveHostedFamilyInviteTokenForInbound.mockImplementation(async (input: {
+    text: string | null | undefined;
+  }) => actual.parseHostedFamilyInviteStartToken(input.text));
 
   return {
     ...actual,
     acceptHostedFamilyInviteFromPhoneTx: mocks.acceptHostedFamilyInviteFromPhoneTx,
     buildHostedFamilyInviteAcceptedReplyText: mocks.buildHostedFamilyInviteAcceptedReplyText,
+    resolveHostedFamilyInviteTokenForInbound: mocks.resolveHostedFamilyInviteTokenForInbound,
   };
 });
 
@@ -1175,6 +1181,79 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expectHostedLinqPointerSignalAccepted();
   });
 
+  it("routes an active Linq member's unknown token-shaped text as a normal message", async () => {
+    mocks.resolveHostedFamilyInviteTokenForInbound.mockResolvedValueOnce(null);
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "sending the family_photos album now",
+            },
+          ],
+        },
+        eventId: "evt_unknown_family_shape_linq",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(mocks.resolveHostedFamilyInviteTokenForInbound).toHaveBeenCalledWith({
+      prisma,
+      text: "sending the family_photos album now",
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "evt_unknown_family_shape_linq",
+        kind: "conversation.message",
+        message: expect.objectContaining({
+          linqMessage: expect.objectContaining({
+            parts: expect.arrayContaining([
+              expect.objectContaining({
+                type: "text",
+                value: "sending the family_photos album now",
+              }),
+            ]),
+          }),
+        }),
+      }),
+      tx: prisma,
+    });
+    expectHostedLinqPointerSignalAccepted("evt_unknown_family_shape_linq");
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("prioritizes active-member Linq text when attachment descriptors arrive first", async () => {
     const prisma = asPrismaTransactionClient({
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -1722,8 +1801,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       channel: "linq",
       threadId: "chat_123",
     });
-    if (!routeLookupKey) {
-      throw new Error("Expected test route lookup key.");
+    const routeIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_123",
+    });
+    if (!routeLookupKey || !routeIdentityLookupKey) {
+      throw new Error("Expected test route lookup keys.");
     }
     const threadContainerAccessRecord = {
       accountGroupMemberships: [],
@@ -1809,8 +1892,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       1,
       expect.objectContaining({
         where: expect.objectContaining({
-          threadLookupKey: {
-            in: expect.arrayContaining([routeLookupKey]),
+          threadIdentityLookupKey: {
+            in: expect.arrayContaining([routeIdentityLookupKey]),
           },
         }),
       }),
@@ -1819,8 +1902,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       2,
       expect.objectContaining({
         where: expect.objectContaining({
-          threadLookupKey: {
-            in: expect.arrayContaining([routeLookupKey]),
+          threadIdentityLookupKey: {
+            in: expect.arrayContaining([routeIdentityLookupKey]),
           },
         }),
       }),

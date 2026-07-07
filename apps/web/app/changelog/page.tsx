@@ -43,6 +43,187 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "group-challenge-referee": (
+    <PhoneMock
+      channel="iMessage · Sunday crew"
+      messages={[
+        {
+          from: "murph",
+          body: (
+            <div className="space-y-1">
+              <p className="font-semibold">Day 3 standings</p>
+              <p>Theo 9,412 steps · Will 8,730 · Sam 7,915</p>
+            </div>
+          ),
+        },
+        { from: "user", body: "ref, Sam counted a golf cart ride" },
+        {
+          from: "murph",
+          body: "Ruling: cart steps don't count. Standings hold. Dinner stakes unchanged.",
+        },
+      ]}
+    />
+  ),
+  "family-invite-imessage-accept": (
+    <PhoneMock
+      channel="Messages"
+      messages={[
+        { from: "user", body: "Hi Murph, joining the family plan (code family_k3)" },
+        {
+          from: "murph",
+          body: "You're in. Sarah's plan covers you now. This number is yours to text anytime.",
+        },
+      ]}
+    />
+  ),
+  "device-workouts-count-toward-experiments": (
+    <StatBlock
+      label="Running block adherence"
+      before="0 logged"
+      after="4 of 7"
+      caption="same watch data, now counted"
+    />
+  ),
+  "reminders-vary-approach": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        {
+          from: "murph",
+          body: "Zone 2 tonight. Even 20 easy minutes keeps the streak honest.",
+        },
+        {
+          from: "murph",
+          body: "Sauna night. Would 10 minutes be so bad? Tomorrow-you says thanks.",
+        },
+      ]}
+    />
+  ),
+  "group-chat-reliability-hardening": (
+    <ChecklistMock
+      label="A group now survives"
+      items={[
+        { label: "Owner's card lapses, group keeps Murph", done: true },
+        { label: "Members join or leave, replies continue", done: true },
+        { label: "One stable route per chat, no lost threads", done: true },
+      ]}
+    />
+  ),
+  "faster-texting-replies": (
+    <StatBlock
+      label="Warm wake round trip"
+      before="750 ms"
+      after="188 ms"
+      caption="plus a leaner cold start and direct wake"
+    />
+  ),
+  "device-history-import-self-heals": (
+    <StatBlock
+      label="Failed history import"
+      before="Stuck until reconnect"
+      after="Re-runs itself"
+      caption="180 days of history, recovered automatically"
+    />
+  ),
+  "group-preferred-names-roster": (
+    <PhoneMock
+      channel="iMessage · Sleep league"
+      messages={[
+        {
+          from: "murph",
+          body: "Theo takes the night: 8h 12m. Will, 6h 40m. Your bedtime is writing checks your alarm can't cash.",
+        },
+      ]}
+    />
+  ),
+  "challenge-stat-sharing-kinds": (
+    <ChecklistMock
+      label="Shareable challenge stats"
+      items={[
+        { label: "Steps and activity minutes", done: true },
+        { label: "Workouts and heart-rate-zone minutes", done: true },
+        { label: "Strain, VO2 max, resting HR, HRV", done: true },
+        { label: "Only what each member approves", done: true },
+      ]}
+    />
+  ),
+  "progress-updates-while-working": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "just sent my full lab panel" },
+        { from: "murph", body: "Reading it now. 34 markers, give me a minute." },
+        { from: "murph", body: "Done. Three things worth a look, starting with ferritin." },
+      ]}
+    />
+  ),
+  "imessage-group-chats-self-serve": (
+    <PhoneMock
+      channel="iMessage · The boys"
+      messages={[
+        { from: "user", body: "added Murph so we can settle the steps debate" },
+        {
+          from: "murph",
+          body: "Happy to referee. Everyone send me your weekly average, and nobody round up.",
+        },
+      ]}
+    />
+  ),
+  "group-contact-card-intro": (
+    <PhoneMock
+      channel="iMessage · Sunday crew"
+      messages={[
+        {
+          from: "murph",
+          body: "If you don't have me saved yet, that card is me. Shoot me a text and I'll get you set up.",
+        },
+        { from: "murph", body: "(shared the Murph contact card)" },
+      ]}
+    />
+  ),
+  "overnight-memory-consolidation": (
+    <CalendarMock
+      label="Overnight maintenance"
+      entries={[
+        { day: "Mon", time: "3:00am", what: "Consolidate the week's context" },
+        { day: "Wed", time: "3:00am", what: "Fold new facts into memory" },
+        { day: "Fri", time: "3:00am", what: "Prune stale threads" },
+      ]}
+    />
+  ),
+  "family-seat-flow": (
+    <ChecklistMock
+      label="Family seat flow"
+      items={[
+        { label: "Invite & add seat · $7/mo, one step", done: true },
+        { label: "Seat count reconciles before it renders", done: true },
+        { label: "Remove empty seats you no longer need", done: true },
+      ]}
+    />
+  ),
+  "group-join-links": (
+    <ChecklistMock
+      label="Joining a group shares"
+      items={[
+        { label: "You're in the group chat", done: true },
+        { label: "Health stats you explicitly approve", done: true },
+        { label: "Private chats or your vault", done: false },
+        { label: "Anything else: joining alone shares nothing", done: false },
+      ]}
+    />
+  ),
+  "red-light-therapy-guidance": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "how long should I sit in front of my red light panel?" },
+        {
+          from: "murph",
+          body: "Which model, and how far away? Dose falls off fast with distance. I'll do the math from the panel's measured output.",
+        },
+      ]}
+    />
+  ),
   "hosted-family-plan-mvp": (
     <ChecklistMock
       label="Family covers"

@@ -201,7 +201,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
         maxItems: 16,
         default: [],
         description:
-          'Optional ordered vault-relative JPG, PNG, or WebP image refs to use as visual references (up to 16). Use only refs the user attached as part of the current turn (other vault paths are rejected as unauthorized). Describe in the prompt how image 1, image 2, etc. should be used.',
+          'Optional ordered vault-relative JPG, PNG, or WebP image refs to use as visual references (up to 16). Refs must be user-sent media under raw/inbox/** or captured media under raw/captures/** (other vault paths are rejected as unauthorized). Describe in the prompt how image 1, image 2, etc. should be used.',
         items: {
           type: 'string',
           minLength: 1,
@@ -1403,9 +1403,6 @@ function currentHostedMailboxItemId(
 
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
-  loadAuthorizedReferenceImageRefs?:
-    | (() => Promise<ReadonlyMap<string, { sha256: string }>>)
-    | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
@@ -1617,20 +1614,9 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
 
-      // Only resolve the per-turn authority allowlist when the model is
-      // actually requesting reference images. A plain no-refs generate_image
-      // call must keep working even if the accepted-input journal is
-      // transiently unreadable; gating the loader keeps the existing
-      // /v1/images/generations path independent of attachment-runtime state.
-      const requestedRefs = input.request.args.referenceImageRefs ?? []
-      const authorizedRefs =
-        requestedRefs.length > 0 && input.loadAuthorizedReferenceImageRefs
-          ? await input.loadAuthorizedReferenceImageRefs()
-          : null
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
-        authorizedReferenceImageRefs: authorizedRefs,
         codexHome: input.codexHome ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
