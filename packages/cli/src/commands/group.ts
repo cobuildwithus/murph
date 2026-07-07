@@ -85,6 +85,10 @@ export function registerGroupCommands(cli: Cli.Cli) {
         description: 'Build a steps leaderboard from the shared daily step totals.',
         options: { kind: ['steps-days.v0'], vault: './vault' },
       },
+      {
+        description: 'Build a running-minutes leaderboard from shared daily running totals.',
+        options: { kind: ['running-minutes-days.v0'], vault: './vault' },
+      },
     ],
     hint:
       'Empty until members have connected the relevant data and their runtime has next woken. When empty, say so plainly and never invent figures.',

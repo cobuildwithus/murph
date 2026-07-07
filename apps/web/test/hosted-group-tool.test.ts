@@ -620,6 +620,7 @@ describe("hosted group join policy", () => {
       "group-email.v0",
       "sleep-times.v0",
       "activity-days.v0",
+      "running-minutes-days.v0",
       "heart-rate-zones-days.v0",
     ])).toEqual([
       {
@@ -639,6 +640,12 @@ describe("hosted group join policy", () => {
           "Allows this group to receive your recent daily active-minute totals as bounded shared records.",
         label: "Recent activity minutes",
         projectionKind: "activity-days.v0",
+      },
+      {
+        description:
+          "Allows this group to receive your recent daily running-minute totals as bounded shared records.",
+        label: "Recent running minutes",
+        projectionKind: "running-minutes-days.v0",
       },
       {
         description:

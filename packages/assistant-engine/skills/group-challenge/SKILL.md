@@ -23,6 +23,27 @@ Full standings, callouts, and leaderboards are in-bounds because joining the
 challenge is the opt-in — but only for the challenge metric, only for the
 challenge window. Score the challenge, never the body.
 
+## Challenge share kinds
+
+Choose the narrowest Vault Share projection that matches the agreed score.
+Use daily aggregate records only; never ask for routes, raw workouts,
+provider traces, or private 1:1 data for a group challenge.
+
+- Running minutes: `running-minutes-days.v0`
+- Walking minutes or walking minutes per day:
+  `walking-minutes-days.v0`
+- Swimming minutes: `swimming-minutes-days.v0`
+- Sauna minutes or sauna minutes per week: `sauna-minutes-days.v0`
+- Running zone challenge: `running-heart-rate-zones-days.v0`
+- Steps: `steps-days.v0`
+- Broad workout count/minutes: `workout-days.v0`
+- Broad active minutes: `activity-days.v0`
+- Broad workout heart-rate zones: `heart-rate-zones-days.v0`
+
+For weekly or two-week challenges, read fresh rolling shared records during
+the daily loop and append standings snapshots to the challenge page. The share
+itself is a short current window; the challenge page is the durable scoreboard.
+
 ## The challenge page (your durable state)
 
 Your context does not survive between days; the vault does. Every challenge

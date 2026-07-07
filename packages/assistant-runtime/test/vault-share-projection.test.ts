@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  getHostedVaultShareActivityHeartRateZoneProjectionSpec,
+  getHostedVaultShareActivityMinutesProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   parseHostedVaultShareDeliverRequest,
@@ -24,9 +26,12 @@ import {
   readProjectableDailyMetricDays,
   readProjectableProfileName,
   selectProjectableDailyMetricDays,
+  selectProjectableActivityHeartRateZoneDays,
+  selectProjectableActivityMinutesDays,
   selectProjectableHeartRateZoneDays,
   selectProjectableSleepNights,
   selectProjectableWorkoutDays,
+  type ActivitySessionProjectionRow,
 } from "../src/hosted-runtime/vault-share-projection.ts";
 import {
   CURRENT_VAULT_FORMAT_VERSION,
@@ -123,6 +128,31 @@ function workoutRows(input: {
       value: input.workoutMinutes,
     })],
     nowMs: Date.parse("2026-07-04T00:00:00.000Z"),
+  };
+}
+
+function activitySessionRow(input: {
+  activityKind: string | null;
+  date: string;
+  durationMinutes: number;
+  endedAt?: string | null;
+  heartRateZones?: ActivitySessionProjectionRow["heartRateZones"];
+  recordIds?: string[];
+  startedAt?: string | null;
+}): ActivitySessionProjectionRow {
+  const recordIds = input.recordIds ?? [`evt_${input.activityKind ?? "unknown"}_${input.date}`];
+  return {
+    activityKind: input.activityKind,
+    date: input.date,
+    durationMinutes: input.durationMinutes,
+    endedAt: input.endedAt ?? null,
+    heartRateZones: input.heartRateZones ?? [],
+    observedAt: `${input.date}T12:00:00.000Z`,
+    pointIds: [`point_${recordIds.join("_")}`],
+    recordIds,
+    sourceFamily: "event",
+    sourceKind: "activity_session",
+    startedAt: input.startedAt ?? `${input.date}T12:00:00.000Z`,
   };
 }
 
@@ -472,6 +502,90 @@ describe("selectProjectableWorkoutDays", () => {
   });
 });
 
+describe("selectProjectableActivityMinutesDays", () => {
+  const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
+  const runningSpec = requireActivityMinutesSpec("running-minutes-days.v0");
+
+  it("maps structured activity sessions to activity-specific daily minute records", () => {
+    const selected = selectProjectableActivityMinutesDays({
+      nowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 40,
+          recordIds: ["evt_run_1"],
+          startedAt: "2026-07-03T07:00:00.000Z",
+        }),
+        activitySessionRow({
+          activityKind: "run",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 35,
+          recordIds: ["evt_run_2"],
+          startedAt: "2026-07-03T17:00:00.000Z",
+        }),
+        activitySessionRow({
+          activityKind: "walking",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 60,
+          recordIds: ["evt_walk_1"],
+        }),
+      ],
+      spec: runningSpec,
+    });
+
+    expect(selected).toEqual([
+      {
+        data: {
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          sessionCount: 2,
+          sessionMinutes: 75,
+        },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      },
+    ]);
+    expect(
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "running-minutes-days.v0",
+        records: selected,
+      }).records,
+    ).toEqual(selected);
+  });
+
+  it("drops exact duplicate activity sessions before scoring a day", () => {
+    const selected = selectProjectableActivityMinutesDays({
+      nowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 40,
+          recordIds: ["evt_garmin_run"],
+          startedAt: "2026-07-03T07:00:00.000Z",
+        }),
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 40,
+          recordIds: ["evt_strava_run"],
+          startedAt: "2026-07-03T07:00:00.000Z",
+        }),
+      ],
+      spec: runningSpec,
+    });
+
+    expect(selected[0]?.data).toEqual({
+      activityKind: "running",
+      date: ACTIVITY_DAY.date,
+      sessionCount: 1,
+      sessionMinutes: 40,
+    });
+  });
+});
+
 describe("selectProjectableHeartRateZoneDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
 
@@ -516,6 +630,67 @@ describe("selectProjectableHeartRateZoneDays", () => {
     expect(
       parseHostedVaultShareDeliverRequest({
         projectionKind: "heart-rate-zones-days.v0",
+        records: selected,
+      }).records,
+    ).toEqual(selected);
+  });
+});
+
+describe("selectProjectableActivityHeartRateZoneDays", () => {
+  const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
+  const runningZoneSpec = requireActivityHeartRateZoneSpec("running-heart-rate-zones-days.v0");
+
+  it("maps only matching activity sessions to activity-specific zone records", () => {
+    const selected = selectProjectableActivityHeartRateZoneDays({
+      nowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 45,
+          heartRateZones: [
+            { durationMinutes: 8, label: "Zone 5", zone: 5 },
+            { durationMinutes: 14, label: "Zone 4", zone: 4 },
+          ],
+          recordIds: ["evt_run_zones"],
+        }),
+        activitySessionRow({
+          activityKind: "cycling",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 45,
+          heartRateZones: [{ durationMinutes: 20, label: "Zone 5", zone: 5 }],
+          recordIds: ["evt_bike_zones"],
+        }),
+      ],
+      spec: runningZoneSpec,
+    });
+
+    expect(selected).toEqual([
+      {
+        data: {
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          zones: [
+            {
+              durationMinutes: 14,
+              label: "Zone 4",
+              zone: 4,
+            },
+            {
+              durationMinutes: 8,
+              label: "Zone 5",
+              zone: 5,
+            },
+          ],
+        },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      },
+    ]);
+    expect(
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "running-heart-rate-zones-days.v0",
         records: selected,
       }).records,
     ).toEqual(selected);
@@ -571,6 +746,26 @@ function requireDailyMetricSpec(kind: Parameters<typeof getHostedVaultShareDaily
   const spec = getHostedVaultShareDailyMetricProjectionSpec(kind);
   if (!spec) {
     throw new Error(`Missing daily metric projection spec for ${kind}.`);
+  }
+  return spec;
+}
+
+function requireActivityMinutesSpec(
+  kind: Parameters<typeof getHostedVaultShareActivityMinutesProjectionSpec>[0],
+) {
+  const spec = getHostedVaultShareActivityMinutesProjectionSpec(kind);
+  if (!spec) {
+    throw new Error(`Missing activity minutes projection spec for ${kind}.`);
+  }
+  return spec;
+}
+
+function requireActivityHeartRateZoneSpec(
+  kind: Parameters<typeof getHostedVaultShareActivityHeartRateZoneProjectionSpec>[0],
+) {
+  const spec = getHostedVaultShareActivityHeartRateZoneProjectionSpec(kind);
+  if (!spec) {
+    throw new Error(`Missing activity heart-rate zone projection spec for ${kind}.`);
   }
   return spec;
 }

@@ -114,6 +114,31 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     description:
       "Allows this group to receive your recent daily workout counts and minutes as bounded shared records.",
   },
+  "running-minutes-days.v0": {
+    label: "Recent running minutes",
+    description:
+      "Allows this group to receive your recent daily running-minute totals as bounded shared records.",
+  },
+  "walking-minutes-days.v0": {
+    label: "Recent walking minutes",
+    description:
+      "Allows this group to receive your recent daily walking-minute totals as bounded shared records.",
+  },
+  "swimming-minutes-days.v0": {
+    label: "Recent swimming minutes",
+    description:
+      "Allows this group to receive your recent daily swimming-minute totals as bounded shared records.",
+  },
+  "sauna-minutes-days.v0": {
+    label: "Recent sauna minutes",
+    description:
+      "Allows this group to receive your recent daily sauna-minute totals as bounded shared records.",
+  },
+  "running-heart-rate-zones-days.v0": {
+    label: "Recent running heart-rate zones",
+    description:
+      "Allows this group to receive your recent daily running heart-rate zone minutes as bounded shared records.",
+  },
   "workout-strain-days.v0": {
     label: "Recent workout strain",
     description:
