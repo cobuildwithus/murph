@@ -60,15 +60,12 @@ const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 // re-sends the whole thread, and OpenAI Standard-tier prompt caches evict
 // within ~45 minutes regardless of prefix size or prompt_cache_retention
 // (measured 2026-06-10 across 32k-170k prefixes), so member messages after an
-// idle gap re-pay the full thread at uncached input rates. 128k was a
-// reduction from 233k; 2026-06-24 rollout analysis showed multi-million-token
-// turns where a single user message ran 20+ computer-use tool round-trips
-// and finished without ever crossing 128k (starting ~44k, ending ~59k),
-// because tool-loop context grows in 1-2k chunks per round-trip. 100k fires
-// compaction in the middle of longer tool loops instead of after them, while
-// staying well above the typical conversational floor so unrelated turns
-// don't compact every message.
-const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
+// idle gap re-pay the full thread at uncached input rates. Keep the ceiling at
+// 164k: it is still a meaningful reduction from the old 233k ceiling, and the
+// 2026-07 hosted model cost profile leaves room for longer tool loops. The
+// separate idle-shutdown compaction threshold intentionally stays lower so
+// off-hot-path checkpointing can clean up large threads before the next wake.
+const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 164_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 0;

@@ -27,7 +27,10 @@ import {
 import type { RuntimeWakeSignal } from "./runtime-wake.ts";
 
 // Compact only when the saving clears the measured post-compaction floor
-// (~40k tokens); below this the compact call costs more than it recovers.
+// (~40k tokens); below this the compact call costs more than it recovers. Keep
+// this below the hosted Codex auto-compact ceiling because idle shutdown runs
+// off the reply path and can compact large-but-below-ceiling threads before the
+// next wake pays the full resend cost.
 export const HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS = 100_000;
 export const HOSTED_IDLE_COMPACT_TIMEOUT_MS = 120_000;
 export const HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS = 5 * 60 * 1000;

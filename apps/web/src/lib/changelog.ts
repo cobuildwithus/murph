@@ -881,7 +881,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 3,
         title: "Longer tool-using turns before context compacts",
         summary:
-          "Hosted auto-compaction now waits until 100k tokens instead of 84k, so long browser/computer-use loops finish in one piece.",
+          "Hosted auto-compaction now waits until 164k tokens, so long browser/computer-use loops get more room to finish in one piece.",
         relevanceTags: ["assistant", "runtime"],
         sourcePullRequests: [],
       },

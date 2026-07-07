@@ -3,10 +3,13 @@
 Status: REVIEWED — design written 2026-06-11 and stress-tested the same day by two
 adversarial codebase reviews (runner lifecycle; codex/engine semantics). All
 design-level claims verified against code; resolved decisions and the remaining
-implementation-time verifications are recorded below.
+implementation-time verifications are recorded below. Threshold update
+2026-07-07: hosted auto-compaction uses 164k tokens and idle-shutdown
+compaction uses 100k tokens.
 
 Depends on: PR #125 (auto-compact ceiling 233k → 128k) merging first — the
-threshold arithmetic below assumes the 128k ceiling.
+idle-shutdown threshold arithmetic below assumes a live auto-compact ceiling
+above 100k; the current ceiling is 164k.
 
 ## Goal
 
@@ -42,9 +45,10 @@ Success criteria:
 
 ## Decisions (operator-approved)
 
-- Auto-compact ceiling stays 128k (`DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT`,
-  PR #125) — the in-day safety net.
-- Idle-compact threshold: 100_000 tokens of last-known thread context.
+- Auto-compact ceiling: 164k (`DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT`) —
+  the in-day safety net.
+- Idle-compact threshold: 100_000 tokens of last-known thread context. It stays
+  below the in-turn ceiling because idle shutdown runs off the reply path.
 - Compact timeout at idle: bounded (initial proposal 120s) then fail-open.
 - No nightly cron, no timezone logic: idle-stop already coincides with the
   longest natural gaps (overnight) and runs while the container is warm, so no
@@ -103,7 +107,7 @@ overlap.
 - RPC AVAILABILITY (verified): `thread/compact/start` exists in the runner's
   pinned Codex (`Dockerfile.cloudflare-hosted-runner-base:3` pins 0.135.0;
   RPC present at tag rust-v0.135.0) and compaction is queued unconditionally —
-  the 100k threshold is enforced entirely on the Murph side.
+  the 100k idle threshold is enforced entirely on the Murph side.
 - EGRESS (verified): `POST /v1/responses/compact` is already allowlisted and
   fence-validated in `runner-egress-intercept.ts:105-106`.
 - THREAD TOKEN SIZE (decided): retain the last `thread/tokenUsage/updated`
