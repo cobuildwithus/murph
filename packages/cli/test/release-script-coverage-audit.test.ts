@@ -638,6 +638,7 @@ Updated: 2026-04-24
       const fullEntries = listZipEntries(fullBundle.zipPath)
 
       expect(leanEntries).toContain('agent-docs/operations/verification-and-runtime.md')
+      expect(leanEntries).toContain('agent-docs/operations/pr-reviewgpt-loop.md')
       expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
       expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
