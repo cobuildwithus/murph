@@ -19,12 +19,15 @@ export function VoiceMemoPlayer({
   accentClassName = "bg-[#5e5530]",
   fillClassName = "bg-[#5e5530]",
   trackClassName = "bg-[#5e5530]/25",
+  containerClassName = "rounded-full bg-[#f5f0e8] px-3 py-2 ring-1 ring-black/[0.05]",
 }: {
   src: string;
   caption?: string;
   accentClassName?: string;
   fillClassName?: string;
   trackClassName?: string;
+  // Chrome around the play row; pass "" when the parent supplies the bubble.
+  containerClassName?: string;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const probedDurationRef = useRef(false);
@@ -95,7 +98,7 @@ export function VoiceMemoPlayer({
 
   return (
     <div className="w-full">
-      <div className="flex items-center gap-3 rounded-full bg-[#f5f0e8] px-3 py-2 ring-1 ring-black/[0.05]">
+      <div className={cn("flex items-center gap-3", containerClassName)}>
         <button
           type="button"
           onClick={toggle}

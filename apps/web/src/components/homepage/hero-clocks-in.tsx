@@ -348,6 +348,8 @@ const GROUP_MESSAGES = {
   murphStandings:
     "Standings, day 5 of 7. Maya is one sunrise walk from taking the lead. Theo, bold words for a man who logged 11 minutes yesterday.",
   mayaReply: "😂 not the sunrise walk pressure",
+  samSongReply: "why does this actually slap 😭",
+  theoSongReply: "take it down. i'm still winning btw",
   sundayTimestamp: "Sunday 8:02 AM",
   murphNewsletter: "This week's wins just landed in everyone's inbox.",
 } as const;
@@ -355,6 +357,14 @@ const GROUP_MESSAGES = {
 // Placeholder track until the ElevenLabs challenge-roast song is dropped in
 // at its own path; swap the src, keep the beat.
 const CHALLENGE_ROAST_AUDIO_SRC = "/audio/one-foot-two-foot.mp3";
+
+// Identifies consecutive-message runs so avatars and name labels appear once
+// per sender run, like iMessage. Voice memos are always Murph's.
+function senderKeyOf(item: StreamItem): string | null {
+  if (item.kind === "audio") return "murph";
+  if (item.kind !== "text") return null;
+  return item.from === "member" ? `member:${item.sender.id}` : item.from;
+}
 
 function findExchangeByTopic(topic: string): Exchange {
   const exchange = EXCHANGES.find(
@@ -827,6 +837,38 @@ export function HeroClocksIn({
       () => {
         appendItems([
           {
+            kind: "text",
+            id: nextId(),
+            from: "member",
+            sender: GROUP_MEMBERS[2],
+            text: GROUP_MESSAGES.samSongReply,
+          },
+        ]);
+      },
+      GROUP_BEATS_START_AT + GROUP_BEAT_GAP * 3 + 2400,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => {
+        appendItems([
+          {
+            kind: "text",
+            id: nextId(),
+            from: "member",
+            sender: GROUP_MEMBERS[0],
+            text: GROUP_MESSAGES.theoSongReply,
+          },
+        ]);
+      },
+      GROUP_BEATS_START_AT + GROUP_BEAT_GAP * 3 + 4300,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => {
+        appendItems([
+          {
             kind: "timestamp",
             id: nextId(),
             text: GROUP_MESSAGES.sundayTimestamp,
@@ -932,6 +974,20 @@ export function HeroClocksIn({
               text: GROUP_MESSAGES.mayaReply,
             },
             { kind: "audio", id: nextId(), src: CHALLENGE_ROAST_AUDIO_SRC },
+            {
+              kind: "text",
+              id: nextId(),
+              from: "member",
+              sender: GROUP_MEMBERS[2],
+              text: GROUP_MESSAGES.samSongReply,
+            },
+            {
+              kind: "text",
+              id: nextId(),
+              from: "member",
+              sender: GROUP_MEMBERS[0],
+              text: GROUP_MESSAGES.theoSongReply,
+            },
             {
               kind: "timestamp",
               id: nextId(),
@@ -1372,23 +1428,42 @@ export function HeroClocksIn({
                             );
                           }
                           if (it.kind === "audio") {
+                            const prevItem = items[i - 1];
+                            const showMurphLabel =
+                              !prevItem ||
+                              senderKeyOf(prevItem) !== "murph";
                             return (
                               <div
                                 key={it.id}
                                 className="hero-msg-in mr-auto w-full max-w-[86%] shrink-0"
                               >
-                                <VoiceMemoPlayer src={it.src} />
+                                <div className="flex items-end gap-1.5">
+                                  <div
+                                    aria-hidden="true"
+                                    className="mb-0.5 size-[18px] shrink-0 rounded-full bg-cover bg-center ring-1 ring-[#c4a882]/25"
+                                    style={{
+                                      backgroundImage: `url('${murphHeadshotSrc}')`,
+                                    }}
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    {showMurphLabel ? (
+                                      <p className="mb-0.5 pl-1 font-mono text-[9px] tracking-[0.08em] text-[#736a58]">
+                                        Murph
+                                      </p>
+                                    ) : null}
+                                    <div className="rounded-[17px] bg-white px-2.5 py-2">
+                                      <VoiceMemoPlayer
+                                        containerClassName=""
+                                        src={it.src}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             );
                           }
                           const next = items[i + 1];
                           const prev = items[i - 1];
-                          const senderKeyOf = (item: StreamItem) =>
-                            item.kind === "text"
-                              ? item.from === "member"
-                                ? `member:${item.sender.id}`
-                                : item.from
-                              : null;
                           const isTail =
                             !next ||
                             senderKeyOf(next) !== senderKeyOf(it);
