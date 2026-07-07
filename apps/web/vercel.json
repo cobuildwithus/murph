@@ -17,6 +17,10 @@
     {
       "path": "/api/internal/hosted-growth/snapshot/cron",
       "schedule": "10 0 * * *"
+    },
+    {
+      "path": "/api/internal/call-circle/cron",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

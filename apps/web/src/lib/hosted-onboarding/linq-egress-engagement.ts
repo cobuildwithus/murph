@@ -25,7 +25,7 @@ type HostedLinqLegacyCurrentInboundProof = {
   occurredAt: string;
   replyToMessageId: string;
   target: string;
-};
+    };
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 

@@ -225,6 +225,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       if (
         request.action !== "read_chat_participants"
         && request.action !== "post_join_offer"
+        && request.action !== "post_call_circle_offer"
         && request.action !== "share_contact_card"
       ) {
         return await input.groupToolPort.request(request);
@@ -522,6 +523,7 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
+        callCircle: input.runtime.platform.callCircle ?? null,
         connectedApps: input.runtime.platform.connectedApps ?? null,
         phoneCalls: input.runtime.platform.phoneCalls ?? null,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({

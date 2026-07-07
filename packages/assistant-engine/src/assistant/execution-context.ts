@@ -23,6 +23,11 @@ import type {
   HostedPhoneCallStartRequest,
   HostedPhoneCallStartResponse,
 } from '@murphai/hosted-execution/phone-calls'
+import type {
+  HostedCallCircleRespondContext,
+  HostedCallCircleRespondRequest,
+  HostedCallCircleRespondResponse,
+} from '@murphai/hosted-execution/call-circle'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
 import { normalizeNullableString } from './shared.js'
@@ -96,6 +101,16 @@ export interface AssistantPhoneCallPort {
   ): Promise<HostedPhoneCallStartResponse>
 }
 
+export interface AssistantCallCirclePort {
+  respond(
+    request: HostedCallCircleRespondRequest,
+    context?: {
+      inboundMailboxItemIds?: HostedCallCircleRespondContext['inboundMailboxItemIds']
+      signal?: AbortSignal | null
+    },
+  ): Promise<HostedCallCircleRespondResponse>
+}
+
 export type AssistantGeneratedImageContentType =
   | 'image/jpeg'
   | 'image/png'
@@ -127,6 +142,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
+  callCircle?: AssistantCallCirclePort | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
@@ -163,6 +179,7 @@ export function normalizeAssistantExecutionContext(
   const actionApprovalPort = normalizeAssistantActionApprovalPort(
     hosted?.actionApprovalPort,
   )
+  const callCircle = normalizeAssistantCallCirclePort(hosted?.callCircle)
   const connectedApps = normalizeAssistantConnectedAppsPort(hosted?.connectedApps)
   const defaultTarget = normalizeAssistantBackendTarget(hosted?.defaultTarget ?? null)
   const channelTypingDependencies = normalizeAssistantChannelTypingDependencies(
@@ -197,6 +214,7 @@ export function normalizeAssistantExecutionContext(
   return {
     hosted: {
       ...(actionApprovalPort ? { actionApprovalPort } : {}),
+      ...(callCircle ? { callCircle } : {}),
       ...(connectedApps ? { connectedApps } : {}),
       ...(typeof hosted?.issueDeviceConnectLink === 'function'
         ? {
@@ -287,6 +305,18 @@ function normalizeAssistantConnectedAppsPort(
 
   return {
     request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantCallCirclePort(
+  input: AssistantHostedExecutionContext['callCircle'] | undefined,
+): AssistantCallCirclePort | undefined {
+  if (!input || typeof input.respond !== 'function') {
+    return undefined
+  }
+
+  return {
+    respond: input.respond.bind(input),
   }
 }
 

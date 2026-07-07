@@ -110,6 +110,49 @@ describe("Retell phone-call runtime", () => {
     expect(body).not.toHaveProperty("agent_override");
   });
 
+  it("uses per-call Retell agent and opening-line overrides for connector calls", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_default");
+    vi.stubEnv("RETELL_AGENT_VERSION", "prod");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    const fetchCalls: Array<{
+      init?: RequestInit;
+      url: RequestInfo | URL;
+    }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      fetchCalls.push({ init, url });
+      return new Response(JSON.stringify({
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      });
+    };
+
+    await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      openingLine: "Hi, this is Murph connecting a Call Circle call.",
+      retellAgentId: "agent_connector",
+      retellAgentVersion: "draft",
+      transferNumber: "+12125550000",
+    });
+
+    const body = JSON.parse(String(fetchCalls[0]!.init?.body));
+    expect(body).toMatchObject({
+      override_agent_id: "agent_connector",
+      override_agent_version: "draft",
+      retell_llm_dynamic_variables: {
+        opening_line: "Hi, this is Murph connecting a Call Circle call.",
+      },
+    });
+  });
+
   it("passes a configured Retell webhook public base as a per-call agent override", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
@@ -461,10 +504,18 @@ describe("Retell phone-call result handling", () => {
 
     expect(firstResult).toEqual({
       notificationMailboxItemId: "mailbox_hpc_123",
+      notificationSignals: [{
+        notificationMailboxItemId: "mailbox_hpc_123",
+        notificationUserId: "member_123",
+      }],
       notificationUserId: "member_123",
     });
     expect(secondResult).toEqual({
       notificationMailboxItemId: "mailbox_hpc_123",
+      notificationSignals: [{
+        notificationMailboxItemId: "mailbox_hpc_123",
+        notificationUserId: "member_123",
+      }],
       notificationUserId: "member_123",
     });
     expect(store.updateManyCalls).toHaveLength(1);
@@ -995,8 +1046,10 @@ function createWebhookStore(input: {
       appendResultNotificationCalls.push(call);
       await input.appendResultNotification?.(call);
       return {
-        notificationMailboxItemId: `mailbox_${call.id}`,
-        notificationUserId: call.memberId,
+        notificationSignals: [{
+          notificationMailboxItemId: `mailbox_${call.id}`,
+          notificationUserId: call.memberId,
+        }],
       };
     },
     hostedPhoneCall: {

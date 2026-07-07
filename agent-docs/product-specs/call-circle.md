@@ -1,10 +1,11 @@
 # Call Circle
 
-Last verified: 2026-07-06
+Last verified: 2026-07-07
 
 Status: decisions locked 2026-07-06 (revised twice same day: founder review,
-then a three-lens Codex stress test against the codebase); not yet
-implemented. Ships as one release including the connector bridge.
+then a three-lens Codex stress test against the codebase); implementation is
+in progress on the Call Circle v1 PR. Ships as one release including the
+connector bridge.
 
 ## Purpose
 
@@ -30,9 +31,9 @@ captures enrollment in the group chat; each member's Murph gathers
 preferences and renders confirm asks in its own voice.
 
 This placement follows from three hard constraints found in the codebase:
-notification turns cannot carry structured responses out of a container
-(no `hostedToolContext`: `packages/assistant-engine/src/assistant/notification-turn.ts`,
-`codex-turn/planning.ts`); assistant cron one-shots expire late wakes after
+notification turns are outbound asks, while structured member replies must
+flow through the normal member-thread auto-reply tool context and the
+web-owned response route; assistant cron one-shots expire late wakes after
 60 minutes, which would silently kill time-sensitive confirms
 (`packages/assistant-engine/src/assistant/cron/execution.ts`); and matching
 caps must be deterministic server code, not model behavior, because the
@@ -45,14 +46,22 @@ cannot provide.
 
 - Any active group member can ask the group's Murph to set up Call Circle in
   the group chat. Setup is per group.
-- Enrollment happens in the group chat. Members who reply "I'm in" (or
-  equivalent) are enrolled; attribution resolves the sender to a `memberId`
-  through the existing participant-contact lookup (not raw handle string
-  comparison). The first private DM is not a consent question; it is a
-  transparent start with an instant off-ramp: Murph introduces Call Circle
-  for that group and asks what days and times usually work. Chat
-  participants without their own Murph cannot enroll; the group's Murph
-  points them at the join link.
+- Enrollment happens through the existing group offer/reaction primitive.
+  The group's Murph posts a server-owned, model-authored Call Circle offer in
+  the group chat; liking that offer opts the liker into Call Circle for that
+  group, may add them to the group if needed, shares their profile name with
+  the group, and lets Murph ask privately for availability. Attribution
+  resolves the liker to a `memberId` through the existing reaction/participant
+  lookup, not raw handle string comparison. Chat participants without their
+  own Murph cannot enroll; the offer points them at the existing join path.
+  Posting Call Circle offers is rollout-gated by
+  `HOSTED_CALL_CIRCLE_OFFERS_ENABLED` so new offer-scope rows are not created
+  until all reaction handlers run the v1 scope reader.
+- The first private DM is not a consent question; it is a transparent start
+  with an instant off-ramp: Murph introduces Call Circle for that group and
+  asks what days and times usually work. The member-thread response tool
+  carries hidden mailbox context so web can resolve "this group" from the
+  setup notification when a member belongs to multiple Call Circle groups.
 - Availability preferences are stated conversationally to the member's own
   Murph ("weekday lunches", "Sunday mornings"). The member's Murph submits
   them as coarse structured windows to web, where they are stored on the
@@ -64,9 +73,11 @@ cannot provide.
   pair back to back, rotation so no member is starved. Members are skipped
   for a cycle when the 28-day recipient-reply egress guard would block
   their confirm DM (preflighted web-side, never bypassed).
-- Matches are named: "Free at 5 for a call with Mike? yes/no". (A mystery
-  mode was considered and deferred; nothing in v1 may imply a specific
-  person asked for the call.)
+- Match confirms are transparent that the call is with a matched member from
+  this group. When web has a safe existing counterpart label, the ask should
+  include it; v1 does not denormalize vault-only profile names into web
+  coordination state just to name the ask. Nothing in v1 may imply a specific
+  person asked for the call.
 - Confirms are calendar-aware before asking. For a member with a connected
   calendar, web calls a stateless free/busy helper for the proposed window
   (`{free|busy|unknown}`, nothing persisted, no calendar detail read beyond
@@ -74,7 +85,9 @@ cannot provide.
   the member. Members without a calendar get plain asks.
 - Confirm asks are morning-of plus a short final confirm near call time,
   scheduled web-side, clamped to recipient-local daytime hours and gated on
-  line health. A late or blocked send is recorded as a match outcome
+  line health. Sending the final ask resets both per-side response slots, so
+  both members must record a fresh final yes before the connector can claim
+  the bridge. A late or blocked send is recorded as a match outcome
   (expired/skipped), never silently consumed.
 - Rescheduling is capped at one counter-proposal per side per match,
   enforced on the match row. If no fit, the match is dropped quietly and
@@ -116,6 +129,37 @@ cannot provide.
   prototyped on Retell in week one of the build; it is on the critical
   path.
 
+## Deployment And Rollback Contract
+
+Call Circle spans web, Cloudflare runner, assistant tool registration,
+Postgres schema, and Retell configuration. The safe rollout order is:
+
+1. Apply the additive Prisma migration and deploy the schema-compatible web,
+   Cloudflare runner, and assistant bundle while
+   `HOSTED_CALL_CIRCLE_OFFERS_ENABLED` is off and the Call Circle cron is not
+   yet active.
+2. Ensure old warm Cloudflare runner containers are drained/restarted before
+   enabling offers or cron. Use `container_rollout=immediate` or equivalent
+   operational proof when gradual rollout could leave a warm old bundle that
+   does not know the Call Circle port or `murph.call_circle_respond` tool.
+3. Configure the Retell connector env, verify connector smoke behavior, then
+   enable the offer gate and cron.
+
+With the offer gate off, no new Call Circle offer-scope rows should be
+created. Old bundles may safely ignore the feature because no user-visible
+Call Circle asks should be generated until both web and runner/assistant
+support the response tool. If a stale or unavailable match is referenced,
+web rejects the response through the normal unavailable outcome instead of
+mutating expired or inaccessible state.
+
+Rollback is safe before v1 rows or asks exist by disabling the gate/cron and
+rolling web/runner back to any schema-compatible version. After Call Circle
+participant, match, or pending notification rows exist, do not roll back
+below schema/tool support while those rows are active. First disable the
+gate and cron, let current pending matches terminalize or manually
+terminalize them with the current code, then roll back only to a version that
+can still read the additive schema.
+
 ## Non-Goals
 
 - No generic group-to-member notification rail, no purpose enum, no
@@ -144,8 +188,10 @@ cannot provide.
    `call_circle_match` (pair, proposed window as absolute time, per-side
    ask/confirm/counter state, outcome, claimed phone-call id). Match
    transitions are single conditional updates.
-2. One group-tool action: enrollment capture from the group chat (sender
-   resolved to memberId server-side).
+2. One group-tool action: post a server-owned Call Circle offer into the
+   group chat using the existing group offer/reaction primitive. The model
+   authors the visible offer copy inside tool guardrails; the server owns
+   the offer row and reaction acceptance.
 3. One member-side runtime action: submit a structured Call Circle response
    (preferences, confirm yes/no, counter-proposal, pause), validated
    against a pending ask or active participation for that member. This is
@@ -157,10 +203,11 @@ cannot provide.
 6. A Retell connector agent config plus a connector brief variant on the
    existing phone-call path.
 
-Everything else is existing rails: group containers and roster, mailbox
-notification wakes with event-id dedupe, the notification-decision turn,
-participant-contact lookup, LinQ egress guards, Composio accounts, vCard
-generation, `HostedPhoneCall` and Retell webhooks.
+Everything else is existing rails: group containers and roster,
+`HostedGroupJoinOffer` reaction acceptance, mailbox notification wakes with
+event-id dedupe, the notification-decision turn, participant-contact lookup,
+LinQ egress guards, Composio accounts, vCard generation, `HostedPhoneCall`
+and Retell webhooks.
 
 ## Security Invariants
 
@@ -192,9 +239,14 @@ generation, `HostedPhoneCall` and Retell webhooks.
   state placement gate forbids product truth starting in runtime state.
 - A separate bridge-session table: rejected; the match-row conditional
   claim plus `HostedPhoneCall` covers idempotency and lifecycle.
-- A new consent table or scope in v1: rejected; the participant row records
-  enrollment provenance, and document-backed consent can be added if legal
-  posture requires it.
+- A new consent table or per-feature consent field in v1: rejected; Call
+  Circle bootstraps on the existing offer/reaction primitive and stores only
+  product coordination truth in Call Circle participant/match rows. A
+  document-backed consent layer can be added if legal posture requires it.
+- A web-side profile-label cache for confirms: rejected for v1. Profile names
+  stay on the existing `profile-name.v0` vault-share/runtime path; Call Circle
+  should not add denormalized identity state unless a broader web-readable
+  profile-label primitive is introduced.
 
 ## Open Questions
 

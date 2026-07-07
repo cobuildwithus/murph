@@ -41,6 +41,7 @@ export * from "./browser-vault.ts";
 export * from "./cli-runtime-bridge.ts";
 export * from "./connected-apps.ts";
 export * from "./computer-use.ts";
+export * from "./call-circle.ts";
 export * from "./phone-calls.ts";
 export * from "./email-ingress.ts";
 export * from "./env.ts";

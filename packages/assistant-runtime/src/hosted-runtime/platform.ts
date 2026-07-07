@@ -62,6 +62,11 @@ import type {
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import type {
+  HostedCallCircleRespondContext,
+  HostedCallCircleRespondRequest,
+  HostedCallCircleRespondResponse,
+} from "@murphai/hosted-execution/call-circle";
+import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
   HostedExecutionDeviceSyncDirtyAckResponse,
@@ -361,6 +366,16 @@ export interface HostedRuntimePhoneCallPort {
   ): Promise<HostedPhoneCallStartResponse>;
 }
 
+export interface HostedRuntimeCallCirclePort {
+  respond(
+    request: HostedCallCircleRespondRequest,
+    context?: {
+      inboundMailboxItemIds?: HostedCallCircleRespondContext["inboundMailboxItemIds"];
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedCallCircleRespondResponse>;
+}
+
 export interface HostedRuntimeMailboxPort {
   fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
   fetchPayload(
@@ -478,6 +493,7 @@ export interface HostedRuntimePlatform {
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   codexAuthPort?: HostedRuntimeCodexAuthPort | null;
   connectedApps?: AssistantConnectedAppsPort | null;
+  callCircle?: HostedRuntimeCallCirclePort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   familyPlanToolPort?: HostedRuntimeFamilyPlanToolPort | null;

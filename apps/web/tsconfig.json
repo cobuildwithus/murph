@@ -73,6 +73,9 @@
       "@murphai/hosted-execution/browser-vault": [
         "packages/hosted-execution/src/browser-vault.ts"
       ],
+      "@murphai/hosted-execution/call-circle": [
+        "packages/hosted-execution/src/call-circle.ts"
+      ],
       "@murphai/hosted-execution/bundles": [
         "packages/hosted-execution/src/bundles.ts"
       ],

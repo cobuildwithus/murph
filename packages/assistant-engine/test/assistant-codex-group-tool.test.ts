@@ -48,6 +48,7 @@ describe("murph.group dynamic tool", () => {
       "read_current",
       "create_join_link",
       "post_join_offer",
+      "post_call_circle_offer",
       "read_chat_participants",
       "share_contact_card",
       "revoke_own_email_share",
@@ -95,6 +96,21 @@ describe("murph.group dynamic tool", () => {
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_call_circle_offer",
+      message:
+        "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "post_call_circle_offer",
+        callCircleOffer: {
+          message:
+            "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+        },
+      },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
       action: "revoke_own_email_share",
     }))).toEqual({
       kind: "group",
@@ -111,6 +127,35 @@ describe("murph.group dynamic tool", () => {
       messageTemplate:
         "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       linqThread: { chatId: "chat_hijack" },
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_call_circle_offer",
+      linqThread: { chatId: "chat_hijack" },
+      message: "Like this to opt in.",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_call_circle_offer",
+      message: "Like this for a Call Circle update.",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_call_circle_offer",
+      message:
+        "Like this to opt into Call Circle for this group. Murph will ask you privately for availability.",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_call_circle_offer",
+      message:
+        "Like this to opt into Call Circle for this group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_call_circle_offer",
+      message:
+        "Like this if you do not want to join Call Circle for this group and do not want Murph to privately ask about your availability.",
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({

@@ -43,6 +43,7 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+  normalizeHostedGroupOfferScope,
   recordHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
@@ -64,6 +65,24 @@ let restoreKeyring: (() => void) | null = null;
 afterEach(() => {
   restoreKeyring?.();
   restoreKeyring = null;
+});
+
+it("normalizes legacy and scoped group-offer JSON", () => {
+  expect(normalizeHostedGroupOfferScope(["sleep-times.v0"])).toEqual({
+    featureActivations: [],
+    schema: "murph.hosted-group.offer-scope.v1",
+    vaultShareProjectionKinds: ["sleep-times.v0"],
+  });
+
+  expect(normalizeHostedGroupOfferScope({
+    featureActivations: ["call-circle.enroll.v0", "unknown.v0"],
+    schema: "murph.hosted-group.offer-scope.v1",
+    vaultShareProjectionKinds: ["sleep-times.v0", "profile-name.v0"],
+  })).toEqual({
+    featureActivations: ["call-circle.enroll.v0"],
+    schema: "murph.hosted-group.offer-scope.v1",
+    vaultShareProjectionKinds: ["sleep-times.v0"],
+  });
 });
 
 function createPrismaStub<T extends Record<string, unknown>>(delegates: T): PrismaClient & T {
@@ -144,7 +163,7 @@ function buildTx(input?: {
           return {
             groupId: "group_1",
             messageLookupKey,
-            projectionKindsJson: ["sleep-times.v0"],
+            offerScopeJson: ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -165,7 +184,7 @@ function buildTx(input?: {
           return {
             groupId: "group_1",
             messageLookupKey,
-            projectionKindsJson: ["sleep-times.v0"],
+            offerScopeJson: ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -438,14 +457,20 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     await expect(recordHostedGroupJoinOfferTx({
       groupId: "group_1",
       messageId: "msg_offer_123",
+      offerScope: {
+        featureActivations: ["call-circle.enroll.v0"],
+        vaultShareProjectionKinds: ["sleep-times.v0", "profile-name.v0"],
+      },
       postedAt,
-      projectionKinds: ["sleep-times.v0", "profile-name.v0"],
       tx,
     })).resolves.toMatchObject({
       groupId: "group_1",
       messageIdSuffix: expect.stringContaining("123"),
       messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
-      projectionKinds: ["sleep-times.v0"],
+      offerScope: {
+        featureActivations: ["call-circle.enroll.v0"],
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
     });
 
     expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledWith({
@@ -455,7 +480,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         messageIdSuffix: expect.stringContaining("123"),
         messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
         postedAt,
-        projectionKindsJson: ["sleep-times.v0"],
+        offerScopeJson: {
+          featureActivations: ["call-circle.enroll.v0"],
+          schema: "murph.hosted-group.offer-scope.v1",
+          vaultShareProjectionKinds: ["sleep-times.v0"],
+        },
       },
     });
   });
@@ -596,15 +625,19 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const firstOffer = await recordHostedGroupJoinOfferTx({
       groupId: "group_1",
       messageId: "msg_offer_a",
+      offerScope: {
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
       postedAt: firstPostedAt,
-      projectionKinds: ["sleep-times.v0"],
       tx,
     });
     await recordHostedGroupJoinOfferTx({
       groupId: "group_1",
       messageId: "msg_offer_b",
+      offerScope: {
+        vaultShareProjectionKinds: ["activity-days.v0"],
+      },
       postedAt: secondPostedAt,
-      projectionKinds: ["activity-days.v0"],
       tx,
     });
 
@@ -776,6 +809,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
         memberCount: 1,
         members: [
           {
+            callCircle: null,
             grantedVaultShareProjectionKinds: ["profile-name.v0"],
             handle: "+15551110000",
             memberId: "member_owner",
@@ -889,6 +923,9 @@ function buildGroupLinkTx(input: {
     hostedGroupMember: {
       upsert: vi.fn(async () => undefined),
     },
+    hostedCallCircleParticipant: {
+      findMany: vi.fn(async () => []),
+    },
     hostedVaultShare: {
       count: vi.fn(async () => 0),
       findMany: vi.fn(async () =>
@@ -938,7 +975,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
   const offers: Array<{
     groupId: string;
     messageLookupKey: string;
-    projectionKindsJson: Prisma.InputJsonValue;
+    offerScopeJson: Prisma.InputJsonValue;
     revokedAt: Date | null;
   }> = [];
 
@@ -959,13 +996,13 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
         data: {
           groupId: string;
           messageLookupKey: string;
-          projectionKindsJson: Prisma.InputJsonValue;
+          offerScopeJson: Prisma.InputJsonValue;
         };
       }) => {
         offers.push({
           groupId: args.data.groupId,
           messageLookupKey: args.data.messageLookupKey,
-          projectionKindsJson: args.data.projectionKindsJson,
+          offerScopeJson: args.data.offerScopeJson,
           revokedAt: null,
         });
         return {};
@@ -979,7 +1016,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
           ? {
               groupId: offer.groupId,
               messageLookupKey: offer.messageLookupKey,
-              projectionKindsJson: offer.projectionKindsJson,
+              offerScopeJson: offer.offerScopeJson,
               revokedAt: offer.revokedAt,
               group,
             }
@@ -999,7 +1036,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
         return {
           groupId: offer.groupId,
           messageLookupKey: offer.messageLookupKey,
-          projectionKindsJson: offer.projectionKindsJson,
+          offerScopeJson: offer.offerScopeJson,
           revokedAt: offer.revokedAt,
           group,
         };

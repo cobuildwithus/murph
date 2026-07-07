@@ -255,6 +255,7 @@ describe("hosted web production migration guard", () => {
     const cronPaths = (vercelJson.crons ?? []).map((cron) => cron.path).sort();
 
     assert.deepEqual(cronPaths, [
+      "/api/internal/call-circle/cron",
       "/api/internal/hosted-execution/retention/cron",
       "/api/internal/hosted-growth/snapshot/cron",
       "/api/internal/hosted-onboarding/linq/contact-card/cron",

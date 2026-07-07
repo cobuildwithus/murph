@@ -4,16 +4,18 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
-import {
-  buildHostedExecutionAssistantNotificationRequestedWake,
-  type HostedExecutionAssistantNotificationRoute,
-  type HostedExecutionAssistantNotificationResponsePolicy,
+import type {
+  HostedExecutionAssistantNotificationRoute,
+  HostedExecutionAssistantNotificationResponsePolicy,
 } from "@murphai/hosted-execution";
 
 import { buildMurphSmsHref, normalizeMurphTelegramUsername } from "../murph-contact-routing";
-import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
-import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { getPrisma } from "../prisma";
+import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
+import {
+  appendHostedAssistantNotificationTx,
+  resolveHostedAssistantNotificationRouteTx,
+} from "../hosted-execution/assistant-notifications";
 import {
   encryptHostedWebNullableString,
   decryptHostedWebNullableString,
@@ -85,7 +87,6 @@ import { createHostedMember } from "./hosted-member-store";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
 import {
   lookupHostedMemberIdentityByPhoneNumber,
-  readHostedMemberIdentity,
 } from "./hosted-member-identity-store";
 import {
   readHostedMemberRoutingState,
@@ -97,10 +98,6 @@ import {
   provisionActiveHostedDomainRootEnvelopeForUserOnly,
 } from "../hosted-crypto/domain-root-store";
 import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
-import {
-  resolveHostedMemberAssistantNotificationRoute,
-  resolveHostedMemberMessagingState,
-} from "./messaging-state";
 
 export { HOSTED_FAMILY_MAX_SEATS, HOSTED_FAMILY_MIN_SEATS } from "./billing-plans";
 
@@ -2486,33 +2483,16 @@ export async function appendHostedFamilyChatNotificationTx(input: {
   sourceEventId: string;
   tx: Prisma.TransactionClient;
 }): Promise<{ mailboxItemId: string | null }> {
-  if (!input.route) {
-    return {
-      mailboxItemId: null,
-    };
-  }
-
   const eventId = `assistant.notification.requested:family-chat:${input.memberId}:${input.sourceEventId}`;
-  const append = await appendHostedMailboxEnvelopeTx({
-    envelope: buildHostedExecutionAssistantNotificationRequestedWake({
-      eventId,
-      memberId: input.memberId,
-      notification: {
-        deliveryDedupeToken: eventId,
-        deliveryDispatchMode: "queue-only",
-        deliveryIdempotencyKey: eventId,
-        instructions: input.notification.instructions,
-        responsePolicy: input.notification.responsePolicy,
-        route: input.route,
-      },
-      occurredAt: input.occurredAt,
-    }),
+  return appendHostedAssistantNotificationTx({
+    eventId,
+    instructions: input.notification.instructions,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    responsePolicy: input.notification.responsePolicy,
+    route: input.route,
     tx: input.tx,
   });
-
-  return {
-    mailboxItemId: append.item.id,
-  };
 }
 
 export async function resolveHostedFamilyChatNotificationRouteTx(input: {
@@ -2521,45 +2501,7 @@ export async function resolveHostedFamilyChatNotificationRouteTx(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedExecutionAssistantNotificationRoute | null> {
-  const [identity, routing] = await Promise.all([
-    readHostedMemberIdentity({
-      memberId: input.memberId,
-      prisma: input.tx,
-    }),
-    readHostedMemberRoutingState({
-      memberId: input.memberId,
-      prisma: input.tx,
-    }),
-  ]);
-
-  return resolveHostedMemberAssistantNotificationRoute({
-    linqChatId: routing?.linqChatId ?? routing?.pendingLinqChatId ?? null,
-    linqContactLookupKey:
-      routing?.pendingLinqParticipantContact?.lookupKey
-      ?? identity?.phoneLookupKey
-      ?? null,
-    linqRecipientPhone: routing?.linqRecipientPhone ?? null,
-    memberId: input.memberId,
-    memberPhoneNumber: identity?.phoneNumber ?? null,
-    messaging: resolveHostedMemberMessagingState({
-      identity: {
-        phoneLookupKey: identity?.phoneLookupKey ?? null,
-      },
-      routing: {
-        linqChatId: routing?.linqChatId ?? null,
-        pendingLinqChatId: routing?.pendingLinqChatId ?? null,
-        pendingLinqParticipantContact: routing?.pendingLinqParticipantContact ?? null,
-        telegramThreadId:
-          routing?.telegramThreadId
-          ?? input.fallbackTelegramThreadId
-          ?? null,
-        telegramUserId:
-          routing?.telegramUserId
-          ?? input.fallbackTelegramUserId
-          ?? null,
-      },
-    }),
-  });
+  return resolveHostedAssistantNotificationRouteTx(input);
 }
 
 export async function acceptHostedFamilyInvite(input: {

@@ -20,6 +20,7 @@ import type {
   AssistantHostedFamilyPlanTool,
   AssistantHostedGroupTool,
   AssistantHostedNewsletterTool,
+  AssistantCallCirclePort,
   AssistantPhoneCallPort,
 } from './execution-context.js'
 import {
@@ -56,6 +57,7 @@ export type AssistantHostedVaultFileSendResult =
     }
 
 export interface AssistantHostedToolContext {
+  readonly callCircle?: AssistantCallCirclePort | null
   readonly connectedApps?: AssistantConnectedAppsPort | null
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   readonly groupTool?: AssistantHostedGroupTool | null
@@ -79,6 +81,7 @@ type AssistantHostedToolDeliveryContext = {
 }
 
 export function createAssistantHostedToolContext(input: {
+  callCircle?: AssistantCallCirclePort | null
   connectedApps?: AssistantConnectedAppsPort | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   groupTool?: AssistantHostedGroupTool | null
@@ -112,6 +115,7 @@ export function createAssistantHostedToolContext(input: {
   }
 
   return {
+    callCircle: input.callCircle ?? null,
     connectedApps: input.connectedApps ?? null,
     familyPlanTool: input.familyPlanTool ?? null,
     groupTool: input.groupTool ?? null,
@@ -142,8 +146,10 @@ export function createAssistantHostedToolContext(input: {
     },
     currentHostedMailboxItemIds: () => {
       const deliveryContext = readDeliveryContext()
-      return deliveryContext.messageInput.hostedDeliveryIdempotency
-        ?.inboundMailboxItemIds ?? []
+      const context = deliveryContext.messageInput.hostedDeliveryIdempotency
+      return context?.contextMailboxItemIds
+        ?? context?.inboundMailboxItemIds
+        ?? []
     },
     currentScheduledAutomationAuthority: () => {
       const deliveryContext = readDeliveryContext()

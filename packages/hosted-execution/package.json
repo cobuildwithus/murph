@@ -50,6 +50,10 @@
       "types": "./dist/computer-use.d.ts",
       "default": "./dist/computer-use.js"
     },
+    "./call-circle": {
+      "types": "./dist/call-circle.d.ts",
+      "default": "./dist/call-circle.js"
+    },
     "./phone-calls": {
       "types": "./dist/phone-calls.d.ts",
       "default": "./dist/phone-calls.js"

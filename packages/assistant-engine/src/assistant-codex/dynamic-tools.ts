@@ -3,12 +3,14 @@ import { loadVault } from '@murphai/core'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  isHostedRuntimeGroupCallCircleOfferConsentMessage,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupToolRequest,
@@ -79,6 +81,11 @@ import {
   readConnectedAppsDynamicToolRequest,
   type ConnectedAppsDynamicToolRequest,
 } from './dynamic-tools/connected-apps.js'
+import {
+  MURPH_CALL_CIRCLE_RESPOND_TOOL,
+  readCallCircleDynamicToolRequest,
+  type CallCircleDynamicToolRequest,
+} from './dynamic-tools/call-circle.js'
 import {
   executeGenerateVoiceMemoDynamicTool,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
@@ -329,7 +336,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, each member\'s granted share kinds, and Call Circle status) with action="read_current", mint the shareable group join link with action="create_join_link", post a server-owned like-to-join offer into the current group chat with action="post_join_offer", or post a server-owned Call Circle offer into the current group chat with action="post_call_circle_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. For action="post_call_circle_offer", write the group-facing invite in message yourself: it must naturally say that liking that message opts the liker into Call Circle for this group, may add them to the group if needed, shares their Murph profile name with the group, and lets Murph ask them privately for availability. Do not use a fixed script, do not include phone numbers, do not enroll anyone directly, and do not imply any specific person requested the call. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -340,6 +347,7 @@ export const MURPH_GROUP_TOOL = {
           'read_current',
           'create_join_link',
           'post_join_offer',
+          'post_call_circle_offer',
           'read_chat_participants',
           'share_contact_card',
           'revoke_own_email_share',
@@ -383,6 +391,13 @@ export const MURPH_GROUP_TOOL = {
         maxLength: HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
         description:
           'Required for action="post_join_offer". Write one short natural group-chat message, not a fixed script. Mention that liking or reacting to this message joins the group. Include {{join_url}} exactly once where the server should insert the exact join URL, and {{share_scope}} exactly once where the server should insert the exact shared-scope phrase. Do not include any other URL.',
+      },
+      message: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH,
+        description:
+          'Required for post_call_circle_offer. Model-authored invite to send into the current group chat. It must say liking this message opts the liker into Call Circle for this group, may add them to the group, shares their Murph profile name with the group, and lets Murph ask privately for availability.',
       },
     },
     required: ['action'],
@@ -644,6 +659,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_CREATE_PHONE_CALL_TOOL,
+  MURPH_CALL_CIRCLE_RESPOND_TOOL,
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
@@ -673,6 +689,7 @@ export interface MurphDynamicToolAvailability {
   newsletterAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
+  callCircleAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
 }
@@ -706,6 +723,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
+    [MURPH_CALL_CIRCLE_RESPOND_TOOL, defaultOff((a) => a.callCircleAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
       (tool) =>
         [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
@@ -802,6 +820,20 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         .array(z.enum(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS))
         .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length)
         .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('post_call_circle_offer'),
+      message: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH)
+        .refine(
+          isHostedRuntimeGroupCallCircleOfferConsentMessage,
+          "Call Circle offer message must say liking or reacting opts the member into Call Circle for this group, may add them to the group, shares their Murph profile name with the group, and lets Murph ask privately for availability.",
+        ),
     })
     .strict(),
   z
@@ -1101,6 +1133,7 @@ interface ParsedDynamicToolCallRequest {
 
 export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
+  | CallCircleDynamicToolRequest
   | {
       kind: 'attach-response-media'
       media: AssistantResponseMedia[]
@@ -1261,6 +1294,14 @@ export function readMurphDynamicToolRequest(
   })
   if (phoneCallRequest) {
     return phoneCallRequest
+  }
+
+  const callCircleRequest = readCallCircleDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (callCircleRequest) {
+    return callCircleRequest
   }
 
   switch (request.tool) {
@@ -1607,6 +1648,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid vault file arguments')
     case 'invalid-phone-call-arguments':
       return toolTextResult(false, 'invalid phone-call arguments')
+    case 'invalid-call-circle-arguments':
+      return toolTextResult(false, 'invalid call circle arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media': {
@@ -1721,6 +1764,26 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(true, `phone call ${result.status}: ${result.phoneCallId}`)
       } catch {
         return toolTextResult(false, 'phone call could not be started')
+      }
+    }
+    case 'call-circle-respond': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const callCircle = hostedToolContext?.callCircle ?? null
+      if (!hostedToolContext || !callCircle) {
+        return toolTextResult(
+          false,
+          'call circle response is unavailable without hosted call circle transport',
+        )
+      }
+      try {
+        const inboundMailboxItemIds = hostedToolContext.currentHostedMailboxItemIds()
+        const response = await callCircle.respond(input.request.request, {
+          inboundMailboxItemIds: [...inboundMailboxItemIds],
+          signal: input.abortSignal ?? null,
+        })
+        return toolTextResult(true, safeToolPayloadText(response))
+      } catch {
+        return toolTextResult(false, 'call circle response could not be recorded')
       }
     }
     case 'submit-product-feedback':
@@ -2882,6 +2945,15 @@ function parseGroupArguments(
     return {
       ok: true,
       request: { action: 'post_join_offer', joinOffer },
+    }
+  }
+  if (parsed.data.action === 'post_call_circle_offer') {
+    return {
+      ok: true,
+      request: {
+        action: 'post_call_circle_offer',
+        callCircleOffer: { message: parsed.data.message },
+      },
     }
   }
   if (

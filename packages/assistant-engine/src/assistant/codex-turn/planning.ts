@@ -70,6 +70,9 @@ import {
   resolveAssistantMurphProductBaseUrl,
   type AssistantPromptCacheMetadata,
 } from '../system-prompt.js'
+import {
+  isCallCircleTurnTriggerEligible,
+} from '../../assistant-codex/dynamic-tools/call-circle.js'
 import type {
   AssistantAcceptedTurnInputItemInput,
   AssistantCodexContinuation,
@@ -585,6 +588,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
         allowMessageReactions: messageReactionsAvailable,
         computerToolsAvailable:
           input.hostedToolContext?.computerToolsAvailable === true,
+        callCircleAvailable:
+          input.hostedToolContext?.callCircle != null &&
+          isCallCircleTurnTriggerEligible(input.input.turnTrigger ?? null),
         progressUpdatesAvailable: input.progressDelivery != null,
         connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
         familyPlanAvailable: input.hostedToolContext?.familyPlanTool != null,

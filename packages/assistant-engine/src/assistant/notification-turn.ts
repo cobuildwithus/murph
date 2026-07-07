@@ -1212,6 +1212,8 @@ async function deliverAssistantNotificationMessage(input: {
   const outcome = await state.outbox.deliverMessage({
     turnId: input.turnId,
     message: input.message,
+    answeredMailboxItemIds:
+      input.input.hostedDeliveryIdempotency?.inboundMailboxItemIds ?? [],
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,

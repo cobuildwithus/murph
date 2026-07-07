@@ -1266,6 +1266,7 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
 
   expect(deliverMessage).toHaveBeenCalledWith(
     expect.objectContaining({
+      answeredMailboxItemIds: ['mailbox_item_notification'],
       channel: 'linq',
       deliveryIdempotencyKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
       deliveryTransportIdempotent: true,

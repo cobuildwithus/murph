@@ -250,6 +250,7 @@ describe("Retell ask_murph route", () => {
   it("does not wake the runtime when call_analyzed did not append a notification", async () => {
     mocks.handleRetellCallAnalyzed.mockResolvedValueOnce({
       notificationMailboxItemId: null,
+      notificationSignals: [],
       notificationUserId: null,
     });
 
@@ -266,6 +267,45 @@ describe("Retell ask_murph route", () => {
 
     expect(response.status).toBe(204);
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("wakes every returned call_analyzed notification signal", async () => {
+    mocks.handleRetellCallAnalyzed.mockResolvedValueOnce({
+      notificationMailboxItemId: "mailbox_item_a",
+      notificationSignals: [
+        {
+          notificationMailboxItemId: "mailbox_item_a",
+          notificationUserId: "member_a",
+        },
+        {
+          notificationMailboxItemId: "mailbox_item_b",
+          notificationUserId: "member_b",
+        },
+      ],
+      notificationUserId: "member_a",
+    });
+
+    const response = await retellWebhookRoute.POST(signedRetellRequest({
+      payload: {
+        call: {
+          call_id: "retell_call_123",
+          data_storage_setting: "basic_attributes_only",
+        },
+        event: "call_analyzed",
+      },
+      url: "https://join.example.test/api/retell/webhook",
+    }));
+
+    expect(response.status).toBe(204);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_a",
+      mailboxItemId: "mailbox_item_a",
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_b",
+      mailboxItemId: "mailbox_item_b",
+    });
   });
 });
 

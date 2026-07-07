@@ -63,6 +63,30 @@ describe('assistant return contact kind', () => {
       returnContactKind: 'telegram',
     })
   })
+
+  it('prefers explicit hosted tool mailbox context over delivery idempotency inputs', () => {
+    const hostedToolContext = createAssistantHostedToolContext({
+      messageInput: createMessageInput({
+        channel: 'linq',
+        hostedDeliveryIdempotency: {
+          assistantTurnOrdinal: 1,
+          contextMailboxItemIds: [
+            'mailbox_reply',
+            'mailbox_setup_notification',
+          ],
+          conversationId: 'conversation-123',
+          inboundMailboxItemIds: ['mailbox_reply'],
+          recipientKey: null,
+        },
+      }),
+      session: createAssistantSession(),
+    })
+
+    expect(hostedToolContext.currentHostedMailboxItemIds()).toEqual([
+      'mailbox_reply',
+      'mailbox_setup_notification',
+    ])
+  })
 })
 
 function createMessageInput(input: {

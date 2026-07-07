@@ -143,6 +143,7 @@ interface AssistantAutoReplyReplyDecision {
   deliveryTarget: string | null
   deliveryMessageReactionsAvailable: boolean | null
   deliveryReplyToMessageId: string | null
+  hostedContextMailboxItemIds: readonly string[]
   kind: 'reply'
   operatorAuthority: AssistantOperatorAuthority
   primaryInput: AssistantAutoReplyPrimaryInput
@@ -503,6 +504,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   const activeTurnHooks = input.inputSource
     ? createAssistantAutoReplyActiveTurnInputHooks({
         context,
+        contextMailboxItemIds: decision.hostedContextMailboxItemIds,
         deliveryTarget: decision.deliveryTarget,
         executionContext: input.executionContext,
         onAcceptedContext(nextContext) {
@@ -519,6 +521,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     context,
     deliveryTarget: decision.deliveryTarget,
     executionContext: input.executionContext,
+    contextMailboxItemIds: decision.hostedContextMailboxItemIds,
   })
   const result = await executeAssistantAutoReply({
     acceptedTurnInputInitialInputs: buildAutoReplyAcceptedTurnInputItems({
@@ -1236,6 +1239,8 @@ async function evaluateAssistantAutoReplyGroup(input: {
       : {
           intentId: latestCrossSessionDelivery.intentId,
         },
+    hostedContextMailboxItemIds:
+      latestCrossSessionDelivery?.answeredMailboxItemIds ?? [],
     kind: 'reply',
     operatorAuthority: 'direct-operator',
     primaryInput: primaryReplyInput,
@@ -1346,6 +1351,7 @@ interface HostedAutoReplyDeliveryIdempotency {
 }
 
 function createHostedAutoReplyDeliveryIdempotency(input: {
+  contextMailboxItemIds?: readonly string[] | null
   context: AssistantAutoReplyGroupContext
   deliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
@@ -1411,9 +1417,14 @@ function createHostedAutoReplyDeliveryIdempotency(input: {
     input.context.firstItem.summary.conversation.actorId,
     input.context.firstItem.summary.conversation.threadId,
   ])
+  const contextMailboxItemIds = mergeUniqueHostedMailboxItemIds([
+    hostedMailboxItemIds,
+    input.contextMailboxItemIds ?? [],
+  ])
   const hostedDeliveryIdempotency = hostedMailboxItemIds.length === candidates.length
     ? {
         assistantTurnOrdinal,
+        contextMailboxItemIds,
         conversationId,
         inboundMailboxItemIds: hostedMailboxItemIds,
         recipientKey,
@@ -1438,6 +1449,24 @@ function stringifyHostedAutoReplyDeliveryKeyParts(
   parts: readonly (boolean | null | string | undefined)[],
 ): string {
   return JSON.stringify(parts.map((part) => part ?? null))
+}
+
+function mergeUniqueHostedMailboxItemIds(
+  groups: readonly (readonly string[])[],
+): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+  for (const group of groups) {
+    for (const itemId of group) {
+      const normalized = normalizeNullableString(itemId)
+      if (!normalized || seen.has(normalized)) {
+        continue
+      }
+      seen.add(normalized)
+      result.push(normalized)
+    }
+  }
+  return result
 }
 
 async function prepareAssistantAutoReplyInputWithContext(input: {
@@ -1623,6 +1652,7 @@ interface AssistantAutoReplyActiveTurnPendingAcceptance {
 
 function createAssistantAutoReplyActiveTurnInputHooks(input: {
   context: AssistantAutoReplyGroupContext
+  contextMailboxItemIds?: readonly string[] | null
   deliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
   onAcceptedContext(context: AssistantAutoReplyGroupContext): void
@@ -1691,6 +1721,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     )
     if (lateCaptureCandidates.length === 0) {
       return admitCapturelessAssistantInputs({
+        contextMailboxItemIds: input.contextMailboxItemIds,
         deliveryTarget: input.deliveryTarget,
         executionContext: input.executionContext,
         getContext: () => context,
@@ -1837,6 +1868,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     })
 
     const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
+      contextMailboxItemIds: input.contextMailboxItemIds,
       context: finalContext,
       deliveryTarget:
         acceptedInputDeliveryTargetForIdempotency ?? input.deliveryTarget,
@@ -2112,6 +2144,7 @@ function assistantAutoReplyGroupItemFromInputCandidate(
 }
 
 function admitCapturelessAssistantInputs(input: {
+  contextMailboxItemIds?: readonly string[] | null
   deliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
   getContext(): AssistantAutoReplyGroupContext
@@ -2183,6 +2216,7 @@ function admitCapturelessAssistantInputs(input: {
     expectedChannel: queuedContext.firstItem.summary.source,
   })
   const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
+    contextMailboxItemIds: input.contextMailboxItemIds,
     context: nextContext,
     deliveryTarget: deliveryTarget ?? input.deliveryTarget,
     executionContext: input.executionContext,
@@ -3486,6 +3520,7 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 }
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
+  answeredMailboxItemIds: string[]
   intentId: string
   message: string
   providerMessageIds: string[]
@@ -3539,6 +3574,10 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
     }
 
     return [{
+      answeredMailboxItemIds:
+        normalizeAssistantAutoReplyOutboxDeliveryMailboxItemIds(
+          intent.answeredMailboxItemIds ?? [],
+        ),
       intentId: intent.intentId,
       message,
       providerMessageIds: readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
@@ -3548,6 +3587,12 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       sessionId: intent.sessionId,
     }]
   })
+}
+
+function normalizeAssistantAutoReplyOutboxDeliveryMailboxItemIds(
+  itemIds: readonly string[],
+): string[] {
+  return mergeUniqueHostedMailboxItemIds([itemIds])
 }
 
 async function resolveAssistantAutoReplyExistingSession(input: {

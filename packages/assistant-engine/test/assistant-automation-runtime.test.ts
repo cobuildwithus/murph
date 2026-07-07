@@ -364,6 +364,7 @@ function createCaptureDetail(
 
 function createSentOutboxIntent(input: {
   actorId?: string | null
+  answeredMailboxItemIds?: string[]
   channel?: string
   identityId?: string | null
   intentId?: string
@@ -394,6 +395,7 @@ function createSentOutboxIntent(input: {
       target,
       targetKind: 'thread',
     },
+    answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     identityId: input.identityId ?? null,
     intentId: input.intentId ?? 'intent-1',
     message: input.message,
@@ -7483,6 +7485,94 @@ describe('assistant auto-reply runtime', () => {
       expect(afterLocalStateLossKey).toBe(firstImportKey)
     },
   )
+
+  it('adds exact native-reply mailbox anchors to hosted tool context without changing delivery idempotency', async () => {
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    replyMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:03:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createSentOutboxIntent({
+        answeredMailboxItemIds: ['mailbox_setup_notification'],
+        channel: 'linq',
+        intentId: 'intent-call-circle-setup',
+        message: 'setup prompt',
+        providerMessageId: 'linq-msg-call-circle-setup',
+        providerThreadId: 'real_thread_call_circle',
+        sentAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-notification',
+        target: 'real_thread_call_circle',
+        threadId: null,
+      }),
+    ])
+    const candidate = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'safe_thread_call_circle',
+      inputId: 'ain_callcirclecontext0000000000001',
+      mailboxRow: {
+        dedupeKey: 'dedupe_call_circle_reply',
+        eventId: 'event_call_circle_reply',
+        itemId: 'mailbox_call_circle_reply',
+        laneSeq: '53',
+        sourceRefItemId: 'blinded_call_circle_reply',
+      },
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      receivedAt: '2026-04-08T00:04:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'linq-msg-call-circle-setup',
+        threadId: 'real_thread_call_circle',
+      },
+      source: 'linq',
+      sourceMetadata: {
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: 'linq-msg-call-circle-setup',
+        service: null,
+      },
+      text: 'Tuesdays after five',
+    })
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(candidate),
+    ])
+    if (!context) {
+      throw new Error('expected hosted reply context')
+    }
+
+    await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      executionContext: {
+        hosted: {
+          memberId: 'member_call_circle',
+          userEnvKeys: [],
+        },
+      },
+      inboxServices: createInboxServices({
+        show: vi.fn(),
+      }),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    const sendInput = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput?.deliveryIdempotencyKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
+    expect(sendInput?.hostedDeliveryIdempotency?.inboundMailboxItemIds).toEqual([
+      'mailbox_call_circle_reply',
+    ])
+    expect(sendInput?.hostedDeliveryIdempotency?.contextMailboxItemIds).toEqual([
+      'mailbox_call_circle_reply',
+      'mailbox_setup_notification',
+    ])
+  })
 
   it('changes hosted delivery idempotency keys when route dimensions change', async () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(

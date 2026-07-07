@@ -22,12 +22,28 @@ import {
   requireHostedPhoneCallResultNotificationRoute,
 } from "./notification-route";
 import {
+  readCallCircleMatchIdFromPhoneCallRequestKey,
+} from "../call-circle/connector-call";
+import {
+  attachCallCirclePhoneCall,
+  markCallCircleMatchOutcome,
+} from "../call-circle/match-store";
+import {
+  appendCallCircleHandoffNotificationTx,
+  appendCallCircleOutcomeNotificationTx,
+  buildCallCircleHandoffNotificationEventId,
+  buildCallCircleOutcomeNotificationEventId,
+  type CallCircleNotificationSignal,
+  readExistingCallCircleNotificationSignalTx,
+  readCallCircleNotificationSignal,
+} from "../call-circle/notifications";
+import {
   readRetellMurphPhoneCallId,
   type RetellCallPayload,
 } from "./retell-payloads";
 
 interface HostedPhoneCallWebhookTx {
-  appendResultNotification(call: HostedPhoneCall): Promise<HostedPhoneCallResultNotificationAppend>;
+  appendResultNotification(call: HostedPhoneCall): Promise<HostedPhoneCallResultNotificationAppend | null>;
   hostedPhoneCall: {
     findUnique(input: {
       where:
@@ -76,10 +92,15 @@ interface RetellWebhookCallTarget {
 
 export interface RetellCallAnalyzedHandlingResult {
   notificationMailboxItemId: string | null;
+  notificationSignals: readonly HostedPhoneCallResultNotificationSignal[];
   notificationUserId: string | null;
 }
 
 interface HostedPhoneCallResultNotificationAppend {
+  notificationSignals: HostedPhoneCallResultNotificationSignal[];
+}
+
+interface HostedPhoneCallResultNotificationSignal {
   notificationMailboxItemId: string;
   notificationUserId: string;
 }
@@ -147,7 +168,9 @@ export async function handleRetellCallAnalyzed(input: {
     }
 
     if (target.call.analyzedAt && target.call.resultJson) {
-      return await tx.appendResultNotification(target.call);
+      return toRetellCallAnalyzedHandlingResult(
+        await tx.appendResultNotification(target.call),
+      );
     }
 
     const authorityWhere = readRetellCallAnalyzedAuthorityWhere({
@@ -181,7 +204,9 @@ export async function handleRetellCallAnalyzed(input: {
         },
       });
       if (stored.analyzedAt && stored.resultJson) {
-        return await tx.appendResultNotification(stored);
+        return toRetellCallAnalyzedHandlingResult(
+          await tx.appendResultNotification(stored),
+        );
       }
       return emptyRetellCallAnalyzedHandlingResult();
     }
@@ -191,14 +216,16 @@ export async function handleRetellCallAnalyzed(input: {
         id: target.call.id,
       },
     });
-    return await tx.appendResultNotification(stored);
+    return toRetellCallAnalyzedHandlingResult(
+      await tx.appendResultNotification(stored),
+    );
   });
 }
 
 async function appendPhoneCallResultNotificationTx(input: {
   call: HostedPhoneCall;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedPhoneCallResultNotificationAppend> {
+}): Promise<HostedPhoneCallResultNotificationAppend | null> {
   const call = input.call;
   if (!call?.resultJson) {
     throw hostedPhoneCallResultNotificationError(
@@ -213,6 +240,88 @@ async function appendPhoneCallResultNotificationTx(input: {
       "HOSTED_PHONE_CALL_RESULT_INVALID",
       "Hosted phone call result notification requires a valid stored result.",
     );
+  }
+
+  const callCircleMatchId = readCallCircleMatchIdFromPhoneCallRequestKey(call.requestKey);
+  if (callCircleMatchId) {
+    const outcomeAt = new Date();
+    const completed = result.data.outcome === "completed";
+    await attachCallCirclePhoneCall({
+      matchId: callCircleMatchId,
+      phoneCallId: call.id,
+      prisma: input.prisma,
+    });
+    const updatedMatch = await markCallCircleMatchOutcome({
+      matchId: callCircleMatchId,
+      now: outcomeAt,
+      outcome: completed ? "completed" : "text_handoff",
+      phoneCallId: call.id,
+      prisma: input.prisma,
+      status: completed ? "completed" : "dropped",
+    });
+    if (!updatedMatch) {
+      return await readExistingCallCircleResultNotificationSignalsTx({
+        completed,
+        matchId: callCircleMatchId,
+        prisma: input.prisma,
+      });
+    }
+    const match = await input.prisma.hostedCallCircleMatch.findUnique({
+      select: {
+        memberAId: true,
+        memberBId: true,
+      },
+      where: { id: callCircleMatchId },
+    });
+    if (match) {
+      const [memberANotification, memberBNotification] = await Promise.all([
+        completed
+          ? appendCallCircleOutcomeNotificationTx({
+              matchId: callCircleMatchId,
+              memberId: match.memberAId,
+              now: outcomeAt,
+              tx: input.prisma,
+            })
+          : appendCallCircleHandoffNotificationTx({
+              matchId: callCircleMatchId,
+              memberId: match.memberAId,
+              now: outcomeAt,
+              tx: input.prisma,
+            }),
+        completed
+          ? appendCallCircleOutcomeNotificationTx({
+              matchId: callCircleMatchId,
+              memberId: match.memberBId,
+              now: outcomeAt,
+              tx: input.prisma,
+            })
+          : appendCallCircleHandoffNotificationTx({
+              matchId: callCircleMatchId,
+              memberId: match.memberBId,
+              now: outcomeAt,
+              tx: input.prisma,
+            }),
+      ]);
+      return {
+        notificationSignals: [
+          readHostedPhoneCallResultNotificationSignal(
+            readCallCircleNotificationSignal({
+              memberId: match.memberAId,
+              notification: memberANotification,
+            }),
+          ),
+          readHostedPhoneCallResultNotificationSignal(
+            readCallCircleNotificationSignal({
+              memberId: match.memberBId,
+              notification: memberBNotification,
+            }),
+          ),
+        ].filter((signal): signal is HostedPhoneCallResultNotificationSignal =>
+          signal !== null
+        ),
+      };
+    }
+    return { notificationSignals: [] };
   }
 
   const brief = hostedPhoneCallBriefSchema.safeParse(call.briefJson);
@@ -252,16 +361,95 @@ async function appendPhoneCallResultNotificationTx(input: {
     tx: input.prisma,
   });
   return {
-    notificationMailboxItemId: appended.item.id,
-    notificationUserId: appended.item.userId,
+    notificationSignals: [{
+      notificationMailboxItemId: appended.item.id,
+      notificationUserId: appended.item.userId,
+    }],
   };
 }
 
 function emptyRetellCallAnalyzedHandlingResult(): RetellCallAnalyzedHandlingResult {
   return {
     notificationMailboxItemId: null,
+    notificationSignals: [],
     notificationUserId: null,
   };
+}
+
+async function readExistingCallCircleResultNotificationSignalsTx(input: {
+  completed: boolean;
+  matchId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedPhoneCallResultNotificationAppend | null> {
+  const match = await input.prisma.hostedCallCircleMatch.findUnique({
+    select: {
+      memberAId: true,
+      memberBId: true,
+    },
+    where: { id: input.matchId },
+  });
+  if (!match) return null;
+
+  const signals = await Promise.all([
+    readExistingCallCircleNotificationSignalTx({
+      eventId: buildCallCircleResultNotificationEventId({
+        completed: input.completed,
+        matchId: input.matchId,
+        memberId: match.memberAId,
+      }),
+      memberId: match.memberAId,
+      tx: input.prisma,
+    }),
+    readExistingCallCircleNotificationSignalTx({
+      eventId: buildCallCircleResultNotificationEventId({
+        completed: input.completed,
+        matchId: input.matchId,
+        memberId: match.memberBId,
+      }),
+      memberId: match.memberBId,
+      tx: input.prisma,
+    }),
+  ]);
+  const notificationSignals = signals.flatMap((result) => {
+    const signal = readHostedPhoneCallResultNotificationSignal(result.signal);
+    return signal ? [signal] : [];
+  });
+  return notificationSignals.length > 0 ? { notificationSignals } : null;
+}
+
+function buildCallCircleResultNotificationEventId(input: {
+  completed: boolean;
+  matchId: string;
+  memberId: string;
+}): string {
+  return input.completed
+    ? buildCallCircleOutcomeNotificationEventId(input)
+    : buildCallCircleHandoffNotificationEventId(input);
+}
+
+function toRetellCallAnalyzedHandlingResult(
+  append: HostedPhoneCallResultNotificationAppend | null,
+): RetellCallAnalyzedHandlingResult {
+  if (!append) {
+    return emptyRetellCallAnalyzedHandlingResult();
+  }
+  const firstSignal = append.notificationSignals[0] ?? null;
+  return {
+    notificationMailboxItemId: firstSignal?.notificationMailboxItemId ?? null,
+    notificationSignals: append.notificationSignals,
+    notificationUserId: firstSignal?.notificationUserId ?? null,
+  };
+}
+
+function readHostedPhoneCallResultNotificationSignal(
+  signal: CallCircleNotificationSignal | null,
+): HostedPhoneCallResultNotificationSignal | null {
+  return signal
+    ? {
+        notificationMailboxItemId: signal.mailboxItemId,
+        notificationUserId: signal.memberId,
+      }
+    : null;
 }
 
 function hostedPhoneCallResultNotificationError(

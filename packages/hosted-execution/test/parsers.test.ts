@@ -575,6 +575,19 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "post_call_circle_offer",
+      callCircleOffer: {
+        message:
+          "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+      },
+    })).toEqual({
+      action: "post_call_circle_offer",
+      callCircleOffer: {
+        message:
+          "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "revoke_own_email_share",
       selfOptOut: {
         senderHandle: "person@example.test",
@@ -645,6 +658,45 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/unsupported projection kind/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
+        action: "post_call_circle_offer",
+        callCircleOffer: { message: "   " },
+      })
+    ).toThrow(/must not be blank/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_call_circle_offer",
+        callCircleOffer: { message: "Like this for a fun Call Circle update." },
+      })
+    ).toThrow(/must say liking or reacting opts/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_call_circle_offer",
+        callCircleOffer: {
+          message:
+            "Like this to opt into Call Circle for this group. Murph will ask you privately for availability.",
+        },
+      })
+    ).toThrow(/shares their Murph profile name/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_call_circle_offer",
+        callCircleOffer: {
+          message:
+            "Like this to opt into Call Circle for this group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+        },
+      })
+    ).toThrow(/may add them to the group/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_call_circle_offer",
+        callCircleOffer: {
+          message:
+            "Like this if you do not want to join Call Circle for this group and do not want Murph to privately ask about your availability.",
+        },
+      })
+    ).toThrow(/must say liking or reacting opts/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
         action: "revoke_own_email_share",
         selfOptOut: { senderHandle: "person@example.test", source: "sms" },
       })
@@ -697,7 +749,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/not allowed/u);
   });
 
-  it("parses post_join_offer responses", () => {
+  it("parses posted group offer responses", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "post_join_offer",
       result: {
@@ -723,6 +775,38 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     })).toEqual({
       action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "send_failed",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "post_call_circle_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        status: "sent",
+      },
+    })).toEqual({
+      action: "post_call_circle_offer",
+      result: {
+        group: PARSED_GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        status: "sent",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "post_call_circle_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "send_failed",
+      },
+    })).toEqual({
+      action: "post_call_circle_offer",
       result: {
         group: null,
         status: "unavailable",
@@ -755,12 +839,14 @@ describe("parseHostedRuntimeGroupTool", () => {
           ...GROUP_SUMMARY,
           members: [
             {
+              callCircle: { enrolled: true, paused: false },
               grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
               handle: "+15551110000",
               memberId: "member_owner_123",
               role: "owner",
             },
             {
+              callCircle: null,
               grantedVaultShareProjectionKinds: [],
               handle: null,
               memberId: "member_joiner_456",
@@ -777,12 +863,14 @@ describe("parseHostedRuntimeGroupTool", () => {
           ...GROUP_SUMMARY,
           members: [
             {
+              callCircle: { enrolled: true, paused: false },
               grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
               handle: "+15551110000",
               memberId: "member_owner_123",
               role: "owner",
             },
             {
+              callCircle: null,
               grantedVaultShareProjectionKinds: [],
               handle: null,
               memberId: "member_joiner_456",

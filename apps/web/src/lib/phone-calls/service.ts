@@ -23,6 +23,11 @@ import type { PhoneCallRuntime } from "./types";
 
 const HOSTED_PHONE_CALL_UNSTARTED_REPLAY_GRACE_MS = 2 * 60 * 1_000;
 
+type HostedPhoneCallBeforeStart = (resolverInput: {
+  memberId: string;
+  phoneCallId: string;
+}) => Promise<boolean>;
+
 interface HostedPhoneCallStore {
   hostedPhoneCall: {
     create(input: {
@@ -49,20 +54,27 @@ interface HostedPhoneCallStore {
       data: {
         providerCallId?: string;
         resultJson?: HostedPhoneCallResult;
-        status: HostedPhoneCall["status"];
+        status?: HostedPhoneCall["status"];
+        updatedAt?: Date;
       };
       where: {
         analyzedAt?: null;
+        endedAt?: null;
         id: string;
         provider: "retell";
         providerCallId: null;
         status: "starting";
+        updatedAt?: Date;
       };
     }): Promise<{ count: number }>;
   };
 }
 
 export async function createHostedPhoneCall(input: {
+  beforeStart?: (resolverInput: {
+    memberId: string;
+    phoneCallId: string;
+  }) => Promise<boolean>;
   brief: HostedPhoneCallBrief;
   memberId: string;
   prisma?: HostedPhoneCallStore;
@@ -71,6 +83,11 @@ export async function createHostedPhoneCall(input: {
     memberId: string;
   }) => Promise<void>;
   runtime?: PhoneCallRuntime;
+  runtimeOptions?: {
+    openingLine?: string | null;
+    retellAgentId?: string | null;
+    retellAgentVersion?: string | null;
+  };
   transferNumberResolver?: (resolverInput: {
     memberId: string;
   }) => Promise<string | null>;
@@ -118,6 +135,39 @@ export async function createHostedPhoneCall(input: {
       actual: existing.briefJson,
       expected: input.brief,
     });
+    if (
+      input.beforeStart
+      && isUnstartedPhoneCallReservation(existing)
+    ) {
+      if (!isStaleUnstartedPhoneCallReservation(existing)) {
+        return {
+          phoneCallId: existing.id,
+          status: toStartResponseStatus(existing.status),
+        };
+      }
+      if (hasProviderStartAttemptMarker(existing)) {
+        const replayed = await failStaleUnstartedPhoneCallReservation({
+          call: existing,
+          prisma,
+        });
+        return {
+          phoneCallId: replayed.id,
+          status: toStartResponseStatus(replayed.status),
+        };
+      }
+      return await startHostedPhoneCallReservation({
+        beforeStart: input.beforeStart,
+        brief: input.brief,
+        call: existing,
+        memberId: input.memberId,
+        prisma,
+        requireResultNotificationRoute,
+        resolveTransferNumber,
+        runtime,
+        runtimeOptions: input.runtimeOptions,
+      });
+    }
+
     const replayed = await failStaleUnstartedPhoneCallReservation({
       call: existing,
       prisma,
@@ -128,23 +178,79 @@ export async function createHostedPhoneCall(input: {
     };
   }
 
+  return await startHostedPhoneCallReservation({
+    beforeStart: input.beforeStart,
+    brief: input.brief,
+    call,
+    memberId: input.memberId,
+    prisma,
+    requireResultNotificationRoute,
+    resolveTransferNumber,
+    runtime,
+    runtimeOptions: input.runtimeOptions,
+  });
+}
+
+async function startHostedPhoneCallReservation(input: {
+  beforeStart?: HostedPhoneCallBeforeStart;
+  brief: HostedPhoneCallBrief;
+  call: HostedPhoneCall;
+  memberId: string;
+  prisma: HostedPhoneCallStore;
+  requireResultNotificationRoute: (resolverInput: {
+    memberId: string;
+  }) => Promise<void>;
+  resolveTransferNumber: (resolverInput: {
+    memberId: string;
+  }) => Promise<string | null>;
+  runtime: PhoneCallRuntime;
+  runtimeOptions?: {
+    openingLine?: string | null;
+    retellAgentId?: string | null;
+    retellAgentVersion?: string | null;
+  };
+}): Promise<HostedPhoneCallStartResponse> {
+  let call = input.call;
   let started: Awaited<ReturnType<PhoneCallRuntime["start"]>>;
   try {
-    await requireResultNotificationRoute({
+    await input.requireResultNotificationRoute({
       memberId: input.memberId,
     });
-    started = await runtime.start({
+    if (
+      input.beforeStart &&
+      !await input.beforeStart({
+        memberId: input.memberId,
+        phoneCallId: call.id,
+      })
+    ) {
+      throw new Error("Hosted phone call start aborted.");
+    }
+    const providerStartAttempt = await markHostedPhoneCallProviderStartAttempt({
+      call,
+      prisma: input.prisma,
+    });
+    if (!providerStartAttempt.marked) {
+      return {
+        phoneCallId: providerStartAttempt.call.id,
+        status: toStartResponseStatus(providerStartAttempt.call.status),
+      };
+    }
+    call = providerStartAttempt.call;
+    started = await input.runtime.start({
       brief: input.brief,
       id: call.id,
       memberId: input.memberId,
+      openingLine: input.runtimeOptions?.openingLine ?? null,
+      retellAgentId: input.runtimeOptions?.retellAgentId ?? null,
+      retellAgentVersion: input.runtimeOptions?.retellAgentVersion ?? null,
       transferNumber: input.brief.allowTransferToUser
-        ? await resolveTransferNumber({
+        ? await input.resolveTransferNumber({
             memberId: input.memberId,
           })
         : null,
     });
   } catch (error) {
-    const updated = await prisma.hostedPhoneCall.updateMany({
+    const updated = await input.prisma.hostedPhoneCall.updateMany({
       data: {
         resultJson: {
           outcome: "not_completed",
@@ -162,7 +268,7 @@ export async function createHostedPhoneCall(input: {
     });
 
     if (updated.count === 0) {
-      const current = await prisma.hostedPhoneCall.findUniqueOrThrow({
+      const current = await input.prisma.hostedPhoneCall.findUniqueOrThrow({
         where: { id: call.id },
       });
       if (hasPhoneCallAdvancedBeyondStart(current)) {
@@ -176,7 +282,7 @@ export async function createHostedPhoneCall(input: {
     throw error;
   }
 
-  const updated = await prisma.hostedPhoneCall.updateMany({
+  const updated = await input.prisma.hostedPhoneCall.updateMany({
     data: {
       providerCallId: started.providerCallId,
       status: "calling",
@@ -191,7 +297,7 @@ export async function createHostedPhoneCall(input: {
   });
 
   if (updated.count === 0) {
-    const current = await prisma.hostedPhoneCall.findUniqueOrThrow({
+    const current = await input.prisma.hostedPhoneCall.findUniqueOrThrow({
       where: { id: call.id },
     });
     return {
@@ -228,6 +334,60 @@ function hasPhoneCallAdvancedBeyondStart(call: HostedPhoneCall): boolean {
     || call.analyzedAt !== null;
 }
 
+function isUnstartedPhoneCallReservation(call: HostedPhoneCall): boolean {
+  return call.status === "starting"
+    && call.providerCallId === null
+    && call.endedAt === null
+    && call.analyzedAt === null;
+}
+
+function isStaleUnstartedPhoneCallReservation(call: HostedPhoneCall): boolean {
+  return isUnstartedPhoneCallReservation(call)
+    && Date.now() - call.updatedAt.getTime() >= HOSTED_PHONE_CALL_UNSTARTED_REPLAY_GRACE_MS;
+}
+
+function hasProviderStartAttemptMarker(call: HostedPhoneCall): boolean {
+  return call.updatedAt.getTime() > call.createdAt.getTime();
+}
+
+async function markHostedPhoneCallProviderStartAttempt(input: {
+  call: HostedPhoneCall;
+  prisma: HostedPhoneCallStore;
+}): Promise<
+  | { call: HostedPhoneCall; marked: true }
+  | { call: HostedPhoneCall; marked: false }
+> {
+  const markedAt = new Date();
+  const updated = await input.prisma.hostedPhoneCall.updateMany({
+    data: { updatedAt: markedAt },
+    where: {
+      analyzedAt: null,
+      endedAt: null,
+      id: input.call.id,
+      provider: "retell",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: input.call.updatedAt,
+    },
+  });
+  if (updated.count === 0) {
+    return {
+      call: await input.prisma.hostedPhoneCall.findUniqueOrThrow({
+        where: { id: input.call.id },
+      }),
+      marked: false,
+    };
+  }
+
+  return {
+    call: {
+      ...input.call,
+      updatedAt: markedAt,
+    },
+    marked: true,
+  };
+}
+
 async function failStaleUnstartedPhoneCallReservation(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallStore;
@@ -237,11 +397,7 @@ async function failStaleUnstartedPhoneCallReservation(input: {
     summary: "Murph could not start the phone call.",
   };
   if (
-    input.call.status !== "starting"
-    || input.call.providerCallId !== null
-    || input.call.endedAt !== null
-    || input.call.analyzedAt !== null
-    || Date.now() - input.call.updatedAt.getTime() < HOSTED_PHONE_CALL_UNSTARTED_REPLAY_GRACE_MS
+    !isStaleUnstartedPhoneCallReservation(input.call)
   ) {
     return input.call;
   }

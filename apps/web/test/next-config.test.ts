@@ -103,6 +103,10 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
     ["packages/hosted-execution/src/connected-apps.ts"],
   );
   assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/call-circle"],
+    ["packages/hosted-execution/src/call-circle.ts"],
+  );
+  assert.deepEqual(
     tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/routes"],
     ["packages/hosted-execution/src/routes.ts"],
   );

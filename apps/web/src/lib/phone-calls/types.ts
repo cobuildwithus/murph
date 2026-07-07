@@ -6,6 +6,9 @@ export interface HostedPhoneCallRuntimeRecord {
   brief: HostedPhoneCallBrief;
   id: string;
   memberId: string;
+  openingLine?: string | null;
+  retellAgentId?: string | null;
+  retellAgentVersion?: string | null;
   transferNumber: string | null;
 }
 

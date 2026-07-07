@@ -135,8 +135,10 @@ function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): 
   return {
     from_number: requireEnv("RETELL_FROM_NUMBER"),
     to_number: call.brief.to.phoneNumber,
-    override_agent_id: requireEnv("RETELL_AGENT_ID"),
-    override_agent_version: process.env.RETELL_AGENT_VERSION?.trim() || "prod",
+    override_agent_id: call.retellAgentId?.trim() || requireEnv("RETELL_AGENT_ID"),
+    override_agent_version: call.retellAgentVersion?.trim()
+      || process.env.RETELL_AGENT_VERSION?.trim()
+      || "prod",
     ...(agentOverride ? { agent_override: agentOverride } : {}),
     metadata: {
       murph_phone_call_id: call.id,
@@ -208,7 +210,7 @@ function buildRetellDynamicVariables(
   return {
     call_brief: JSON.stringify(brief),
     murph_timezone: brief.timeZone,
-    opening_line: renderOpeningLine(brief),
+    opening_line: call.openingLine?.trim() || renderOpeningLine(brief),
     ...(publicBaseOrigin
       ? {
         [RETELL_PUBLIC_BASE_DYNAMIC_VARIABLE]: publicBaseOrigin,

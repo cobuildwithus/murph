@@ -27,12 +27,21 @@ export const POST = withJsonError(async (request: Request) => {
       break;
     case "call_analyzed": {
       const result = await handleRetellCallAnalyzed({ call: payload.call });
-      if (result.notificationMailboxItemId) {
-        await signalHostedMailboxAppendRuntime({
-          expectedUserId: result.notificationUserId,
-          mailboxItemId: result.notificationMailboxItemId,
-        });
-      }
+      const resultSignals = result.notificationSignals ?? [];
+      const notificationSignals = resultSignals.length > 0
+        ? resultSignals
+        : result.notificationMailboxItemId
+          ? [{
+              notificationMailboxItemId: result.notificationMailboxItemId,
+              notificationUserId: result.notificationUserId,
+            }]
+          : [];
+      await Promise.all(notificationSignals.map((signal) =>
+        signalHostedMailboxAppendRuntime({
+          expectedUserId: signal.notificationUserId,
+          mailboxItemId: signal.notificationMailboxItemId,
+        })
+      ));
       break;
     }
   }

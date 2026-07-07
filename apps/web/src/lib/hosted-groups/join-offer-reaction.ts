@@ -1,7 +1,17 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
+import {
+  appendCallCircleSetupNotificationTx,
+  readCallCircleNotificationSignal,
+  signalCallCircleNotificationRuntimesBestEffort,
+  type CallCircleNotificationAppendResult,
+} from "../call-circle/notifications";
+import {
+  canAppendCallCircleSetupNotification,
+  enrollCallCircleParticipant,
+} from "../call-circle/participant-store";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
@@ -13,7 +23,10 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
-import { acceptHostedGroupJoinOfferTx } from "./group-store";
+import {
+  acceptHostedGroupJoinOfferTx,
+  type HostedGroupFeatureActivationKind,
+} from "./group-store";
 
 type HostedGroupJoinOfferReactionSkipReason =
   | "launch_consent_missing"
@@ -88,15 +101,29 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     threadId: input.event.linqChatId,
   });
 
+  let accepted: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>> & {
+    callCircleSetupNotification: CallCircleNotificationAppendResult | null;
+  };
   try {
-    await input.prisma.$transaction(async (tx) =>
-      acceptHostedGroupJoinOfferTx({
+    accepted = await input.prisma.$transaction(async (tx) => {
+      const offerAcceptance = await acceptHostedGroupJoinOfferTx({
         memberId: member.id,
         messageLookupKeyReadCandidates,
         now: input.event.providerCreatedAt,
         threadIdentityLookupKeyReadCandidates,
         tx,
-      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      });
+      return {
+        ...offerAcceptance,
+        callCircleSetupNotification: await applyHostedGroupOfferFeatureActivationsTx({
+          featureActivations: offerAcceptance.featureActivations,
+          groupId: offerAcceptance.groupId,
+          memberId: member.id,
+          now: input.event.providerCreatedAt,
+          tx,
+        }),
+      };
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch (error) {
     const reason = readHostedGroupJoinOfferReactionSkipReason(error);
     if (!reason) {
@@ -107,7 +134,49 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
 
+  const callCircleSetupSignal = accepted.callCircleSetupNotification
+    ? readCallCircleNotificationSignal({
+      memberId: member.id,
+      notification: accepted.callCircleSetupNotification,
+    })
+    : null;
+  if (callCircleSetupSignal) {
+    await signalCallCircleNotificationRuntimesBestEffort([callCircleSetupSignal]);
+  }
+
   return { status: "accepted", reason: "accepted" };
+}
+
+async function applyHostedGroupOfferFeatureActivationsTx(input: {
+  featureActivations: readonly HostedGroupFeatureActivationKind[];
+  groupId: string;
+  memberId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<CallCircleNotificationAppendResult | null> {
+  if (!input.featureActivations.includes("call-circle.enroll.v0")) {
+    return null;
+  }
+  await enrollCallCircleParticipant({
+    groupId: input.groupId,
+    memberId: input.memberId,
+    now: input.now,
+    prisma: input.tx,
+  });
+  if (!await canAppendCallCircleSetupNotification({
+    groupId: input.groupId,
+    memberId: input.memberId,
+    prisma: input.tx,
+  })) {
+    return null;
+  }
+  const notification = await appendCallCircleSetupNotificationTx({
+    groupId: input.groupId,
+    memberId: input.memberId,
+    now: input.now,
+    tx: input.tx,
+  });
+  return notification;
 }
 
 function normalizeLookupKeyCandidates(values: readonly (string | null | undefined)[]): string[] {

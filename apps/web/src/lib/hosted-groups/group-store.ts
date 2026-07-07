@@ -37,7 +37,28 @@ import { normalizeHostedGroupKind, type HostedGroupKind } from "./types";
 
 export type HostedGroupsReadClient = PrismaClient | Prisma.TransactionClient;
 
+export const HOSTED_GROUP_OFFER_SCOPE_SCHEMA = "murph.hosted-group.offer-scope.v1" as const;
+
+export const HOSTED_GROUP_FEATURE_ACTIVATION_KINDS = [
+  "call-circle.enroll.v0",
+] as const;
+
+export type HostedGroupFeatureActivationKind =
+  (typeof HOSTED_GROUP_FEATURE_ACTIVATION_KINDS)[number];
+
+export interface HostedGroupOfferScope {
+  featureActivations: HostedGroupFeatureActivationKind[];
+  schema: typeof HOSTED_GROUP_OFFER_SCOPE_SCHEMA;
+  vaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+}
+
+export interface HostedGroupOfferScopeInput {
+  featureActivations?: readonly HostedGroupFeatureActivationKind[] | null;
+  vaultShareProjectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
+}
+
 export interface HostedGroupMemberRosterEntry {
+  callCircle: { enrolled: boolean; paused: boolean } | null;
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   handle: string | null;
   memberId: string;
@@ -82,13 +103,15 @@ export interface HostedGroupJoinOfferBindingTxResult {
   groupId: string;
   messageIdSuffix: string | null;
   messageLookupKey: string;
-  projectionKinds: HostedVaultShareProjectionKind[];
+  offerScope: HostedGroupOfferScope;
 }
 
 export interface HostedGroupJoinOfferAcceptanceTxResult
   extends HostedGroupJoinAcceptanceTxResult {
   joinCode: string;
+  offerScope: HostedGroupOfferScope;
   messageLookupKey: string;
+  featureActivations: HostedGroupFeatureActivationKind[];
   selectedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
 }
 
@@ -421,8 +444,8 @@ export async function acceptHostedGroupJoinCodeTx(input: {
 export async function recordHostedGroupJoinOfferTx(input: {
   groupId: string;
   messageId: string | null;
+  offerScope: HostedGroupOfferScopeInput;
   postedAt: Date;
-  projectionKinds: readonly HostedVaultShareProjectionKind[];
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferBindingTxResult> {
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
@@ -434,7 +457,7 @@ export async function recordHostedGroupJoinOfferTx(input: {
       retryable: true,
     });
   }
-  const projectionKinds = normalizeHostedVaultShareProjectionKinds(input.projectionKinds);
+  const offerScope = normalizeHostedGroupOfferScopeInput(input.offerScope);
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
@@ -454,8 +477,8 @@ export async function recordHostedGroupJoinOfferTx(input: {
       groupId: input.groupId,
       messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
       messageLookupKey,
+      offerScopeJson: toHostedGroupOfferScopeJson(offerScope),
       postedAt: input.postedAt,
-      projectionKindsJson: toHostedGroupJoinOfferProjectionKindsJson(projectionKinds),
     },
   });
 
@@ -463,7 +486,7 @@ export async function recordHostedGroupJoinOfferTx(input: {
     groupId: input.groupId,
     messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
     messageLookupKey,
-    projectionKinds,
+    offerScope,
   };
 }
 
@@ -518,7 +541,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     select: {
       groupId: true,
       messageLookupKey: true,
-      projectionKindsJson: true,
+      offerScopeJson: true,
       revokedAt: true,
       group: {
         select: {
@@ -573,9 +596,8 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     });
   }
 
-  const selectedVaultShareProjectionKinds = normalizeHostedVaultShareProjectionKinds(
-    offer.projectionKindsJson,
-  );
+  const offerScope = normalizeHostedGroupOfferScope(offer.offerScopeJson);
+  const selectedVaultShareProjectionKinds = offerScope.vaultShareProjectionKinds;
   const accepted = await acceptHostedGroupJoinTx({
     additiveOnly: true,
     groupId: group.id,
@@ -588,8 +610,10 @@ export async function acceptHostedGroupJoinOfferTx(input: {
 
   return {
     ...accepted,
+    featureActivations: offerScope.featureActivations,
     joinCode: group.joinCode,
     messageLookupKey: offer.messageLookupKey,
+    offerScope,
     selectedVaultShareProjectionKinds,
   };
 }
@@ -869,10 +893,68 @@ function toHostedGroupJoinPolicyJson(policy: ReturnType<typeof mergeHostedGroupJ
   return JSON.parse(JSON.stringify(policy)) as Prisma.InputJsonValue;
 }
 
-function toHostedGroupJoinOfferProjectionKindsJson(
-  projectionKinds: readonly HostedVaultShareProjectionKind[],
-): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(normalizeHostedVaultShareProjectionKinds(projectionKinds))) as Prisma.InputJsonValue;
+function normalizeHostedGroupOfferScopeInput(
+  input: HostedGroupOfferScopeInput,
+): HostedGroupOfferScope {
+  return {
+    featureActivations: normalizeHostedGroupFeatureActivationKinds(input.featureActivations ?? []),
+    schema: HOSTED_GROUP_OFFER_SCOPE_SCHEMA,
+    vaultShareProjectionKinds: normalizeHostedVaultShareProjectionKinds(
+      input.vaultShareProjectionKinds ?? [],
+    ),
+  };
+}
+
+export function normalizeHostedGroupOfferScope(value: unknown): HostedGroupOfferScope {
+  if (Array.isArray(value)) {
+    return {
+      featureActivations: [],
+      schema: HOSTED_GROUP_OFFER_SCOPE_SCHEMA,
+      vaultShareProjectionKinds: normalizeHostedVaultShareProjectionKinds(value),
+    };
+  }
+  if (!isPlainObject(value) || value.schema !== HOSTED_GROUP_OFFER_SCOPE_SCHEMA) {
+    return {
+      featureActivations: [],
+      schema: HOSTED_GROUP_OFFER_SCOPE_SCHEMA,
+      vaultShareProjectionKinds: [],
+    };
+  }
+  return {
+    featureActivations: normalizeHostedGroupFeatureActivationKinds(value.featureActivations),
+    schema: HOSTED_GROUP_OFFER_SCOPE_SCHEMA,
+    vaultShareProjectionKinds: normalizeHostedVaultShareProjectionKinds(
+      value.vaultShareProjectionKinds,
+    ),
+  };
+}
+
+function normalizeHostedGroupFeatureActivationKinds(
+  value: unknown,
+): HostedGroupFeatureActivationKind[] {
+  if (!Array.isArray(value)) return [];
+  const selected: HostedGroupFeatureActivationKind[] = [];
+  for (const item of value) {
+    if (isHostedGroupFeatureActivationKind(item) && !selected.includes(item)) {
+      selected.push(item);
+    }
+  }
+  return selected;
+}
+
+function isHostedGroupFeatureActivationKind(
+  value: unknown,
+): value is HostedGroupFeatureActivationKind {
+  return typeof value === "string"
+    && (HOSTED_GROUP_FEATURE_ACTIVATION_KINDS as readonly string[]).includes(value);
+}
+
+function toHostedGroupOfferScopeJson(scope: HostedGroupOfferScope): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(scope)) as Prisma.InputJsonValue;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -948,6 +1030,7 @@ async function readHostedGroupSummaryById(
     kind: group.kind,
     memberCount: group.members.length,
     members: await readHostedGroupMemberRoster(prisma, {
+      groupId,
       members: group.members,
       runtimeMemberId: group.runtimeMemberId,
     }),
@@ -966,12 +1049,31 @@ async function readHostedGroupSummaryById(
 async function readHostedGroupMemberRoster(
   prisma: HostedGroupsReadClient,
   input: {
+    groupId: string;
     members: readonly { memberId: string; role: string }[];
     runtimeMemberId: string | null;
   },
 ): Promise<HostedGroupMemberRosterEntry[]> {
   if (input.members.length === 0) {
     return [];
+  }
+
+  const callCircleByMemberId = new Map<
+    string,
+    { enrolled: boolean; paused: boolean }
+  >();
+  const participants = await prisma.hostedCallCircleParticipant.findMany({
+    select: { memberId: true, status: true },
+    where: {
+      groupId: input.groupId,
+      memberId: { in: input.members.map((member) => member.memberId) },
+    },
+  });
+  for (const participant of participants) {
+    callCircleByMemberId.set(participant.memberId, {
+      enrolled: participant.status === "enrolled",
+      paused: participant.status === "paused",
+    });
   }
 
   const grantsByMemberId = new Map<string, HostedVaultShareProjectionKind[]>();
@@ -1000,6 +1102,7 @@ async function readHostedGroupMemberRoster(
       prisma,
     });
     return {
+      callCircle: callCircleByMemberId.get(member.memberId) ?? null,
       grantedVaultShareProjectionKinds: grantsByMemberId.get(member.memberId) ?? [],
       handle: identity?.phoneNumber ?? null,
       memberId: member.memberId,

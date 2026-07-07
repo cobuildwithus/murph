@@ -2,6 +2,9 @@ import {
   HOSTED_CONNECTED_APPS_PATH,
 } from "@murphai/hosted-execution/connected-apps";
 import {
+  HOSTED_CALL_CIRCLE_RESPOND_PATH,
+} from "@murphai/hosted-execution/call-circle";
+import {
   HOSTED_PHONE_CALLS_PATH,
 } from "@murphai/hosted-execution/phone-calls";
 import {
@@ -58,6 +61,7 @@ export type HostedRunnerWebControlOperation =
   | "action_approval_request"
   | "assistant_runtime_issue_export"
   | "browser_vault_replica_publish"
+  | "call_circle_respond"
   | "codex_auth_update"
   | "computer_use"
   | "connected_apps"
@@ -118,6 +122,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_ISSUE_RECORD_PATH, "assistant_runtime_issue_export"],
   [HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH, "product_feedback_recording"],
   [HOSTED_RUNTIME_USAGE_RECORD_PATH, "usage_recording"],
+  [HOSTED_CALL_CIRCLE_RESPOND_PATH, "call_circle_respond"],
   [HOSTED_PHONE_CALLS_PATH, "phone_call_start"],
   [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH, "vault_share_deliver"],
 ]);

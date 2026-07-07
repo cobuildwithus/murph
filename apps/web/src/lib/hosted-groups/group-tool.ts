@@ -5,6 +5,7 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
+  type HostedRuntimeGroupPostCallCircleOfferRequest,
   type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupToolAction,
   type HostedRuntimeGroupToolLinqThreadContext,
@@ -63,6 +64,7 @@ import {
   readHostedGroupByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
+  type HostedGroupFeatureActivationKind,
 } from "./group-store";
 import {
   normalizeHostedVaultShareProjectionKinds,
@@ -71,6 +73,7 @@ import {
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
+const HOSTED_CALL_CIRCLE_OFFERS_ENABLED_ENV = "HOSTED_CALL_CIRCLE_OFFERS_ENABLED";
 
 const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
 const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
@@ -81,6 +84,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   create_join_link: "owner_active",
+  post_call_circle_offer: "owner_active",
   post_join_offer: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
@@ -112,6 +116,14 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "post_join_offer") {
     return handleHostedRuntimeGroupPostJoinOffer({
       joinOffer: input.request.joinOffer ?? null,
+      linqThread: input.request.linqThread ?? null,
+      memberId: input.memberId,
+    });
+  }
+
+  if (input.request.action === "post_call_circle_offer") {
+    return handleHostedRuntimeGroupPostCallCircleOffer({
+      callCircleOffer: input.request.callCircleOffer,
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
@@ -357,6 +369,72 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     action: "post_join_offer",
     result: { group: null, status: "unavailable", unavailableReason },
   });
+  const projectionKinds = normalizeHostedVaultShareProjectionKinds(
+    input.joinOffer?.projectionKinds ?? [],
+  );
+  const messageTemplate = normalizeHostedGroupJoinOfferMessageTemplate(
+    input.joinOffer?.messageTemplate ?? null,
+  );
+  if (
+    !messageTemplate
+    || !isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate)
+  ) {
+    return unavailable("join_offer_message_template_unavailable");
+  }
+  return postHostedRuntimeGroupOffer({
+    action: "post_join_offer",
+    featureActivations: [],
+    idempotencyKeyPrefix: "group-join-offer",
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+    message: ({ joinUrl }) => buildHostedGroupJoinOfferMessage({
+      joinUrl,
+      messageTemplate,
+      projectionKinds,
+    }),
+    projectionKinds,
+  });
+}
+
+async function handleHostedRuntimeGroupPostCallCircleOffer(input: {
+  callCircleOffer: HostedRuntimeGroupPostCallCircleOfferRequest;
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  if (!isHostedCallCircleOffersEnabled()) {
+    return {
+      action: "post_call_circle_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "call_circle_offers_disabled",
+      },
+    };
+  }
+  return postHostedRuntimeGroupOffer({
+    action: "post_call_circle_offer",
+    featureActivations: ["call-circle.enroll.v0"],
+    idempotencyKeyPrefix: "group-call-circle-offer",
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+    message: input.callCircleOffer.message,
+    projectionKinds: [],
+  });
+}
+
+async function postHostedRuntimeGroupOffer(input: {
+  action: "post_call_circle_offer" | "post_join_offer";
+  featureActivations: readonly HostedGroupFeatureActivationKind[];
+  idempotencyKeyPrefix: string;
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+  message: string | ((input: { joinUrl: string }) => string);
+  projectionKinds: readonly HostedVaultShareProjectionKind[];
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: input.action,
+    result: { group: null, status: "unavailable", unavailableReason },
+  });
 
   const publicBaseUrl = resolveHostedPublicBaseUrl();
   if (!publicBaseUrl) {
@@ -372,18 +450,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const projectionKinds = normalizeHostedVaultShareProjectionKinds(
-    input.joinOffer?.projectionKinds ?? [],
-  );
-  const messageTemplate = normalizeHostedGroupJoinOfferMessageTemplate(
-    input.joinOffer?.messageTemplate ?? null,
-  );
-  if (
-    !messageTemplate
-    || !isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate)
-  ) {
-    return unavailable("join_offer_message_template_unavailable");
-  }
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
       memberId: input.memberId,
@@ -396,7 +462,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
       now,
-      requestedVaultShareProjectionKinds: projectionKinds,
+      requestedVaultShareProjectionKinds: input.projectionKinds,
       tx,
     });
     return { kind: "ok" as const, ownerMemberId: ownerAccess.ownerMemberId, ...result };
@@ -412,17 +478,15 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   if (!joinUrl) {
     return unavailable("join_links_unavailable");
   }
+  const message = typeof input.message === "string"
+    ? input.message
+    : input.message({ joinUrl });
 
-  const message = buildHostedGroupJoinOfferMessage({
-    joinUrl,
-    messageTemplate,
-    projectionKinds,
-  });
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
     sent = await sendHostedLinqChatMessage({
       chatId: authorized.chatId,
-      idempotencyKey: `group-join-offer:${created.group.id}:${now.toISOString()}`,
+      idempotencyKey: `${input.idempotencyKeyPrefix}:${created.group.id}:${now.toISOString()}`,
       message,
     });
   } catch {
@@ -437,8 +501,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       await recordHostedGroupJoinOfferTx({
         groupId: created.group.id,
         messageId: sent.messageId,
+        offerScope: {
+          featureActivations: input.featureActivations,
+          vaultShareProjectionKinds: input.projectionKinds,
+        },
         postedAt: now,
-        projectionKinds,
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -454,7 +521,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   }
 
   return {
-    action: "post_join_offer",
+    action: input.action,
     result: { group: created.group, joinUrl, status: "sent" },
   };
 }
@@ -505,6 +572,12 @@ function renderHostedGroupJoinOfferShareScope(
   return labels.length > 0
     ? `your Murph profile name and ${formatHumanList(labels)}`
     : "your Murph profile name";
+}
+
+function isHostedCallCircleOffersEnabled(
+  source: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return source[HOSTED_CALL_CIRCLE_OFFERS_ENABLED_ENV]?.trim() === "1";
 }
 
 function formatHumanList(values: readonly string[]): string {

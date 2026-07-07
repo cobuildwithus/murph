@@ -761,6 +761,7 @@ export type HostedRuntimeGroupToolAction =
   | "read_current"
   | "create_join_link"
   | "post_join_offer"
+  | "post_call_circle_offer"
   | "read_chat_participants"
   | "share_contact_card"
   | "revoke_own_email_share";
@@ -780,6 +781,7 @@ export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
 
 export interface HostedRuntimeGroupMemberSummary {
+  callCircle: { enrolled: boolean; paused: boolean } | null;
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   handle: string | null;
   memberId: string;
@@ -813,6 +815,85 @@ export interface HostedRuntimeGroupPostJoinOfferRequest {
   projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
 }
 
+export const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH = 1_000;
+
+const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_REACTION_PATTERN =
+  /\b(like|heart|react|reaction)\b/u;
+const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_OPT_IN_PATTERN =
+  /\b(opt(?:s|ed|ing)?\s+in(?:to)?|included?|join(?:s|ed|ing)?|enroll(?:s|ed|ing)?|sign(?:s|ed|ing)?\s+up)\b/u;
+const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_NEGATION_PATTERN =
+  /\b(no|not|never|without|don't|do\s+not|doesn't|does\s+not|won't|will\s+not|can't|cannot)\b/u;
+const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_PRIVATE_PATTERN =
+  /\b(private|privately|direct(?:ly)?|dm|message|text)\b/u;
+const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_AVAILABILITY_PATTERN =
+  /\b(availability|available|free|time|times|schedule)\b/u;
+const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_GROUP_SCOPE_PATTERN =
+  /\b(group|chat)\b/u;
+const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_GROUP_MEMBERSHIP_PATTERN =
+  /\b(?:add(?:s|ed|ing)?\s+(?:you|them|the\s+liker|members?)\s+to\s+(?:the\s+)?(?:group|chat)|join(?:s|ed|ing)?\s+(?:the\s+)?(?:group|chat)|group\s+member(?:ship)?|member(?:ship)?\s+(?:in|of)\s+(?:the\s+)?(?:group|chat))\b/u;
+const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_SHARE_PATTERN =
+  /\b(share(?:s|d|ing)?|show(?:s|n|ing)?|visible|grant(?:s|ed|ing)?)\b/u;
+const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_PROFILE_NAME_PATTERN =
+  /\b(?:murph\s+)?profile\s+(?:display\s+)?name\b|\bdisplay\s+name\b/u;
+
+export function isHostedRuntimeGroupCallCircleOfferConsentMessage(
+  message: string,
+): boolean {
+  const normalized = message
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US");
+  if (HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_NEGATION_PATTERN.test(normalized)) {
+    return false;
+  }
+  return /\bcall\s+circle\b/u.test(normalized)
+    && HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_GROUP_SCOPE_PATTERN.test(normalized)
+    && hasNearbyCallCircleConsentPhrase({
+      first: HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_REACTION_PATTERN,
+      second: HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_OPT_IN_PATTERN,
+      text: normalized,
+    })
+    && HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_GROUP_MEMBERSHIP_PATTERN.test(normalized)
+    && hasNearbyCallCircleConsentPhrase({
+      first: HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_SHARE_PATTERN,
+      second: HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_PROFILE_NAME_PATTERN,
+      text: normalized,
+    })
+    && hasNearbyCallCircleConsentPhrase({
+      first: HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_PRIVATE_PATTERN,
+      second: HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_AVAILABILITY_PATTERN,
+      text: normalized,
+    });
+}
+
+function hasNearbyCallCircleConsentPhrase(input: {
+  first: RegExp;
+  second: RegExp;
+  text: string;
+}): boolean {
+  return hasOrderedNearbyCallCircleConsentPhrase(input)
+    || hasOrderedNearbyCallCircleConsentPhrase({
+      first: input.second,
+      second: input.first,
+      text: input.text,
+    });
+}
+
+function hasOrderedNearbyCallCircleConsentPhrase(input: {
+  first: RegExp;
+  second: RegExp;
+  text: string;
+}): boolean {
+  const first = input.first.exec(input.text);
+  if (!first) return false;
+  const afterFirst = input.text.slice(first.index + first[0].length);
+  const second = input.second.exec(afterFirst);
+  return !!second && second.index <= 160;
+}
+
+export interface HostedRuntimeGroupPostCallCircleOfferRequest {
+  message: string;
+}
+
 /**
  * Injected by the hosted runtime from the current wake's Linq delivery
  * context; never supplied by the model. The web handler asserts the authority
@@ -843,6 +924,11 @@ export type HostedRuntimeGroupToolRequest =
       joinOffer?: HostedRuntimeGroupPostJoinOfferRequest | null;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
+  | {
+      action: "post_call_circle_offer";
+      callCircleOffer: HostedRuntimeGroupPostCallCircleOfferRequest;
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
   | { action: "read_chat_participants"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
   | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
   | {
@@ -866,6 +952,12 @@ export type HostedRuntimeGroupToolResponse =
     }
   | {
       action: "post_join_offer";
+      result:
+        | { status: "sent"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "post_call_circle_offer";
       result:
         | { status: "sent"; group: HostedRuntimeGroupSummary; joinUrl: string }
         | { status: "unavailable"; unavailableReason: string; group: null };

@@ -330,6 +330,29 @@ enum HostedPhoneCallStatus {
   failed
 }
 
+enum HostedCallCircleParticipantStatus {
+  enrolled
+  paused
+}
+
+enum HostedCallCircleMatchStatus {
+  proposed
+  asking
+  both_confirmed
+  bridging
+  completed
+  dropped
+  expired
+  canceled
+}
+
+enum HostedCallCircleMatchResponse {
+  pending
+  confirmed
+  declined
+  countered
+}
+
 model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
@@ -373,6 +396,9 @@ model HostedMember {
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
   phoneCalls                     HostedPhoneCall[]
+  callCircleParticipants         HostedCallCircleParticipant[] @relation("HostedCallCircleParticipantMember")
+  callCircleMatchesAsA           HostedCallCircleMatch[]       @relation("HostedCallCircleMatchMemberA")
+  callCircleMatchesAsB           HostedCallCircleMatch[]       @relation("HostedCallCircleMatchMemberB")
   productFeedback                HostedProductFeedback[]
   sensitiveActionChallenges      HostedSensitiveActionChallenge[]
   threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
@@ -559,11 +585,63 @@ model HostedPhoneCall {
   createdAt      DateTime              @default(now()) @map("created_at")
   updatedAt      DateTime              @updatedAt @map("updated_at")
   member         HostedMember          @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  callCircleMatches HostedCallCircleMatch[]
 
   @@unique([memberId, requestKey])
   @@index([memberId, createdAt])
   @@index([status, updatedAt])
   @@map("hosted_phone_call")
+}
+
+model HostedCallCircleParticipant {
+  id              String                            @id
+  groupId         String                            @map("group_id")
+  memberId        String                            @map("member_id")
+  status          HostedCallCircleParticipantStatus @default(enrolled)
+  preferencesJson Json?                             @map("preferences_json")
+  lastMatchedAt   DateTime?                         @map("last_matched_at")
+  createdAt       DateTime                          @default(now()) @map("created_at")
+  updatedAt       DateTime                          @updatedAt @map("updated_at")
+  group           HostedGroup                       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  member          HostedMember                      @relation("HostedCallCircleParticipantMember", fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, memberId])
+  @@index([memberId])
+  @@map("hosted_call_circle_participant")
+}
+
+model HostedCallCircleMatch {
+  id            String                        @id
+  groupId       String                        @map("group_id")
+  memberAId     String                        @map("member_a_id")
+  memberBId     String                        @map("member_b_id")
+  windowStartAt DateTime                      @map("window_start_at")
+  windowEndAt   DateTime                      @map("window_end_at")
+  status        HostedCallCircleMatchStatus   @default(proposed)
+  sideAResponse HostedCallCircleMatchResponse @default(pending) @map("side_a_response")
+  sideBResponse HostedCallCircleMatchResponse @default(pending) @map("side_b_response")
+  counterUsedA  Boolean                       @default(false) @map("counter_used_a")
+  counterUsedB  Boolean                       @default(false) @map("counter_used_b")
+  amAskedAt     DateTime?                     @map("am_asked_at")
+  finalAskedAt  DateTime?                     @map("final_asked_at")
+  claimedAt     DateTime?                     @map("claimed_at")
+  endedAt       DateTime?                     @map("ended_at")
+  outcome       String?
+  phoneCallId   String?                       @map("phone_call_id")
+  createdAt     DateTime                      @default(now()) @map("created_at")
+  updatedAt     DateTime                      @updatedAt @map("updated_at")
+  group         HostedGroup                   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  memberA       HostedMember                  @relation("HostedCallCircleMatchMemberA", fields: [memberAId], references: [id], onDelete: Cascade)
+  memberB       HostedMember                  @relation("HostedCallCircleMatchMemberB", fields: [memberBId], references: [id], onDelete: Cascade)
+  phoneCall     HostedPhoneCall?              @relation(fields: [phoneCallId], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, memberAId, memberBId, windowStartAt])
+  @@index([groupId, createdAt])
+  @@index([status, windowStartAt])
+  @@index([memberAId])
+  @@index([memberBId])
+  @@index([phoneCallId])
+  @@map("hosted_call_circle_match")
 }
 
 model HostedMemberIdentity {
@@ -1058,6 +1136,8 @@ model HostedGroup {
   runtimeMember     HostedMember?       @relation("HostedGroupRuntimeMember", fields: [runtimeMemberId], references: [id], onDelete: SetNull)
   members           HostedGroupMember[]
   joinOffers        HostedGroupJoinOffer[]
+  callCircleParticipants HostedCallCircleParticipant[]
+  callCircleMatches      HostedCallCircleMatch[]
 
   @@index([ownerMemberId])
   @@index([kind])
@@ -1069,7 +1149,7 @@ model HostedGroupJoinOffer {
   groupId             String      @map("group_id")
   messageLookupKey    String      @unique @map("message_lookup_key")
   messageIdSuffix     String?     @map("message_id_suffix")
-  projectionKindsJson Json        @map("projection_kinds_json")
+  offerScopeJson      Json        @map("projection_kinds_json")
   postedAt            DateTime    @map("posted_at")
   revokedAt           DateTime?   @map("revoked_at")
   group               HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)

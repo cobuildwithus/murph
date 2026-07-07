@@ -13,6 +13,7 @@ import { createHostedWebActionApprovalPort } from "./action-approval-port.ts";
 import { createCloudflareBrowserVaultReplicaPort } from "./browser-vault-replica-port.ts";
 import { createHostedRuntimeCodexAuthPort } from "./codex-auth-port.ts";
 import { createHostedWebConnectedAppsPort } from "./connected-apps-port.ts";
+import { createHostedWebCallCirclePort } from "./call-circle-port.ts";
 import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
 import { createCloudflareEffectsPort } from "./effects-port.ts";
 import { createHostedRuntimeFamilyPlanToolPort } from "./family-plan-tool-port.ts";
@@ -126,6 +127,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport,
           }),
           connectedApps: createHostedWebConnectedAppsPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+          callCircle: createHostedWebCallCirclePort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

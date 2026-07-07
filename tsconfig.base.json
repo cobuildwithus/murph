@@ -64,6 +64,9 @@
       "@murphai/hosted-execution/cli-runtime-bridge": [
         "packages/hosted-execution/src/cli-runtime-bridge.ts"
       ],
+      "@murphai/hosted-execution/call-circle": [
+        "packages/hosted-execution/src/call-circle.ts"
+      ],
       "@murphai/hosted-execution/contracts": [
         "packages/hosted-execution/src/contracts.ts"
       ],

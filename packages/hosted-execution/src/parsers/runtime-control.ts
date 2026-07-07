@@ -88,6 +88,8 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH,
+  isHostedRuntimeGroupCallCircleOfferConsentMessage,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
@@ -95,6 +97,7 @@ import {
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupKind,
+  type HostedRuntimeGroupPostCallCircleOfferRequest,
   type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMemberSummary,
@@ -734,6 +737,27 @@ export function parseHostedRuntimeGroupToolRequest(
               record.linqThread,
               "Hosted runtime group tool post_join_offer request linqThread",
             ),
+      }),
+    };
+  }
+  if (action === "post_call_circle_offer") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "callCircleOffer", "linqThread"]),
+      "Hosted runtime group tool post_call_circle_offer request",
+    );
+    return {
+      action,
+      callCircleOffer: parseHostedRuntimeGroupPostCallCircleOfferRequest(
+        record.callCircleOffer,
+      ),
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool post_call_circle_offer request linqThread",
+            ),
           }),
     };
   }
@@ -825,6 +849,36 @@ function parseHostedRuntimeGroupJoinOfferMessageTemplate(value: unknown): string
     );
   }
   return template;
+}
+
+function parseHostedRuntimeGroupPostCallCircleOfferRequest(
+  value: unknown,
+): HostedRuntimeGroupPostCallCircleOfferRequest {
+  const record = requireObject(
+    value,
+    "Hosted runtime group tool post_call_circle_offer callCircleOffer",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["message"]),
+    "Hosted runtime group tool post_call_circle_offer callCircleOffer",
+  );
+  const message = requireString(
+    record.message,
+    "Hosted runtime group tool post_call_circle_offer message",
+  ).trim();
+  if (message.length === 0) {
+    throw new TypeError("Hosted runtime group tool post_call_circle_offer message must not be blank.");
+  }
+  if (message.length > HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH) {
+    throw new TypeError("Hosted runtime group tool post_call_circle_offer message is too long.");
+  }
+  if (!isHostedRuntimeGroupCallCircleOfferConsentMessage(message)) {
+    throw new TypeError(
+      "Hosted runtime group tool post_call_circle_offer message must say liking or reacting opts the member into Call Circle for this group, may add them to the group, shares their Murph profile name with the group, and lets Murph ask privately for availability.",
+    );
+  }
+  return { message };
 }
 
 function parseHostedRuntimeGroupToolSelfOptOutContext(
@@ -941,22 +995,23 @@ export function parseHostedRuntimeGroupToolResponse(
     }
   }
 
-  if (action === "post_join_offer") {
-    const result = requireObject(record.result, "Hosted runtime group tool post_join_offer response result");
-    const status = requireString(result.status, "Hosted runtime group tool post_join_offer response status");
+  if (action === "post_join_offer" || action === "post_call_circle_offer") {
+    const label = `Hosted runtime group tool ${action}`;
+    const result = requireObject(record.result, `${label} response result`);
+    const status = requireString(result.status, `${label} response status`);
     if (status === "sent") {
-      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), "Hosted runtime group tool post_join_offer sent response result");
+      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), `${label} sent response result`);
       return {
         action,
         result: {
           status,
           group: parseHostedRuntimeGroupSummary(result.group),
-          joinUrl: requireString(result.joinUrl, "Hosted runtime group tool post_join_offer joinUrl"),
+          joinUrl: requireString(result.joinUrl, `${label} joinUrl`),
         },
       };
     }
     if (status === "unavailable") {
-      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool post_join_offer unavailable response result");
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), `${label} unavailable response result`);
       return {
         action,
         result: {
@@ -1387,10 +1442,14 @@ function parseHostedRuntimeGroupMemberSummaries(
     const record = requireObject(entry, "Hosted runtime group summary member");
     assertAllowedObjectKeys(
       record,
-      new Set(["grantedVaultShareProjectionKinds", "handle", "memberId", "role"]),
+      new Set(["callCircle", "grantedVaultShareProjectionKinds", "handle", "memberId", "role"]),
       "Hosted runtime group summary member",
     );
     return {
+      callCircle: parseHostedRuntimeGroupMemberCallCircle(
+        record.callCircle,
+        "Hosted runtime group summary member callCircle",
+      ),
       grantedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
         record.grantedVaultShareProjectionKinds,
         "Hosted runtime group summary member grantedVaultShareProjectionKinds",
@@ -1401,6 +1460,21 @@ function parseHostedRuntimeGroupMemberSummaries(
       role: requireString(record.role, "Hosted runtime group summary member role"),
     };
   });
+}
+
+function parseHostedRuntimeGroupMemberCallCircle(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupMemberSummary["callCircle"] {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(record, new Set(["enrolled", "paused"]), label);
+  return {
+    enrolled: requireBoolean(record.enrolled, `${label} enrolled`),
+    paused: requireBoolean(record.paused, `${label} paused`),
+  };
 }
 
 export function parseHostedRuntimeFamilyPlanToolRequest(
