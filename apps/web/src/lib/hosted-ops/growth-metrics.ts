@@ -459,15 +459,23 @@ export function buildTrialCohortRows(input: {
       row.pulseTrialRedeemedAt >= start &&
       row.pulseTrialRedeemedAt < end
     );
-    const converted = cohortRows.filter((row) =>
-      row.member.suspendedAt === null &&
-      (row.currentBillingPhase === "paid" || row.paidViaFamily)
-    ).length;
-    const stillTrialing = cohortRows.filter((row) =>
-      row.currentBillingPhase !== "paid" &&
-      row.pulseTrialRedeemedAt !== null &&
-      row.pulseTrialRedeemedAt >= maturityCutoff
-    ).length;
+    let converted = 0;
+    let stillTrialing = 0;
+
+    for (const row of cohortRows) {
+      const isConverted = row.member.suspendedAt === null &&
+        (row.currentBillingPhase === "paid" || row.paidViaFamily);
+
+      if (isConverted) {
+        converted += 1;
+      } else if (
+        row.pulseTrialRedeemedAt !== null &&
+        row.pulseTrialRedeemedAt >= maturityCutoff
+      ) {
+        stillTrialing += 1;
+      }
+    }
+
     const matureStarted = cohortRows.length - stillTrialing;
 
     rows.push({

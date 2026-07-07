@@ -330,6 +330,39 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
+  it("does not count immature family-paid trial rows as still trialing", () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const rows = buildTrialCohortRows({
+      rowCount: 2,
+      trialStartRows: [
+        {
+          currentBillingPhase: "paid",
+          member: {
+            suspendedAt: null,
+          },
+          paidViaFamily: false,
+          pulseTrialRedeemedAt: new Date("2026-06-25T12:00:00.000Z"),
+        },
+        {
+          currentBillingPhase: null,
+          member: {
+            suspendedAt: null,
+          },
+          paidViaFamily: true,
+          pulseTrialRedeemedAt: new Date("2026-06-26T12:00:00.000Z"),
+        },
+      ],
+      windowEnd: now,
+    });
+
+    expect(rows[1]).toMatchObject({
+      converted: 2,
+      conversionPercent: 100,
+      started: 2,
+      stillTrialing: 0,
+    });
+  });
+
   it("counts own-paid or family-paid members in the mature converted count query", async () => {
     queueCurrentMetricMocks();
     queueCurrentMetricMocks();
