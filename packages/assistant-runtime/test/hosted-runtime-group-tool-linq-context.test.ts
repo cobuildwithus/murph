@@ -74,6 +74,19 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     });
 
     await groupTool.request({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      linqThread: {
+        authority: ROUTE_AUTHORITY,
+        chatId: "chat_group_1",
+      },
+    });
+
+    await groupTool.request({
       action: "post_join_offer",
       joinOffer: {
         messageTemplate:
@@ -195,6 +208,15 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({ action: "read_chat_participants" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
+
+    await groupTool.request({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    });
 
     await groupTool.request({
       action: "post_join_offer",

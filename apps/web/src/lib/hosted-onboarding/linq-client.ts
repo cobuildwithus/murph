@@ -96,6 +96,34 @@ export async function sendHostedLinqChatMessage(input: {
   };
 }
 
+export async function updateHostedLinqChatAvatar(input: {
+  chatId: string;
+  groupChatIconUrl: string;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const response = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify({
+      group_chat_icon: normalizeRequiredHttpsUrl(
+        input.groupChatIconUrl,
+        "group chat icon url",
+      ),
+    }),
+    method: "PUT",
+    operation: "chat avatar update",
+    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}`,
+    signal: input.signal,
+    timeoutMessage: "Linq chat avatar update timed out.",
+  });
+
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "chat avatar update",
+      retryable: isRetryableHostedLinqStatus(response.status),
+      status: response.status,
+    });
+  }
+}
+
 export async function sendHostedLinqReadReceipt(input: {
   chatId: string;
   signal?: AbortSignal;
@@ -408,6 +436,20 @@ function normalizeRequiredString(value: unknown, label: string): string {
   }
 
   return normalized;
+}
+
+function normalizeRequiredHttpsUrl(value: unknown, label: string): string {
+  const normalized = normalizeRequiredString(value, label);
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new TypeError(`${label} must be an HTTPS URL.`);
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    throw new TypeError(`${label} must be an HTTPS URL.`);
+  }
+  return parsed.toString();
 }
 
 function normalizeRequiredStringList(values: readonly string[], label: string): string[] {

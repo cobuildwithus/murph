@@ -601,6 +601,13 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    })).toEqual({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "revoke_own_email_share",
       selfOptOut: {
         senderHandle: "person@example.test",
@@ -693,6 +700,25 @@ describe("parseHostedRuntimeGroupTool", () => {
         joinOffer: { projectionScopes: [{ projectionKind: "profile-name.v0" }] },
       })
     ).toThrow(/unsupported projection scope/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "set_chat_avatar",
+        groupChatIconUrl: "http://example.com/avatar.png",
+      })
+    ).toThrow(/must be HTTPS/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "set_chat_avatar",
+        groupChatIconUrl: "https://user:pass@example.com/avatar.png",
+      })
+    ).toThrow(/must be HTTPS/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "set_chat_avatar",
+        chatId: "chat_hijack",
+        groupChatIconUrl: "https://example.com/avatar.png",
+      })
+    ).toThrow(/not allowed/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "revoke_own_email_share",
@@ -791,6 +817,44 @@ describe("parseHostedRuntimeGroupTool", () => {
           group: GROUP_SUMMARY,
           status: "ok",
           updatedAt: "2026-07-07T00:00:00.000Z",
+        },
+      })
+    ).toThrow(/not allowed/u);
+  });
+
+  it("parses set_chat_avatar responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "set_chat_avatar",
+      result: {
+        status: "ok",
+      },
+    })).toEqual({
+      action: "set_chat_avatar",
+      result: {
+        status: "ok",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    })).toEqual({
+      action: "set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "set_chat_avatar",
+        result: {
+          status: "ok",
+          url: "https://example.com/avatar.png",
         },
       })
     ).toThrow(/not allowed/u);

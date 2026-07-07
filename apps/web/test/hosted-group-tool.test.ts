@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   sendHostedLinqChatMessage: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   updateHostedGroupDisplayNameByRuntimeMemberIdTx: vi.fn(),
+  updateHostedLinqChatAvatar: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
@@ -63,6 +64,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
     ),
   sendHostedLinqAttachmentMessage: mocks.sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
+  updateHostedLinqChatAvatar: mocks.updateHostedLinqChatAvatar,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", () => ({
@@ -197,6 +199,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       read_chat_participants: "participant_aware",
       read_current: "participant_aware",
       revoke_own_email_share: "participant_aware",
+      set_chat_avatar: "owner_active",
       share_contact_card: "owner_active",
       update_display_name: "participant_aware",
     });
@@ -735,6 +738,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       chatId: "chat_group_1",
       messageId: "msg_offer_1",
     });
+    mocks.updateHostedLinqChatAvatar.mockResolvedValue(undefined);
   });
 
   it("fails closed when the runtime supplied no linq thread context", async () => {
@@ -752,6 +756,68 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.getHostedLinqChatHandles).not.toHaveBeenCalled();
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
+  });
+
+  it("updates the current authorized iMessage group avatar", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: { status: "ok" },
+    });
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
+      expect.objectContaining({ authority: LINQ_THREAD.authority }),
+    );
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledWith({
+      chatId: "chat_group_1",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    });
+  });
+
+  it("does not update the group avatar when the owner lacks active access", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "owner_unavailable",
+      },
+    });
+
+    expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
+  });
+
+  it("reports group avatar provider failures as structured unavailability", async () => {
+    mocks.updateHostedLinqChatAvatar.mockRejectedValue(new Error("linq down"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
   });
 
   it("posts a server-owned like-to-join offer and records the provider message binding", async () => {

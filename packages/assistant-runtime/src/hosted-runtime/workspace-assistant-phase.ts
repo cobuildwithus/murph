@@ -225,6 +225,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       if (
         request.action !== "read_chat_participants"
         && request.action !== "post_join_offer"
+        && request.action !== "set_chat_avatar"
         && request.action !== "share_contact_card"
       ) {
         return await input.groupToolPort.request(request);

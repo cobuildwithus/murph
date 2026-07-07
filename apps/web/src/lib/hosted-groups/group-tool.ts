@@ -27,6 +27,7 @@ import {
   isHostedLinqAttachmentSendPrepareFailure,
   sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage,
+  updateHostedLinqChatAvatar,
 } from "../hosted-onboarding/linq-client";
 import {
   buildMurphHostedLinqContactCardVcf,
@@ -86,6 +87,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
   revoke_own_email_share: "participant_aware",
+  set_chat_avatar: "owner_active",
   share_contact_card: "owner_active",
   update_display_name: "participant_aware",
 } as const satisfies Record<
@@ -121,6 +123,14 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "post_join_offer") {
     return handleHostedRuntimeGroupPostJoinOffer({
       joinOffer: input.request.joinOffer ?? null,
+      linqThread: input.request.linqThread ?? null,
+      memberId: input.memberId,
+    });
+  }
+
+  if (input.request.action === "set_chat_avatar") {
+    return handleHostedRuntimeGroupSetChatAvatar({
+      groupChatIconUrl: input.request.groupChatIconUrl,
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
@@ -504,6 +514,52 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   };
 }
 
+async function handleHostedRuntimeGroupSetChatAvatar(input: {
+  groupChatIconUrl: string;
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "set_chat_avatar",
+    result: { status: "unavailable", unavailableReason },
+  });
+
+  const groupChatIconUrl = normalizeHostedGroupChatIconUrl(input.groupChatIconUrl);
+  if (!groupChatIconUrl) {
+    return unavailable("group_chat_icon_url_unavailable");
+  }
+
+  const authorized = await authorizeHostedRuntimeGroupLinqThread({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if ("unavailableReason" in authorized) {
+    return unavailable(authorized.unavailableReason);
+  }
+
+  const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+    memberId: input.memberId,
+    prisma: getPrisma(),
+  });
+  if (ownerAccess.status !== "ok") {
+    return unavailable(ownerAccess.unavailableReason);
+  }
+
+  try {
+    await updateHostedLinqChatAvatar({
+      chatId: authorized.chatId,
+      groupChatIconUrl,
+    });
+  } catch {
+    return unavailable("provider_unavailable");
+  }
+
+  return {
+    action: "set_chat_avatar",
+    result: { status: "ok" },
+  };
+}
+
 function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
   messageTemplate: string;
@@ -529,6 +585,21 @@ function normalizeHostedGroupJoinOfferMessageTemplate(
     return null;
   }
   return normalized;
+}
+
+function normalizeHostedGroupChatIconUrl(value: string): string | null {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    return null;
+  }
+  return parsed.toString();
 }
 
 function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): boolean {

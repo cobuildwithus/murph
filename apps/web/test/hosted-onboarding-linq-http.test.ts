@@ -11,6 +11,7 @@ import {
   sendHostedLinqChatMessage,
   sendHostedLinqReadReceipt,
   shareHostedLinqContactCard,
+  updateHostedLinqChatAvatar,
 } from "@/src/lib/hosted-onboarding/linq";
 
 const originalFetch = globalThis.fetch;
@@ -228,6 +229,55 @@ describe("sendHostedLinqReadReceipt", () => {
         signal: expect.any(AbortSignal),
       }),
     );
+  });
+});
+
+describe("updateHostedLinqChatAvatar", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("updates a chat with a public group icon URL", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({ status: "pending" }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    })).resolves.toBeUndefined();
+
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (!firstCall) {
+      throw new Error("Expected fetch to be called");
+    }
+    const [url, init] = firstCall as [RequestInfo | URL, RequestInit?];
+    expect(url).toEqual(new URL("chats/chat_123", "https://linq.example.test/api/partner/v3/"));
+    expect(expectRequestInit(init).method).toBe("PUT");
+    expect(readJsonRequestBody(init)).toEqual({
+      group_chat_icon: "https://imagedelivery.net/account/avatar/public",
+    });
+  });
+
+  it("rejects non-HTTPS icon URLs before calling Linq", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl: "http://example.com/avatar.png",
+    })).rejects.toThrow(/HTTPS URL/u);
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
