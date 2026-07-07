@@ -793,6 +793,8 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
 }
 
 export async function markHostedLinqDeliverySkippedTx(input: {
+  failureCode?: string | null;
+  failureReason?: string | null;
   idempotencyKey?: string | null;
   linqChatId?: string | null;
   phoneNumber?: string | null;
@@ -817,8 +819,14 @@ export async function markHostedLinqDeliverySkippedTx(input: {
   const data = {
     attemptedAt: skippedAt,
     failedAt: null,
-    failureCode: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
-    failureReason: "Linq/iMessage send skipped because the recipient has not replied within the allowed window.",
+    failureCode: sanitizeHostedOnboardingPersistedErrorCode(
+      normalizeNullable(input.failureCode)
+        ?? "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+    ),
+    failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
+      normalizeNullable(input.failureReason)
+        ?? "Linq/iMessage send skipped because the recipient has not replied within the allowed window.",
+    ),
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
     phoneNumberLookupKey,
