@@ -530,6 +530,7 @@ test("browser vault replica projects experiment event fields only for relevant e
             scheduledLocalDate: "2026-04-20",
             sessionStatus: "partial",
             sessionLocalDate: "2026-04-20",
+            source: "manual",
             summary: "Generic event summary should not be projected.",
             symptoms: ["lightheaded"],
             temperatureC: 88,
@@ -587,6 +588,7 @@ test("browser vault replica projects experiment event fields only for relevant e
             externalId: "activity-1",
             interventionType: "running",
             severity: "info",
+            source: "device",
             symptoms: ["sore"],
           },
           body: "# Activity note\n\nUnrelated activity details.",
@@ -633,6 +635,7 @@ test("browser vault replica projects experiment event fields only for relevant e
     scheduledLocalDate: "2026-04-20",
     sessionStatus: "partial",
     sessionLocalDate: "2026-04-20",
+    source: "manual",
     symptoms: ["lightheaded"],
   });
   assert.equal(Object.hasOwn(session.attributes, "durationMinutes"), false);
@@ -673,7 +676,7 @@ test("browser vault replica projects experiment event fields only for relevant e
   assert.equal(context.title, null);
 
   assert.ok(activity);
-  assert.deepEqual(activity.attributes, {});
+  assert.deepEqual(activity.attributes, { source: "device" });
   assert.equal(activity.bodyPreview, null);
   assert.deepEqual(activity.links, []);
   assert.deepEqual(activity.lookupIds, ["evt_activity"]);

@@ -11,6 +11,7 @@ import {
 
 import { buildMurphSmsHref, normalizeMurphTelegramUsername } from "../murph-contact-routing";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
+import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import { getPrisma } from "../prisma";
 import {
   encryptHostedWebNullableString,
@@ -76,7 +77,6 @@ import {
   readHostedOnboardingEnvironment,
 } from "./env";
 import {
-  MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE,
   activateHostedMemberForFamilySponsorshipTx,
   type HostedMemberActivationResult,
 } from "./member-activation";
@@ -3348,14 +3348,18 @@ export function buildHostedFamilyInviteReplyText(input: {
   }
 
   lines.push(
-    "You pay for their Murph access, but you cannot see their private Murph conversations, health data, vault data, exports, or deletion data.",
+    "You pay for their Murph access, but everything they share with me stays private to them.",
   );
 
   return lines.join("\n\n");
 }
 
-export function buildHostedFamilyInviteAcceptedReplyText(): string {
-  return MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE;
+export function buildHostedFamilyInviteAcceptedReplyText(input: { memberId: string }): string {
+  return renderUserFacingMessage({
+    context: {},
+    key: "assistant.family_welcome",
+    seed: input.memberId,
+  }).text;
 }
 
 async function readHostedFamilyBilledSeatCountTx(input: {

@@ -8,7 +8,7 @@ import {
 } from "./hosted-family-settings-actions";
 
 const OWNER_PRIVACY_COPY =
-  "You pay for your family's access, but you can't see their Murph conversations, health data, vault, exports, or deletion controls.";
+  "You pay for your family's access, but what they share with Murph stays private to them.";
 
 const SEAT_PRICE_LABEL = `$${Math.round(
   HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat / 100,

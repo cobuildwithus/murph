@@ -2460,10 +2460,21 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
-    // The chat is already the member's home chat with no pending state, so
-    // the wake skips the binding rewrite entirely — the missing recipient
-    // stays missing rather than being filled from inbound metadata.
-    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    // The chat is already the member's home chat with no pending state, but
+    // the live webhook chat id is still rewritten so stale lookup keys heal.
+    // The missing recipient stays missing rather than being filled from
+    // inbound metadata.
+    expect(hostedMemberRouting.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        linqRecipientPhoneLookupKey: null,
+      }),
+      update: expect.objectContaining({
+        linqRecipientPhoneLookupKey: null,
+      }),
+      where: {
+        memberId: "member_123",
+      },
+    }));
     expect(hostedMemberRouting.groupBy).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
@@ -2873,6 +2884,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.buildHostedFamilyInviteAcceptedReplyText).toHaveBeenCalledWith({
+      memberId: "member_family",
+    });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
       chatId: "chat_123",
       idempotencyKey: "linq-message:evt_family_linq",
@@ -3389,6 +3403,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.buildHostedFamilyInviteAcceptedReplyText).toHaveBeenLastCalledWith({
+      memberId: "member_family",
+    });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenLastCalledWith({
       chatId: "chat_123",
       idempotencyKey: "linq-message:evt_family_linq_retry",

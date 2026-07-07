@@ -1,7 +1,3 @@
-import {
-  createHostedLinqChatLookupKey,
-  createHostedPhoneLookupKey,
-} from "./contact-privacy-core";
 import { type HostedMemberSnapshot } from "./hosted-member-store";
 import {
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
@@ -58,10 +54,6 @@ export type HostedLinqHomeLineRouteBindingResult =
       homeLineAssignedAt: Date | null;
       kind: "bind";
       recipientPhone: string | null;
-      // True only when the routing row already holds exactly this home
-      // binding and no pending-Linq state remains to clear, so re-writing
-      // the binding would be a no-op the caller may skip.
-      routeAlreadyBound?: boolean;
     }
   | Exclude<HostedLinqActiveRouteDecision, { kind: "bind_home" }>
   | {
@@ -216,25 +208,12 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
       || (authority.recipientPhone !== null && authority.recipientPhone === recipientPhone)
     )
   ) {
-    // The raw persisted columns are the cleanup authority: decoded fields
-    // can read correct while stale pending state or old-generation home
-    // lookup keys persist, and those must still be repaired by the rewrite.
-    // Absent raw fields (older fixtures/snapshots) fail safe by keeping the
-    // rewrite.
-    const routeAlreadyBound =
-      authority.kind === "home"
-      && authority.chatId === input.incomingChatId
-      && authority.recipientPhone === recipientPhone
-      && routing?.hasPendingLinqRouteState === false
-      && routing.linqChatLookupKey === createHostedLinqChatLookupKey(input.incomingChatId)
-      && routing.linqRecipientPhoneLookupKey === createHostedPhoneLookupKey(recipientPhone);
     return {
       kind: "done",
       result: {
         homeLineAssignedAt: authority.assignedAt,
         kind: "bind",
         recipientPhone,
-        ...(routeAlreadyBound ? { routeAlreadyBound: true } : {}),
       },
     };
   }

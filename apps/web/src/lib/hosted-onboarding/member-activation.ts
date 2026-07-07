@@ -63,9 +63,6 @@ type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
   core: HostedMemberActivationCoreState;
 };
 
-export const MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE =
-  "You are in. Your Murph access is paid through a Family plan, but your Murph conversations, health data, vault data, exports, and deletion controls stay private to you. The Family owner cannot see them.";
-
 export async function activateHostedMemberForPositiveSourceTx(input: {
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
@@ -115,7 +112,11 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
     preserveBillingStatus: true,
     prisma: input.prisma,
     skipIfPreviouslyActivated: true,
-    welcomeMessage: MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE,
+    welcomeMessage: renderUserFacingMessage({
+      context: {},
+      key: "assistant.family_welcome",
+      seed: input.memberId,
+    }).text,
   });
 }
 

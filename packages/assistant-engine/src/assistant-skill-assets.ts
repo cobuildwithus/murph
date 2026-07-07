@@ -133,6 +133,12 @@ export const ASSISTANT_SKILLS = [
     triggerHint:
       'Read whenever a group chat starts, runs, scores, or closes a challenge, and on every scheduled challenge dispatch. Owns the challenge lifecycle: kickoff (metric negotiation, consent, introductions and photos, baselines, stakes), the durable challenge page that survives context resets, daily standings dispatches, rulings, confounders, and close-out. Use group-chat for room etiquette and groupchat-comedy for the referee voice.',
   },
+  {
+    slug: 'music-generation',
+    name: 'music-generation',
+    triggerHint:
+      'Read before calling the generate_song tool or writing any music prompt, including reminder songs, group-challenge hype tracks, jingles, celebration anthems, and any generated song or instrumental. Owns how to write the ElevenLabs music prompt (genre, instrumentation, tempo, key, vocals, lyrics, structure, instrumental-only, and duration), the copyright-safe style rules, and the reggae house-style default. Use behavior-followthrough and groupchat-comedy to decide when to send a song; use this to decide what prompt to send.',
+  },
 ] as const
 
 export type AssistantSkillSlug = typeof ASSISTANT_SKILLS[number]['slug']
