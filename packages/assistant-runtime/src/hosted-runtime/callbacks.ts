@@ -1886,7 +1886,8 @@ function hostedAssistantDeliveryOutcomeShouldStopLinqTyping(
   outcome: HostedAssistantDeliveryOutcome | null,
 ): boolean {
   return outcome?.deliveryStatus === "failed"
-    || outcome?.deliveryStatus === "failed_ambiguous";
+    || outcome?.deliveryStatus === "failed_ambiguous"
+    || outcome?.deliveryStatus === "missing-result";
 }
 
 function resolveHostedLinqTypingStopTarget(input: {
