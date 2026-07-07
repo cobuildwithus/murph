@@ -49,6 +49,8 @@ interface CompletionState {
   member: HostedMemberCoreState | null;
 }
 
+type ConnectIdentityMatchMode = "loose" | "strict";
+
 export function buildDeviceSyncCompletionHomeRedirectHref(
   searchParams: DeviceSyncCompletionSearchParams,
 ): string {
@@ -209,10 +211,11 @@ function findConnectedSource(input: {
   const connectTarget = normalizeProviderKey(input.connectTarget);
   const provider = normalizeProviderKey(input.provider);
   const activeSources = input.sources.filter((source) => source.state === "active");
+  const matchMode: ConnectIdentityMatchMode = input.strict ? "strict" : "loose";
 
   if (connectSource || connectTarget) {
     const matchedSource = activeSources.find((source) =>
-      sourceMatchesConnectIdentity(source, { connectSource, connectTarget })
+      sourceMatchesConnectIdentity(source, { connectSource, connectTarget }, matchMode)
     );
     if (matchedSource) {
       return matchedSource;
@@ -236,24 +239,53 @@ function sourceMatchesConnectIdentity(
     connectSource: string | null;
     connectTarget: string | null;
   },
+  mode: ConnectIdentityMatchMode,
 ): boolean {
-  const provider = normalizeProviderKey(source.provider);
-
-  if (identity.connectTarget && provider === identity.connectTarget) {
+  if (connectIdentityValueMatches(source.provider, identity)) {
     return true;
   }
 
-  if (identity.connectSource && provider === identity.connectSource) {
+  return source.upstreamSources.some((upstreamSource) =>
+    upstreamSourceMatchesConnectIdentity(upstreamSource, identity, mode)
+  );
+}
+
+function upstreamSourceMatchesConnectIdentity(
+  upstreamSource: HostedDeviceSyncSettingsSource["upstreamSources"][number],
+  identity: {
+    connectSource: string | null;
+    connectTarget: string | null;
+  },
+  mode: ConnectIdentityMatchMode,
+): boolean {
+  if (mode === "strict" && upstreamSource.status !== "connected") {
+    return false;
+  }
+
+  if (connectIdentityValueMatches(upstreamSource.sourceProviderSlug, identity)) {
     return true;
   }
 
-  return source.upstreamSources.some((upstreamSource) => {
-    const sourceProviderSlug = normalizeProviderKey(upstreamSource.sourceProviderSlug);
-    return Boolean(
-      sourceProviderSlug
-      && (sourceProviderSlug === identity.connectTarget || sourceProviderSlug === identity.connectSource),
-    );
-  });
+  if (mode !== "strict") {
+    return false;
+  }
+
+  return connectIdentityValueMatches(upstreamSource.connectSourceId, identity)
+    || connectIdentityValueMatches(upstreamSource.connectTarget, identity);
+}
+
+function connectIdentityValueMatches(
+  value: string | null | undefined,
+  identity: {
+    connectSource: string | null;
+    connectTarget: string | null;
+  },
+): boolean {
+  const normalized = normalizeProviderKey(value);
+  return Boolean(
+    normalized
+    && (normalized === identity.connectTarget || normalized === identity.connectSource),
+  );
 }
 
 function resolveConnectedSourceLabel(input: {

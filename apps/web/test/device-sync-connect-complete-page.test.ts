@@ -353,6 +353,79 @@ test("HomePage uses connect source labels for Junction-backed targets", async ()
   assert.doesNotMatch(markup, /I%20just%20connected%20my%20Junction/);
 });
 
+test("HomePage does not trust replay-stripped Junction child matches unless the child is connected", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-03T22:05:48.000Z",
+    ok: true,
+    sources: [
+      buildConnectedSource("junction", "Junction", [
+        {
+          providerLabel: "Garmin",
+          resourceCount: 1,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+        {
+          providerLabel: "Oura",
+          resourceCount: 1,
+          sourceProviderSlug: "oura",
+          status: "error",
+        },
+      ]),
+    ],
+  });
+
+  const markup = renderToStaticMarkup(await HomePage({
+    searchParams: Promise.resolve({
+      connectSource: "oura",
+      connectTarget: "oura",
+      deviceSyncCompletion: "1",
+    }),
+  }));
+
+  assert.match(markup, /Device connection complete/);
+  assert.match(markup, /Open Murph to confirm your connected sources\./);
+  assert.match(markup, /data-completion-unverified="true"/);
+  assert.doesNotMatch(markup, /Oura is connected/);
+  assert.doesNotMatch(markup, /href="sms:/);
+  assert.doesNotMatch(markup, />Text Murph</);
+});
+
+test("HomePage matches replay-stripped Junction upstream aliases by resolved connect identity", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-03T22:05:48.000Z",
+    ok: true,
+    sources: [
+      buildConnectedSource("junction", "Junction", [
+        {
+          connectSourceId: "whoop",
+          connectTarget: "whoop",
+          providerLabel: "WHOOP",
+          resourceCount: 1,
+          sourceProviderSlug: "whoop_v2",
+          status: "connected",
+        },
+      ]),
+    ],
+  });
+
+  const markup = renderToStaticMarkup(await HomePage({
+    searchParams: Promise.resolve({
+      connectSource: "whoop",
+      connectTarget: "whoop",
+      deviceSyncCompletion: "1",
+    }),
+  }));
+
+  assert.match(markup, /WHOOP is connected/);
+  assert.match(markup, /WHOOP is ready\. Say hi to start exploring your data\./);
+  assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
+  assert.match(markup, />Text Murph</);
+  assert.doesNotMatch(markup, /data-completion-unverified/);
+});
+
 test("HomePage keeps a continue-only dialog when there is no messaging destination", async () => {
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   mocks.readHostedMemberRoutingState.mockResolvedValueOnce({
