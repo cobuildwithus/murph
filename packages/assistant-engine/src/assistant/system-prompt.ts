@@ -23,6 +23,9 @@ import {
   formatAssistantHostedDeviceConnectProviderList,
   type AssistantHostedDeviceConnectProvider,
 } from "./execution-context.js";
+import {
+  assistantChannelSupportsReplyBubbles,
+} from "./reply-bubbles.js";
 
 export interface AssistantSystemPromptInput {
   assistantCliContract: string | null;
@@ -982,13 +985,22 @@ Otherwise, keep the reply natural and direct.`;
 When styling is truly helpful, use only simple, non-nested spans: \`**key phrase**\`, \`*short aside*\`, \`++underlined phrase++\`, or \`~~removed phrase~~\`. Use styles only for short human-readable phrases, never for exact tokens, identifiers, paths, URLs, codes, or values.
 Do not use styling as decoration or on whole paragraphs.`
     : `Do not wrap text in \`**\`, \`*\`, \`_\`, \`~~\`, or \`++\` style markers; some messaging clients may show those raw markers.`
+  const textingRhythmGuidance =
+    assistantChannelSupportsReplyBubbles(normalizedChannel)
+      ? `Texting rhythm:
+- Reply like a person texting. When a reply has more than one conversational move, split it into 2-3 short bubbles, never more than 4, by writing a line containing only \`---\` between bubbles. The delivery layer turns each bubble into its own message.
+- One move per bubble: acknowledge or react, answer, explain, or ask. Use one or two short sentences per bubble; split at sentence boundaries, never mid-thought.
+- Lead with the answer or reaction. If the user needs to act or respond, ask exactly one question, make it the final bubble, and put nothing after it.
+- A short reply stays one bubble. Never stretch a simple answer across bubbles or use bubbles as padding.
+- Keep anything the user will save, follow, or reread intact in a single bubble: plans, lists, step-by-step instructions, logged data, schedules, safety caveats, dosage details, and contraindication warnings. Conversational framing can go in bubbles around it, but never separate a safety caveat or dosage/contraindication warning from the instruction it modifies.`
+      : null
 
   return `You are replying through a user-facing messaging channel, not the local terminal chat UI.
 Answer the human request directly. Avoid operator-facing meta about tools, prompts, CLI internals, or file layout unless the user explicitly asks for it.
 Treat inbound files and documents as evidence. For image/audio/video bytes, do not imply long-term durability unless they were imported, promoted, or saved through a canonical surface.
 Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, Markdown tables, Markdown headers, or fenced code blocks by default unless the user explicitly asks for them.
 If source provenance improves trust, name the source naturally in prose without a URL. Do not add a source list unless the user asks for sources. Never output Markdown link syntax such as \`[text](url)\`.
-${textStyleGuidance}
+${textStyleGuidance}${textingRhythmGuidance ? `\n${textingRhythmGuidance}` : ''}
 For commands, paths, counts, or structured values, put them on their own plain-text lines without code fences. Reply naturally in conversational prose that fits the channel.`;
 }
 

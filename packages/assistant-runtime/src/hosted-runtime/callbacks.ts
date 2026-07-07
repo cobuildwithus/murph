@@ -24,6 +24,7 @@ import {
   applyAssistantVaultFileSendApprovalResult,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
+  compareAssistantOutboxDeliverySequenceOrder,
   deferAssistantVaultFileApprovalCheck,
   dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds,
@@ -764,78 +765,6 @@ function compareHostedAssistantForegroundDeliveryCandidateIntents(input: {
   return compareHostedAssistantDeliveryCandidateIntents(input.left, input.right);
 }
 
-function compareHostedAssistantSteeredSegmentOrder(
-  left: AssistantOutboxIntent,
-  right: AssistantOutboxIntent,
-): number {
-  const leftKey = left.deliveryIdempotencyKey ?? null;
-  const rightKey = right.deliveryIdempotencyKey ?? null;
-  const leftSegment = readHostedAssistantSteeredSegmentOrder(left);
-  const rightSegment = readHostedAssistantSteeredSegmentOrder(right);
-  if (leftSegment && rightSegment && leftSegment.groupKey === rightSegment.groupKey) {
-    return leftSegment.ordinal - rightSegment.ordinal;
-  }
-  if (
-    leftSegment
-    && !rightSegment
-    && shouldHostedAssistantSegmentPrecedeNonSegment(leftSegment, rightKey)
-  ) {
-    return -1;
-  }
-  if (
-    rightSegment
-    && !leftSegment
-    && shouldHostedAssistantSegmentPrecedeNonSegment(rightSegment, leftKey)
-  ) {
-    return 1;
-  }
-  return 0;
-}
-
-interface HostedAssistantSteeredSegmentOrder {
-  groupKey: string;
-  kind: "fallback" | "generated";
-  ordinal: number;
-}
-
-function readHostedAssistantSteeredSegmentOrder(
-  intent: AssistantOutboxIntent,
-): HostedAssistantSteeredSegmentOrder | null {
-  const deliveryIdempotencyKey = intent.deliveryIdempotencyKey ?? null;
-  if (!deliveryIdempotencyKey) {
-    return null;
-  }
-  const match = /^(.*):segment:([0-9]+)$/.exec(deliveryIdempotencyKey);
-  if (match?.[1] && match[2]) {
-    const ordinal = Number.parseInt(match[2], 10);
-    return Number.isSafeInteger(ordinal)
-      ? { groupKey: match[1], kind: "generated", ordinal }
-      : null;
-  }
-  const fallbackPrefix = `assistant-segment:${intent.turnId}:`;
-  if (!deliveryIdempotencyKey.startsWith(fallbackPrefix)) {
-    return null;
-  }
-  const ordinalText = deliveryIdempotencyKey.slice(fallbackPrefix.length);
-  if (!/^[0-9]+$/.test(ordinalText)) {
-    return null;
-  }
-  const ordinal = Number.parseInt(ordinalText, 10);
-  return Number.isSafeInteger(ordinal)
-    ? { groupKey: `assistant-segment:${intent.turnId}`, kind: "fallback", ordinal }
-    : null;
-}
-
-function shouldHostedAssistantSegmentPrecedeNonSegment(
-  segment: HostedAssistantSteeredSegmentOrder,
-  deliveryIdempotencyKey: string | null,
-): boolean {
-  if (segment.kind === "generated") {
-    return deliveryIdempotencyKey === segment.groupKey;
-  }
-  return deliveryIdempotencyKey === null;
-}
-
 function compareHostedAssistantDeliveryCandidateIntents(
   left: AssistantOutboxIntent,
   right: AssistantOutboxIntent,
@@ -866,7 +795,7 @@ function compareHostedAssistantDeliveryBoundaryIntents(
   right: AssistantOutboxIntent,
 ): number {
   return compareHostedAssistantDeliveryOperationOrder(left, right)
-    || compareHostedAssistantSteeredSegmentOrder(left, right)
+    || compareAssistantOutboxDeliverySequenceOrder(left, right)
     || compareHostedAssistantDeliveryCandidateCreatedAt(left, right)
     || left.intentId.localeCompare(right.intentId);
 }
