@@ -136,9 +136,6 @@ describe("hosted Linq line rehome ops", () => {
       id: MEMBER_ID,
       suspendedAt: null,
     });
-    mocks.hostedMemberRouting.findUnique.mockResolvedValue({
-      linqLastInboundAt: new Date("2026-07-01T12:00:00.000Z"),
-    });
     mocks.readHostedMemberRoutingState.mockResolvedValue(buildRouting({
       linqChatId: "chat_home_a",
       linqHomeLineAssignedAt: new Date("2026-07-01T11:00:00.000Z"),
@@ -192,7 +189,6 @@ describe("hosted Linq line rehome ops", () => {
         currentLinePhoneHint: "*** 0001",
         homeChatBound: true,
         linqHomeLineAssignedAt: "2026-07-01T11:00:00.000Z",
-        linqLastInboundAt: "2026-07-01T12:00:00.000Z",
         linqRecipientPhoneLookupKey: LINE_A.phoneNumberLookupKey,
       },
       member: {

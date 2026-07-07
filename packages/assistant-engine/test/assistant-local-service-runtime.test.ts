@@ -140,6 +140,7 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls[0]?.[0], 'telegram')
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.deepEqual(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls[0]?.[0], {
     vault: '/vaults/test',
   })
@@ -833,7 +834,13 @@ test('sendAssistantMessageLocal reports preceding delivery failure when no final
   const session = createAssistantSession({
     sessionId: 'session-no-reply-preceding-failure',
   })
+  const stopTyping = vi.fn(async () => undefined)
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        stop: stopTyping,
+      })),
+    },
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
@@ -890,13 +897,22 @@ test('sendAssistantMessageLocal reports preceding delivery failure when no final
       kind: 'failed',
       intentId: 'intent-preceding-failed',
     })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: true,
+  })
 })
 
 test('sendAssistantMessageLocal reports preceding queued delivery when no final reply exists', async () => {
   const session = createAssistantSession({
     sessionId: 'session-no-reply-preceding-queued',
   })
+  const stopTyping = vi.fn(async () => undefined)
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        stop: stopTyping,
+      })),
+    },
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
@@ -953,6 +969,131 @@ test('sendAssistantMessageLocal reports preceding queued delivery when no final 
       kind: 'queued',
       intentId: 'intent-preceding-queued',
     })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: false,
+  })
+})
+
+test('sendAssistantMessageLocal stops typing when only a different-target preceding delivery is queued', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+    sessionId: 'session-preceding-different-target',
+  })
+  const providerStarted = createDeferred<void>()
+  const providerRelease = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+  const stopTyping = vi.fn(async () => undefined)
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        stop: stopTyping,
+      })),
+    },
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'provider-thread-different-target-preceding',
+      providerTurnId: 'provider-turn-different-target-preceding',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await providerRelease.promise
+    releaseLiveTurn?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        finalAction: {
+          kind: 'none',
+        },
+        precedingResponseSegments: [
+          {
+            deliveryContextOrdinal: 1,
+            response: 'Answer for the later target.',
+            media: [],
+          },
+        ],
+        response: '',
+        session,
+      },
+    }
+  })
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
+    {
+      error: {
+        code: 'ASSISTANT_DELIVERY_DEFERRED',
+        message: 'preceding delivery queued',
+      },
+      intentId: 'intent-preceding-queued-different-target',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+  ])
+
+  const initialResultPromise = sendAssistantMessageLocal({
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    deliveryTarget: 'thread-one',
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const steeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    deliveryDispatchMode: 'queue-only',
+    deliveryTarget: 'thread-two',
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Later prompt',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['Later prompt'])
+  })
+  providerRelease.resolve()
+
+  const [initialResult, steeredResult] = await Promise.all([
+    initialResultPromise,
+    steeredResultPromise,
+  ])
+
+  expect(initialResult.deliveryDeferred).toBe(true)
+  expect(steeredResult.deliveryDeferred).toBe(true)
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        deliveryContext: expect.objectContaining({
+          deliveryTarget: 'thread-two',
+        }),
+      }),
+    ])
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: true,
+  })
 })
 
 test('sendAssistantMessageLocal reports thrown preceding delivery when no final reply exists', async () => {
@@ -6504,6 +6645,9 @@ test('sendAssistantMessageLocal does not wait for a pending typing indicator sta
   await vi.waitFor(() => {
     expect(stopTyping).toHaveBeenCalledTimes(1)
   })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: false,
+  })
 })
 
 test('sendAssistantMessageLocal returns deferred delivery results and keeps typing in queue-only mode', async () => {
@@ -6571,6 +6715,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(startTypingIndicator.mock.calls[0]?.[1]?.startTelegramTyping, startTelegramTyping)
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 0)
 })
 
@@ -6578,6 +6723,7 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
   const failedSession = createAssistantSession({
     sessionId: 'session-failed-delivery',
   })
+  const stopTyping = vi.fn(async () => undefined)
   const failedDeliveryOutcome = {
     error: {
       code: 'ASSISTANT_DELIVERY_FAILED',
@@ -6590,6 +6736,11 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
     session: failedSession,
   }
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        stop: stopTyping,
+      })),
+    },
     deliveryOutcome: failedDeliveryOutcome,
   })
 
@@ -6615,6 +6766,9 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
     status: 'completed',
     vault: '<redacted-vault>',
   })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: true,
+  })
 })
 
 test('sendAssistantMessageLocal starts typing indicators for queue-only delivery', async () => {
@@ -6639,6 +6793,7 @@ test('sendAssistantMessageLocal starts typing indicators for queue-only delivery
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls.length, 1)
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
 })
 
 test('sendAssistantMessageLocal swallows typing-indicator startup failures', async () => {
@@ -6700,6 +6855,7 @@ test('sendAssistantMessageLocal surfaces queued delivery state after queue-only 
   assert.deepEqual(result.deliveryError, queuedError)
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.equal(mocks.finalizeDeliveredAssistantTurn.mock.calls.length, 1)
 })
 
@@ -8468,10 +8624,14 @@ async function loadLocalServiceModule(input?: {
             null,
           channel,
           deliverySource: message.deliverySource ?? null,
-          explicitTarget: audience.explicitTarget ?? message.deliveryTarget ?? null,
+          explicitTarget: message.deliveryTarget === undefined
+            ? audience.explicitTarget ?? null
+            : message.deliveryTarget,
           identityId,
           replyToMessageId:
-            audience.replyToMessageId ?? message.deliveryReplyToMessageId ?? null,
+            message.deliveryReplyToMessageId === undefined
+              ? audience.replyToMessageId ?? null
+              : message.deliveryReplyToMessageId,
           sessionId: input.session.sessionId,
           subject: message.deliverySubject ?? null,
           threadId,

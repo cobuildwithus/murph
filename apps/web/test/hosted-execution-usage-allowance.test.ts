@@ -542,7 +542,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-03-29T12:00:05.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toBeNull();
 
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -586,7 +586,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     ]);
   });
 
-  it("accounts usage against the record's allowance period without returning notice data", async () => {
+  it("accounts usage against the record's allowance period without returning notice data before crossing", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
@@ -597,15 +597,43 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-04-01T00:00:00.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toBeNull();
 
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
-  it("accounts usage when the period was already blocked", async () => {
+  it("returns a limit-notice candidate when the spend update crosses the period limit", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      spentUsdMicros: 9_999_000n,
+    });
+    const now = new Date("2026-03-29T12:00:05.000Z");
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now,
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toEqual({
+      crossedAt: now,
+      memberId: "member_123",
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      sourceUsageId: "turn_123.attempt-1",
+      userNotice: expect.objectContaining({
+        code: "pulse_upgrade_edge",
+        message: expect.any(String),
+      }),
+    });
+  });
+
+  it("does not return a limit-notice candidate when the period was already blocked", async () => {
+    const tx = createAllowanceTx({
+      blockedAt: new Date("2026-03-29T11:59:00.000Z"),
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      spentUsdMicros: 9_999_000n,
     });
 
     await expect(accountHostedAiUsageForAllowanceTx({
@@ -613,7 +641,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-03-29T12:00:05.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toBeNull();
   });
 
   it("accounts a worker-built transcription record with duration pricing", async () => {
@@ -678,7 +706,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       memberId: "member_123",
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toBeNull();
 
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
@@ -843,7 +871,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         credentialSource: "member",
       },
       tx: tx as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toBeNull();
 
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
@@ -2165,6 +2193,7 @@ describe("releaseHostedAiUsageLimitNotice", () => {
 function createAllowanceTx(input: {
   billingPhase?: string | null;
   billingPlanCode?: string;
+  blockedAt?: Date | null;
   checkoutOffer?: string | null;
   executeRaw: AllowanceExecuteRawMock;
   familyAccessActive?: boolean;
@@ -2176,6 +2205,7 @@ function createAllowanceTx(input: {
   periodStart?: Date;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
+  spentUsdMicros?: bigint;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
 }) {
@@ -2208,14 +2238,28 @@ function createAllowanceTx(input: {
       createMany: vi.fn(async () => ({ count: 1 })),
       findUniqueOrThrow: vi.fn(async () => ({
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
-        blockedAt: null,
+        blockedAt: input.blockedAt ?? null,
         lastUsageAt: null,
         limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
         periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
-        spentUsdMicros: 0n,
+        spentUsdMicros: input.spentUsdMicros ?? 0n,
       })),
-      update: vi.fn(async () => undefined),
+      update: vi.fn(async (args?: {
+        data?: {
+          billingPlanCode?: string;
+          blockedAt?: Date | null;
+          limitUsdMicros?: bigint;
+          periodEnd?: Date;
+        };
+      }) => ({
+        billingPlanCode: args?.data?.billingPlanCode ?? input.billingPlanCode ?? "launch_monthly",
+        blockedAt: args?.data?.blockedAt ?? input.blockedAt ?? null,
+        limitUsdMicros: args?.data?.limitUsdMicros ?? input.limitUsdMicros ?? 10_000_000n,
+        periodEnd: args?.data?.periodEnd ?? input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: input.spentUsdMicros ?? 0n,
+      })),
     },
     hostedAccountGroupMembership: {
       count: vi.fn(async () => input.familyAccessActive ? 2 : 0),
@@ -2383,6 +2427,7 @@ function createGatePrisma(input: {
         };
       }) => ({
         billingPlanCode: args?.data?.billingPlanCode ?? defaultPeriod.billingPlanCode,
+        blockedAt: defaultPeriod.blockedAt,
         limitUsdMicros: args?.data?.limitUsdMicros ?? defaultPeriod.limitUsdMicros,
         periodEnd: args?.data?.periodEnd ?? defaultPeriod.periodEnd,
         periodStart: defaultPeriod.periodStart,

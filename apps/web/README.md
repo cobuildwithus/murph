@@ -574,6 +574,68 @@ greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during
 the skew window.
 
+## Production build memory guard
+
+The hosted web production build must keep fitting Vercel's Standard build
+machine: 4 vCPUs, 8 GB RAM, and 32 GB disk. The CI guard currently observes the
+production `next build` in a root-level cgroup-v2 child for accounting only. It
+does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
+
+The default advisory budget is 7,200,000,000 cgroup-accounted bytes: the 8 GB
+machine model minus a 0.8 GB reserve for OS/container overhead outside the build
+cgroup at the ceiling. The legacy-named
+`MURPH_HOSTED_WEB_BUILD_MEMORY_CAP_BYTES` override is still validated as this
+advisory budget: strictly greater than the 6,000,000,000-byte
+known-false-positive cgroup floor and less than or equal to 7,200,000,000 bytes.
+
+PR #349 is historical RSS context only. It calibrated this repo's local
+single-process peak-RSS measurement method against the Vercel failure mode:
+
+```bash
+/usr/bin/time -l env NEXT_TELEMETRY_DISABLED=1 VERCEL=1 VERCEL_ENV=preview pnpm --dir apps/web build
+```
+
+That calibration found 5.34 GB peak RSS passing and 6.18 GB peak RSS failing
+with exit 137 on the 8 GB Vercel builder. Those numbers are RSS units and are
+not comparable to cgroup `memory.current`, which includes anonymous memory
+across all build workers plus page cache. A fully working Linux CI run on
+2026-07-06 proved the mismatch: a 6,000,000,000-byte cgroup cap OOM-killed a
+build that the real 8 GB Vercel Standard machine accepts.
+
+Linux CI defaults to wrapping the `apps/web verify` production `next build` step
+with `apps/web/scripts/build-memory-guard.sh`. Privileged operations are limited
+to creating/removing that measured cgroup and moving the build process into it;
+the build itself still runs as the invoking user with its normal environment,
+working directory, and stdio.
+
+Enforcement is deferred because live CI on 2026-07-07 showed the cold-build
+multi-process anonymous-memory ramp is not governed by the Turbopack heap limit:
+with `turbopackMemoryLimit=3GiB`, anon climbed about 2.9 GB at 12 seconds, 5.5
+GB at 27 seconds, and 6.9 GB at 42 seconds before an OOM-group kill, matching
+the prior 4 GiB run. Any hard cgroup limit that leaves a meaningful reserve on
+the 8 GB machine would currently false-fail the cold build. Cold-build memory
+optimization is the follow-up work; production config should not carry
+unproven heap-limit churn from the 3 GiB trial.
+
+The guard samples cgroup `memory.current` and selected `memory.stat` fields
+about every 3 seconds during the build, prints trajectory lines about every 15
+seconds, then reports sampled maxima before cgroup `memory.peak`,
+`memory.events`, and selected final-read `memory.stat` values. If sampled max
+anon or `memory.peak` exceeds the advisory budget, it prints a loud
+`WOULD EXCEED` warning, but the guard exits with the wrapped build's status.
+It still fails closed when cgroup v2, the root memory controller, passwordless
+`sudo`, or peak accounting are unavailable.
+Disabling the guard in Linux CI requires `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0`
+and logs a prominent warning that the Vercel Standard-machine memory budget is
+not being measured.
+Local non-Linux wrapper validation may use
+`MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD_MODE=passthrough`; that mode is rejected in
+CI and does not prove cgroup accounting.
+
+Flipping back to enforcement means restoring the `memory.max`,
+`memory.swap.max`, and `memory.oom.group` writes after the cold build fits under
+the advisory budget with the machine-model reserve intact.
+
 The hosted schema now includes the canonical member slices, hosted email
 authorization, device-sync web ownership models, the anonymized hosted
 assistant-runtime issue sink, canonical hosted mailbox rows, hosted workspace

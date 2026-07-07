@@ -51,7 +51,15 @@ export type HostedMailboxItemImportOutcome =
       linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
       reasonCode?: string | null;
       afterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
+      conversationImportTiming?: HostedMailboxConversationImportTiming | null;
     };
+
+export interface HostedMailboxConversationImportTiming {
+  projectionPrepareMs?: number;
+  projectionImportMs?: number;
+  attachmentEvidenceMs?: number;
+  projectionTotalMs?: number;
+}
 
 export interface HostedMailboxPostCheckpointEffectResult {
   kind: "inbox_projection";
@@ -85,6 +93,7 @@ export interface HostedMailboxImportLoopResult {
   emailDeliveryContexts?: HostedAssistantEmailDeliveryContext[];
   latestLinqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: HostedAssistantLinqDeliveryContext[];
+  conversationImportTiming?: HostedMailboxConversationImportTiming;
   nextRetryAt?: string | null;
   state: HostedMailboxImportState;
 }
@@ -198,6 +207,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
   let latestLinqDeliveryContext: HostedAssistantLinqDeliveryContext | null = null;
   const linqDeliveryContexts: HostedAssistantLinqDeliveryContext[] = [];
+  let conversationImportTiming: HostedMailboxConversationImportTiming | null = null;
   let nextRetryAt: string | null = null;
   const stoppedLanes = new Set<HostedMailboxLane>();
   const expectedSeqByLane = resolveHostedMailboxExpectedSeqByLane({
@@ -462,6 +472,12 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       latestLinqDeliveryContext = outcome.linqDeliveryContext;
       linqDeliveryContexts.push(outcome.linqDeliveryContext);
     }
+    if (outcome.status === "imported" || outcome.status === "skipped") {
+      conversationImportTiming = mergeHostedMailboxConversationImportTiming(
+        conversationImportTiming,
+        outcome.conversationImportTiming ?? null,
+      );
+    }
     if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.emailDeliveryContext) {
       emailDeliveryContexts.push(outcome.emailDeliveryContext);
     }
@@ -489,9 +505,38 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     ...(emailDeliveryContexts.length > 0 ? { emailDeliveryContexts } : {}),
     ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
     ...(linqDeliveryContexts.length > 0 ? { linqDeliveryContexts } : {}),
+    ...(conversationImportTiming ? { conversationImportTiming } : {}),
     ...(nextRetryAt ? { nextRetryAt } : {}),
     state: nextState,
   };
+}
+
+function mergeHostedMailboxConversationImportTiming(
+  current: HostedMailboxConversationImportTiming | null,
+  next: HostedMailboxConversationImportTiming | null,
+): HostedMailboxConversationImportTiming | null {
+  if (!next) {
+    return current;
+  }
+
+  const merged: HostedMailboxConversationImportTiming = { ...(current ?? {}) };
+  addHostedMailboxConversationImportTimingField(merged, "projectionPrepareMs", next.projectionPrepareMs);
+  addHostedMailboxConversationImportTimingField(merged, "projectionImportMs", next.projectionImportMs);
+  addHostedMailboxConversationImportTimingField(merged, "attachmentEvidenceMs", next.attachmentEvidenceMs);
+  addHostedMailboxConversationImportTimingField(merged, "projectionTotalMs", next.projectionTotalMs);
+  return Object.keys(merged).length > 0 ? merged : current;
+}
+
+function addHostedMailboxConversationImportTimingField(
+  target: HostedMailboxConversationImportTiming,
+  key: keyof HostedMailboxConversationImportTiming,
+  value: number | undefined,
+): void {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return;
+  }
+
+  target[key] = (target[key] ?? 0) + Math.trunc(value);
 }
 
 function isDurablyConsumedReplay(input: {

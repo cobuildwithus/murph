@@ -45,6 +45,7 @@ import {
   resolveAssistantCurrentAudienceDeliveryFields,
   resolveAssistantHostedDeliveryIdempotency,
   supportsAssistantCurrentAudienceMessageReaction,
+  type AssistantCurrentAudienceDeliveryFields,
   type AssistantPrecedingReplySegment,
 } from './delivery-service.js'
 import {
@@ -98,6 +99,7 @@ import {
   type AssistantActiveTurnInputAdmissionResult,
 } from './turn-input.js'
 import {
+  assistantDeliveryOutcomeSupersedesTypingIndicator,
   startAssistantChannelTypingIndicator,
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
@@ -405,6 +407,14 @@ export async function sendAssistantMessageLocal(
 
       let responseText: string | null = null
       let userTurn: PersistedUserTurn | null = null
+      const typingIndicatorDeliveryFields =
+        input.deliverResponse === true
+          ? resolveAssistantCurrentAudienceDeliveryFields({
+              input,
+              session: resolved.session,
+              sharedPlan,
+            })
+          : null
       const typingIndicator = startAssistantChannelTypingIndicator({
         channelDependencies:
           executionContext?.hosted?.channelTypingDependencies ?? null,
@@ -419,6 +429,7 @@ export async function sendAssistantMessageLocal(
         value: null,
       }
       let currentSession = resolved.session
+      let deliverySupersededTypingIndicator = false
 
       try {
         const turnInputController = createAssistantActiveTurnInputController({
@@ -1439,7 +1450,27 @@ export async function sendAssistantMessageLocal(
             )
           }
         }
-        for (const precedingOutcome of precedingDeliveryOutcomes) {
+        for (const [precedingOutcomeIndex, precedingOutcome] of
+          precedingDeliveryOutcomes.entries()) {
+          const precedingSegment =
+            precedingResponseSegments[precedingOutcomeIndex] ?? null
+          const precedingDeliveryFields = precedingSegment
+            ? resolveAssistantCurrentAudienceDeliveryFields({
+                input: applyAssistantReplyDeliveryContext({
+                  context: precedingSegment.deliveryContext ?? null,
+                  input: currentInput,
+                }),
+                session: precedingOutcome.session,
+                sharedPlan,
+              })
+            : null
+          deliverySupersededTypingIndicator =
+            deliverySupersededTypingIndicator ||
+            assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget({
+              deliveryFields: precedingDeliveryFields,
+              kind: precedingOutcome.kind,
+              typingIndicatorDeliveryFields,
+            })
           if (precedingOutcome.kind !== 'failed') {
             continue
           }
@@ -1473,6 +1504,21 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
+        const finalReplyDeliveryFields =
+          finalResponseText !== null
+            ? resolveAssistantCurrentAudienceDeliveryFields({
+                input: currentInput,
+                session: deliveryOutcome.session,
+                sharedPlan,
+              })
+            : null
+        deliverySupersededTypingIndicator =
+          deliverySupersededTypingIndicator ||
+          assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget({
+            deliveryFields: finalReplyDeliveryFields,
+            kind: finalResponseText !== null ? deliveryOutcome.kind : null,
+            typingIndicatorDeliveryFields,
+          })
         const reactionDeliveryResult = await deliverAssistantProviderReactions({
           currentInput,
           providerResult,
@@ -1624,7 +1670,9 @@ export async function sendAssistantMessageLocal(
         throw error
       } finally {
         activeTurnInputController?.close()
-        await stopAssistantChannelTypingIndicator(typingIndicator)
+        await stopAssistantChannelTypingIndicator(typingIndicator, {
+          providerStop: !deliverySupersededTypingIndicator,
+        })
         if (
           !(
             executionContext?.hosted != null
@@ -1639,6 +1687,48 @@ export async function sendAssistantMessageLocal(
       }
     },
   })
+}
+
+function assistantDeliveryOutcomeSupersedesTypingIndicatorForTarget(input: {
+  deliveryFields: AssistantCurrentAudienceDeliveryFields | null
+  kind: AssistantDeliveryOutcome['kind'] | null
+  typingIndicatorDeliveryFields: AssistantCurrentAudienceDeliveryFields | null
+}): boolean {
+  if (!assistantDeliveryOutcomeSupersedesTypingIndicator(input.kind)) {
+    return false
+  }
+  if (!input.typingIndicatorDeliveryFields || !input.deliveryFields) {
+    return true
+  }
+
+  const typingChannel = normalizeAssistantDeliveryMatchChannel(
+    input.typingIndicatorDeliveryFields.channel,
+  )
+  const deliveryChannel = normalizeAssistantDeliveryMatchChannel(
+    input.deliveryFields.channel,
+  )
+  if (typingChannel && deliveryChannel && typingChannel !== deliveryChannel) {
+    return false
+  }
+
+  const typingTarget = resolveAssistantVaultFileSendTargetFingerprint(
+    input.typingIndicatorDeliveryFields,
+  )
+  const deliveryTarget = resolveAssistantVaultFileSendTargetFingerprint(
+    input.deliveryFields,
+  )
+  if (!typingTarget || !deliveryTarget) {
+    return true
+  }
+
+  return typingTarget === deliveryTarget
+}
+
+function normalizeAssistantDeliveryMatchChannel(
+  value: string | null,
+): string | null {
+  const normalized = value?.trim().toLowerCase() ?? ''
+  return normalized.length > 0 ? normalized : null
 }
 
 export async function updateAssistantSessionOptionsLocal(input: {

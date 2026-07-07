@@ -427,7 +427,7 @@ test("updates paid Family seat count explicitly", async () => {
   });
 });
 
-test("does not create a Family owner group from the seats route", async () => {
+test("does not create a family owner group from the seats route", async () => {
   mocks.hostedAccountGroupFindUnique.mockResolvedValueOnce(null);
 
   const response = await seatsRoute.PATCH(

@@ -22,9 +22,13 @@ type AssistantVaultFileResponseMedia = Extract<
   { kind: 'vault_file' }
 >
 
+export interface AssistantChannelActivityStopOptions {
+  providerStop?: boolean
+}
+
 export interface AssistantChannelActivityHandle {
   refreshNow?: () => Promise<void>
-  stop: () => Promise<void>
+  stop: (options?: AssistantChannelActivityStopOptions) => Promise<void>
 }
 
 export interface TelegramRuntimeDependencies {

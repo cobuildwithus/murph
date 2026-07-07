@@ -149,7 +149,7 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('Product feedback:')
     expect(prompt).toContain('`murph.submit_product_feedback`')
     expect(prompt).toContain(
-      'capture explicit Murph product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
+      'capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
     )
     expect(prompt).toContain(
       'Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known',

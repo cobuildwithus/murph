@@ -609,6 +609,22 @@ export async function runHostedWorkspaceAssistantPhase(
         input,
         wake,
       });
+    const preManagedAutomationWakeAt = await resolvePreAutomationLaneAssistantWakeAt({
+      hasFreshConversationInput,
+      input,
+      pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
+    });
+    if (preManagedAutomationWakeAt) {
+      return withHostedDeviceSyncMaintenanceRan(
+        mergeContinuingSystemMailboxAssistantPhaseResult({
+          assistantResult: buildPreAutomationLaneSkippedAssistantWakeResult({
+            wakeAt: preManagedAutomationWakeAt,
+          }),
+          systemMailboxResult: systemMailboxMaintenance.result,
+        }),
+        systemMailboxMaintenance.deviceSyncMaintenanceRan,
+      );
+    }
     const managedAutomationsResult = hasFreshConversationInput
       || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
       ? null
@@ -787,6 +803,19 @@ export async function runHostedWorkspaceAssistantPhase(
           : { redactedLogEntries: [...assistantAutomationRedactedLogEntries] }),
       };
     };
+    const preAutomationLaneWakeAt = await resolvePreAutomationLaneAssistantWakeAt({
+      hasFreshConversationInput,
+      input,
+      pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
+    });
+    if (preAutomationLaneWakeAt) {
+      return mergeContinuingSystemMailboxResult(
+        buildPreAutomationLaneSkippedAssistantWakeResult({
+          wakeAt: preAutomationLaneWakeAt,
+        }),
+      );
+    }
+
     let assistantMetrics = await runAutomationLane({
       managedAutomationsResult,
       systemMailboxMaintenance,
@@ -833,6 +862,21 @@ export async function runHostedWorkspaceAssistantPhase(
       || (deferredPendingSystemMailboxMaintenance?.backgroundMaintenanceYielded
         ?? false);
     if (deferredPendingSystemMailboxMaintenance?.continueAssistantLane === true) {
+      const deferredPreAutomationLaneWakeAt =
+        await resolvePreAutomationLaneAssistantWakeAt({
+          hasFreshConversationInput,
+          input,
+          pendingAssistantInputWakeAt:
+            deferredPendingSystemMailboxMaintenance.pendingAssistantInputWakeAt,
+        });
+      if (deferredPreAutomationLaneWakeAt) {
+        return mergeContinuingSystemMailboxResult(
+          buildPreAutomationLaneSkippedAssistantWakeResult({
+            wakeAt: deferredPreAutomationLaneWakeAt,
+          }),
+        );
+      }
+
       assistantMetrics = await runAutomationLane({
         managedAutomationsResult: null,
         systemMailboxMaintenance: deferredPendingSystemMailboxMaintenance,
@@ -2658,6 +2702,38 @@ function buildDeferredPendingAssistantInputWakeResult(input: {
 
   return {
     nextWakeAt: input.pendingAssistantInputWakeAt,
+    progressed: false,
+  };
+}
+
+async function resolvePreAutomationLaneAssistantWakeAt(
+  input: {
+    hasFreshConversationInput: boolean;
+    input: HostedWorkspaceRuntimeAssistantPhaseInput;
+    pendingAssistantInputWakeAt?: string | null;
+  },
+): Promise<string | null> {
+  if (input.hasFreshConversationInput) {
+    return null;
+  }
+
+  if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
+    return new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
+  }
+
+  if (input.pendingAssistantInputWakeAt) {
+    return input.pendingAssistantInputWakeAt;
+  }
+
+  return await resolvePendingAssistantInputWakeAt(input.input);
+}
+
+function buildPreAutomationLaneSkippedAssistantWakeResult(input: {
+  wakeAt: string;
+}): HostedWorkspaceRunnerAssistantPhaseResult {
+  return {
+    nextWakeAt: input.wakeAt,
+    nextWakeReason: "assistant",
     progressed: false,
   };
 }

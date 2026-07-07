@@ -1341,6 +1341,35 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })
 
+  it('can release a Linq typing session locally without provider stop', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        refreshMs: 5,
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(6)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await handle.stop({
+      providerStop: false,
+    })
+    await vi.advanceTimersByTimeAsync(20)
+
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled()
+  })
+
   it('refreshes the Linq typing indicator at the low-volume default cadence', async () => {
     vi.useFakeTimers()
     runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)

@@ -730,7 +730,6 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         pendingLinqParticipantContactObservedAt: null,
         pendingLinqRecipientPhoneEncrypted: null,
         pendingLinqRecipientPhoneLookupKey: null,
-        pendingLinqLastInboundAt: null,
       },
       where: {
         NOT: {
@@ -752,7 +751,6 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         pendingLinqParticipantContactObservedAt: null,
         pendingLinqRecipientPhoneEncrypted: null,
         pendingLinqRecipientPhoneLookupKey: null,
-        pendingLinqLastInboundAt: null,
       },
       where: {
         NOT: {

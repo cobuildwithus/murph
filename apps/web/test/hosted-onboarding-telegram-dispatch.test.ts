@@ -6,7 +6,9 @@ import {
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import {
   createHostedTelegramUsernameLookupKey,
+  createHostedTelegramUserLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -54,6 +56,7 @@ const mocks = vi.hoisted(() => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
+    provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(async () => ({})),
     readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
     readHostedMailboxItemOwnerById: vi.fn(async (input: {
       mailboxItemId: string;
@@ -163,6 +166,18 @@ vi.mock("@/src/lib/hosted-runner/assistant-nudge", () => ({
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-crypto/domain-root-store")>(
+    "@/src/lib/hosted-crypto/domain-root-store",
+  );
+
+  return {
+    ...actual,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly:
+      mocks.provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  };
+});
 
 import { handleHostedOnboardingTelegramWebhook as handleHostedOnboardingTelegramWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
 
@@ -401,6 +416,181 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
       }),
     );
+  });
+
+  it("sends the accepted family invite reply seeded by the accepted Telegram member id", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const acceptedMemberId = "member_telegram_family";
+    const invite = {
+      acceptedAt: null,
+      acceptedByMemberId: null,
+      channel: "telegram",
+      createdAt: new Date("2026-06-18T12:00:00.000Z"),
+      expiresAt: new Date("2026-07-01T12:00:00.000Z"),
+      group: {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "hbag_telegram",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+      groupId: "hbag_telegram",
+      id: "invite_telegram",
+      inviteCode: "invite_telegram",
+      invitedByMemberId: "member_owner",
+      status: "pending",
+      targetEmailEncrypted: null,
+      targetEmailLookupKey: null,
+      targetLabel: "Alice",
+      targetPhoneLookupKey: null,
+      targetPhoneNumberEncrypted: null,
+      targetTelegramUsernameEncrypted: null,
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@alice_user"),
+      updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+    };
+    const hostedAccountGroupInviteFindUnique = vi.fn(async () => invite);
+    const hostedAccountGroupMembershipFindFirst = vi.fn().mockResolvedValue(null);
+    const prisma = withPrismaTransaction({
+      hostedAccountGroupBillingRef: {
+        findUnique: vi.fn().mockResolvedValue({
+          billedSeatCount: 2,
+        }),
+      },
+      hostedAccountGroupInvite: {
+        count: vi.fn().mockResolvedValue(0),
+        findUnique: hostedAccountGroupInviteFindUnique,
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedAccountGroupMembership: {
+        count: vi.fn().mockResolvedValue(1),
+        findFirst: hostedAccountGroupMembershipFindFirst,
+        upsert: vi.fn().mockResolvedValue({
+          group: invite.group,
+          groupId: invite.groupId,
+          memberId: acceptedMemberId,
+          role: "member",
+          status: "active",
+        }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingRef: null,
+          billingStatus: HostedBillingStatus.not_started,
+        }),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            linqChatIdEncrypted: null,
+            linqChatLookupKey: null,
+            linqHomeLineAssignedAt: null,
+            linqRecipientPhoneEncrypted: null,
+            linqRecipientPhoneLookupKey: null,
+            member: {
+              billingStatus: HostedBillingStatus.not_started,
+              createdAt: new Date("2026-06-18T12:00:00.000Z"),
+              id: acceptedMemberId,
+              suspendedAt: null,
+              updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+            },
+            memberId: acceptedMemberId,
+            pendingLinqChatIdEncrypted: null,
+            pendingLinqChatLookupKey: null,
+            pendingLinqLastInboundAt: null,
+            pendingLinqParticipantContactEncrypted: null,
+            pendingLinqParticipantContactKind: null,
+            pendingLinqParticipantContactLookupKey: null,
+            pendingLinqParticipantContactObservedAt: null,
+            pendingLinqRecipientPhoneEncrypted: null,
+            pendingLinqRecipientPhoneLookupKey: null,
+            replyAliasLookupKey: null,
+            telegramUserIdEncrypted: null,
+            telegramUserLookupKey: createHostedTelegramUserLookupKey("456"),
+          },
+        ]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 333,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+            username: "alice_user",
+          },
+          message_id: 4,
+          text: "/start family_invite_telegram",
+        },
+        update_id: 333,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "family-invite-accepted",
+    });
+
+    expect(mocks.provisionActiveHostedDomainRootEnvelopeForUserOnly).toHaveBeenCalledWith({
+      domain: "control",
+      prisma,
+      reason: "hosted-family.telegram-routing",
+      userId: acceptedMemberId,
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          eventId: "assistant.notification.requested:family-chat:member_telegram_family:telegram:update:333",
+          kind: "assistant.notification.requested",
+          notification: expect.objectContaining({
+            responsePolicy: {
+              kind: "require_send_exact_text",
+              text: renderUserFacingMessage({
+                context: {},
+                key: "assistant.family_welcome",
+                seed: acceptedMemberId,
+              }).text,
+            },
+            route: expect.objectContaining({
+              channel: "telegram",
+              delivery: {
+                kind: "thread",
+                target: "123",
+              },
+            }),
+          }),
+          userId: acceptedMemberId,
+        }),
+      }),
+    );
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: acceptedMemberId,
+      mailboxItemId: "mailbox_assistant.notification.requested:family-chat:member_telegram_family:telegram:update:333",
+    });
   });
 
   it("routes unknown token-shaped Telegram text to the assistant", async () => {
@@ -795,7 +985,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           memberId: true,
           pendingLinqChatIdEncrypted: true,
           pendingLinqChatLookupKey: true,
-          pendingLinqLastInboundAt: true,
           pendingLinqParticipantContactEncrypted: true,
           pendingLinqParticipantContactKind: true,
           pendingLinqParticipantContactLookupKey: true,

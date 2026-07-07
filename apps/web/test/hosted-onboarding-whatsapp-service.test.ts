@@ -109,6 +109,7 @@ import {
   grantHostedWhatsAppMessagingConsentTx,
   revokeHostedWhatsAppMessagingConsentTx,
 } from "@/src/lib/hosted-onboarding/whatsapp-consent";
+import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 
 type HostedOnboardingWhatsAppWebhookInput =
   Parameters<typeof handleHostedOnboardingWhatsAppWebhookImpl>[0];
@@ -736,7 +737,11 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
       notification: {
         responsePolicy: {
           kind: "require_send_exact_text",
-          text: expect.stringContaining("The Family owner cannot see them."),
+          text: renderUserFacingMessage({
+            context: {},
+            key: "assistant.family_welcome",
+            seed: "member_whatsapp_family",
+          }).text,
         },
         route: {
           channel: "whatsapp",

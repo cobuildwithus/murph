@@ -96,6 +96,10 @@ async function getHostedAppSessionForPublicPageAuth(): Promise<HostedAppSession 
     return await getHostedAppSession();
   } catch (error) {
     if (isHostedSessionStoreUnavailableError(error)) {
+      console.warn("Hosted app session store unavailable during public page auth.", {
+        code: getErrorStringField(error, "code"),
+        name: getErrorStringField(error, "name"),
+      });
       return null;
     }
 

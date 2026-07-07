@@ -174,14 +174,105 @@ describe("hosted group newsletter participants", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
   });
 
+  it("does not spend the private email nudge key for a phone-lookup-only member", async () => {
+    mocks.readHostedMemberIdentity.mockImplementation(async (input: { memberId: string }) =>
+      input.memberId === "member_active_missing_email"
+        ? { phoneLookupKey: "phone_lookup_key_only" }
+        : null
+    );
+    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+
+    await readHostedGroupNewsletterParticipants({
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("enqueues one private email nudge for an established Linq direct thread", async () => {
+    mocks.readHostedMemberIdentity.mockImplementation(async (input: { memberId: string }) =>
+      input.memberId === "member_active_missing_email"
+        ? { phoneLookupKey: "phone_lookup_with_thread" }
+        : null
+    );
+    mocks.readHostedMemberRoutingState.mockImplementation(async (input: { memberId: string }) =>
+      input.memberId === "member_active_missing_email" ? createLinqHomeRoutingState() : null
+    );
+
+    await readHostedGroupNewsletterParticipants({
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "group-newsletter.email-needed:member_active_missing_email:hgrp_123",
+        kind: "group-newsletter.email-needed",
+        userId: "member_active_missing_email",
+      }),
+      tx: expect.any(Object),
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("enqueues one private email nudge for a Telegram-only member", async () => {
+    mocks.readHostedMemberIdentity.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingState.mockImplementation(async (input: { memberId: string }) =>
+      input.memberId === "member_active_missing_email" ? createTelegramRoutingState() : null
+    );
+
+    await readHostedGroupNewsletterParticipants({
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "group-newsletter.email-needed:member_active_missing_email:hgrp_123",
+        kind: "group-newsletter.email-needed",
+        userId: "member_active_missing_email",
+      }),
+      tx: expect.any(Object),
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not enqueue a private email nudge for a Telegram settings sync without a direct thread", async () => {
+    mocks.readHostedMemberIdentity.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingState.mockImplementation(async (input: { memberId: string }) =>
+      input.memberId === "member_active_missing_email"
+        ? createTelegramSettingsOnlyRoutingState()
+        : null
+    );
+
+    await readHostedGroupNewsletterParticipants({
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("does not consume the once-ever nudge until a missing-email participant has a direct route", async () => {
     let memberHasDirectRoute = false;
+    mocks.readHostedMemberIdentity.mockImplementation(async (input: { memberId: string }) =>
+      input.memberId === "member_active_missing_email"
+        ? { phoneLookupKey: "phone_lookup_pending_only" }
+        : null
+    );
     mocks.readHostedMemberRoutingState.mockImplementation(async (input: { memberId: string }) => {
-      if (input.memberId !== "member_active_missing_email" || !memberHasDirectRoute) {
+      if (input.memberId !== "member_active_missing_email") {
         return null;
       }
 
-      return createTelegramRoutingState();
+      return memberHasDirectRoute
+        ? createLinqHomeRoutingState()
+        : createPendingLinqRoutingState();
     });
     mocks.appendHostedMailboxEnvelopeTx
       .mockResolvedValueOnce({
@@ -303,6 +394,59 @@ function createTelegramRoutingState() {
     pendingLinqParticipantContact: null,
     pendingLinqRecipientPhone: null,
     telegramThreadId: "telegram_thread_123",
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  };
+}
+
+function createTelegramSettingsOnlyRoutingState() {
+  return {
+    hasPendingLinqRouteState: false,
+    linqChatId: null,
+    linqHomeLineAssignedAt: null,
+    linqRecipientPhone: null,
+    memberId: "member_active_missing_email",
+    pendingLinqChatId: null,
+    pendingLinqParticipantContact: null,
+    pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
+    telegramUserId: "telegram_user_settings_only",
+    telegramUserLookupKey: null,
+  };
+}
+
+function createLinqHomeRoutingState() {
+  return {
+    hasPendingLinqRouteState: false,
+    linqChatId: "linq_home_thread_123",
+    linqHomeLineAssignedAt: new Date("2026-07-01T12:00:00.000Z"),
+    linqRecipientPhone: null,
+    memberId: "member_active_missing_email",
+    pendingLinqChatId: null,
+    pendingLinqParticipantContact: null,
+    pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  };
+}
+
+function createPendingLinqRoutingState() {
+  return {
+    hasPendingLinqRouteState: true,
+    linqChatId: null,
+    linqHomeLineAssignedAt: null,
+    linqRecipientPhone: null,
+    memberId: "member_active_missing_email",
+    pendingLinqChatId: "linq_pending_thread_123",
+    pendingLinqParticipantContact: {
+      kind: "phone",
+      lookupKey: "pending_contact_lookup_key",
+      observedAt: new Date("2026-07-01T12:00:00.000Z"),
+      value: "+15550101010",
+    },
+    pendingLinqRecipientPhone: "+15550101010",
+    telegramThreadId: null,
     telegramUserId: null,
     telegramUserLookupKey: null,
   };

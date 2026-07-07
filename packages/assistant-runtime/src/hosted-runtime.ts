@@ -481,6 +481,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
 }
 
 export interface HostedWorkspaceRuntimeJobImportContext {
+  onConversationInputStaged?: (() => void) | null;
   recordMessagingReturnTarget?(
     target: HostedRuntimeDeviceSyncMessagingReturnTarget | null,
   ): void;
@@ -561,6 +562,7 @@ function withoutHostedRuntimeInvocationOrchestrationLatencyDiagnostics(
       || phaseBreakdown.restore
       || phaseBreakdown.boot
       || phaseBreakdown.wake
+      || phaseBreakdown.import
       || phaseBreakdown.provider,
   );
   if (hasRemainingPhase) {
@@ -912,6 +914,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             initialAssistantInputLatencyMilestones,
             context?.latencyMilestones ?? null,
           ),
+          onConversationInputStaged: context?.onConversationInputStaged ?? null,
           runtimeAttemptId: input.request.attemptId,
           signal: context?.signal ?? runtimeAbortController.signal,
         },
@@ -933,6 +936,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             initialAssistantInputLatencyMilestones,
             context?.latencyMilestones ?? null,
           ),
+          onConversationInputStaged: context?.onConversationInputStaged ?? null,
           runtimeAttemptId: input.request.attemptId,
           signal: context?.signal ?? runtimeAbortController.signal,
         },

@@ -821,11 +821,11 @@ export async function markHostedLinqDeliverySkippedTx(input: {
     failedAt: null,
     failureCode: sanitizeHostedOnboardingPersistedErrorCode(
       normalizeNullable(input.failureCode)
-        ?? "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+        ?? "HOSTED_LINQ_DELIVERY_SKIPPED",
     ),
     failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
       normalizeNullable(input.failureReason)
-        ?? "Linq/iMessage send skipped because the recipient has not replied within the allowed window.",
+        ?? "Linq/iMessage send skipped before provider dispatch.",
     ),
     linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,

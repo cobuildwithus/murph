@@ -59,6 +59,11 @@ export type HostedAiUsageGateNoticeCode =
   | "trial_usage_limit_reached"
   | "trial_conversion_pending";
 
+export type HostedAiUsageLimitNoticeCode = Exclude<
+  HostedAiUsageGateNoticeCode,
+  "trial_conversion_pending"
+>;
+
 export type HostedAiUsageGateDecision =
   | {
     allowed: true;
@@ -89,11 +94,24 @@ export interface HostedAiUsageGateUserNotice {
   message: string;
 }
 
+export interface HostedAiUsageLimitNotice extends HostedAiUsageGateUserNotice {
+  code: HostedAiUsageLimitNoticeCode;
+}
+
 export interface HostedAiUsageAllowancePricingResult {
   costUsdMicros: bigint;
   counted: boolean;
   pricingSnapshot: Prisma.InputJsonObject;
   pricingVersion: string;
+}
+
+export interface HostedAiUsageLimitNoticeCandidate {
+  crossedAt: Date;
+  memberId: string;
+  periodEnd: Date;
+  periodStart: Date;
+  sourceUsageId: string;
+  userNotice: HostedAiUsageLimitNotice;
 }
 
 type HostedAiUsageAllowancePricingModelSource =
@@ -140,6 +158,7 @@ type HostedAiUsageAllowanceTokenPricingBasisResolution =
 interface HostedAiUsageAllowancePeriod {
   allowanceSource: HostedAiUsageAllowanceSourceKind;
   billingPlanCode: HostedBillingPlanCode;
+  blockedAt: Date | null;
   limitUsdMicros: bigint;
   periodEnd: Date;
   periodStart: Date;
@@ -158,7 +177,7 @@ type HostedAiUsageAllowancePeriodResolution =
     kind: "period";
     allowanceSource: HostedAiUsageAllowanceSourceKind;
     source: "billing" | "calendar" | "trial";
-  } & Omit<HostedAiUsageAllowancePeriod, "spentUsdMicros">)
+  } & Omit<HostedAiUsageAllowancePeriod, "blockedAt" | "spentUsdMicros">)
   | {
     billingPlanCode: HostedBillingPlanCode;
     kind: "denied";
@@ -543,7 +562,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   now?: Date;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<HostedAiUsageLimitNoticeCandidate | null> {
   const now = input.now ?? new Date();
   const at = normalizeHostedAiUsageAllowanceDate(input.record.occurredAt);
   const memberState = await input.tx.hostedMember.findUnique({
@@ -614,7 +633,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
       record: input.record,
       tx: input.tx,
     });
-    return;
+    return null;
   }
 
   const priced = priceHostedAiUsageForAllowance(input.record);
@@ -636,15 +655,16 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   });
 
   if (accounted.count !== 1 || !priced.counted) {
-    return;
+    return null;
   }
 
-  await accountHostedAiUsageAllowancePeriodSpendTx({
+  return accountHostedAiUsageAllowancePeriodSpendTx({
     costUsdMicros: priced.costUsdMicros,
     memberId: input.memberId,
     now,
     period,
     recordOccurredAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
+    sourceUsageId: input.record.usageId,
     tx: input.tx,
   });
 }
@@ -1197,6 +1217,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       limitUsdMicros: current.limitUsdMicros,
       periodEnd: current.periodEnd,
       periodStart: current.periodStart,
+      blockedAt: current.blockedAt,
       spentUsdMicros: current.spentUsdMicros,
     };
   }
@@ -1226,6 +1247,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     },
     select: {
       billingPlanCode: true,
+      blockedAt: true,
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
@@ -1238,6 +1260,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     allowanceSource: resolved.allowanceSource,
     billingPlanCode: parseHostedBillingPlanCode(upgraded.billingPlanCode)
       ?? resolved.billingPlanCode,
+    blockedAt: upgraded.blockedAt,
     limitUsdMicros: upgraded.limitUsdMicros,
     periodEnd: upgraded.periodEnd,
     periodStart: upgraded.periodStart,
@@ -1283,6 +1306,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     },
     select: {
       billingPlanCode: true,
+      blockedAt: true,
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
@@ -1303,6 +1327,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
       kind: "period",
       allowanceSource: resolved.allowanceSource,
       billingPlanCode: periodMatches ? currentBillingPlanCode : resolved.billingPlanCode,
+      blockedAt: current.blockedAt,
       limitUsdMicros,
       periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
       periodStart: periodMatches ? current.periodStart : resolved.periodStart,
@@ -1314,6 +1339,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
     kind: "period",
     allowanceSource: resolved.allowanceSource,
     billingPlanCode: resolved.billingPlanCode,
+    blockedAt: null,
     limitUsdMicros: resolved.limitUsdMicros,
     periodEnd: resolved.periodEnd,
     periodStart: resolved.periodStart,
@@ -1327,9 +1353,14 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
   now: Date;
   period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>;
   recordOccurredAt: Date;
+  sourceUsageId: string;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
-  await input.tx.$executeRaw`
+}): Promise<HostedAiUsageLimitNoticeCandidate | null> {
+  const crossedLimit =
+    input.period.blockedAt === null
+    && input.period.spentUsdMicros + input.costUsdMicros >= input.period.limitUsdMicros;
+
+  const updated = await input.tx.$executeRaw`
     UPDATE "hosted_ai_usage_period"
     SET
       "spent_usd_micros" = "spent_usd_micros" + ${input.costUsdMicros},
@@ -1350,6 +1381,25 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
     WHERE "member_id" = ${input.memberId}
       AND "period_start" = ${input.period.periodStart}
   `;
+
+  if (!crossedLimit || updated !== 1) {
+    return null;
+  }
+
+  return {
+    crossedAt: input.now,
+    memberId: input.memberId,
+    periodEnd: input.period.periodEnd,
+    periodStart: input.period.periodStart,
+    sourceUsageId: input.sourceUsageId,
+    userNotice: buildHostedAiUsageGateLimitNotice({
+      allowanceSource: input.period.allowanceSource,
+      billingPlanCode: input.period.billingPlanCode,
+      limitUsdMicros: input.period.limitUsdMicros,
+      memberId: input.memberId,
+      periodStart: input.period.periodStart,
+    }),
+  };
 }
 
 function resolveHostedAiUsageAllowancePeriod(input: {
@@ -2114,7 +2164,7 @@ function buildHostedAiUsageGateLimitNotice(input: {
   limitUsdMicros: bigint;
   memberId: string;
   periodStart: Date;
-}): HostedAiUsageGateUserNotice {
+}): HostedAiUsageLimitNotice {
   if (
     input.billingPlanCode === "launch_monthly" &&
     input.limitUsdMicros === HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS
