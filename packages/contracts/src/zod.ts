@@ -1906,7 +1906,7 @@ export const experimentAdherenceEvidenceRuleSchema = z
           "activity_session",
           "measurement",
         ]),
-        missing: z.enum(["missed_after_grace", "unknown"]),
+        missing: z.enum(["missed_after_grace", "assumed_after_grace", "unknown"]),
         activityKind: boundedString(1, 80).optional(),
         partialCredit: numberSchema(0, 1).optional(),
       })
@@ -2274,6 +2274,7 @@ export const experimentProgressSnapshotSchema = z
     adherence: z
       .object({
         completedSessions: integerSchema(0),
+        assumedSessions: integerSchema(0).optional(),
         evidence: z
           .object({
             eventKind: z.enum(["activity_session", "intervention_session"]),
@@ -2281,10 +2282,12 @@ export const experimentProgressSnapshotSchema = z
           })
           .strict()
           .optional(),
+        confirmedSessions: integerSchema(0).optional(),
         expectedSessionsByNow: integerSchema(0).nullable(),
         loggedSessions: integerSchema(0).optional(),
         minimumUsefulSessions: integerSchema(0).nullable(),
         partialSessions: integerSchema(0).optional(),
+        sensedSessions: integerSchema(0).optional(),
         sessionEventIds: uniqueArray(idSchema(ID_PREFIXES.event), { uniqueItems: true }).optional(),
         status: z.enum(EXPERIMENT_ADHERENCE_STATUSES),
         targetSessions: integerSchema(0).nullable(),

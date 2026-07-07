@@ -78,6 +78,7 @@ const experimentFollowupReasonSchema = z.enum([
   'missed_log_followup_disabled',
   'reminders_disabled',
   'session_already_logged',
+  'session_assumed',
   'planned_session_log_missing',
   'unsupported_session_schedule',
   'weekly_digest_disabled',

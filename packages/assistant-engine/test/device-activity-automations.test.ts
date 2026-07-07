@@ -253,6 +253,61 @@ describe('device activity triggered automations', () => {
     )
   })
 
+  it('matches cardio automations to cycling activity but not strength sessions', async () => {
+    const automation = createDeviceActivityAutomation({
+      activityKind: 'cardio',
+      after: '2026-06-07T11:00:00.000Z',
+      automationId: 'auto_cardio',
+      instructions: 'Ask how the cardio session felt.',
+    })
+    deviceActivityMocks.automations = [automation]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_cardio_strength',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Strength session',
+          workoutType: 'strength',
+        }),
+        createActivityEntity({
+          entityId: 'evt_cardio_cycling',
+          occurredAt: '2026-06-07T12:30:00.000Z',
+          title: 'Lunch ride',
+          workoutType: 'cycling',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:31:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:31:00.000Z',
+      scheduled: 1,
+    })
+
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]?.prompt).toContain('Kind: cardio')
+    expect(jobs[0]?.prompt).toContain('Lunch ride')
+    expect(jobs[0]?.prompt).not.toContain('Strength session')
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: '2026-06-07T12:30:00.000Z',
+        afterEntityId: 'evt_cardio_cycling',
+        afterOccurredAt: '2026-06-07T12:30:00.000Z',
+        expectedActivityKind: 'cardio',
+        expectedSource: undefined,
+        lookup: 'auto_cardio',
+        vaultRoot,
+      }),
+    )
+  })
+
   it('keeps explicit whoop device activity automations scoped to whoop providers', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({

@@ -18,6 +18,7 @@ import {
 import { getExperiment, type VaultReadModel } from "./read-model.ts";
 import {
   buildExperimentAdherenceCalendar,
+  countAdherenceConfidenceSessions,
   countCompletedAdherenceSessions,
   eventKindIsCandidateForEvidence,
   resolveActivityEvidenceLocalDate,
@@ -100,6 +101,7 @@ export type ExperimentFollowupReason =
   | "missed_log_followup_disabled"
   | "reminders_disabled"
   | "session_already_logged"
+  | "session_assumed"
   | "planned_session_log_missing"
   | "unsupported_session_schedule"
   | "weekly_digest_disabled"
@@ -135,14 +137,17 @@ export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
   asOf: string;
   adherence: {
     completedSessions: number;
+    assumedSessions?: number;
     evidence?: {
       eventKind: "activity_session" | "intervention_session";
       activityKind?: string;
     };
+    confirmedSessions?: number;
     expectedSessionsByNow: number | null;
     loggedSessions?: number;
     minimumUsefulSessions: number | null;
     partialSessions?: number;
+    sensedSessions?: number;
     sessionEventIds?: string[];
     status: ExperimentAdherenceStatus;
     targetSessions: number | null;
@@ -684,21 +689,38 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
   const rollupCells = progressTarget?.calendar && rollupTarget && adherenceCalendar
     ? adherenceCalendar.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
     : null;
+  const progressObservations = progressTarget
+    ? buildAdherenceObservations(context, [progressTarget])
+    : [];
   const progressCounts = progressTarget && !progressTarget.calendar
     ? countCompletedAdherenceSessions({
         asOfDate: context.asOf,
-        observations: buildAdherenceObservations(context, [progressTarget]),
+        observations: progressObservations,
         target: progressTarget,
         windows: buildWindowSummary(context.frontmatter),
       })
     : null;
+  const progressCells = progressTarget?.calendar
+    ? rollupCells ?? adherenceCalendar?.cells ?? []
+    : [];
+  const confidenceCounts = !hasAmbiguousTargets && progressTarget?.calendar
+    ? countAdherenceConfidenceSessions({
+        cells: progressCells,
+        observations: progressObservations,
+      })
+    : progressCounts ?? {
+        sensedSessions: 0,
+        confirmedSessions: 0,
+        assumedSessions: 0,
+      };
   let completedSessions = 0;
   let partialSessions = 0;
   if (!hasAmbiguousTargets) {
     if (progressTarget?.calendar) {
-      completedSessions = (rollupCells ?? adherenceCalendar?.cells ?? []).filter(
-        (cell) => cell.status === "satisfied",
+      completedSessions = progressCells.filter(
+        (cell) => cell.status === "satisfied" || cell.status === "assumed",
       ).length;
+      partialSessions = progressCells.filter((cell) => cell.status === "partial").length;
     } else {
       completedSessions = progressCounts?.completedSessions ?? 0;
       partialSessions = progressCounts?.partialSessions ?? 0;
@@ -737,15 +759,28 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
     status = "on_track";
   }
 
-  return {
+  const summary: ExperimentProgressSummary["adherence"] = {
     completedSessions,
     ...(evidence ? { evidence } : {}),
     expectedSessionsByNow,
-    ...(partialSessions > 0 ? { loggedSessions, partialSessions } : {}),
+    loggedSessions,
+    ...(partialSessions > 0 ? { partialSessions } : {}),
     minimumUsefulSessions,
     status,
     targetSessions,
   };
+  if (confidenceCounts.sensedSessions > 0) {
+    summary.sensedSessions = confidenceCounts.sensedSessions;
+  }
+  if (confidenceCounts.confirmedSessions > 0) {
+    summary.confirmedSessions = confidenceCounts.confirmedSessions;
+  }
+  if (confidenceCounts.assumedSessions > 0) {
+    // Calendar-less targets have no per-day plan to assume; derived count-style events can still report as assumed.
+    summary.assumedSessions = confidenceCounts.assumedSessions;
+  }
+
+  return summary;
 }
 
 function buildProgressAdherenceEvidence(
@@ -1128,6 +1163,13 @@ function buildOutcomeConfidence(input: {
     reasons.push("Logged session count stayed below the minimum useful target.")
   }
 
+  if (
+    (input.adherence.assumedSessions ?? 0) >
+      (input.adherence.sensedSessions ?? 0) + (input.adherence.confirmedSessions ?? 0)
+  ) {
+    reasons.push("Most sessions are assumed rather than confirmed.");
+  }
+
   if (input.confounders.length > 0) {
     reasons.push("Context and confounder logs were present during the run.")
   }
@@ -1285,17 +1327,6 @@ function decideMissedLogDue(
     );
   }
 
-  if (!isDailyInterventionSchedule(context.frontmatter)) {
-    return buildFollowupBase(
-      context,
-      date,
-      "missed-log",
-      "unsupported_session_schedule",
-      "skip",
-      null,
-    );
-  }
-
   if (hasSessionLogForDate(context, date)) {
     return buildFollowupBase(
       context,
@@ -1307,6 +1338,28 @@ function decideMissedLogDue(
     );
   }
 
+  if (hasAssumedAfterGraceSessionTarget(context)) {
+    return buildFollowupBase(
+      context,
+      date,
+      "missed-log",
+      "session_assumed",
+      "skip",
+      date,
+    );
+  }
+
+  if (!isDailyInterventionSchedule(context.frontmatter)) {
+    return buildFollowupBase(
+      context,
+      date,
+      "missed-log",
+      "unsupported_session_schedule",
+      "skip",
+      null,
+    );
+  }
+
   return buildFollowupBase(
     context,
     date,
@@ -1314,6 +1367,15 @@ function decideMissedLogDue(
     "planned_session_log_missing",
     "notify",
     date,
+  );
+}
+
+function hasAssumedAfterGraceSessionTarget(context: ExperimentFollowupContext): boolean {
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
+  const targets = rollupTarget ? [rollupTarget] : context.adherenceTargets;
+  return targets.some((target) =>
+    target.evidence.kind === "linkedEventCount" &&
+    target.evidence.missing === "assumed_after_grace"
   );
 }
 

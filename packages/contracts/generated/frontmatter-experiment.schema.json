@@ -413,6 +413,7 @@
                         "type": "string",
                         "enum": [
                           "missed_after_grace",
+                          "assumed_after_grace",
                           "unknown"
                         ]
                       },

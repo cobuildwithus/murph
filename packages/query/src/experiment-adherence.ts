@@ -11,6 +11,7 @@ import type { MetricComparator } from "./metrics/index.ts";
 export type ExperimentAdherenceCellStatus =
   | "scheduled"
   | "satisfied"
+  | "assumed"
   | "partial"
   | "missed"
   | "failed"
@@ -58,6 +59,7 @@ export interface ExperimentAdherenceCalendarResult {
     rollup?: ExperimentAdherenceTarget["rollup"];
     plannedCount: number;
     satisfiedCount: number;
+    assumedCount: number;
     partialCount: number;
     missedCount: number;
     failedCount: number;
@@ -70,6 +72,7 @@ export interface ExperimentAdherenceCalendarResult {
     status: "not_started" | "behind" | "on_track" | "met_minimum" | "met_target" | "unknown";
     plannedCount: number;
     satisfiedCount: number;
+    assumedCount: number;
     partialCount: number;
     missedCount: number;
     failedCount: number;
@@ -132,20 +135,33 @@ export type LinkedEventCountEvidence = Extract<ExperimentAdherenceEvidenceRule, 
 
 export interface AdherenceSessionCounts {
   completedSessions: number;
+  sensedSessions: number;
+  confirmedSessions: number;
+  assumedSessions: number;
   missedSessions: number;
   partialSessions: number;
   skippedSessions: number;
 }
 
+export interface AdherenceConfidenceSessionCounts {
+  sensedSessions: number;
+  confirmedSessions: number;
+  assumedSessions: number;
+}
+
 export function resolveAdherenceEvidence(
   modality: string | null | undefined,
 ): { eventKind: "activity_session" | "intervention_session"; activityKind?: string } {
+  const normalizedModality = normalizeActivityKindToken(modality);
+  if (normalizedModality === "cardio") {
+    return { eventKind: "activity_session", activityKind: "cardio" };
+  }
+
   const activityKind = resolveDeviceObservableActivityKind(modality);
   if (activityKind) {
     return { eventKind: "activity_session", activityKind };
   }
 
-  const normalizedModality = normalizeActivityKindToken(modality);
   if (normalizedModality && GENERIC_WORKOUT_MODALITIES.has(normalizedModality)) {
     return { eventKind: "activity_session" };
   }
@@ -333,7 +349,9 @@ export function synthesizeLegacySessionAdherenceTargets(input: {
       kind: "linkedEventCount" as const,
       eventKind: evidence.eventKind,
       ...(evidence.activityKind ? { activityKind: evidence.activityKind } : {}),
-      missing: "missed_after_grace" as const,
+      missing: evidence.eventKind === "intervention_session"
+        ? "assumed_after_grace" as const
+        : "missed_after_grace" as const,
     },
     grace: { hours: 24 },
     ...(rollup ? { rollup } : {}),
@@ -404,6 +422,7 @@ export function countCompletedAdherenceSessions(input: {
     switch (observation.status) {
       case "partial":
         counts.partialSessions += 1;
+        countAdherenceObservationConfidence(counts, observation);
         break;
       case "missed":
         counts.missedSessions += 1;
@@ -413,7 +432,43 @@ export function countCompletedAdherenceSessions(input: {
         break;
       default:
         counts.completedSessions += 1;
+        countAdherenceObservationConfidence(counts, observation);
         break;
+    }
+  }
+
+  return counts;
+}
+
+export function countAdherenceConfidenceSessions(input: {
+  cells?: readonly ExperimentAdherenceCell[] | null;
+  observations: readonly ExperimentAdherenceObservation[];
+}): AdherenceConfidenceSessionCounts {
+  const counts = emptyAdherenceConfidenceSessionCounts();
+  const cells = input.cells ?? null;
+  if (!cells) {
+    for (const observation of input.observations) {
+      if (observation.status !== "missed" && observation.status !== "skipped") {
+        countAdherenceObservationConfidence(counts, observation);
+      }
+    }
+    return counts;
+  }
+
+  const observationsById = new Map(input.observations.map((observation) => [observation.evidenceId, observation]));
+  for (const cell of cells) {
+    if (cell.status === "assumed") {
+      counts.assumedSessions += 1;
+      continue;
+    }
+    if (cell.status !== "satisfied" && cell.status !== "partial") {
+      continue;
+    }
+    for (const evidenceId of cell.evidenceIds) {
+      const observation = observationsById.get(evidenceId);
+      if (observation) {
+        countAdherenceObservationConfidence(counts, observation);
+      }
     }
   }
 
@@ -559,6 +614,10 @@ function missingCell(input: {
   }
 
   const missingPolicy = expectation.target.evidence.missing;
+  if (missingPolicy === "assumed_after_grace") {
+    return cell(expectation, "assumed", 1, 0, input.observations, "No log needed. Assumed done on schedule.");
+  }
+
   const status =
     missingPolicy === "missed_after_grace"
       ? "missed"
@@ -778,10 +837,41 @@ function extractDate(value: string | null | undefined): string | null {
 function emptyAdherenceSessionCounts(): AdherenceSessionCounts {
   return {
     completedSessions: 0,
+    sensedSessions: 0,
+    confirmedSessions: 0,
+    assumedSessions: 0,
     missedSessions: 0,
     partialSessions: 0,
     skippedSessions: 0,
   };
+}
+
+function emptyAdherenceConfidenceSessionCounts(): AdherenceConfidenceSessionCounts {
+  return {
+    sensedSessions: 0,
+    confirmedSessions: 0,
+    assumedSessions: 0,
+  };
+}
+
+function countAdherenceObservationConfidence(
+  counts: AdherenceConfidenceSessionCounts,
+  observation: ExperimentAdherenceObservation,
+): void {
+  switch (normalizeObservationSource(observation.source)) {
+    case "device":
+    case "import":
+      counts.sensedSessions += 1;
+      return;
+    case "manual":
+      counts.confirmedSessions += 1;
+      return;
+    case "derived":
+      counts.assumedSessions += 1;
+      return;
+    default:
+      return;
+  }
 }
 
 function minLocalDate(left: string, right: string): string {
@@ -829,7 +919,7 @@ function summarizeCells(
 ): ExperimentAdherenceCalendarResult["summary"] {
   const counts = countCellStatuses(cells);
   const score = scoreCells(cells);
-  const numericCompleted = counts.satisfiedCount + counts.partialCount;
+  const numericCompleted = counts.satisfiedCount + counts.assumedCount + counts.partialCount;
   let status: ExperimentAdherenceCalendarResult["summary"]["status"] = "unknown";
 
   if (counts.plannedCount === 0) {
@@ -855,6 +945,7 @@ function countCellStatuses(cells: readonly ExperimentAdherenceCell[]) {
   return {
     plannedCount: cells.length,
     satisfiedCount: countCells(cells, "satisfied"),
+    assumedCount: countCells(cells, "assumed"),
     partialCount: countCells(cells, "partial"),
     missedCount: countCells(cells, "missed"),
     failedCount: countCells(cells, "failed"),

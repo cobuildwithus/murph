@@ -201,7 +201,7 @@ function resolveDayCode(input: {
     return input.date > input.asOf ? DAY_CODES.scheduled : DAY_CODES.noEvidence;
   }
 
-  const satisfied = countStatuses(statuses, "satisfied");
+  const satisfied = countStatuses(statuses, "satisfied") + countStatuses(statuses, "assumed");
   const partial = countStatuses(statuses, "partial");
   const missedOrFailed = countStatuses(statuses, "missed") + countStatuses(statuses, "failed");
   if (satisfied === statuses.length) {
