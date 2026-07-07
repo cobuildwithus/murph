@@ -85,7 +85,7 @@ test("hosted Codex provider transport diagnostics expose only safe config metada
   assert.deepEqual(HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS, {
     codexProviderRequestMaxRetries: 4,
     codexProviderStreamIdleTimeoutMs: 90_000,
-    codexProviderStreamMaxRetries: 0,
+    codexProviderStreamMaxRetries: 5,
     codexProviderTransportMode: "codex-native-provider-transport",
   });
 });
@@ -174,7 +174,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
+  assert.match(config, /^stream_max_retries = 5$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /\[features\]\nplugins = false\nmulti_agent_v2 = true\nmemories = true/u);
   assert.doesNotMatch(config, /root_agent_usage_hint_text/u);
@@ -401,7 +401,7 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
   assert.match(config, /stream_idle_timeout_ms = 90000/u);
   assert.match(config, /request_max_retries = 4/u);
-  assert.match(config, /stream_max_retries = 0/u);
+  assert.match(config, /stream_max_retries = 5/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
 });
 
@@ -459,7 +459,7 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
+  assert.match(config, /^stream_max_retries = 5$/mu);
   assert.doesNotMatch(config, /chatgpt-access-token/u);
   assert.match(config, /model_reasoning_effort = "low"/u);
   assert.match(config, /\[history\]\npersistence = "none"/u);
@@ -638,7 +638,7 @@ test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   assert.match(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^request_max_retries = 4$/mu);
-  assert.match(config, /^stream_max_retries = 0$/mu);
+  assert.match(config, /^stream_max_retries = 5$/mu);
   assert.doesNotMatch(config, /chatgpt-refresh-token/u);
   assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assertHostedCodexAutoCompactTokenLimit(config);
@@ -1301,7 +1301,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "stream_idle_timeout_ms = 90000",
       "requires_openai_auth = false",
       "request_max_retries = 4",
-      "stream_max_retries = 0",
+      "stream_max_retries = 5",
       "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
