@@ -42,6 +42,8 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     title: "Murph in group chats",
     summary:
       "Add Murph to an iMessage group and it can participate in the room, understand who said what, and decide when a reply, reaction, or silence fits.",
+    details:
+      "Murph can create a join link so someone can sign in and join the room. Joining alone does not share anyone's health data.",
     relevanceTags: ["groups", "messaging", "imessage"],
     priority: 5,
     tryIt: {
@@ -50,36 +52,6 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     },
     alreadyUsing: "the user is in any group chat with Murph",
     sourcePullRequests: [363, 369],
-  },
-  {
-    id: "group-join-links",
-    title: "Group join links",
-    summary:
-      "Murph can create a join link for a group so someone can sign in and join the room. Joining alone does not share health data, and any challenge stats stay a separate explicit choice.",
-    relevanceTags: ["groups", "invites", "privacy"],
-    priority: 4,
-    tryIt: {
-      label: "Invite someone",
-      prompt: "Invite my brother to this Murph group.",
-    },
-    alreadyUsing:
-      "the user has created, accepted, or shared a Murph group join link",
-    sourcePullRequests: [356, 360],
-  },
-  {
-    id: "bounded-challenge-stat-sharing",
-    title: "Bounded challenge stat sharing",
-    summary:
-      "For group challenges, Murph can work with scoped daily stats like steps, activity minutes, workouts, heart-rate-zone minutes, strain, resting heart rate, or HRV after members approve what fits the challenge.",
-    relevanceTags: ["groups", "challenges", "privacy"],
-    priority: 4,
-    tryIt: {
-      label: "Pick a challenge metric",
-      prompt: "What stats could we safely use for a sleep or walking challenge?",
-    },
-    alreadyUsing:
-      "the user has approved bounded stat sharing for a Murph group challenge",
-    sourcePullRequests: [382],
   },
   {
     id: "family-private-accounts",
@@ -110,36 +82,6 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     alreadyUsing:
       "the user has any active wearable, device, or Apple Health connection",
     sourcePullRequests: [72, 73, 138, 336],
-  },
-  {
-    id: "wearable-reconnect-help",
-    title: "Wearable reconnect help",
-    summary:
-      "When sleep, recovery, activity, or workouts look missing, Murph can check whether a connected source needs attention before treating silence as the truth.",
-    relevanceTags: ["wearables", "reliability", "assistant"],
-    priority: 4,
-    tryIt: {
-      label: "Check a data gap",
-      prompt: "Why does my sleep data look missing this week?",
-    },
-    alreadyUsing:
-      "the user has asked Murph to diagnose a wearable data gap or reconnect a device",
-    sourcePullRequests: [341],
-  },
-  {
-    id: "wearable-workout-adherence",
-    title: "Wearable workouts count toward experiments",
-    summary:
-      "Running and cycling experiments can count workouts your watch already recorded, so progress reflects the sessions you actually did without a second manual log.",
-    relevanceTags: ["experiments", "wearables", "adherence"],
-    priority: 4,
-    tryIt: {
-      label: "Check an experiment",
-      prompt: "How's my running experiment going?",
-    },
-    alreadyUsing:
-      "the user has an active or completed experiment whose adherence used wearable workouts",
-    sourcePullRequests: [399],
   },
   {
     id: "apple-health-relay",
@@ -217,25 +159,12 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     sourcePullRequests: [322],
   },
   {
-    id: "expanded-health-metrics",
-    title: "Expanded health metric questions",
-    summary:
-      "Murph can answer from more captured metric types, including caffeine, water, mindfulness, heart-rate recovery, glucose, blood pressure, basal body temperature, height, and cycle data when those records exist.",
-    relevanceTags: ["metrics", "data", "health"],
-    priority: 4,
-    tryIt: {
-      label: "Ask about a metric",
-      prompt: "What changed in my blood pressure and caffeine logs this month?",
-    },
-    alreadyUsing:
-      "the user has asked about a captured metric such as glucose, blood pressure, caffeine, water, mindfulness, or cycle data",
-    sourcePullRequests: [168],
-  },
-  {
     id: "personal-experiments",
     title: "Personal experiments",
     summary:
       "Murph can help you choose a bounded health experiment, set a baseline, track adherence and confounders, and review what changed afterward.",
+    details:
+      "For an active experiment, Murph can share a compact progress readout with trends, movers, a session timeline, and likely confounders.",
     relevanceTags: ["experiments", "protocols", "health"],
     priority: 5,
     tryIt: {
@@ -244,50 +173,6 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     },
     alreadyUsing: "the user has an active or completed Murph experiment",
     sourcePullRequests: [141],
-  },
-  {
-    id: "experiment-progress-cards",
-    title: "Experiment progress cards",
-    summary:
-      "For an active experiment, Murph can share a compact progress readout with trends, movers, a session timeline, and likely confounders.",
-    relevanceTags: ["experiments", "media", "progress"],
-    priority: 4,
-    tryIt: {
-      label: "Check progress",
-      prompt: "How is my current experiment going so far?",
-    },
-    alreadyUsing:
-      "the user has requested an experiment progress check or received an experiment progress card",
-    sourcePullRequests: [97],
-  },
-  {
-    id: "goals-and-habits-memory",
-    title: "Goals and habits Murph remembers",
-    summary:
-      "When you accept a habit, ramp, target, or non-experiment plan, Murph can keep it in working context so later replies do not have to reconstruct it from chat.",
-    relevanceTags: ["goals", "habits", "memory"],
-    priority: 4,
-    tryIt: {
-      label: "Save a plan",
-      prompt: "Help me set a simple two-week walking plan and remember it for check-ins.",
-    },
-    alreadyUsing:
-      "the user has a saved goal, habit, regimen, or active plan that Murph already reads",
-  },
-  {
-    id: "behavior-followthrough",
-    title: "Follow-through repair",
-    summary:
-      "If you miss a workout, supplement, diet plan, or other commitment, Murph can help repair the plan instead of pretending everything is fine.",
-    relevanceTags: ["coaching", "habits", "assistant"],
-    priority: 4,
-    tryIt: {
-      label: "Repair a plan",
-      prompt: "I missed two of the workouts I planned for this week.",
-    },
-    alreadyUsing:
-      "the user has told Murph they missed a plan or asked for help repairing follow-through",
-    sourcePullRequests: [199],
   },
   {
     id: "scheduled-reminders",
@@ -318,51 +203,6 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     sourcePullRequests: [59],
   },
   {
-    id: "weekly-health-digest",
-    title: "Weekly health digest",
-    summary:
-      "Murph can make a concise weekly digest when there is real wearable, log, or experiment movement, and skip when a hollow recap would be noise.",
-    relevanceTags: ["automations", "digest", "health"],
-    priority: 4,
-    tryIt: {
-      label: "Ask about digests",
-      prompt: "What would you put in my weekly health digest right now?",
-    },
-    alreadyUsing:
-      "the user has received, configured, or already has an active weekly health digest automation",
-    sourcePullRequests: [74, 331],
-  },
-  {
-    id: "weekly-research-scout",
-    title: "Weekly research scout",
-    summary:
-      "Murph can scan for recent research relevant to your saved goals, conditions, supplements, and experiments, then share only the single insight that clears the bar.",
-    relevanceTags: ["research", "automations", "health"],
-    priority: 4,
-    tryIt: {
-      label: "Ask about research",
-      prompt: "What new research would be worth watching for my current health goals?",
-    },
-    alreadyUsing:
-      "the user has received, configured, or already has an active weekly research scout automation",
-    sourcePullRequests: [206, 226],
-  },
-  {
-    id: "memory-consolidation",
-    title: "Murph remembers durable context",
-    summary:
-      "Murph can consolidate useful conversation context into durable memory so preferences, stable plans, and recurring details carry forward without making you repeat them.",
-    relevanceTags: ["memory", "assistant", "context"],
-    priority: 4,
-    tryIt: {
-      label: "Save context",
-      prompt: "Remember that I prefer morning workouts and vegetarian dinners.",
-    },
-    alreadyUsing:
-      "the user has saved durable memory or Murph has run overnight memory consolidation for them",
-    sourcePullRequests: [355],
-  },
-  {
     id: "exercise-image-demos",
     title: "Exercise demos with images",
     summary:
@@ -390,21 +230,6 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     },
     alreadyUsing:
       "the user has asked Murph for pain, injury, or rehab guidance",
-  },
-  {
-    id: "specialized-health-coaches",
-    title: "Specialized health coaches",
-    summary:
-      "Murph can route through specialized coaching modes for sleep, stress, food, running, lifting, and race prep when the question calls for that lens.",
-    relevanceTags: ["coaching", "health", "skills"],
-    priority: 4,
-    tryIt: {
-      label: "Try a coach",
-      prompt: "Half marathon in 8 weeks and I'm lifting twice a week. What should I actually do?",
-    },
-    alreadyUsing:
-      "the user has used a specialized Murph coach for sleep, stress, food, running, lifting, or race prep",
-    sourcePullRequests: [298, 299, 300, 301, 302, 303],
   },
   {
     id: "chronic-condition-experiments",
@@ -454,6 +279,8 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     title: "Image generation in chat",
     summary:
       "Murph can create images directly in conversation, from quick illustrations to workout visuals or a poster for a group activity.",
+    details:
+      "A sketch, product photo, room photo, or style reference you send can be used as context for the next generated image.",
     relevanceTags: ["images", "media", "assistant"],
     priority: 5,
     tryIt: {
@@ -462,20 +289,6 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     },
     alreadyUsing: "the user has asked Murph to generate an image",
     sourcePullRequests: [77],
-  },
-  {
-    id: "reference-image-generation",
-    title: "Image generation from references",
-    summary:
-      "Share a sketch, product photo, room photo, or style reference and Murph can use that image as context for the next generated image.",
-    relevanceTags: ["images", "media", "tools"],
-    priority: 4,
-    tryIt: {
-      label: "Use a reference",
-      prompt: "Use that fridge photo I just shared and show me a cleaner shelf layout.",
-    },
-    alreadyUsing: "the user has shared an image as a reference for image generation",
-    sourcePullRequests: [330],
   },
   {
     id: "pdfs-in-chat",
@@ -595,20 +408,6 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     },
     alreadyUsing: "the user has asked Murph for current weather or a forecast",
     sourcePullRequests: [284],
-  },
-  {
-    id: "product-feedback",
-    title: "Product feedback from chat",
-    summary:
-      "If something in Murph feels confusing, useful, broken, or missing, you can tell Murph in chat and it can record concise product feedback for the team.",
-    relevanceTags: ["feedback", "product", "assistant"],
-    priority: 3,
-    tryIt: {
-      label: "Share feedback",
-      prompt: "I have some feedback on Murph. Can you record this for the team?",
-    },
-    alreadyUsing: "the user has asked Murph to record product feedback",
-    sourcePullRequests: [255],
   },
 ] satisfies readonly FeatureCatalogItem[];
 
