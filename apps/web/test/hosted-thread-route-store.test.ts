@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   assertHostedLinqRouteEgressAuthority,
+  hasHostedMemberEstablishedLinqThreadRoute,
   readHostedThreadRouteByThreadIdentity,
 } from "../src/lib/hosted-routing/thread-route-store";
 import {
@@ -23,6 +24,7 @@ function createPrismaMock() {
     findUnique: vi.fn(),
   };
   const hostedThreadRoute = {
+    findFirst: vi.fn(),
     findMany: vi.fn(),
   };
   const hostedThreadContainerParticipant = {
@@ -62,6 +64,38 @@ function buildThreadContainerAccessRecord(input: {
 }
 
 describe("hosted thread route store", () => {
+  it("checks established Linq thread routes by container member id", async () => {
+    const prisma = createPrismaMock();
+    prisma.hostedThreadRoute.findFirst.mockResolvedValueOnce({
+      containerMemberId: "member_container_123",
+    });
+
+    await expect(hasHostedMemberEstablishedLinqThreadRoute({
+      memberId: "member_container_123",
+      prisma,
+    })).resolves.toBe(true);
+
+    expect(prisma.hostedThreadRoute.findFirst).toHaveBeenCalledWith({
+      select: {
+        containerMemberId: true,
+      },
+      where: {
+        channel: "linq",
+        containerMemberId: "member_container_123",
+      },
+    });
+  });
+
+  it("does not treat a missing Linq thread route as established", async () => {
+    const prisma = createPrismaMock();
+    prisma.hostedThreadRoute.findFirst.mockResolvedValueOnce(null);
+
+    await expect(hasHostedMemberEstablishedLinqThreadRoute({
+      memberId: "member_container_123",
+      prisma,
+    })).resolves.toBe(false);
+  });
+
   it("reads a routed external thread by stable thread identity", async () => {
     const prisma = createPrismaMock();
     const container = {

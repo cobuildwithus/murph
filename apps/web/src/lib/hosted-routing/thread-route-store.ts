@@ -129,6 +129,23 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
   };
 }
 
+export async function hasHostedMemberEstablishedLinqThreadRoute(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const route = await input.prisma.hostedThreadRoute.findFirst({
+    select: {
+      containerMemberId: true,
+    },
+    where: {
+      channel: "linq",
+      containerMemberId: input.memberId,
+    },
+  });
+
+  return Boolean(route);
+}
+
 export async function assertHostedThreadRouteEgressAuthority(input: {
   authority: HostedThreadRouteEgressAuthority;
   prisma: HostedOnboardingReadClient;

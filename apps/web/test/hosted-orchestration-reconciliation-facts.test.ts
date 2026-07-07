@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   getPrisma: vi.fn(),
   hasHostedLinqInboundWithinDays: vi.fn(),
+  hasHostedMemberEstablishedLinqThreadRoute: vi.fn(),
   hasHostedMemberEstablishedLinqHomeRoute: vi.fn(),
   hostedThreadContainerParticipantFindFirst: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
@@ -88,6 +89,18 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async (importOriginal) =
   };
 });
 
+vi.mock("@/src/lib/hosted-routing/thread-route-store", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("@/src/lib/hosted-routing/thread-route-store")
+  >();
+
+  return {
+    ...original,
+    hasHostedMemberEstablishedLinqThreadRoute:
+      mocks.hasHostedMemberEstablishedLinqThreadRoute,
+  };
+});
+
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   readHostedWorkspace: mocks.readHostedWorkspace,
 }));
@@ -124,6 +137,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord());
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
+    mocks.hasHostedMemberEstablishedLinqThreadRoute.mockResolvedValue(false);
     mocks.hasHostedLinqInboundWithinDays.mockImplementation(async () => {
       throw new Error("Configure Linq inbound evidence explicitly for engagement tests.");
     });
@@ -977,7 +991,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
-  it("does not pause due automation wakes for members without an established Linq home route", async () => {
+  it("does not pause due automation wakes for members without an established Linq route", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T11:59:59.000Z",
       nextWakeReason: "assistant_due",
@@ -1003,7 +1017,91 @@ describe("hosted orchestration reconciliation facts", () => {
       memberId: MEMBER_ID,
       prisma: expect.objectContaining({ kind: "prisma" }),
     });
+    expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
     expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "mutating",
+      now: new Date(FIXED_NOW),
+      userId: MEMBER_ID,
+    });
+  });
+
+  it("pauses due automation wakes when a Linq thread-container route has no recent inbound day", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:59:59.000Z",
+      nextWakeReason: "assistant_due",
+    }));
+    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
+    mocks.hasHostedMemberEstablishedLinqThreadRoute.mockResolvedValue(true);
+    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "automation_engagement_paused",
+      retryAt: "2026-05-21T12:00:00.000Z",
+    });
+    expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
+    expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
+    expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("allows due automation wakes when a Linq thread-container route has a qualifying inbound day", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:59:59.000Z",
+      nextWakeReason: "assistant_due",
+    }));
+    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
+    mocks.hasHostedMemberEstablishedLinqThreadRoute.mockResolvedValue(true);
+    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(true);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      retryAt: "2026-05-20T12:00:30.000Z",
+      status: "unavailable",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_gate_unavailable",
+      retryAt: "2026-05-20T12:00:30.000Z",
+    });
+    expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
+    expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
+    expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "mutating",
       now: new Date(FIXED_NOW),
@@ -1034,6 +1132,7 @@ describe("hosted orchestration reconciliation facts", () => {
       memberId: MEMBER_ID,
       prisma: expect.objectContaining({ kind: "prisma" }),
     });
+    expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).not.toHaveBeenCalled();
     expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       now: new Date(FIXED_NOW),
@@ -1068,6 +1167,7 @@ describe("hosted orchestration reconciliation facts", () => {
       memberId: MEMBER_ID,
       prisma: expect.objectContaining({ kind: "prisma" }),
     });
+    expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).not.toHaveBeenCalled();
     expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalled();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "mutating",
@@ -1113,6 +1213,7 @@ describe("hosted orchestration reconciliation facts", () => {
       retryAt: "2026-05-20T12:00:30.000Z",
     });
     expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).not.toHaveBeenCalled();
+    expect(mocks.hasHostedMemberEstablishedLinqThreadRoute).not.toHaveBeenCalled();
     expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
       mode: "mutating",

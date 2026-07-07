@@ -50,6 +50,12 @@ import {
 import {
   hasHostedLinqInboundWithinDays,
 } from "../hosted-onboarding/linq-daily-state";
+import type {
+  HostedOnboardingReadClient,
+} from "../hosted-onboarding/shared";
+import {
+  hasHostedMemberEstablishedLinqThreadRoute,
+} from "../hosted-routing/thread-route-store";
 import {
   readHostedWorkspace,
   type HostedWorkspaceRecord,
@@ -160,7 +166,7 @@ export async function readHostedRuntimeReconciliationFacts(
       now,
       workspace: projectedWorkspace,
     })
-    && await hasHostedMemberEstablishedLinqHomeRoute({
+    && await hasHostedMemberEstablishedLinqRoute({
       memberId: input.userId,
       prisma,
     })
@@ -335,6 +341,17 @@ function hostedRuntimeReconciliationNeedsAutomationEngagement(input: {
   return !input.freshConversationMailboxLag
     && isHostedRuntimeWakeDue(input.workspace.nextWakeAt, input.now)
     && isHostedRuntimeModelCapableWorkspaceWakeReason(input.workspace.nextWakeReason);
+}
+
+async function hasHostedMemberEstablishedLinqRoute(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  if (await hasHostedMemberEstablishedLinqHomeRoute(input)) {
+    return true;
+  }
+
+  return await hasHostedMemberEstablishedLinqThreadRoute(input);
 }
 
 function resolveHostedRuntimeAiBlockedRetryAt(input: {
