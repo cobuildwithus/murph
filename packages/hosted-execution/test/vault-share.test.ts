@@ -391,17 +391,22 @@ describe("vault-share contracts", () => {
     ).toThrow(/delivered or no-active-share/u);
   });
 
-  it("parses active projection-kind responses through the closed registry", () => {
+  it("deduplicates supported active projection-kind responses and skips unknown future strings", () => {
     expect(parseHostedVaultShareActiveProjectionKindsResponse({
-      projectionKinds: ["profile-name.v0", "activity-days.v0", "activity-days.v0"],
+      projectionKinds: [
+        "profile-name.v0",
+        "future-challenge-kind.v0",
+        "activity-days.v0",
+        "activity-days.v0",
+      ],
     })).toEqual({
       projectionKinds: ["profile-name.v0", "activity-days.v0"],
     });
     expect(() =>
       parseHostedVaultShareActiveProjectionKindsResponse({
-        projectionKinds: ["everything.v0"],
+        projectionKinds: [17],
       })
-    ).toThrow(/known vault-share projection kind/u);
+    ).toThrow(/non-empty string/u);
   });
 
   it("round-trips a vault-share delivery wake and pins the envelope occurredAt to the record", () => {

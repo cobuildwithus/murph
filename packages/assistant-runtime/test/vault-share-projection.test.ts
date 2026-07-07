@@ -23,6 +23,8 @@ import {
 import {
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
   offerHostedVaultShareProjectionBestEffort,
+  readProjectableActivityHeartRateZoneDays,
+  readProjectableActivityMinutesDays,
   readProjectableDailyMetricDays,
   readProjectableProfileName,
   selectProjectableDailyMetricDays,
@@ -154,6 +156,30 @@ function activitySessionRow(input: {
     sourceKind: "activity_session",
     startedAt: input.startedAt ?? `${input.date}T12:00:00.000Z`,
   };
+}
+
+async function createActivitySessionVault(
+  records: readonly Record<string, unknown>[],
+): Promise<string> {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-activity-session-"));
+  await mkdir(join(vaultRoot, "ledger", "events", "2026"), { recursive: true });
+  await writeFile(
+    join(vaultRoot, "vault.json"),
+    `${JSON.stringify({
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4C",
+      createdAt: "2026-07-03T00:00:00.000Z",
+      title: "Vault share activity session test",
+      timezone: "UTC",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl"),
+    `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    "utf8",
+  );
+  return vaultRoot;
 }
 
 async function createProfileVault(displayName: string | null): Promise<string> {
@@ -584,6 +610,89 @@ describe("selectProjectableActivityMinutesDays", () => {
       sessionMinutes: 40,
     });
   });
+
+  it("deduplicates matching activity aliases before scoring a day", () => {
+    const selected = selectProjectableActivityMinutesDays({
+      nowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 40,
+          recordIds: ["evt_garmin_run"],
+          startedAt: "2026-07-03T07:00:00.000Z",
+        }),
+        activitySessionRow({
+          activityKind: "run",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 40,
+          recordIds: ["evt_strava_run"],
+          startedAt: "2026-07-03T07:00:00.000Z",
+        }),
+      ],
+      spec: runningSpec,
+    });
+
+    expect(selected[0]?.data).toEqual({
+      activityKind: "running",
+      date: ACTIVITY_DAY.date,
+      sessionCount: 1,
+      sessionMinutes: 40,
+    });
+  });
+
+  it("reads nested workout sport before generic activity labels from canonical vaults", async () => {
+    const vaultRoot = await createActivitySessionVault([{
+      schemaVersion: "murph.event.v1",
+      id: "evt_nested_run_1",
+      kind: "activity_session",
+      occurredAt: "2026-07-03T07:00:00.000Z",
+      dayKey: ACTIVITY_DAY.date,
+      recordedAt: "2026-07-03T08:00:00.000Z",
+      startAt: "2026-07-03T07:00:00.000Z",
+      endAt: "2026-07-03T07:42:00.000Z",
+      activityType: "workout",
+      durationMinutes: 42,
+      workout: {
+        sportName: "Run",
+        heartRateZones: [{ durationMinutes: 12, label: "Zone 5", zone: 5 }],
+      },
+    }]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await expect(readProjectableActivityMinutesDays(
+        vaultRoot,
+        runningSpec,
+      )).resolves.toEqual([{
+        data: {
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          sessionCount: 1,
+          sessionMinutes: 42,
+        },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      }]);
+      await expect(readProjectableActivityHeartRateZoneDays(
+        vaultRoot,
+        requireActivityHeartRateZoneSpec("running-heart-rate-zones-days.v0"),
+      )).resolves.toEqual([{
+        data: {
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          zones: [{ durationMinutes: 12, label: "Zone 5", zone: 5 }],
+        },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      }]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("selectProjectableHeartRateZoneDays", () => {
@@ -694,6 +803,37 @@ describe("selectProjectableActivityHeartRateZoneDays", () => {
         records: selected,
       }).records,
     ).toEqual(selected);
+  });
+
+  it("deduplicates matching activity aliases before scoring zone buckets", () => {
+    const selected = selectProjectableActivityHeartRateZoneDays({
+      nowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 45,
+          heartRateZones: [{ durationMinutes: 8, label: "Zone 5", zone: 5 }],
+          recordIds: ["evt_garmin_run_zones"],
+          startedAt: "2026-07-03T07:00:00.000Z",
+        }),
+        activitySessionRow({
+          activityKind: "run",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 45,
+          heartRateZones: [{ durationMinutes: 8, label: "Zone 5", zone: 5 }],
+          recordIds: ["evt_strava_run_zones"],
+          startedAt: "2026-07-03T07:00:00.000Z",
+        }),
+      ],
+      spec: runningZoneSpec,
+    });
+
+    expect(selected[0]?.data).toEqual({
+      activityKind: "running",
+      date: ACTIVITY_DAY.date,
+      zones: [{ durationMinutes: 8, label: "Zone 5", zone: 5 }],
+    });
   });
 });
 

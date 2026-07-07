@@ -891,12 +891,15 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
   const uniqueProjectionKinds: HostedVaultShareProjectionKind[] = [];
 
   for (const projectionKind of projectionKinds) {
-    const parsed = parseHostedVaultShareProjectionKind(
+    const text = requireString(
       projectionKind,
       "Vault share active projection kind",
     );
-    if (!uniqueProjectionKinds.includes(parsed)) {
-      uniqueProjectionKinds.push(parsed);
+    if (!isHostedVaultShareProjectionKind(text)) {
+      continue;
+    }
+    if (!uniqueProjectionKinds.includes(text)) {
+      uniqueProjectionKinds.push(text);
     }
   }
 

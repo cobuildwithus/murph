@@ -23,6 +23,7 @@ import {
   listMetricPoints,
   listMetricPointsBatch,
   readProfileDocumentRuntime,
+  resolveAdherenceObservationActivityKind,
   selectMetricSeries,
   summarizeWearableSleepRuntime,
   type CanonicalEntity,
@@ -579,10 +580,10 @@ export function selectProjectableActivityMinutesDays(
     sessionMinutes: number;
   }>();
 
-  for (const row of dedupeActivitySessionRows(input.rows)) {
-    if (!isProjectableActivitySessionRow(row, input.spec.activityKind, cutoffMs)) {
-      continue;
-    }
+  const projectableRows = input.rows.filter((row) =>
+    isProjectableActivitySessionRow(row, input.spec.activityKind, cutoffMs)
+  );
+  for (const row of dedupeActivitySessionRows(projectableRows, input.spec.activityKind)) {
     const group = groups.get(row.date) ?? {
       date: row.date,
       rows: [],
@@ -641,13 +642,11 @@ export function selectProjectableActivityHeartRateZoneDays(
     zones: ActivitySessionHeartRateZoneProjectionRow[];
   }>();
 
-  for (const row of dedupeActivitySessionRows(input.rows)) {
-    if (
-      !isProjectableActivitySessionRow(row, input.spec.activityKind, cutoffMs)
-      || row.heartRateZones.length === 0
-    ) {
-      continue;
-    }
+  const projectableRows = input.rows.filter((row) =>
+    isProjectableActivitySessionRow(row, input.spec.activityKind, cutoffMs)
+    && row.heartRateZones.length > 0
+  );
+  for (const row of dedupeActivitySessionRows(projectableRows, input.spec.activityKind)) {
     const group = groups.get(row.date) ?? {
       date: row.date,
       rows: [],
@@ -865,18 +864,9 @@ function readActivitySessionDate(entity: CanonicalEntity): string | null {
 }
 
 function readActivitySessionKind(entity: CanonicalEntity): string | null {
-  return readOptionalString(entity.attributes.activityType)
-    ?? readWorkoutActivityType(entity.attributes.workout);
-}
-
-function readWorkoutActivityType(workout: unknown): string | null {
-  const record = readRecord(workout);
-  if (!record) {
-    return null;
-  }
-  return readOptionalString(record.sport)
-    ?? readOptionalString(record.sportName)
-    ?? readOptionalString(record.activityType);
+  return resolveAdherenceObservationActivityKind({
+    attributes: entity.attributes as Record<string, unknown>,
+  });
 }
 
 function readActivitySessionHeartRateZones(
@@ -937,10 +927,11 @@ function isProjectableActivitySessionRow(
 
 function dedupeActivitySessionRows(
   rows: readonly ActivitySessionProjectionRow[],
+  activityKind?: string,
 ): ActivitySessionProjectionRow[] {
   const deduped = new Map<string, ActivitySessionProjectionRow>();
   for (const row of rows) {
-    const key = activitySessionRowDedupeKey(row);
+    const key = activitySessionRowDedupeKey(row, activityKind);
     if (!deduped.has(key)) {
       deduped.set(key, row);
     }
@@ -948,10 +939,14 @@ function dedupeActivitySessionRows(
   return [...deduped.values()];
 }
 
-function activitySessionRowDedupeKey(row: ActivitySessionProjectionRow): string {
+function activitySessionRowDedupeKey(
+  row: ActivitySessionProjectionRow,
+  activityKind?: string,
+): string {
+  const dedupeActivityKind = activityKind ?? row.activityKind;
   if (row.startedAt || row.endedAt) {
     return JSON.stringify({
-      activityKind: row.activityKind,
+      activityKind: dedupeActivityKind,
       date: row.date,
       durationMinutes: row.durationMinutes,
       endedAt: row.endedAt ?? null,
@@ -961,7 +956,7 @@ function activitySessionRowDedupeKey(row: ActivitySessionProjectionRow): string 
 
   return metricSeriesPointSourceOwnerKey(row)
     ?? JSON.stringify({
-      activityKind: row.activityKind,
+      activityKind: dedupeActivityKind,
       date: row.date,
       durationMinutes: row.durationMinutes,
       pointIds: sortedStrings(row.pointIds ?? []),
