@@ -200,6 +200,8 @@ describe('experiment onboarding skill guidance', () => {
       'experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>',
     )
     expect(raw).toContain('--kind missed-log --date <sessionDate>')
+    expect(raw).toContain('skip when `decision.action` is `skip`')
+    expect(raw).toContain('send only when `decision.action` is `notify`')
   })
 
   it('branches device-observable experiments from progress evidence', async () => {
@@ -207,9 +209,9 @@ describe('experiment onboarding skill guidance', () => {
 
     expect(raw).toContain('## Device-observable experiments')
     expect(raw).toContain(
-      'read `vault-cli experiment progress <id> --format json` and check `adherence.evidence`',
+      'read `vault-cli experiment progress <id> --format json` and check `progress.adherence.evidence`',
     )
-    expect(raw).toContain('`adherence.evidence.eventKind` is `activity_session`')
+    expect(raw).toContain('`progress.adherence.evidence.eventKind` is `activity_session`')
     expect(raw).toContain(
       'Do not ask the user to log sessions, do not create per-session "log it" reminders',
     )
@@ -223,7 +225,13 @@ describe('experiment onboarding skill guidance', () => {
       'Device sensing changes what happens after a session, not before it.',
     )
     expect(raw).toContain('--trigger-kind deviceActivity')
-    expect(raw).toContain('--activity-kind <adherence.evidence.activityKind>')
+    expect(raw).toContain(
+      'If `progress.adherence.evidence.activityKind` is present, pass `--activity-kind <progress.adherence.evidence.activityKind>`',
+    )
+    expect(raw).toContain(
+      'If it is absent for a generic any-activity target, pass `--activity-kind activity`',
+    )
+    expect(raw).toContain('the deviceActivity scanner treats `activity` as any workout session')
     expect(raw).toContain('Do not pass `--device-source`')
     expect(raw).toContain('experiment-activity-nudge-<experiment-slug>')
     expect(raw).toContain('activity_nudge_automation_slug')
@@ -249,7 +257,7 @@ describe('experiment onboarding skill guidance', () => {
     const raw = await readExperimentOnboardingSkill()
 
     expect(raw).toContain(
-      'Log sessions with typed flags only for experiments whose `adherence.evidence.eventKind` is `intervention_session`',
+      'Log sessions with typed flags only for experiments whose `progress.adherence.evidence.eventKind` is `intervention_session`',
     )
     expect(raw).toContain('sessions the user says the wearable missed')
     expect(raw).toContain('and corrections')
@@ -259,6 +267,9 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain(
       'sensed events and manual logs both count, so duplicating creates double counts',
     )
+    expect(raw).toContain('`progress.setupReadiness`')
+    expect(raw).toContain('`progress.analysisReadiness`')
+    expect(raw).toContain('`progress.dataCoverage`')
   })
 
   it('requires context-backed reminder time suggestions before open-ended time questions', async () => {

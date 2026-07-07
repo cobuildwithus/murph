@@ -2359,6 +2359,66 @@ test("experiment follow-up due uses explicit activity target evidence for missed
   assert.equal(decision.reason, "session_already_logged");
 });
 
+test("experiment follow-up due skips missed-log when generic activity target has any device activity", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFR",
+    slug: "daily-any-activity",
+    runPlan: {
+      baselineStart: "2026-05-25",
+      baselineEnd: "2026-05-31",
+      interventionStart: "2026-06-01",
+      interventionEnd: "2026-06-14",
+      modality: "Workout",
+      targetSessions: 14,
+      minimumUsefulSessions: 10,
+      adherenceTargets: [{
+        targetId: "any-activity",
+        label: "Any activity",
+        phase: "intervention",
+        calendar: {
+          kind: "daily",
+          timeZone: "America/New_York",
+        },
+        evidence: {
+          kind: "linkedEventCount",
+          eventKind: "activity_session",
+          missing: "missed_after_grace",
+        },
+        rollup: {
+          targetCompletions: 14,
+          minimumUsefulCompletions: 10,
+        },
+      }],
+    },
+    assistantSupport: {
+      remindersEnabled: true,
+      missedLogFollowup: "default_on",
+      weeklyDigestEnabled: false,
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-generic-device-activity",
+    metadata: { timezone: "America/New_York" },
+    entities: [
+      experiment,
+      makeActivitySession({
+        entityId: "evt_generic_daily_activity_device_1",
+        dayKey: "2026-06-03",
+        occurredAt: "2026-06-03T22:00:00.000Z",
+        activityType: "Cycling",
+      }),
+    ],
+  });
+
+  const decision = decideExperimentFollowupDue(vault, "daily-any-activity", {
+    kind: "missed-log",
+    date: "2026-06-03",
+  });
+
+  assert.equal(decision.action, "skip");
+  assert.equal(decision.reason, "session_already_logged");
+});
+
 test("experiment follow-up due skips missed-log for opt-out and unsupported schedules", () => {
   const optedOut = createVaultReadModel({
     vaultRoot: "/virtual/experiment-followup-opt-out",

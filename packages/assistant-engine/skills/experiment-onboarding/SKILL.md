@@ -94,10 +94,10 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 
 ## Device-observable experiments
 
-- After creating the run, read `vault-cli experiment progress <id> --format json` and check `adherence.evidence`. If `adherence.evidence.eventKind` is `activity_session`, sessions are sensed automatically from the user's connected wearable. Do not ask the user to log sessions, do not create per-session "log it" reminders, and do not log a manual session for any workout the wearable synced or will sync.
+- After creating the run, read `vault-cli experiment progress <id> --format json` and check `progress.adherence.evidence`. If `progress.adherence.evidence.eventKind` is `activity_session`, sessions are sensed automatically from the user's connected wearable. Do not ask the user to log sessions, do not create per-session "log it" reminders, and do not log a manual session for any workout the wearable synced or will sync.
 - In the setup summary, include one short line that makes this effortless, for example: "Your runs count automatically from your WHOOP. No need to tell me when you run." Name the provider only when current evidence shows it.
 - Pre-session support reminders remain available exactly as before if the user wants them. Device sensing changes what happens after a session, not before it.
-- Create one default-on activity nudge automation per device-observable experiment unless the user declines or the route is blocked: `vault-cli automation save <title> --slug experiment-activity-nudge-<experiment-slug> --trigger-kind deviceActivity --activity-kind <adherence.evidence.activityKind> --instructions "<scheduled instructions>" --channel <channel> ...`. Do not pass `--device-source`; the trigger is provider-agnostic. Save traceability in setup answers with `activity_nudge_automation_slug`; if declined or blocked, record that result in setup answers too.
+- Create one default-on activity nudge automation per device-observable experiment unless the user declines or the route is blocked. If `progress.adherence.evidence.activityKind` is present, pass `--activity-kind <progress.adherence.evidence.activityKind>`. If it is absent for a generic any-activity target, pass `--activity-kind activity`; the deviceActivity scanner treats `activity` as any workout session. Command shape: `vault-cli automation save <title> --slug experiment-activity-nudge-<experiment-slug> --trigger-kind deviceActivity --activity-kind <activity-kind> --instructions "<scheduled instructions>" --channel <channel> ...`. Do not pass `--device-source`; the trigger is provider-agnostic. Save traceability in setup answers with `activity_nudge_automation_slug`; if declined or blocked, record that result in setup answers too.
 - Activity nudge automation instructions must be self-contained because a future notification turn may not read this skill. Tell that turn to run `vault-cli experiment progress <experiment-slug> --format json`; send a short celebratory progress line only when it earns a send, such as the first sensed session, halfway, target met, or recovery after a behind stretch; otherwise skip silently. Archive this automation when the experiment is no longer active or today is past the intervention end date. Nudge copy is one short sentence with the progress count, for example: "Nice run, that's 8 of 24 for your base block." Never ask a question and never ask the user to log.
 
 ## Session support loop
@@ -111,7 +111,7 @@ Pre-session guidance tells the user what to do now. It should not assign the use
 
 For pre-bed protocols, default the after-session check to shortly after the user's usual wake window on the next local day, and evaluate the prior night's session date.
 
-Use existing bounded one-shot automations. Prefer stable slugs such as `experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>` or `experiment-session-support-<experiment-slug>-session-<n>`. Include enough session identity to avoid collisions when a plan has multiple sessions on the same local date. When deterministic missed-log due logic applies, the automation should call `vault-cli experiment followup due <id> --kind missed-log --date <sessionDate> --format json` and skip when it returns `skip`.
+Use existing bounded one-shot automations. Prefer stable slugs such as `experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>` or `experiment-session-support-<experiment-slug>-session-<n>`. Include enough session identity to avoid collisions when a plan has multiple sessions on the same local date. When deterministic missed-log due logic applies, the automation should call `vault-cli experiment followup due <id> --kind missed-log --date <sessionDate> --format json`; skip when `decision.action` is `skip`, and send only when `decision.action` is `notify`.
 
 If sending, ask whether the planned session happened and collect only the missing subjective fields needed to log it. Keep it neutral and easy to answer.
 
@@ -142,10 +142,10 @@ If sending, ask whether the planned session happened and collect only the missin
 
 ## Active experiment support
 
-- Log sessions with typed flags only for experiments whose `adherence.evidence.eventKind` is `intervention_session`, sessions the user says the wearable missed, and corrections: `vault-cli experiment session log <id> ...`. Never write a manual session for a workout that synced or will sync; sensed events and manual logs both count, so duplicating creates double counts.
+- Log sessions with typed flags only for experiments whose `progress.adherence.evidence.eventKind` is `intervention_session`, sessions the user says the wearable missed, and corrections: `vault-cli experiment session log <id> ...`. Never write a manual session for a workout that synced or will sync; sensed events and manual logs both count, so duplicating creates double counts.
 - Log confounders with typed flags: `vault-cli experiment context log <id> ...`
-- Check-ins: `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` - skip when it returns `skip`.
-- Progress: `vault-cli experiment progress <id> --format json`; inspect `setupReadiness`, `analysisReadiness`, and `dataCoverage` separately before saying wearable data is missing.
+- Check-ins: `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` - skip when `decision.action` is `skip`; send only when `decision.action` is `notify`.
+- Progress: `vault-cli experiment progress <id> --format json`; inspect `progress.setupReadiness`, `progress.analysisReadiness`, and `progress.dataCoverage` separately before saying wearable data is missing.
 - Progress cards: `vault-cli experiment progress-card <id> --format json`; attach the returned `url` with `murph.attach_response_media` when showing the run visually.
 - Outcomes: `vault-cli experiment outcome analyze <id> --format json`, persist with `vault-cli experiment outcome write <id> --format json`.
 - Automations: `vault-cli automation save <title> --instructions "<text>" --schedule-kind <kind> --channel <channel>`. Missed-log checks are neutral, at most once per planned session, easy to decline.

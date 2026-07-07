@@ -1304,14 +1304,13 @@ function hasSessionLogForDate(context: ExperimentFollowupContext, date: string):
     return true;
   }
 
-  const activityEvidenceKinds = context.adherenceTargets.flatMap((target) =>
+  const activityEvidenceTargets = context.adherenceTargets.flatMap((target) =>
     target.evidence.kind === "linkedEventCount" &&
-      target.evidence.eventKind === "activity_session" &&
-      target.evidence.activityKind
-      ? [target.evidence.activityKind]
+      target.evidence.eventKind === "activity_session"
+      ? [target.evidence]
       : []
   );
-  if (activityEvidenceKinds.length === 0) {
+  if (activityEvidenceTargets.length === 0) {
     return false;
   }
 
@@ -1328,9 +1327,12 @@ function hasSessionLogForDate(context: ExperimentFollowupContext, date: string):
     const activityKind = resolveAdherenceObservationActivityKind({
       attributes: event.attributes as Record<string, unknown>,
     });
-    return activityEvidenceKinds.some((activityEvidenceKind) =>
-      activityTextMatchesKind(activityKind, activityEvidenceKind)
-    );
+    return activityEvidenceTargets.some((evidence) => {
+      if (!evidence.activityKind) {
+        return true;
+      }
+      return activityTextMatchesKind(activityKind, evidence.activityKind);
+    });
   });
 }
 
