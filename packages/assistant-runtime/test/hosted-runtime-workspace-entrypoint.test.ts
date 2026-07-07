@@ -16887,6 +16887,14 @@ describe("hosted workspace runtime entrypoint", () => {
                 workspace: createWorkspaceState({ version: "0" }),
               }),
             }),
+            async runAssistantPhase() {
+              return {
+                progressed: false,
+                redactedStatus: {
+                  hostedAssistantProgressed: false,
+                },
+              };
+            },
             vaultRoot,
           },
         ),

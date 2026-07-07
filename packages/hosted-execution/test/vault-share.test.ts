@@ -400,7 +400,7 @@ describe("vault-share contracts", () => {
     ).toThrow(/delivered or no-active-share/u);
   });
 
-  it("deduplicates supported active projection-kind responses and skips unknown future strings", () => {
+  it("deduplicates supported active projection-kind responses and rejects unknown values", () => {
     const runningScope = {
       projectionKind: "activity-minutes-days.v1",
       selector: { activityKind: "running" },
@@ -408,7 +408,6 @@ describe("vault-share contracts", () => {
     expect(parseHostedVaultShareActiveProjectionKindsResponse({
       projectionKinds: [
         "profile-name.v0",
-        "future-challenge-kind.v0",
         "activity-days.v0",
         "activity-days.v0",
       ],
@@ -416,8 +415,6 @@ describe("vault-share contracts", () => {
         "profile-name.v0",
         runningScope,
         runningScope,
-        { projectionKind: "activity-minutes-days.v1" },
-        { projectionKind: "future-challenge-kind.v0" },
       ],
     })).toEqual({
       projectionKinds: ["profile-name.v0", "activity-days.v0"],
@@ -428,6 +425,16 @@ describe("vault-share contracts", () => {
         projectionKinds: [17],
       })
     ).toThrow(/non-empty string/u);
+    expect(() =>
+      parseHostedVaultShareActiveProjectionKindsResponse({
+        projectionKinds: ["future-challenge-kind.v0"],
+      })
+    ).toThrow(/known vault-share projection kind/u);
+    expect(() =>
+      parseHostedVaultShareActiveProjectionKindsResponse({
+        projectionScopes: [{ projectionKind: "future-challenge-kind.v0" }],
+      })
+    ).toThrow(/known vault-share projection kind/u);
   });
 
   it("round-trips a vault-share delivery wake and pins the envelope occurredAt to the record", () => {

@@ -995,11 +995,12 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
       projectionKind,
       "Vault share active projection kind",
     );
-    if (!isHostedVaultShareProjectionKind(text)) {
-      continue;
-    }
-    if (!uniqueProjectionKinds.includes(text)) {
-      uniqueProjectionKinds.push(text);
+    const parsedProjectionKind = parseHostedVaultShareProjectionKind(
+      text,
+      "Vault share active projection kind",
+    );
+    if (!uniqueProjectionKinds.includes(parsedProjectionKind)) {
+      uniqueProjectionKinds.push(parsedProjectionKind);
     }
   }
 
@@ -1013,15 +1014,10 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
   const uniqueScopeKeys = new Set<string>();
 
   for (const scopeValue of scopeValues) {
-    let scope: HostedVaultShareProjectionScope;
-    try {
-      scope = parseHostedVaultShareProjectionScope(
-        scopeValue,
-        "Vault share active projection scope",
-      );
-    } catch {
-      continue;
-    }
+    const scope = parseHostedVaultShareProjectionScope(
+      scopeValue,
+      "Vault share active projection scope",
+    );
     const scopeKey = buildHostedVaultShareProjectionScopeKey(scope);
     if (uniqueScopeKeys.has(scopeKey)) {
       continue;
