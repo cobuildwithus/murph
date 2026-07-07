@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  getHostedVaultShareActivityHeartRateZoneProjectionSpec,
+  buildHostedVaultShareActivityMinutesProjectionScope,
   getHostedVaultShareActivityMinutesProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  hostedVaultShareProjectionKindToScope,
   parseHostedVaultShareDeliverRequest,
   type HostedVaultShareDeliverRequest,
 } from "@murphai/hosted-execution/vault-share";
@@ -24,12 +25,10 @@ import {
 import {
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
   offerHostedVaultShareProjectionBestEffort,
-  readProjectableActivityHeartRateZoneDays,
   readProjectableActivityMinutesDays,
   readProjectableDailyMetricDays,
   readProjectableProfileName,
   selectProjectableDailyMetricDays,
-  selectProjectableActivityHeartRateZoneDays,
   selectProjectableActivityMinutesDays,
   selectProjectableHeartRateZoneDays,
   selectProjectableSleepNights,
@@ -54,6 +53,19 @@ const RECORD = {
   occurredAt: `${NIGHT.date}T00:00:00.000Z`,
   recordKey: NIGHT.date,
 };
+
+const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
+const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
+const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
+const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
+  activityKind: "running",
+});
+const WALKING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
+  activityKind: "walking",
+});
+const SAUNA_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
+  activityKind: "sauna",
+});
 
 const ACTIVITY_DAY = {
   date: "2026-07-03",
@@ -139,7 +151,6 @@ function activitySessionRow(input: {
   date: string;
   durationMinutes: number;
   endedAt?: string | null;
-  heartRateZones?: ActivitySessionProjectionRow["heartRateZones"];
   recordIds?: string[];
   startedAt?: string | null;
 }): ActivitySessionProjectionRow {
@@ -149,7 +160,6 @@ function activitySessionRow(input: {
     date: input.date,
     durationMinutes: input.durationMinutes,
     endedAt: input.endedAt ?? null,
-    heartRateZones: input.heartRateZones ?? [],
     observedAt: `${input.date}T12:00:00.000Z`,
     pointIds: [`point_${recordIds.join("_")}`],
     recordIds,
@@ -221,7 +231,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       vaultRoot,
       vaultSharePort: {
         deliver,
-        listActiveProjectionKinds: async () => ["profile-name.v0"],
+        listActiveProjectionScopes: async () => [PROFILE_SCOPE],
       },
     });
 
@@ -229,6 +239,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith({
       projectionKind: "profile-name.v0",
+      projectionScope: PROFILE_SCOPE,
       records: [{
         data: { displayName: "Theo" },
         occurredAt: "2026-07-01T00:00:00.000Z",
@@ -244,7 +255,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       vaultRoot: "/nonexistent",
       vaultSharePort: {
         deliver,
-        listActiveProjectionKinds: async () => [],
+        listActiveProjectionScopes: async () => [],
       },
     });
 
@@ -258,7 +269,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       vaultRoot: "/nonexistent",
       vaultSharePort: {
         deliver,
-        listActiveProjectionKinds: async () => ["group-email.v0"],
+        listActiveProjectionScopes: async () => [GROUP_EMAIL_SCOPE],
       },
     });
 
@@ -273,7 +284,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       vaultRoot,
       vaultSharePort: {
         deliver,
-        listActiveProjectionKinds: async () => ["profile-name.v0"],
+        listActiveProjectionScopes: async () => [PROFILE_SCOPE],
       },
     });
 
@@ -287,7 +298,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       vaultRoot: "/unused",
       vaultSharePort: {
         deliver,
-        listActiveProjectionKinds: async () => {
+        listActiveProjectionScopes: async () => {
           throw new Error("network down");
         },
       },
@@ -531,7 +542,7 @@ describe("selectProjectableWorkoutDays", () => {
 
 describe("selectProjectableActivityMinutesDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
-  const runningSpec = requireActivityMinutesSpec("running-minutes-days.v0");
+  const runningSpec = requireActivityMinutesSpec(RUNNING_SCOPE);
 
   it("maps structured activity sessions to activity-specific daily minute records", () => {
     const selected = selectProjectableActivityMinutesDays({
@@ -576,7 +587,8 @@ describe("selectProjectableActivityMinutesDays", () => {
     ]);
     expect(
       parseHostedVaultShareDeliverRequest({
-        projectionKind: "running-minutes-days.v0",
+        projectionKind: "activity-minutes-days.v1",
+        projectionScope: RUNNING_SCOPE,
         records: selected,
       }).records,
     ).toEqual(selected);
@@ -708,19 +720,6 @@ describe("selectProjectableActivityMinutesDays", () => {
         recordKey: ACTIVITY_DAY.date,
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }]);
-      await expect(readProjectableActivityHeartRateZoneDays(
-        vaultRoot,
-        requireActivityHeartRateZoneSpec("running-heart-rate-zones-days.v0"),
-      )).resolves.toEqual([{
-        data: {
-          activityKind: "running",
-          date: ACTIVITY_DAY.date,
-          zones: [{ durationMinutes: 12, label: "Zone 5", zone: 5 }],
-        },
-        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
-        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
-      }]);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -742,7 +741,7 @@ describe("selectProjectableActivityMinutesDays", () => {
     try {
       await expect(readProjectableActivityMinutesDays(
         vaultRoot,
-        requireActivityMinutesSpec("sauna-minutes-days.v0"),
+        requireActivityMinutesSpec(SAUNA_SCOPE),
       )).resolves.toEqual([{
         data: {
           activityKind: "sauna",
@@ -760,7 +759,7 @@ describe("selectProjectableActivityMinutesDays", () => {
     }
   });
 
-  it("shares one cached session read across activity-specific projections in an offer", async () => {
+  it("shares one cached session read across activity-minute scopes in an offer", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",
       id: "evt_run_cache_1",
@@ -775,10 +774,21 @@ describe("selectProjectableActivityMinutesDays", () => {
       workout: {
         heartRateZones: [{ durationMinutes: 8, label: "Zone 5", zone: 5 }],
       },
+    }, {
+      schemaVersion: "murph.event.v1",
+      id: "evt_walk_cache_1",
+      kind: "activity_session",
+      occurredAt: "2026-07-03T18:00:00.000Z",
+      dayKey: ACTIVITY_DAY.date,
+      recordedAt: "2026-07-03T19:00:00.000Z",
+      startAt: "2026-07-03T18:00:00.000Z",
+      endAt: "2026-07-03T18:25:00.000Z",
+      activityType: "walking",
+      durationMinutes: 25,
     }]);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
     const deliver = vi.fn(async (request: HostedVaultShareDeliverRequest) => {
-      if (request.projectionKind === "running-minutes-days.v0") {
+      if (request.projectionScope === RUNNING_SCOPE) {
         await rm(vaultRoot, { recursive: true, force: true });
       }
       return { status: "delivered" as const };
@@ -789,22 +799,20 @@ describe("selectProjectableActivityMinutesDays", () => {
         vaultRoot,
         vaultSharePort: {
           deliver,
-          listActiveProjectionKinds: async () => [
-            "running-minutes-days.v0",
-            "running-heart-rate-zones-days.v0",
-          ],
+          listActiveProjectionScopes: async () => [RUNNING_SCOPE, WALKING_SCOPE],
         },
       })).resolves.toEqual({ outcome: "delivered" });
       expect(deliver).toHaveBeenCalledTimes(2);
-      expect(deliver.mock.calls.map(([request]) => request.projectionKind)).toEqual([
-        "running-minutes-days.v0",
-        "running-heart-rate-zones-days.v0",
+      expect(deliver.mock.calls.map(([request]) => request.projectionScope)).toEqual([
+        RUNNING_SCOPE,
+        WALKING_SCOPE,
       ]);
       expect(deliver.mock.calls[1]?.[0].records).toEqual([{
         data: {
-          activityKind: "running",
+          activityKind: "walking",
           date: ACTIVITY_DAY.date,
-          zones: [{ durationMinutes: 8, label: "Zone 5", zone: 5 }],
+          sessionCount: 1,
+          sessionMinutes: 25,
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
         recordKey: ACTIVITY_DAY.date,
@@ -864,131 +872,6 @@ describe("selectProjectableHeartRateZoneDays", () => {
         records: selected,
       }).records,
     ).toEqual(selected);
-  });
-});
-
-describe("selectProjectableActivityHeartRateZoneDays", () => {
-  const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
-  const runningZoneSpec = requireActivityHeartRateZoneSpec("running-heart-rate-zones-days.v0");
-
-  it("maps only matching activity sessions to activity-specific zone records", () => {
-    const selected = selectProjectableActivityHeartRateZoneDays({
-      nowMs,
-      rows: [
-        activitySessionRow({
-          activityKind: "running",
-          date: ACTIVITY_DAY.date,
-          durationMinutes: 45,
-          heartRateZones: [
-            { durationMinutes: 8, label: "Zone 5", zone: 5 },
-            { durationMinutes: 14, label: "Zone 4", zone: 4 },
-          ],
-          recordIds: ["evt_run_zones"],
-        }),
-        activitySessionRow({
-          activityKind: "cycling",
-          date: ACTIVITY_DAY.date,
-          durationMinutes: 45,
-          heartRateZones: [{ durationMinutes: 20, label: "Zone 5", zone: 5 }],
-          recordIds: ["evt_bike_zones"],
-        }),
-      ],
-      spec: runningZoneSpec,
-    });
-
-    expect(selected).toEqual([
-      {
-        data: {
-          activityKind: "running",
-          date: ACTIVITY_DAY.date,
-          zones: [
-            {
-              durationMinutes: 14,
-              label: "Zone 4",
-              zone: 4,
-            },
-            {
-              durationMinutes: 8,
-              label: "Zone 5",
-              zone: 5,
-            },
-          ],
-        },
-        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
-        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
-      },
-    ]);
-    expect(
-      parseHostedVaultShareDeliverRequest({
-        projectionKind: "running-heart-rate-zones-days.v0",
-        records: selected,
-      }).records,
-    ).toEqual(selected);
-  });
-
-  it("deduplicates matching activity aliases before scoring zone buckets", () => {
-    const selected = selectProjectableActivityHeartRateZoneDays({
-      nowMs,
-      rows: [
-        activitySessionRow({
-          activityKind: "running",
-          date: ACTIVITY_DAY.date,
-          durationMinutes: 45,
-          heartRateZones: [{ durationMinutes: 8, label: "Zone 5", zone: 5 }],
-          recordIds: ["evt_garmin_run_zones"],
-          startedAt: "2026-07-03T07:00:00.000Z",
-        }),
-        activitySessionRow({
-          activityKind: "run",
-          date: ACTIVITY_DAY.date,
-          durationMinutes: 45,
-          heartRateZones: [{ durationMinutes: 8, label: "Zone 5", zone: 5 }],
-          recordIds: ["evt_strava_run_zones"],
-          startedAt: "2026-07-03T07:00:00.000Z",
-        }),
-      ],
-      spec: runningZoneSpec,
-    });
-
-    expect(selected[0]?.data).toEqual({
-      activityKind: "running",
-      date: ACTIVITY_DAY.date,
-      zones: [{ durationMinutes: 8, label: "Zone 5", zone: 5 }],
-    });
-  });
-
-  it("deduplicates overlapping provider copies before scoring zone buckets", () => {
-    const selected = selectProjectableActivityHeartRateZoneDays({
-      nowMs,
-      rows: [
-        activitySessionRow({
-          activityKind: "running",
-          date: ACTIVITY_DAY.date,
-          durationMinutes: 45,
-          endedAt: "2026-07-03T07:45:00.000Z",
-          heartRateZones: [{ durationMinutes: 8, label: "Zone 5", zone: 5 }],
-          recordIds: ["evt_garmin_run_zones"],
-          startedAt: "2026-07-03T07:00:00.000Z",
-        }),
-        activitySessionRow({
-          activityKind: "run",
-          date: ACTIVITY_DAY.date,
-          durationMinutes: 46,
-          endedAt: "2026-07-03T07:46:30.000Z",
-          heartRateZones: [{ durationMinutes: 9, label: "Zone 5", zone: 5 }],
-          recordIds: ["evt_strava_run_zones"],
-          startedAt: "2026-07-03T07:00:30.000Z",
-        }),
-      ],
-      spec: runningZoneSpec,
-    });
-
-    expect(selected[0]?.data).toEqual({
-      activityKind: "running",
-      date: ACTIVITY_DAY.date,
-      zones: [{ durationMinutes: 8, label: "Zone 5", zone: 5 }],
-    });
   });
 });
 
@@ -1055,16 +938,6 @@ function requireActivityMinutesSpec(
   return spec;
 }
 
-function requireActivityHeartRateZoneSpec(
-  kind: Parameters<typeof getHostedVaultShareActivityHeartRateZoneProjectionSpec>[0],
-) {
-  const spec = getHostedVaultShareActivityHeartRateZoneProjectionSpec(kind);
-  if (!spec) {
-    throw new Error(`Missing activity heart-rate zone projection spec for ${kind}.`);
-  }
-  return spec;
-}
-
 describe("selectProjectableSleepNights", () => {
   const nowMs = Date.parse("2026-06-10T00:00:00.000Z");
 
@@ -1100,6 +973,7 @@ describe("selectProjectableSleepNights", () => {
     expect(
       parseHostedVaultShareDeliverRequest({
         projectionKind: "sleep-times.v0",
+        projectionScope: SLEEP_SCOPE,
         records: selected,
       }).records,
     ).toEqual(selected);
@@ -1127,6 +1001,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
     delivery: {
       grantorMemberId: "member_grantor",
       projectionKind: "sleep-times.v0" as const,
+      projectionScope: SLEEP_SCOPE,
       record: RECORD,
       schema: "murph.vault-share.delivery.v1" as const,
       shareId: "share_1",
@@ -1175,6 +1050,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
         delivery: {
           ...wake.delivery,
           projectionKind: "group-email.v0",
+          projectionScope: GROUP_EMAIL_SCOPE,
         },
       },
     })).resolves.toEqual({ status: "imported" });
@@ -1266,6 +1142,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
         revoke: {
           grantorMemberId: "member_grantor",
           projectionKind: "sleep-times.v0",
+          projectionScope: SLEEP_SCOPE,
           revokedAt: "2026-07-01T00:00:00.000Z",
           schema: "murph.vault-share.revoke.v1",
           shareId: "share_1",
@@ -1319,6 +1196,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
         revoke: {
           grantorMemberId: "member_grantor",
           projectionKind: "sleep-times.v0",
+          projectionScope: SLEEP_SCOPE,
           revokedAt: "2026-07-01T00:00:00.000Z",
           schema: "murph.vault-share.revoke.v1",
           shareId: "share_1",
@@ -1353,6 +1231,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
         revoke: {
           grantorMemberId: "member_grantor",
           projectionKind: "sleep-times.v0",
+          projectionScope: SLEEP_SCOPE,
           revokedAt: "2026-07-01T00:00:00.000Z",
           schema: "murph.vault-share.revoke.v1",
           shareId: "share_1",
@@ -1433,6 +1312,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
         revoke: {
           grantorMemberId: "member_grantor",
           projectionKind: "sleep-times.v0",
+          projectionScope: SLEEP_SCOPE,
           revokedAt: "2026-07-01T00:00:00.000Z",
           schema: "murph.vault-share.revoke.v1",
           shareId: "share_1",
@@ -1468,6 +1348,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
         revoke: {
           grantorMemberId: "member_grantor",
           projectionKind: "sleep-times.v0",
+          projectionScope: SLEEP_SCOPE,
           revokedAt: "2026-07-01T00:00:00.000Z",
           schema: "murph.vault-share.revoke.v1",
           shareId: "share_1",
@@ -1515,6 +1396,7 @@ describe("readProjectableProfileName", () => {
     expect(() =>
       parseHostedVaultShareDeliverRequest({
         projectionKind: "profile-name.v0",
+        projectionScope: PROFILE_SCOPE,
         records,
       })
     ).not.toThrow();
@@ -1524,13 +1406,14 @@ describe("readProjectableProfileName", () => {
       vaultRoot,
       vaultSharePort: {
         deliver,
-        listActiveProjectionKinds: async () => ["profile-name.v0"],
+        listActiveProjectionScopes: async () => [PROFILE_SCOPE],
       },
     });
     expect(result.outcome).toBe("delivered");
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith({
       projectionKind: "profile-name.v0",
+      projectionScope: PROFILE_SCOPE,
       records,
     });
   });
@@ -1544,7 +1427,7 @@ describe("readProjectableProfileName", () => {
       vaultRoot,
       vaultSharePort: {
         deliver,
-        listActiveProjectionKinds: async () => ["profile-name.v0"],
+        listActiveProjectionScopes: async () => [PROFILE_SCOPE],
       },
     });
     expect(result.outcome).toBe("no-projectable-records");

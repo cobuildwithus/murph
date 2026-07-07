@@ -127,7 +127,11 @@ import {
   handleHostedRuntimeGroupTool,
   reconcileHostedThreadContainerParticipants,
 } from "@/src/lib/hosted-groups/group-tool";
-import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
+import {
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareActivityMinutesProjectionScope,
+  buildHostedVaultShareProjectionScopeKey,
+} from "@murphai/hosted-execution/vault-share";
 import {
   mergeHostedGroupJoinPolicy,
   projectHostedVaultShareProjectionDisplays,
@@ -147,6 +151,10 @@ const RENAMED_GROUP_SUMMARY = {
   ...GROUP_SUMMARY,
   displayName: "Weekly Health Crew",
 };
+const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
+const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
+  activityKind: "running",
+});
 
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
@@ -351,7 +359,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         containerMemberId: "member_group_runtime",
         displayName: "Sunday sleep crew",
         kind: "friends",
-        requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+        requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
       }),
     );
   });
@@ -597,6 +605,10 @@ describe("hosted group join policy", () => {
       schema: "murph.hosted-group.join-policy.v1",
     })).toEqual({
       requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
+      requestedVaultShareProjectionScopes: [
+        { projectionKind: "sleep-times.v0" },
+        { projectionKind: "activity-days.v0" },
+      ],
       schema: "murph.hosted-group.join-policy.v1",
     });
 
@@ -605,10 +617,13 @@ describe("hosted group join policy", () => {
         requestedVaultShareProjectionKinds: ["sleep-times.v0"],
         schema: "murph.hosted-group.join-policy.v1",
       },
-      requestedVaultShareProjectionKinds: ["activity-days.v0", "sleep-times.v0"],
-    }).requestedVaultShareProjectionKinds).toEqual([
-      "sleep-times.v0",
-      "activity-days.v0",
+      requestedVaultShareProjectionScopes: [
+        { projectionKind: "activity-days.v0" },
+        { projectionKind: "sleep-times.v0" },
+      ],
+    }).requestedVaultShareProjectionScopes).toEqual([
+      { projectionKind: "sleep-times.v0" },
+      { projectionKind: "activity-days.v0" },
     ]);
 
     expect(readHostedGroupJoinPolicy({
@@ -617,48 +632,59 @@ describe("hosted group join policy", () => {
     }).requestedVaultShareProjectionKinds).toEqual([]);
 
     expect(projectHostedVaultShareProjectionDisplays([
-      "group-email.v0",
-      "sleep-times.v0",
-      "activity-days.v0",
-      "running-minutes-days.v0",
-      "heart-rate-zones-days.v0",
+      { projectionKind: "group-email.v0" },
+      { projectionKind: "sleep-times.v0" },
+      { projectionKind: "activity-days.v0" },
+      RUNNING_SCOPE,
+      { projectionKind: "heart-rate-zones-days.v0" },
     ])).toEqual([
       {
         description:
           "Share your email so this group's Murph can send the newsletter. Your address is visible to the group.",
         label: "Email address",
         projectionKind: "group-email.v0",
+        projectionScope: { projectionKind: "group-email.v0" },
+        projectionScopeKey: "group-email.v0",
       },
       {
         description:
           "Allows this group to receive your recent sleep start and end times as bounded shared records.",
         label: "Recent sleep timing",
         projectionKind: "sleep-times.v0",
+        projectionScope: { projectionKind: "sleep-times.v0" },
+        projectionScopeKey: "sleep-times.v0",
       },
       {
         description:
           "Allows this group to receive your recent daily active-minute totals as bounded shared records.",
         label: "Recent activity minutes",
         projectionKind: "activity-days.v0",
-      },
-      {
-        description:
-          "Allows this group to receive your recent daily running-minute totals as bounded shared records.",
-        label: "Recent running minutes",
-        projectionKind: "running-minutes-days.v0",
+        projectionScope: { projectionKind: "activity-days.v0" },
+        projectionScopeKey: "activity-days.v0",
       },
       {
         description:
           "Allows this group to receive your recent daily workout heart-rate zone minutes as bounded shared records.",
         label: "Recent heart-rate zones",
         projectionKind: "heart-rate-zones-days.v0",
+        projectionScope: { projectionKind: "heart-rate-zones-days.v0" },
+        projectionScopeKey: "heart-rate-zones-days.v0",
+      },
+      {
+        description:
+          "Allows this group to receive your recent daily running-minute totals as bounded shared records.",
+        label: "Recent running minutes",
+        projectionKind: "activity-minutes-days.v1",
+        projectionScope: RUNNING_SCOPE,
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_SCOPE),
       },
     ]);
 
     expect(projectHostedVaultShareProjectionDisplays(
-      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
-    ).map((entry) => entry.projectionKind)).toEqual([
-      ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+    ).map((entry) => entry.projectionScopeKey)).toEqual([
+      ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES
+        .map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),
     ]);
   });
 });
@@ -753,7 +779,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       expect.objectContaining({
         actorMemberId: "member_owner",
         containerMemberId: "member_container",
-        requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+        requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
         tx: fakeTx,
       }),
     );
@@ -779,7 +805,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       groupId: GROUP_SUMMARY.id,
       messageId: "msg_offer_1",
       postedAt: expect.any(Date),
-      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
       tx: fakeTx,
     });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();

@@ -3650,6 +3650,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       if (url.pathname.endsWith(HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH)) {
         return new Response(JSON.stringify({
           projectionKinds: ["activity-days.v0"],
+          projectionScopes: [{ projectionKind: "activity-days.v0" }],
         }), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
@@ -3736,8 +3737,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       relatedChangelogItemIds: ["native-message-formatting"],
       summary: "Interested in native message formatting.",
     });
-    await expect(platform.vaultSharePort!.listActiveProjectionKinds()).resolves.toEqual([
-      "activity-days.v0",
+    await expect(platform.vaultSharePort!.listActiveProjectionScopes()).resolves.toEqual([
+      { projectionKind: "activity-days.v0" },
     ]);
     await platform.deviceSyncPort!.fetchSnapshot({
       connectionId: "conn_123",

@@ -17,10 +17,10 @@ export function createHostedWebVaultSharePort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
-    async listActiveProjectionKinds() {
+    async listActiveProjectionScopes() {
       const payload = await fetchHostedWebControlPlaneJson({
         boundUserId: input.boundUserId,
-        description: "Hosted vault share active projection kinds",
+        description: "Hosted vault share active projection scopes",
         fetchImpl: input.fetchImpl,
         method: "GET",
         path: HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
@@ -28,7 +28,7 @@ export function createHostedWebVaultSharePort(input: {
         transport: input.transport,
       });
 
-      return parseHostedVaultShareActiveProjectionKindsResponse(payload).projectionKinds;
+      return parseHostedVaultShareActiveProjectionKindsResponse(payload).projectionScopes;
     },
     async deliver(request: Parameters<NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]>[0]) {
       const payload = await fetchHostedWebControlPlaneJson({

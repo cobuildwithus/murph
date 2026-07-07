@@ -18,7 +18,15 @@ import {
   type HostedRuntimeNewsletterToolResponse,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
-import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from '@murphai/hosted-execution/vault-share'
+import {
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareProjectionScopeKey,
+  parseHostedVaultShareProjectionScope,
+  type HostedVaultShareSelectableProjectionScope,
+} from '@murphai/hosted-execution/vault-share'
 import type { OverviewWeeklyStat } from '@murphai/query'
 import {
   buildHostedComputerRunOperationPath,
@@ -325,6 +333,34 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
+const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [
+        ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+        HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+      ],
+    },
+    selector: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['activityKind'],
+      properties: {
+        activityKind: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS],
+        },
+      },
+      description:
+        'Required only for activity-minutes-days.v1; omit selector for fixed projection kinds.',
+    },
+  },
+} as const
+
 export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
@@ -358,25 +394,19 @@ export const MURPH_GROUP_TOOL = {
         enum: [...HOSTED_RUNTIME_GROUP_KINDS],
         description: 'Optional group kind when creating a join link.',
       },
-      requestedVaultShareProjectionKinds: {
+      requestedVaultShareProjectionScopes: {
         type: 'array',
-        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length,
-        items: {
-          type: 'string',
-          enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
-        },
+        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
+        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projections the join page may offer joining members. Joining never shares them automatically; each member approves their own selection.',
+          'Optional bounded health projection scopes the join page may offer joining members. Joining never shares them automatically; each member approves their own selection. Use activity-minutes-days.v1 with selector.activityKind for running, walking, swimming, sauna, or any other recognized activity alias.',
       },
-      projectionKinds: {
+      projectionScopes: {
         type: 'array',
-        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length,
-        items: {
-          type: 'string',
-          enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
-        },
+        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
+        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projections that liking the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that profile display name is shared too.',
+          'Optional bounded health projection scopes that liking the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that profile display name is shared too.',
       },
       messageTemplate: {
         type: 'string',
@@ -771,6 +801,43 @@ function hasUsableGroupJoinOfferPlaceholders(messageTemplate: string): boolean {
   )
 }
 
+const selectableVaultShareProjectionScopeByKey =
+  new Map<string, HostedVaultShareSelectableProjectionScope>(
+    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) => [
+      buildHostedVaultShareProjectionScopeKey(scope),
+      scope,
+    ]),
+  )
+
+const groupVaultShareProjectionScopeSchema = z.unknown().transform((value, context) => {
+  let parsedScope: ReturnType<typeof parseHostedVaultShareProjectionScope>
+  try {
+    parsedScope = parseHostedVaultShareProjectionScope(
+      value,
+      'murph.group vault share projection scope',
+    )
+  } catch (error) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error instanceof Error
+        ? error.message
+        : 'Vault share projection scope is not supported.',
+    })
+    return z.NEVER
+  }
+  const scope = selectableVaultShareProjectionScopeByKey.get(
+    buildHostedVaultShareProjectionScopeKey(parsedScope),
+  )
+  if (!scope) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Vault share projection scope is not selectable.',
+    })
+    return z.NEVER
+  }
+  return scope
+})
+
 const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
@@ -809,9 +876,9 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
           message:
             'post_join_offer messageTemplate must contain {{join_url}} exactly once and {{share_scope}} exactly once',
         }),
-      projectionKinds: z
-        .array(z.enum(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS))
-        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length)
+      projectionScopes: z
+        .array(groupVaultShareProjectionScopeSchema)
+        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
         .optional(),
     })
     .strict(),
@@ -830,9 +897,9 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
         .optional(),
       kind: z.enum(HOSTED_RUNTIME_GROUP_KINDS).optional(),
-      requestedVaultShareProjectionKinds: z
-        .array(z.enum(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS))
-        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length)
+      requestedVaultShareProjectionScopes: z
+        .array(groupVaultShareProjectionScopeSchema)
+        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
         .optional(),
     })
     .strict(),
@@ -2868,10 +2935,10 @@ function parseGroupArguments(
         ? { displayName: parsed.data.displayName }
         : {}),
       ...(parsed.data.kind !== undefined ? { kind: parsed.data.kind } : {}),
-      ...(parsed.data.requestedVaultShareProjectionKinds !== undefined
+      ...(parsed.data.requestedVaultShareProjectionScopes !== undefined
         ? {
-            requestedVaultShareProjectionKinds:
-              parsed.data.requestedVaultShareProjectionKinds,
+            requestedVaultShareProjectionScopes:
+              parsed.data.requestedVaultShareProjectionScopes,
           }
         : {}),
     }
@@ -2897,8 +2964,8 @@ function parseGroupArguments(
   if (parsed.data.action === 'post_join_offer') {
     const joinOffer = {
       messageTemplate: parsed.data.messageTemplate,
-      ...(parsed.data.projectionKinds !== undefined
-        ? { projectionKinds: parsed.data.projectionKinds }
+      ...(parsed.data.projectionScopes !== undefined
+        ? { projectionScopes: parsed.data.projectionScopes }
         : {}),
     }
     return {

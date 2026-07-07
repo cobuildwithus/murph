@@ -3,13 +3,16 @@ import { resolve } from 'node:path'
 
 import { Cli, z } from 'incur'
 import {
+  buildHostedVaultShareProjectionScopeKey,
   flattenSharedVaultShareProjectionStore,
   HOSTED_VAULT_SHARE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   parseSharedVaultShareProjectionStore,
   SHARED_VAULT_SHARE_PROJECTIONS_RELATIVE_PATH,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
+  type HostedVaultShareProjectionScope,
   type SharedGroupMemberView,
   type SharedVaultShareProjectionsFile,
 } from '@murphai/hosted-execution/vault-share'
@@ -21,6 +24,17 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const groupSharedProjectionKindSchema = z.enum(
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+)
+
+const groupSharedProjectionScopeKeys = new Set(
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) =>
+    buildHostedVaultShareProjectionScopeKey(scope)
+  ),
+)
+
+const groupSharedProjectionScopeKeySchema = z.string().refine(
+  (value) => groupSharedProjectionScopeKeys.has(value),
+  { message: 'Unsupported vault-share projection scope key.' },
 )
 
 const groupSharedRecordSchema = z.object({
@@ -35,6 +49,8 @@ const groupSharedMemberShareSchema = z.object({
   // kinds, so this tightens the output/--json contract to exactly the kinds the
   // shared vault-share contract can produce (never a raw string).
   projectionKind: z.enum(HOSTED_VAULT_SHARE_PROJECTION_KINDS),
+  projectionScope: z.unknown(),
+  projectionScopeKey: z.string(),
   records: z.array(groupSharedRecordSchema),
 })
 
@@ -73,7 +89,13 @@ export function registerGroupCommands(cli: Cli.Cli) {
         .array(groupSharedProjectionKindSchema)
         .optional()
         .describe(
-          'Optional projection-kind filter. Repeat --kind to build a single-metric leaderboard, e.g. --kind steps-days.v0.',
+          'Optional fixed projection-kind filter. Repeat --kind for fixed metrics such as --kind steps-days.v0. Use --scope for selector-scoped activity minutes.',
+        ),
+      scope: z
+        .array(groupSharedProjectionScopeKeySchema)
+        .optional()
+        .describe(
+          'Optional exact projection-scope filter. Use activity-minutes-days.v1.activityKind.running for a running-minutes leaderboard.',
         ),
     }),
     examples: [
@@ -87,7 +109,10 @@ export function registerGroupCommands(cli: Cli.Cli) {
       },
       {
         description: 'Build a running-minutes leaderboard from shared daily running totals.',
-        options: { kind: ['running-minutes-days.v0'], vault: './vault' },
+        options: {
+          scope: ['activity-minutes-days.v1.activityKind.running'],
+          vault: './vault',
+        },
       },
     ],
     hint:
@@ -96,6 +121,7 @@ export function registerGroupCommands(cli: Cli.Cli) {
     async run({ options }) {
       const result = await buildGroupSharedResult({
         kinds: options.kind ?? null,
+        scopeKeys: options.scope ?? null,
         vault: options.vault,
       })
       return groupSharedResultSchema.parse(result)
@@ -107,6 +133,7 @@ export function registerGroupCommands(cli: Cli.Cli) {
 
 export async function buildGroupSharedResult(input: {
   kinds: readonly HostedVaultShareProjectionKind[] | null
+  scopeKeys?: readonly string[] | null
   vault: string
 }): Promise<GroupSharedResult> {
   const read = await readSharedProjectionStore(input.vault)
@@ -117,7 +144,10 @@ export async function buildGroupSharedResult(input: {
   const view = read.status === 'empty'
     ? []
     : flattenSharedVaultShareProjectionStore(read.store)
-  const members = applyKindFilter(view, input.kinds)
+  const members = applyShareFilter(view, {
+    kinds: input.kinds,
+    scopeKeys: input.scopeKeys ?? null,
+  })
 
   return {
     memberCount: members.length,
@@ -128,22 +158,34 @@ export async function buildGroupSharedResult(input: {
 }
 
 /**
- * Narrow each member's shares to the requested kinds and drop members left with nothing,
- * so `--kind steps-days.v0` returns a focused leaderboard. No filter returns the full
- * view, including members who have only shared their name (empty shares).
+ * Narrow each member's shares to the requested scopes/kinds and drop members left with
+ * nothing, so `--scope activity-minutes-days.v1.activityKind.running` returns a focused
+ * leaderboard. No filter returns the full view, including members who have only shared
+ * their name (empty shares).
  */
-function applyKindFilter(
+function applyShareFilter(
   view: readonly SharedGroupMemberView[],
-  kinds: readonly HostedVaultShareProjectionKind[] | null,
+  filters: {
+    kinds: readonly HostedVaultShareProjectionKind[] | null
+    scopeKeys: readonly string[] | null
+  },
 ): SharedGroupMemberView[] {
-  if (!kinds || kinds.length === 0) {
+  const kindSet = filters.kinds && filters.kinds.length > 0
+    ? new Set<HostedVaultShareProjectionKind>(filters.kinds)
+    : null
+  const scopeKeySet = filters.scopeKeys && filters.scopeKeys.length > 0
+    ? new Set(filters.scopeKeys)
+    : null
+  if (!kindSet && !scopeKeySet) {
     return [...view]
   }
-  const kindSet = new Set<HostedVaultShareProjectionKind>(kinds)
   return view
     .map((member) => ({
       ...member,
-      shares: member.shares.filter((share) => kindSet.has(share.projectionKind)),
+      shares: member.shares.filter((share) =>
+        (kindSet ? kindSet.has(share.projectionKind) : true)
+        && (scopeKeySet ? scopeKeySet.has(share.projectionScopeKey) : true)
+      ),
     }))
     .filter((member) => member.shares.length > 0)
 }
@@ -154,9 +196,15 @@ function toMemberOutput(member: SharedGroupMemberView) {
     memberId: member.memberId,
     shares: member.shares.map((share) => ({
       projectionKind: share.projectionKind,
+      projectionScope: toProjectionScopeOutput(share.projectionScope),
+      projectionScopeKey: share.projectionScopeKey,
       records: share.records.map(toRecordOutput),
     })),
   }
+}
+
+function toProjectionScopeOutput(scope: HostedVaultShareProjectionScope) {
+  return scope
 }
 
 function toRecordOutput(record: HostedVaultShareDeliveryRecord) {

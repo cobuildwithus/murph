@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 		&& "code" in error
 		&& error.code === "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE"
 	)),
-	readDeliverableHostedVaultShareProjectionKinds: vi.fn(),
+	readDeliverableHostedVaultShareProjectionScopes: vi.fn(),
 	requireHostedCloudflareCallbackRequest: vi.fn(),
 	requireHostedRuntimeActiveAccess: vi.fn(),
 }));
@@ -23,8 +23,8 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/vault-share-store", () => ({
-	readDeliverableHostedVaultShareProjectionKinds:
-		mocks.readDeliverableHostedVaultShareProjectionKinds,
+	readDeliverableHostedVaultShareProjectionScopes:
+		mocks.readDeliverableHostedVaultShareProjectionScopes,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -32,6 +32,13 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+	buildHostedVaultShareProjectionScopeKey,
+	hostedVaultShareProjectionKindToScope,
+} from "@murphai/hosted-execution/vault-share";
+
+const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
+const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 
 type ActiveKindsRouteModule =
 	typeof import("../app/api/internal/hosted-runtime/vault-share/active-kinds/route");
@@ -56,19 +63,23 @@ describe("vault-share active-kinds route", () => {
 		mocks.getPrisma.mockReturnValue({ kind: "prisma" });
 		mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_grantor");
 		mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
-		mocks.readDeliverableHostedVaultShareProjectionKinds.mockResolvedValue([
-			"activity-days.v0",
-			"profile-name.v0",
+		mocks.readDeliverableHostedVaultShareProjectionScopes.mockResolvedValue([
+			ACTIVITY_SCOPE,
+			PROFILE_SCOPE,
 		]);
 	});
 
-	it("returns web-derived projection kinds for the active grantor runtime", async () => {
+	it("returns web-derived projection scopes for the active grantor runtime", async () => {
 		const request = buildRequest();
 		const response = await activeKindsRoute.GET(request);
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({
 			projectionKinds: ["activity-days.v0", "profile-name.v0"],
+			projectionScopes: [ACTIVITY_SCOPE, PROFILE_SCOPE].sort((left, right) =>
+				buildHostedVaultShareProjectionScopeKey(left)
+					.localeCompare(buildHostedVaultShareProjectionScopeKey(right))
+			),
 		});
 		expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(request, {
 			maxBodyBytes: 0,
@@ -76,13 +87,13 @@ describe("vault-share active-kinds route", () => {
 		expect(mocks.requireHostedRuntimeActiveAccess).toHaveBeenCalledWith("member_grantor", {
 			prisma: { kind: "prisma" },
 		});
-		expect(mocks.readDeliverableHostedVaultShareProjectionKinds).toHaveBeenCalledWith({
+		expect(mocks.readDeliverableHostedVaultShareProjectionScopes).toHaveBeenCalledWith({
 			grantorMemberId: "member_grantor",
 			prisma: { kind: "prisma" },
 		});
 	});
 
-	it("returns no projection kinds for an inactive grantor runtime", async () => {
+	it("returns no projection scopes for an inactive grantor runtime", async () => {
 		mocks.requireHostedRuntimeActiveAccess.mockRejectedValue(hostedOnboardingError({
 			code: "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
 			httpStatus: 403,
@@ -92,7 +103,10 @@ describe("vault-share active-kinds route", () => {
 		const response = await activeKindsRoute.GET(buildRequest());
 
 		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({ projectionKinds: [] });
-		expect(mocks.readDeliverableHostedVaultShareProjectionKinds).not.toHaveBeenCalled();
+		expect(await response.json()).toEqual({
+			projectionKinds: [],
+			projectionScopes: [],
+		});
+		expect(mocks.readDeliverableHostedVaultShareProjectionScopes).not.toHaveBeenCalled();
 	});
 });

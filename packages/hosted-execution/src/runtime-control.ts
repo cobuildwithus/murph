@@ -24,7 +24,9 @@ import {
 
 import type {
   HostedVaultShareProjectionKind,
+  HostedVaultShareProjectionScope,
   HostedVaultShareSelectableProjectionKind,
+  HostedVaultShareSelectableProjectionScope,
 } from "./vault-share.ts";
 
 export const HOSTED_MAILBOX_LANES = [
@@ -782,6 +784,7 @@ export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
 
 export interface HostedRuntimeGroupMemberSummary {
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   handle: string | null;
   memberId: string;
   role: string;
@@ -794,24 +797,31 @@ export interface HostedRuntimeGroupSummary {
   memberCount: number;
   members: HostedRuntimeGroupMemberSummary[];
   requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   status: string;
 }
 
 export interface HostedRuntimeGroupCreateJoinLinkRequest {
   displayName?: string | null;
   kind?: HostedRuntimeGroupKind | null;
-  // Closed over the individually selectable kinds: the membership-implied
-  // profile-name.v0 share is never requestable through a join link.
+  // Compatibility for old fixed-kind callers. Selector-only projections must
+  // use requestedVaultShareProjectionScopes.
   requestedVaultShareProjectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
+  // Closed over the individually selectable scopes: the membership-implied
+  // profile-name.v0 share is never requestable through a join link.
+  requestedVaultShareProjectionScopes?: HostedVaultShareSelectableProjectionScope[] | null;
 }
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
   // Model-authored natural group-chat message with server-filled
   // {{join_url}} and {{share_scope}} placeholders.
   messageTemplate?: string | null;
-  // Closed over the individually selectable kinds; the server-filled share
-  // scope always includes the membership-implied profile-name.v0 share.
+  // Compatibility for old fixed-kind callers. Selector-only projections must
+  // use projectionScopes.
   projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
+  // Closed over the individually selectable scopes; the offer always includes
+  // the membership-implied profile-name.v0 share in its deterministic copy.
+  projectionScopes?: HostedVaultShareSelectableProjectionScope[] | null;
 }
 
 export interface HostedRuntimeGroupUpdateDisplayNameRequest {

@@ -108,7 +108,7 @@ function renderGroupJoin(input: {
 
       {input.authenticated ? (
         <GroupJoinAcceptForm
-          activeVaultShareProjectionKinds={view.activeVaultShareProjectionKinds}
+          activeVaultShareProjectionScopes={view.activeVaultShareProjectionScopes}
           alreadyActiveMember={alreadyActiveMember}
           groupName={groupName}
           joinCode={input.joinCode}

@@ -1,5 +1,9 @@
 import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  hostedVaultShareProjectionKindToScope,
+} from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
@@ -15,6 +19,9 @@ import {
   revokeOutgoingHostedVaultSharesForMemberDeletionTx,
 } from "@/src/lib/hosted-vault-share/share-grant-store";
 
+const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
+const SLEEP_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
+
 function buildTx(): Prisma.TransactionClient & {
   $queryRaw: ReturnType<typeof vi.fn>;
   hostedVaultShare: {
@@ -26,6 +33,8 @@ function buildTx(): Prisma.TransactionClient & {
     grantorMemberId: "member_grantor",
     id: "share_1",
     projectionKind: "sleep-times.v0",
+    projectionScopeJson: SLEEP_SCOPE,
+    projectionScopeKey: SLEEP_SCOPE_KEY,
     revokedAt: new Date("2026-07-01T00:00:00.000Z"),
   }];
   return {
@@ -36,6 +45,8 @@ function buildTx(): Prisma.TransactionClient & {
         grantorMemberId: "member_grantor",
         id: "share_1",
         projectionKind: "sleep-times.v0",
+        projectionScopeJson: SLEEP_SCOPE,
+        projectionScopeKey: SLEEP_SCOPE_KEY,
       }]),
     },
   } as unknown as Prisma.TransactionClient & {
@@ -63,7 +74,7 @@ describe("revokeHostedVaultSharesTx", () => {
       destinationMemberId: "member_referee",
       grantorMemberId: "member_grantor",
       now,
-      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
       tx,
     })).resolves.toBe(1);
 
@@ -71,7 +82,7 @@ describe("revokeHostedVaultSharesTx", () => {
       where: {
         destinationMemberId: "member_referee",
         grantorMemberId: "member_grantor",
-        projectionKind: { in: ["sleep-times.v0"] },
+        projectionScopeKey: { in: [SLEEP_SCOPE_KEY] },
         status: "granted",
       },
     }));
@@ -88,6 +99,7 @@ describe("revokeHostedVaultSharesTx", () => {
         revoke: {
           grantorMemberId: "member_grantor",
           projectionKind: "sleep-times.v0",
+          projectionScope: SLEEP_SCOPE,
           revokedAt: "2026-07-01T00:00:00.000Z",
           schema: "murph.vault-share.revoke.v1",
           shareId: "share_1",
@@ -106,7 +118,7 @@ describe("revokeHostedVaultSharesTx", () => {
       destinationMemberId: "member_referee",
       grantorMemberId: "member_grantor",
       now: new Date("2026-07-01T00:00:01.000Z"),
-      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
       tx,
     })).resolves.toBe(0);
 
@@ -121,7 +133,7 @@ describe("revokeHostedVaultSharesTx", () => {
     await expect(revokeHostedVaultSharesTx({
       destinationMemberId: "member_referee",
       now: new Date("2026-07-01T00:00:00.000Z"),
-      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
       tx,
     })).resolves.toBe(0);
 
@@ -151,7 +163,7 @@ describe("grantHostedVaultShareTx", () => {
       destinationMemberId: "member_referee",
       grantorMemberId: "member_grantor",
       now,
-      projectionKind: "sleep-times.v0",
+      projectionScope: SLEEP_SCOPE,
       tx,
     })).resolves.toBeUndefined();
 
@@ -163,10 +175,10 @@ describe("grantHostedVaultShareTx", () => {
         status: "granted",
       }),
       where: {
-        grantorMemberId_projectionKind_destinationMemberId: {
+        grantorMemberId_projectionScopeKey_destinationMemberId: {
           destinationMemberId: "member_referee",
           grantorMemberId: "member_grantor",
-          projectionKind: "sleep-times.v0",
+          projectionScopeKey: SLEEP_SCOPE_KEY,
         },
       },
     });
@@ -196,7 +208,7 @@ describe("grantHostedVaultShareTx", () => {
       destinationMemberId: "member_referee",
       grantorMemberId: "member_grantor",
       now: new Date("2026-07-02T00:00:00.000Z"),
-      projectionKind: "sleep-times.v0",
+      projectionScope: SLEEP_SCOPE,
       tx,
     })).resolves.toBeUndefined();
 
@@ -213,6 +225,8 @@ describe("revokeOutgoingHostedVaultSharesForMemberDeletionTx", () => {
       grantorMemberId: "member_grantor",
       id: "share_1",
       projectionKind: "sleep-times.v0",
+      projectionScopeJson: SLEEP_SCOPE,
+      projectionScopeKey: SLEEP_SCOPE_KEY,
     }]);
     const now = new Date("2026-07-01T00:00:00.000Z");
 

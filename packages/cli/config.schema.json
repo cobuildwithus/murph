@@ -1659,7 +1659,7 @@
                           "maxLength": 128
                         },
                         "kind": {
-                          "description": "Optional projection-kind filter. Repeat --kind to build a single-metric leaderboard, e.g. --kind steps-days.v0.",
+                          "description": "Optional fixed projection-kind filter. Repeat --kind for fixed metrics such as --kind steps-days.v0. Use --scope for selector-scoped activity minutes.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1668,12 +1668,7 @@
                               "sleep-times.v0",
                               "activity-days.v0",
                               "workout-days.v0",
-                              "running-minutes-days.v0",
-                              "walking-minutes-days.v0",
-                              "swimming-minutes-days.v0",
-                              "sauna-minutes-days.v0",
                               "heart-rate-zones-days.v0",
-                              "running-heart-rate-zones-days.v0",
                               "steps-days.v0",
                               "max-heart-rate-days.v0",
                               "distance-days.v0",
@@ -1687,6 +1682,13 @@
                               "resting-heart-rate-days.v0",
                               "hrv-days.v0"
                             ]
+                          }
+                        },
+                        "scope": {
+                          "description": "Optional exact projection-scope filter. Use activity-minutes-days.v1.activityKind.running for a running-minutes leaderboard.",
+                          "type": "array",
+                          "items": {
+                            "type": "string"
                           }
                         }
                       }

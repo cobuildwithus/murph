@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
 } from '@murphai/hosted-execution/vault-share'
 
@@ -197,7 +198,9 @@ describe('assistant skill assets', () => {
       }
       expect(raw).toContain(projectionKind)
     }
-    expect(raw).toContain('narrowest matching projection')
+    expect(raw).toContain(HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND)
+    expect(raw).toContain('"activityKind": "<alias>"')
+    expect(raw).toContain('narrowest matching scope')
     expect(raw).toContain('unsupported instead of')
   })
 

@@ -129,7 +129,13 @@ import type {
 import {
   HOSTED_VAULT_SHARE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareProjectionScopeKey,
+  hostedVaultShareProjectionKindToScope,
+  parseHostedVaultShareProjectionScope,
+  type HostedVaultShareProjectionScope,
   type HostedVaultShareProjectionKind,
+  type HostedVaultShareSelectableProjectionScope,
 } from "../vault-share.ts";
 import {
   rejectLegacyAliases,
@@ -834,7 +840,7 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
   const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
   assertAllowedObjectKeys(
     record,
-    new Set(["messageTemplate", "projectionKinds"]),
+    new Set(["messageTemplate", "projectionKinds", "projectionScopes"]),
     "Hosted runtime group tool post_join_offer joinOffer",
   );
   const messageTemplate = record.messageTemplate === undefined || record.messageTemplate === null
@@ -846,6 +852,11 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
       record.projectionKinds,
       "Hosted runtime group tool post_join_offer projectionKinds",
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    ),
+    projectionScopes: parseHostedRuntimeGroupSelectableProjectionScopes(
+      record.projectionScopes,
+      record.projectionKinds,
+      "Hosted runtime group tool post_join_offer projectionScopes",
     ),
   };
 }
@@ -888,7 +899,12 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
   const record = requireObject(value, "Hosted runtime group tool create_join_link joinLink");
   assertAllowedObjectKeys(
     record,
-    new Set(["displayName", "kind", "requestedVaultShareProjectionKinds"]),
+    new Set([
+      "displayName",
+      "kind",
+      "requestedVaultShareProjectionKinds",
+      "requestedVaultShareProjectionScopes",
+    ]),
     "Hosted runtime group tool create_join_link joinLink",
   );
   const displayName = readNullableString(
@@ -904,12 +920,18 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
   return {
     displayName,
     kind: readHostedRuntimeGroupKind(record.kind),
-    // The membership-implied profile-name.v0 kind is never requestable through a join
-    // link: the request contract is closed over the individually selectable kinds.
+    // Compatibility for old fixed-kind callers.
     requestedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
       record.requestedVaultShareProjectionKinds,
       "Hosted runtime group tool create_join_link requestedVaultShareProjectionKinds",
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    ),
+    // The membership-implied profile-name.v0 kind is never requestable through a join
+    // link: the request contract is closed over the individually selectable scopes.
+    requestedVaultShareProjectionScopes: parseHostedRuntimeGroupSelectableProjectionScopes(
+      record.requestedVaultShareProjectionScopes,
+      record.requestedVaultShareProjectionKinds,
+      "Hosted runtime group tool create_join_link requestedVaultShareProjectionScopes",
     ),
   };
 }
@@ -1398,6 +1420,72 @@ function parseHostedRuntimeGroupProjectionKindArray<
   return allowedKinds.filter((kind) => seen.has(kind));
 }
 
+const HOSTED_RUNTIME_GROUP_SUMMARY_PROJECTION_SCOPES = Object.freeze([
+  hostedVaultShareProjectionKindToScope("profile-name.v0"),
+  ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+] satisfies readonly HostedVaultShareProjectionScope[]);
+
+function parseHostedRuntimeGroupSelectableProjectionScopes(
+  value: unknown,
+  legacyKindsValue: unknown,
+  label: string,
+): HostedVaultShareSelectableProjectionScope[] | null {
+  const scopes = parseHostedRuntimeGroupProjectionScopeArray(
+    value,
+    label,
+    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  );
+  if (scopes !== null) {
+    return scopes;
+  }
+  const legacyKinds = parseHostedRuntimeGroupProjectionKindArray(
+    legacyKindsValue,
+    `${label} legacy projectionKinds`,
+    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  );
+  if (legacyKinds === null) {
+    return null;
+  }
+  return legacyKinds.map((projectionKind) => hostedVaultShareProjectionKindToScope(projectionKind));
+}
+
+function parseHostedRuntimeGroupProjectionScopeArray<
+  K extends HostedVaultShareProjectionScope,
+>(
+  value: unknown,
+  label: string,
+  allowedScopes: readonly K[],
+): K[] | null {
+  if (value === undefined || value === null) return null;
+  const requested = requireArray(value, label);
+  if (requested.length > allowedScopes.length) {
+    throw new TypeError(`${label} must contain at most ${allowedScopes.length} entries.`);
+  }
+  const allowedScopeByKey = new Map(
+    allowedScopes.map((scope) => [buildHostedVaultShareProjectionScopeKey(scope), scope]),
+  );
+  const seen = new Set<string>();
+  for (const entry of requested) {
+    let scope: HostedVaultShareProjectionScope;
+    try {
+      scope = parseHostedVaultShareProjectionScope(entry, `${label} entry`);
+    } catch (error) {
+      throw new TypeError(
+        `${label} contains an unsupported projection scope.`,
+        { cause: error },
+      );
+    }
+    const scopeKey = buildHostedVaultShareProjectionScopeKey(scope);
+    if (!allowedScopeByKey.has(scopeKey)) {
+      throw new TypeError(`${label} contains an unsupported projection scope.`);
+    }
+    seen.add(scopeKey);
+  }
+  return allowedScopes.filter((scope) =>
+    seen.has(buildHostedVaultShareProjectionScopeKey(scope))
+  );
+}
+
 function isAllowedProjectionKind<K extends HostedVaultShareProjectionKind>(
   allowedKinds: readonly K[],
   value: unknown,
@@ -1405,24 +1493,54 @@ function isAllowedProjectionKind<K extends HostedVaultShareProjectionKind>(
   return (allowedKinds as readonly unknown[]).includes(value);
 }
 
+function legacyProjectionKindsToScopes(
+  projectionKinds: readonly HostedVaultShareProjectionKind[],
+  label: string,
+): HostedVaultShareProjectionScope[] {
+  return projectionKinds.map((projectionKind) =>
+    parseHostedVaultShareProjectionScope(projectionKind, `${label} ${projectionKind}`)
+  );
+}
+
 function parseHostedRuntimeGroupSummary(value: unknown) {
   const record = requireObject(value, "Hosted runtime group summary");
   assertAllowedObjectKeys(
     record,
-    new Set(["displayName", "id", "kind", "memberCount", "members", "requestedVaultShareProjectionKinds", "status"]),
+    new Set([
+      "displayName",
+      "id",
+      "kind",
+      "memberCount",
+      "members",
+      "requestedVaultShareProjectionKinds",
+      "requestedVaultShareProjectionScopes",
+      "status",
+    ]),
     "Hosted runtime group summary",
   );
+  const requestedVaultShareProjectionKinds =
+    parseHostedRuntimeGroupProjectionKindArray(
+      record.requestedVaultShareProjectionKinds,
+      "Hosted runtime group summary requestedVaultShareProjectionKinds",
+      HOSTED_VAULT_SHARE_PROJECTION_KINDS,
+    ) ?? [];
+  const requestedVaultShareProjectionScopes =
+    parseHostedRuntimeGroupProjectionScopeArray(
+      record.requestedVaultShareProjectionScopes,
+      "Hosted runtime group summary requestedVaultShareProjectionScopes",
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+    ) ?? legacyProjectionKindsToScopes(
+      requestedVaultShareProjectionKinds,
+      "Hosted runtime group summary requestedVaultShareProjectionKinds",
+    );
   return {
     displayName: readNullableString(record.displayName, "Hosted runtime group summary displayName"),
     id: requireString(record.id, "Hosted runtime group summary id"),
     kind: requireString(record.kind, "Hosted runtime group summary kind"),
     memberCount: requireNumber(record.memberCount, "Hosted runtime group summary memberCount"),
     members: parseHostedRuntimeGroupMemberSummaries(record.members),
-    requestedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
-      record.requestedVaultShareProjectionKinds,
-      "Hosted runtime group summary requestedVaultShareProjectionKinds",
-      HOSTED_VAULT_SHARE_PROJECTION_KINDS,
-    ) ?? [],
+    requestedVaultShareProjectionKinds,
+    requestedVaultShareProjectionScopes,
     status: requireString(record.status, "Hosted runtime group summary status"),
   };
 }
@@ -1446,15 +1564,33 @@ function parseHostedRuntimeGroupMemberSummaries(
     const record = requireObject(entry, "Hosted runtime group summary member");
     assertAllowedObjectKeys(
       record,
-      new Set(["grantedVaultShareProjectionKinds", "handle", "memberId", "role"]),
+      new Set([
+        "grantedVaultShareProjectionKinds",
+        "grantedVaultShareProjectionScopes",
+        "handle",
+        "memberId",
+        "role",
+      ]),
       "Hosted runtime group summary member",
     );
-    return {
-      grantedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
+    const grantedVaultShareProjectionKinds =
+      parseHostedRuntimeGroupProjectionKindArray(
         record.grantedVaultShareProjectionKinds,
         "Hosted runtime group summary member grantedVaultShareProjectionKinds",
         HOSTED_VAULT_SHARE_PROJECTION_KINDS,
-      ) ?? [],
+      ) ?? [];
+    const grantedVaultShareProjectionScopes =
+      parseHostedRuntimeGroupProjectionScopeArray(
+        record.grantedVaultShareProjectionScopes,
+        "Hosted runtime group summary member grantedVaultShareProjectionScopes",
+        HOSTED_RUNTIME_GROUP_SUMMARY_PROJECTION_SCOPES,
+      ) ?? legacyProjectionKindsToScopes(
+        grantedVaultShareProjectionKinds,
+        "Hosted runtime group summary member grantedVaultShareProjectionKinds",
+      );
+    return {
+      grantedVaultShareProjectionKinds,
+      grantedVaultShareProjectionScopes,
       handle: readNullableString(record.handle, "Hosted runtime group summary member handle"),
       memberId: requireString(record.memberId, "Hosted runtime group summary member memberId"),
       role: requireString(record.role, "Hosted runtime group summary member role"),
