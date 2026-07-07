@@ -149,7 +149,7 @@ test("hosted Linq typing starts without route authority when the target context 
   );
 });
 
-test("hosted Linq typing falls back to the requested target when no context is present", async () => {
+test("hosted Linq typing no-ops when no delivery context is present", async () => {
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {
       LINQ_API_TOKEN: "linq-token",
@@ -164,12 +164,7 @@ test("hosted Linq typing falls back to the requested target when no context is p
     target: "chat_123",
   })).resolves.toBeUndefined();
 
-  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledWith(
-    {
-      target: "chat_123",
-    },
-    expect.any(Object),
-  );
+  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
 });
 
 test("hosted Linq typing allows only one active session per target", async () => {

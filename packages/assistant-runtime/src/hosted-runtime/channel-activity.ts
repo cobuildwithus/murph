@@ -122,13 +122,16 @@ export function createHostedAssistantChannelTypingDependencies(input: {
         target: request.target,
         targetKind: "thread",
       });
-      if (!deliveryContext && linqDeliveryContexts.length > 0) {
+      if (!deliveryContext) {
         return undefined;
       }
       if (!input.providerFetch) {
         return undefined;
       }
-      const target = deliveryContext?.target ?? request.target;
+      const target = deliveryContext.target?.trim() ?? "";
+      if (!target) {
+        return undefined;
+      }
       const typingTarget = claimHostedLinqTypingTarget(target);
       if (!typingTarget) {
         return undefined;
