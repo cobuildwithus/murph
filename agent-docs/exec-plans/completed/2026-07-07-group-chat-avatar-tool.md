@@ -44,7 +44,24 @@ image-reference, and image-upload primitives.
 ## Deployment notes
 
 This spans assistant-engine, hosted runtime contract/parsing, web callback code,
-and the runner bundle. Keep deploy skew compatible: old runners continue
-without the new action; new runners should get structured unavailability until
-the web callback exists.
+and the runner bundle. Deploy `apps/web` first, then the Cloudflare
+runner/bundle; a tandem deploy is also safe.
+
+Gradual runner rollout is acceptable. Old runners against new web do not expose
+or call `set_chat_avatar`. New runners against old web fail closed during the
+avatar preflight: they return a structured `set_chat_avatar` unavailable result
+with `group_avatar_preflight_unavailable` before resolving, generating,
+uploading, or mutating any avatar media.
+
+`container_rollout=immediate` is not required for this PR because mixed old/new
+runners preserve existing group-name/read/join/share behavior and the new
+avatar path has the no-side-effect preflight failure above. Rollback floor:
+`apps/web` may remain new while the runner rolls back; if web rolls back below
+the preflight parser while new runners are still warm, avatar updates degrade to
+structured unavailability until both web parser/handler and runner support are
+deployed again.
+
+Post-deploy checks: from a route-authorized iMessage group, verify one generated
+avatar request and one user-sent JPG/PNG/WebP image-ref avatar request both
+return provider-requested status and reject arbitrary external image URLs.
 Completed: 2026-07-07

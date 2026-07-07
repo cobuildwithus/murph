@@ -2139,6 +2139,18 @@ async function executeFamilyPlanTool(input: {
   }
 }
 
+function groupAvatarUnavailableToolResult(
+  unavailableReason: string,
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(true, safeToolPayloadText({
+    action: 'set_chat_avatar',
+    result: {
+      status: 'unavailable',
+      unavailableReason,
+    },
+  }))
+}
+
 async function executeGroupTool(input: {
   abortSignal: AbortSignal | null
   env: NodeJS.ProcessEnv
@@ -2162,11 +2174,11 @@ async function executeGroupTool(input: {
     try {
       const preflightResult = await groupTool.request({ action: 'preflight_set_chat_avatar' })
       if (preflightResult.action !== 'preflight_set_chat_avatar') {
-        return toolTextResult(false, 'group avatar update is unavailable for this turn')
+        return groupAvatarUnavailableToolResult('group_avatar_preflight_unavailable')
       }
       preflight = preflightResult
     } catch {
-      return toolTextResult(false, 'group avatar update is unavailable for this turn')
+      return groupAvatarUnavailableToolResult('group_avatar_preflight_unavailable')
     }
     if (preflight.result.status !== 'ok') {
       return toolTextResult(true, safeToolPayloadText({

@@ -485,6 +485,65 @@ describe("murph.group dynamic tool", () => {
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });
+
+  it("reports structured avatar unavailability when preflight is rejected by the host", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
+    try {
+      await mkdir(join(vaultRoot, "raw", "inbox"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "raw", "inbox", "avatar.png"),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      );
+
+      const groupRequest = vi.fn<GroupToolRequest>(async () => {
+        throw new Error("unsupported group tool action");
+      });
+      const uploadGeneratedImage = vi.fn(async (
+        input: AssistantHostedGeneratedImageUploadInput,
+      ) => ({
+        alt: input.alt,
+        kind: "image" as const,
+        source: input.source,
+        url: "https://imagedelivery.net/account/avatar/public",
+      }));
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "set_chat_avatar",
+        avatarSource: "image_ref",
+        imageRef: "raw/inbox/avatar.png",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedGeneratedImageUploader: { uploadGeneratedImage },
+        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(result.rpcResult.success).toBe(true);
+      expect(readGroupToolPayload(result)).toEqual({
+        action: "set_chat_avatar",
+        result: {
+          status: "unavailable",
+          unavailableReason: "group_avatar_preflight_unavailable",
+        },
+      });
+      expect(groupRequest).toHaveBeenCalledOnce();
+      expect(groupRequest).toHaveBeenCalledWith({ action: "preflight_set_chat_avatar" });
+      expect(uploadGeneratedImage).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
 });
 
 describe("murph.newsletter dynamic tool", () => {
