@@ -60,8 +60,8 @@ const VISUALS: Record<string, ReactNode> = {
       body={
         <div className="space-y-1.5">
           <p>Dana logged 6 workouts, a season high.</p>
-          <p>Everyone's sleep held above 7 hours except Fridays.</p>
-          <p>Nobody's touched the step goal yet, so that's the dare for next week.</p>
+          <p>Everyone&apos;s sleep held above 7 hours except Fridays.</p>
+          <p>Nobody&apos;s touched the step goal yet, so that&apos;s the dare for next week.</p>
         </div>
       }
     />
