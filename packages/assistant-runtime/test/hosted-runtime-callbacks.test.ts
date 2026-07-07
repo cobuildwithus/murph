@@ -5661,7 +5661,7 @@ describe("hosted runtime callbacks", () => {
         targetMessageId: "linq_message_1",
       });
 
-      throw new Error("unreachable after engagement assertion failure");
+      throw new Error("unreachable after egress authority failure");
     });
 
     await expect(drainHostedPreparedAssistantDeliveries({
@@ -5685,7 +5685,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
   });
 
-  it("blocks Linq reactions when recent inbound engagement is missing", async () => {
+  it("blocks Linq reactions when egress authority is rejected", async () => {
     const effect = createEffect({
       channel: "linq",
       bindingDeliveryTarget: "linq_chat_123",
@@ -5703,7 +5703,7 @@ describe("hosted runtime callbacks", () => {
         targetMessageId: "linq_message_1",
       });
 
-      throw new Error("unreachable after engagement assertion failure");
+      throw new Error("unreachable after egress authority failure");
     });
 
     await expect(drainHostedPreparedAssistantDeliveries({
@@ -5722,7 +5722,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
-        engagementKind: "requires_recent_inbound",
         idempotencyKey: "assistant-outbox:intent_123",
         intentId: "intent_123",
         target: "linq_chat_123",
@@ -5735,7 +5734,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
   });
 
-  it("marks signup welcome Linq sends as first-contact engagement", async () => {
+  it("sends signup welcome Linq egress authority with participant context", async () => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
       answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
@@ -5796,7 +5795,6 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         directRecipientPhoneNumber: null,
-        engagementKind: "first_contact",
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
         target: "+15550100001",
@@ -6307,7 +6305,7 @@ describe("hosted runtime callbacks", () => {
     expect(recordedOutcome).not.toContain("private reply text");
   });
 
-  it("requires recent inbound proof for signup welcome Linq sends into existing threads", async () => {
+  it("checks egress authority for signup welcome Linq sends into existing threads", async () => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
       bindingDeliveryTarget: "linq_chat_123",
@@ -6364,7 +6362,6 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
         directRecipientPhoneNumber: null,
-        engagementKind: "requires_recent_inbound",
         fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
         target: "linq_chat_123",
@@ -6460,7 +6457,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: null,
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
@@ -6952,7 +6948,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550001",
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -7176,7 +7171,6 @@ describe("hosted runtime callbacks", () => {
         target: "linq_chat_a",
       },
       directRecipientPhoneNumber: "+15550000001",
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: "+15559990000",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -7279,7 +7273,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: null,
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -7374,7 +7367,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550001",
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -7454,7 +7446,7 @@ describe("hosted runtime callbacks", () => {
         targetKind: "thread",
       });
 
-      throw new Error("unreachable after engagement assertion failure");
+      throw new Error("unreachable after egress authority failure");
     });
 
     await expect(drainHostedPreparedAssistantDeliveries({
@@ -7542,7 +7534,7 @@ describe("hosted runtime callbacks", () => {
         targetKind: "thread",
       });
 
-      throw new Error("unreachable after engagement assertion failure");
+      throw new Error("unreachable after egress authority failure");
     });
 
     await expect(drainHostedPreparedAssistantDeliveries({
@@ -8247,7 +8239,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("uses recent-inbound engagement for route-scoped Linq timer retries without prepared authority", async () => {
+  it("checks egress authority for route-scoped Linq timer retries without prepared authority", async () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe_123",
       deliveryPhase: "background_retry",
@@ -8313,7 +8305,6 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: null,
-      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",

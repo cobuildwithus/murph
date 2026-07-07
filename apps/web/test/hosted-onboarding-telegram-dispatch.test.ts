@@ -498,7 +498,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
             memberId: acceptedMemberId,
             pendingLinqChatIdEncrypted: null,
             pendingLinqChatLookupKey: null,
-            pendingLinqLastInboundAt: null,
             pendingLinqParticipantContactEncrypted: null,
             pendingLinqParticipantContactKind: null,
             pendingLinqParticipantContactLookupKey: null,

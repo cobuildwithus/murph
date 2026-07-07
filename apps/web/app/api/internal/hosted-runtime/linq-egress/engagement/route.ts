@@ -33,7 +33,6 @@ export const POST = withJsonError(async (request: Request) => {
   await assertHostedLinqRecentInboundEngagementForRuntime({
     currentInbound: parseHostedLinqLegacyCurrentInboundProof(body.currentInbound),
     directRecipientPhoneNumber: readOptionalBodyString(body.directRecipientPhoneNumber),
-    engagementKind: parseHostedLinqEgressEngagementKind(body.engagementKind),
     fromPhoneNumber: readOptionalBodyString(body.fromPhoneNumber),
     idempotencyKey: readOptionalBodyString(body.idempotencyKey),
     memberId: userId,
@@ -105,23 +104,6 @@ function throwHostedLinqCurrentInboundInvalid(): never {
   });
 }
 
-function parseHostedLinqEgressEngagementKind(
-  value: unknown,
-): "first_contact" | "requires_recent_inbound" | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (value === "first_contact" || value === "requires_recent_inbound") {
-    return value;
-  }
-  throw hostedOnboardingError({
-    code: "HOSTED_LINQ_EGRESS_ENGAGEMENT_KIND_INVALID",
-    httpStatus: 400,
-    message: "Hosted Linq egress engagement kind is invalid.",
-    retryable: false,
-  });
-}
-
 function parseHostedLinqEgressRouteAuthority(
   value: unknown,
 ): HostedExecutionLinqExternalThreadRouteAuthority | null {
@@ -130,7 +112,7 @@ function parseHostedLinqEgressRouteAuthority(
   }
   const authority = parseHostedExecutionExternalThreadRouteAuthority(
     value,
-    "Hosted Linq egress engagement request route authority",
+    "Hosted Linq egress authority request route authority",
   );
   if (authority.channel !== "linq") {
     throw hostedOnboardingError({

@@ -129,10 +129,10 @@ export function createCloudflareEffectsPort(input: {
             await fetchHostedWebControlPlaneJson({
               body: request,
               boundUserId: input.boundUserId,
-              description: "Hosted Linq recent inbound engagement assertion",
+              description: "Hosted Linq egress authority assertion",
               fetchImpl: input.fetchImpl,
               headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
-                description: "Hosted Linq recent inbound engagement assertion",
+                description: "Hosted Linq egress authority assertion",
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
               path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,

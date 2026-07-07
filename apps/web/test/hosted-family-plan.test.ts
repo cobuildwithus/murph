@@ -1051,7 +1051,6 @@ describe("hosted Family plan", () => {
       memberId: "member_owner",
       pendingLinqChatIdEncrypted: null,
       pendingLinqChatLookupKey: null,
-      pendingLinqLastInboundAt: null,
       pendingLinqParticipantContactEncrypted: null,
       pendingLinqParticipantContactKind: null,
       pendingLinqParticipantContactLookupKey: null,

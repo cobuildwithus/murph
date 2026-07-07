@@ -190,10 +190,6 @@ export interface HostedRuntimeLinqSendResponse {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
-export type HostedRuntimeLinqEngagementKind =
-  | "first_contact"
-  | "requires_recent_inbound";
-
 export interface HostedRuntimeLinqCurrentInboundProof {
   dedupeKey: string;
   eventId: string;
@@ -206,7 +202,6 @@ export interface HostedRuntimeLinqCurrentInboundProof {
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
-  engagementKind?: HostedRuntimeLinqEngagementKind | null;
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   intentId?: string | null;

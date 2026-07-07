@@ -1179,7 +1179,7 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("does not promote pending Linq inbound freshness when pending chat binding becomes home", async () => {
+  it("clears pending Linq route state when pending chat binding becomes home", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const pendingLinqChatLookupKey = createHostedLinqChatLookupKeyReadCandidates("chat_123")[0];
@@ -1214,12 +1214,10 @@ describe("hosted-member-store", () => {
       pendingLinqChatIdEncrypted: null,
       pendingLinqChatLookupKey: null,
     }));
-    expect(upsertUpdate).not.toHaveProperty("linqLastInboundAt");
-    expect(upsertUpdate).not.toHaveProperty("pendingLinqLastInboundAt");
     expect(updateMany).toHaveBeenCalledTimes(2);
   });
 
-  it("does not write Linq inbound freshness when a different pending chat becomes home", async () => {
+  it("clears pending Linq route state when a different pending chat becomes home", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const findUnique = vi.fn().mockResolvedValue({
@@ -1252,13 +1250,11 @@ describe("hosted-member-store", () => {
       linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_c")[0],
       pendingLinqChatLookupKey: null,
     }));
-    expect(upsertUpdate).not.toHaveProperty("linqLastInboundAt");
-    expect(upsertUpdate).not.toHaveProperty("pendingLinqLastInboundAt");
     expect(findUnique).not.toHaveBeenCalled();
     expect(updateMany).toHaveBeenCalledTimes(2);
   });
 
-  it("does not write pending Linq inbound freshness when pending chat binding is rewritten", async () => {
+  it("rewrites pending Linq chat binding without reading prior route state", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const findUnique = vi.fn().mockResolvedValue({
@@ -1287,7 +1283,6 @@ describe("hosted-member-store", () => {
         pendingLinqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_new")[0],
       }),
     }));
-    expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("pendingLinqLastInboundAt");
     expect(findUnique).not.toHaveBeenCalled();
   });
 
@@ -1575,8 +1570,6 @@ describe("hosted-member-store", () => {
       pendingLinqChatLookupKey: null,
       pendingLinqRecipientPhoneLookupKey: null,
     }));
-    expect(upsertUpdate).not.toHaveProperty("linqLastInboundAt");
-    expect(upsertUpdate).not.toHaveProperty("pendingLinqLastInboundAt");
     expect(findUnique).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
   });

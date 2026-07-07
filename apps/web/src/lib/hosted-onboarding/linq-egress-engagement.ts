@@ -13,12 +13,8 @@ import {
   hostedOnboardingError,
 } from "./errors";
 import { normalizePhoneNumber } from "./phone";
-import {
-  assertHostedThreadRouteEgressAuthority,
-} from "../hosted-routing/thread-route-store";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
-type HostedLinqEgressEngagementKind = "first_contact" | "requires_recent_inbound";
 type HostedLinqLegacyCurrentInboundProof = {
   dedupeKey: string;
   eventId: string;
@@ -62,7 +58,6 @@ export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
-  engagementKind?: HostedLinqEgressEngagementKind | null;
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   memberId: string;
@@ -81,12 +76,13 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_EGRESS_BOUND_USER_MISMATCH",
       httpStatus: 403,
-      message: "Linq egress engagement authority does not match the runtime user.",
+      message: "Linq egress authority does not match the runtime user.",
       retryable: false,
     });
   }
-  if ((input.engagementKind ?? "requires_recent_inbound") === "first_contact") {
-    await assertHostedLinqFirstContactEgressAuthority({
+
+  if (normalizeNullable(input.targetKind) === "participant") {
+    await assertHostedLinqSignupWelcomeParticipantEgressAuthority({
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,
       fromPhoneNumber: input.fromPhoneNumber,
       idempotencyKey: input.idempotencyKey,
@@ -99,24 +95,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   }
 
   if (routeAuthority) {
-    await assertHostedThreadRouteEgressAuthority({
-      authority: routeAuthority,
-      prisma: input.prisma,
-    });
-    return;
-  }
-
-  if (normalizeNullable(input.targetKind) === "participant") {
-    await assertHostedLinqParticipantTargetMatchesMemberIdentity({
-      memberId: input.memberId,
-      participantPhone: input.target ?? input.directRecipientPhoneNumber ?? null,
-      prisma: input.prisma,
-    });
-    await assertHostedMemberLinqRouteMatchesEgressTarget({
-      memberId: input.memberId,
-      prisma: input.prisma,
-      recipientPhone: input.fromPhoneNumber ?? null,
-    });
     return;
   }
 
@@ -126,7 +104,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   })) {
     // Temporary CF-rollout follow-up compatibility: old warm runner bundles
     // sent currentInbound before external thread routeAuthority existed. Delete
-    // this with the engagement assertion route after that rollout window is gone.
+    // this with the egress authority callback route after that rollout window is gone.
     return;
   }
 
@@ -134,39 +112,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     chatId: input.target,
     memberId: input.memberId,
     prisma: input.prisma,
-  });
-}
-
-async function assertHostedLinqParticipantTargetMatchesMemberIdentity(input: {
-  memberId: string;
-  participantPhone?: string | null;
-  prisma: HostedLinqEngagementClient;
-}): Promise<void> {
-  const participantPhone = normalizePhoneNumber(input.participantPhone);
-  const participantPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(participantPhone);
-  if (!participantPhone || participantPhoneLookupKeys.length === 0) {
-    throwHostedLinqParticipantEgressAuthorityMismatch();
-  }
-
-  const identity = await input.prisma.hostedMemberIdentity.findUnique({
-    where: { memberId: input.memberId },
-    select: { phoneLookupKey: true },
-  });
-
-  if (
-    !identity?.phoneLookupKey
-    || !participantPhoneLookupKeys.includes(identity.phoneLookupKey)
-  ) {
-    throwHostedLinqParticipantEgressAuthorityMismatch();
-  }
-}
-
-function throwHostedLinqParticipantEgressAuthorityMismatch(): never {
-  throw hostedOnboardingError({
-    code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
-    httpStatus: 403,
-    message: "Linq participant egress requires the participant target to match the runtime user.",
-    retryable: false,
   });
 }
 
@@ -245,7 +190,7 @@ function throwHostedLinqRouteAuthorityMismatch(): never {
   });
 }
 
-async function assertHostedLinqFirstContactEgressAuthority(input: {
+async function assertHostedLinqSignupWelcomeParticipantEgressAuthority(input: {
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
@@ -255,7 +200,7 @@ async function assertHostedLinqFirstContactEgressAuthority(input: {
   targetKind?: string | null;
 }): Promise<void> {
   if (!isHostedLinqSignupWelcomeFirstContact(input)) {
-    throwHostedLinqFirstContactEgressAuthorityMismatch();
+    throwHostedLinqParticipantEgressAuthorityMismatch();
   }
 
   const targetKind = normalizeNullable(input.targetKind);
@@ -266,13 +211,13 @@ async function assertHostedLinqFirstContactEgressAuthority(input: {
   );
   const fromPhoneNumber = normalizePhoneNumber(input.fromPhoneNumber);
   if (targetKind !== "participant" || !recipientPhone || !fromPhoneNumber) {
-    throwHostedLinqFirstContactEgressAuthorityMismatch();
+    throwHostedLinqParticipantEgressAuthorityMismatch();
   }
 
   const recipientPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(recipientPhone);
   const fromPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber);
   if (recipientPhoneLookupKeys.length === 0 || fromPhoneLookupKeys.length === 0) {
-    throwHostedLinqFirstContactEgressAuthorityMismatch();
+    throwHostedLinqParticipantEgressAuthorityMismatch();
   }
 
   const [identity, routing] = await Promise.all([
@@ -292,15 +237,15 @@ async function assertHostedLinqFirstContactEgressAuthority(input: {
     || !routing?.linqRecipientPhoneLookupKey
     || !fromPhoneLookupKeys.includes(routing.linqRecipientPhoneLookupKey)
   ) {
-    throwHostedLinqFirstContactEgressAuthorityMismatch();
+    throwHostedLinqParticipantEgressAuthorityMismatch();
   }
 }
 
-function throwHostedLinqFirstContactEgressAuthorityMismatch(): never {
+function throwHostedLinqParticipantEgressAuthorityMismatch(): never {
   throw hostedOnboardingError({
-    code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
+    code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
     httpStatus: 403,
-    message: "Linq first-contact egress requires signup welcome authority for the runtime user.",
+    message: "Linq participant egress requires signup welcome authority for the runtime user.",
     retryable: false,
   });
 }
@@ -341,20 +286,10 @@ function normalizeHostedLinqRouteAuthorityForEgress(input: {
     return linqAuthority;
   }
   if (targetKind !== "thread" && targetKind !== "explicit") {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-      message: "Linq egress route authority can only authorize thread delivery.",
-      retryable: false,
-    });
+    return null;
   }
   if (!target || target !== linqAuthority.threadId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-      message: "Linq egress route authority does not match the requested thread.",
-      retryable: false,
-    });
+    return null;
   }
 
   return linqAuthority;

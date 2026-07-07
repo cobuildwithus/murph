@@ -73,7 +73,6 @@ import type {
   HostedRuntimeActionApprovalPort,
   HostedRuntimeEffectsPort,
   HostedRuntimeLinqDeliveryOutcomeRequest,
-  HostedRuntimeLinqEngagementKind,
   HostedRuntimeLinqSendResponse,
   HostedRuntimePlatform,
   HostedRuntimeProviderTargetKind,
@@ -2853,7 +2852,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   if (!assertRecentInbound) {
     throw new VaultCliError(
       "ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE",
-      "Hosted Linq delivery requires recent-recipient-engagement assertion before provider dispatch.",
+      "Hosted Linq delivery requires an egress authority assertion before provider dispatch.",
       { retryable: true },
     );
   }
@@ -2863,10 +2862,6 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   await assertRecentInbound({
     ...(currentInbound ? { currentInbound } : {}),
     directRecipientPhoneNumber: input.directRecipientPhoneNumber,
-    engagementKind: readHostedAssistantLinqEngagementKind({
-      idempotencyKey: input.idempotencyKey,
-      targetKind,
-    }),
     fromPhoneNumber: input.fromPhoneNumber,
     idempotencyKey: input.idempotencyKey,
     intentId: input.intentId,
@@ -2922,16 +2917,6 @@ function normalizeHostedAssistantLinqTargetKind(
   return targetKind === "explicit" || targetKind === "participant" || targetKind === "thread"
     ? targetKind
     : null;
-}
-
-function readHostedAssistantLinqEngagementKind(input: {
-  idempotencyKey: string | null,
-  targetKind: HostedRuntimeProviderTargetKind | null,
-}): HostedRuntimeLinqEngagementKind {
-  return input.targetKind === "participant"
-    && isHostedSignupWelcomeDeliveryIdempotencyKey(input.idempotencyKey)
-    ? "first_contact"
-    : "requires_recent_inbound";
 }
 
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {

@@ -12,9 +12,6 @@ import {
 import {
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
-import type {
-  HostedRuntimeEffectsPort,
-} from "./platform.ts";
 import {
   resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
@@ -31,6 +28,18 @@ const HOSTED_WHATSAPP_CHANNEL_ENV_KEYS = [
   "WHATSAPP_GRAPH_VERSION",
   "WHATSAPP_PHONE_NUMBER_ID",
 ] as const;
+
+const HOSTED_LINQ_TYPING_MAX_SESSION_MS = 5 * 60_000;
+const HOSTED_LINQ_TYPING_REFRESH_MS = 45_000;
+const HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS = 10 * 60_000;
+
+type HostedLinqTypingTargetState = {
+  activeUntilMs: number;
+  cooldownUntilMs: number;
+};
+
+const hostedLinqTypingTargets = new Map<string, HostedLinqTypingTargetState>();
+
 export function buildHostedLinqChannelEnv(input: {
   forwardedEnv: Readonly<Record<string, string>>;
   userEnv: Readonly<Record<string, string>>;
@@ -97,7 +106,6 @@ export function buildHostedWhatsAppChannelEnv(input: {
 }
 
 export function createHostedAssistantChannelTypingDependencies(input: {
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
   forwardedEnv: Readonly<Record<string, string>>;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
@@ -120,27 +128,9 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       if (!input.providerFetch) {
         return undefined;
       }
-      const assertRecentInbound = input.effectsPort?.assertLinqRecentInboundEngagement;
-      if (!assertRecentInbound) {
-        return undefined;
-      }
       const target = deliveryContext?.target ?? request.target;
-      const currentInbound = deliveryContext?.currentInbound ?? null;
-      try {
-        await assertRecentInbound({
-          ...(currentInbound ? { currentInbound } : {}),
-          directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
-          engagementKind: "requires_recent_inbound",
-          fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
-          idempotencyKey: null,
-          intentId: null,
-          routeAuthority: deliveryContext?.routeAuthority ?? null,
-          target,
-          targetKind: "thread",
-        }, {
-          signal: input.signal ?? null,
-        });
-      } catch {
+      const typingTarget = claimHostedLinqTypingTarget(target);
+      if (!typingTarget) {
         return undefined;
       }
 
@@ -152,9 +142,30 @@ export function createHostedAssistantChannelTypingDependencies(input: {
         fetchImplementation: input.providerFetch,
         signal: input.signal,
       }, "Hosted Linq typing indicator");
-      return startLinqTypingIndicator({
-        target,
-      }, dependencies);
+      try {
+        const handle = await startLinqTypingIndicator({
+          target,
+        }, {
+          ...dependencies,
+          maxSessionMs: HOSTED_LINQ_TYPING_MAX_SESSION_MS,
+          refreshMs: HOSTED_LINQ_TYPING_REFRESH_MS,
+        });
+        if (!handle) {
+          releaseHostedLinqTypingTarget(typingTarget, {
+            completedMaxSession: false,
+          });
+          return undefined;
+        }
+        return wrapHostedLinqTypingHandle({
+          handle,
+          target: typingTarget,
+        });
+      } catch (error) {
+        releaseHostedLinqTypingTarget(typingTarget, {
+          completedMaxSession: false,
+        });
+        throw error;
+      }
     },
     startTelegramTyping: async (request) => {
       const dependencies = requireHostedProviderFetchDependencies({
@@ -168,6 +179,66 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       return startTelegramTypingIndicator(request, dependencies);
     },
   };
+}
+
+function claimHostedLinqTypingTarget(target: string): string | null {
+  const normalized = target.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const now = Date.now();
+  for (const [key, state] of hostedLinqTypingTargets) {
+    if (state.activeUntilMs <= now && state.cooldownUntilMs <= now) {
+      hostedLinqTypingTargets.delete(key);
+    }
+  }
+
+  const existing = hostedLinqTypingTargets.get(normalized);
+  if (existing && (existing.activeUntilMs > now || existing.cooldownUntilMs > now)) {
+    return null;
+  }
+
+  hostedLinqTypingTargets.set(normalized, {
+    activeUntilMs: now + HOSTED_LINQ_TYPING_MAX_SESSION_MS,
+    cooldownUntilMs: now + HOSTED_LINQ_TYPING_MAX_SESSION_MS
+      + HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS,
+  });
+  return normalized;
+}
+
+function wrapHostedLinqTypingHandle(input: {
+  handle: NonNullable<Awaited<ReturnType<typeof startLinqTypingIndicator>>>;
+  target: string;
+}): NonNullable<Awaited<ReturnType<typeof startLinqTypingIndicator>>> {
+  return {
+    ...input.handle,
+    stop: async (options) => {
+      const state = hostedLinqTypingTargets.get(input.target);
+      const completedMaxSession = Boolean(state && Date.now() >= state.activeUntilMs);
+      try {
+        await input.handle.stop(options);
+      } finally {
+        releaseHostedLinqTypingTarget(input.target, {
+          completedMaxSession,
+        });
+      }
+    },
+  };
+}
+
+function releaseHostedLinqTypingTarget(input: string, options: {
+  completedMaxSession: boolean;
+}): void {
+  if (!options.completedMaxSession) {
+    hostedLinqTypingTargets.delete(input);
+    return;
+  }
+
+  hostedLinqTypingTargets.set(input, {
+    activeUntilMs: Date.now(),
+    cooldownUntilMs: Date.now() + HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS,
+  });
 }
 
 function pickHostedChannelEnv(

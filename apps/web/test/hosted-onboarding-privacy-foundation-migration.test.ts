@@ -80,7 +80,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'linqRecipientPhoneLookupKey String? @map("linq_recipient_phone_lookup_key")',
     'linqRecipientPhoneEncrypted String? @map("linq_recipient_phone_encrypted")',
     'linqHomeLineAssignedAt DateTime? @map("linq_home_line_assigned_at")',
-    'linqLastInboundAt DateTime? @map("linq_last_inbound_at")',
     'pendingLinqChatLookupKey String? @unique @map("pending_linq_chat_lookup_key")',
     'pendingLinqChatIdEncrypted String? @map("pending_linq_chat_id_encrypted")',
     'pendingLinqParticipantContactKind String? @map("pending_linq_participant_contact_kind")',
@@ -89,7 +88,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'pendingLinqParticipantContactObservedAt DateTime? @map("pending_linq_participant_contact_observed_at")',
     'pendingLinqRecipientPhoneLookupKey String? @map("pending_linq_recipient_phone_lookup_key")',
     'pendingLinqRecipientPhoneEncrypted String? @map("pending_linq_recipient_phone_encrypted")',
-    'pendingLinqLastInboundAt DateTime? @map("pending_linq_last_inbound_at")',
     'replyAliasLookupKey String? @unique @map("reply_alias_lookup_key")',
     'telegramUserLookupKey String? @unique @map("telegram_user_lookup_key")',
     'telegramUserIdEncrypted String? @map("telegram_user_id_encrypted")',
@@ -524,6 +522,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const staleLinqRecencyDropMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260707170000_drop_stale_linq_recency_columns/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -606,6 +611,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260706120000_hosted_thread_container_participant",
       "20260706130000_hosted_group_join_offer",
       "20260706130000_hosted_growth_daily_snapshot",
+      "20260707170000_drop_stale_linq_recency_columns",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -751,6 +757,24 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedLinqEgressEngagementMigrationSql).not.toContain(
       'SET "last_inbound_at" = CURRENT_TIMESTAMP',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP INDEX IF EXISTS "hosted_member_routing_linq_last_inbound_at_idx"',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP INDEX IF EXISTS "hosted_member_routing_pending_linq_last_inbound_at_idx"',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP INDEX IF EXISTS "hosted_thread_route_channel_last_inbound_at_idx"',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP COLUMN IF EXISTS "linq_last_inbound_at"',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP COLUMN IF EXISTS "pending_linq_last_inbound_at"',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP COLUMN IF EXISTS "last_inbound_at"',
     );
     expect(hostedLinqObservabilityMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
     expect(hostedLinqObservabilityMigrationSql).toContain('"skip_reason" TEXT');

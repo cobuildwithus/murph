@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
-  readActiveHostedMemberAccess: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
 
@@ -10,17 +9,6 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest:
     mocks.requireHostedCloudflareCallbackRequest,
 }));
-
-vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
-  const original = await importOriginal<
-    typeof import("@/src/lib/hosted-onboarding/member-access")
-  >();
-
-  return {
-    ...original,
-    readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
-  };
-});
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
@@ -36,10 +24,9 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
 
-describe("hosted Linq egress engagement", () => {
+describe("hosted Linq egress authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member-1");
   });
 
@@ -50,7 +37,6 @@ describe("hosted Linq egress engagement", () => {
     });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      engagementKind: "first_contact",
       fromPhoneNumber: "+15550100099",
       idempotencyKey: "signup-welcome:member-1",
       memberId: "member-1",
@@ -72,7 +58,6 @@ describe("hosted Linq egress engagement", () => {
 
   it("rejects first contact without signup-welcome authority", async () => {
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      engagementKind: "first_contact",
       fromPhoneNumber: "+15550100099",
       idempotencyKey: "signup-welcome:member-2",
       memberId: "member-1",
@@ -83,12 +68,12 @@ describe("hosted Linq egress engagement", () => {
       target: "+15550100001",
       targetKind: "participant",
     })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
+      code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
       httpStatus: 403,
     });
   });
 
-  it("allows participant replies only when participant identity and source line match", async () => {
+  it("rejects participant sends without signup-welcome idempotency even when identity and source line match", async () => {
     const prisma = createPrismaStub({
       identityPhone: "+15550100001",
       homeLinePhone: "+15550100099",
@@ -100,7 +85,10 @@ describe("hosted Linq egress engagement", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "+15550100001",
       targetKind: "participant",
-    })).resolves.toBeUndefined();
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       fromPhoneNumber: "+15550100100",
@@ -109,7 +97,7 @@ describe("hosted Linq egress engagement", () => {
       target: "+15550100001",
       targetKind: "participant",
     })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
       httpStatus: 403,
     });
 
@@ -156,11 +144,8 @@ describe("hosted Linq egress engagement", () => {
     });
   });
 
-  it("preserves route-authority validation for bound external threads", async () => {
-    const prisma = createPrismaStub({
-      routeThreadId: "chat-authorized",
-      routeContainerMemberId: "member-1",
-    });
+  it("allows same-user route authority without a DB route assertion", async () => {
+    const prisma = createPrismaStub({});
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
@@ -175,17 +160,8 @@ describe("hosted Linq egress engagement", () => {
       targetKind: "thread",
     })).resolves.toBeUndefined();
 
-    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          channel: "linq",
-        }),
-      }),
-    );
-    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
-      memberId: "member-1",
-      prisma: asRuntimeEngagementPrisma(prisma),
-    });
+    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
@@ -201,6 +177,36 @@ describe("hosted Linq egress engagement", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_LINQ_EGRESS_BOUND_USER_MISMATCH",
       httpStatus: 403,
+    });
+  });
+
+  it("falls back to the durable home route when same-user route authority is stale", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:line-1",
+        channel: "linq",
+        containerMemberId: "member-1",
+        threadId: "chat-stale",
+      },
+      target: "chat-home",
+      targetKind: "thread",
+    })).resolves.toBeUndefined();
+
+    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
+      select: {
+        linqChatLookupKey: true,
+        linqRecipientPhoneLookupKey: true,
+        pendingLinqChatLookupKey: true,
+        pendingLinqRecipientPhoneLookupKey: true,
+      },
+      where: { memberId: "member-1" },
     });
   });
 
@@ -232,7 +238,7 @@ describe("hosted Linq egress engagement", () => {
     })).toThrow(/Linq egress route authority/u);
   });
 
-  it("accepts old-runner currentInbound payloads for external thread engagement assertions", async () => {
+  it("accepts old-runner currentInbound payloads for external thread egress authority", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
     });
@@ -249,7 +255,6 @@ describe("hosted Linq egress engagement", () => {
             replyToMessageId: "message_external",
             target: "chat-external",
           },
-          engagementKind: "requires_recent_inbound",
           target: "chat-external",
           targetKind: "thread",
         }),
@@ -272,8 +277,6 @@ function createPrismaStub(input: {
   homeLinePhone?: string;
   identityPhone?: string;
   pendingChatId?: string;
-  routeContainerMemberId?: string;
-  routeThreadId?: string;
 }) {
   return {
     hostedMemberIdentity: {
@@ -290,11 +293,7 @@ function createPrismaStub(input: {
       }),
     },
     hostedThreadRoute: {
-      findMany: vi.fn().mockResolvedValue(input.routeThreadId
-        ? [buildThreadRouteRow({
-            containerMemberId: input.routeContainerMemberId ?? "member-1",
-          })]
-        : []),
+      findMany: vi.fn().mockResolvedValue([]),
     },
   };
 }
@@ -325,29 +324,4 @@ function createRequiredLinqChatLookupKey(value: string | undefined): string | nu
     throw new Error("Expected Linq chat lookup key.");
   }
   return lookupKey;
-}
-
-function buildThreadRouteRow(input: {
-  containerMemberId: string;
-}) {
-  return {
-    channel: "linq",
-    container: {
-      member: buildMemberAccessRecord(input.containerMemberId),
-      owner: buildMemberAccessRecord("owner-1"),
-    },
-    containerMemberId: input.containerMemberId,
-  };
-}
-
-function buildMemberAccessRecord(id: string) {
-  return {
-    accountGroupMemberships: [],
-    billingStatus: "active",
-    createdAt: new Date("2026-06-01T12:00:00.000Z"),
-    id,
-    suspendedAt: null,
-    threadContainer: null,
-    updatedAt: new Date("2026-06-01T12:00:00.000Z"),
-  };
 }

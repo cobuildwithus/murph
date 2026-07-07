@@ -38,6 +38,7 @@ import {
 } from "../src/hosted-runtime/channel-activity.ts";
 
 beforeEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
   mocks.sendEmail.mockResolvedValue({
     providerMessageId: "email-message",
@@ -63,7 +64,7 @@ function buildLinqRouteAuthority(threadId: string) {
   };
 }
 
-test("hosted Linq typing uses the hosted env after recent inbound assertion", async () => {
+test("hosted Linq typing uses the hosted env after target context validation", async () => {
   const forwardedEnv = {
     LINQ_API_BASE_URL: "https://api.linq.example",
     LINQ_API_TOKEN: "platform-linq-token",
@@ -83,11 +84,7 @@ test("hosted Linq typing uses the hosted env after recent inbound assertion", as
   });
 
   const routeAuthority = buildLinqRouteAuthority("chat_123");
-  const assertRecentInbound = vi.fn(async () => undefined);
   const typing = createHostedAssistantChannelTypingDependencies({
-    effectsPort: {
-      assertLinqRecentInboundEngagement: assertRecentInbound,
-    },
     forwardedEnv,
     linqDeliveryContexts: [
       {
@@ -114,27 +111,13 @@ test("hosted Linq typing uses the hosted env after recent inbound assertion", as
   assert.deepEqual(mocks.startLinqTypingIndicator.mock.calls[0]?.[0], {
     target: "chat_123",
   });
-  expect(assertRecentInbound).toHaveBeenCalledWith({
-    directRecipientPhoneNumber: "+15551234567",
-    engagementKind: "requires_recent_inbound",
-    fromPhoneNumber: null,
-    idempotencyKey: null,
-    intentId: null,
-    routeAuthority,
-    target: "chat_123",
-    targetKind: "thread",
-  }, {
-    signal: null,
-  });
   assert.deepEqual(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.env, linqEnv);
+  assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.maxSessionMs, 5 * 60_000);
+  assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.refreshMs, 45_000);
 });
 
-test("hosted Linq typing can use recent inbound engagement without route authority", async () => {
-  const assertRecentInbound = vi.fn(async () => undefined);
+test("hosted Linq typing starts without route authority when the target context matches", async () => {
   const typing = createHostedAssistantChannelTypingDependencies({
-    effectsPort: {
-      assertLinqRecentInboundEngagement: assertRecentInbound,
-    },
     forwardedEnv: {
       LINQ_API_TOKEN: "linq-token",
     },
@@ -158,16 +141,6 @@ test("hosted Linq typing can use recent inbound engagement without route authori
     target: "chat_123",
   })).resolves.toBeUndefined();
 
-  expect(assertRecentInbound).toHaveBeenCalledWith(
-    expect.objectContaining({
-      routeAuthority: null,
-      target: "chat_123",
-      targetKind: "thread",
-    }),
-    {
-      signal: null,
-    },
-  );
   expect(mocks.startLinqTypingIndicator).toHaveBeenCalledWith(
     {
       target: "chat_123",
@@ -176,12 +149,8 @@ test("hosted Linq typing can use recent inbound engagement without route authori
   );
 });
 
-test("hosted Linq typing falls back to target recent inbound when initial context is unavailable", async () => {
-  const assertRecentInbound = vi.fn(async () => undefined);
+test("hosted Linq typing falls back to the requested target when no context is present", async () => {
   const typing = createHostedAssistantChannelTypingDependencies({
-    effectsPort: {
-      assertLinqRecentInboundEngagement: assertRecentInbound,
-    },
     forwardedEnv: {
       LINQ_API_TOKEN: "linq-token",
     },
@@ -195,18 +164,6 @@ test("hosted Linq typing falls back to target recent inbound when initial contex
     target: "chat_123",
   })).resolves.toBeUndefined();
 
-  expect(assertRecentInbound).toHaveBeenCalledWith({
-    directRecipientPhoneNumber: null,
-    engagementKind: "requires_recent_inbound",
-    fromPhoneNumber: null,
-    idempotencyKey: null,
-    intentId: null,
-    routeAuthority: null,
-    target: "chat_123",
-    targetKind: "thread",
-  }, {
-    signal: null,
-  });
   expect(mocks.startLinqTypingIndicator).toHaveBeenCalledWith(
     {
       target: "chat_123",
@@ -215,15 +172,12 @@ test("hosted Linq typing falls back to target recent inbound when initial contex
   );
 });
 
-test("hosted Linq typing no-ops when recent inbound engagement is rejected", async () => {
-  const routeAuthority = buildLinqRouteAuthority("chat_123");
-  const assertRecentInbound = vi.fn(async () => {
-    throw new Error("recent inbound required");
+test("hosted Linq typing allows only one active session per target", async () => {
+  const stop = vi.fn(async () => undefined);
+  mocks.startLinqTypingIndicator.mockResolvedValue({
+    stop,
   });
   const typing = createHostedAssistantChannelTypingDependencies({
-    effectsPort: {
-      assertLinqRecentInboundEngagement: assertRecentInbound,
-    },
     forwardedEnv: {
       LINQ_API_TOKEN: "linq-token",
     },
@@ -232,7 +186,7 @@ test("hosted Linq typing no-ops when recent inbound engagement is rejected", asy
         directRecipientPhoneNumber: "+15551234567",
         fromPhoneNumber: null,
         replyToMessageId: "msg_123",
-        routeAuthority,
+        routeAuthority: buildLinqRouteAuthority("chat_123"),
         service: null,
         target: "chat_123",
         threadIsDirect: null,
@@ -243,24 +197,30 @@ test("hosted Linq typing no-ops when recent inbound engagement is rejected", asy
     userEnv: {},
   });
 
+  const handle = await typing.startLinqTyping?.({
+    target: "chat_123",
+  });
   await expect(typing.startLinqTyping?.({
     target: "chat_123",
   })).resolves.toBeUndefined();
 
-  expect(assertRecentInbound).toHaveBeenCalledWith(
-    expect.objectContaining({
-      routeAuthority,
-      target: "chat_123",
-      targetKind: "thread",
-    }),
-    {
-      signal: null,
-    },
-  );
-  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(1);
+  await handle?.stop();
+  const restartedHandle = await typing.startLinqTyping?.({
+    target: "chat_123",
+  });
+  expect(restartedHandle).toBeDefined();
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(2);
+  await restartedHandle?.stop();
 });
 
-test("hosted Linq typing no-ops when recent inbound assertion is unavailable", async () => {
+test("hosted Linq typing suppresses restarts after a max-length session", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-07T12:00:00.000Z"));
+  const stop = vi.fn(async () => undefined);
+  mocks.startLinqTypingIndicator.mockResolvedValue({
+    stop,
+  });
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {
       LINQ_API_TOKEN: "linq-token",
@@ -281,11 +241,24 @@ test("hosted Linq typing no-ops when recent inbound assertion is unavailable", a
     userEnv: {},
   });
 
+  const handle = await typing.startLinqTyping?.({
+    target: "chat_123",
+  });
+  vi.setSystemTime(new Date("2026-07-07T12:05:01.000Z"));
+  await handle?.stop();
+
   await expect(typing.startLinqTyping?.({
     target: "chat_123",
   })).resolves.toBeUndefined();
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(1);
 
-  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
+  vi.setSystemTime(new Date("2026-07-07T12:15:02.000Z"));
+  const restartedHandle = await typing.startLinqTyping?.({
+    target: "chat_123",
+  });
+  expect(restartedHandle).toBeDefined();
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(2);
+  await restartedHandle?.stop();
 });
 
 test("hosted Linq channel env does not mix a forwarded token with a user base URL", () => {
@@ -366,9 +339,6 @@ test("hosted channel activity uses provider fetch instead of effects-port provid
   const providerFetch = vi.fn<typeof fetch>();
   const routeAuthority = buildLinqRouteAuthority("linq_chat_123");
   const typing = createHostedAssistantChannelTypingDependencies({
-    effectsPort: {
-      async assertLinqRecentInboundEngagement() {},
-    },
     forwardedEnv: {},
     linqDeliveryContexts: [
       {
@@ -426,11 +396,7 @@ test("hosted Linq typing no-ops when the target is not the current inbound conte
 });
 
 test("hosted Linq typing does not use target fallback when another context is present", async () => {
-  const assertRecentInbound = vi.fn(async () => undefined);
   const typing = createHostedAssistantChannelTypingDependencies({
-    effectsPort: {
-      assertLinqRecentInboundEngagement: assertRecentInbound,
-    },
     forwardedEnv: {
       LINQ_API_TOKEN: "linq-token",
     },
@@ -454,7 +420,6 @@ test("hosted Linq typing does not use target fallback when another context is pr
     target: "different_linq_chat",
   })).resolves.toBeUndefined();
 
-  expect(assertRecentInbound).not.toHaveBeenCalled();
   expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
 });
 
@@ -763,7 +728,7 @@ test("hosted progress Linq delivery sends recovered same-wake chat when request 
   });
 });
 
-test("hosted progress Linq delivery recovers redacted routed same-wake chat through engagement assertion", async () => {
+test("hosted progress Linq delivery recovers redacted routed same-wake chat through egress authority", async () => {
   const routeAuthority = buildLinqRouteAuthority("linq_chat_current");
   const wake = buildHostedExecutionLinqConversationMessageWake({
     eventId: "evt_linq_progress_blinded_routed_target",
