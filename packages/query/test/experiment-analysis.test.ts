@@ -542,6 +542,7 @@ test("experiment progress summarizes adherence, coverage, confounders, and remin
 
   assert.deepEqual(progress.adherence, {
     completedSessions: 3,
+    evidence: { eventKind: "intervention_session" },
     expectedSessionsByNow: 5,
     minimumUsefulSessions: 4,
     sessionEventIds: [
@@ -645,6 +646,10 @@ test("experiment progress counts calendar-less running adherence from activity s
 
   assert.equal(progress.adherence.completedSessions, 4);
   assert.equal(progress.adherence.expectedSessionsByNow, 7);
+  assert.deepEqual(progress.adherence.evidence, {
+    eventKind: "activity_session",
+    activityKind: "running",
+  });
   assert.equal(progress.adherence.status, "behind");
   assert.equal(progress.adherence.targetSessions, 24);
 });
@@ -1358,6 +1363,7 @@ test("metric adherence uses the selected same-day metric point", () => {
   });
 
   assert.equal(progress.adherence.completedSessions, 0);
+  assert.equal(progress.adherence.evidence, undefined);
   assert.equal(progress.adherence.expectedSessionsByNow, 1);
   assert.equal(progress.adherence.status, "not_started");
 });
@@ -1433,6 +1439,7 @@ test("metric adherence exact-matches metrics that share a biomarker", () => {
   });
 
   assert.equal(progress.adherence.completedSessions, 0);
+  assert.equal(progress.adherence.evidence, undefined);
   assert.equal(progress.adherence.expectedSessionsByNow, 1);
   assert.equal(progress.adherence.status, "not_started");
 });
@@ -2139,6 +2146,7 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
   assert.equal(progress.phase, "intervention");
   assert.deepEqual(progress.adherence, {
     completedSessions: 1,
+    evidence: { eventKind: "intervention_session" },
     expectedSessionsByNow: 2,
     minimumUsefulSessions: 1,
     sessionEventIds: ["evt_01JNV45RHN0TQ9ZXE0A7YSE2AA"],

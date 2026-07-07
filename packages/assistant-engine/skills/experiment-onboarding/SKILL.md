@@ -76,7 +76,7 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 
 ## Planned-session support reminders
 
-- First-session prep and planned-session support are separate. First-session prep teaches the user how to do the protocol the first time. Planned-session support helps the user remember, repeat, and log every planned intervention session in the confirmed run plan.
+- First-session prep and planned-session support are separate. First-session prep teaches the user how to do the protocol the first time. Planned-session support helps the user remember and repeat every planned intervention session in the confirmed run plan. Logging applies to experiments whose sessions Murph cannot sense; for device-observable experiments, sensing handles the record after the session.
 - During onboarding, after safety, protocol fit, schedule, first-session timing, and route delivery are clear, planned-session support is default-on once the user agrees to a run plan with assistant support. Schedule bounded support for every planned intervention session, record that the user declined it, or name the concrete missing cadence, timing, or route detail. Do not ask the user to choose cadence by default.
 - Ask a planned-session support setup question only when cadence, timing, route, or user preference is genuinely unclear. Do not ask when the user already gave a clear preference, explicitly declined reminders, or reminder delivery is not possible in the current route.
 - Default planned-session support plan: automatically schedule bounded support around every planned intervention session in the confirmed run plan, unless reminders were declined or delivery is blocked. For daily or near-daily protocols, cover each planned session through the intervention window. For non-daily protocols, cover each planned intervention. Do not cap support at the first week or the first 3-5 planned sessions. Use the experiment schedule plus saved context: shortly after the user's usual wake window for morning logs, before the usual activity window for exercise protocols, near the relevant meal window for meal-linked protocols, or far enough before the usual sleep window for pre-bed protocols. For behavior-dependent protocols, include the compact follow-through loop in setup answers or automation instructions when available: target behavior, user reason, anchor/action window, standard/tiny/fallback versions, support style, privacy boundary, repair-after policy, and review point.
@@ -91,6 +91,14 @@ Match the user's energy. Brief answers deserve brief follow-ups. Never restate i
 - Keep planned-session reminder copy short and non-pressuring, written for someone who already knows the plan and stop conditions: the planned action or baseline log for that day, and what Murph can capture automatically or may ask about later if needed. Bring up the stop rule only when new context makes it newly relevant.
 - When a reminder needs the user to report, end with one direct question they can answer in their own words; Murph derives values like grams or totals from the answer.
 - Do not turn planned-session support into a user-facing setup chore. The user does not need to approve the cadence separately once they have agreed to the run plan and assistant support is available.
+
+## Device-observable experiments
+
+- After creating the run, read `vault-cli experiment progress <id> --format json` and check `adherence.evidence`. If `adherence.evidence.eventKind` is `activity_session`, sessions are sensed automatically from the user's connected wearable. Do not ask the user to log sessions, do not create per-session "log it" reminders, and do not log a manual session for any workout the wearable synced or will sync.
+- In the setup summary, include one short line that makes this effortless, for example: "Your runs count automatically from your WHOOP. No need to tell me when you run." Name the provider only when current evidence shows it.
+- Pre-session support reminders remain available exactly as before if the user wants them. Device sensing changes what happens after a session, not before it.
+- Create one default-on activity nudge automation per device-observable experiment unless the user declines or the route is blocked: `vault-cli automation save <title> --slug experiment-activity-nudge-<experiment-slug> --trigger-kind deviceActivity --activity-kind <adherence.evidence.activityKind> --instructions "<scheduled instructions>" --channel <channel> ...`. Do not pass `--device-source`; the trigger is provider-agnostic. Save traceability in setup answers with `activity_nudge_automation_slug`; if declined or blocked, record that result in setup answers too.
+- Activity nudge automation instructions must be self-contained because a future notification turn may not read this skill. Tell that turn to run `vault-cli experiment progress <experiment-slug> --format json`; send a short celebratory progress line only when it earns a send, such as the first sensed session, halfway, target met, or recovery after a behind stretch; otherwise skip silently. Archive this automation when the experiment is no longer active or today is past the intervention end date. Nudge copy is one short sentence with the progress count, for example: "Nice run, that's 8 of 24 for your base block." Never ask a question and never ask the user to log.
 
 ## Session support loop
 
@@ -134,7 +142,7 @@ If sending, ask whether the planned session happened and collect only the missin
 
 ## Active experiment support
 
-- Log sessions with typed flags: `vault-cli experiment session log <id> ...`
+- Log sessions with typed flags only for experiments whose `adherence.evidence.eventKind` is `intervention_session`, sessions the user says the wearable missed, and corrections: `vault-cli experiment session log <id> ...`. Never write a manual session for a workout that synced or will sync; sensed events and manual logs both count, so duplicating creates double counts.
 - Log confounders with typed flags: `vault-cli experiment context log <id> ...`
 - Check-ins: `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` - skip when it returns `skip`.
 - Progress: `vault-cli experiment progress <id> --format json`; inspect `setupReadiness`, `analysisReadiness`, and `dataCoverage` separately before saying wearable data is missing.

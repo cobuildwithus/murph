@@ -124,6 +124,10 @@ export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
   asOf: string;
   adherence: {
     completedSessions: number;
+    evidence?: {
+      eventKind: "activity_session" | "intervention_session";
+      activityKind?: string;
+    };
     expectedSessionsByNow: number | null;
     loggedSessions?: number;
     minimumUsefulSessions: number | null;
@@ -696,6 +700,7 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
         context.asOf,
         targetSessions,
       );
+  const evidence = buildProgressAdherenceEvidence(progressTarget);
 
   let status: ExperimentAdherenceStatus = "unknown";
   if (hasAmbiguousTargets) {
@@ -720,11 +725,32 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
 
   return {
     completedSessions,
+    ...(evidence ? { evidence } : {}),
     expectedSessionsByNow,
     ...(partialSessions > 0 ? { loggedSessions, partialSessions } : {}),
     minimumUsefulSessions,
     status,
     targetSessions,
+  };
+}
+
+function buildProgressAdherenceEvidence(
+  target: QueryExperimentAdherenceTarget | null,
+): ExperimentProgressSummary["adherence"]["evidence"] | null {
+  if (!target || target.evidence.kind !== "linkedEventCount") {
+    return null;
+  }
+
+  if (
+    target.evidence.eventKind !== "activity_session" &&
+    target.evidence.eventKind !== "intervention_session"
+  ) {
+    return null;
+  }
+
+  return {
+    eventKind: target.evidence.eventKind,
+    ...(target.evidence.activityKind ? { activityKind: target.evidence.activityKind } : {}),
   };
 }
 

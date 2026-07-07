@@ -2274,6 +2274,13 @@ export const experimentProgressSnapshotSchema = z
     adherence: z
       .object({
         completedSessions: integerSchema(0),
+        evidence: z
+          .object({
+            eventKind: z.enum(["activity_session", "intervention_session"]),
+            activityKind: boundedString(1, 80).optional(),
+          })
+          .strict()
+          .optional(),
         expectedSessionsByNow: integerSchema(0).nullable(),
         loggedSessions: integerSchema(0).optional(),
         minimumUsefulSessions: integerSchema(0).nullable(),

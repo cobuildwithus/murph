@@ -2449,6 +2449,7 @@ test.sequential(
       assert.equal(requireData(progress).progress.dayInRun, 20)
       assert.deepEqual(requireData(progress).progress.adherence, {
         completedSessions: 2,
+        evidence: { eventKind: 'intervention_session' },
         expectedSessionsByNow: 3,
         minimumUsefulSessions: 3,
         sessionEventIds: [
