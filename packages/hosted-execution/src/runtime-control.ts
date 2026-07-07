@@ -707,13 +707,6 @@ export interface HostedRuntimeUsageRecordResponse {
   usageId: string;
 }
 
-export interface HostedRuntimeLinqContactCardShareAfterOutboundRequest {
-  authority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
-  chatId: string;
-  service: string | null;
-  threadIsDirect: boolean | null;
-}
-
 export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
   "feature_interest",
   "feature_request",

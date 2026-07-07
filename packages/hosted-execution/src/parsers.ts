@@ -136,7 +136,6 @@ export {
   parseHostedRuntimeLogEntry,
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
-  parseHostedRuntimeLinqContactCardShareAfterOutboundRequest,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
   parseHostedRuntimeGroupToolRequest,

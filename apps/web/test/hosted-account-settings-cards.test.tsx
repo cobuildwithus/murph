@@ -26,6 +26,25 @@ describe("HostedAccountSettingsCards", () => {
     expect(withPhone).toContain("sms:+15550100001");
   });
 
+  test("shows Murph contact customization only after the member has linked a phone", () => {
+    const withoutPhone = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: makeAccountSnapshot({ phoneNumber: null }),
+      }),
+    );
+    const withPhone = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: makeAccountSnapshot({ phoneNumber: "+14045550123" }),
+      }),
+    );
+
+    expect(withoutPhone).not.toContain("Murph contact");
+    expect(withoutPhone).not.toContain("Pick a look and save the updated card.");
+    expect(withPhone).toContain("Murph contact");
+    expect(withPhone).toContain("Pick a look and save the updated card.");
+    expect(withPhone).toContain("Customize");
+  });
+
   test("shows a private Murph email action after the member has one", () => {
     const markup = renderToStaticMarkup(
       React.createElement(HostedAccountSettingsCards, {

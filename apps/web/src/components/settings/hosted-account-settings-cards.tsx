@@ -1,9 +1,10 @@
 "use client";
 
-import { Mail, Phone, Send } from "lucide-react";
+import { ContactRound, Mail, Phone, Send } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useState, type ReactNode } from "react";
 
+import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-card-picker";
 import { Button } from "@/src/components/ui/button";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
@@ -29,6 +30,7 @@ export function HostedAccountSettingsCards({
   account: HostedAccountSettingsSnapshot;
   murphPhoneNumber?: string | null;
 }) {
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(null);
 
   const phoneNumber = account.phone.number;
@@ -59,6 +61,23 @@ export function HostedAccountSettingsCards({
             </Button>
           }
         />
+        {phoneNumber ? (
+          <SettingsRow
+            icon={<ContactRound className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+            label="Murph contact"
+            value="Pick a look and save the updated card."
+            action={
+              <Button
+                onClick={() => setContactPickerOpen(true)}
+                size="default"
+                type="button"
+                variant="ghost"
+              >
+                Customize
+              </Button>
+            }
+          />
+        ) : null}
         <SettingsRow
           icon={<Send className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Telegram"
@@ -108,6 +127,20 @@ export function HostedAccountSettingsCards({
               setLinkMode(null);
             }
           }}
+        />
+      ) : null}
+      {contactPickerOpen ? (
+        <MurphContactCardPicker
+          copy={{
+            description: "Pick a look and save the updated card.",
+            primaryAction: "Save updated card",
+            secondaryAction: "Close",
+            title: "Customize Murph contact",
+          }}
+          onAddToContacts={() => setContactPickerOpen(false)}
+          onOpenChange={setContactPickerOpen}
+          onSkip={() => setContactPickerOpen(false)}
+          open={contactPickerOpen}
         />
       ) : null}
     </>
