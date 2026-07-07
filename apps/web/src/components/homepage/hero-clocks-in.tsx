@@ -22,6 +22,12 @@ export type HeroMessengerChannel = "imessage" | "telegram";
 
 import { ExperimentCard, type ExperimentResult } from "./phone-mock";
 import {
+  ChallengeCard,
+  GROUP_MEMBERS,
+  NewsletterCard,
+  type GroupMember,
+} from "./group-chat-cards";
+import {
   MurphHeadshotAvatar,
   type MurphHeadshotSrc,
 } from "./murph-headshot-avatar";
@@ -51,10 +57,26 @@ type OrderResult = {
   price: string;
 };
 
-type TextItem = { kind: "text"; id: number; from: "user" | "murph"; text: string };
+type SoloTextItem = {
+  kind: "text";
+  id: number;
+  from: "user" | "murph";
+  text: string;
+};
+type MemberTextItem = {
+  kind: "text";
+  id: number;
+  from: "member";
+  sender: GroupMember;
+  text: string;
+};
+type TextItem = SoloTextItem | MemberTextItem;
 type CardItem = { kind: "card"; id: number; result: ExperimentResult };
 type BloodworkItem = { kind: "bloodwork"; id: number; result: BloodworkResult };
 type OrderItem = { kind: "order"; id: number; result: OrderResult };
+type SystemItem = { kind: "system"; id: number; text: string };
+type ChallengeItem = { kind: "challenge"; id: number };
+type NewsletterItem = { kind: "newsletter"; id: number };
 type ContactItem = {
   kind: "contact";
   id: number;
@@ -66,6 +88,9 @@ type StreamItem =
   | CardItem
   | BloodworkItem
   | OrderItem
+  | SystemItem
+  | ChallengeItem
+  | NewsletterItem
   | ContactItem;
 
 type Exchange = {
@@ -279,8 +304,54 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
   },
 ];
 
+const AUTO_RUN_TOPICS = [
+  "Magnesium",
+  "LDL cholesterol",
+  "Dentist",
+] as const;
+
+const GROUP_NAME = "The Crew";
+
+const HERO_COPY = {
+  act1: {
+    line1: "Health is overwhelming.",
+    line2: "Murph makes it easy.",
+    paragraph:
+      "Murph is your personal health assistant. Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep. Murph runs it all and helps you figure out what actually makes you healthier, then build habits that stick. And it gets your friends and family in on it.",
+  },
+  act2: {
+    line1: "Health is a team sport.",
+    line2: "Murph is the referee.",
+    paragraph:
+      "Start a health challenge with your friends in a group chat. Murph sets fair baselines, keeps score, calls the winner, and sends everyone a weekly newsletter on how the crew is doing.",
+  },
+} as const;
+
+const GROUP_MESSAGES = {
+  theoQuestion: "ok who's actually winning this thing",
+  murphStandings:
+    "Standings, day 5 of 7. Maya is one sunrise walk from taking the lead. Theo, bold words for a man who logged 11 minutes yesterday.",
+  mayaReply: "😂 not the sunrise walk pressure",
+  userNewsletterQuestion: "how does everyone keep up with this?",
+  murphNewsletter:
+    "Weekly recap lands in everyone's inbox on Sunday morning. Family included, no app needed.",
+} as const;
+
+function findExchangeByTopic(topic: string): Exchange {
+  const exchange = EXCHANGES.find(
+    (candidate) => candidate.topic.toLowerCase() === topic.toLowerCase(),
+  );
+  if (!exchange) {
+    throw new Error(`Missing homepage hero exchange for ${topic}`);
+  }
+  return exchange;
+}
+
+const AUTO_RUN_EXCHANGES = AUTO_RUN_TOPICS.map(findExchangeByTopic);
+
 type Floater = {
   text: string;
+  member?: GroupMember;
   top?: string;
   bottom?: string;
   left?: string;
@@ -289,6 +360,13 @@ type Floater = {
   flyY: string;
   delay: number;
   duration: number;
+};
+
+type FloaterStyle = React.CSSProperties & {
+  "--delay": string;
+  "--dur": string;
+  "--fly-x": string;
+  "--fly-y": string;
 };
 
 // Floaters live in the top/bottom strips, the left edge, and the right-edge
@@ -313,9 +391,39 @@ const FLOATERS: ReadonlyArray<Floater> = [
   { text: "Daily walk", bottom: "4%", left: "5%", flyX: "58vw", flyY: "-42vh", delay: 1.3, duration: 10.5 },
   { text: "Sleep quality", bottom: "5%", left: "26%", flyX: "44vw", flyY: "-40vh", delay: 2.7, duration: 13.5 },
   { text: "Blood pressure", bottom: "4%", right: "28%", flyX: "6vw", flyY: "-42vh", delay: 2.6, duration: 14 },
+  {
+    text: "Theo",
+    member: GROUP_MEMBERS[0],
+    top: "138px",
+    right: "20%",
+    flyX: "-8vw",
+    flyY: "36vh",
+    delay: 0.2,
+    duration: 10.8,
+  },
+  {
+    text: "Maya",
+    member: GROUP_MEMBERS[1],
+    top: "31%",
+    right: "1.5%",
+    flyX: "-13vw",
+    flyY: "19vh",
+    delay: 1.9,
+    duration: 12.2,
+  },
+  {
+    text: "Sam",
+    member: GROUP_MEMBERS[2],
+    bottom: "16%",
+    right: "9%",
+    flyX: "-16vw",
+    flyY: "-18vh",
+    delay: 2.9,
+    duration: 11.6,
+  },
 ];
 
-const FLOATER_INDEX_BY_TOPIC: Record<string, number> = FLOATERS.reduce(
+const FLOATER_INDEX_BY_TEXT: Record<string, number> = FLOATERS.reduce(
   (acc, f, i) => {
     acc[f.text.toLowerCase()] = i;
     return acc;
@@ -328,6 +436,9 @@ const USER_BUBBLE_AT = 1400;
 const TYPING_AT = 2200;
 const REPLY_AT = 3600;
 const CYCLE_LENGTH = 7800;
+const GROUP_JOIN_STAGGER = 1800;
+const GROUP_JOIN_LINE_AT = 1400;
+const GROUP_BEAT_GAP = 6500;
 const MAX_ITEMS = 30;
 
 export function HeroClocksIn({
@@ -345,6 +456,7 @@ export function HeroClocksIn({
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [typing, setTyping] = useState(false);
   const [composerValue, setComposerValue] = useState("");
+  const [groupMode, setGroupModeState] = useState(false);
   const [usedFloaters, setUsedFloaters] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -353,7 +465,68 @@ export function HeroClocksIn({
   const scrollerRef = useRef<HTMLDivElement>(null);
   const cancelDemoRef = useRef<(() => void) | null>(null);
   const engagedRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const groupSequenceStartedRef = useRef(false);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const isAtBottomRef = useRef(true);
+
+  const setGroupMode = (next: boolean) => {
+    setGroupModeState(next);
+  };
+
+  const nextId = () => ++idRef.current;
+
+  const appendItems = (nextItems: ReadonlyArray<StreamItem>) => {
+    setItems((prev) => [...prev, ...nextItems].slice(-MAX_ITEMS));
+  };
+
+  const clearScheduledDemo = ({
+    resetVisualState = true,
+  }: {
+    resetVisualState?: boolean;
+  } = {}) => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    if (resetVisualState) {
+      setTyping(false);
+      setActiveIdx(null);
+    }
+  };
+
+  const cancelScheduledDemo = () => {
+    cancelledRef.current = true;
+    clearScheduledDemo();
+  };
+
+  const prepareScheduledDemo = ({
+    resetVisualState = true,
+  }: {
+    resetVisualState?: boolean;
+  } = {}) => {
+    clearScheduledDemo({ resetVisualState });
+    cancelledRef.current = false;
+    cancelDemoRef.current = cancelScheduledDemo;
+  };
+
+  const prepareScheduledDemoForMount = () => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    cancelledRef.current = false;
+    cancelDemoRef.current = cancelScheduledDemo;
+  };
+
+  const queue = (
+    fn: () => void,
+    ms: number,
+    options: { allowAfterEngaged?: boolean } = {},
+  ) => {
+    const timer = setTimeout(() => {
+      if (cancelledRef.current) return;
+      if (engagedRef.current && !options.allowAfterEngaged) return;
+      fn();
+    }, ms);
+    timersRef.current.push(timer);
+  };
 
   const markFloaterUsed = (idx: number | null) => {
     if (idx === null) return;
@@ -365,6 +538,154 @@ export function HeroClocksIn({
       next.add(f.text);
       return next;
     });
+  };
+
+  const buildExchangeReplyItems = (ex: Exchange): ReadonlyArray<StreamItem> => {
+    const next: StreamItem[] = [];
+    if (ex.card) {
+      next.push({ kind: "card", id: nextId(), result: ex.card });
+    }
+    if (ex.bloodwork) {
+      next.push({
+        kind: "bloodwork",
+        id: nextId(),
+        result: ex.bloodwork,
+      });
+    }
+    if (ex.order) {
+      next.push({
+        kind: "order",
+        id: nextId(),
+        result: ex.order,
+      });
+    }
+    next.push({
+      kind: "text",
+      id: nextId(),
+      from: "murph",
+      text: ex.murph,
+    });
+    return next;
+  };
+
+  const startGroupSequence = ({
+    allowAfterEngaged,
+  }: {
+    allowAfterEngaged: boolean;
+  }) => {
+    if (groupSequenceStartedRef.current) return;
+    groupSequenceStartedRef.current = true;
+
+    GROUP_MEMBERS.forEach((member, index) => {
+      const idx = FLOATER_INDEX_BY_TEXT[member.name.toLowerCase()] ?? null;
+      const startsAt = index * GROUP_JOIN_STAGGER;
+
+      queue(
+        () => {
+          setGroupMode(true);
+          setActiveIdx(idx);
+        },
+        startsAt,
+        { allowAfterEngaged },
+      );
+
+      queue(
+        () => {
+          markFloaterUsed(idx);
+          setActiveIdx((current) => (current === idx ? null : current));
+          appendItems([
+            {
+              kind: "system",
+              id: nextId(),
+              text: `${member.name} joined the conversation`,
+            },
+          ]);
+        },
+        startsAt + GROUP_JOIN_LINE_AT,
+        { allowAfterEngaged },
+      );
+    });
+
+    const beatsStart = GROUP_MEMBERS.length * GROUP_JOIN_STAGGER + 1100;
+
+    queue(
+      () => {
+        appendItems([
+          {
+            kind: "text",
+            id: nextId(),
+            from: "member",
+            sender: GROUP_MEMBERS[0],
+            text: GROUP_MESSAGES.theoQuestion,
+          },
+        ]);
+      },
+      beatsStart,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => {
+        appendItems([
+          { kind: "challenge", id: nextId() },
+          {
+            kind: "text",
+            id: nextId(),
+            from: "murph",
+            text: GROUP_MESSAGES.murphStandings,
+          },
+        ]);
+      },
+      beatsStart + GROUP_BEAT_GAP,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => {
+        appendItems([
+          {
+            kind: "text",
+            id: nextId(),
+            from: "member",
+            sender: GROUP_MEMBERS[1],
+            text: GROUP_MESSAGES.mayaReply,
+          },
+        ]);
+      },
+      beatsStart + GROUP_BEAT_GAP * 2,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => {
+        appendItems([
+          {
+            kind: "text",
+            id: nextId(),
+            from: "user",
+            text: GROUP_MESSAGES.userNewsletterQuestion,
+          },
+        ]);
+      },
+      beatsStart + GROUP_BEAT_GAP * 3,
+      { allowAfterEngaged },
+    );
+
+    queue(
+      () => {
+        appendItems([
+          { kind: "newsletter", id: nextId() },
+          {
+            kind: "text",
+            id: nextId(),
+            from: "murph",
+            text: GROUP_MESSAGES.murphNewsletter,
+          },
+        ]);
+      },
+      beatsStart + GROUP_BEAT_GAP * 3 + 1100,
+      { allowAfterEngaged },
+    );
   };
 
   // Track whether the user is at the bottom of the thread; if they scroll up
@@ -398,75 +719,71 @@ export function HeroClocksIn({
   }, [items, typing]);
 
   useEffect(() => {
-    const nextId = () => ++idRef.current;
+    prepareScheduledDemoForMount();
 
     if (
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
-      const seed: StreamItem[] = [];
-      [EXCHANGES[0]].forEach((ex) => {
-        seed.push({ kind: "text", id: nextId(), from: "user", text: ex.user });
-        if (ex.card)
-          seed.push({ kind: "card", id: nextId(), result: ex.card });
-        if (ex.bloodwork)
-          seed.push({ kind: "bloodwork", id: nextId(), result: ex.bloodwork });
-        if (ex.order)
-          seed.push({ kind: "order", id: nextId(), result: ex.order });
-        seed.push({ kind: "text", id: nextId(), from: "murph", text: ex.murph });
-      });
-      setItems(seed);
-      return;
-    }
-
-    let cancelled = false;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-
-    const queue = (fn: () => void, ms: number) => {
-      const t = setTimeout(() => {
-        if (!cancelled && !engagedRef.current) fn();
-      }, ms);
-      timers.push(t);
-    };
-
-    const runCycle = () => {
-      if (cancelled || engagedRef.current) return;
-
-      // Walk forward through EXCHANGES, skipping any whose topic has no matching
-      // floater. When we run out, mark the demo complete and stop — no looping.
-      let ex: Exchange | null = null;
-      let idx: number | null = null;
-      while (cycleRef.current < EXCHANGES.length) {
-        const candidate = EXCHANGES[cycleRef.current];
-        cycleRef.current += 1;
-        const candidateIdx =
-          FLOATER_INDEX_BY_TOPIC[candidate.topic.toLowerCase()] ?? null;
-        if (candidateIdx !== null) {
-          ex = candidate;
-          idx = candidateIdx;
-          break;
-        }
-      }
-
-      if (!ex || idx === null) {
-        engagedRef.current = true;
-        return;
-      }
-
-      setActiveIdx(idx);
-
-      queue(() => {
-        setItems((prev) =>
-          [
-            ...prev,
+      queue(
+        () => {
+          groupSequenceStartedRef.current = true;
+          setGroupMode(true);
+          setUsedFloaters((prev) => {
+            const next = new Set(prev);
+            GROUP_MEMBERS.forEach((member) => next.add(member.name));
+            return next;
+          });
+          setItems([
             {
               kind: "text",
               id: nextId(),
-              from: "user",
-              text: ex.user,
-            } as TextItem,
-          ].slice(-MAX_ITEMS),
-        );
+              from: "member",
+              sender: GROUP_MEMBERS[0],
+              text: GROUP_MESSAGES.theoQuestion,
+            },
+            { kind: "challenge", id: nextId() },
+            {
+              kind: "text",
+              id: nextId(),
+              from: "murph",
+              text: GROUP_MESSAGES.murphStandings,
+            },
+            { kind: "newsletter", id: nextId() },
+          ]);
+        },
+        0,
+        { allowAfterEngaged: true },
+      );
+      return () => {
+        cancelScheduledDemo();
+        cancelDemoRef.current = null;
+      };
+    }
+
+    const runCycle = () => {
+      if (cancelledRef.current || engagedRef.current) return;
+
+      const ex = AUTO_RUN_EXCHANGES[cycleRef.current];
+      cycleRef.current += 1;
+
+      if (!ex) {
+        startGroupSequence({ allowAfterEngaged: false });
+        return;
+      }
+
+      const idx = FLOATER_INDEX_BY_TEXT[ex.topic.toLowerCase()] ?? null;
+      setActiveIdx(idx);
+
+      queue(() => {
+        appendItems([
+          {
+            kind: "text",
+            id: nextId(),
+            from: "user",
+            text: ex.user,
+          },
+        ]);
         markFloaterUsed(idx);
         setActiveIdx(null);
       }, USER_BUBBLE_AT);
@@ -475,33 +792,7 @@ export function HeroClocksIn({
 
       queue(() => {
         setTyping(false);
-        setItems((prev) => {
-          const next: StreamItem[] = [...prev];
-          if (ex.card) {
-            next.push({ kind: "card", id: nextId(), result: ex.card });
-          }
-          if (ex.bloodwork) {
-            next.push({
-              kind: "bloodwork",
-              id: nextId(),
-              result: ex.bloodwork,
-            });
-          }
-          if (ex.order) {
-            next.push({
-              kind: "order",
-              id: nextId(),
-              result: ex.order,
-            });
-          }
-          next.push({
-            kind: "text",
-            id: nextId(),
-            from: "murph",
-            text: ex.murph,
-          });
-          return next.slice(-MAX_ITEMS);
-        });
+        appendItems(buildExchangeReplyItems(ex));
       }, REPLY_AT);
 
       queue(runCycle, CYCLE_LENGTH);
@@ -509,18 +800,13 @@ export function HeroClocksIn({
 
     queue(runCycle, FIRST_RUN_DELAY);
 
-    cancelDemoRef.current = () => {
-      cancelled = true;
-      timers.forEach(clearTimeout);
-      setTyping(false);
-      setActiveIdx(null);
-    };
-
     return () => {
-      cancelled = true;
-      timers.forEach(clearTimeout);
+      cancelScheduledDemo();
       cancelDemoRef.current = null;
     };
+    // The hero demo is intentionally started once on mount. User actions cancel
+    // and reschedule the tracked timers explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSend = async () => {
@@ -531,89 +817,81 @@ export function HeroClocksIn({
     cancelDemoRef.current?.();
     setComposerValue("");
 
-    setItems((prev) =>
-      [
-        ...prev,
-        {
-          kind: "text",
-          id: ++idRef.current,
-          from: "user",
-          text,
-        } as TextItem,
-      ].slice(-MAX_ITEMS),
-    );
+    appendItems([
+      {
+        kind: "text",
+        id: nextId(),
+        from: "user",
+        text,
+      },
+    ]);
 
     await new Promise((r) => setTimeout(r, 450));
     setTyping(true);
 
     await new Promise((r) => setTimeout(r, 1100));
     setTyping(false);
-    setItems((prev) =>
-      [
-        ...prev,
-        {
-          kind: "contact",
-          id: ++idRef.current,
-          info: contactInfo,
-          text: "Hey mate, shoot me a message and we can get started.",
-        } as ContactItem,
-      ].slice(-MAX_ITEMS),
-    );
+    appendItems([
+      {
+        kind: "contact",
+        id: nextId(),
+        info: contactInfo,
+        text: "Hey mate, shoot me a message and we can get started.",
+      },
+    ]);
   };
 
-  const runExchangeOnce = async (ex: Exchange) => {
+  const runExchangeOnce = (ex: Exchange) => {
     engagedRef.current = true;
     cancelDemoRef.current?.();
+    prepareScheduledDemo();
 
-    const idx = FLOATER_INDEX_BY_TOPIC[ex.topic.toLowerCase()] ?? null;
+    const idx = FLOATER_INDEX_BY_TEXT[ex.topic.toLowerCase()] ?? null;
     setActiveIdx(idx);
 
-    await new Promise((r) => setTimeout(r, 1400));
-    setItems((prev) =>
-      [
-        ...prev,
-        {
-          kind: "text",
-          id: ++idRef.current,
-          from: "user",
-          text: ex.user,
-        } as TextItem,
-      ].slice(-MAX_ITEMS),
+    queue(
+      () => {
+        appendItems([
+          {
+            kind: "text",
+            id: nextId(),
+            from: "user",
+            text: ex.user,
+          },
+        ]);
+        markFloaterUsed(idx);
+        setActiveIdx(null);
+      },
+      USER_BUBBLE_AT,
+      { allowAfterEngaged: true },
     );
-    markFloaterUsed(idx);
-    setActiveIdx(null);
 
-    await new Promise((r) => setTimeout(r, 550));
-    setTyping(true);
+    queue(
+      () => setTyping(true),
+      USER_BUBBLE_AT + 550,
+      { allowAfterEngaged: true },
+    );
 
-    await new Promise((r) => setTimeout(r, 1100));
-    setTyping(false);
-    setItems((prev) => {
-      const next: StreamItem[] = [...prev];
-      if (ex.card) {
-        next.push({ kind: "card", id: ++idRef.current, result: ex.card });
-      }
-      if (ex.bloodwork) {
-        next.push({
-          kind: "bloodwork",
-          id: ++idRef.current,
-          result: ex.bloodwork,
-        });
-      }
-      if (ex.order) {
-        next.push({ kind: "order", id: ++idRef.current, result: ex.order });
-      }
-      next.push({
-        kind: "text",
-        id: ++idRef.current,
-        from: "murph",
-        text: ex.murph,
-      });
-      return next.slice(-MAX_ITEMS);
-    });
+    queue(
+      () => {
+        setTyping(false);
+        appendItems(buildExchangeReplyItems(ex));
+      },
+      USER_BUBBLE_AT + 1650,
+      { allowAfterEngaged: true },
+    );
   };
 
   const handleFloaterClick = (f: Floater) => {
+    if (f.member) {
+      if (groupSequenceStartedRef.current) return;
+      engagedRef.current = true;
+      cancelDemoRef.current?.();
+      prepareScheduledDemo();
+      startGroupSequence({ allowAfterEngaged: true });
+      return;
+    }
+
     const ex = EXCHANGES.find(
       (e) => e.topic.toLowerCase() === f.text.toLowerCase(),
     );
@@ -684,6 +962,9 @@ export function HeroClocksIn({
           .hero-floater, .hero-floater--active, .hero-msg-in, .hero-typing-dot {
             animation: none !important;
           }
+          .hero-copy-layer, .hero-header-layer {
+            transition: none !important;
+          }
         }
       `}</style>
 
@@ -691,6 +972,18 @@ export function HeroClocksIn({
         {FLOATERS.map((f, i) => {
           if (usedFloaters.has(f.text)) return null;
           const isActive = activeIdx === i;
+          const isPerson = Boolean(f.member);
+          const isDisabled = isActive || (isPerson && groupMode);
+          const floaterStyle: FloaterStyle = {
+            top: f.top,
+            bottom: f.bottom,
+            left: f.left,
+            right: f.right,
+            "--dur": `${f.duration}s`,
+            "--delay": `${f.delay}s`,
+            "--fly-x": f.flyX,
+            "--fly-y": f.flyY,
+          };
           return (
             <div
               key={f.text}
@@ -698,25 +991,38 @@ export function HeroClocksIn({
                 "hero-floater absolute",
                 isActive && "hero-floater--active",
               )}
-              style={{
-                top: f.top,
-                bottom: f.bottom,
-                left: f.left,
-                right: f.right,
-                ["--dur" as keyof React.CSSProperties as string]: `${f.duration}s`,
-                ["--delay" as keyof React.CSSProperties as string]: `${f.delay}s`,
-                ["--fly-x" as keyof React.CSSProperties as string]: f.flyX,
-                ["--fly-y" as keyof React.CSSProperties as string]: f.flyY,
-              } as React.CSSProperties}
+              style={floaterStyle}
             >
               <button
                 type="button"
                 onClick={() => handleFloaterClick(f)}
-                disabled={isActive}
-                aria-label={`Ask Murph about ${f.text}`}
-                className="hero-floater-btn pointer-events-auto inline-block cursor-pointer select-none whitespace-nowrap bg-transparent px-1 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-[#c4a882]/60 transition-colors duration-200 ease-out hover:text-[#5a6e32] focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5a6e32]/40 disabled:cursor-default"
+                disabled={isDisabled}
+                aria-label={
+                  f.member
+                    ? `Start ${GROUP_NAME} group chat with ${f.text}`
+                    : `Ask Murph about ${f.text}`
+                }
+                className={cn(
+                  "hero-floater-btn pointer-events-auto cursor-pointer select-none whitespace-nowrap bg-transparent font-mono text-[10px] tracking-[0.18em] text-[#c4a882]/60 transition-colors duration-200 ease-out hover:text-[#5a6e32] focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5a6e32]/40 disabled:cursor-default",
+                  f.member
+                    ? "inline-flex items-center gap-1.5 rounded-full border border-[#c4a882]/25 bg-[#f5f0e8]/75 py-1 pl-1 pr-2.5 backdrop-blur-sm"
+                    : "inline-block px-1 py-0.5 uppercase",
+                )}
               >
-                {f.text}
+                {f.member ? (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className="size-[22px] rounded-full bg-cover bg-center ring-1 ring-[#c4a882]/25"
+                      style={{
+                        backgroundImage: `url('${f.member.avatarSrc}')`,
+                      }}
+                    />
+                    <span>{f.text}</span>
+                  </>
+                ) : (
+                  f.text
+                )}
               </button>
             </div>
           );
@@ -725,20 +1031,20 @@ export function HeroClocksIn({
 
       <div className="relative z-10 mx-auto grid min-h-svh max-w-[1280px] grid-cols-1 items-center gap-6 px-5 pt-20 pb-10 sm:gap-10 sm:px-10 sm:pb-16 lg:grid-cols-12 lg:gap-20 lg:px-16 lg:pt-24">
         <div className="relative z-10 lg:col-span-7">
-          <h1 className="font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-black">
-            <span className="block">Health is</span>
-            <span className="block">overwhelming.</span>
-          </h1>
-          <p className="mt-3 font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-[#5a6e32] lg:whitespace-nowrap">
-            Murph makes it easy.
-          </p>
-
-          <p className="mt-6 max-w-[52ch] text-[1.0625rem] leading-[1.7] text-pretty text-[#3a322a] lg:mt-10">
-            Murph is your personal health assistant. Wearables, bloodwork,
-            doctor visits, supplements, blood pressure, sleep. Murph runs it
-            all and helps you figure out what actually makes you healthier,
-            then build habits that stick.
-          </p>
+          <div className="grid">
+            <HeroCopyLayer
+              active={!groupMode}
+              ariaHidden={groupMode}
+              copy={HERO_COPY.act1}
+              headline="h1"
+            />
+            <HeroCopyLayer
+              active={groupMode}
+              ariaHidden={!groupMode}
+              copy={HERO_COPY.act2}
+              headline="div"
+            />
+          </div>
 
           <div className="mt-10 hidden lg:block">
             <LandingAuthActions
@@ -758,7 +1064,10 @@ export function HeroClocksIn({
                 <StatusBar />
                 <div className="relative">
                   <div className="absolute inset-x-0 top-0 z-20">
-                    <ChatHeader murphHeadshotSrc={murphHeadshotSrc} />
+                    <ChatHeader
+                      groupMode={groupMode}
+                      murphHeadshotSrc={murphHeadshotSrc}
+                    />
                   </div>
                   <div className="relative h-[460px] lg:h-[580px]">
                     <div
@@ -775,6 +1084,9 @@ export function HeroClocksIn({
                     >
                       <div className="flex min-h-full flex-col justify-end gap-2 px-3.5 pb-4 pt-[72px]">
                         {items.map((it, i) => {
+                          if (it.kind === "system") {
+                            return <SystemLine key={it.id} text={it.text} />;
+                          }
                           if (it.kind === "card") {
                             return (
                               <div key={it.id} className="hero-msg-in shrink-0">
@@ -796,6 +1108,26 @@ export function HeroClocksIn({
                               </div>
                             );
                           }
+                          if (it.kind === "challenge") {
+                            return (
+                              <div
+                                key={it.id}
+                                className="hero-msg-in mr-auto w-full max-w-[94%] shrink-0"
+                              >
+                                <ChallengeCard />
+                              </div>
+                            );
+                          }
+                          if (it.kind === "newsletter") {
+                            return (
+                              <div
+                                key={it.id}
+                                className="hero-msg-in mr-auto w-full max-w-[94%] shrink-0"
+                              >
+                                <NewsletterCard />
+                              </div>
+                            );
+                          }
                           if (it.kind === "contact") {
                             return (
                               <div
@@ -811,14 +1143,26 @@ export function HeroClocksIn({
                             );
                           }
                           const next = items[i + 1];
+                          const prev = items[i - 1];
                           const isTail =
                             !next ||
                             next.kind !== "text" ||
-                            next.from !== it.from;
+                            next.from !== it.from ||
+                            (next.from === "member" &&
+                              it.from === "member" &&
+                              next.sender.id !== it.sender.id);
+                          const showSenderLabel =
+                            it.from === "member" &&
+                            (!prev ||
+                              prev.kind !== "text" ||
+                              prev.from !== "member" ||
+                              prev.sender.id !== it.sender.id);
                           return (
                             <MessageBubble
                               key={it.id}
                               from={it.from}
+                              sender={it.from === "member" ? it.sender : undefined}
+                              showSenderLabel={showSenderLabel}
                               text={it.text}
                               isTail={isTail}
                             />
@@ -850,6 +1194,45 @@ export function HeroClocksIn({
         </div>
       </div>
     </section>
+  );
+}
+
+function HeroCopyLayer({
+  active,
+  ariaHidden,
+  copy,
+  headline: Headline,
+}: {
+  active: boolean;
+  ariaHidden: boolean;
+  copy: {
+    line1: string;
+    line2: string;
+    paragraph: string;
+  };
+  // Only the act-1 layer is the document h1; the act-2 layer is a purely
+  // visual crossfade twin, so it must not add a second h1 to the page.
+  headline: "h1" | "div";
+}) {
+  return (
+    <div
+      aria-hidden={ariaHidden}
+      className={cn(
+        "hero-copy-layer col-start-1 row-start-1 transition-opacity duration-500 ease-out",
+        active ? "opacity-100" : "pointer-events-none opacity-0",
+      )}
+    >
+      <Headline className="font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-black">
+        <span className="block">{copy.line1}</span>
+        <span className="mt-3 block text-[#5a6e32] lg:whitespace-nowrap">
+          {copy.line2}
+        </span>
+      </Headline>
+
+      <p className="mt-6 max-w-[52ch] text-[1.0625rem] leading-[1.7] text-pretty text-[#3a322a] lg:mt-10">
+        {copy.paragraph}
+      </p>
+    </div>
   );
 }
 
@@ -1091,8 +1474,10 @@ function StatusBar() {
 }
 
 function ChatHeader({
+  groupMode,
   murphHeadshotSrc,
 }: {
+  groupMode: boolean;
   murphHeadshotSrc: MurphHeadshotSrc;
 }) {
   return (
@@ -1112,21 +1497,26 @@ function ChatHeader({
         </span>
       </div>
 
-      <div className="flex flex-1 flex-col items-center">
-        <MurphHeadshotAvatar src={murphHeadshotSrc} />
-        <div className="-mt-[5px] flex items-center gap-[3px] rounded-full bg-[#2d3436]/10 px-2.5 py-[3px] backdrop-blur-md ring-1 ring-inset ring-white/50">
-          <p className="text-[0.6875rem] font-semibold tracking-tight text-[#2d3436]">
-            Murph
-          </p>
-          <svg width="5" height="8" viewBox="0 0 5 8" fill="none" aria-hidden="true">
-            <path
-              d="M1 1L4 4L1 7"
-              stroke="#736a58"
-              strokeWidth="1.3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+      <div className="grid flex-1 place-items-center">
+        <div
+          aria-hidden={groupMode}
+          className={cn(
+            "hero-header-layer col-start-1 row-start-1 flex flex-col items-center transition-opacity duration-500 ease-out",
+            groupMode ? "pointer-events-none opacity-0" : "opacity-100",
+          )}
+        >
+          <MurphHeadshotAvatar src={murphHeadshotSrc} />
+          <HeaderNamePill label="Murph" />
+        </div>
+        <div
+          aria-hidden={!groupMode}
+          className={cn(
+            "hero-header-layer col-start-1 row-start-1 flex flex-col items-center transition-opacity duration-500 ease-out",
+            groupMode ? "opacity-100" : "pointer-events-none opacity-0",
+          )}
+        >
+          <GroupHeaderAvatars murphHeadshotSrc={murphHeadshotSrc} />
+          <HeaderNamePill label={GROUP_NAME} />
         </div>
       </div>
 
@@ -1155,48 +1545,154 @@ function ChatHeader({
   );
 }
 
+function HeaderNamePill({ label }: { label: string }) {
+  return (
+    <div className="-mt-[5px] flex items-center gap-[3px] rounded-full bg-[#2d3436]/10 px-2.5 py-[3px] backdrop-blur-md ring-1 ring-inset ring-white/50">
+      <p className="text-[0.6875rem] font-semibold tracking-tight text-[#2d3436]">
+        {label}
+      </p>
+      <svg width="5" height="8" viewBox="0 0 5 8" fill="none" aria-hidden="true">
+        <path
+          d="M1 1L4 4L1 7"
+          stroke="#736a58"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  );
+}
+
+function GroupHeaderAvatars({
+  murphHeadshotSrc,
+}: {
+  murphHeadshotSrc: MurphHeadshotSrc;
+}) {
+  return (
+    <div aria-hidden="true" className="relative h-[38px] w-[86px]">
+      <MurphHeadshotAvatar
+        className="absolute left-0 top-0 size-[32px] ring-2 ring-[#f5f0e8]"
+        src={murphHeadshotSrc}
+      />
+      {GROUP_MEMBERS.map((member, index) => (
+        <div
+          key={member.id}
+          className="absolute top-0 size-[32px] rounded-full bg-cover bg-center ring-2 ring-[#f5f0e8]"
+          style={{
+            backgroundImage: `url('${member.avatarSrc}')`,
+            left: `${18 + index * 18}px`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 function MessageBubble({
   from,
   isTail,
+  sender,
+  showSenderLabel,
   text,
 }: {
-  from: "user" | "murph";
+  from: TextItem["from"];
   isTail: boolean;
+  sender?: GroupMember;
+  showSenderLabel?: boolean;
   text: string;
 }) {
   const isUser = from === "user";
-  const tailFill = isUser ? "#5a6e32" : "#ffffff";
+  const isMember = from === "member" && Boolean(sender);
+  const tailFill = isUser ? "#5a6e32" : isMember ? "#ece7dc" : "#ffffff";
+  const bubbleClassName = cn(
+    "rounded-[17px] px-3.5 py-2",
+    isUser
+      ? "bg-[#5a6e32] text-white"
+      : isMember
+        ? "bg-[#ece7dc] text-[#2d3436]"
+        : "bg-white text-[#2d3436]",
+  );
+  const tailClassName = cn(
+    "pointer-events-none absolute -bottom-[2px]",
+    isUser ? "-right-[3px]" : "-left-[3px] -scale-x-100",
+  );
 
   return (
     <div
       className={cn(
         "hero-msg-in relative",
-        isUser ? "ml-auto max-w-[80%]" : "mr-auto max-w-[84%]",
+        isUser ? "ml-auto max-w-[80%]" : "mr-auto max-w-[86%]",
       )}
     >
-      <div
-        className={cn(
-          "rounded-[17px] px-3.5 py-2",
-          isUser ? "bg-[#5a6e32] text-white" : "bg-white text-[#2d3436]",
-        )}
-      >
-        <p className="text-[0.875rem] leading-[1.5] tracking-tight">{text}</p>
-      </div>
-      {isTail ? (
-        <svg
-          aria-hidden="true"
-          width="14"
-          height="9"
-          viewBox="0 0 14 9"
-          fill={tailFill}
-          className={cn(
-            "pointer-events-none absolute -bottom-[2px]",
-            isUser ? "-right-[3px]" : "-left-[3px] -scale-x-100",
-          )}
-        >
-          <path d="M0 0 C 0 4 4 8 14 8 C 12.5 7.5 8.5 5 6 0 Z" />
-        </svg>
-      ) : null}
+      {isMember && sender ? (
+        <div className="flex items-end gap-1.5">
+          <div
+            aria-hidden="true"
+            className="mb-0.5 size-[18px] shrink-0 rounded-full bg-cover bg-center ring-1 ring-[#c4a882]/25"
+            style={{ backgroundImage: `url('${sender.avatarSrc}')` }}
+          />
+          <div className="min-w-0">
+            {showSenderLabel ? (
+              <p className="mb-0.5 pl-1 font-mono text-[9px] tracking-[0.08em] text-[#736a58]">
+                {sender.name}
+              </p>
+            ) : null}
+            <div className="relative">
+              <div className={bubbleClassName}>
+                <p className="text-[0.875rem] leading-[1.5] tracking-tight">
+                  {text}
+                </p>
+              </div>
+              {isTail ? (
+                <MessageTail className={tailClassName} fill={tailFill} />
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="relative">
+          <div className={bubbleClassName}>
+            <p className="text-[0.875rem] leading-[1.5] tracking-tight">
+              {text}
+            </p>
+          </div>
+          {isTail ? (
+            <MessageTail className={tailClassName} fill={tailFill} />
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MessageTail({
+  className,
+  fill,
+}: {
+  className: string;
+  fill: string;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="9"
+      viewBox="0 0 14 9"
+      fill={fill}
+      className={className}
+    >
+      <path d="M0 0 C 0 4 4 8 14 8 C 12.5 7.5 8.5 5 6 0 Z" />
+    </svg>
+  );
+}
+
+function SystemLine({ text }: { text: string }) {
+  return (
+    <div className="hero-msg-in flex justify-center">
+      <p className="max-w-[82%] rounded-full bg-[#2d3436]/10 px-3 py-1 text-center text-[10px] font-medium leading-[1.35] tracking-tight text-[#736a58]">
+        {text}
+      </p>
     </div>
   );
 }
