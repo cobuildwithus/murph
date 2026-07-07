@@ -99,7 +99,7 @@ export function NewsletterCard({ className }: { className?: string }) {
         <span>Weekly newsletter · Sunday 8:02 AM</span>
       </div>
       <p className="mt-2 font-serif text-[15px] font-semibold leading-tight text-[#2d3436]">
-        The Crew: week 3 in health
+        Your crew: week 3 in health
       </p>
       <div className="mt-2 divide-y divide-[#2d3436]/[0.06]">
         {NEWSLETTER_ROWS.map((row) => (

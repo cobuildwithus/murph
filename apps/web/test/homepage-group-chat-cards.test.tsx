@@ -36,7 +36,7 @@ test("group chat cards render the challenge and newsletter copy", () => {
   assert.doesNotMatch(challengeMarkup, /best HRV/i);
 
   assert.match(newsletterMarkup, /Weekly newsletter · Sunday 8:02 AM/);
-  assert.match(newsletterMarkup, /The Crew: week 3 in health/);
+  assert.match(newsletterMarkup, /Your crew: week 3 in health/);
   assert.match(newsletterMarkup, /Theo · best sleep week since May/);
   assert.match(newsletterMarkup, /Maya · 4 sunrise walks logged/);
   assert.match(newsletterMarkup, /Sam · steps up 12% on baseline/);

@@ -310,7 +310,9 @@ const AUTO_RUN_TOPICS = [
   "Dentist",
 ] as const;
 
-const GROUP_NAME = "The Crew";
+// Unnamed iMessage groups are titled by participant count (excluding you):
+// Murph plus the three joined members.
+const GROUP_HEADER_LABEL = `${GROUP_MEMBERS.length + 1} People`;
 
 const HERO_COPY = {
   act1: {
@@ -1002,7 +1004,7 @@ export function HeroClocksIn({
                 disabled={isDisabled}
                 aria-label={
                   f.member
-                    ? `Start ${GROUP_NAME} group chat with ${f.text}`
+                    ? `Start a group chat with ${f.text}`
                     : `Ask Murph about ${f.text}`
                 }
                 className={cn(
@@ -1514,7 +1516,7 @@ function ChatHeader({
           )}
         >
           <GroupHeaderAvatars murphHeadshotSrc={murphHeadshotSrc} />
-          <HeaderNamePill label={GROUP_NAME} />
+          <HeaderNamePill label={GROUP_HEADER_LABEL} />
         </div>
       </div>
 
@@ -1562,24 +1564,33 @@ function HeaderNamePill({ label }: { label: string }) {
   );
 }
 
+// Matches Apple's unnamed-group iMessage header: a bunched avatar cluster
+// (two small in back on top, two larger in front on the bottom) above an
+// "N People" pill, rather than a flat overlapping row.
 function GroupHeaderAvatars({
   murphHeadshotSrc,
 }: {
   murphHeadshotSrc: MurphHeadshotSrc;
 }) {
+  const cluster = [
+    { src: GROUP_MEMBERS[0].avatarSrc, size: 20, left: 8, top: 0, z: 0 },
+    { src: GROUP_MEMBERS[1].avatarSrc, size: 20, left: 29, top: 2, z: 0 },
+    { src: GROUP_MEMBERS[2].avatarSrc, size: 22, left: 31, top: 17, z: 10 },
+    { src: murphHeadshotSrc, size: 27, left: 8, top: 15, z: 20 },
+  ];
   return (
-    <div aria-hidden="true" className="relative h-[38px] w-[86px]">
-      <MurphHeadshotAvatar
-        className="absolute left-0 top-0 size-[32px] ring-2 ring-[#f5f0e8]"
-        src={murphHeadshotSrc}
-      />
-      {GROUP_MEMBERS.map((member, index) => (
+    <div aria-hidden="true" className="relative h-[42px] w-[57px]">
+      {cluster.map((avatar) => (
         <div
-          key={member.id}
-          className="absolute top-0 size-[32px] rounded-full bg-cover bg-center ring-2 ring-[#f5f0e8]"
+          key={avatar.src}
+          className="absolute rounded-full bg-cover bg-center ring-2 ring-[#f5f0e8]"
           style={{
-            backgroundImage: `url('${member.avatarSrc}')`,
-            left: `${18 + index * 18}px`,
+            backgroundImage: `url('${avatar.src}')`,
+            height: `${avatar.size}px`,
+            left: `${avatar.left}px`,
+            top: `${avatar.top}px`,
+            width: `${avatar.size}px`,
+            zIndex: avatar.z,
           }}
         />
       ))}

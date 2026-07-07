@@ -68,11 +68,12 @@ test("HeroClocksIn renders the reduced-motion group seed", async () => {
   assert.match(text, /Walk challenge · Day 5 of 7/);
   assert.match(text, /Standings, day 5 of 7\. Maya is one sunrise walk/);
   assert.match(text, /Weekly newsletter · Sunday 8:02 AM/);
-  assert.match(text, /The Crew: week 3 in health/);
+  assert.match(text, /Your crew: week 3 in health/);
+  assert.match(text, /4 People/);
   assert.match(text, /Health is a team sport\./);
   assert.equal(
     view.container.querySelector(
-      'button[aria-label="Start The Crew group chat with Theo"]',
+      'button[aria-label="Start a group chat with Theo"]',
     ),
     null,
   );
@@ -90,7 +91,7 @@ test("topic floater clicks during group mode keep scheduled group beats", async 
   });
 
   const theoButton = view.container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Start The Crew group chat with Theo"]',
+    'button[aria-label="Start a group chat with Theo"]',
   );
   assert.ok(theoButton);
 
