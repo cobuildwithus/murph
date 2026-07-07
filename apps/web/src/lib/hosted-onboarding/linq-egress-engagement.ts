@@ -91,10 +91,9 @@ export function decideHostedLinqRecentInbound(input: {
 }
 
 export async function recordHostedMemberLinqInboundEngagementTx(input: {
-  chatId: string | null | undefined;
+  binding: "home" | "pending";
   memberId: string;
   occurredAt: Date | string;
-  linePhoneNumber?: string | null;
   now?: Date;
   prisma: HostedLinqEngagementClient;
 }): Promise<void> {
@@ -105,29 +104,26 @@ export async function recordHostedMemberLinqInboundEngagementTx(input: {
   if (!occurredAt) {
     return;
   }
-  const chatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.chatId);
-  if (chatLookupKeys.length === 0) {
+
+  if (input.binding === "home") {
+    await input.prisma.hostedMemberRouting.updateMany({
+      where: {
+        memberId: input.memberId,
+        OR: [
+          { linqLastInboundAt: null },
+          { linqLastInboundAt: { lt: occurredAt } },
+        ],
+      },
+      data: {
+        linqLastInboundAt: occurredAt,
+      },
+    });
     return;
   }
 
   await input.prisma.hostedMemberRouting.updateMany({
     where: {
-      linqChatLookupKey: { in: chatLookupKeys },
       memberId: input.memberId,
-      OR: [
-        { linqLastInboundAt: null },
-        { linqLastInboundAt: { lt: occurredAt } },
-      ],
-    },
-    data: {
-      linqLastInboundAt: occurredAt,
-    },
-  });
-
-  await input.prisma.hostedMemberRouting.updateMany({
-    where: {
-      memberId: input.memberId,
-      pendingLinqChatLookupKey: { in: chatLookupKeys },
       OR: [
         { pendingLinqLastInboundAt: null },
         { pendingLinqLastInboundAt: { lt: occurredAt } },
@@ -137,7 +133,6 @@ export async function recordHostedMemberLinqInboundEngagementTx(input: {
       pendingLinqLastInboundAt: occurredAt,
     },
   });
-
 }
 
 export async function recordHostedThreadRouteLinqInboundEngagementTx(input: {
@@ -474,7 +469,7 @@ async function readHostedLinqCurrentInboundDecision(input: {
     });
   } else {
     await recordHostedMemberLinqInboundEngagementTx({
-      chatId: proof.target,
+      binding: "home",
       memberId: input.memberId,
       now: input.now,
       occurredAt,
