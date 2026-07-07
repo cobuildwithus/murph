@@ -56,12 +56,14 @@ afterEach(async () => {
     await cleanup();
   }
   activeCleanups.clear();
+  vi.useRealTimers();
 });
 
 test("HeroClocksIn renders the reduced-motion group seed", async () => {
   const view = await renderHero({ messengerChannel: "imessage" });
 
   const text = view.container.textContent ?? "";
+  assert.equal(view.container.querySelectorAll("h1").length, 1);
   assert.match(text, /ok who's actually winning this thing/);
   assert.match(text, /Walk challenge · Day 5 of 7/);
   assert.match(text, /Standings, day 5 of 7\. Maya is one sunrise walk/);
@@ -78,13 +80,54 @@ test("HeroClocksIn renders the reduced-motion group seed", async () => {
   await view.cleanup();
 });
 
+test("topic floater clicks during group mode keep scheduled group beats", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  const theoButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Start The Crew group chat with Theo"]',
+  );
+  assert.ok(theoButton);
+
+  await act(async () => {
+    theoButton.click();
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  const stepsButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Steps"]',
+  );
+  assert.ok(stepsButton);
+
+  await act(async () => {
+    stepsButton.click();
+  });
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(13_100);
+  });
+
+  assert.match(view.container.textContent ?? "", /Walk challenge · Day 5 of 7/);
+
+  await view.cleanup();
+});
+
 async function renderHero({
   messengerChannel,
+  reducedMotion = true,
+  flushInitialTimers = true,
 }: {
   messengerChannel: HeroMessengerChannel;
+  reducedMotion?: boolean;
+  flushInitialTimers?: boolean;
 }) {
   const { document, window } = parseHTML("<html><body><div id='root'></div></body></html>");
-  const cleanupGlobals = installGlobals(window, document);
+  const cleanupGlobals = installGlobals(window, document, { reducedMotion });
   activeCleanups.add(cleanupGlobals);
   const container = document.getElementById("root");
   assert.ok(container);
@@ -104,9 +147,11 @@ async function renderHero({
       }),
     );
   });
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
+  if (flushInitialTimers) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
 
   return {
     cleanup: async () => {
@@ -125,6 +170,7 @@ async function renderHero({
 function installGlobals(
   window: Window & typeof globalThis,
   document: Document,
+  { reducedMotion }: { reducedMotion: boolean },
 ) {
   class ResizeObserverMock {
     observe() {}
@@ -133,7 +179,7 @@ function installGlobals(
   }
 
   const matchMedia: typeof window.matchMedia = (query) => ({
-    matches: query === "(prefers-reduced-motion: reduce)",
+    matches: reducedMotion && query === "(prefers-reduced-motion: reduce)",
     media: query,
     onchange: null,
     addEventListener() {},

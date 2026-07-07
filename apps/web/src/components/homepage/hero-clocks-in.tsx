@@ -317,7 +317,7 @@ const HERO_COPY = {
     line1: "Health is overwhelming.",
     line2: "Murph makes it easy.",
     paragraph:
-      "Murph is your personal health assistant. Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep. Murph runs it all and helps you figure out what actually makes you healthier, then build habits that stick. And it gets your friends and family in on it.",
+      "Murph is your personal health assistant. Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep. Murph runs it all and helps you figure out what actually makes you healthier, then build habits that stick. It also runs health challenges with your friends and sends your family a weekly health newsletter.",
   },
   act2: {
     line1: "Health is a team sport.",
@@ -842,9 +842,11 @@ export function HeroClocksIn({
   };
 
   const runExchangeOnce = (ex: Exchange) => {
-    engagedRef.current = true;
-    cancelDemoRef.current?.();
-    prepareScheduledDemo();
+    if (!groupSequenceStartedRef.current) {
+      engagedRef.current = true;
+      cancelDemoRef.current?.();
+      prepareScheduledDemo();
+    }
 
     const idx = FLOATER_INDEX_BY_TEXT[ex.topic.toLowerCase()] ?? null;
     setActiveIdx(idx);
@@ -905,6 +907,7 @@ export function HeroClocksIn({
     ) : (
       <IMessageLogo className="size-[18px]" />
     );
+  const activeCopy = groupMode ? HERO_COPY.act2 : HERO_COPY.act1;
 
   return (
     <section className="relative min-h-svh overflow-hidden bg-[#f5f0e8]">
@@ -1031,18 +1034,17 @@ export function HeroClocksIn({
 
       <div className="relative z-10 mx-auto grid min-h-svh max-w-[1280px] grid-cols-1 items-center gap-6 px-5 pt-20 pb-10 sm:gap-10 sm:px-10 sm:pb-16 lg:grid-cols-12 lg:gap-20 lg:px-16 lg:pt-24">
         <div className="relative z-10 lg:col-span-7">
+          <h1 className="sr-only">{`${activeCopy.line1} ${activeCopy.line2}`}</h1>
           <div className="grid">
             <HeroCopyLayer
               active={!groupMode}
               ariaHidden={groupMode}
               copy={HERO_COPY.act1}
-              headline="h1"
             />
             <HeroCopyLayer
               active={groupMode}
               ariaHidden={!groupMode}
               copy={HERO_COPY.act2}
-              headline="div"
             />
           </div>
 
@@ -1201,7 +1203,6 @@ function HeroCopyLayer({
   active,
   ariaHidden,
   copy,
-  headline: Headline,
 }: {
   active: boolean;
   ariaHidden: boolean;
@@ -1210,9 +1211,6 @@ function HeroCopyLayer({
     line2: string;
     paragraph: string;
   };
-  // Only the act-1 layer is the document h1; the act-2 layer is a purely
-  // visual crossfade twin, so it must not add a second h1 to the page.
-  headline: "h1" | "div";
 }) {
   return (
     <div
@@ -1222,12 +1220,12 @@ function HeroCopyLayer({
         active ? "opacity-100" : "pointer-events-none opacity-0",
       )}
     >
-      <Headline className="font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-black">
+      <div className="font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-black">
         <span className="block">{copy.line1}</span>
         <span className="mt-3 block text-[#5a6e32] lg:whitespace-nowrap">
           {copy.line2}
         </span>
-      </Headline>
+      </div>
 
       <p className="mt-6 max-w-[52ch] text-[1.0625rem] leading-[1.7] text-pretty text-[#3a322a] lg:mt-10">
         {copy.paragraph}
