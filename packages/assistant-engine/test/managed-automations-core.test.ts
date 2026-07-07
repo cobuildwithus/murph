@@ -252,6 +252,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(productUpdatesRecord?.instructions).toContain('context already surfaced for ordinary assistance')
     expect(productUpdatesRecord?.instructions).toContain('Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used')
     expect(productUpdatesRecord?.instructions).toContain('Drop items already pitched in a ledger section from roughly the last three months')
+    expect(productUpdatesRecord?.instructions).toContain('Drop items this conversation cannot actually do right now')
     expect(productUpdatesRecord?.instructions).toContain('Keep this scheduled note text-only')
     expect(productUpdatesRecord?.instructions).not.toContain('Choose 3-7 items')
     expect(productUpdatesRecord?.instructions).not.toContain('murph.attach_response_media')

@@ -365,6 +365,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('context already surfaced for ordinary assistance')
     expect(seed.instructions).toContain('Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used')
     expect(seed.instructions).toContain('Drop items already pitched in a ledger section from roughly the last three months')
+    expect(seed.instructions).toContain('Drop items this conversation cannot actually do right now')
     expect(seed.instructions).toContain('Keep this scheduled note text-only')
     expect(seed.instructions).not.toContain('Choose 3-7 items')
     expect(seed.instructions).not.toContain('murph.attach_response_media')
