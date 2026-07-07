@@ -204,6 +204,55 @@ describe('device activity triggered automations', () => {
     )
   })
 
+  it('matches activity kind from sportName-only device sessions', async () => {
+    const automation = createDeviceActivityAutomation({
+      activityKind: 'running',
+      after: '2026-06-07T11:00:00.000Z',
+      automationId: 'auto_run_sport_name',
+      instructions: 'Ask how the run felt.',
+    })
+    deviceActivityMocks.automations = [automation]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_sport_name_run',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          sportName: 'Run',
+          title: 'Imported workout',
+          workoutType: null,
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:01:00.000Z',
+      scheduled: 1,
+    })
+
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]?.prompt).toContain('Kind: running')
+    expect(jobs[0]?.prompt).toContain('Imported workout')
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: '2026-06-07T12:00:00.000Z',
+        afterEntityId: 'evt_sport_name_run',
+        afterOccurredAt: '2026-06-07T12:00:00.000Z',
+        expectedActivityKind: 'running',
+        expectedSource: undefined,
+        lookup: 'auto_run_sport_name',
+        vaultRoot,
+      }),
+    )
+  })
+
   it('keeps explicit whoop device activity automations scoped to whoop providers', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({
@@ -1537,9 +1586,10 @@ function createActivityEntity(input: {
   occurredAt: string
   recordedAt?: string
   sourceProviderSlug?: string
+  sportName?: string
   title: string
   workoutSport?: Record<string, string>
-  workoutType?: string
+  workoutType?: string | null
 }): CanonicalEntity {
   return {
     attributes: {
@@ -1552,9 +1602,12 @@ function createActivityEntity(input: {
         system: input.externalRefSystem ?? 'junction',
       },
       ...(input.recordedAt ? { recordedAt: input.recordedAt } : {}),
-      workout: input.workoutSport
-        ? { sport: input.workoutSport }
-        : { type: input.workoutType ?? 'activity' },
+      ...(input.sportName ? { sportName: input.sportName } : {}),
+      ...(input.workoutSport
+        ? { workout: { sport: input.workoutSport } }
+        : input.workoutType === null
+          ? {}
+          : { workout: { type: input.workoutType ?? 'activity' } }),
     },
     body: null,
     date: '2026-06-07',
