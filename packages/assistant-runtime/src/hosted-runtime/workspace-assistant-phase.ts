@@ -33,6 +33,7 @@ import {
   upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
   type AssistantExecutionContext,
+  type AssistantInputEventRecord,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
 import type {
@@ -45,8 +46,9 @@ import {
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
 } from "@murphai/device-syncd/connect-config";
-import type {
-  AssistantCurrentDeliveryRoute,
+import {
+  type AssistantCurrentDeliveryRoute,
+  normalizeAssistantRouteString,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 
 import {
@@ -74,9 +76,6 @@ import {
   readHostedAssistantInputCurrentDeliveryRoute,
   resolveUnambiguousCurrentDeliveryRoute,
 } from "./current-delivery-route.ts";
-import {
-  readCurrentDirectAssistantSessionRoute,
-} from "./direct-assistant-session-route.ts";
 import {
   runHostedAssistantAutomationLane,
 } from "./maintenance.ts";
@@ -4127,6 +4126,18 @@ function isHostedAssistantDeliveryOutcomeTerminalized(
     && outcome.deliveryStatus !== "sending";
 }
 
+const HOSTED_TERMINAL_OUTBOX_FAILURE_DIRECT_REPLY_CHANNELS = new Set([
+  "linq",
+  "telegram",
+]);
+
+type HostedTerminalOutboxFailureIntent =
+  NonNullable<Awaited<ReturnType<typeof readAssistantOutboxIntent>>>;
+type HostedTerminalOutboxFailureRoute = Pick<
+  AssistantInputEventRecord,
+  "conversation" | "replyTarget"
+>;
+
 async function stageHostedTerminalOutboxFailureInputs(input: {
   deliveryEffects: HostedAssistantDeliveryEffects;
   outcomes: readonly HostedAssistantDeliveryOutcome[];
@@ -4138,21 +4149,19 @@ async function stageHostedTerminalOutboxFailureInputs(input: {
   if (terminalFailures.length === 0) {
     return 0;
   }
-  const route = await readCurrentDirectAssistantSessionRoute(input.vaultRoot);
-  if (!route) {
-    return 0;
-  }
   const effectsById = new Map(
     input.deliveryEffects.map((effect) => [effect.effectId, effect]),
   );
   let staged = 0;
 
   for (const outcome of terminalFailures) {
-    const occurredAt = await readHostedTerminalOutboxFailureInputOccurredAt({
-      effectId: outcome.effectId,
-      vaultRoot: input.vaultRoot,
-    });
+    const intent = await readAssistantOutboxIntent(input.vaultRoot, outcome.effectId);
+    const occurredAt = readHostedTerminalOutboxFailureInputOccurredAt(intent);
     if (!occurredAt) {
+      continue;
+    }
+    const route = buildHostedTerminalOutboxFailureRouteFromIntent(intent);
+    if (!route) {
       continue;
     }
     const identity = safeHostedAssistantInputTokenOrHash(
@@ -4205,15 +4214,52 @@ async function stageHostedTerminalOutboxFailureInputs(input: {
   return staged;
 }
 
-async function readHostedTerminalOutboxFailureInputOccurredAt(input: {
-  effectId: string;
-  vaultRoot: string;
-}): Promise<string | null> {
-  const intent = await readAssistantOutboxIntent(input.vaultRoot, input.effectId);
+function readHostedTerminalOutboxFailureInputOccurredAt(
+  intent: HostedTerminalOutboxFailureIntent | null,
+): string | null {
   const createdAt = intent?.createdAt ?? null;
   return typeof createdAt === "string" && Number.isFinite(Date.parse(createdAt))
     ? createdAt
     : null;
+}
+
+function buildHostedTerminalOutboxFailureRouteFromIntent(
+  intent: HostedTerminalOutboxFailureIntent | null,
+): HostedTerminalOutboxFailureRoute | null {
+  if (intent?.threadIsDirect !== true) {
+    return null;
+  }
+
+  const channel = normalizeHostedTerminalOutboxFailureDirectReplyChannel(
+    intent.channel,
+  );
+  if (!channel) {
+    return null;
+  }
+
+  const replyTargetThreadId =
+    normalizeAssistantRouteString(intent.bindingDelivery?.target)
+    ?? normalizeAssistantRouteString(intent.explicitTarget)
+    ?? normalizeAssistantRouteString(intent.threadId);
+  if (!replyTargetThreadId) {
+    return null;
+  }
+
+  return {
+    conversation: {
+      accountId: normalizeAssistantRouteString(intent.identityId),
+      actorId: normalizeAssistantRouteString(intent.actorId),
+      actorIsSelf: false,
+      source: channel,
+      threadId: normalizeAssistantRouteString(intent.threadId),
+      threadIsDirect: true,
+    },
+    replyTarget: {
+      channel,
+      messageId: null,
+      threadId: replyTargetThreadId,
+    },
+  };
 }
 
 function shouldStageHostedTerminalOutboxFailureInput(
@@ -4222,14 +4268,18 @@ function shouldStageHostedTerminalOutboxFailureInput(
   if (outcome.deliveryStatus !== "failed" || outcome.retryable === true) {
     return false;
   }
-  return isHostedMemberFacingDeliveryChannel(outcome.deliveryChannel);
+  return normalizeHostedTerminalOutboxFailureDirectReplyChannel(
+    outcome.deliveryChannel,
+  ) !== null;
 }
 
-function isHostedMemberFacingDeliveryChannel(channel: string | null): boolean {
-  return channel === "email"
-    || channel === "linq"
-    || channel === "telegram"
-    || channel === "whatsapp";
+function normalizeHostedTerminalOutboxFailureDirectReplyChannel(
+  value: string | null | undefined,
+): string | null {
+  const channel = normalizeAssistantRouteString(value);
+  return channel && HOSTED_TERMINAL_OUTBOX_FAILURE_DIRECT_REPLY_CHANNELS.has(channel)
+    ? channel
+    : null;
 }
 
 function renderHostedTerminalOutboxFailureSystemNote(input: {
