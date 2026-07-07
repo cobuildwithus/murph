@@ -6,7 +6,7 @@ import {
   isValidIanaTimeZone,
   type ExperimentFrontmatter,
 } from '@murphai/contracts'
-import { loadVault } from '@murphai/core'
+import { isVaultError, loadVault, patchAutomation } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 
@@ -33,6 +33,7 @@ const PROGRESS_MILESTONE_TAGS = ['experiment', 'progress-card', 'milestone'] as 
 const FINAL_RESULTS_TAGS = ['experiment', 'final-results', 'progress-card'] as const
 const AUTOMATION_ID_PREFIX = 'automation_'
 const EXPERIMENT_ID_PREFIX = 'exp_'
+const ACTIVITY_NUDGE_AUTOMATION_SLUG_PREFIX = 'experiment-activity-nudge-'
 
 export async function buildExperimentLifecycleSeeds(
   input: BuildExperimentLifecycleSeedsInput,
@@ -295,8 +296,31 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
     asOf: interventionEnd,
     requestId: null,
   })
+  await archiveExperimentActivityNudgeAutomation({
+    experimentSlug: experiment.slug,
+    vaultRoot: input.vault,
+  })
 
   return { kind: 'continue' }
+}
+
+async function archiveExperimentActivityNudgeAutomation(input: {
+  experimentSlug: string
+  vaultRoot: string
+}): Promise<void> {
+  try {
+    await patchAutomation({
+      lookup: `${ACTIVITY_NUDGE_AUTOMATION_SLUG_PREFIX}${input.experimentSlug}`,
+      status: 'archived',
+      vaultRoot: input.vaultRoot,
+    })
+  } catch (error) {
+    if (isVaultError(error) && error.code === 'VAULT_AUTOMATION_MISSING') {
+      return
+    }
+    // Best-effort cleanup: outcome persistence is the durable precondition.
+    void error
+  }
 }
 
 function isExperimentFinalResultsAutomation(tags: readonly string[]): boolean {

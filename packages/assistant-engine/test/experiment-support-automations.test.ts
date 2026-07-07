@@ -6,6 +6,17 @@ const vaultServicesMocks = vi.hoisted(() => ({
   writeExperimentOutcome: vi.fn(),
   showExperiment: vi.fn(),
 }))
+const coreMocks = vi.hoisted(() => ({
+  patchAutomation: vi.fn(),
+}))
+
+vi.mock('@murphai/core', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return {
+    ...actual,
+    patchAutomation: coreMocks.patchAutomation,
+  }
+})
 
 vi.mock('@murphai/vault-usecases/vault-services', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
@@ -22,7 +33,7 @@ vi.mock('@murphai/vault-usecases/vault-services', async (importOriginal) => {
   }
 })
 
-import { createExperiment, initializeVault, updateExperiment } from '@murphai/core'
+import { createExperiment, initializeVault, updateExperiment, VaultError } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
@@ -265,6 +276,7 @@ function buildShowExperimentResult(frontmatter: Record<string, unknown>) {
 function resetPreconditionMocks() {
   vaultServicesMocks.writeExperimentOutcome.mockReset().mockResolvedValue({})
   vaultServicesMocks.showExperiment.mockReset()
+  coreMocks.patchAutomation.mockReset().mockResolvedValue({})
 }
 
 const FINAL_RESULTS_AUTOMATION_ID = 'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
@@ -304,6 +316,66 @@ it('persists the deterministic outcome with a pinned asOf for an eligible final-
     // across cron retries crossing a UTC midnight boundary.
     asOf: '2026-04-28',
     requestId: null,
+  })
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
+  expect(
+    vaultServicesMocks.writeExperimentOutcome.mock.invocationCallOrder[0],
+  ).toBeLessThan(coreMocks.patchAutomation.mock.invocationCallOrder[0] ?? 0)
+})
+
+it('treats a missing activity nudge automation as a successful final-results precondition cleanup', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatter),
+  )
+  coreMocks.patchAutomation
+    .mockReset()
+    .mockRejectedValue(new VaultError('VAULT_AUTOMATION_MISSING', 'Automation was not found.'))
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({ lookup: FINAL_RESULTS_EXPERIMENT_ID }),
+  )
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
+})
+
+it('does not block outcome persistence when activity nudge archive fails', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatter),
+  )
+  coreMocks.patchAutomation
+    .mockReset()
+    .mockRejectedValue(new Error('archive failed'))
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({ lookup: FINAL_RESULTS_EXPERIMENT_ID }),
+  )
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
   })
 })
 

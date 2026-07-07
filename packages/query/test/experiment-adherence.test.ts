@@ -304,7 +304,7 @@ test("maps generic workout modalities to unscoped activity evidence", () => {
     eventKind: "activity_session",
   });
   assert.deepEqual(resolveAdherenceEvidence("cardio"), {
-    eventKind: "activity_session",
+    eventKind: "intervention_session",
   });
   assert.deepEqual(resolveAdherenceEvidence("movement"), {
     eventKind: "intervention_session",

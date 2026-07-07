@@ -1357,7 +1357,7 @@ test("counts browser generic workout modality from any activity sessions", () =>
             baselineEnd: "2026-05-31",
             interventionStart: "2026-06-01",
             interventionEnd: "2026-06-28",
-            modality: "cardio",
+            modality: "Workout",
             targetSessions: 4,
             minimumUsefulSessions: 2,
           },
@@ -1377,6 +1377,49 @@ test("counts browser generic workout modality from any activity sessions", () =>
   assert.equal(evidence?.kind, "linkedEventCount");
   if (evidence?.kind === "linkedEventCount") {
     assert.equal(evidence.eventKind, "activity_session");
+    assert.equal(evidence.activityKind, undefined);
+  }
+});
+
+test("keeps browser cardio modality on manual intervention-session evidence", () => {
+  const slug = "cardio-manual-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_cardio_manual_block",
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "cardio",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        sessionEvent("2026-06-02", "completed", {
+          experimentId: "exp_cardio_manual_block",
+          experimentSlug: slug,
+          id: "evt_cardio_manual_1",
+          title: "Cardio session",
+        }),
+        activitySessionEvent({ id: "evt_cardio_strength", date: "2026-06-04", activityType: "Strength" }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const evidence = result?.adherence?.targets[0]?.evidence;
+
+  assert.ok(result);
+  assert.equal(result.progress?.adherence.completedSessions, 1);
+  assert.equal(result.progress?.adherence.loggedSessions, 1);
+  assert.equal(evidence?.kind, "linkedEventCount");
+  if (evidence?.kind === "linkedEventCount") {
+    assert.equal(evidence.eventKind, "intervention_session");
     assert.equal(evidence.activityKind, undefined);
   }
 });

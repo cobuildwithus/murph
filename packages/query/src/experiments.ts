@@ -59,6 +59,8 @@ import type { CanonicalEntity } from "./canonical-entities.ts";
 
 const MAX_EXPERIMENT_ANALYSIS_WINDOW_DAYS = 366;
 const MAX_DATA_COVERAGE_PROVIDERS = 20;
+// Answers whether the vault is currently receiving workout events.
+const ACTIVITY_PROVIDER_COVERAGE_WINDOW_DAYS = 30;
 
 export type ExperimentProgressPhase =
   | "planned"
@@ -319,6 +321,7 @@ export function summarizeExperimentProgress(
     sessionEventIds: completedSessionEventIds,
   };
   const dataCoverage = buildCoverageSummary({
+    asOf: context.asOf,
     baselineDaysAvailable,
     interventionDaysAvailable,
     primarySignal,
@@ -839,6 +842,7 @@ function selectMetricAdherenceRows(
 }
 
 function buildCoverageSummary(input: {
+  asOf: string;
   baselineDaysAvailable: number;
   interventionDaysAvailable: number;
   frontmatter: ExperimentFrontmatter;
@@ -895,7 +899,7 @@ function buildCoverageSummary(input: {
     status = "insufficient";
   }
 
-  const activityProviders = buildActivityProviderCoverage(input.vault);
+  const activityProviders = buildActivityProviderCoverage(input.vault, input.asOf);
   const wearableProviders = normalizeDataCoverageProviderList(
     [...input.summariesByDate.values()].flatMap((summary) => summary?.providers ?? []),
   );
@@ -911,10 +915,19 @@ function buildCoverageSummary(input: {
   };
 }
 
-function buildActivityProviderCoverage(vault: VaultReadModel): string[] {
+function buildActivityProviderCoverage(vault: VaultReadModel, asOf: string): string[] {
+  const windowStart = addDaysToIsoDate(
+    asOf,
+    -(ACTIVITY_PROVIDER_COVERAGE_WINDOW_DAYS - 1),
+  );
   return normalizeDataCoverageProviderList(
     vault.events.flatMap((event) => {
       if (event.kind !== "activity_session") {
+        return [];
+      }
+
+      const localDate = resolveActivityEvidenceLocalDate(event);
+      if (!localDate || localDate < windowStart || localDate > asOf) {
         return [];
       }
 

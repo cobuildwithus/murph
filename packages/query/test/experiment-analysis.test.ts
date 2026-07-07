@@ -681,7 +681,7 @@ test("experiment data coverage keeps wearable summaries separate from activity c
   assert.deepEqual(progress.dataCoverage.wearableProviders, ["whoop"]);
 });
 
-test("experiment data coverage reports activity provider capability from vault activity sessions", () => {
+test("experiment data coverage ignores activity provider history outside the current coverage window", () => {
   const vault = createVaultReadModel({
     vaultRoot: "/virtual/experiment-analysis-activity-provider-capability",
     metadata: null,
@@ -709,6 +709,39 @@ test("experiment data coverage reports activity provider capability from vault a
   });
 
   const progress = summarizeExperimentProgress(vault, "fresh-run-block", { asOf: "2026-06-09" });
+
+  assert.deepEqual(progress.dataCoverage.activityProviders, []);
+  assert.deepEqual(progress.dataCoverage.wearableProviders, []);
+});
+
+test("experiment data coverage reports recent activity provider capability", () => {
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-recent-activity-provider-capability",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGC",
+        slug: "recent-run-block",
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-28",
+          modality: "Run",
+          targetSessions: 24,
+          minimumUsefulSessions: 12,
+        },
+      }),
+      makeActivitySession({
+        entityId: "evt_whoop_recent_run",
+        dayKey: "2026-06-02",
+        activityType: "Running",
+        provider: "whoop",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "recent-run-block", { asOf: "2026-06-09" });
 
   assert.deepEqual(progress.dataCoverage.activityProviders, ["whoop"]);
   assert.deepEqual(progress.dataCoverage.wearableProviders, []);
