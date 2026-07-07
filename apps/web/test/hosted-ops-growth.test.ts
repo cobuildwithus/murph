@@ -10,6 +10,7 @@ import {
   calculatePercentChange,
   captureHostedGrowthDailySnapshot,
   findComparableSnapshot,
+  readHostedGrowthDashboard,
   startOfUtcDay,
 } from "../src/lib/hosted-ops/growth-metrics";
 
@@ -443,6 +444,41 @@ describe("hosted ops growth metrics", () => {
         },
         pulseTrialRedeemedAt: {
           lt: expect.any(Date),
+        },
+      },
+    });
+  });
+
+  it("excludes synthetic runtime members from total and new member count queries", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const realMemberWhere = {
+      hostedGroupRuntime: null,
+      threadContainer: null,
+    };
+    queueCurrentMetricMocks();
+    mocks.hostedMember.findMany.mockResolvedValueOnce([
+      { createdAt: new Date("2026-07-06T11:00:00.000Z") },
+    ]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    await readHostedGrowthDashboard(now);
+
+    expect(mocks.hostedMember.count.mock.calls[0]?.[0]).toMatchObject({
+      where: realMemberWhere,
+    });
+    expect(mocks.hostedMember.findMany.mock.calls[2]?.[0]).toMatchObject({
+      select: {
+        createdAt: true,
+      },
+      where: {
+        ...realMemberWhere,
+        createdAt: {
+          gte: expect.any(Date),
+          lte: now,
         },
       },
     });

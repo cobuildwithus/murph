@@ -39,6 +39,11 @@ const paidHostedFamilyGroupWhere = {
   suspendedAt: null,
 } satisfies Prisma.HostedAccountGroupWhereInput;
 
+const realHostedMemberWhere = {
+  hostedGroupRuntime: null,
+  threadContainer: null,
+} satisfies Prisma.HostedMemberWhereInput;
+
 function activePaidFamilyMembershipWhere(): Prisma.HostedAccountGroupMembershipWhereInput {
   return {
     group: paidHostedFamilyGroupWhere,
@@ -559,6 +564,7 @@ export async function readHostedGrowthDashboard(
         createdAt: true,
       },
       where: {
+        ...realHostedMemberWhere,
         createdAt: {
           gte: recentStart,
           lte: now,
@@ -775,7 +781,9 @@ async function readCurrentHostedGrowthMetrics(
     trialCandidates,
     statusCounts,
   ] = await Promise.all([
-    prisma.hostedMember.count(),
+    prisma.hostedMember.count({
+      where: realHostedMemberWhere,
+    }),
     prisma.hostedMember.findMany({
       select: {
         billingRef: {
