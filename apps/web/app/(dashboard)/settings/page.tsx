@@ -154,7 +154,7 @@ export default async function SettingsPage() {
         {accountWithPrivyDisplay ? (
           <HostedAccountSettingsCards
             account={accountWithPrivyDisplay}
-            murphPhoneNumber={routing?.linqRecipientPhone ?? null}
+            murphPhoneNumber={routing?.linqRecipientPhone ?? routing?.pendingLinqRecipientPhone ?? null}
           />
         ) : null}
       </section>

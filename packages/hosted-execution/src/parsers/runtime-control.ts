@@ -79,7 +79,6 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
-  type HostedRuntimeLinqContactCardShareAfterOutboundRequest,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
@@ -599,40 +598,6 @@ export function parseHostedRuntimeUsageRecordResponse(
   return {
     recorded: requireBoolean(record.recorded, "Hosted runtime usage record response recorded"),
     usageId: requireString(record.usageId, "Hosted runtime usage record response usageId"),
-  };
-}
-
-export function parseHostedRuntimeLinqContactCardShareAfterOutboundRequest(
-  value: unknown,
-): HostedRuntimeLinqContactCardShareAfterOutboundRequest {
-  const record = requireObject(value, "Hosted runtime Linq contact-card share after-outbound request");
-  assertAllowedObjectKeys(
-    record,
-    new Set(["authority", "chatId", "service", "threadIsDirect"]),
-    "Hosted runtime Linq contact-card share after-outbound request",
-  );
-
-  return {
-    authority: record.authority === undefined || record.authority === null
-      ? null
-      : parseHostedRuntimeLinqExternalThreadRouteAuthority(
-        record.authority,
-        "Hosted runtime Linq contact-card share after-outbound request authority",
-      ),
-    chatId: requireString(
-      record.chatId,
-      "Hosted runtime Linq contact-card share after-outbound request chatId",
-    ),
-    service: readNullableString(
-      record.service,
-      "Hosted runtime Linq contact-card share after-outbound request service",
-    ),
-    threadIsDirect: record.threadIsDirect === null
-      ? null
-      : requireBoolean(
-          record.threadIsDirect,
-          "Hosted runtime Linq contact-card share after-outbound request threadIsDirect",
-        ),
   };
 }
 
