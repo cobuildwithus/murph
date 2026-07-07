@@ -158,6 +158,57 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
   });
 
+  it("accepts an early direct ensure ack and still records timing", async () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const afterResponseTasks: Array<() => Promise<void>> = [];
+    mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
+      input.onTiming({
+        tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+        tokenAcquiredAtEpochMs: 1_777_000_000_010,
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_025,
+      });
+      return {
+        accepted: true,
+      };
+    });
+
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      response,
+      scheduleAfterResponse: (task) => {
+        afterResponseTasks.push(task);
+      },
+      wakeHandoff: buildWakeHandoff(),
+    })).resolves.toMatchObject({
+      reason: "temporal-signaled",
+      signalAccepted: true,
+    });
+
+    await Promise.all(afterResponseTasks.map((task) => task()));
+    expect(consoleInfo).toHaveBeenCalledWith(
+      "Hosted direct ensure wake accepted.",
+      {
+        accepted: true,
+        source: "linq",
+      },
+    );
+    expect(mocks.recordHostedIngressDirectEnsureTiming).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_123",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        orchestration: {
+          tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+          tokenAcquiredAtEpochMs: 1_777_000_000_010,
+          directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+          directEnsureResponseReceivedAtEpochMs: 1_777_000_000_025,
+        },
+      },
+      source: "linq",
+    });
+    consoleInfo.mockRestore();
+  });
+
   it("keeps the Temporal signal and handoff result intact when the direct ensure fails", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.ensureRuntimeProcessing.mockRejectedValue(new Error("cloudflare unreachable"));

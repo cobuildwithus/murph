@@ -66,9 +66,14 @@ export interface WorkerEnvironmentSource
   RUNNER_CONTAINER_SMOKE: HostedExecutionContainerNamespaceLike;
 }
 
+export interface WorkerExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
 export interface WorkerRouteContext {
   env: WorkerEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  executionCtx?: WorkerExecutionContext;
   request: Request;
   requestText?: Promise<string>;
   runtimeControlAuthTiming?: {

@@ -104,7 +104,12 @@ describe("hosted local runner warm reuse e2e", () => {
     });
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
-    requireScenario().queueAssistantResponses([firstReplyText, secondReplyText]);
+    requireScenario().queueAssistantResponses([firstReplyText], {
+      matchInputContains: firstUserText,
+    });
+    requireScenario().queueAssistantResponses([secondReplyText], {
+      matchInputContains: secondUserText,
+    });
 
     const firstWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
@@ -187,7 +192,9 @@ describe("hosted local runner warm reuse e2e", () => {
       userId: pendingUserId,
     });
 
-    requireScenario().queueAssistantResponses([pendingReplyText]);
+    requireScenario().queueAssistantResponses([pendingReplyText], {
+      matchInputContains: pendingInputText,
+    });
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const requestCountBeforeInvocation = requireLinqStub().observedRequests.length;
 
