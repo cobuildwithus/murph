@@ -2500,8 +2500,8 @@ test.sequential(
       assert.equal(requireData(missedLogDue).date, '2026-04-20')
       assert.equal(requireData(missedLogDue).decision.schema, 'murph.experiment-followup-due.v1')
       assert.equal(requireData(missedLogDue).decision.action, 'skip')
-      assert.equal(requireData(missedLogDue).decision.reason, 'session_assumed')
-      assert.equal(requireData(missedLogDue).decision.window.sessionDate, '2026-04-20')
+      assert.equal(requireData(missedLogDue).decision.reason, 'unsupported_session_schedule')
+      assert.equal(requireData(missedLogDue).decision.window.sessionDate, null)
       assert.match(
         requireData(missedLogDue).decision.dedupeKey,
         /^experiment-followup:exp_[A-Z0-9]+:missed-log:2026-04-20$/u,

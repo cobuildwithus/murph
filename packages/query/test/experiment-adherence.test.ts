@@ -510,6 +510,69 @@ test("counts cardio category activity targets from member activity kinds only", 
   assert.equal(counts.completedSessions, 2);
 });
 
+test("honors only known intervention activity-kind contradictions for scoped activity evidence", () => {
+  const target: ExperimentAdherenceTarget = {
+    targetId: "cardio",
+    label: "Cardio",
+    phase: "intervention",
+    calendar: {
+      kind: "daily",
+      timeZone: "America/New_York",
+    },
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "activity_session",
+      activityKind: "cardio",
+      missing: "missed_after_grace",
+    },
+    grace: { hours: 0 },
+  };
+
+  const result = buildExperimentAdherenceCalendar({
+    asOf: "2026-04-11T12:00:00.000Z",
+    observations: [
+      {
+        activityKind: "strength",
+        evidenceId: "evt_strength_intervention",
+        eventKind: "intervention_session",
+        localDate: "2026-04-08",
+        status: "completed",
+      },
+      {
+        evidenceId: "evt_kindless_manual_intervention",
+        eventKind: "intervention_session",
+        localDate: "2026-04-09",
+        status: "completed",
+      },
+      {
+        activityKind: "running",
+        evidenceId: "evt_running_intervention",
+        eventKind: "intervention_session",
+        localDate: "2026-04-10",
+        status: "completed",
+      },
+      {
+        activityKind: "hiit",
+        evidenceId: "evt_hiit_intervention",
+        eventKind: "intervention_session",
+        localDate: "2026-04-11",
+        status: "completed",
+      },
+    ],
+    targets: [target],
+    windows,
+  });
+
+  assert.deepEqual(
+    result.cells.slice(0, 4).map((cell) => [cell.localDate, cell.status, cell.evidenceIds]),
+    [
+      ["2026-04-08", "missed", []],
+      ["2026-04-09", "satisfied", ["evt_kindless_manual_intervention"]],
+      ["2026-04-10", "satisfied", ["evt_running_intervention"]],
+      ["2026-04-11", "satisfied", ["evt_hiit_intervention"]],
+    ],
+  );
+});
 
 test("rejects adherence calendars that expand beyond the browser-safe cell limit", () => {
   const target: ExperimentAdherenceTarget = {

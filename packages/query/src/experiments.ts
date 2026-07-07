@@ -23,8 +23,9 @@ import {
   eventKindIsCandidateForEvidence,
   experimentAdherenceTargetPlansDate,
   resolveActivityEvidenceLocalDate,
-  resolveExperimentAdherenceRollupTarget,
   resolveAdherenceObservationActivityKind,
+  resolveExperimentAdherenceRollupTarget,
+  resolveInterventionSessionLocalDate,
   synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
@@ -825,11 +826,13 @@ function buildAdherenceObservations(
             localDate:
               event.kind === "activity_session"
                 ? resolveActivityEvidenceLocalDate(event) ?? context.asOf
-                : readStringAttribute(event, "scheduledLocalDate") ??
-                  readStringAttribute(event, "sessionLocalDate") ??
-                  (target.calendar && event.occurredAt
-                    ? toLocalDayKey(new Date(event.occurredAt), target.calendar?.timeZone ?? "UTC")
-                    : event.date ?? extractDate(event.occurredAt) ?? context.asOf),
+                : event.kind === "intervention_session"
+                  ? resolveInterventionSessionLocalDate(event) ?? context.asOf
+                  : readStringAttribute(event, "scheduledLocalDate") ??
+                    readStringAttribute(event, "sessionLocalDate") ??
+                    (target.calendar && event.occurredAt
+                      ? toLocalDayKey(new Date(event.occurredAt), target.calendar?.timeZone ?? "UTC")
+                      : event.date ?? extractDate(event.occurredAt) ?? context.asOf),
             source: readStringAttribute(event, "source"),
             status: readExperimentSessionStatus(event),
             targetId: target.targetId,
@@ -1463,7 +1466,12 @@ function isWeeklyDigestDueOnDate(frontmatter: ExperimentFrontmatter, date: strin
 }
 
 function hasSessionLogForDate(context: ExperimentFollowupContext, date: string): boolean {
-  if (context.events.some((event) => event.kind === "intervention_session" && event.date === date)) {
+  if (
+    context.events.some((event) =>
+      event.kind === "intervention_session" &&
+      resolveInterventionSessionLocalDate(event) === date
+    )
+  ) {
     return true;
   }
 
@@ -1945,7 +1953,9 @@ function findExperimentEvents(
   const experimentId = frontmatter.experimentId;
 
   return vault.events.filter((event) => {
-    const date = event.date ?? extractDate(event.occurredAt);
+    const date = event.kind === "intervention_session"
+      ? resolveInterventionSessionLocalDate(event)
+      : event.date ?? extractDate(event.occurredAt);
     if (from && date && date < from) {
       return false;
     }

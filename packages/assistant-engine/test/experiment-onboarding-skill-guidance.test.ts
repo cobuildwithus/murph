@@ -211,7 +211,19 @@ describe('experiment onboarding skill guidance', () => {
     expect(raw).toContain(
       'vault-cli experiment session log <id> --date <date> --status missed',
     )
-    expect(raw).toContain('Explicit statuses outrank assumed cells automatically')
+    expect(raw).toContain(
+      'first check whether that date already has an explicit logged session',
+    )
+    expect(raw).toContain('vault-cli experiment show <id> --format json')
+    expect(raw).toContain('vault-cli experiment progress <id> --format json')
+    expect(raw).toContain(
+      'vault-cli intervention edit <eventId> --session-status skipped',
+    )
+    expect(raw).toContain(
+      'vault-cli intervention edit <eventId> --session-status missed',
+    )
+    expect(raw).toContain('Two contradictory logs for one day can leave the day counted')
+    expect(raw).toContain('explicit statuses outrank assumed cells automatically')
     expect(raw).toContain('never edit or delete derived assumption behavior')
     expect(raw).toContain('If the user confirms "yep all done," write nothing')
     expect(raw).toContain('Keep the never-double-log rule')
@@ -228,6 +240,12 @@ describe('experiment onboarding skill guidance', () => {
     )
     expect(raw).toContain(
       'Repair policy starts from that correction or routine-break signal',
+    )
+    expect(raw).toContain(
+      'edit an existing explicit intervention session with `vault-cli intervention edit <eventId> --session-status skipped|missed`',
+    )
+    expect(raw).toContain(
+      'only use `vault-cli experiment session log <id> --date <date> --status skipped|missed` for assumed dates with no explicit session',
     )
   })
 

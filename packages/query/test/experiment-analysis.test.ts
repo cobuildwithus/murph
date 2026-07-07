@@ -346,14 +346,18 @@ function makeSession(input: {
   occurredAt: string;
   afterExercise?: boolean;
   confounders?: string[];
+  date?: string;
   experimentId?: string;
   experimentSlug?: string;
+  interventionType?: string;
   relatedIds?: string[];
+  scheduledLocalDate?: string;
+  sessionLocalDate?: string;
   sessionStatus?: string;
   source?: string;
   symptoms?: string[];
 }): CanonicalEntity {
-  const dayKey = input.occurredAt.slice(0, 10);
+  const dayKey = input.date ?? input.occurredAt.slice(0, 10);
   const experimentSlug = input.experimentSlug ?? "sauna-rhr";
 
   return makeEntity({
@@ -371,6 +375,9 @@ function makeSession(input: {
       confounders: input.confounders,
       experimentId: input.experimentId,
       experimentSlug,
+      interventionType: input.interventionType,
+      scheduledLocalDate: input.scheduledLocalDate,
+      sessionLocalDate: input.sessionLocalDate,
       sessionStatus: input.sessionStatus,
       ...(input.source === undefined ? {} : { source: input.source }),
       symptoms: input.symptoms,
@@ -1339,6 +1346,82 @@ test("cardio category experiments count running and swimming but not strength se
   assert.equal(progress.adherence.completedSessions, 2);
   assert.equal(progress.adherence.loggedSessions, 2);
   assert.equal(progress.adherence.sensedSessions, 2);
+});
+
+test("cardio category experiments reject explicitly contradictory intervention sessions only", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFC";
+  const slug = "cardio-intervention-kind-scope";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-analysis-cardio-intervention-kind-scope",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        experimentId,
+        slug,
+        runPlan: {
+          baselineStart: "2026-05-25",
+          baselineEnd: "2026-05-31",
+          interventionStart: "2026-06-01",
+          interventionEnd: "2026-06-07",
+          adherenceTargets: [{
+            targetId: "cardio",
+            label: "Cardio",
+            phase: "intervention",
+            calendar: {
+              kind: "explicitDates",
+              timeZone: "America/New_York",
+              dates: [
+                { localDate: "2026-06-01" },
+                { localDate: "2026-06-02" },
+                { localDate: "2026-06-03" },
+              ],
+            },
+            evidence: {
+              kind: "linkedEventCount",
+              eventKind: "activity_session",
+              activityKind: "cardio",
+              missing: "missed_after_grace",
+            },
+            rollup: {
+              targetCompletions: 3,
+              minimumUsefulCompletions: 2,
+            },
+          }],
+        },
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE4AA",
+        occurredAt: "2026-06-01T13:00:00.000Z",
+        experimentId,
+        experimentSlug: slug,
+        interventionType: "strength",
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE4AB",
+        occurredAt: "2026-06-02T13:00:00.000Z",
+        experimentId,
+        experimentSlug: slug,
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE4AC",
+        occurredAt: "2026-06-03T13:00:00.000Z",
+        experimentId,
+        experimentSlug: slug,
+        interventionType: "running",
+      }),
+    ],
+  });
+
+  const progress = summarizeExperimentProgress(vault, slug, { asOf: "2026-06-05" });
+  const calendar = collectExperimentAdherenceCalendar(vault, slug, { asOf: "2026-06-05" });
+
+  assert.equal(progress.adherence.completedSessions, 2);
+  assert.equal(progress.adherence.loggedSessions, 2);
+  assert.deepEqual(calendar?.cells.map((cell) => [cell.localDate, cell.status, cell.evidenceIds]), [
+    ["2026-06-01", "missed", []],
+    ["2026-06-02", "satisfied", ["evt_01JNV45RHN0TQ9ZXE0A7YSE4AB"]],
+    ["2026-06-03", "satisfied", ["evt_01JNV45RHN0TQ9ZXE0A7YSE4AC"]],
+  ]);
 });
 
 test("experiment progress counts manual sessions for device-observable running adherence", () => {
@@ -3449,6 +3532,65 @@ test("experiment follow-up due skips missed-log when the date already has any se
   assert.equal(decision.reason, "session_already_logged");
 });
 
+test("experiment follow-up due honors sessionLocalDate for later-recorded corrections", () => {
+  const experiment = makeExperiment("active", {
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFD",
+    slug: "late-session-local-date",
+    runPlan: {
+      baselineStart: "2026-04-01",
+      baselineEnd: "2026-04-07",
+      interventionStart: "2026-04-08",
+      interventionEnd: "2026-04-21",
+      modality: "sauna",
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "08:00",
+        timeZone: "America/New_York",
+      },
+      targetSessions: 14,
+      minimumUsefulSessions: 10,
+    },
+    assistantSupport: {
+      remindersEnabled: true,
+      missedLogFollowup: "default_on",
+      weeklyDigestEnabled: false,
+    },
+  });
+  const skippedCorrection = makeSession({
+    entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE4AD",
+    occurredAt: "2026-04-12T19:00:00.000Z",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFD",
+    experimentSlug: "late-session-local-date",
+    sessionLocalDate: "2026-04-10",
+    sessionStatus: "skipped",
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-session-local-date",
+    metadata: { timezone: "America/New_York" },
+    entities: [experiment, skippedCorrection],
+  });
+
+  const progress = summarizeExperimentProgress(vault, "late-session-local-date", {
+    asOf: "2026-04-11",
+  });
+  const calendar = collectExperimentAdherenceCalendar(vault, "late-session-local-date", {
+    asOf: "2026-04-11",
+  });
+  const decision = decideExperimentFollowupDue(vault, "late-session-local-date", {
+    kind: "missed-log",
+    date: "2026-04-10",
+  });
+
+  assert.equal(progress.adherence.completedSessions, 2);
+  const cellsByDate = new Map(calendar?.cells.map((cell) => [cell.localDate, cell.status]));
+  assert.equal(cellsByDate.get("2026-04-08"), "assumed");
+  assert.equal(cellsByDate.get("2026-04-09"), "assumed");
+  assert.equal(cellsByDate.get("2026-04-10"), "missed");
+  assert.equal(decision.action, "skip");
+  assert.equal(decision.reason, "session_already_logged");
+  assert.equal(decision.window.sessionDate, "2026-04-10");
+});
+
 test("experiment follow-up due skips missed-log when device activity already handled a run date", () => {
   const experiment = makeExperiment("active", {
     experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFK",
@@ -3636,6 +3778,29 @@ test("experiment follow-up due skips missed-log for opt-out and unsupported non-
       }),
     ],
   });
+  const nonDailySaunaCountTarget = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-nondaily-sauna-count",
+    metadata: null,
+    entities: [
+      makeExperiment("active", {
+        runPlan: {
+          baselineStart: "2026-04-01",
+          baselineEnd: "2026-04-07",
+          interventionStart: "2026-04-08",
+          interventionEnd: "2026-04-21",
+          modality: "sauna",
+          sessionsPerWeek: 3,
+          targetSessions: 4,
+          minimumUsefulSessions: 3,
+        },
+        assistantSupport: {
+          remindersEnabled: true,
+          missedLogFollowup: "default_on",
+          weeklyDigestEnabled: false,
+        },
+      }),
+    ],
+  });
   const nonDaily = createVaultReadModel({
     vaultRoot: "/virtual/experiment-followup-nondaily",
     metadata: null,
@@ -3666,6 +3831,13 @@ test("experiment follow-up due skips missed-log for opt-out and unsupported non-
     }).reason,
     "missed_log_followup_disabled",
   );
+  const saunaCountDecision = decideExperimentFollowupDue(nonDailySaunaCountTarget, "sauna-rhr", {
+    kind: "missed-log",
+    date: "2026-04-10",
+  });
+  assert.equal(saunaCountDecision.action, "skip");
+  assert.equal(saunaCountDecision.reason, "unsupported_session_schedule");
+  assert.equal(saunaCountDecision.window.sessionDate, null);
   assert.equal(
     decideExperimentFollowupDue(nonDaily, "sauna-rhr", {
       kind: "missed-log",

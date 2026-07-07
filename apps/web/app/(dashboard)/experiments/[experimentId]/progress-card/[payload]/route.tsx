@@ -505,7 +505,7 @@ function sessionsLine(data: ExperimentProgressCardData): string {
   }
 
   return assumed > 0
-    ? `${data.sessions.logged} logged (${assumed} assumed)`
+    ? `${data.sessions.logged} done (${assumed} assumed)`
     : `${data.sessions.logged} logged`;
 }
 

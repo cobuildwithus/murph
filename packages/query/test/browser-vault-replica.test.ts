@@ -630,6 +630,7 @@ test("browser vault replica projects experiment event fields only for relevant e
     },
     experimentId: "exp_sauna",
     experimentSlug: "sauna-rhr",
+    interventionType: "dry-sauna",
     note: "Felt lightheaded near the end.",
     protocolId: "prot_sauna",
     scheduledLocalDate: "2026-04-20",
@@ -639,7 +640,6 @@ test("browser vault replica projects experiment event fields only for relevant e
     symptoms: ["lightheaded"],
   });
   assert.equal(Object.hasOwn(session.attributes, "durationMinutes"), false);
-  assert.equal(Object.hasOwn(session.attributes, "interventionType"), false);
   assert.equal(Object.hasOwn(session.attributes, "regimenId"), false);
   assert.equal(Object.hasOwn(session.attributes, "temperatureC"), false);
   assert.equal(Object.hasOwn(session.attributes, "timing"), false);
@@ -676,7 +676,7 @@ test("browser vault replica projects experiment event fields only for relevant e
   assert.equal(context.title, null);
 
   assert.ok(activity);
-  assert.deepEqual(activity.attributes, { source: "device" });
+  assert.deepEqual(activity.attributes, { activityKind: "running", source: "device" });
   assert.equal(activity.bodyPreview, null);
   assert.deepEqual(activity.links, []);
   assert.deepEqual(activity.lookupIds, ["evt_activity"]);

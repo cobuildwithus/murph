@@ -191,6 +191,18 @@ export function resolveActivityEvidenceLocalDate(event: {
   return event.date ?? extractDate(event.occurredAt);
 }
 
+export function resolveInterventionSessionLocalDate(event: {
+  attributes?: Record<string, unknown> | null;
+  date?: string | null;
+  occurredAt?: string | null;
+}): string | null {
+  const attributes = event.attributes ?? {};
+  return readString(attributes.scheduledLocalDate) ??
+    readString(attributes.sessionLocalDate) ??
+    event.date ??
+    extractDate(event.occurredAt);
+}
+
 export function resolveAdherenceObservationActivityKind(input: {
   attributes: Record<string, unknown>;
 }): string | null {
@@ -762,6 +774,17 @@ function linkedEventObservationMatchesEvidence(
     return activityTextMatchesKind(observation.activityKind, evidence.activityKind);
   }
 
+  if (
+    observation.eventKind === "intervention_session" &&
+    evidence.activityKind &&
+    observation.activityKind
+  ) {
+    // Write boundaries own type matching; this read guard only honors explicit contradictions.
+    // Only canonical-sport contradictions are rejected; unrecognized types pass.
+    const canonicalKind = resolveDeviceObservableActivityKind(observation.activityKind);
+    return canonicalKind ? activityTextMatchesKind(canonicalKind, evidence.activityKind) : true;
+  }
+
   return true;
 }
 
@@ -855,6 +878,7 @@ function listActivityKindCandidates(attributes: Record<string, unknown>): string
     readString(attributes.activityType),
     readString(attributes.sportName),
     readString(attributes.type),
+    readString(attributes.interventionType),
     readString(attributes.sport),
     readString(sport?.slug),
     readString(sport?.name),

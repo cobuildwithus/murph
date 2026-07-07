@@ -199,7 +199,7 @@ test("experiment progress-card route returns a static-like PNG response for medi
       title: "Bedtime silent meditation",
       asOf: "2026-06-16",
       phase: { day: 19, totalDays: 21 },
-      sessions: { logged: 5, assumed: 2, target: 12 },
+      sessions: { logged: 5, assumed: 2, target: null },
       weeks: [
         { start: "2026-06-05", cells: "CMAMMCP" },
         { start: "2026-06-12", cells: "MMCCSSS" },
@@ -231,7 +231,8 @@ test("experiment progress-card route returns a static-like PNG response for medi
   assert.equal(headersInitToRecord(init.headers)["Cache-Control"], "public, max-age=31536000, immutable");
   const serializedImageTree = JSON.stringify(renderReactTree(imageTree));
   assert.match(serializedImageTree, /Bedtime silent meditation/u);
-  assert.match(serializedImageTree, /5 of 12 \(2 assumed\)/u);
+  assert.match(serializedImageTree, /5 done \(2 assumed\)/u);
+  assert.doesNotMatch(serializedImageTree, /5 logged \(2 assumed\)/u);
   assert.match(serializedImageTree, /rgba\(90,110,50,0\.18\)/u);
 });
 
