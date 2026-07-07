@@ -46,6 +46,7 @@ describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
       "read_current",
+      "update_display_name",
       "create_join_link",
       "post_join_offer",
       "read_chat_participants",
@@ -133,6 +134,45 @@ describe("murph.group dynamic tool", () => {
       kind: "group",
       request: { action: "read_current" },
     });
+  });
+
+  it("parses update_display_name arguments into a bounded rename request", () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "update_display_name",
+      displayName: "Weekly Health Crew",
+    }));
+
+    expect(request).toEqual({
+      kind: "group",
+      request: {
+        action: "update_display_name",
+        updateDisplayName: {
+          displayName: "Weekly Health Crew",
+        },
+      },
+    });
+  });
+
+  it("rejects invalid update_display_name arguments", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "update_display_name",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "update_display_name",
+      displayName: " ",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "update_display_name",
+      displayName: "x".repeat(121),
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "update_display_name",
+      displayName: "Valid name",
+      groupId: "hgrp_hijack",
+    }))?.kind).toBe("invalid-group-arguments");
   });
 
   it("parses create_join_link arguments into a bounded joinLink request", () => {

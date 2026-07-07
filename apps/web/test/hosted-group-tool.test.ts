@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   sendHostedLinqAttachmentMessage: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
+  updateHostedGroupDisplayNameByRuntimeMemberIdTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
@@ -88,6 +89,8 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
   recordHostedGroupJoinOfferTx: mocks.recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
+  updateHostedGroupDisplayNameByRuntimeMemberIdTx:
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -136,8 +139,13 @@ const GROUP_SUMMARY = {
   id: "hgrp_123",
   kind: "friends",
   memberCount: 3,
+  members: [],
   requestedVaultShareProjectionKinds: ["sleep-times.v0" as const],
   status: "active",
+};
+const RENAMED_GROUP_SUMMARY = {
+  ...GROUP_SUMMARY,
+  displayName: "Weekly Health Crew",
 };
 
 describe("handleHostedRuntimeGroupTool", () => {
@@ -152,6 +160,8 @@ describe("handleHostedRuntimeGroupTool", () => {
       revokedCount: 1,
       vaultShareCleanupSignals: [],
     });
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx
+      .mockResolvedValue(RENAMED_GROUP_SUMMARY);
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
     mocks.hostedThreadContainerFindUnique.mockResolvedValue({
       member: { suspendedAt: null },
@@ -180,6 +190,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       read_current: "participant_aware",
       revoke_own_email_share: "participant_aware",
       share_contact_card: "owner_active",
+      update_display_name: "participant_aware",
     });
   });
 
@@ -229,6 +240,74 @@ describe("handleHostedRuntimeGroupTool", () => {
       result: {
         group: null,
         status: "none",
+      },
+    });
+  });
+
+  it("updates the current hosted group display name for the active group runtime", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        updateDisplayName: {
+          displayName: "Weekly Health Crew",
+        },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: RENAMED_GROUP_SUMMARY,
+        status: "ok",
+      },
+    });
+
+    expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledWith(
+      "member_group_runtime",
+    );
+    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        displayName: "Weekly Health Crew",
+        runtimeMemberId: "member_group_runtime",
+        tx: fakeTx,
+      }));
+  });
+
+  it("does not update the group display name when runtime access is inactive", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        updateDisplayName: { displayName: "Blocked name" },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    });
+
+    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
+  });
+
+  it("reports group_not_found when the active runtime has no hosted group to rename", async () => {
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValue(null);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        updateDisplayName: { displayName: "Unattached group" },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "group_not_found",
       },
     });
   });

@@ -96,6 +96,15 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
+
+    await groupTool.request({
+      action: "update_display_name",
+      updateDisplayName: { displayName: "Weekly Health Crew" },
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "update_display_name",
+      updateDisplayName: { displayName: "Weekly Health Crew" },
+    });
   });
 
   it("fails closed when the turn carries two distinct route-authorized threads", async () => {

@@ -539,6 +539,17 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "read_current",
     });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "update_display_name",
+      updateDisplayName: {
+        displayName: "  Weekly   Health Crew  ",
+      },
+    })).toEqual({
+      action: "update_display_name",
+      updateDisplayName: {
+        displayName: "Weekly Health Crew",
+      },
+    });
 
     expect(parseHostedRuntimeGroupToolRequest({
       action: "create_join_link",
@@ -597,6 +608,24 @@ describe("parseHostedRuntimeGroupTool", () => {
       parseHostedRuntimeGroupToolRequest({
         action: "read_current",
         requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      })
+    ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "update_display_name",
+        updateDisplayName: { displayName: "   " },
+      })
+    ).toThrow(/must not be blank/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "update_display_name",
+        updateDisplayName: { displayName: "x".repeat(121) },
+      })
+    ).toThrow(/too long/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "update_display_name",
+        displayName: "model-supplied shorthand",
       })
     ).toThrow(/not allowed/u);
     expect(() =>
@@ -692,6 +721,55 @@ describe("parseHostedRuntimeGroupTool", () => {
           joinCode: "abc123",
           joinUrl: "https://example.com/groups/join/abc123",
           status: "ok",
+        },
+      })
+    ).toThrow(/not allowed/u);
+  });
+
+  it("parses update_display_name responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "update_display_name",
+      result: {
+        group: {
+          ...GROUP_SUMMARY,
+          displayName: "Weekly Health Crew",
+        },
+        status: "ok",
+      },
+    })).toEqual({
+      action: "update_display_name",
+      result: {
+        group: {
+          ...PARSED_GROUP_SUMMARY,
+          displayName: "Weekly Health Crew",
+        },
+        status: "ok",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "group_not_found",
+      },
+    })).toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "group_not_found",
+      },
+    });
+
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "update_display_name",
+        result: {
+          group: GROUP_SUMMARY,
+          status: "ok",
+          updatedAt: "2026-07-07T00:00:00.000Z",
         },
       })
     ).toThrow(/not allowed/u);

@@ -63,6 +63,7 @@ import {
   readHostedGroupByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
+  updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
 import {
   normalizeHostedVaultShareProjectionKinds,
@@ -86,6 +87,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_current: "participant_aware",
   revoke_own_email_share: "participant_aware",
   share_contact_card: "owner_active",
+  update_display_name: "participant_aware",
 } as const satisfies Record<
   HostedRuntimeGroupToolAction,
   HostedRuntimeGroupToolAccessClassification
@@ -99,6 +101,13 @@ export async function handleHostedRuntimeGroupTool(input: {
     return handleHostedRuntimeGroupCreateJoinLink({
       joinLink: input.request.joinLink ?? null,
       memberId: input.memberId,
+    });
+  }
+
+  if (input.request.action === "update_display_name") {
+    return handleHostedRuntimeGroupUpdateDisplayName({
+      memberId: input.memberId,
+      updateDisplayName: input.request.updateDisplayName,
     });
   }
 
@@ -151,6 +160,35 @@ export async function handleHostedRuntimeGroupTool(input: {
     result: group
       ? { status: "ok", group }
       : { status: "none", group: null },
+  };
+}
+
+async function handleHostedRuntimeGroupUpdateDisplayName(input: {
+  memberId: string;
+  updateDisplayName: { displayName: string };
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "update_display_name",
+    result: { group: null, status: "unavailable", unavailableReason },
+  });
+
+  if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
+    return unavailable("runtime_inactive");
+  }
+
+  const prisma = getPrisma();
+  const updated = await prisma.$transaction(async (tx) =>
+    updateHostedGroupDisplayNameByRuntimeMemberIdTx({
+      displayName: input.updateDisplayName.displayName,
+      runtimeMemberId: input.memberId,
+      tx,
+    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  return {
+    action: "update_display_name",
+    result: updated
+      ? { group: updated, status: "ok" }
+      : { group: null, status: "unavailable", unavailableReason: "group_not_found" },
   };
 }
 

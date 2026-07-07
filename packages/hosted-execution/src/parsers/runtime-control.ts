@@ -96,6 +96,7 @@ import {
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupKind,
   type HostedRuntimeGroupPostJoinOfferRequest,
+  type HostedRuntimeGroupUpdateDisplayNameRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupToolSelfOptOutContext,
@@ -702,6 +703,19 @@ export function parseHostedRuntimeGroupToolRequest(
     );
     return { action };
   }
+  if (action === "update_display_name") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "updateDisplayName"]),
+      "Hosted runtime group tool update_display_name request",
+    );
+    return {
+      action,
+      updateDisplayName: parseHostedRuntimeGroupUpdateDisplayNameRequest(
+        record.updateDisplayName,
+      ),
+    };
+  }
   if (action === "create_join_link") {
     assertAllowedObjectKeys(
       record,
@@ -772,6 +786,31 @@ export function parseHostedRuntimeGroupToolRequest(
     };
   }
   throw new TypeError("Hosted runtime group tool action is not supported.");
+}
+
+function parseHostedRuntimeGroupUpdateDisplayNameRequest(
+  value: unknown,
+): HostedRuntimeGroupUpdateDisplayNameRequest {
+  const record = requireObject(
+    value,
+    "Hosted runtime group tool update_display_name updateDisplayName",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["displayName"]),
+    "Hosted runtime group tool update_display_name updateDisplayName",
+  );
+  const displayName = requireString(
+    record.displayName,
+    "Hosted runtime group tool update_display_name displayName",
+  ).trim().replace(/\s+/gu, " ");
+  if (displayName.length === 0) {
+    throw new TypeError("Hosted runtime group tool update_display_name displayName must not be blank.");
+  }
+  if (displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
+    throw new TypeError("Hosted runtime group tool update_display_name displayName is too long.");
+  }
+  return { displayName };
 }
 
 function parseHostedRuntimeGroupToolLinqThreadContext(
@@ -930,6 +969,26 @@ export function parseHostedRuntimeGroupToolResponse(
     }
     if (status === "unavailable") {
       assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool create_join_link unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "update_display_name") {
+    const result = requireObject(record.result, "Hosted runtime group tool update_display_name response result");
+    const status = requireString(result.status, "Hosted runtime group tool update_display_name response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool update_display_name ok response result");
+      return { action, result: { status, group: parseHostedRuntimeGroupSummary(result.group) } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool update_display_name unavailable response result");
       return {
         action,
         result: {
