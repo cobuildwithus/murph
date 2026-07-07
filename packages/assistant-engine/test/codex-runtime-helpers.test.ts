@@ -2762,7 +2762,7 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.result.codexThreadId).toBe('fresh-thread-after-rpc-failure')
   })
 
-  it('does not fresh-thread retry resumed Codex transport failures after provider actions', async () => {
+  it('fresh-thread retries resumed Codex transport failures after provider actions', async () => {
     const expectedError = new VaultCliError(
       'ASSISTANT_CODEX_FAILED',
       'Codex app-server turn failed. status failed. stream disconnected before completion: error sending request for url (https://api.openai.com/v1/responses)',
@@ -2772,7 +2772,18 @@ describe('Codex assistant registry helpers', () => {
       },
     )
 
-    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(expectedError)
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(expectedError)
+      .mockResolvedValueOnce({
+        finalMessage: 'final after transport fallback despite provider action',
+        jsonEvents: [],
+        providerActionCount: 0,
+        sessionId: 'fresh-thread-after-provider-action-transport-failure',
+        stderr: '',
+        stdout: '',
+        threadId: 'fresh-thread-after-provider-action-transport-failure',
+        turnId: 'turn-fallback-provider-action-transport',
+      })
     codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
       jsonEvents: [
         {
@@ -2798,13 +2809,27 @@ describe('Codex assistant registry helpers', () => {
       workingDirectory: '/tmp/provider-tests',
     })
 
-    expect(attempt.ok).toBe(false)
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
-    if (attempt.ok) {
-      throw new Error('expected failed provider attempt')
+    expect(attempt.ok).toBe(true)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
+    ).toMatchObject({
+      resumeSessionId: 'resume-thread',
+    })
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
+    ).toMatchObject({
+      resumeSessionId: undefined,
+    })
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
     }
-    expect(attempt.error).toBe(expectedError)
-    expect(attempt.metadata.providerActionCount).toBe(1)
+    expect(attempt.result.codexContinuation).toEqual({
+      kind: 'thread-start',
+    })
+    expect(attempt.result.codexThreadId).toBe(
+      'fresh-thread-after-provider-action-transport-failure',
+    )
   })
 
   it('starts a fresh thread when resumed Codex history has invalid tool output', async () => {

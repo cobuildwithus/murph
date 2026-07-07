@@ -342,7 +342,7 @@ export async function executeCodexAssistantTurnAttempt(
       }
     } else if (
       input.resume &&
-      isCodexNoSideEffectResumeTransportFailure(error, failureContext)
+      isCodexResumeTransportFailure(error)
     ) {
       result = await runFreshThreadFallback(input.resume)
       codexContinuation = {
@@ -667,14 +667,9 @@ function isCodexInvalidOutputResumeFailure(error: unknown): boolean {
   )
 }
 
-function isCodexNoSideEffectResumeTransportFailure(
+function isCodexResumeTransportFailure(
   error: unknown,
-  failureContext: CodexAppServerTurnFailureContext | null,
 ): boolean {
-  if (failureContext?.providerActionCount !== 0) {
-    return false
-  }
-
   const errorCode = readCodexDiagnosticErrorCode(error)
   if (
     errorCode === 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT' ||
