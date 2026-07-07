@@ -2,6 +2,10 @@ import type {
   HostedReturnContactKind,
 } from '@murphai/hosted-execution/return-contact'
 import type {
+  HostedRuntimeNewsletterToolResponse,
+  HostedRuntimeNewsletterScheduledAuthority,
+} from '@murphai/hosted-execution/runtime-control'
+import type {
   AssistantSession,
   AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -15,6 +19,7 @@ import type {
 import type {
   AssistantHostedFamilyPlanTool,
   AssistantHostedGroupTool,
+  AssistantHostedNewsletterTool,
   AssistantPhoneCallPort,
 } from './execution-context.js'
 import {
@@ -54,9 +59,14 @@ export interface AssistantHostedToolContext {
   readonly connectedApps?: AssistantConnectedAppsPort | null
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   readonly groupTool?: AssistantHostedGroupTool | null
+  readonly newsletterTool?: AssistantHostedNewsletterTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentHostedMailboxItemIds(): readonly string[]
+  currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
+  recordNewsletterSendResult?(
+    result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
+  ): void
   currentPhoneCallToolRequestKeyScope?(): AssistantHostedToolRequestKeyScope | null
   readonly computerToolsAvailable: boolean
   readonly vaultFileSendAvailable: boolean
@@ -72,11 +82,15 @@ export function createAssistantHostedToolContext(input: {
   connectedApps?: AssistantConnectedAppsPort | null
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
   groupTool?: AssistantHostedGroupTool | null
+  newsletterTool?: AssistantHostedNewsletterTool | null
   computerToolsAvailable?: boolean
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getPhoneCallAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
   phoneCalls?: AssistantPhoneCallPort | null
+  recordNewsletterSendResult?: (
+    result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
+  ) => void
   sendVaultFile?: (ref: string) => Promise<AssistantHostedVaultFileSendResult>
   session: AssistantSession
 }): AssistantHostedToolContext {
@@ -101,6 +115,7 @@ export function createAssistantHostedToolContext(input: {
     connectedApps: input.connectedApps ?? null,
     familyPlanTool: input.familyPlanTool ?? null,
     groupTool: input.groupTool ?? null,
+    newsletterTool: input.newsletterTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentHostedDeliveryContext: () => {
@@ -130,6 +145,11 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
     },
+    currentScheduledAutomationAuthority: () => {
+      const deliveryContext = readDeliveryContext()
+      return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
+    },
+    recordNewsletterSendResult: input.recordNewsletterSendResult,
     currentPhoneCallToolRequestKeyScope: () => {
       const acceptedInputIds = input.getPhoneCallAcceptedInputIds?.() ?? []
       return acceptedInputIds.length > 0

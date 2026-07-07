@@ -13,6 +13,10 @@
     {
       "path": "/api/internal/hosted-execution/retention/cron",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/internal/hosted-growth/snapshot/cron",
+      "schedule": "10 0 * * *"
     }
   ]
 }

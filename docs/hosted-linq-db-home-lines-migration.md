@@ -61,7 +61,7 @@ Keep new lines below 50 net-new conversations per day unless current provider he
 
 ## Contact Cards
 
-Run or keep the existing contact-card reconciliation path enabled after line changes. Every configured or provider-discovered line should have the Murph contact card set up before meaningful outbound use.
+Run or keep the existing contact-card reconciliation path enabled after line changes. Every configured or provider-discovered line should have the shared Murph name and phone contact card set up before meaningful outbound use.
 
 ## Logging
 

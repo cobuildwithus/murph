@@ -13,6 +13,7 @@ import {
   handleHostedEmailIngress,
 } from "./hosted-email/worker-ingress.ts";
 import type {
+  WorkerExecutionContext,
   WorkerEnvironmentSource,
 } from "./worker-routes/shared.ts";
 import {
@@ -37,9 +38,10 @@ export default {
   async fetch(
     request: Request,
     env: WorkerEnvironmentSource,
+    ctx?: WorkerExecutionContext,
   ): Promise<Response> {
     try {
-      return await handleHostedLocalTestWorkerFetch(request, env);
+      return await handleHostedLocalTestWorkerFetch(request, env, ctx);
     } catch (error) {
       return mapWorkerRouteError(request, error);
     }

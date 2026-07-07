@@ -28,8 +28,10 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 
 // Byte budgets over the esbuild metafile so import-graph creep in the boot
 // surface fails the assembly instead of silently regressing cold start.
-// Baselines measured from the real assembled bundle on 2026-07-06: total
-// 8,223,286B across 42 chunks, entry container-entrypoint.js 1,267,937B.
+// Latest measured from the real assembled bundle on 2026-07-07: total
+// 7,884,530B across 40 chunks, entry container-entrypoint.js 1,270,050B,
+// static boot closure 6,382,690B across 30 chunks. The entry ratchet baseline
+// remains 1,267,937B because the latest entry did not beat the prior baseline.
 //
 // The entry chunk gates cold-start parse, so it is ratcheted, not given
 // headroom: the guard holds it to the measured baseline plus a tight noise
@@ -38,6 +40,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // below. When an increase is intentional, set the baseline to the measured
 // value the failure prints and say why in the same change.
 //
+// Node parses the entry chunk plus every statically reachable chunk before
+// HTTP listen, so the static boot closure is ratcheted with the same reviewed
+// baseline discipline as the entry chunk. Its tolerance is wider than the
+// entry tolerance because the closure spans ~5x more bytes and many more
+// chunks, so path comments, content hashes, and platform-specific emit jitter
+// have more surface. CI Linux has measured slightly smaller than local macOS;
+// since this ratchet fails only on growth, the local baseline remains safe.
+//
 // The total ceiling stays a fixed backstop at its prior 9,300,000B value (not
 // ratcheted): #397 shrank the bundle, so there is no reason to loosen it, and
 // dynamic (non-boot) chunk jitter should not force a baseline bump. Ratchet it
@@ -45,10 +55,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_267_937;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_382_690;
 // Noise band above the baseline before the ratchet trips (~2%): absorbs
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
 // workspace package inputs appear as `node_modules/@murphai/*/dist/...` in
 // the staged production assembly but as `packages/*/dist/...` when bundling
@@ -63,6 +75,10 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/device-syncd/dist/providers/",
   "/importers/dist/",
   "node_modules/@junction-api/sdk/",
+  "/health-metrics/dist/murph-age.js",
+  "/health-metrics/dist/murph-age-source-routes.js",
+  "/query/dist/murph-age.js",
+  "/query/dist/browser-replica/murph-age.js",
 ] as const;
 
 export async function bundleRunnerContainerEntrypoint(
@@ -103,7 +119,7 @@ export async function bundleRunnerContainerEntrypoint(
     buildResult.metafile,
   );
   console.log(
-    `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance), total ${bundleBytes.totalBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET}B budget`,
+    `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance), static boot closure ${bundleBytes.staticClosureBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES}B tolerance), total ${bundleBytes.totalBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET}B budget`,
   );
   assertRunnerEntrypointBundleBoots({
     bundleDir,
@@ -121,12 +137,16 @@ export async function bundleRunnerContainerEntrypoint(
 // assertRunnerEntrypointBundleWithinBudgets with this as the default).
 export function resolveRunnerEntrypointBundleBudgets(): {
   entryBytes: number;
+  staticClosureBytes: number;
   totalBytes: number;
 } {
   return {
     entryBytes:
       RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES
       + RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES,
+    staticClosureBytes:
+      RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES
+      + RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES,
     totalBytes: RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET,
   };
 }
@@ -149,9 +169,9 @@ function assertRunnerEntrypointBundleInputsStayExternal(
 // call site always uses the default budgets above.
 export function assertRunnerEntrypointBundleWithinBudgets(
   metafile: Metafile,
-  budgets: { entryBytes: number; totalBytes: number }
+  budgets: { entryBytes: number; staticClosureBytes: number; totalBytes: number }
     = resolveRunnerEntrypointBundleBudgets(),
-): { entryBytes: number; totalBytes: number } {
+): { entryBytes: number; staticClosureBytes: number; totalBytes: number } {
   const outputs = Object.entries(metafile.outputs);
   const totalBytes = outputs.reduce((sum, [, output]) => sum + output.bytes, 0);
 
@@ -162,7 +182,18 @@ export function assertRunnerEntrypointBundleWithinBudgets(
       `runner entrypoint bundle metafile is missing output ${entryPath}; cannot enforce the entry-chunk byte budget.`,
     );
   }
-  assertRunnerEntrypointBundleBootInputsAllowed(metafile, entryPath);
+  const staticBootOutputPaths = collectStaticRunnerEntrypointOutputPaths(
+    metafile,
+    entryPath,
+  );
+  const staticClosureBytes = [...staticBootOutputPaths].reduce(
+    (sum, outputPath) => sum + (metafile.outputs[outputPath]?.bytes ?? 0),
+    0,
+  );
+  assertRunnerEntrypointBundleBootInputsAllowed(
+    metafile,
+    staticBootOutputPaths,
+  );
 
   const violations: string[] = [];
   if (totalBytes > budgets.totalBytes) {
@@ -175,8 +206,13 @@ export function assertRunnerEntrypointBundleWithinBudgets(
       `entry chunk ${entryPath} ${entryBytes}B exceeds budget ${budgets.entryBytes}B`,
     );
   }
+  if (staticClosureBytes > budgets.staticClosureBytes) {
+    violations.push(
+      `static boot closure ${staticClosureBytes}B exceeds budget ${budgets.staticClosureBytes}B`,
+    );
+  }
   if (violations.length === 0) {
-    return { entryBytes, totalBytes };
+    return { entryBytes, staticClosureBytes, totalBytes };
   }
 
   const largestInputs = Object.entries(metafile.inputs)
@@ -212,9 +248,8 @@ function findRunnerEntrypointBundleEntryOutputPath(metafile: Metafile): string {
 
 function assertRunnerEntrypointBundleBootInputsAllowed(
   metafile: Metafile,
-  entryPath: string,
+  bootOutputPaths: Set<string>,
 ): void {
-  const bootOutputPaths = collectStaticRunnerEntrypointOutputPaths(metafile, entryPath);
   const forbiddenInputs = new Set<string>();
 
   for (const outputPath of bootOutputPaths) {
@@ -237,8 +272,8 @@ function assertRunnerEntrypointBundleBootInputsAllowed(
   if (forbiddenInputs.size > 0) {
     throw new Error(
       [
-        "runner entrypoint bundle includes provider connector inputs in the static boot closure.",
-        "Move these imports behind a per-turn dynamic import:",
+        "runner entrypoint bundle includes forbidden inputs in the static boot closure.",
+        "Move these imports behind a per-turn dynamic import or a narrow package subpath:",
         ...[...forbiddenInputs].sort().map((inputPath) => `  ${inputPath}`),
       ].join("\n"),
     );
@@ -302,10 +337,11 @@ function collectRunnerEntrypointOutputPaths(
       if (!shouldFollowImport(imported)) {
         continue;
       }
-      const importedOutputPath = resolveMetafileOutputImportPath(
-        outputPath,
-        imported.path,
-      );
+      const importedOutputPath = resolveMetafileOutputImportPath({
+        importedPath: imported.path,
+        importerOutputPath: outputPath,
+        outputPaths: metafile.outputs,
+      });
       if (importedOutputPath in metafile.outputs) {
         pending.push(importedOutputPath);
       }
@@ -315,11 +351,16 @@ function collectRunnerEntrypointOutputPaths(
   return outputPaths;
 }
 
-function resolveMetafileOutputImportPath(
-  importerOutputPath: string,
-  importedPath: string,
-): string {
+function resolveMetafileOutputImportPath(input: {
+  importedPath: string;
+  importerOutputPath: string;
+  outputPaths: Metafile["outputs"];
+}): string {
+  const { importedPath, importerOutputPath, outputPaths } = input;
   const normalizedImportedPath = normalizeMetafilePath(importedPath);
+  if (normalizedImportedPath in outputPaths) {
+    return normalizedImportedPath;
+  }
   if (!normalizedImportedPath.startsWith(".")) {
     return normalizedImportedPath;
   }

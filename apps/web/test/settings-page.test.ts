@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   HostedAccountSettingsCards: vi.fn((props: {
     account: unknown;
     murphPhoneNumber?: string | null;
+    openEmailLink?: boolean;
   }) =>
     React.createElement(
       "div",
@@ -257,7 +258,9 @@ test("SettingsPage reads the app session and persisted account settings into the
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  const markup = renderToStaticMarkup(await SettingsPage());
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ addEmail: "true" }),
+  }));
 
   assert.match(markup, /Hosted billing settings/);
   assert.match(markup, /Hosted account settings \+15550100001/);
@@ -311,9 +314,63 @@ test("SettingsPage reads the app session and persisted account settings into the
   expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
     account: accountSnapshot,
     murphPhoneNumber: "+15550100001",
+    openEmailLink: true,
   }), undefined);
   expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
+  }), undefined);
+});
+
+test("SettingsPage passes a pending Murph text line to account settings", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    memberLookup: null,
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedMemberRoutingState.mockResolvedValue({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: "member_123",
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: "+15550100003",
+    telegramThreadId: null,
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  });
+  mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
+  const accountSnapshot = {
+    email: {
+      address: null,
+      verifiedAt: null,
+    },
+    phone: {
+      number: "+15550100002",
+      verifiedAt: "2025-03-27T08:00:00.000Z",
+    },
+    telegram: {
+      telegramUserId: null,
+    },
+  };
+  mocks.readHostedAccountSettingsSnapshot.mockResolvedValue(accountSnapshot);
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage());
+
+  assert.match(markup, /Hosted account settings \+15550100003/);
+  expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
+    account: accountSnapshot,
+    murphPhoneNumber: "+15550100003",
   }), undefined);
 });
 

@@ -24,13 +24,11 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  conversationRefFromAssistantInputConversation,
   isAssistantContextSnapshotRefreshPending,
   listAssistantContextSnapshotDirtyDomainsForCanonicalWrite,
   markAssistantContextSnapshotDirty,
-  notifyAssistantActiveTurnInputAvailable,
+  notifyAssistantActiveTurnInputAvailableForInputIds,
   resolveAssistantContextSnapshotPath,
-  readAssistantInputEvent,
   warnAssistantBestEffortFailure,
 } from "@murphai/assistant-engine";
 import type {
@@ -909,41 +907,62 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       const foregroundConversationImportItem =
         input.input.foregroundImportItem ?? input.input.importItem;
       try {
-        const result = await importHostedMailboxForWorkspaceRunner({
+        const handleForegroundImportResult = async (
+          result: HostedMailboxImportCheckpointResult,
+        ) => {
+          if (shouldRecordHostedForegroundMailboxImportResult(result)) {
+            input.checkpointRequestBuilder.recordCheckpointResult(result);
+          }
+          markHostedMailboxImportDirtyIfNeeded(input.checkpointRequestBuilder, result);
+          await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+            checkpointRequestBuilder: input.checkpointRequestBuilder,
+            input: input.input,
+            phase: "active_turn_input",
+            signal: outerSignal,
+          });
+          if (hasHostedMailboxImportForegroundConversationWork(result)) {
+            input.onForegroundConversationWorkObserved?.();
+          }
+          await notifyHostedActiveTurnInputForMailboxImport({
+            input: input.input,
+            result,
+            signal: outerSignal,
+          });
+        };
+        const conversationResult = await importHostedMailboxForWorkspaceRunner({
           checkpointRequestBuilder: input.checkpointRequestBuilder,
           checkpointReason: "active_turn_input",
           deferCheckpoint: true,
-          importItem: (item, context) =>
-            item.item.lane === "conversation"
-              ? foregroundConversationImportItem(item, context)
-              : input.input.importItem(item, context),
+          importItem: foregroundConversationImportItem,
           importItemContext: {
             latencyMilestones,
           },
           input: input.input,
-          lanes: ["system", "conversation"],
+          lanes: ["conversation"],
           limitPerLane: input.input.foregroundLimitPerLane ?? input.input.limitPerLane,
-          requestId,
+          requestId: `${requestId}:conversation`,
           signal: outerSignal,
         });
-        if (shouldRecordHostedForegroundMailboxImportResult(result)) {
-          input.checkpointRequestBuilder.recordCheckpointResult(result);
+        await handleForegroundImportResult(conversationResult);
+        if (hasHostedMailboxImportForegroundConversationWork(conversationResult)) {
+          continue;
         }
-        markHostedMailboxImportDirtyIfNeeded(input.checkpointRequestBuilder, result);
-        await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+
+        const systemResult = await importHostedMailboxForWorkspaceRunner({
           checkpointRequestBuilder: input.checkpointRequestBuilder,
+          checkpointReason: "active_turn_input",
+          deferCheckpoint: true,
+          importItem: input.input.importItem,
+          importItemContext: {
+            latencyMilestones,
+          },
           input: input.input,
-          phase: "active_turn_input",
+          lanes: ["system"],
+          limitPerLane: input.input.limitPerLane,
+          requestId: `${requestId}:system`,
           signal: outerSignal,
         });
-        if (hasHostedMailboxImportForegroundConversationWork(result)) {
-          input.onForegroundConversationWorkObserved?.();
-        }
-        await notifyHostedActiveTurnInputForMailboxImport({
-          input: input.input,
-          result,
-          signal: outerSignal,
-        });
+        await handleForegroundImportResult(systemResult);
       } catch (error) {
         if (outerSignal?.aborted) {
           break;
@@ -1109,53 +1128,11 @@ async function notifyHostedActiveTurnInputForMailboxImport(input: {
   result: HostedMailboxImportCheckpointResult;
   signal: AbortSignal | null;
 }): Promise<void> {
-  const inputIds = [...new Set(input.result.importResult.assistantInputIds ?? [])];
-  const conversationsByKey = new Map<
-    string,
-    ReturnType<typeof conversationRefFromAssistantInputConversation>
-  >();
-  for (const inputId of inputIds) {
-    const event = await readAssistantInputEvent({
-      inputId,
-      vault: input.input.vaultRoot,
-    });
-    if (!event?.conversation) {
-      continue;
-    }
-
-    const conversation = conversationRefFromAssistantInputConversation(event.conversation);
-    conversationsByKey.set(
-      formatHostedActiveTurnConversationNotificationKey(conversation),
-      conversation,
-    );
-  }
-
-  for (const conversation of conversationsByKey.values()) {
-    await notifyAssistantActiveTurnInputAvailable({
-      conversation,
-      ...(input.signal ? { signal: input.signal } : {}),
-      vault: input.input.vaultRoot,
-    }).catch((error: unknown) => {
-      warnAssistantBestEffortFailure({
-        error,
-        operation: "hosted active-turn input notification",
-      });
-    });
-  }
-}
-
-function formatHostedActiveTurnConversationNotificationKey(
-  conversation: ReturnType<typeof conversationRefFromAssistantInputConversation>,
-): string {
-  return [
-    conversation.alias ?? "",
-    conversation.channel ?? "",
-    conversation.directness ?? "",
-    conversation.identityId ?? "",
-    conversation.participantId ?? "",
-    conversation.sessionId ?? "",
-    conversation.threadId ?? "",
-  ].join("\u0000");
+  await notifyAssistantActiveTurnInputAvailableForInputIds({
+    inputIds: input.result.importResult.assistantInputIds ?? [],
+    ...(input.signal ? { signal: input.signal } : {}),
+    vault: input.input.vaultRoot,
+  });
 }
 
 export async function importHostedMailboxForWorkspaceRunner(input: {

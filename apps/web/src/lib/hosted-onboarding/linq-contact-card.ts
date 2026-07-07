@@ -22,7 +22,6 @@ const MURPH_CONTACT_CARD_DEFAULT_ORIGIN = "https://www.withmurph.ai";
 const MURPH_CONTACT_CARD_DEFAULT_IMAGE_URL =
   "https://www.withmurph.ai/murph_headshot.png";
 const MURPH_CONTACT_CARD_IMAGE_PATH = "/murph_headshot.png";
-const LINQ_CONTACT_CARD_IMAGE_CDN_HOST = "cdn.linqapp.com";
 
 export type HostedLinqContactCard = {
   firstName: string;
@@ -69,8 +68,6 @@ export async function reconcileHostedLinqContactCards(input: {
     prisma: input.prisma,
     signal: input.signal,
   });
-  const murphImageUrl = getMurphContactCardImageUrl();
-
   const result: HostedLinqContactCardReconciliation = {
     activeCards: 0,
     atRiskLines: 0,
@@ -95,7 +92,6 @@ export async function reconcileHostedLinqContactCards(input: {
     });
     const outcome = await reconcileHostedLinqContactCardForLine({
       existingCard,
-      imageUrl: murphImageUrl,
       phoneNumber: line.phoneNumber,
       signal: input.signal,
     });
@@ -226,65 +222,37 @@ async function listHostedLinqConfiguredContactCardLines(input: {
 
 async function reconcileHostedLinqContactCardForLine(input: {
   existingCard: HostedLinqContactCard | null;
-  imageUrl: string | null;
   phoneNumber: string;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCardOutcome> {
   if (!input.existingCard) {
     const created = await setupHostedLinqContactCard({
       firstName: MURPH_CONTACT_CARD_FIRST_NAME,
-      imageUrl: input.imageUrl,
       phoneNumber: input.phoneNumber,
       signal: input.signal,
     });
     return created.isActive ? "createdCards" : "inactiveCards";
   }
 
-  if (isCurrentMurphContactCard(input.existingCard, input.imageUrl)) {
+  if (isCurrentMurphContactCard(input.existingCard)) {
     return input.existingCard.isActive ? "activeCards" : "inactiveCards";
   }
 
   const updated = await updateHostedLinqContactCard({
     firstName: MURPH_CONTACT_CARD_FIRST_NAME,
-    imageUrl: input.imageUrl,
+    imageUrl: null,
     phoneNumber: input.phoneNumber,
     signal: input.signal,
   });
   return updated.isActive ? "updatedCards" : "inactiveCards";
 }
 
-function isCurrentMurphContactCard(
-  card: HostedLinqContactCard,
-  imageUrl: string | null,
-): boolean {
+function isCurrentMurphContactCard(card: HostedLinqContactCard): boolean {
   if (card.firstName !== MURPH_CONTACT_CARD_FIRST_NAME || (card.lastName ?? "") !== "") {
     return false;
   }
 
-  if (!imageUrl) {
-    return true;
-  }
-
-  // Linq rewrites accepted contact-card images to its own CDN URL.
-  return card.imageUrl === imageUrl || isHostedLinqContactCardImageUrl(card.imageUrl);
-}
-
-function isHostedLinqContactCardImageUrl(value: string | null): boolean {
-  const imageUrl = normalizeNullableString(value);
-  if (!imageUrl) {
-    return false;
-  }
-
-  try {
-    const url = new URL(imageUrl);
-    return url.protocol === "https:"
-      && url.hostname === LINQ_CONTACT_CARD_IMAGE_CDN_HOST
-      && url.search === ""
-      && url.pathname.includes("/contact-card/")
-      && /\/image-[^/]+\.png$/i.test(url.pathname);
-  } catch {
-    return false;
-  }
+  return card.imageUrl === null;
 }
 
 /**
@@ -377,15 +345,15 @@ function buildHostedLinqContactCardBody(input: {
   imageUrl?: string | null;
   lastName?: string | null;
   phoneNumber?: string | null;
-}): Record<string, string> {
+}): Record<string, string | null> {
   const firstName = normalizeNullableString(input.firstName);
-  const imageUrl = normalizeNullableString(input.imageUrl);
+  const imageUrl = input.imageUrl === null ? null : normalizeNullableString(input.imageUrl);
   const lastName = normalizeNullableString(input.lastName);
   const phoneNumber = normalizeNullableString(input.phoneNumber);
 
   return {
     ...(firstName ? { first_name: firstName } : {}),
-    ...(imageUrl ? { image_url: imageUrl } : {}),
+    ...(input.imageUrl === null ? { image_url: null } : imageUrl ? { image_url: imageUrl } : {}),
     ...(lastName ? { last_name: lastName } : {}),
     ...(phoneNumber ? { phone_number: phoneNumber } : {}),
   };

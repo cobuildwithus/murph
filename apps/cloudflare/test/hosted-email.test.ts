@@ -16,11 +16,13 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
 } from "@murphai/hosted-execution/hosted-email";
 import {
   createHostedEmailThreadTarget,
+  HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
   parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
@@ -464,6 +466,250 @@ describe("hosted email routing and transport", () => {
     expect((sentMessage as { raw: string }).raw).toMatch(/Reply-To: assistant\+[A-Za-z0-9-]+@mail\.example\.test/u);
   });
 
+  it("sends one shared group MIME with all recipients in To and an HTML alternative", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: unknown) => undefined),
+    };
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          recipients: [
+            { address: "one@example.test", memberId: "member_one" },
+            { address: "two@example.test", memberId: "member_two" },
+          ],
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
+
+    const response = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        html: "<p>Weekly</p>",
+        idempotencyKey: "group-newsletter:test",
+        message: "Plain body",
+        subject: "Weekly health note",
+        target: "group_123",
+        targetKind: "group",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]?.[0])
+      .toMatchObject({
+        boundUserId: "member_runtime",
+        path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
+      });
+    expect(emailBinding.send).toHaveBeenCalledTimes(2);
+    const firstMessage = emailBinding.send.mock.calls[0]?.[0] as {
+      raw: string;
+      to: string;
+    };
+    const secondMessage = emailBinding.send.mock.calls[1]?.[0] as {
+      raw: string;
+      to: string;
+    };
+
+    expect(firstMessage.to).toBe("one@example.test");
+    expect(secondMessage.to).toBe("two@example.test");
+    expect(secondMessage.raw).toBe(firstMessage.raw);
+    expect(firstMessage.raw).toContain("To: one@example.test, two@example.test");
+    expect(firstMessage.raw).toContain("Subject: Weekly health note");
+    expect(firstMessage.raw).toContain("Content-Type: multipart/alternative;");
+    expect(firstMessage.raw).toContain('Content-Type: text/html; charset="utf-8"');
+    expect(firstMessage.raw).toContain("UGxhaW4gYm9keQ==");
+    expect(firstMessage.raw).toContain("PHA+V2Vla2x5PC9wPg==");
+    expect(firstMessage.raw).toContain("References: <hosted-thread.");
+
+    const threadTarget = parseHostedEmailThreadTarget(response.target);
+    expect((threadTarget as typeof threadTarget & { targetKind?: string } | null)?.targetKind)
+      .toBe("group");
+    expect((threadTarget as typeof threadTarget & { groupId?: string | null } | null)?.groupId)
+      .toBe("group_123");
+    expect(threadTarget?.to).toEqual([]);
+  });
+
+  it("re-resolves group thread replies to the current authorized recipients", async () => {
+    const emailBinding = {
+      send: vi.fn(async (_message: unknown) => undefined),
+    };
+    const groupThreadTarget = `hostedmail:${Buffer.from(JSON.stringify({
+      cc: [],
+      groupId: "group_123",
+      lastMessageId: "<group-last@example.test>",
+      references: ["<group-root@example.test>", "<group-last@example.test>"],
+      schema: HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
+      subject: "Weekly health note",
+      targetKind: "group",
+      to: [],
+    })).toString("base64url")}`;
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          recipients: [
+            { address: "one@example.test", memberId: "member_one" },
+            { address: "three@example.test", memberId: "member_three" },
+          ],
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
+
+    const response = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        message: "reply to the current group",
+        target: groupThreadTarget,
+        targetKind: "thread",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]?.[0])
+      .toMatchObject({
+        body: JSON.stringify({ groupId: "group_123" }),
+        boundUserId: "member_runtime",
+        path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
+      });
+    expect(emailBinding.send).toHaveBeenCalledTimes(2);
+    const firstMessage = emailBinding.send.mock.calls[0]?.[0] as {
+      raw: string;
+      to: string;
+    };
+    const secondMessage = emailBinding.send.mock.calls[1]?.[0] as {
+      raw: string;
+      to: string;
+    };
+    expect(firstMessage.to).toBe("one@example.test");
+    expect(secondMessage.to).toBe("three@example.test");
+    expect(firstMessage.raw).toContain("To: one@example.test, three@example.test");
+    expect(firstMessage.raw).toContain("Subject: Re: Weekly health note");
+    expect(firstMessage.raw).toContain("In-Reply-To: <group-last@example.test>");
+    expect(firstMessage.raw).toContain(
+      "References: <group-root@example.test> <group-last@example.test>",
+    );
+
+    const returnedThreadTarget = parseHostedEmailThreadTarget(response.target);
+    expect((returnedThreadTarget as typeof returnedThreadTarget & { targetKind?: string } | null)?.targetKind)
+      .toBe("group");
+    expect((returnedThreadTarget as typeof returnedThreadTarget & { groupId?: string | null } | null)?.groupId)
+      .toBe("group_123");
+    expect(returnedThreadTarget?.to).toEqual([]);
+  });
+
+  it("continues group fanout after one recipient fails and keeps the occurrence message id stable", async () => {
+    const emailBinding = {
+      send: vi.fn(async (message: { raw: string; to: string }) => {
+        if (message.to === "two@example.test") {
+          throw new Error("simulated recipient failure");
+        }
+      }),
+    };
+    const recipientsResponse = () => new Response(
+      JSON.stringify({
+        recipients: [
+          { address: "one@example.test", memberId: "member_one" },
+          { address: "two@example.test", memberId: "member_two" },
+          { address: "three@example.test", memberId: "member_three" },
+        ],
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    );
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(recipientsResponse())
+      .mockResolvedValueOnce(recipientsResponse());
+
+    const request = {
+      html: "<p>Weekly</p>",
+      idempotencyKey: "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123",
+      message: "Plain body",
+      subject: "Weekly health note",
+      target: "group_123",
+      targetKind: "group" as const,
+    };
+
+    const first = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request,
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const second = await sendHostedEmailMessage({
+      config: TEST_CONFIG,
+      emailBinding,
+      request: {
+        ...request,
+        html: "<p>Weekly, recomposed</p>",
+        message: "Plain body, recomposed",
+        subject: "Weekly health note, recomposed",
+      },
+      userId: "member_runtime",
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    expect(first).toMatchObject({
+      delivery: {
+        failedCount: 1,
+        sentCount: 2,
+        skippedCount: 0,
+        status: "partial_failure",
+      },
+    });
+    expect(second).toMatchObject({
+      delivery: {
+        failedCount: 1,
+        sentCount: 2,
+        skippedCount: 0,
+        status: "partial_failure",
+      },
+    });
+    expect(emailBinding.send).toHaveBeenCalledTimes(6);
+    expect(emailBinding.send.mock.calls.map((call) => call[0].to)).toEqual([
+      "one@example.test",
+      "two@example.test",
+      "three@example.test",
+      "one@example.test",
+      "two@example.test",
+      "three@example.test",
+    ]);
+
+    const firstRaw = emailBinding.send.mock.calls[0]?.[0].raw;
+    const secondRaw = emailBinding.send.mock.calls[3]?.[0].raw;
+    if (!firstRaw || !secondRaw) {
+      throw new Error("Expected sent MIME messages.");
+    }
+    expect(secondRaw).not.toBe(firstRaw);
+    const firstMessageId = firstRaw.match(/^Message-ID: (.+)$/mu)?.[1];
+    const secondMessageId = secondRaw.match(/^Message-ID: (.+)$/mu)?.[1];
+
+    expect(firstMessageId).toBeDefined();
+    expect(firstMessageId).toBe(secondMessageId);
+    expect(parseHostedEmailThreadTarget(first.target)?.lastMessageId).toBe(firstMessageId);
+    expect(parseHostedEmailThreadTarget(second.target)?.lastMessageId).toBe(firstMessageId);
+  });
+
   it("rejects thread subject overrides on the hosted email bridge", async () => {
     const threadTarget = serializeHostedEmailThreadTarget(createHostedEmailThreadTarget({
       cc: [],
@@ -550,6 +796,10 @@ describe("hosted email routing and transport", () => {
     expect(followUpMessage.raw).toContain("In-Reply-To: ");
     expect(followUpMessage.raw).toContain("References: ");
     expect(followUpMessage.raw).not.toContain("Cc:");
+    expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls)
+      .not.toEqual(expect.arrayContaining([
+        [expect.objectContaining({ path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH })],
+      ]));
 
     const collapsedThreadTarget = parseHostedEmailThreadTarget(followUp.target);
     expect(collapsedThreadTarget?.to).toEqual(["owner@example.com"]);

@@ -23,6 +23,8 @@ export const HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_PATH =
   "/api/internal/hosted-execution/groups/tool";
+export const HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH =
+  "/api/internal/hosted-execution/groups/newsletter-tool";
 export const HOSTED_RUNTIME_CODEX_AUTH_PATH =
   "/api/internal/hosted-runtime/codex-auth";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH =
@@ -35,8 +37,6 @@ export const HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH =
   "/api/internal/hosted-runtime/action-approvals/consume";
 export const HOSTED_RUNTIME_ISSUE_RECORD_PATH =
   "/api/internal/hosted-execution/issues/record";
-export const HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH =
-  "/api/internal/hosted-runtime/linq/contact-card/share-after-outbound";
 export const HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH =
   "/api/internal/hosted-runtime/linq-egress/engagement";
 export const HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH =

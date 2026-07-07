@@ -40,6 +40,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  "group-newsletter.email-needed",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -707,13 +708,6 @@ export interface HostedRuntimeUsageRecordResponse {
   usageId: string;
 }
 
-export interface HostedRuntimeLinqContactCardShareAfterOutboundRequest {
-  authority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
-  chatId: string;
-  service: string | null;
-  threadIsDirect: boolean | null;
-}
-
 export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
   "feature_interest",
   "feature_request",
@@ -766,8 +760,10 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
 export type HostedRuntimeGroupToolAction =
   | "read_current"
   | "create_join_link"
+  | "post_join_offer"
   | "read_chat_participants"
-  | "share_contact_card";
+  | "share_contact_card"
+  | "revoke_own_email_share";
 
 export const HOSTED_RUNTIME_GROUP_KINDS = [
   "couple",
@@ -807,6 +803,12 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
   requestedVaultShareProjectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
 }
 
+export interface HostedRuntimeGroupPostJoinOfferRequest {
+  // Closed over the individually selectable kinds; the offer always includes
+  // the membership-implied profile-name.v0 share in its deterministic copy.
+  projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
+}
+
 /**
  * Injected by the hosted runtime from the current wake's Linq delivery
  * context; never supplied by the model. The web handler asserts the authority
@@ -815,6 +817,11 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 export interface HostedRuntimeGroupToolLinqThreadContext {
   authority: HostedExecutionLinqExternalThreadRouteAuthority;
   chatId: string;
+}
+
+export interface HostedRuntimeGroupToolSelfOptOutContext {
+  senderHandle: string;
+  source: "email" | "linq";
 }
 
 export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
@@ -827,8 +834,17 @@ export interface HostedRuntimeGroupChatParticipant {
 export type HostedRuntimeGroupToolRequest =
   | { action: "read_current" }
   | { action: "create_join_link"; joinLink?: HostedRuntimeGroupCreateJoinLinkRequest | null }
+  | {
+      action: "post_join_offer";
+      joinOffer?: HostedRuntimeGroupPostJoinOfferRequest | null;
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
   | { action: "read_chat_participants"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
-  | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null };
+  | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
+  | {
+      action: "revoke_own_email_share";
+      selfOptOut?: HostedRuntimeGroupToolSelfOptOutContext | null;
+    };
 
 export type HostedRuntimeGroupToolResponse =
   | {
@@ -845,6 +861,12 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
   | {
+      action: "post_join_offer";
+      result:
+        | { status: "sent"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
       action: "read_chat_participants";
       result:
         | { status: "ok"; participants: HostedRuntimeGroupChatParticipant[] }
@@ -856,6 +878,86 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "sent" }
         | { status: "already_shared" }
         | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "revoke_own_email_share";
+      result:
+        | { status: "revoked"; revokedCount: number }
+        | { status: "already_removed"; revokedCount: 0 }
+        | { status: "unavailable"; unavailableReason: string };
+    };
+
+export type HostedRuntimeNewsletterToolAction =
+  | "read_stats"
+  | "send";
+
+export const HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH = 160;
+export const HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH = 100_000;
+export const HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH = 500_000;
+export const HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX = 100;
+
+export interface HostedRuntimeNewsletterParticipantSummary {
+  displayName: string | null;
+  hasEmail: boolean;
+  memberId: string;
+}
+
+export interface HostedRuntimeNewsletterScheduledAuthority {
+  automationId: string;
+  occurrenceAt: string;
+}
+
+export interface HostedRuntimeNewsletterToolSendRequest {
+  groupId: string;
+  html: string;
+  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
+  subject: string;
+  text?: string | null;
+}
+
+export type HostedRuntimeNewsletterToolRequest =
+  | { action: "read_stats"; groupId: string }
+  | ({ action: "send" } & HostedRuntimeNewsletterToolSendRequest);
+
+export type HostedRuntimeNewsletterToolResponse =
+  | {
+      action: "read_stats";
+      result:
+        | {
+            groupId: string;
+            missingEmailParticipants: HostedRuntimeNewsletterParticipantSummary[];
+            participants: HostedRuntimeNewsletterParticipantSummary[];
+            status: "ok";
+          }
+        | {
+            status: "unavailable";
+            unavailableReason: string;
+          };
+    }
+  | {
+      action: "send";
+      result:
+        | {
+            participantCount: number;
+            skippedNoEmailMemberIds: string[];
+            status: "sent";
+          }
+        | {
+            failedRecipientCount: number;
+            participantCount: number;
+            sentRecipientCount: number;
+            skippedNoEmailMemberIds: string[];
+            status: "partial_failure";
+          }
+        | {
+            participantCount: 0;
+            skippedNoEmailMemberIds: string[];
+            status: "no_recipients";
+          }
+        | {
+            status: "unavailable";
+            unavailableReason: string;
+          };
     };
 
 export type HostedRuntimeFamilyPlanToolAction =

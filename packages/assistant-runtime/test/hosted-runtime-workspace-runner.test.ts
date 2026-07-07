@@ -1607,7 +1607,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "system" },
         ],
         [
-          { importedSeq: "1", lane: "system" },
           { importedSeq: "0", lane: "conversation" },
         ],
       ]);
@@ -3338,7 +3337,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "conversation" },
         ],
         [
-          { importedSeq: "0", lane: "system" },
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
@@ -3353,6 +3351,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         eventCode: "mailbox.imported",
         leaseGeneration: "4",
         level: "info",
+        mailboxLane: "conversation",
+        mailboxSeqEnd: "3",
+        mailboxSeqStart: "1",
         phase: "active_turn_input",
         redactedJson: {
           assistantInputCount: 2,
@@ -3366,7 +3367,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           conversationSeqStart: "1",
           fetchedCount: 2,
           importedCount: 2,
-          laneCount: 2,
+          laneCount: 1,
           retryableBlockedCount: 0,
           stateChanged: true,
           systemSeqEnd: "0",
@@ -3602,7 +3603,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "conversation" },
         ],
         [
-          { importedSeq: "0", lane: "system" },
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
@@ -3724,7 +3724,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "conversation" },
         ],
         [
-          { importedSeq: "0", lane: "system" },
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
@@ -3811,8 +3810,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "conversation" },
         ],
         [
-          { importedSeq: "0", lane: "system" },
           { importedSeq: "1", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
         ],
       ]);
     } finally {
@@ -3940,7 +3941,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "conversation" },
         ],
         [
-          { importedSeq: "0", lane: "system" },
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
@@ -4073,7 +4073,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "conversation" },
         ],
         [
-          { importedSeq: "0", lane: "system" },
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
@@ -4770,7 +4769,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "system" },
         ],
         [
-          { importedSeq: "0", lane: "system" },
           { importedSeq: "0", lane: "conversation" },
         ],
       ]);
@@ -4900,7 +4898,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "0", lane: "conversation" },
         ],
         [
-          { importedSeq: "0", lane: "system" },
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
@@ -4916,7 +4913,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         conversationSeqStart: "1",
         fetchedCount: 2,
         importedCount: 1,
-        laneCount: 2,
+        laneCount: 1,
         retryableBlockedCount: 1,
         stateChanged: true,
         systemSeqEnd: "0",

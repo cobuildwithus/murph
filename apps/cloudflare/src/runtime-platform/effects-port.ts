@@ -1,6 +1,8 @@
 import type { HostedRuntimeEffectsPort } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import type {
+  HostedEmailDeliverySummary,
+} from "@murphai/assistant-runtime/hosted-email";
 import {
-  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -139,27 +141,6 @@ export function createCloudflareEffectsPort(input: {
               transport: webControlTransport,
             });
           },
-          async maybeShareLinqContactCardAfterOutbound(request, context) {
-            const description = "Hosted Linq contact-card share after outbound";
-            await fetchHostedWebControlPlaneJson({
-              body: request,
-              boundUserId: input.boundUserId,
-              description,
-              fetchImpl: input.fetchImpl,
-              ...(webControlTransport.mode === "proxy"
-                ? {
-                    headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
-                      description,
-                      workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
-                    }),
-                  }
-                : {}),
-              path: HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
-              signal: context?.signal ?? null,
-              timeoutMs: input.timeoutMs,
-              transport: webControlTransport,
-            });
-          },
           async recordLinqDeliveryOutcome(request, context) {
             await fetchHostedWebControlPlaneJson({
               body: request,
@@ -195,10 +176,44 @@ export function createCloudflareEffectsPort(input: {
         ),
       });
       const target = readOptionalStringField(payload, "target");
+      const delivery = readOptionalHostedEmailDeliverySummary(payload);
 
-      return target ? { target } : undefined;
+      return target ? { delivery, target } : undefined;
     },
   };
+}
+
+function readOptionalHostedEmailDeliverySummary(
+  payload: unknown,
+): HostedEmailDeliverySummary | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const delivery = (payload as Record<string, unknown>).delivery;
+  if (delivery === null || delivery === undefined) {
+    return null;
+  }
+  if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) {
+    throw new TypeError("Hosted email send delivery must be an object.");
+  }
+  const record = delivery as Record<string, unknown>;
+  const status = record.status;
+  if (status !== "failed" && status !== "partial_failure" && status !== "sent") {
+    throw new TypeError("Hosted email send delivery status is invalid.");
+  }
+  return {
+    failedCount: readHostedEmailDeliveryCount(record.failedCount, "failedCount"),
+    sentCount: readHostedEmailDeliveryCount(record.sentCount, "sentCount"),
+    skippedCount: readHostedEmailDeliveryCount(record.skippedCount, "skippedCount"),
+    status,
+  };
+}
+
+function readHostedEmailDeliveryCount(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new TypeError(`Hosted email send delivery ${field} must be a non-negative integer.`);
+  }
+  return value;
 }
 
 async function requireHostedEffectsRuntimeWriteFenceHeaders(input: {
