@@ -154,6 +154,15 @@ function findProviderTraceRawEvent(
   return rawEvents[0]!
 }
 
+function findProviderTraceRawEvents(
+  events: readonly AssistantProviderTraceEvent[],
+  providerTraceKind: string,
+): Record<string, unknown>[] {
+  return events
+    .map((event) => readProviderTraceRawEvent(event))
+    .filter((event) => event.providerTraceKind === providerTraceKind)
+}
+
 function findProviderPromptSizeTraceRawEvent(
   events: readonly AssistantProviderTraceEvent[],
   providerPromptDiagnosticKind: string,
@@ -2700,6 +2709,38 @@ describe('Codex assistant registry helpers', () => {
     expect(String(resumeFailureTrace.codexResumeFailureErrorMessage)).toContain(
       'stream disconnected before completion',
     )
+    const fallbackTraces = findProviderTraceRawEvents(
+      traceEvents,
+      'codex.fresh_thread_fallback',
+    )
+    expect(fallbackTraces).toHaveLength(2)
+    expect(fallbackTraces[0]).toMatchObject({
+      codexFreshThreadFallbackErrorCode: 'ASSISTANT_CODEX_FAILED',
+      codexFreshThreadFallbackErrorKind: 'turn-failed',
+      codexFreshThreadFallbackFailureEventCount: 1,
+      codexFreshThreadFallbackFailureProviderActionCount: 0,
+      codexFreshThreadFallbackFailureSessionPresent: true,
+      codexFreshThreadFallbackFailureTurnPresent: true,
+      codexFreshThreadFallbackPhase: 'fallback-started',
+      codexFreshThreadFallbackReason: 'resume-transport-failure',
+      codexFreshThreadFallbackResult: 'started',
+      codexFreshThreadFallbackResumeMatchesFailureSession: true,
+      codexFreshThreadFallbackResumeSessionPresent: true,
+      codexFreshThreadFallbackSessionPresent: false,
+      codexFreshThreadFallbackTraceType: 'fallback',
+      codexFreshThreadFallbackTurnPresent: false,
+      providerTraceKind: 'codex.fresh_thread_fallback',
+    })
+    expect(fallbackTraces[1]).toMatchObject({
+      codexFreshThreadFallbackEventCount: 0,
+      codexFreshThreadFallbackPhase: 'fallback-succeeded',
+      codexFreshThreadFallbackProviderActionCount: 0,
+      codexFreshThreadFallbackResult: 'succeeded',
+      codexFreshThreadFallbackSessionChanged: true,
+      codexFreshThreadFallbackSessionPresent: true,
+      codexFreshThreadFallbackTurnPresent: true,
+      providerTraceKind: 'codex.fresh_thread_fallback',
+    })
     expect(JSON.stringify(traceEvents)).not.toContain('api.openai.com')
   })
 
@@ -2771,6 +2812,7 @@ describe('Codex assistant registry helpers', () => {
         codexTurnStatus: 'failed',
       },
     )
+    const traceEvents: AssistantProviderTraceEvent[] = []
 
     codexAppServerMocks.executeCodexAppServerTurn
       .mockRejectedValueOnce(expectedError)
@@ -2801,6 +2843,9 @@ describe('Codex assistant registry helpers', () => {
     })
 
     const attempt = await executeCodexAssistantTurnAttempt({
+      onTraceEvent: (event) => {
+        traceEvents.push(event)
+      },
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
@@ -2830,6 +2875,27 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.result.codexThreadId).toBe(
       'fresh-thread-after-provider-action-transport-failure',
     )
+    const fallbackTraces = findProviderTraceRawEvents(
+      traceEvents,
+      'codex.fresh_thread_fallback',
+    )
+    expect(fallbackTraces).toHaveLength(2)
+    expect(fallbackTraces[0]).toMatchObject({
+      codexFreshThreadFallbackFailureProviderActionCount: 1,
+      codexFreshThreadFallbackPhase: 'fallback-started',
+      codexFreshThreadFallbackReason: 'resume-transport-failure',
+      codexFreshThreadFallbackResult: 'started',
+      codexFreshThreadFallbackResumeMatchesFailureSession: true,
+      providerTraceKind: 'codex.fresh_thread_fallback',
+    })
+    expect(fallbackTraces[1]).toMatchObject({
+      codexFreshThreadFallbackPhase: 'fallback-succeeded',
+      codexFreshThreadFallbackProviderActionCount: 0,
+      codexFreshThreadFallbackResult: 'succeeded',
+      codexFreshThreadFallbackSessionChanged: true,
+      providerTraceKind: 'codex.fresh_thread_fallback',
+    })
+    expect(JSON.stringify(traceEvents)).not.toContain('api.openai.com')
   })
 
   it('starts a fresh thread when resumed Codex history has invalid tool output', async () => {
