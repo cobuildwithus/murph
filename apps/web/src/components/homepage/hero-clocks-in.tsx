@@ -354,9 +354,7 @@ const GROUP_MESSAGES = {
   murphNewsletter: "This week's wins just landed in everyone's inbox.",
 } as const;
 
-// Placeholder track until the ElevenLabs challenge-roast song is dropped in
-// at its own path; swap the src, keep the beat.
-const CHALLENGE_ROAST_AUDIO_SRC = "/audio/one-foot-two-foot.mp3";
+const CHALLENGE_ROAST_AUDIO_SRC = "/audio/challenge-roast.mp3";
 
 // Identifies consecutive-message runs so avatars and name labels appear once
 // per sender run, like iMessage. Voice memos are always Murph's.
