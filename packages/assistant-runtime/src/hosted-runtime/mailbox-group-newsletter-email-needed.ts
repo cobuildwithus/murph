@@ -61,7 +61,9 @@ export async function importHostedGroupNewsletterEmailNeededMailboxItem(input: {
     };
   }
 
-  const route = await readCurrentDirectAssistantSessionRoute(input.vaultRoot);
+  const route =
+    await readCurrentDirectAssistantSessionRoute(input.vaultRoot)
+    ?? readGroupNewsletterWakeDirectAssistantRoute(input.wake);
   if (!route) {
     return {
       reasonCode: GROUP_NEWSLETTER_EMAIL_NEEDED_NO_ROUTE_REASON,
@@ -141,6 +143,35 @@ function readDirectAssistantSessionRoute(
       channel,
       messageId: null,
       threadId: deliveryTarget,
+    },
+  };
+}
+
+function readGroupNewsletterWakeDirectAssistantRoute(
+  wake: HostedExecutionGroupNewsletterEmailNeededWake,
+): Pick<AssistantInputEventRecord, "conversation" | "replyTarget"> | null {
+  const channel = normalizeAssistantRouteString(wake.directRoute?.channel);
+  if (!channel || !DELIVERY_CHANNELS.includes(channel)) {
+    return null;
+  }
+  const threadId = normalizeAssistantRouteString(wake.directRoute?.threadId);
+  if (!threadId) {
+    return null;
+  }
+
+  return {
+    conversation: {
+      accountId: null,
+      actorId: null,
+      actorIsSelf: false,
+      source: channel,
+      threadId,
+      threadIsDirect: true,
+    },
+    replyTarget: {
+      channel,
+      messageId: null,
+      threadId,
     },
   };
 }

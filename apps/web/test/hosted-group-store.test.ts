@@ -95,6 +95,8 @@ function buildTx(input?: {
   activeGroupGrantCount?: number;
   existingMembershipId?: string | null;
   offerMessageLookupKey?: string;
+  offerProjectionKinds?: string[];
+  requestedProjectionKinds?: string[];
   revokedOfferAt?: Date | null;
   runtimeMemberId?: string | null;
   threadIdentityLookupKey?: string;
@@ -130,7 +132,12 @@ function buildTx(input?: {
           return {
             id: "group_1",
             joinCode: "join_1",
-            joinPolicyJson: JOIN_POLICY,
+            joinPolicyJson: input?.requestedProjectionKinds
+              ? {
+                  ...JOIN_POLICY,
+                  requestedVaultShareProjectionKinds: input.requestedProjectionKinds,
+                }
+              : JOIN_POLICY,
             runtimeMemberId: input?.runtimeMemberId === undefined
               ? "member_group_runtime"
               : input.runtimeMemberId,
@@ -154,7 +161,7 @@ function buildTx(input?: {
           return {
             groupId: "group_1",
             messageLookupKey,
-            projectionKindsJson: ["sleep-times.v0"],
+            projectionKindsJson: input?.offerProjectionKinds ?? ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -175,7 +182,7 @@ function buildTx(input?: {
           return {
             groupId: "group_1",
             messageLookupKey,
-            projectionKindsJson: ["sleep-times.v0"],
+            projectionKindsJson: input?.offerProjectionKinds ?? ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
               id: "group_1",
@@ -311,6 +318,34 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       grantorMemberId: "member_joiner",
       now,
       projectionScope: PROFILE_SCOPE,
+      tx,
+    });
+  });
+
+  it("reports email sharing when a join grants it", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      requestedProjectionKinds: ["group-email.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      now,
+      selectedVaultShareProjectionKinds: ["group-email.v0"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
+      membershipId: "membership_created",
+    });
+
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScope: GROUP_EMAIL_SCOPE,
       tx,
     });
   });
@@ -504,6 +539,38 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       },
     });
     expect(mocks.revokeHostedVaultSharesWithCleanupTx).not.toHaveBeenCalled();
+  });
+
+  it("reports email sharing when a join offer grants it", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      offerProjectionKinds: ["group-email.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now,
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: true,
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
+      joinCode: "join_1",
+      membershipId: "membership_existing",
+      revokedVaultShareProjectionKinds: [],
+      selectedVaultShareProjectionKinds: ["group-email.v0"],
+    });
+
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScope: GROUP_EMAIL_SCOPE,
+      tx,
+    });
   });
 
   it("accepts a join-offer reaction matched by prior-version message and thread identity lookup candidates", async () => {

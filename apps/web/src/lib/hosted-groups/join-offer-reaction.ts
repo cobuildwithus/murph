@@ -13,6 +13,9 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
+import {
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
+} from "./group-newsletter";
 import { acceptHostedGroupJoinOfferTx } from "./group-store";
 
 type HostedGroupJoinOfferReactionSkipReason =
@@ -89,7 +92,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   });
 
   try {
-    await input.prisma.$transaction(async (tx) =>
+    const accepted = await input.prisma.$transaction(async (tx) =>
       acceptHostedGroupJoinOfferTx({
         memberId: member.id,
         messageLookupKeyReadCandidates,
@@ -97,6 +100,13 @@ export async function handleHostedGroupJoinOfferReaction(input: {
         threadIdentityLookupKeyReadCandidates,
         tx,
       }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    if (accepted.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
+      await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+        groupId: accepted.groupId,
+        memberId: member.id,
+        prisma: input.prisma,
+      });
+    }
   } catch (error) {
     const reason = readHostedGroupJoinOfferReactionSkipReason(error);
     if (!reason) {

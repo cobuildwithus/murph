@@ -167,6 +167,46 @@ describe("hosted group newsletter email-needed mailbox import", () => {
     }
   });
 
+  test("uses the wake direct route when no current direct assistant session exists", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-wake-route-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+
+    const outcome = await importHostedGroupNewsletterEmailNeededMailboxItem({
+      item: createResolvedGroupNewsletterEmailNeededMailboxItem(),
+      vaultRoot,
+      wake: createGroupNewsletterEmailNeededWake({
+        directRoute: { channel: "telegram", threadId: "telegram_direct_thread" },
+      }),
+    });
+
+    assert.equal(outcome.status, "imported");
+    assert.equal(outcome.reasonCode, "group-newsletter.email-needed.staged");
+    assert.ok(outcome.assistantInputId);
+
+    const staged = await readAssistantInputEvent({
+      inputId: outcome.assistantInputId,
+      vault: vaultRoot,
+    });
+    assert.ok(staged);
+    assert.deepEqual(staged.conversation, {
+      accountId: null,
+      actorId: null,
+      actorIsSelf: false,
+      source: "telegram",
+      threadId: "telegram_direct_thread",
+      threadIsDirect: true,
+    });
+    assert.deepEqual(staged.replyTarget, {
+      channel: "telegram",
+      messageId: null,
+      threadId: "telegram_direct_thread",
+    });
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      staged.inputId,
+    ]);
+  });
+
   test("skips email-only direct sessions without spending assistant work", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-email-only-"));
     tempRoots.push(parentRoot);
@@ -316,8 +356,11 @@ async function seedPriorDirectInput(
   });
 }
 
-function createGroupNewsletterEmailNeededWake(): HostedExecutionGroupNewsletterEmailNeededWake {
+function createGroupNewsletterEmailNeededWake(input: {
+  directRoute?: HostedExecutionGroupNewsletterEmailNeededWake["directRoute"];
+} = {}): HostedExecutionGroupNewsletterEmailNeededWake {
   return {
+    ...(input.directRoute === undefined ? {} : { directRoute: input.directRoute }),
     eventId: "group-newsletter.email-needed:member_private_missing_email:hgrp_private",
     groupDisplayName: "Tempo Crew",
     groupId: "hgrp_private",

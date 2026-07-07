@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
@@ -93,6 +94,11 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
     mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 }));
 
+vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort:
+    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
+}));
+
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
@@ -156,6 +162,18 @@ const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
 });
 
+function groupSummaryWithOwnerEmailGrant() {
+  return {
+    ...GROUP_SUMMARY,
+    members: [{
+      grantedVaultShareProjectionKinds: ["profile-name.v0" as const, "group-email.v0" as const],
+      handle: "+15551110000",
+      memberId: "member_owner",
+      role: "owner",
+    }],
+  };
+}
+
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -182,6 +200,9 @@ describe("handleHostedRuntimeGroupTool", () => {
       group: GROUP_SUMMARY,
       joinCode: "abc123",
     });
+    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
+      undefined,
+    );
     mocks.recordHostedGroupJoinOfferTx.mockResolvedValue({
       groupId: GROUP_SUMMARY.id,
       messageIdSuffix: "offer_msg",
@@ -321,6 +342,11 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 
   it("creates a join link bound to the runtime member's thread container owner", async () => {
+    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
+      group: groupSummaryWithOwnerEmailGrant(),
+      joinCode: "abc123",
+    });
+
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: {
@@ -334,7 +360,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     })).resolves.toEqual({
       action: "create_join_link",
       result: {
-        group: GROUP_SUMMARY,
+        group: groupSummaryWithOwnerEmailGrant(),
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
         status: "ok",
       },
@@ -362,6 +388,12 @@ describe("handleHostedRuntimeGroupTool", () => {
         requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
       }),
     );
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .toHaveBeenCalledWith({
+        groupId: GROUP_SUMMARY.id,
+        memberId: "member_owner",
+        prisma: expect.any(Object),
+      });
   });
 
   it("does not mint a join link when the owner lacks active access even if participant-aware access is active", async () => {
@@ -755,6 +787,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it("posts a server-owned like-to-join offer and records the provider message binding", async () => {
+    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
+      group: groupSummaryWithOwnerEmailGrant(),
+      joinCode: "abc123",
+    });
+
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {
@@ -769,7 +806,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     })).resolves.toEqual({
       action: "post_join_offer",
       result: {
-        group: GROUP_SUMMARY,
+        group: groupSummaryWithOwnerEmailGrant(),
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
         status: "sent",
       },
@@ -808,6 +845,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       projectionScopes: [SLEEP_SCOPE],
       tx: fakeTx,
     });
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .toHaveBeenCalledWith({
+        groupId: GROUP_SUMMARY.id,
+        memberId: "member_owner",
+        prisma: expect.any(Object),
+      });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 

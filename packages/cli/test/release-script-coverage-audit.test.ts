@@ -316,7 +316,7 @@ describe('monorepo release flow coverage audit', () => {
       'utf8',
     )
     expect(prReviewGptLoop).toContain('Required post-completion ReviewGPT loop')
-    expect(prReviewGptLoop).toContain('pnpm review:gpt')
+    expect(prReviewGptLoop).toContain('pnpm review:gpt pr-review')
     expect(prReviewGptLoop).toContain('Eragon managed browser profile')
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')

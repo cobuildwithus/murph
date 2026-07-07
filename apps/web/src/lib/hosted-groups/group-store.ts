@@ -391,7 +391,6 @@ export async function createHostedGroupJoinLinkForOwnedThreadContainerTx(input: 
     now: input.now,
     tx: input.tx,
   });
-
   return {
     group,
     joinCode: link.joinCode,

@@ -401,11 +401,13 @@ describe("parseHostedExecutionEvent", () => {
 
   it("parses group newsletter email-needed events and wakes", () => {
     expect(parseHostedExecutionEvent({
+      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
       kind: "group-newsletter.email-needed",
       userId: "member_123",
     })).toEqual({
+      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
       kind: "group-newsletter.email-needed",
@@ -413,6 +415,7 @@ describe("parseHostedExecutionEvent", () => {
     });
 
     expect(parseHostedExecutionWake({
+      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
       eventId: "group-newsletter.email-needed:member_123:hgrp_123",
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
@@ -420,6 +423,7 @@ describe("parseHostedExecutionEvent", () => {
       occurredAt: "2026-04-26T00:00:00.000Z",
       userId: "member_123",
     })).toEqual({
+      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
       eventId: "group-newsletter.email-needed:member_123:hgrp_123",
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
