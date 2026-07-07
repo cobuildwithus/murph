@@ -71,6 +71,9 @@ export interface HostedGrowthDateRow {
 
 export interface HostedGrowthTrialStartRow {
   currentBillingPhase: string | null;
+  member: {
+    suspendedAt: Date | null;
+  };
   pulseTrialRedeemedAt: Date | null;
 }
 
@@ -436,7 +439,7 @@ export function buildTrialCohortRows(input: {
       row.pulseTrialRedeemedAt < end
     );
     const converted = cohortRows.filter((row) =>
-      row.currentBillingPhase === "paid"
+      row.currentBillingPhase === "paid" && row.member.suspendedAt === null
     ).length;
     const stillTrialing = cohortRows.filter((row) =>
       row.currentBillingPhase !== "paid" &&
@@ -535,6 +538,11 @@ export async function readHostedGrowthDashboard(
     prisma.hostedMemberBillingRef.findMany({
       select: {
         currentBillingPhase: true,
+        member: {
+          select: {
+            suspendedAt: true,
+          },
+        },
         pulseTrialRedeemedAt: true,
       },
       where: {
@@ -566,6 +574,9 @@ export async function readHostedGrowthDashboard(
     prisma.hostedMemberBillingRef.count({
       where: {
         currentBillingPhase: "paid",
+        member: {
+          suspendedAt: null,
+        },
         pulseTrialRedeemedAt: {
           lt: getTrialMaturityCutoff(now),
         },

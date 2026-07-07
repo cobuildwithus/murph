@@ -238,14 +238,23 @@ describe("hosted ops growth metrics", () => {
       trialStartRows: [
         {
           currentBillingPhase: "paid",
+          member: {
+            suspendedAt: null,
+          },
           pulseTrialRedeemedAt: new Date("2026-06-25T12:00:00.000Z"),
         },
         {
           currentBillingPhase: null,
+          member: {
+            suspendedAt: null,
+          },
           pulseTrialRedeemedAt: new Date("2026-06-26T12:00:00.000Z"),
         },
         {
           currentBillingPhase: null,
+          member: {
+            suspendedAt: null,
+          },
           pulseTrialRedeemedAt: new Date("2026-06-24T12:00:00.000Z"),
         },
       ],
@@ -257,6 +266,74 @@ describe("hosted ops growth metrics", () => {
       conversionPercent: 50,
       started: 3,
       stillTrialing: 1,
+    });
+  });
+
+  it("keeps suspended paid mature trial rows in the cohort denominator without counting them converted", () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const rows = buildTrialCohortRows({
+      rowCount: 2,
+      trialStartRows: [
+        {
+          currentBillingPhase: "paid",
+          member: {
+            suspendedAt: null,
+          },
+          pulseTrialRedeemedAt: new Date("2026-06-25T12:00:00.000Z"),
+        },
+        {
+          currentBillingPhase: "paid",
+          member: {
+            suspendedAt: new Date("2026-07-01T00:00:00.000Z"),
+          },
+          pulseTrialRedeemedAt: new Date("2026-06-24T12:00:00.000Z"),
+        },
+      ],
+      windowEnd: now,
+    });
+
+    expect(rows[1]).toMatchObject({
+      converted: 1,
+      conversionPercent: 50,
+      started: 2,
+      stillTrialing: 0,
+    });
+  });
+
+  it("filters suspended members out of the mature converted count query", async () => {
+    queueCurrentMetricMocks();
+    queueCurrentMetricMocks();
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(3)
+      .mockResolvedValueOnce(1);
+
+    await growthPage.default();
+
+    expect(mocks.hostedMemberBillingRef.findMany.mock.calls[0]?.[0]).toMatchObject({
+      select: {
+        member: {
+          select: {
+            suspendedAt: true,
+          },
+        },
+      },
+    });
+    expect(mocks.hostedMemberBillingRef.count.mock.calls[1]?.[0]).toMatchObject({
+      where: {
+        currentBillingPhase: "paid",
+        member: {
+          suspendedAt: null,
+        },
+        pulseTrialRedeemedAt: {
+          lt: expect.any(Date),
+        },
+      },
     });
   });
 
