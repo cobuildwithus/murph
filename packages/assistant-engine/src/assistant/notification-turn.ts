@@ -6,6 +6,9 @@ import type {
 import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  HostedRuntimeNewsletterToolResponse,
+} from '@murphai/hosted-execution/runtime-control'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -62,6 +65,7 @@ import {
 import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
+import { createAssistantHostedToolContext } from './hosted-tool-context.js'
 import {
   startAssistantChannelTypingIndicator,
   stopAssistantChannelTypingIndicator,
@@ -152,6 +156,17 @@ export interface AssistantNotificationCommitContext {
   response: string | null
 }
 
+export interface AssistantNotificationPostTurnDeliveryExpectations {
+  newsletterSendResult?: Extract<
+    HostedRuntimeNewsletterToolResponse,
+    { action: 'send' }
+  >['result'] | null
+}
+
+type AssistantNotificationNewsletterSendResult = NonNullable<
+  AssistantNotificationPostTurnDeliveryExpectations['newsletterSendResult']
+>
+
 export interface AssistantNotificationInput
   extends AssistantSessionResolutionFields,
     Pick<
@@ -171,6 +186,7 @@ export interface AssistantNotificationInput
       | 'onTraceEvent'
       | 'operatorAuthority'
       | 'assistantTargetOverride'
+      | 'scheduledAutomationAuthority'
       | 'serviceTier'
       | 'showThinkingTraces'
       | 'turnEnvironment'
@@ -189,6 +205,7 @@ export interface AssistantNotificationInput
 export interface AssistantNotificationResult {
   decision: AssistantNotificationDecision
   deliveryOutcome?: AssistantDeliveryOutcome | null
+  postTurnDeliveryExpectations?: AssistantNotificationPostTurnDeliveryExpectations | null
   response: string | null
   session: AssistantSession
 }
@@ -222,6 +239,9 @@ export async function sendAssistantNotificationLocal(
         input,
         maintenanceEvidence,
       )
+      let newsletterSendResult:
+        | AssistantNotificationPostTurnDeliveryExpectations['newsletterSendResult']
+        | null = null
       const resolved =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? createAssistantMaintenanceNotificationResolvedSession({
@@ -239,6 +259,33 @@ export async function sendAssistantNotificationLocal(
         resolved,
         source: 'assistant-notification',
       })
+      const hostedNewsletterTool = executionContext?.hosted?.newsletterTool ?? null
+      const hostedToolContext =
+        hostedNewsletterTool
+          ? createAssistantHostedToolContext({
+              newsletterTool: hostedNewsletterTool,
+              messageInput,
+              recordNewsletterSendResult: (result) => {
+                newsletterSendResult = resolveAssistantNotificationNewsletterSendResult({
+                  current: newsletterSendResult ?? null,
+                  next: result.result,
+                })
+              },
+              session: resolved.session,
+            })
+          : null
+      const withPostTurnDeliveryExpectations = (
+        result: AssistantNotificationResult,
+      ): AssistantNotificationResult =>
+        newsletterSendResult
+          ? {
+              ...result,
+              postTurnDeliveryExpectations: {
+                ...(result.postTurnDeliveryExpectations ?? {}),
+                newsletterSendResult,
+              },
+            }
+          : result
       const sharedPlan = await resolveAssistantTurnSharedPlan(messageInput, resolved)
       const firstContactDocIds = resolveAssistantNotificationFirstContactDocIds({
         input: messageInput,
@@ -316,6 +363,7 @@ export async function sendAssistantNotificationLocal(
           route,
           turnCreatedAt,
           turnId,
+          hostedToolContext,
         })
         if (providerOutcome.kind === 'failed_terminal') {
           const nonReplayableProviderWork =
@@ -416,11 +464,11 @@ export async function sendAssistantNotificationLocal(
               providerValidationErrorDetails,
             )
           }
-          return {
+          return withPostTurnDeliveryExpectations({
             decision,
             response: null,
             session: resolved.session,
-          }
+          })
         }
 
         if (decision.kind === 'skip') {
@@ -441,11 +489,11 @@ export async function sendAssistantNotificationLocal(
             turnCreatedAt,
             turnId,
           })
-          return {
+          return withPostTurnDeliveryExpectations({
             decision,
             response: null,
             session: savedSession,
-          }
+          })
         }
 
         const responseText = normalizeRequiredText(decision.text, 'notification response')
@@ -531,7 +579,7 @@ export async function sendAssistantNotificationLocal(
             )
           }
 
-          return {
+          return withPostTurnDeliveryExpectations({
             decision: {
               ...decision,
               text: responseText,
@@ -539,7 +587,7 @@ export async function sendAssistantNotificationLocal(
             deliveryOutcome,
             response: responseText,
             session: deliveryOutcome.session,
-          }
+          })
         }
 
         const deliveryOutcome = await deliverAssistantNotificationMessage({
@@ -629,7 +677,7 @@ export async function sendAssistantNotificationLocal(
           })
         })
 
-        return {
+        return withPostTurnDeliveryExpectations({
           decision: {
             ...decision,
             text: responseText,
@@ -637,7 +685,7 @@ export async function sendAssistantNotificationLocal(
           deliveryOutcome: committedDeliveryOutcome,
           response: responseText,
           session: committedDeliveryOutcome.session,
-        }
+        })
       } finally {
         await stopAssistantChannelTypingIndicator(typingIndicator)
       }
@@ -803,6 +851,28 @@ async function sendAssistantExactTextNotificationLocal(input: {
     response: responseText,
     session: savedSession,
   }
+}
+
+function resolveAssistantNotificationNewsletterSendResult(input: {
+  current: AssistantNotificationNewsletterSendResult | null
+  next: AssistantNotificationNewsletterSendResult
+}): AssistantNotificationNewsletterSendResult {
+  if (newsletterSendResultHasSuccessfulRecipient(input.current)) {
+    return input.current
+  }
+  return input.next
+}
+
+function newsletterSendResultHasSuccessfulRecipient(
+  result: AssistantNotificationNewsletterSendResult | null,
+): result is AssistantNotificationNewsletterSendResult {
+  if (!result) {
+    return false
+  }
+  if (result.status === 'sent') {
+    return result.participantCount > 0
+  }
+  return result.status === 'partial_failure' && result.sentRecipientCount > 0
 }
 
 async function runAssistantNotificationBeforeCommit(
@@ -1076,6 +1146,7 @@ function buildAssistantNotificationMessageInput(
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
     sandbox: input.sandbox,
+    scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,

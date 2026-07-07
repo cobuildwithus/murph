@@ -262,6 +262,12 @@ async function executeHostedSystemWake(input: {
       throw new TypeError(
         'Hosted vault-share revoke wakes are applied at mailbox import and must never reach system wake execution.',
       );
+    case "group-newsletter.email-needed":
+      // Group newsletter email-needed wakes stage a private system note at
+      // mailbox import and never enter the system wake execution path.
+      throw new TypeError(
+        'Hosted group newsletter email-needed wakes are staged at mailbox import and must never reach system wake execution.',
+      );
   }
 
   const exhaustiveWake: never = input.wake;

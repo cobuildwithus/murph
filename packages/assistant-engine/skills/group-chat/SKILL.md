@@ -126,3 +126,61 @@ pre-consented; send them on schedule with confidence. Etiquette:
   sustained silence, reduce frequency rather than escalating.
 - Automations do not override the ladder: between scheduled sends, the normal
   reply rules above still apply.
+
+## Group health newsletter
+
+The group health newsletter is a single cron automation in the group runtime's
+vault, not a new scheduler or private data store. Any member can set it up,
+edit it, or stop it. One automation per group wins, and the latest request
+replaces the previous one.
+
+Set up or edit it with `vault-cli automation save` using:
+
+- Use exactly `--slug group-health-newsletter`. Any other slug will not be able to send
+  because scheduled newsletter send authority resolves only this automation slug.
+- `--schedule-kind cron`
+- `--schedule-cron "0 9 * * 0"` unless the group chose another cadence
+- `--continuity-policy fresh`
+- the current group channel
+- instructions that say this is the group health newsletter, include the
+  chosen tone, and include any optional custom note
+
+Stop it with `vault-cli automation set-status group-health-newsletter --status archived`.
+
+When creating or materially editing the newsletter, post one clear group notice
+in the chat. Say what will be shared, that it goes only to members who granted
+group email sharing and have a verified email, how to add an email at
+`/settings?addEmail=true`, and that anyone can ask to be taken off. The first
+edition must wait for the next natural cron occurrence. Never create an
+immediate `at` automation and never call `murph.newsletter` `send` right after
+setup.
+
+On each scheduled run:
+
+1. Call `murph.newsletter` with `action="read_stats"` for the group.
+   If it returns zero participants because nobody has enabled email sharing,
+   do not send an empty newsletter; tell the group that nobody has enabled
+   email sharing, point them to `/settings?addEmail=true`, then stop for that
+   run.
+2. Compose one shared digest from the returned participants, weekly stats, and
+   superlatives. Stay silent in the group about participants who are missing a
+   verified email.
+3. Use supportive tone by default. Never shame, moralize, or use purity
+   language. Coach-style roast is allowed only when the group explicitly asked
+   for it, such as "be hard on us like a coach." Even then roast upward at the
+   organizer, loudest, or most confident person, and roast the effort or
+   challenge, never bodies, weight, diagnoses, or whoever is struggling.
+4. Call `murph.newsletter` with `action="send"` only after composing the final
+   subject, HTML, and optional text body.
+
+If a member never granted email sharing and expresses interest, or the group
+asks how someone can join the newsletter, post a join offer scoped to
+`group-email.v0` so a like grants it; never repeatedly re-offer to someone who
+declined.
+
+If a member asks to be removed from the newsletter in the group chat, call
+`murph.group` with `action="revoke_own_email_share"`. That revokes only the
+current sender's own `group-email.v0` grant. If the request arrives by email
+thread reply, do not revoke from the email `From` header; reply directing them
+to opt out in the group chat or settings. Do not remove anyone else, do not
+change their health-sharing grants, and do not ask for their raw email address.

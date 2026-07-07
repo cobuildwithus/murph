@@ -141,11 +141,16 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST";
   const isLinqDeliveryOutcomeRequest = policy.operation === "linq_delivery_outcome"
     && input.request.method === "POST";
+  const isLinqContactCardShareAfterOutboundRequest =
+    policy.operation === "linq_contact_card_share_after_outbound"
+    && input.request.method === "POST";
   const isVaultShareDeliverRequest =
     input.url.pathname === HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH
     && input.request.method === "POST";
   const isGroupToolRequest =
     input.url.pathname === HOSTED_RUNTIME_GROUP_TOOL_PATH
+    && input.request.method === "POST";
+  const isNewsletterToolRequest = policy.operation === "newsletter_tool"
     && input.request.method === "POST";
   const isComputerUseRequest = policy.operation === "computer_use"
     && input.request.method === "POST";
@@ -154,9 +159,6 @@ export async function handleRunnerWebControlRequest(input: {
   const isCodexAuthUpdateRequest = policy.operation === "codex_auth_update"
     && input.request.method === "POST";
   const isPhoneCallStartRequest = policy.operation === "phone_call_start"
-    && input.request.method === "POST";
-  const isLinqContactCardShareAfterOutboundRequest =
-    policy.operation === "linq_contact_card_share_after_outbound"
     && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
@@ -169,12 +171,13 @@ export async function handleRunnerWebControlRequest(input: {
     || isRuntimeLatencyTraceRequest
     || isLinqDeliveryOutcomeRequest
     || isLinqEgressEngagementRequest
+    || isLinqContactCardShareAfterOutboundRequest
     || isVaultShareDeliverRequest
     || isGroupToolRequest
+    || isNewsletterToolRequest
     || isComputerUseRequest
     || isConnectedAppsRequest
     || isCodexAuthUpdateRequest
-    || isLinqContactCardShareAfterOutboundRequest
     || isPhoneCallStartRequest
   ) {
     try {

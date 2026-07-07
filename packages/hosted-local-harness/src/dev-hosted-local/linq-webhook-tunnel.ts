@@ -12,7 +12,11 @@ import type { HostedLocalDevConfig } from "./types.ts";
 
 export const HOSTED_LOCAL_LINQ_WEBHOOK_PATH =
   "/api/hosted-onboarding/linq/webhook";
-const HOSTED_LOCAL_LINQ_WEBHOOK_EVENT = "message.received";
+const HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS = [
+  "message.received",
+  "reaction.added",
+  "reaction.removed",
+] as const;
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const LINQ_CONVERSATION_PHONE_NUMBERS_ENV =
   "HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS";
@@ -179,7 +183,7 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
     env: registrationEnv,
     fetchImplementation: input.fetchImplementation ?? hostedLocalFetch,
     phoneNumbers: input.setup.phoneNumbers,
-    subscribedEvents: [HOSTED_LOCAL_LINQ_WEBHOOK_EVENT],
+    subscribedEvents: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
     targetUrl: input.setup.targetUrl,
     webhookSecret: configuredWebhookSecret,
   });
@@ -298,7 +302,7 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
   const result = await createLinqWebhookSubscription(
     {
       phoneNumbers: input.setup.phoneNumbers,
-      subscribedEvents: [HOSTED_LOCAL_LINQ_WEBHOOK_EVENT],
+      subscribedEvents: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
       targetUrl: input.setup.targetUrl,
     },
     {
@@ -643,7 +647,7 @@ function createLinqWebhookRegistrationFingerprint(input: {
   webhookSecret: string;
 }): string {
   const payload = JSON.stringify({
-    event: HOSTED_LOCAL_LINQ_WEBHOOK_EVENT,
+    events: normalizeStringSet(HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS),
     phoneNumbers: input.phoneNumbers === null
       ? null
       : normalizeStringSet(input.phoneNumbers),

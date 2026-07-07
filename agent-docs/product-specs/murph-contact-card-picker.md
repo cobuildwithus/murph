@@ -34,7 +34,7 @@ Target range is five to ten options. Option ids are stable identifiers; never re
 
 ## Invariants and non-goals
 
-- Do not touch Linq per-line contact cards. Lines are pooled across members and the contact-card cron (`reconcileHostedLinqContactCards`) reconciles every line to the canonical headshot; a per-member choice written there would fight the reconciler and leak one member's pick to others on the same line.
+- Do not write member avatar choices to Linq per-line contact cards. Lines are pooled across members and the contact-card cron (`reconcileHostedLinqContactCards`) keeps the provider card shared and name/phone-only; a per-member choice written there would fight the reconciler and leak one member's pick to others on the same line.
 - No persona or behavior change. The assistant prompt, name, and voice are untouched; only the card image varies.
 - v1 keeps no server state for the choice. Optional follow-up: persist the chosen avatar id on the hosted member so the group contact-card share tool and future re-sends use it.
 

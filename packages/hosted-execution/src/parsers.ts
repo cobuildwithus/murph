@@ -27,6 +27,7 @@ import type {
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionGroupNewsletterEmailNeededEvent,
   HostedExecutionWake,
   HostedExecutionWakeKind,
   HostedExecutionEvent,
@@ -55,6 +56,7 @@ import {
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionGroupNewsletterEmailNeededWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "./builders.ts";
@@ -136,11 +138,12 @@ export {
   parseHostedRuntimeLogEntry,
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
-  parseHostedRuntimeLinqContactCardShareAfterOutboundRequest,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
+  parseHostedRuntimeNewsletterToolRequest,
+  parseHostedRuntimeNewsletterToolResponse,
   parseHostedRuntimeFamilyPlanToolRequest,
   parseHostedRuntimeFamilyPlanToolResponse,
   parseHostedRuntimeProductFeedbackRecordRequest,
@@ -261,6 +264,20 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
             }),
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId: wireUserId,
+      });
+    case "group-newsletter.email-needed":
+      return buildHostedExecutionGroupNewsletterEmailNeededWake({
+        eventId,
+        groupDisplayName: readNullableString(
+          record.groupDisplayName,
+          "Hosted execution wake group-newsletter.email-needed groupDisplayName",
+        ),
+        groupId: requireString(
+          record.groupId,
+          "Hosted execution wake group-newsletter.email-needed groupId",
+        ),
+        memberId: wireUserId,
+        occurredAt,
       });
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
@@ -872,6 +889,19 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId,
       } satisfies HostedExecutionDeviceSyncWakeEvent;
+    case "group-newsletter.email-needed":
+      return {
+        groupDisplayName: readNullableString(
+          record.groupDisplayName,
+          "Hosted execution group-newsletter.email-needed groupDisplayName",
+        ),
+        groupId: requireString(
+          record.groupId,
+          "Hosted execution group-newsletter.email-needed groupId",
+        ),
+        kind,
+        userId,
+      } satisfies HostedExecutionGroupNewsletterEmailNeededEvent;
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":

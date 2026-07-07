@@ -1,9 +1,10 @@
 "use client";
 
-import { Mail, Phone, Send } from "lucide-react";
+import { ContactRound, Mail, Phone, Send } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
+import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-card-picker";
 import { Button } from "@/src/components/ui/button";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
@@ -13,6 +14,7 @@ import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-helpers";
 
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
+const ADD_EMAIL_QUERY_KEY = "addEmail";
 
 const HostedSettingsIdentityLinkDialog = dynamic(
   () => import("./hosted-settings-identity-link-dialog").then((mod) => mod.HostedSettingsIdentityLinkDialog),
@@ -25,11 +27,30 @@ const HostedSettingsIdentityLinkDialog = dynamic(
 export function HostedAccountSettingsCards({
   account,
   murphPhoneNumber,
+  openEmailLink = false,
 }: {
   account: HostedAccountSettingsSnapshot;
   murphPhoneNumber?: string | null;
+  openEmailLink?: boolean;
 }) {
-  const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(null);
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(
+    openEmailLink ? "email" : null,
+  );
+  const [previousOpenEmailLink, setPreviousOpenEmailLink] = useState(openEmailLink);
+
+  if (previousOpenEmailLink !== openEmailLink) {
+    setPreviousOpenEmailLink(openEmailLink);
+    if (openEmailLink) {
+      setLinkMode("email");
+    }
+  }
+
+  useEffect(() => {
+    if (openEmailLink) {
+      stripAddEmailQueryParam();
+    }
+  }, [openEmailLink]);
 
   const phoneNumber = account.phone.number;
   const phoneVerified = Boolean(account.phone.verifiedAt);
@@ -59,6 +80,23 @@ export function HostedAccountSettingsCards({
             </Button>
           }
         />
+        {murphPhoneNumber ? (
+          <SettingsRow
+            icon={<ContactRound className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+            label="Murph contact"
+            value="Pick a new look for Murph in your contacts."
+            action={
+              <Button
+                onClick={() => setContactPickerOpen(true)}
+                size="default"
+                type="button"
+                variant="ghost"
+              >
+                Customize
+              </Button>
+            }
+          />
+        ) : null}
         <SettingsRow
           icon={<Send className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Telegram"
@@ -110,8 +148,33 @@ export function HostedAccountSettingsCards({
           }}
         />
       ) : null}
+      {contactPickerOpen ? (
+        <MurphContactCardPicker
+          copy={{
+            description:
+              "iPhone only applies the photo when the card is saved as a new contact. Delete your current Murph contact first, then save this one fresh.",
+            primaryAction: "Save new card",
+            secondaryAction: "Close",
+            title: "Pick a new look",
+          }}
+          onAddToContacts={() => setContactPickerOpen(false)}
+          onOpenChange={setContactPickerOpen}
+          onSkip={() => setContactPickerOpen(false)}
+          open={contactPickerOpen}
+        />
+      ) : null}
     </>
   );
+}
+
+function stripAddEmailQueryParam() {
+  if (typeof window === "undefined" || typeof window.location.href !== "string") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.delete(ADD_EMAIL_QUERY_KEY);
+  window.history?.replaceState?.({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function SettingsRow(props: {

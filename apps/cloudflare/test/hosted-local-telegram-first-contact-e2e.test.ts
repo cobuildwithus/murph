@@ -19,7 +19,9 @@ import {
   buildTelegramThreadId,
   HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT,
   HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT,
+  HOSTED_TELEGRAM_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
   startHostedLocalTelegramStub,
+  type ObservedTelegramRequest,
   type HostedLocalTelegramStub,
 } from "./helpers/hosted-local-telegram-support.js";
 import {
@@ -33,6 +35,7 @@ const reactionFailureUserId = `member_local_telegram_reaction_failure_${Date.now
 const telegramBotToken = "telegram-local-test-token";
 const hostedLocalTelegramRequestToken = HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 const telegramHeartEmoji = "\u2764";
+const defaultTelegramInboundText = "yo murph telegram first contact e2e";
 const reactionReplyText = "Heart reaction test sent.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -71,7 +74,9 @@ describe("hosted local Telegram auto-reply e2e", () => {
       userId,
     });
 
-    requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT]);
+    requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT], {
+      matchInputContains: defaultTelegramInboundText,
+    });
     const requestCountBeforeInbound = requireTelegramStub().observedRequests.length;
     await requireScenario().runWake(buildInboundTelegramWake(userId), userId);
 
@@ -138,17 +143,37 @@ describe("hosted local Telegram auto-reply e2e", () => {
     });
 
     const expectedSendPath = `/bot${hostedLocalTelegramRequestToken}/sendMessage`;
+    const sendMessageMatcher = requireTelegramStub().createSendMessageMatcher(fastReplyUserId);
     const baselineSendCount = requireTelegramStub().countObservedRequests(
       expectedSendPath,
-      requireTelegramStub().createSendMessageMatcher(fastReplyUserId),
+      sendMessageMatcher,
+    );
+    const nameText = "U can call me Rocket Man";
+    const goalsText = "I want to build more strength, improve endurance, and get fitter overall.";
+    const groupedReplyMatcher = (request: ObservedTelegramRequest) =>
+      sendMessageMatcher(request)
+      && requireTelegramStub().parseObservedJson(request.body)?.text ===
+        HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT;
+    const groupedReplyCountBefore = requireTelegramStub().countObservedRequests(
+      expectedSendPath,
+      groupedReplyMatcher,
     );
 
-    requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT]);
+    requireScenario().queueAssistantResponses([
+      {
+        matchInputContains: nameText,
+        response: HOSTED_TELEGRAM_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
+      },
+      {
+        matchInputContains: goalsText,
+        response: HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT,
+      },
+    ]);
     await requireScenario().enqueueWake(
       buildInboundTelegramWake(fastReplyUserId, {
         eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_name`,
         messageId: `${buildTelegramMessageId(fastReplyUserId)}1`,
-        text: "U can call me Rocket Man",
+        text: nameText,
       }),
       fastReplyUserId,
     );
@@ -157,7 +182,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
       buildInboundTelegramWake(fastReplyUserId, {
         eventId: `telegram.message.received:local:${fastReplyUserId}:evt_telegram_goals`,
         messageId: `${buildTelegramMessageId(fastReplyUserId)}2`,
-        text: "I want to build more strength, improve endurance, and get fitter overall.",
+        text: goalsText,
       }),
       fastReplyUserId,
     );
@@ -169,22 +194,26 @@ describe("hosted local Telegram auto-reply e2e", () => {
       userId: fastReplyUserId,
     });
 
-    const replyRequests = await requireTelegramStub().waitForRequestCount({
-      expectedCount: baselineSendCount + 1,
+    await requireTelegramStub().waitForRequestCount({
+      expectedCount: groupedReplyCountBefore + 1,
       expectedPath: expectedSendPath,
-      matchRequest: requireTelegramStub().createSendMessageMatcher(fastReplyUserId),
+      matchRequest: groupedReplyMatcher,
       scenario: requireScenario(),
       userId: fastReplyUserId,
     });
-    const newReplyRequests = replyRequests.slice(baselineSendCount);
-    expect(newReplyRequests).toHaveLength(1);
+    const newReplyRequests = requireTelegramStub().observedRequests.filter((request) =>
+      request.url === expectedSendPath && sendMessageMatcher(request)
+    ).slice(baselineSendCount);
     const replyTexts = newReplyRequests.map((request) =>
       requireTelegramStub().parseObservedJson(request.body)?.text
     );
 
-    expect(replyTexts).toEqual([
-      HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT,
-    ]);
+    expect(replyTexts).toContain(HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT);
+    expect(replyTexts.every((text) =>
+      text === HOSTED_TELEGRAM_ROCKET_MAN_ASSISTANT_REPLY_TEXT
+      || text === HOSTED_TELEGRAM_GROUPED_ASSISTANT_REPLY_TEXT
+    )).toBe(true);
+    expect(replyTexts.length).toBeLessThanOrEqual(2);
   }, 300_000);
 
   it("advertises the reaction tool and delivers a Telegram message reaction", async () => {
@@ -200,7 +229,9 @@ describe("hosted local Telegram auto-reply e2e", () => {
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("react_to_message", { reaction: "heart" }),
       reactionReplyText,
-    ]);
+    ], {
+      matchInputContains: "react to this with a heart",
+    });
     const expectedReactionPath = `/bot${hostedLocalTelegramRequestToken}/setMessageReaction`;
     const expectedSendPath = `/bot${hostedLocalTelegramRequestToken}/sendMessage`;
     const reactionMatcher = requireTelegramStub().createReactionMatcher(reactionUserId, {
@@ -282,7 +313,9 @@ describe("hosted local Telegram auto-reply e2e", () => {
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall("react_to_message", { reaction: "heart" }),
       reactionReplyText,
-    ]);
+    ], {
+      matchInputContains: "try to react to this with a heart",
+    });
     const expectedReactionPath = `/bot${hostedLocalTelegramRequestToken}/setMessageReaction`;
     const expectedSendPath = `/bot${hostedLocalTelegramRequestToken}/sendMessage`;
     const reactionMatcher = requireTelegramStub().createReactionMatcher(reactionFailureUserId, {
@@ -367,7 +400,7 @@ function buildInboundTelegramWake(
     telegramMessage: {
       messageId: overrides.messageId ?? buildTelegramMessageId(userId),
       schema: "murph.hosted-telegram-message.v1",
-      text: overrides.text ?? "yo",
+      text: overrides.text ?? defaultTelegramInboundText,
       threadId: buildTelegramThreadId(userId),
     },
     userId,

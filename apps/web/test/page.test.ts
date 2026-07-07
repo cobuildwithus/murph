@@ -253,6 +253,7 @@ test("SecurityPage splits the shared sticky nav into Log in + Signup when logged
       context: "nav",
       authLabel: "Dashboard",
       splitUnauthenticated: true,
+      onDarkSurface: true,
     },
     undefined
   );

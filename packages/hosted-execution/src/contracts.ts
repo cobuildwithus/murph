@@ -53,6 +53,7 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  "group-newsletter.email-needed",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -70,6 +71,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  "group-newsletter.email-needed",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -222,6 +224,12 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
     | "reconcile_due";
 }
 
+export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
+  groupDisplayName: string | null;
+  groupId: string;
+  kind: "group-newsletter.email-needed";
+}
+
 export interface HostedExecutionPlainRuntimeControlRequestedEvent
   extends HostedExecutionBaseEvent {
   kind: HostedExecutionPlainRuntimeControlWakeKind;
@@ -243,6 +251,7 @@ export type HostedExecutionEvent =
   | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionAssistantNotificationRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
+  | HostedExecutionGroupNewsletterEmailNeededEvent
   | HostedExecutionRuntimeControlRequestedEvent;
 
 export interface HostedExecutionBaseWake {
@@ -444,6 +453,12 @@ export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
   reason: HostedExecutionDeviceSyncWakeEvent["reason"];
 }
 
+export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
+  groupDisplayName: string | null;
+  groupId: string;
+  kind: "group-newsletter.email-needed";
+}
+
 export interface HostedExecutionPlainRuntimeControlWake extends HostedExecutionBaseWake {
   kind: HostedExecutionPlainRuntimeControlWakeKind;
 }
@@ -469,6 +484,7 @@ export type HostedExecutionWake =
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionDeviceSyncWake
+  | HostedExecutionGroupNewsletterEmailNeededWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake
   | HostedExecutionRuntimeControlWake;

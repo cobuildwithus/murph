@@ -35,7 +35,18 @@ export const metadata: Metadata = createMurphPageMetadata({
   description: "Manage your Murph account settings.",
 });
 
-export default async function SettingsPage() {
+type SettingsSearchParams = {
+  addEmail?: string | string[] | undefined;
+};
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<SettingsSearchParams>;
+} = {}) {
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const openEmailLink =
+    readFirstSearchParamValue(resolvedSearchParams.addEmail) === "true";
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
 
@@ -154,7 +165,8 @@ export default async function SettingsPage() {
         {accountWithPrivyDisplay ? (
           <HostedAccountSettingsCards
             account={accountWithPrivyDisplay}
-            murphPhoneNumber={routing?.linqRecipientPhone ?? null}
+            murphPhoneNumber={routing?.linqRecipientPhone ?? routing?.pendingLinqRecipientPhone ?? null}
+            openEmailLink={openEmailLink}
           />
         ) : null}
       </section>
@@ -198,4 +210,10 @@ export default async function SettingsPage() {
       )}
     </div>
   );
+}
+
+function readFirstSearchParamValue(
+  value: string | string[] | undefined,
+): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

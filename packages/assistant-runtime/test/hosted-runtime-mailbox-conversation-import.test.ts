@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+  readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution/contracts";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
+  hashNullableHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
 import type {
   HostedExecutionConversationMessageWake,
@@ -26,7 +28,9 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
+  createAssistantActiveTurnInputController,
   listAssistantInputEvents,
+  resolveAssistantConversationLookupKey,
   updateAssistantInputAttachmentEvidence,
 } from "@murphai/assistant-engine";
 import {
@@ -241,6 +245,272 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
   });
 
+  test("notifies active turn input after staging and before inbox projection completes", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-early-notify-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_early_notify",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_early_notify",
+          parts: [
+            {
+              type: "text",
+              value: "please fold this into the turn",
+            },
+          ],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const notificationObserved = createDeferred<void>();
+    const projectionRelease = createDeferred<void>();
+    const signalController = new AbortController();
+    const order: string[] = [];
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook: async (input) => {
+        assert.equal(input.signal, signalController.signal);
+        order.push("notify");
+        notificationObserved.resolve(undefined);
+        return {
+          kind: "no-new-input",
+        };
+      },
+      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
+      sessionId: "session_early_notify",
+      turnId: "turn_early_notify",
+      vault: vaultRoot,
+    });
+
+    const importPromise = importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        order.push("projection-started");
+        await projectionRelease.promise;
+        order.push("projection-finished");
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {
+        order.push("projection-prepared");
+      },
+      item,
+      runtime: createRuntime(),
+      signal: signalController.signal,
+      vaultRoot,
+    });
+
+    try {
+      await withTestTimeout(
+        notificationObserved.promise,
+        "active turn notify did not fire before projection",
+      );
+      assert.deepEqual(order, ["notify"]);
+
+      projectionRelease.resolve(undefined);
+      const outcome = await importPromise;
+      if (outcome.status !== "imported") {
+        throw new Error("Expected imported mailbox outcome.");
+      }
+
+      const listed = await listAssistantInputEvents({ vault: vaultRoot });
+      assert.equal(listed.events.length, 1);
+      assert.deepEqual(order, [
+        "notify",
+        "projection-prepared",
+        "projection-started",
+        "projection-finished",
+      ]);
+      assert.equal(outcome.assistantInputId, listed.events[0]?.inputId);
+      assert.equal(outcome.captureId, null);
+      assert.deepEqual(outcome.metrics, {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      });
+      const currentInbound = outcome.linqDeliveryContext?.currentInbound;
+      assert.ok(currentInbound);
+      assert.equal(currentInbound.mailboxItemId, item.item.id);
+      assert.equal(currentInbound.eventId, decodedWake.eventId);
+      assert.equal(outcome.linqDeliveryContext?.replyToMessageId, "msg_early_notify");
+      assert.equal("reasonCode" in outcome, false);
+      assert.equal("afterCheckpoint" in outcome, false);
+    } finally {
+      projectionRelease.resolve(undefined);
+      controller.close();
+      await importPromise.catch(() => undefined);
+    }
+  });
+
+  test("does not notify active turn input early for durably consumed replay imports", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-replay-notify-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_replay_notify",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_replay_notify",
+          parts: [
+            {
+              type: "text",
+              value: "already consumed",
+            },
+          ],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const item: HostedMailboxResolvedImportItem = {
+      ...createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_replay_notify",
+      }),
+      durablyConsumed: true,
+    };
+    let notificationCount = 0;
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook: async () => {
+        notificationCount += 1;
+        return {
+          kind: "no-new-input",
+        };
+      },
+      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
+      sessionId: "session_replay_notify",
+      turnId: "turn_replay_notify",
+      vault: vaultRoot,
+    });
+
+    try {
+      const outcome = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          return {
+            captureId: null,
+            metrics: {
+              nextWakeAt: null,
+              parserProcessed: 0,
+            },
+          };
+        },
+        async prepareWakeContext() {},
+        item,
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+
+      assert.equal(outcome.status, "imported");
+      assert.equal(notificationCount, 0);
+    } finally {
+      controller.close();
+    }
+  });
+
+  test("keeps mailbox import imported when early active turn notification fails", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-notify-failure-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_notify_failure",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_notify_failure",
+          parts: [
+            {
+              type: "text",
+              value: "still import me",
+            },
+          ],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    let notificationAttempts = 0;
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook: async () => {
+        notificationAttempts += 1;
+        throw new Error("synthetic active-turn notify failure");
+      },
+      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
+      sessionId: "session_notify_failure",
+      turnId: "turn_notify_failure",
+      vault: vaultRoot,
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const outcome = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          return {
+            captureId: null,
+            metrics: {
+              nextWakeAt: null,
+              parserProcessed: 0,
+            },
+          };
+        },
+        async prepareWakeContext() {},
+        item,
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+
+      const listed = await listAssistantInputEvents({ vault: vaultRoot });
+      assert.equal(notificationAttempts, 1);
+      assert.equal(warn.mock.calls.length > 0, true);
+      assert.deepEqual(outcome, {
+        assistantInputId: listed.events[0]?.inputId,
+        captureId: null,
+        linqDeliveryContext: {
+          currentInbound: {
+            dedupeKey: decodedWake.eventId,
+            eventId: decodedWake.eventId,
+            mailboxItemId: item.item.id,
+            occurredAt: TEST_NOW,
+            replyToMessageId: "msg_notify_failure",
+            target: "chat_notify_failure",
+          },
+          directRecipientPhoneNumber: "redacted-contact-sentinel",
+          fromPhoneNumber: null,
+          replyToMessageId: "msg_notify_failure",
+          routeAuthority: null,
+          service: null,
+          target: "chat_notify_failure",
+          threadIsDirect: true,
+        },
+        metrics: {
+          nextWakeAt: null,
+          parserProcessed: 0,
+        },
+        status: "imported",
+      });
+    } finally {
+      warn.mockRestore();
+      controller.close();
+    }
+  });
+
   test("stages a durably consumed conversation item with a null reply target", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-consumed-"));
     tempRoots.push(parentRoot);
@@ -310,6 +580,9 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
+    if (outcome.status === "imported") {
+      assert.equal(outcome.reasonCode ?? null, null);
+    }
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
@@ -2490,6 +2763,9 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(outcome, {
       assistantInputId: "ain_00000000000000000000000000000000",
       captureId: null,
+      emailDeliveryContext: {
+        senderHandle: null,
+      },
       metrics: {
         nextWakeAt: null,
         parserProcessed: 0,
@@ -2771,6 +3047,9 @@ describe("hosted mailbox conversation import adapter", () => {
       {
         assistantInputId: "ain_00000000000000000000000000000000",
         captureId: null,
+        emailDeliveryContext: {
+          senderHandle: null,
+        },
         metrics: {
           nextWakeAt: null,
           parserProcessed: 0,
@@ -2783,6 +3062,9 @@ describe("hosted mailbox conversation import adapter", () => {
       {
         assistantInputId: "ain_00000000000000000000000000000000",
         captureId: null,
+        emailDeliveryContext: {
+          senderHandle: null,
+        },
         metrics: {
           nextWakeAt: null,
           parserProcessed: 0,
@@ -2889,6 +3171,9 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(outcome, {
       assistantInputId: "ain_00000000000000000000000000000000",
       captureId: null,
+      emailDeliveryContext: {
+        senderHandle: null,
+      },
       metrics: {
         nextWakeAt: null,
         parserProcessed: 0,
@@ -3041,6 +3326,9 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(outcome, {
       assistantInputId: listed.events[0]?.inputId,
       captureId: null,
+      emailDeliveryContext: {
+        senderHandle: "Sender <sender@example.test>",
+      },
       metrics: {
         nextWakeAt: null,
         parserProcessed: 0,
@@ -3100,7 +3388,8 @@ describe("hosted mailbox conversation import adapter", () => {
         rawMessageKey: "raw_email_prompt_ready",
         selfAddress: "assistant@example.test",
         subject: "Question about sauna",
-        textPreview: "Can you compare my sauna notes from this week?",
+        textPreview:
+          "Can you compare my sauna notes from this week and include teammate@example.test? From: Sender <sender@example.test>",
         threadTarget: "hostedmail:opaque-thread-target",
         to: ["assistant@example.test"],
       },
@@ -3132,7 +3421,7 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.match(event.content.text ?? "", /Email subject - Question about sauna/u);
     assert.match(
       event.content.text ?? "",
-      /Email body preview - Can you compare my sauna notes from this week\?/u,
+      /Email body preview - Can you compare my sauna notes from this week and include teammate@example\.test\? From: Sender <sender@example\.test>/u,
     );
     assert.deepEqual(event.sourceMetadata, {
       kind: "email",
@@ -3148,6 +3437,185 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     assert.equal(JSON.stringify(event).includes("labs.pdf"), true);
     assert.equal(event.replyTarget?.threadId, "hostedmail:opaque-thread-target");
+  });
+
+  test("renders group-routed hosted email input without resurfacing address fields", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-group-redacted-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const groupThreadTarget = serializeHostedEmailThreadTarget({
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      lastMessageId: "<group-message@example.test>",
+      references: ["<group-root@example.test>", "<group-message@example.test>"],
+      subject: "Group newsletter reply",
+      targetKind: "group",
+    });
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "email",
+        cc: ["Member Two <member-two@example.test>"],
+        from: "Member One <member-one@example.test>",
+        identityId: "assistant@mail.example.test",
+        messageId: "<group-message@example.test>",
+        rawMessageKey: "raw_email_group_redacted",
+        selfAddress: "assistant+g2-secret@mail.example.test",
+        subject: "Group newsletter reply from member-one@example.test",
+        textPreview: [
+          "Loved the weekly note. The Friday sleep bit was useful.",
+          "On Tue, Jul 7, Member Two <member-two@example.test> wrote:",
+          "> From: Member Two <member-two@example.test>",
+          "> To: Member One <member-one@example.test>, Member Three <member-three@example.test>",
+          "> Cc: stale-header-recipient@example.test",
+          "> Reply-To: member-two@example.test",
+          "> Inline note from inline-address@example.test should be hidden.",
+        ].join("\n"),
+        threadTarget: groupThreadTarget,
+        to: ["assistant+g2-secret@mail.example.test", "Member Three <member-three@example.test>"],
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedRawEmailMessageMissingError({
+          rawMessageKey: "raw_email_group_redacted",
+          userId: TEST_USER_ID,
+        });
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events.length, 1);
+    const event = listed.events[0]!;
+    assert.match(
+      event.content.text ?? "",
+      /Sender summary - Email reply from group participant: Member One/u,
+    );
+    assert.doesNotMatch(event.content.text ?? "", /Recipient summary/u);
+    assert.doesNotMatch(event.content.text ?? "", /Cc summary/u);
+    assert.doesNotMatch(event.content.text ?? "", /member-one@example\.test/u);
+    assert.doesNotMatch(event.content.text ?? "", /member-two@example\.test/u);
+    assert.doesNotMatch(event.content.text ?? "", /member-three@example\.test/u);
+    assert.doesNotMatch(event.content.text ?? "", /assistant\+g2-/u);
+    assert.doesNotMatch(event.content.text ?? "", /stale-header-recipient@example\.test/u);
+    assert.doesNotMatch(event.content.text ?? "", /inline-address@example\.test/u);
+    assert.match(
+      event.content.text ?? "",
+      /Email subject - Group newsletter reply from \[redacted email\]/u,
+    );
+    assert.match(
+      event.content.text ?? "",
+      /Loved the weekly note\. The Friday sleep bit was useful\./u,
+    );
+    assert.match(
+      event.content.text ?? "",
+      /On Tue, Jul 7, Member Two <\[redacted email\]> wrote:/u,
+    );
+    assert.doesNotMatch(event.content.text ?? "", /From:/u);
+    assert.doesNotMatch(event.content.text ?? "", /To:/u);
+    assert.doesNotMatch(event.content.text ?? "", /Cc:/u);
+    assert.doesNotMatch(event.content.text ?? "", /Reply-To:/u);
+    assert.equal(event.replyTarget?.threadId, groupThreadTarget);
+  });
+
+  test("omits group-routed hosted email raw inbox projection and redacts attachment descriptors", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-email-group-raw-sweep-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const groupThreadTarget = serializeHostedEmailThreadTarget({
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      lastMessageId: "<group-raw-message@example.test>",
+      references: ["<group-newsletter-root@example.test>", "<group-raw-message@example.test>"],
+      subject: "Redacted group newsletter subject",
+      targetKind: "group",
+    });
+    const rawOnlyAddress = "raw-only-member@example.test";
+    const rawOnlySubject = "Raw Only Group Health Reply Subject";
+    const rawOnlyBody = "RAW_ONLY_GROUP_EMAIL_BODY_SHOULD_NOT_PERSIST";
+    const rawEmailBytes = new TextEncoder().encode([
+      `From: Raw Member <${rawOnlyAddress}>`,
+      "To: assistant+g2-secret@mail.example.test, Other Member <other-raw@example.test>",
+      `Subject: ${rawOnlySubject}`,
+      "Message-ID: <group-raw-message@example.test>",
+      "References: <group-newsletter-root@example.test>",
+      "",
+      rawOnlyBody,
+      "> From: Other Member <other-raw@example.test>",
+    ].join("\r\n"));
+    const readRawEmailMessage = async () => rawEmailBytes;
+    const decodedWake = createConversationWake({
+      message: {
+        attachmentSummaries: [
+          {
+            contentType: "application/pdf",
+            fileName: "member@example.test.pdf",
+            sizeBytes: 1234,
+          },
+        ],
+        channel: "email",
+        from: "Email reply from group participant: Raw Member",
+        identityId: null,
+        messageId: "<group-raw-message@example.test>",
+        rawMessageKey: "raw_email_group_sweep",
+        subject: "Redacted group newsletter subject",
+        textPreview: "Loved the weekly note. Please compare my Friday sleep with the group.",
+        threadTarget: groupThreadTarget,
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem(),
+      runtime: createRuntime({
+        platform: {
+          effectsPort: {
+            readRawEmailMessage,
+            async sendEmail() {},
+          },
+        },
+      }),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    if (outcome.status === "imported") {
+      assert.equal(outcome.captureId, null);
+      assert.equal(outcome.reasonCode ?? null, null);
+    }
+    const listed = await listAssistantInputEvents({
+      vault: vaultRoot,
+    });
+    assert.equal(listed.events.length, 1);
+    const event = listed.events[0]!;
+    assert.deepEqual(event.content.attachmentDescriptors[0], {
+      attachmentId: event.content.attachmentDescriptors[0]?.attachmentId,
+      contentType: "application/pdf",
+      fileName: null,
+      kind: "email_attachment",
+      sizeBytes: 1234,
+    });
+    assert.equal(event.projection.status, "pending");
+    assert.equal(event.projection.captureId, null);
+    const persistedSurface = await collectVaultTextSurface(vaultRoot);
+    for (const forbidden of [
+      rawOnlyAddress,
+      "other-raw@example.test",
+      rawOnlySubject,
+      rawOnlyBody,
+      "member@example.test.pdf",
+    ]) {
+      assert.doesNotMatch(persistedSurface, new RegExp(escapeRegExp(forbidden), "u"));
+    }
+    assert.doesNotMatch(persistedSurface, /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu);
   });
 
   test("makes five rapid staged mailbox conversation messages available without capture projection", async () => {
@@ -3302,6 +3770,82 @@ describe("hosted mailbox conversation import adapter", () => {
   });
 });
 
+function createDeferred<T = void>(): {
+  promise: Promise<T>;
+  reject(error: unknown): void;
+  resolve(value: T | PromiseLike<T>): void;
+} {
+  let reject!: (error: unknown) => void;
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    reject = innerReject;
+    resolve = innerResolve;
+  });
+  return {
+    promise,
+    reject,
+    resolve,
+  };
+}
+
+async function withTestTimeout<T>(
+  promise: Promise<T>,
+  message: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const timer = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), 1_000);
+  });
+  try {
+    return await Promise.race([promise, timer]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function createLinqConversationLookupKey(input: {
+  item: HostedMailboxResolvedImportItem;
+  wake: HostedExecutionConversationMessageWake;
+}): string {
+  if (input.wake.message.channel !== "linq") {
+    throw new Error("Expected Linq conversation wake.");
+  }
+
+  const accountLookupKey = readHostedLinqConversationMessageAccountLookupKey(
+    input.wake.message,
+  );
+  const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+    secret: accountLookupKey,
+    userId: input.item.item.userId,
+  });
+  const conversationKey = resolveAssistantConversationLookupKey({
+    conversation: {
+      channel: "linq",
+      directness: input.wake.message.linqMessage.threadIsDirect === false
+        ? "group"
+        : "direct",
+      identityId: hashNullableHostedAssistantConversationIdentifier(
+        identifierBlind,
+        accountLookupKey,
+      ),
+      participantId: hashNullableHostedAssistantConversationIdentifier(
+        identifierBlind,
+        input.wake.message.linqMessage.from,
+      ),
+      threadId: hashNullableHostedAssistantConversationIdentifier(
+        identifierBlind,
+        input.wake.message.linqMessage.chatId,
+      ),
+    },
+  });
+  if (!conversationKey) {
+    throw new Error("Expected Linq conversation lookup key.");
+  }
+  return conversationKey;
+}
+
 function createDecodedPayloadDecoder(
   wake: HostedExecutionConversationMessageWake,
 ): HostedConversationMailboxPayloadDecoder {
@@ -3421,6 +3965,36 @@ async function writeVaultFile(
   const absolutePath = path.join(vaultRoot, relativePath);
   await mkdir(path.dirname(absolutePath), { recursive: true });
   await writeFile(absolutePath, bytes);
+}
+
+async function collectVaultTextSurface(vaultRoot: string): Promise<string> {
+  const lines: string[] = [];
+
+  async function visit(relativePath: string): Promise<void> {
+    const absolutePath = relativePath ? path.join(vaultRoot, relativePath) : vaultRoot;
+    const entries = await readdir(absolutePath, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryRelativePath = relativePath
+        ? path.posix.join(relativePath.split(path.sep).join("/"), entry.name)
+        : entry.name;
+      lines.push(`path:${entryRelativePath}`);
+      if (entry.isDirectory()) {
+        await visit(entryRelativePath);
+        continue;
+      }
+      if (entry.isFile()) {
+        const bytes = await readFile(path.join(vaultRoot, entryRelativePath));
+        lines.push(bytes.toString("utf8"));
+      }
+    }
+  }
+
+  await visit("");
+  return lines.join("\n");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 type RuntimeTestConfigInput = Partial<Pick<

@@ -951,6 +951,21 @@ model HostedAccountGroupBillingRef {
   @@map("hosted_account_group_billing_ref")
 }
 
+model HostedGrowthDailySnapshot {
+  snapshotDate       DateTime @id @map("snapshot_date") @db.Date
+  capturedAt         DateTime @map("captured_at")
+  totalMembers       Int      @map("total_members")
+  payingIndividuals  Int      @map("paying_individuals")
+  payingFamilyGroups Int      @map("paying_family_groups")
+  payingFamilySeats  Int      @map("paying_family_seats")
+  payingCustomers    Int      @map("paying_customers")
+  coveredMembers     Int      @map("covered_members")
+  trialingMembers    Int      @map("trialing_members")
+  mrrUsdCents        Int      @map("mrr_usd_cents")
+
+  @@map("hosted_growth_daily_snapshot")
+}
+
 model HostedLinqFirstContactAdmissionDecision {
   eventId             String   @id @map("event_id")
   decision            String
@@ -1046,10 +1061,25 @@ model HostedGroup {
   owner             HostedMember        @relation("HostedGroupOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
   runtimeMember     HostedMember?       @relation("HostedGroupRuntimeMember", fields: [runtimeMemberId], references: [id], onDelete: SetNull)
   members           HostedGroupMember[]
+  joinOffers        HostedGroupJoinOffer[]
 
   @@index([ownerMemberId])
   @@index([kind])
   @@map("hosted_group")
+}
+
+model HostedGroupJoinOffer {
+  id                  String      @id
+  groupId             String      @map("group_id")
+  messageLookupKey    String      @unique @map("message_lookup_key")
+  messageIdSuffix     String?     @map("message_id_suffix")
+  projectionKindsJson Json        @map("projection_kinds_json")
+  postedAt            DateTime    @map("posted_at")
+  revokedAt           DateTime?   @map("revoked_at")
+  group               HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, revokedAt, postedAt])
+  @@map("hosted_group_join_offer")
 }
 
 model HostedGroupMember {
