@@ -24,13 +24,11 @@ import type {
   HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
-  conversationRefFromAssistantInputConversation,
   isAssistantContextSnapshotRefreshPending,
   listAssistantContextSnapshotDirtyDomainsForCanonicalWrite,
   markAssistantContextSnapshotDirty,
-  notifyAssistantActiveTurnInputAvailable,
+  notifyAssistantActiveTurnInputAvailableForInputIds,
   resolveAssistantContextSnapshotPath,
-  readAssistantInputEvent,
   warnAssistantBestEffortFailure,
 } from "@murphai/assistant-engine";
 import type {
@@ -1130,53 +1128,11 @@ async function notifyHostedActiveTurnInputForMailboxImport(input: {
   result: HostedMailboxImportCheckpointResult;
   signal: AbortSignal | null;
 }): Promise<void> {
-  const inputIds = [...new Set(input.result.importResult.assistantInputIds ?? [])];
-  const conversationsByKey = new Map<
-    string,
-    ReturnType<typeof conversationRefFromAssistantInputConversation>
-  >();
-  for (const inputId of inputIds) {
-    const event = await readAssistantInputEvent({
-      inputId,
-      vault: input.input.vaultRoot,
-    });
-    if (!event?.conversation) {
-      continue;
-    }
-
-    const conversation = conversationRefFromAssistantInputConversation(event.conversation);
-    conversationsByKey.set(
-      formatHostedActiveTurnConversationNotificationKey(conversation),
-      conversation,
-    );
-  }
-
-  for (const conversation of conversationsByKey.values()) {
-    await notifyAssistantActiveTurnInputAvailable({
-      conversation,
-      ...(input.signal ? { signal: input.signal } : {}),
-      vault: input.input.vaultRoot,
-    }).catch((error: unknown) => {
-      warnAssistantBestEffortFailure({
-        error,
-        operation: "hosted active-turn input notification",
-      });
-    });
-  }
-}
-
-function formatHostedActiveTurnConversationNotificationKey(
-  conversation: ReturnType<typeof conversationRefFromAssistantInputConversation>,
-): string {
-  return [
-    conversation.alias ?? "",
-    conversation.channel ?? "",
-    conversation.directness ?? "",
-    conversation.identityId ?? "",
-    conversation.participantId ?? "",
-    conversation.sessionId ?? "",
-    conversation.threadId ?? "",
-  ].join("\u0000");
+  await notifyAssistantActiveTurnInputAvailableForInputIds({
+    inputIds: input.result.importResult.assistantInputIds ?? [],
+    ...(input.signal ? { signal: input.signal } : {}),
+    vault: input.input.vaultRoot,
+  });
 }
 
 export async function importHostedMailboxForWorkspaceRunner(input: {
