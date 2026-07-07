@@ -9,6 +9,7 @@ import {
   type AssistantCurrentAudienceDeliveryPrecedence,
   resolveAssistantCurrentAudienceDeliveryFields,
 } from './delivery-service.js'
+import type { AssistantChannelActivityStopOptions } from './channels/types.js'
 import type { AssistantMessageInput, AssistantTurnSharedPlan } from './service-contracts.js'
 
 const ASSISTANT_TYPING_STOP_WAIT_MS = 2_000
@@ -38,6 +39,7 @@ export function startAssistantChannelTypingIndicator(input: {
 
   let activeIndicator: AssistantChannelActivityHandle | null = null
   let stopRequested = false
+  let requestedStopOptions: AssistantChannelActivityStopOptions = {}
   const indicatorReady = Promise.resolve()
     .then(() =>
       startTypingIndicator(
@@ -55,7 +57,7 @@ export function startAssistantChannelTypingIndicator(input: {
       }
 
       if (stopRequested) {
-        void runAssistantTypingBestEffort(() => indicator.stop(), {
+        void runAssistantTypingBestEffort(() => indicator.stop(requestedStopOptions), {
           timeoutMs: ASSISTANT_TYPING_STOP_WAIT_MS,
         })
         return null
@@ -86,12 +88,13 @@ export function startAssistantChannelTypingIndicator(input: {
         return undefined
       })
     },
-    async stop() {
+    async stop(options: AssistantChannelActivityStopOptions = {}) {
       stopRequested = true
+      requestedStopOptions = options
       if (activeIndicator) {
         const indicator = activeIndicator
         activeIndicator = null
-        await runAssistantTypingBestEffort(() => indicator.stop(), {
+        await runAssistantTypingBestEffort(() => indicator.stop(options), {
           timeoutMs: ASSISTANT_TYPING_STOP_WAIT_MS,
         })
         return
@@ -104,12 +107,13 @@ export function startAssistantChannelTypingIndicator(input: {
 
 export async function stopAssistantChannelTypingIndicator(
   indicator: AssistantChannelActivityHandle | null,
+  options: AssistantChannelActivityStopOptions = {},
 ): Promise<void> {
   if (!indicator) {
     return
   }
 
-  await indicator.stop()
+  await indicator.stop(options)
 }
 
 async function runAssistantTypingBestEffort(

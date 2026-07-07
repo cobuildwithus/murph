@@ -419,6 +419,7 @@ export async function sendAssistantMessageLocal(
         value: null,
       }
       let currentSession = resolved.session
+      let finalReplyDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
 
       try {
         const turnInputController = createAssistantActiveTurnInputController({
@@ -1472,6 +1473,9 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
+        if (finalResponseText !== null) {
+          finalReplyDeliveryOutcomeKind = deliveryOutcome.kind
+        }
         const reactionDeliveryResult = await deliverAssistantProviderReactions({
           currentInput,
           providerResult,
@@ -1623,7 +1627,11 @@ export async function sendAssistantMessageLocal(
         throw error
       } finally {
         activeTurnInputController?.close()
-        await stopAssistantChannelTypingIndicator(typingIndicator)
+        await stopAssistantChannelTypingIndicator(typingIndicator, {
+          providerStop: !assistantDeliveryOutcomeSupersedesTypingIndicator(
+            finalReplyDeliveryOutcomeKind,
+          ),
+        })
         if (
           !(
             executionContext?.hosted != null
@@ -2119,6 +2127,12 @@ function resolveAssistantNoReplyDeliveryOutcome(input: {
     media: [],
     session: input.session,
   }
+}
+
+function assistantDeliveryOutcomeSupersedesTypingIndicator(
+  kind: AssistantDeliveryOutcome['kind'] | null,
+): boolean {
+  return kind === 'sent' || kind === 'queued'
 }
 
 function buildActiveTurnInput(input: {

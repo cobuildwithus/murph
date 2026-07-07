@@ -281,6 +281,7 @@ export async function sendAssistantNotificationLocal(
       const turnId = createAssistantTurnId()
       const turnCreatedAt = new Date().toISOString()
       const progressDelivery = null
+      let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
       const typingIndicator =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? null
@@ -489,6 +490,7 @@ export async function sendAssistantNotificationLocal(
             sharedPlan,
             turnId,
           })
+          committedDeliveryOutcomeKind = deliveryOutcome.kind
           await finalizeAssistantTurnFromDeliveryOutcome({
             outcome: deliveryOutcome,
             response: responseText,
@@ -628,6 +630,7 @@ export async function sendAssistantNotificationLocal(
             operation: 'status snapshot refresh',
           })
         })
+        committedDeliveryOutcomeKind = committedDeliveryOutcome.kind
 
         return {
           decision: {
@@ -639,7 +642,11 @@ export async function sendAssistantNotificationLocal(
           session: committedDeliveryOutcome.session,
         }
       } finally {
-        await stopAssistantChannelTypingIndicator(typingIndicator)
+        await stopAssistantChannelTypingIndicator(typingIndicator, {
+          providerStop: !assistantNotificationDeliveryOutcomeSupersedesTypingIndicator(
+            committedDeliveryOutcomeKind,
+          ),
+        })
       }
     },
   })
@@ -841,6 +848,12 @@ function assistantNotificationDeliveryAcceptedFirstContact(input: {
   }
 
   return input.dispatchMode === 'queue-only' && input.deliveryOutcome.kind === 'queued'
+}
+
+function assistantNotificationDeliveryOutcomeSupersedesTypingIndicator(
+  kind: AssistantDeliveryOutcome['kind'] | null,
+): boolean {
+  return kind === 'sent' || kind === 'queued'
 }
 
 async function persistAssistantExactTextNotificationSession(input: {

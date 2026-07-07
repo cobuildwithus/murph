@@ -2665,6 +2665,98 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
+  it("does not stop Linq typing when foreground drain confirms a sent message", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 }));
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
+      createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerThreadId: "linq_chat_123",
+          target: "linq_chat_123",
+          targetKind: "thread",
+        }),
+        status: "sent",
+      }),
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+      }),
+    ]);
+    await flushHostedRuntimeCallbackTestMicrotasks();
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("best-effort stops Linq typing after foreground drain fails and swallows cleanup errors", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+    });
+    const deliveryError = {
+      code: "ASSISTANT_DELIVERY_FAILED",
+      message: "provider send failed",
+    };
+    const providerFetch = vi.fn<typeof fetch>(async () => {
+      throw new Error("typing stop failed");
+    });
+    mocks.dispatchAssistantOutboxIntent.mockResolvedValueOnce(
+      createDispatchResult(
+        {
+          lastError: deliveryError,
+          status: "failed",
+        },
+        deliveryError,
+      ),
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "ASSISTANT_DELIVERY_FAILED",
+        deliveryStatus: "failed",
+        retryable: false,
+      }),
+    ]);
+    await flushHostedRuntimeCallbackTestMicrotasks();
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = providerFetch.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/chats/linq_chat_123/typing");
+    expect(init).toMatchObject({
+      method: "DELETE",
+    });
+  });
+
   it("terminally fails disabled auto-reply delivery before dispatch", async () => {
     const effect = createEffect();
     const disabledError = {

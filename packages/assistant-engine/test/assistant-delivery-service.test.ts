@@ -11,6 +11,9 @@ import {
   startAssistantChannelTypingIndicator,
 } from '../src/assistant/channel-typing.ts'
 import type {
+  AssistantChannelActivityHandle,
+} from '../src/assistant/channels/types.ts'
+import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.ts'
@@ -499,8 +502,8 @@ test('typing indicator stop does not wait for a pending start', async () => {
     vault: '/vaults/test',
   }
   const stop = vi.fn(async () => undefined)
-  let resolveStart!: (indicator: { stop(): Promise<void> }) => void
-  const startPromise = new Promise<{ stop(): Promise<void> }>((resolve) => {
+  let resolveStart!: (indicator: AssistantChannelActivityHandle) => void
+  const startPromise = new Promise<AssistantChannelActivityHandle>((resolve) => {
     resolveStart = resolve
   })
   const startLinqTyping = vi.fn(() => startPromise)
@@ -523,7 +526,9 @@ test('typing indicator stop does not wait for a pending start', async () => {
   })
 
   expect(indicator).not.toBeNull()
-  const stopPromise = indicator?.stop()
+  const stopPromise = indicator?.stop({
+    providerStop: false,
+  })
   let stopResolved = false
   stopPromise?.then(() => {
     stopResolved = true
@@ -535,6 +540,9 @@ test('typing indicator stop does not wait for a pending start', async () => {
   resolveStart({ stop })
   await vi.waitFor(() => {
     expect(stop).toHaveBeenCalledTimes(1)
+  })
+  expect(stop).toHaveBeenCalledWith({
+    providerStop: false,
   })
 })
 

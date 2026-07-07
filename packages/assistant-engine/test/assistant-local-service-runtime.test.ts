@@ -140,6 +140,7 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls[0]?.[0], 'telegram')
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.deepEqual(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls[0]?.[0], {
     vault: '/vaults/test',
   })
@@ -6504,6 +6505,9 @@ test('sendAssistantMessageLocal does not wait for a pending typing indicator sta
   await vi.waitFor(() => {
     expect(stopTyping).toHaveBeenCalledTimes(1)
   })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: false,
+  })
 })
 
 test('sendAssistantMessageLocal returns deferred delivery results and keeps typing in queue-only mode', async () => {
@@ -6571,6 +6575,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(startTypingIndicator.mock.calls[0]?.[1]?.startTelegramTyping, startTelegramTyping)
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 0)
 })
 
@@ -6578,6 +6583,7 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
   const failedSession = createAssistantSession({
     sessionId: 'session-failed-delivery',
   })
+  const stopTyping = vi.fn(async () => undefined)
   const failedDeliveryOutcome = {
     error: {
       code: 'ASSISTANT_DELIVERY_FAILED',
@@ -6590,6 +6596,11 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
     session: failedSession,
   }
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        stop: stopTyping,
+      })),
+    },
     deliveryOutcome: failedDeliveryOutcome,
   })
 
@@ -6615,6 +6626,9 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
     status: 'completed',
     vault: '<redacted-vault>',
   })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: true,
+  })
 })
 
 test('sendAssistantMessageLocal starts typing indicators for queue-only delivery', async () => {
@@ -6639,6 +6653,7 @@ test('sendAssistantMessageLocal starts typing indicators for queue-only delivery
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls.length, 1)
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
 })
 
 test('sendAssistantMessageLocal swallows typing-indicator startup failures', async () => {
@@ -6700,6 +6715,7 @@ test('sendAssistantMessageLocal surfaces queued delivery state after queue-only 
   assert.deepEqual(result.deliveryError, queuedError)
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.equal(mocks.finalizeDeliveredAssistantTurn.mock.calls.length, 1)
 })
 

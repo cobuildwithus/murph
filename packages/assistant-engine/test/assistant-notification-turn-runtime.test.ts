@@ -1969,6 +1969,43 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
+test('sendAssistantNotificationLocal releases typing after accepted delivery', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Deliver this reminder.',
+      text: 'Remember to sleep.',
+    }),
+    session: providerSession,
+  })
+  const { mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-typing-delivered',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Deliver this scheduled reminder.',
+    vault: '/vaults/typing-delivered',
+  })
+
+  expect(result.deliveryOutcome).toEqual(expect.objectContaining({
+    kind: 'sent',
+  }))
+  expect(mocks.stopAssistantChannelTypingIndicator).toHaveBeenCalledWith(
+    expect.objectContaining({
+      stop: expect.any(Function),
+    }),
+    {
+      providerStop: false,
+    },
+  )
+})
+
 test('sendAssistantNotificationLocal defers queue-only notification commit until delivery is accepted', async () => {
   const providerSession = createAssistantSession()
   const providerResult = createProviderResult({
@@ -2081,6 +2118,14 @@ test('sendAssistantNotificationLocal abandons queued delivery when deferred comm
     status: 'abandoned',
     vault: '/vaults/deferred-queue-commit-failure',
   })
+  expect(mocks.stopAssistantChannelTypingIndicator).toHaveBeenCalledWith(
+    expect.objectContaining({
+      stop: expect.any(Function),
+    }),
+    {
+      providerStop: true,
+    },
+  )
 })
 
 test('sendAssistantNotificationLocal runs beforeCommit before persisting skip decisions', async () => {
@@ -3069,6 +3114,10 @@ async function loadNotificationTurnHarness(input: {
     })),
     resolveAssistantTurnRoute: vi.fn(() => input.providerResult.route),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    startAssistantChannelTypingIndicator: vi.fn(() => ({
+      stop: vi.fn(async () => undefined),
+    })),
+    stopAssistantChannelTypingIndicator: vi.fn(async () => undefined),
     withAssistantTurnLock: vi.fn(async (lockInput: { run(): Promise<unknown> }) =>
       await lockInput.run()),
   }
@@ -3121,6 +3170,12 @@ async function loadNotificationTurnHarness(input: {
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
     createAssistantTurnId: () => input.turnId,
+  }))
+  vi.doMock('../src/assistant/channel-typing.js', () => ({
+    startAssistantChannelTypingIndicator:
+      mocks.startAssistantChannelTypingIndicator,
+    stopAssistantChannelTypingIndicator:
+      mocks.stopAssistantChannelTypingIndicator,
   }))
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
