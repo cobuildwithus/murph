@@ -88,8 +88,12 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
     ?? state.connectedSource?.providerLabel
     ?? callback.providerLabel
     ?? "Device";
-  const connected = callback.status === "connected" && state.connectedSource !== null;
   const failed = callback.status === "error";
+  const connected = !failed && state.connectedSource !== null;
+  const successAsserted =
+    callback.status === "connected"
+    || callback.connectSource !== null
+    || callback.connectTarget !== null;
   const title = failed
     ? `${providerLabel} connection did not finish`
     : connected
@@ -111,7 +115,7 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
     kind: "device-sync",
     retryHref: failed ? "/connect" : null,
     title,
-    unverified: !failed && callback.status === "connected" && !connected,
+    unverified: !failed && !connected && successAsserted,
   };
 }
 
@@ -158,7 +162,9 @@ async function loadCompletionState(input: {
       connectTarget: input.callback.connectTarget,
       provider: input.callback.provider,
       sources: settings.sources,
+      strict: input.callback.status === null,
     });
+    const connected = input.callback.status !== "error" && connectedSource !== null;
     const messageBody = buildHostedDeviceSyncMessagingReturnMessageBody(
       input.callback.sourceLabel
         ?? resolveConnectedSourceLabel({
@@ -171,7 +177,7 @@ async function loadCompletionState(input: {
     );
 
     return {
-      contactAction: input.callback.status === "connected" && connectedSource !== null
+      contactAction: connected
         ? resolvePreferredContactAction({
             hasTelegramRouting: Boolean(routing?.telegramThreadId || routing?.telegramUserId),
             messageBody,
@@ -197,6 +203,7 @@ function findConnectedSource(input: {
   connectTarget: string | null;
   provider: string | null;
   sources: readonly HostedDeviceSyncSettingsSource[];
+  strict: boolean;
 }): HostedDeviceSyncSettingsSource | null {
   const connectSource = normalizeProviderKey(input.connectSource);
   const connectTarget = normalizeProviderKey(input.connectTarget);
@@ -210,6 +217,10 @@ function findConnectedSource(input: {
     if (matchedSource) {
       return matchedSource;
     }
+  }
+
+  if (input.strict) {
+    return null;
   }
 
   if (!provider) {
