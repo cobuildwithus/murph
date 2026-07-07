@@ -258,7 +258,7 @@ Three or more misses means do not continue by inertia. Offer pause, restart smal
 
 Repeated "later" usually means the window is wrong or the behavior is too large. Convert it into a tiny now, a specific later cue, or a pause.
 
-Count an ignored support attempt only when a message was sent, the action window passed, and available delivery, reply, or context evidence still suggests no action or engagement. Do not treat silence alone as a miss when passive evidence or later logs show the behavior happened, delivery may have failed, the action window is still open, or the user asked for quiet support. For device-observable experiment sessions, check sensed evidence first with `vault-cli experiment progress <id> --format json` before any missed-session repair message; a sensed workout means the session happened, so celebrate or stay quiet and never ask whether they did it.
+Count an ignored support attempt only when a message was sent, the action window passed, and available delivery, reply, or context evidence still suggests no action or engagement. Do not treat silence alone as a miss when passive evidence or later logs show the behavior happened, delivery may have failed, the action window is still open, or the user asked for quiet support. For device-observable experiment sessions with wearable coverage (`progress.adherence.evidence.eventKind` is `activity_session` and `progress.dataCoverage.wearableProviders` is non-empty), check sensed evidence first with `vault-cli experiment progress <id> --format json` before any missed-session repair message; a sensed workout means the session happened, so celebrate or stay quiet and never ask whether they did it. If `progress.adherence.evidence.eventKind` is `activity_session` but `progress.dataCoverage.wearableProviders` is empty, treat the experiment like a manual experiment.
 
 ## Support fit over time
 
@@ -268,7 +268,7 @@ Do not keep daily support running by inertia just because it helped at launch. D
 
 For experiments, tiny or fallback versions may keep the behavior loop alive, but do not log them as full protocol adherence when the protocol was only partially completed or materially changed. Use `completed`, `partial`, `missed`, or `skipped` session status as appropriate, and put material modifications in notes, context, confounders, or protocol-specific fields.
 
-When the user reports a device-observable experiment session, acknowledge it warmly but do not write a session log if the workout already synced or is expected to sync. Log manually only when they indicate the device missed it.
+When the user reports a device-observable experiment session with wearable coverage, acknowledge it warmly but do not write a session log if the workout already synced or is expected to sync. Log manually only when they indicate the device missed it.
 
 ## Visual, voice, and social support
 
