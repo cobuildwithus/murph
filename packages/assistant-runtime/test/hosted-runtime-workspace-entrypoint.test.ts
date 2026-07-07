@@ -4082,7 +4082,8 @@ describe("hosted workspace runtime entrypoint", () => {
           workspaceVersion: "0",
         },
       }), {
-        async createCheckpointSnapshot() {
+        async createCheckpointSnapshot(snapshotInput) {
+          assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
           return {
             snapshotRef: createBundleRef({
               hash: "d".repeat(64),
@@ -4122,6 +4123,17 @@ describe("hosted workspace runtime entrypoint", () => {
         ["workspace.checkpoint.idle_shutdown", "done"],
         ["runtime.return", "done"],
       ]));
+      expect(
+        phaseLogs.find((entry) =>
+          entry.details.runtimePhase === "workspace.checkpoint.idle_shutdown"
+          && entry.details.runtimePhaseStatus === "start"
+        )?.details,
+      ).toEqual(expect.objectContaining({
+        idleCheckpointTrigger: "idle_window",
+        runtimeWakePendingAtCheckpoint: false,
+        shutdownSignalAbortedAtCheckpoint: false,
+      }));
+      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       expect(
         phaseLogs.find((entry) =>
           entry.details.runtimePhase === "cli.bridge"
@@ -13116,7 +13128,8 @@ describe("hosted workspace runtime entrypoint", () => {
           },
         }),
         {
-          async createCheckpointSnapshot() {
+          async createCheckpointSnapshot(snapshotInput) {
+            assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
             return {
               snapshotRef: createBundleRef({
                 hash: "d".repeat(64),
@@ -13918,7 +13931,8 @@ describe("hosted workspace runtime entrypoint", () => {
           },
         }),
         {
-          async createCheckpointSnapshot() {
+          async createCheckpointSnapshot(snapshotInput) {
+            assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
             return {
               snapshotRef: createBundleRef({
                 hash: "9".repeat(64),
@@ -13984,7 +13998,8 @@ describe("hosted workspace runtime entrypoint", () => {
           },
         }),
         {
-          async createCheckpointSnapshot() {
+          async createCheckpointSnapshot(snapshotInput) {
+            assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
             return {
               snapshotRef: createBundleRef({
                 hash: "e".repeat(64),
@@ -19441,12 +19456,15 @@ describe("hosted runtime shutdown signal", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-04-15T00:00:00.000Z"));
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const shutdownController = new AbortController();
     const retryWakeAt = "2026-04-15T00:05:00.000Z";
 
     try {
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
@@ -19462,7 +19480,8 @@ describe("hosted runtime shutdown signal", () => {
           },
         }),
         {
-          async createCheckpointSnapshot() {
+          async createCheckpointSnapshot(snapshotInput) {
+            assert.equal(snapshotInput.idleCheckpointTrigger, "shutdown_signal");
             return {
               snapshotRef: createBundleRef({
                 hash: "f".repeat(64),
@@ -19500,10 +19519,42 @@ describe("hosted runtime shutdown signal", () => {
       );
 
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "shutdown_signal");
       assert.equal(checkpointRequests[0]?.inboxMediaRetentionWakeAt, retryWakeAt);
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, retryWakeAt);
+
+      const phaseLogs = readCapturedRuntimePhaseLogs({
+        attemptId: "attempt_synthetic_shutdown_signal_pre",
+        spy: consoleInfo,
+      });
+      expect(
+        phaseLogs.find((entry) =>
+          entry.details.runtimePhase === "workspace.checkpoint.idle_shutdown"
+          && entry.details.runtimePhaseStatus === "start"
+        )?.details,
+      ).toEqual(expect.objectContaining({
+        idleCheckpointTrigger: "shutdown_signal",
+        runtimeWakePendingAtCheckpoint: false,
+        shutdownSignalAbortedAtCheckpoint: true,
+      }));
+      expect(
+        phaseLogs.find((entry) =>
+          entry.details.runtimePhase === "workspace.checkpoint.idle_shutdown"
+          && entry.details.runtimePhaseStatus === "done"
+        )?.details,
+      ).toEqual(expect.objectContaining({
+        idleCheckpointTrigger: "shutdown_signal",
+        runtimeWakePendingAtCheckpoint: false,
+        shutdownSignalAbortedAtCheckpoint: true,
+      }));
     } finally {
+      if (previousStdIoLogSetting === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = previousStdIoLogSetting;
+      }
+      consoleInfo.mockRestore();
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }

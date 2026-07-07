@@ -20,6 +20,7 @@ import {
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
+  HOSTED_IDLE_CHECKPOINT_TRIGGERS,
   HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES,
   HOSTED_RUNTIME_LOG_COMPONENTS,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
@@ -110,6 +111,7 @@ import {
   type HostedCodexAuthUpdateResponseStatus,
   type HostedProductFeedbackKind,
   type HostedIngressLatencySource,
+  type HostedIdleCheckpointTrigger,
   type HostedWorkspaceCheckpointReason,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
@@ -2448,6 +2450,13 @@ export function parseHostedWorkspaceCheckpointRequest(
       record.expectedWorkspaceVersion,
       "Hosted workspace checkpoint request expectedWorkspaceVersion",
     ),
+    ...(record.idleCheckpointTrigger === undefined
+      ? {}
+      : {
+          idleCheckpointTrigger: parseHostedIdleCheckpointTrigger(
+            record.idleCheckpointTrigger,
+          ),
+        }),
     leaseGeneration: requireNonNegativeBigIntString(
       record.leaseGeneration,
       "Hosted workspace checkpoint request leaseGeneration",
@@ -2990,6 +2999,14 @@ function parseHostedWorkspaceCheckpointReason(
     value,
     "Hosted workspace checkpoint reason",
     HOSTED_WORKSPACE_CHECKPOINT_REASONS,
+  );
+}
+
+function parseHostedIdleCheckpointTrigger(value: unknown): HostedIdleCheckpointTrigger {
+  return parseAllowedString(
+    value,
+    "Hosted idle checkpoint trigger",
+    HOSTED_IDLE_CHECKPOINT_TRIGGERS,
   );
 }
 

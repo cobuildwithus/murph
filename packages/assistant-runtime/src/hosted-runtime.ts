@@ -2186,13 +2186,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           checkpointWakeLatencySeed = latencySeed;
         }
+        const idleCheckpointPhaseLogDetails =
+          buildHostedRuntimeIdleCheckpointPhaseLogDetails({
+            checkpointWakeLatencySeed,
+            dirtyWaitResult,
+            idleCheckpointStartByMs,
+            pendingWake,
+            shutdownSignal: options.shutdownSignal ?? null,
+          });
 
         emitPhaseLog({
-          details: {
-            idleCheckpointStartByMs,
-            nextWakeAtPresent: pendingWake.nextWakeAt !== null,
-            nextWakeReasonPresent: pendingWake.nextWakeReason !== null,
-          },
+          details: idleCheckpointPhaseLogDetails,
           input,
           phase: "checkpoint",
           requestId,
@@ -2309,6 +2313,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             assertRuntimeNotAborted,
             checkpointRequestBuilder,
             expectedUserId: input.request.userId,
+            idleCheckpointTrigger: idleCheckpointPhaseLogDetails.idleCheckpointTrigger,
             nextWakeAt: idleCheckpointWake.nextWakeAt,
             nextWakeReason: idleCheckpointWake.nextWakeReason,
             inboxMediaRetentionWakeAt: idleCheckpointWake.inboxMediaRetentionWakeAt,
@@ -2337,6 +2342,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         emitPhaseLog({
           details: {
+            ...idleCheckpointPhaseLogDetails,
             checkpointed: checkpoint.checkpointed,
             checkpointWorkspaceVersion: checkpoint.workspace.version,
           },
@@ -2839,7 +2845,12 @@ const activeHostedRuntimeDeferredUsageCaptures =
 
 type HostedRuntimeDirtyWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
-  | { kind: "idle_checkpoint" };
+  | { kind: "idle_checkpoint"; trigger: "idle_window" | "shutdown_signal" };
+
+type HostedRuntimeIdleCheckpointTrigger =
+  | "idle_window"
+  | "runtime_wake"
+  | "shutdown_signal";
 
 type HostedRuntimeMailboxPostCheckpointEffectWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
@@ -3210,6 +3221,49 @@ function hostedRuntimeWakeReasonIsAssistant(nextWakeReason: string | null): bool
   return normalizeHostedRuntimeWakeReason(nextWakeReason) === HOSTED_ASSISTANT_WAKE_REASON;
 }
 
+function buildHostedRuntimeIdleCheckpointPhaseLogDetails(input: {
+  checkpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null;
+  dirtyWaitResult: HostedRuntimeDirtyWaitResult;
+  idleCheckpointStartByMs: number;
+  pendingWake: HostedRuntimePendingWake;
+  shutdownSignal: AbortSignal | null;
+}): HostedExecutionStructuredLogDetails & {
+  idleCheckpointTrigger: HostedRuntimeIdleCheckpointTrigger;
+} {
+  const checkpointWakeLatencySeedPresent = input.checkpointWakeLatencySeed !== null;
+  const idleCheckpointTrigger = resolveHostedRuntimeIdleCheckpointTrigger({
+    checkpointWakeLatencySeedPresent,
+    dirtyWaitResult: input.dirtyWaitResult,
+  });
+
+  return {
+    idleCheckpointStartByMs: input.idleCheckpointStartByMs,
+    idleCheckpointTrigger,
+    nextWakeAtPresent: input.pendingWake.nextWakeAt !== null,
+    nextWakeReasonPresent: input.pendingWake.nextWakeReason !== null,
+    runtimeWakePendingAtCheckpoint: checkpointWakeLatencySeedPresent,
+    shutdownSignalAbortedAtCheckpoint: input.shutdownSignal?.aborted === true,
+  };
+}
+
+function resolveHostedRuntimeIdleCheckpointTrigger(input: {
+  checkpointWakeLatencySeedPresent: boolean;
+  dirtyWaitResult: HostedRuntimeDirtyWaitResult;
+}): HostedRuntimeIdleCheckpointTrigger {
+  if (
+    input.dirtyWaitResult.kind === "idle_checkpoint"
+    && input.dirtyWaitResult.trigger === "shutdown_signal"
+  ) {
+    return "shutdown_signal";
+  }
+
+  if (input.dirtyWaitResult.kind === "external_wake" || input.checkpointWakeLatencySeedPresent) {
+    return "runtime_wake";
+  }
+
+  return "idle_window";
+}
+
 async function waitForHostedRuntimeDirtyWindow(input: {
   idleCheckpointStartByMs: number;
   runtimeAbortSignal: AbortSignal;
@@ -3218,10 +3272,10 @@ async function waitForHostedRuntimeDirtyWindow(input: {
 }): Promise<HostedRuntimeDirtyWaitResult> {
   const nowMs = Date.now();
   if (input.shutdownSignal?.aborted === true) {
-    return { kind: "idle_checkpoint" };
+    return { kind: "idle_checkpoint", trigger: "shutdown_signal" };
   }
   if (input.idleCheckpointStartByMs <= nowMs) {
-    return { kind: "idle_checkpoint" };
+    return { kind: "idle_checkpoint", trigger: "idle_window" };
   }
 
   const timeoutDelayMs = Math.min(
@@ -3229,7 +3283,7 @@ async function waitForHostedRuntimeDirtyWindow(input: {
     HOSTED_RUNTIME_MAX_TIMER_DELAY_MS,
   );
   if (timeoutDelayMs <= 0) {
-    return { kind: "idle_checkpoint" };
+    return { kind: "idle_checkpoint", trigger: "idle_window" };
   }
 
   return await new Promise<HostedRuntimeDirtyWaitResult>((resolve, reject) => {
@@ -3241,13 +3295,13 @@ async function waitForHostedRuntimeDirtyWindow(input: {
     let settled = false;
     const wakeAbortController = new AbortController();
     const timer = setTimeout(() => {
-      settle(() => resolve({ kind: "idle_checkpoint" }));
+      settle(() => resolve({ kind: "idle_checkpoint", trigger: "idle_window" }));
     }, timeoutDelayMs);
     const abort = () => {
       settle(() => reject(readHostedRuntimeAbortReason(input.runtimeAbortSignal)));
     };
     const shutdown = () => {
-      settle(() => resolve({ kind: "idle_checkpoint" }));
+      settle(() => resolve({ kind: "idle_checkpoint", trigger: "shutdown_signal" }));
     };
     const cleanup = () => {
       clearTimeout(timer);
@@ -3309,6 +3363,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
   expectedUserId: string;
+  idleCheckpointTrigger?: HostedRuntimeIdleCheckpointTrigger;
   inboxMediaRetentionWakeAt: string | null;
   issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
   nextWakeAt: string | null;
@@ -3325,6 +3380,9 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
 
   input.assertRuntimeNotAborted();
   const checkpointInput = {
+    ...(input.idleCheckpointTrigger
+      ? { idleCheckpointTrigger: input.idleCheckpointTrigger }
+      : {}),
     inboxMediaRetentionWakeAt: input.inboxMediaRetentionWakeAt,
     nextWakeAt: input.nextWakeAt,
     nextWakeReason: input.nextWakeReason,

@@ -1270,6 +1270,7 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "4",
+      idleCheckpointTrigger: "shutdown_signal",
       leaseGeneration: "9",
       nextWakeAt: null,
       nextWakeReason: null,
@@ -1284,6 +1285,7 @@ describe("hosted runtime control contracts", () => {
     })).toEqual({
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "4",
+      idleCheckpointTrigger: "shutdown_signal",
       leaseGeneration: "9",
       nextWakeAt: null,
       nextWakeReason: null,
@@ -1362,6 +1364,15 @@ describe("hosted runtime control contracts", () => {
         generatedAt: "not-a-date",
       },
     })).toThrow(/replicaRef\.generatedAt must be a valid ISO-8601 timestamp/u);
+
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      idleCheckpointTrigger: "deploy_rollout",
+      leaseGeneration: "9",
+      reason: "idle_shutdown",
+      snapshotRef: null,
+    })).toThrow(/Hosted idle checkpoint trigger/u);
 
     expect(() => parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",

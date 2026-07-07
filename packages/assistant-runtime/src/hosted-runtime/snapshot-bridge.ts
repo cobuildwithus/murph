@@ -800,6 +800,9 @@ async function writeHostedCheckpointSnapshotLifecycleLog(input: {
 
   const redactedJson: HostedRuntimeRedactedJson = {
     checkpointReason: input.request.reason,
+    ...(input.request.idleCheckpointTrigger
+      ? { idleCheckpointTrigger: input.request.idleCheckpointTrigger }
+      : {}),
     ...(input.details ?? {}),
   };
   appendHostedCheckpointSnapshotFailureDiagnostics(redactedJson, input.error);
@@ -1016,6 +1019,9 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   const redactedJson: HostedRuntimeRedactedJson = {
     browserVaultReplicaState: "omitted",
     checkpointReason: input.request.reason,
+    ...(input.request.idleCheckpointTrigger
+      ? { idleCheckpointTrigger: input.request.idleCheckpointTrigger }
+      : {}),
     leaseCheckCount: input.leaseCheckCount,
     ...(input.prunedRuntimeSymlinkCount > 0
       ? {
