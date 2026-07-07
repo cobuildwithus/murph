@@ -36,7 +36,7 @@ const TINTS: Record<
   },
 };
 
-function WideFeature({
+export function WideFeature({
   artifactSide,
   body,
   bubble,
