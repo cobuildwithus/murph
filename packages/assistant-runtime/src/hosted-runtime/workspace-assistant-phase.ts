@@ -43,6 +43,9 @@ import {
   findAssistantAutoReplyDeliveryIntentIds,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
+  resolveDeliveryCandidates,
+} from "@murphai/assistant-engine/assistant-channel-adapters";
+import {
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
 } from "@murphai/device-syncd/connect-config";
@@ -4237,10 +4240,15 @@ function buildHostedTerminalOutboxFailureRouteFromIntent(
     return null;
   }
 
-  const replyTargetThreadId =
-    normalizeAssistantRouteString(intent.bindingDelivery?.target)
-    ?? normalizeAssistantRouteString(intent.explicitTarget)
-    ?? normalizeAssistantRouteString(intent.threadId);
+  const candidate = resolveDeliveryCandidates({
+    bindingDelivery: intent.bindingDelivery,
+    explicitTarget: intent.explicitTarget,
+  })[0] ?? null;
+  if (!candidate || candidate.kind === "participant") {
+    return null;
+  }
+
+  const replyTargetThreadId = normalizeAssistantRouteString(candidate.target);
   if (!replyTargetThreadId) {
     return null;
   }

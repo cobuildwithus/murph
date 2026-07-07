@@ -6009,6 +6009,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           channel: "linq",
           createdAt: intentCreatedAt,
           effectId: deliveryEffect.effectId,
+          explicitTarget: null,
           identityId: "identity_linq_a",
           replyToMessageId: "linq_message_a",
           threadId: "thread_linq_a",
@@ -6071,6 +6072,115 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("routes terminal delivery failure pending input to the explicit target when it overrides binding delivery", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-terminal-failure-explicit-target-",
+    ));
+    try {
+      const now = "2026-05-08T16:00:08.000Z";
+      const intentCreatedAt = "2026-05-08T16:00:00.000Z";
+      await seedDirectLinqAssistantInputRoute({
+        actorId: "actor_linq_a",
+        deliveryTarget: "linq_chat_a",
+        enabledAt: intentCreatedAt,
+        identityId: "identity_linq_a",
+        sessionId: "asst_linq_a",
+        threadId: "thread_linq_a",
+        vaultRoot,
+      });
+      await seedDirectLinqAssistantInputRoute({
+        actorId: "actor_linq_b",
+        deliveryTarget: "linq_chat_b",
+        enabledAt: "2026-05-08T16:00:05.000Z",
+        identityId: "identity_linq_b",
+        sessionId: "asst_linq_b",
+        threadId: "thread_linq_b",
+        vaultRoot,
+      });
+      const actualAssistantAutomation =
+        await vi.importActual<typeof import("@murphai/assistant-engine/assistant-automation")>(
+          "@murphai/assistant-engine/assistant-automation",
+        );
+      const baseEffect = createDeliveryEffect();
+      const deliveryEffect = {
+        ...baseEffect,
+        effectId: "intent_terminal_failure_explicit_target",
+        fingerprint: "fingerprint_terminal_failure_explicit_target",
+        payload: {
+          ...baseEffect.payload,
+          channel: "linq" as const,
+          idempotencyKey: "assistant-outbox:intent_terminal_failure_explicit_target",
+        },
+      };
+      const terminalFailure = {
+        ...createFailedDeliveryOutcome({
+          deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+          effectId: deliveryEffect.effectId,
+        }),
+        deliveryStatus: "failed" as const,
+        effectFingerprint: deliveryEffect.fingerprint,
+        retryable: false,
+      };
+      mocks.readAssistantOutboxIntent.mockImplementation(async (
+        _vaultRoot: string,
+        intentId: string,
+      ) => intentId === deliveryEffect.effectId
+        ? createTerminalFailureOutboxIntent({
+          actorId: "actor_linq_b",
+          bindingDelivery: { kind: "thread", target: "linq_chat_a" },
+          channel: "linq",
+          createdAt: intentCreatedAt,
+          effectId: deliveryEffect.effectId,
+          explicitTarget: "linq_chat_b",
+          identityId: "identity_linq_b",
+          replyToMessageId: "linq_message_b",
+          threadId: "thread_linq_b",
+          threadIsDirect: true,
+        })
+        : null);
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([
+        terminalFailure,
+      ]);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = result.afterCheckpoint
+        ? await result.afterCheckpoint()
+        : result;
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 1,
+          hostedOutboxTerminalizedSending: 1,
+        }),
+      }));
+      const pendingInputIds = await readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      });
+      expect(pendingInputIds).toHaveLength(1);
+      const event = await actualAssistantAutomation.readAssistantInputEvent({
+        inputId: pendingInputIds[0]!,
+        vault: vaultRoot,
+      });
+      expect(event?.replyTarget?.threadId).toBe("linq_chat_b");
+      expect(event?.replyTarget?.threadId).not.toBe("linq_chat_a");
+      expect(event?.conversation?.threadId).toBe("thread_linq_b");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("keeps terminal delivery failure input idempotent after the current session changes", async () => {
     const vaultRoot = await mkdtemp(path.join(
       tmpdir(),
@@ -6123,6 +6233,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           channel: "linq",
           createdAt: intentCreatedAt,
           effectId: deliveryEffect.effectId,
+          explicitTarget: null,
           identityId: "identity_linq_a",
           replyToMessageId: "linq_message_a",
           threadId: "thread_linq_a",
@@ -6257,8 +6368,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         intentId: string,
       ) => intentId === deliveryEffect.effectId
         ? createTerminalFailureOutboxIntent({
+          bindingDeliveryTarget: "linq_chat_direct",
           createdAt: intentCreatedAt,
           effectId: deliveryEffect.effectId,
+          explicitTarget: null,
         })
         : null);
       mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
@@ -6416,6 +6529,85 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           explicitTarget: null,
           threadId: null,
           threadIsDirect: null,
+        }),
+      );
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([
+        {
+          ...createFailedDeliveryOutcome({
+            deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+            effectId: deliveryEffect.effectId,
+          }),
+          deliveryStatus: "failed" as const,
+          effectFingerprint: deliveryEffect.fingerprint,
+          retryable: false,
+        },
+      ]);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = result.afterCheckpoint
+        ? await result.afterCheckpoint()
+        : result;
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 0,
+        }),
+      }));
+      await expect(readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      })).resolves.toEqual([]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not stage pending assistant input for participant terminal failure delivery candidates", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-terminal-failure-participant-",
+    ));
+    try {
+      const now = "2026-05-08T16:00:08.000Z";
+      const intentCreatedAt = "2026-05-08T16:00:00.000Z";
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: intentCreatedAt,
+        }],
+        updatedAt: intentCreatedAt,
+        version: 1,
+      });
+      const deliveryEffect = {
+        ...createDeliveryEffect(),
+        effectId: "intent_vault_file_terminal_failure_participant",
+        fingerprint: "fingerprint_vault_file_terminal_failure_participant",
+        payload: {
+          ...createDeliveryEffect().payload,
+          channel: "linq" as const,
+          idempotencyKey:
+            "assistant-outbox:intent_vault_file_terminal_failure_participant",
+        },
+      };
+      mocks.readAssistantOutboxIntent.mockResolvedValue(
+        createTerminalFailureOutboxIntent({
+          bindingDelivery: { kind: "participant", target: "+15550000001" },
+          channel: "linq",
+          createdAt: intentCreatedAt,
+          effectId: deliveryEffect.effectId,
+          explicitTarget: null,
+          threadId: "thread_linq_direct",
+          threadIsDirect: true,
         }),
       );
       mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
@@ -11354,6 +11546,7 @@ async function seedDirectLinqAssistantInputRoute(input: {
 
 function createTerminalFailureOutboxIntent(input: {
   actorId?: string | null;
+  bindingDelivery?: { kind: "participant" | "thread"; target: string } | null;
   bindingDeliveryTarget?: string | null;
   channel?: string | null;
   createdAt: string;
@@ -11367,6 +11560,11 @@ function createTerminalFailureOutboxIntent(input: {
   const bindingDeliveryTarget = "bindingDeliveryTarget" in input
     ? input.bindingDeliveryTarget
     : "linq_chat_direct";
+  const bindingDelivery = "bindingDelivery" in input
+    ? input.bindingDelivery ?? null
+    : bindingDeliveryTarget
+      ? { kind: "thread" as const, target: bindingDeliveryTarget }
+      : null;
   const channel = "channel" in input ? input.channel : "linq";
   const actorId = "actorId" in input ? input.actorId : "actor_linq_direct";
   const identityId = "identityId" in input
@@ -11382,9 +11580,7 @@ function createTerminalFailureOutboxIntent(input: {
   return {
     actorId,
     answeredMailboxItemIds: [],
-    bindingDelivery: bindingDeliveryTarget
-      ? { kind: "thread", target: bindingDeliveryTarget }
-      : null,
+    bindingDelivery,
     channel,
     createdAt: input.createdAt,
     dedupeKey: `dedupe_${input.effectId}`,
