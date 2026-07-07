@@ -141,6 +141,9 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST";
   const isLinqDeliveryOutcomeRequest = policy.operation === "linq_delivery_outcome"
     && input.request.method === "POST";
+  const isLinqContactCardShareAfterOutboundRequest =
+    policy.operation === "linq_contact_card_share_after_outbound"
+    && input.request.method === "POST";
   const isVaultShareDeliverRequest =
     input.url.pathname === HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH
     && input.request.method === "POST";
@@ -166,6 +169,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isRuntimeLatencyTraceRequest
     || isLinqDeliveryOutcomeRequest
     || isLinqEgressEngagementRequest
+    || isLinqContactCardShareAfterOutboundRequest
     || isVaultShareDeliverRequest
     || isGroupToolRequest
     || isComputerUseRequest

@@ -26,23 +26,42 @@ describe("HostedAccountSettingsCards", () => {
     expect(withPhone).toContain("sms:+15550100001");
   });
 
-  test("shows Murph contact customization only after the member has linked a phone", () => {
-    const withoutPhone = renderToStaticMarkup(
-      React.createElement(HostedAccountSettingsCards, {
-        account: makeAccountSnapshot({ phoneNumber: null }),
-      }),
-    );
-    const withPhone = renderToStaticMarkup(
+  test("hides Murph contact customization without a Murph text line even when identity phone is linked", () => {
+    const markup = renderToStaticMarkup(
       React.createElement(HostedAccountSettingsCards, {
         account: makeAccountSnapshot({ phoneNumber: "+14045550123" }),
+        murphPhoneNumber: null,
       }),
     );
 
-    expect(withoutPhone).not.toContain("Murph contact");
-    expect(withoutPhone).not.toContain("Pick a look and save the updated card.");
-    expect(withPhone).toContain("Murph contact");
-    expect(withPhone).toContain("Pick a look and save the updated card.");
-    expect(withPhone).toContain("Customize");
+    expect(markup).not.toContain("Murph contact");
+    expect(markup).not.toContain("Pick a look and save the updated card.");
+  });
+
+  test("shows Murph contact customization with an assigned Murph text line", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: makeAccountSnapshot({ phoneNumber: "+14045550123" }),
+        murphPhoneNumber: "+15550100001",
+      }),
+    );
+
+    expect(markup).toContain("Murph contact");
+    expect(markup).toContain("Pick a look and save the updated card.");
+    expect(markup).toContain("Customize");
+  });
+
+  test("shows Murph contact customization with a pending Murph text line", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: makeAccountSnapshot({ phoneNumber: null }),
+        murphPhoneNumber: "+15550100002",
+      }),
+    );
+
+    expect(markup).toContain("Murph contact");
+    expect(markup).toContain("Pick a look and save the updated card.");
+    expect(markup).toContain("Customize");
   });
 
   test("shows a private Murph email action after the member has one", () => {

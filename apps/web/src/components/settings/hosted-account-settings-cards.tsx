@@ -61,7 +61,7 @@ export function HostedAccountSettingsCards({
             </Button>
           }
         />
-        {phoneNumber ? (
+        {murphPhoneNumber ? (
           <SettingsRow
             icon={<ContactRound className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
             label="Murph contact"

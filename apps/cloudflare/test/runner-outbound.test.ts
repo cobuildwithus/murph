@@ -157,6 +157,8 @@ const RUNNER_PROXY_TOKEN = "proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
 const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`;
 const HEARTBEAT_URL = "http://runner-control.worker/internal/active-invocation/heartbeat";
+const LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH =
+  "/api/internal/hosted-runtime/linq/contact-card/share-after-outbound";
 const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
@@ -230,6 +232,21 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted Linq egress engagement",
     path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+  },
+  {
+    body: {
+      authority: {
+        accountLookupKey: "hbidx:phone:v1:account",
+        channel: "linq",
+        containerMemberId: "member_123",
+        threadId: "linq_chat_123",
+      },
+      chatId: "linq_chat_123",
+      service: "iMessage",
+      threadIsDirect: true,
+    },
+    name: "legacy hosted Linq contact-card share after outbound",
+    path: LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   },
   {
     body: {
@@ -641,6 +658,7 @@ describe("handleRunnerOutboundRequest", () => {
                     || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
+                    || path === LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH
                     || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
@@ -799,6 +817,47 @@ describe("handleRunnerOutboundRequest", () => {
           engagementKind: "requires_recent_inbound",
           target: "chat_123",
           targetKind: "thread",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects legacy Linq contact-card share-after-outbound without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH}`, {
+        body: JSON.stringify({
+          authority: {
+            accountLookupKey: "hbidx:phone:v1:account",
+            channel: "linq",
+            containerMemberId: "member_123",
+            threadId: "linq_chat_123",
+          },
+          chatId: "linq_chat_123",
+          service: "iMessage",
+          threadIsDirect: true,
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
