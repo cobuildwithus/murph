@@ -561,6 +561,7 @@ function withoutHostedRuntimeInvocationOrchestrationLatencyDiagnostics(
       || phaseBreakdown.restore
       || phaseBreakdown.boot
       || phaseBreakdown.wake
+      || phaseBreakdown.import
       || phaseBreakdown.provider,
   );
   if (hasRemainingPhase) {

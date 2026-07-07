@@ -247,6 +247,8 @@ const HOSTED_PRE_AUTO_REPLY_SYSTEM_IMPORT_MAX_PAGES = 4;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
+  onConversationInputStaged?: (() => void) | null;
+  runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
 }
 
@@ -936,6 +938,8 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           importItem: foregroundConversationImportItem,
           importItemContext: {
             latencyMilestones,
+            onConversationInputStaged: input.onForegroundConversationWorkObserved ?? null,
+            runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
           },
           input: input.input,
           lanes: ["conversation"],
@@ -955,6 +959,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           importItem: input.input.importItem,
           importItemContext: {
             latencyMilestones,
+            runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
           },
           input: input.input,
           lanes: ["system"],
@@ -1244,6 +1249,7 @@ async function writeHostedMailboxImportRuntimeLog(input: {
         fetchedCount: input.result.importResult.fetchedCount,
         importedCount: input.result.importResult.importedCount,
         laneCount: lanes.length,
+        ...(input.result.importResult.conversationImportTiming ?? {}),
         retryableBlockedCount,
         stateChanged: input.result.stateChanged,
         systemSeqEnd: input.result.state.watermarks.system,

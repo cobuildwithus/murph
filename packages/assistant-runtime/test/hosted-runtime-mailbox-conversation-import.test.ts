@@ -306,6 +306,9 @@ describe("hosted mailbox conversation import adapter", () => {
         order.push("projection-prepared");
       },
       item,
+      onConversationInputStaged() {
+        order.push("staged-callback");
+      },
       runtime: createRuntime(),
       signal: signalController.signal,
       vaultRoot,
@@ -316,7 +319,7 @@ describe("hosted mailbox conversation import adapter", () => {
         notificationObserved.promise,
         "active turn notify did not fire before projection",
       );
-      assert.deepEqual(order, ["notify"]);
+      assert.deepEqual(order, ["staged-callback", "notify"]);
 
       projectionRelease.resolve(undefined);
       const outcome = await importPromise;
@@ -327,6 +330,7 @@ describe("hosted mailbox conversation import adapter", () => {
       const listed = await listAssistantInputEvents({ vault: vaultRoot });
       assert.equal(listed.events.length, 1);
       assert.deepEqual(order, [
+        "staged-callback",
         "notify",
         "projection-prepared",
         "projection-started",
@@ -338,6 +342,10 @@ describe("hosted mailbox conversation import adapter", () => {
         nextWakeAt: null,
         parserProcessed: 0,
       });
+      assert.equal(typeof outcome.conversationImportTiming?.projectionPrepareMs, "number");
+      assert.equal(typeof outcome.conversationImportTiming?.projectionImportMs, "number");
+      assert.equal(typeof outcome.conversationImportTiming?.projectionTotalMs, "number");
+      assert.equal("attachmentEvidenceMs" in (outcome.conversationImportTiming ?? {}), false);
       const currentInbound = outcome.linqDeliveryContext?.currentInbound;
       assert.ok(currentInbound);
       assert.equal(currentInbound.mailboxItemId, item.item.id);
@@ -397,6 +405,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     try {
+      let stagedCallbackCount = 0;
       const outcome = await importHostedConversationMailboxItem({
         decodePayload: createDecodedPayloadDecoder(decodedWake),
         async importConversationWake() {
@@ -410,12 +419,16 @@ describe("hosted mailbox conversation import adapter", () => {
         },
         async prepareWakeContext() {},
         item,
+        onConversationInputStaged() {
+          stagedCallbackCount += 1;
+        },
         runtime: createRuntime(),
         vaultRoot,
       });
 
       assert.equal(outcome.status, "imported");
       assert.equal(notificationCount, 0);
+      assert.equal(stagedCallbackCount, 0);
     } finally {
       controller.close();
     }
@@ -472,14 +485,25 @@ describe("hosted mailbox conversation import adapter", () => {
         },
         async prepareWakeContext() {},
         item,
+        onConversationInputStaged() {
+          throw new Error("synthetic staged callback failure");
+        },
         runtime: createRuntime(),
         vaultRoot,
       });
 
+      if (outcome.status !== "imported") {
+        throw new Error("Expected imported mailbox outcome.");
+      }
       const listed = await listAssistantInputEvents({ vault: vaultRoot });
       assert.equal(notificationAttempts, 1);
       assert.equal(warn.mock.calls.length > 0, true);
-      assert.deepEqual(outcome, {
+      const {
+        conversationImportTiming: _conversationImportTiming,
+        ...outcomeWithoutTiming
+      } = outcome;
+      assert.equal(typeof _conversationImportTiming?.projectionTotalMs, "number");
+      assert.deepEqual(outcomeWithoutTiming, {
         assistantInputId: listed.events[0]?.inputId,
         captureId: null,
         linqDeliveryContext: {
@@ -721,6 +745,119 @@ describe("hosted mailbox conversation import adapter", () => {
       }),
     ]);
     assert.equal(JSON.stringify(latencyTraceRequests).includes("latency trace message body"), false);
+  });
+
+  test("adds conversation import stage timings to staged trace callbacks", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-import-timing-"));
+    tempRoots.push(parentRoot);
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_import_timing_001",
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_import_timing",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_import_timing",
+          parts: [
+            {
+              type: "text",
+              value: "timing",
+            },
+          ],
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const item = createResolvedConversationMailboxItem({
+      dedupeKey: decodedWake.eventId,
+      id: "mailbox_item_import_timing_001",
+    });
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+
+    const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          return {
+            captureId: null,
+            metrics: {
+              nextWakeAt: null,
+              parserProcessed: 0,
+            },
+          };
+        },
+        item,
+        latencyMilestones: {
+          phaseBreakdown: {
+            schemaVersion: 1,
+            wake: {
+              foregroundImportStartedAtEpochMs: 1_777_000_000_300,
+              foregroundWaitResolvedAtEpochMs: 1_777_000_000_200,
+              runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
+            },
+          },
+        },
+        runtime: createRuntime({
+          platform: {
+            latencyTracePort: {
+              async record(request) {
+                latencyTraceRequests.push(request);
+                return {
+                  matchedCount: 1,
+                  recorded: true,
+                  unmatchedCount: 0,
+                };
+              },
+            },
+          },
+        }),
+        stageAssistantInputEvent: async () => ({
+          inputId: "input_import_timing",
+          async recordProjection() {},
+        }),
+        vaultRoot,
+      })
+    );
+
+    assert.equal(outcome.status, "imported");
+    assert.equal(latencyTraceRequests.length, 1);
+    const event = latencyTraceRequests[0]?.event;
+    assert.equal(event?.type, "assistant_input_staged");
+    if (!event || event.type !== "assistant_input_staged") {
+      throw new Error("Expected assistant input staged latency trace event.");
+    }
+    const importBreakdown = event.phaseBreakdown?.import;
+    if (!importBreakdown) {
+      throw new Error("Expected conversation import phase breakdown.");
+    }
+    const {
+      autoReplyPreparedAtEpochMs,
+      decodeDoneAtEpochMs,
+      decodeStartedAtEpochMs,
+      pendingIndexEnsuredAtEpochMs,
+      stagedAtEpochMs,
+    } = importBreakdown;
+    if (
+      typeof decodeStartedAtEpochMs !== "number"
+      || typeof decodeDoneAtEpochMs !== "number"
+      || typeof autoReplyPreparedAtEpochMs !== "number"
+      || typeof pendingIndexEnsuredAtEpochMs !== "number"
+      || typeof stagedAtEpochMs !== "number"
+    ) {
+      throw new Error("Expected numeric conversation import timing diagnostics.");
+    }
+    assert.ok(decodeStartedAtEpochMs <= decodeDoneAtEpochMs);
+    assert.ok(decodeDoneAtEpochMs <= autoReplyPreparedAtEpochMs);
+    assert.ok(autoReplyPreparedAtEpochMs <= pendingIndexEnsuredAtEpochMs);
+    assert.ok(pendingIndexEnsuredAtEpochMs <= stagedAtEpochMs);
+    assert.deepEqual(event.phaseBreakdown?.wake, {
+      foregroundImportStartedAtEpochMs: 1_777_000_000_300,
+      foregroundWaitResolvedAtEpochMs: 1_777_000_000_200,
+    });
   });
 
   test("records Telegram staged trace callbacks with Telegram source", async () => {
@@ -2757,7 +2894,12 @@ describe("hosted mailbox conversation import adapter", () => {
       throw new Error("Expected imported mailbox outcome.");
     }
 
-    assert.deepEqual(outcome, {
+    const {
+      conversationImportTiming: _conversationImportTiming,
+      ...outcomeWithoutTiming
+    } = outcome;
+    assert.equal(typeof _conversationImportTiming?.projectionTotalMs, "number");
+    assert.deepEqual(outcomeWithoutTiming, {
       assistantInputId: "ain_00000000000000000000000000000000",
       captureId: null,
       metrics: {
@@ -3036,30 +3178,34 @@ describe("hosted mailbox conversation import adapter", () => {
       ["conversation.message", "conversation.message"],
     );
 
-    assert.deepEqual(
-      first,
-      {
-        assistantInputId: "ain_00000000000000000000000000000000",
-        captureId: null,
-        metrics: {
-          nextWakeAt: null,
-          parserProcessed: 0,
-        },
-        status: "imported",
+    const {
+      conversationImportTiming: _firstTiming,
+      ...firstWithoutTiming
+    } = first;
+    const {
+      conversationImportTiming: _secondTiming,
+      ...secondWithoutTiming
+    } = second;
+    assert.deepEqual(firstWithoutTiming, {
+      assistantInputId: "ain_00000000000000000000000000000000",
+      captureId: null,
+      metrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
       },
-    );
-    assert.deepEqual(
-      second,
-      {
-        assistantInputId: "ain_00000000000000000000000000000000",
-        captureId: null,
-        metrics: {
-          nextWakeAt: null,
-          parserProcessed: 0,
-        },
-        status: "imported",
+      status: "imported",
+    });
+    assert.deepEqual(secondWithoutTiming, {
+      assistantInputId: "ain_00000000000000000000000000000000",
+      captureId: null,
+      metrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
       },
-    );
+      status: "imported",
+    });
+    assert.equal(typeof _firstTiming?.projectionTotalMs, "number");
+    assert.equal(typeof _secondTiming?.projectionTotalMs, "number");
     assert.equal("afterCheckpoint" in first, false);
     assert.equal("afterCheckpoint" in second, false);
     const serialized = JSON.stringify([first, second]);
@@ -3156,7 +3302,12 @@ describe("hosted mailbox conversation import adapter", () => {
       throw new Error("Expected imported mailbox outcome.");
     }
 
-    assert.deepEqual(outcome, {
+    const {
+      conversationImportTiming: _conversationImportTiming,
+      ...outcomeWithoutTiming
+    } = outcome;
+    assert.equal(typeof _conversationImportTiming?.projectionTotalMs, "number");
+    assert.deepEqual(outcomeWithoutTiming, {
       assistantInputId: "ain_00000000000000000000000000000000",
       captureId: null,
       metrics: {
@@ -3308,7 +3459,12 @@ describe("hosted mailbox conversation import adapter", () => {
     const listed = await listAssistantInputEvents({
       vault: vaultRoot,
     });
-    assert.deepEqual(outcome, {
+    const {
+      conversationImportTiming: _conversationImportTiming,
+      ...outcomeWithoutTiming
+    } = outcome;
+    assert.equal(typeof _conversationImportTiming?.projectionTotalMs, "number");
+    assert.deepEqual(outcomeWithoutTiming, {
       assistantInputId: listed.events[0]?.inputId,
       captureId: null,
       metrics: {

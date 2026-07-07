@@ -3614,6 +3614,185 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("foreground conversation staging flips background yield before projection completes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const lateOccurredAt = "2026-04-26T00:00:02.000Z";
+    const lateWake: HostedExecutionConversationMessageWake = {
+      ...createRunnerConversationWake(),
+      eventId: "evt_synthetic_runner_staging_yield_late",
+      occurredAt: lateOccurredAt,
+    };
+    const items: HostedMailboxItem[] = [];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const yieldStates: boolean[] = [];
+    let projectionFinished = false;
+    let releaseProjection = (): void => {};
+    let projectionStarted = (): void => {};
+    const projectionStartedPromise = new Promise<void>((resolve) => {
+      projectionStarted = resolve;
+    });
+    const projectionReleasePromise = new Promise<void>((resolve) => {
+      releaseProjection = resolve;
+    });
+    const conversationImportItem = createHostedConversationMailboxImportItem({
+      decodePayload: {
+        async decode() {
+          return {
+            status: "decoded",
+            wake: lateWake,
+          };
+        },
+      },
+      async importConversationWake() {
+        projectionStarted();
+        await projectionReleasePromise;
+        projectionFinished = true;
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      runtime: createConversationRuntime(),
+      vaultRoot,
+    });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_staging_yield",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        foregroundImportItem: async (item, context) => {
+          importedSeqs.push(item.item.laneSeq);
+          return await conversationImportItem(item, context);
+        },
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_staging_yield",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          items.push(createMailboxItem({
+            dedupeKey: lateWake.eventId,
+            id: "mailbox_item_runner_staging_yield_late",
+            laneSeq: "1",
+            occurredAt: lateOccurredAt,
+          }));
+          runtimeWakeSignal.notify();
+          await withTestTimeout(projectionStartedPromise, 1_000);
+          assert.equal(projectionFinished, false);
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          releaseProjection();
+          await waitForCondition(() => projectionFinished);
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(importedSeqs, ["1"]);
+      assert.deepEqual(yieldStates, [false, true]);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
+      assert.equal(result.runtimeStateDirty, true);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+      ]);
+    } finally {
+      releaseProjection();
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("foreground system lane import does not flip background yield", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items: HostedMailboxItem[] = [];
+    const importedLanes: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const yieldStates: boolean[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_system_wake_no_yield",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedLanes.push(item.item.lane);
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_system_wake_no_yield",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_system_wake_no_yield",
+            kind: "member.activated",
+            lane: "system",
+            laneSeq: "1",
+          }));
+          runtimeWakeSignal.notify();
+          await waitForCondition(() => importedLanes.includes("system"));
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(importedLanes, ["system"]);
+      assert.deepEqual(yieldStates, [false, false]);
+      assert.equal(result.latestMailboxImport.state.watermarks.system, "1");
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("runtime wake interrupts post-checkpoint background maintenance after late assistant input import", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
@@ -5546,6 +5725,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.ok(result);
+      const importLog = logRequests.flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "mailbox.imported");
+      assert.ok(importLog);
+      assert.equal(typeof importLog.redactedJson?.projectionPrepareMs, "number");
+      assert.equal(typeof importLog.redactedJson?.projectionImportMs, "number");
+      assert.equal(typeof importLog.redactedJson?.attachmentEvidenceMs, "number");
+      assert.equal(typeof importLog.redactedJson?.projectionTotalMs, "number");
       const effectLog = logRequests.flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
       assert.equal(effectLog, undefined);
