@@ -55,6 +55,11 @@
       "types": "./dist/id-families.d.ts",
       "import": "./dist/id-families.js",
       "default": "./dist/id-families.js"
+    },
+    "./murph-age": {
+      "types": "./dist/murph-age.d.ts",
+      "import": "./dist/murph-age.js",
+      "default": "./dist/murph-age.js"
     }
   },
   "files": [
