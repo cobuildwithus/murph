@@ -117,12 +117,16 @@ OOM-killed a build that the real Vercel 8 GB machine accepts, so caps at or
 below that floor are known false positives. PR #349's 5.34 GB passing and 6.18
 GB exit-137 failure numbers are historical single-process RSS measurements
 only; they are not comparable to cgroup accounting, which includes anonymous
-memory across all build workers plus page cache. The guard prints cgroup
-`memory.peak`, `memory.events`, and selected final-read `memory.stat` values,
-and fails if cgroup v2, the root memory controller, passwordless `sudo`, or
-peak accounting are unavailable. Treat the guard
-verdict as the memory-budget signal; `memory.peak` is the cgroup-unit trend to
-watch, but it can sit near the cap when page cache saturates the cgroup.
+memory across all build workers plus page cache. The guard samples cgroup
+`memory.current` and selected `memory.stat` fields about every 3 seconds,
+prints trajectory lines about every 15 seconds, then reports sampled maxima
+before cgroup `memory.peak`, `memory.events`, and selected final-read
+`memory.stat` values; on an OOM kill, those maxima identify whether anonymous
+memory or dirty file cache saturated the cap. It fails if cgroup v2, the root
+memory controller, passwordless `sudo`, or peak accounting are unavailable.
+Treat the guard verdict as the memory-budget signal; `memory.peak` is the
+cgroup-unit trend to watch, but it can sit near the cap when page cache
+saturates the cgroup.
 Disabling the guard in Linux CI requires
 `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0` and logs a prominent warning that the
 Vercel Standard-machine memory budget is not being enforced. Local non-Linux

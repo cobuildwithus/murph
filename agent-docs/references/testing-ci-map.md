@@ -38,10 +38,14 @@ Last verified: 2026-07-06
   5.34 GB passing and 6.18 GB exit-137 failure numbers are historical
   single-process RSS measurements only, not cgroup cap bounds; cgroup accounting
   includes anonymous memory across all build workers plus page cache. The guard
-  prints cgroup `memory.peak`, `memory.events`, and selected final-read
-  `memory.stat` values, fails loudly if cgroup v2, the root memory controller,
-  passwordless `sudo`, or peak-accounting machinery is
-  unavailable, and treats the pass/fail verdict as the memory-budget signal.
+  samples cgroup `memory.current` and selected `memory.stat` fields about every
+  3 seconds, prints trajectory lines about every 15 seconds, then reports
+  sampled maxima before cgroup `memory.peak`, `memory.events`, and selected
+  final-read `memory.stat` values; on an OOM kill, those maxima identify whether
+  anonymous memory or dirty file cache saturated the cap. It fails loudly if
+  cgroup v2, the root memory controller, passwordless `sudo`, or
+  peak-accounting machinery is unavailable, and treats the pass/fail verdict as
+  the memory-budget signal.
   `memory.peak` remains the cgroup-unit trend to watch, but can read near the
   cap when page cache saturates the cgroup. Disabling the guard in Linux CI requires
   `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0` and logs a prominent warning that the

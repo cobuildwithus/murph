@@ -69,12 +69,33 @@ cgroup_controllers_file="$cgroup_root/cgroup.controllers"
 cgroup_subtree_control_file="$cgroup_root/cgroup.subtree_control"
 cgroup_dir=""
 cgroup_created=0
+sampler_pid=""
+sampler_state_file=""
+
+cleanup_sampler() {
+  local status="$1"
+
+  if [[ -n "${sampler_pid:-}" ]]; then
+    kill "$sampler_pid" 2>/dev/null || true
+    wait "$sampler_pid" 2>/dev/null || true
+    sampler_pid=""
+  fi
+
+  if [[ -n "${sampler_state_file:-}" ]]; then
+    rm -f "$sampler_state_file" 2>/dev/null || true
+    rm -f "${sampler_state_file}.next" 2>/dev/null || true
+  fi
+
+  return "$status"
+}
 
 cleanup_cgroup() {
   local status="$1"
   local cleanup_output
   local cleanup_status
   local cleanup_attempt
+
+  cleanup_sampler "$status" || true
 
   if [[ "$cgroup_created" != "1" || -z "$cgroup_dir" ]]; then
     return 0
@@ -184,6 +205,114 @@ report_cgroup_memory() {
   return 0
 }
 
+sample_cgroup_memory() {
+  local state_file="$1"
+  local current_file="$2"
+  local stat_file="$3"
+  local current
+  local stat_values
+  local stat_key
+  local stat_value
+  local sample_count=0
+  local max_current=0
+  local max_anon=0
+  local max_file=0
+  local max_file_dirty=0
+  local max_file_writeback=0
+  local max_shmem=0
+  local max_slab=0
+  local anon=0
+  local file=0
+  local file_dirty=0
+  local file_writeback=0
+  local shmem=0
+  local slab=0
+
+  set +e
+  while [[ -r "$current_file" ]]; do
+    if ! current="$(cat "$current_file" 2>/dev/null)"; then
+      break
+    fi
+    if [[ ! "$current" =~ ^[0-9]+$ ]]; then
+      break
+    fi
+
+    if [[ ! -r "$stat_file" ]]; then
+      break
+    fi
+    if ! stat_values="$(awk '
+      $1 == "anon" || $1 == "file" || $1 == "file_dirty" || $1 == "file_writeback" || $1 == "shmem" || $1 == "slab" {
+        print $1 "=" $2
+      }
+    ' "$stat_file" 2>/dev/null)"; then
+      break
+    fi
+
+    anon=0
+    file=0
+    file_dirty=0
+    file_writeback=0
+    shmem=0
+    slab=0
+    while IFS='=' read -r stat_key stat_value; do
+      if [[ -z "$stat_key" || ! "$stat_value" =~ ^[0-9]+$ ]]; then
+        continue
+      fi
+      case "$stat_key" in
+        anon) anon="$stat_value" ;;
+        file) file="$stat_value" ;;
+        file_dirty) file_dirty="$stat_value" ;;
+        file_writeback) file_writeback="$stat_value" ;;
+        shmem) shmem="$stat_value" ;;
+        slab) slab="$stat_value" ;;
+      esac
+    done <<<"$stat_values"
+
+    (( current > max_current )) && max_current="$current"
+    (( anon > max_anon )) && max_anon="$anon"
+    (( file > max_file )) && max_file="$file"
+    (( file_dirty > max_file_dirty )) && max_file_dirty="$file_dirty"
+    (( file_writeback > max_file_writeback )) && max_file_writeback="$file_writeback"
+    (( shmem > max_shmem )) && max_shmem="$shmem"
+    (( slab > max_slab )) && max_slab="$slab"
+
+    printf 'current=%s anon=%s file=%s file_dirty=%s file_writeback=%s shmem=%s slab=%s\n' \
+      "$max_current" \
+      "$max_anon" \
+      "$max_file" \
+      "$max_file_dirty" \
+      "$max_file_writeback" \
+      "$max_shmem" \
+      "$max_slab" > "${state_file}.next" 2>/dev/null && mv "${state_file}.next" "$state_file" 2>/dev/null || true
+
+    sample_count=$((sample_count + 1))
+    if (( sample_count % 5 == 0 )); then
+      printf '[apps/web build memory guard] sample: current=%s anon=%s file=%s file_dirty=%s file_writeback=%s shmem=%s slab=%s\n' \
+        "$current" \
+        "$anon" \
+        "$file" \
+        "$file_dirty" \
+        "$file_writeback" \
+        "$shmem" \
+        "$slab" >&2
+    fi
+
+    sleep 3
+  done
+}
+
+report_sampled_maxima() {
+  local state_file="$1"
+  local sampled_maxima
+
+  if [[ -r "$state_file" ]]; then
+    sampled_maxima="$(cat "$state_file" 2>/dev/null || true)"
+    if [[ -n "$sampled_maxima" ]]; then
+      printf '[apps/web build memory guard] sampled maxima: %s\n' "$sampled_maxima" >&2
+    fi
+  fi
+}
+
 if [[ "$(uname -s)" != "Linux" ]]; then
   fail "enforce mode requires Linux cgroup v2. Use passthrough mode only for local non-CI wrapper validation."
 fi
@@ -214,6 +343,7 @@ printf '[apps/web build memory guard] enforcing cgroup machine-model cap %s byte
   "$machine_model_ceiling_bytes" >&2
 
 cgroup_dir="$cgroup_root/murph-web-build-$$"
+memory_current_file="$cgroup_dir/memory.current"
 memory_peak_file="$cgroup_dir/memory.peak"
 memory_events_file="$cgroup_dir/memory.events"
 memory_stat_file="$cgroup_dir/memory.stat"
@@ -232,6 +362,10 @@ if [[ ! -r "$memory_peak_file" ]]; then
   fail "cannot read ${memory_peak_file}; memory peak accounting is unavailable."
 fi
 
+sampler_state_file="$(mktemp "${TMPDIR:-/tmp}/murph-web-build-memory-samples.XXXXXX")"
+sample_cgroup_memory "$sampler_state_file" "$memory_current_file" "$memory_stat_file" &
+sampler_pid=$!
+
 status=0
 (
   # In bash, $$ remains the top-level shell PID inside this subshell, and BASHPID
@@ -247,7 +381,14 @@ status=0
   exec "${command_args[@]}"
 ) || status=$?
 
+if [[ -n "${sampler_pid:-}" ]]; then
+  kill "$sampler_pid" 2>/dev/null || true
+  wait "$sampler_pid" 2>/dev/null || true
+  sampler_pid=""
+fi
+
 report_failed=0
+report_sampled_maxima "$sampler_state_file"
 report_cgroup_memory "$status" || report_failed=1
 if [[ "$report_failed" -ne 0 && "$status" -eq 0 ]]; then
   status=1

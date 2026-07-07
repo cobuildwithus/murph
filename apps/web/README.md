@@ -607,9 +607,14 @@ under the 8 GB machine model. The cap sits at the ceiling pending decomposition
 evidence because 7.0 GB was measured to false-positive on 2026-07-06 while the
 real Vercel machine passes. The floor only rises as the app grows.
 
-The guard prints cgroup `memory.peak`, `memory.events`, and selected final-read
-`memory.stat` values on every CI build and fails loudly if cgroup v2, the root
-memory controller, passwordless `sudo`, or peak accounting are unavailable.
+The guard samples cgroup `memory.current` and selected `memory.stat` fields
+about every 3 seconds during the build, prints trajectory lines about every 15
+seconds, then reports sampled maxima before cgroup `memory.peak`,
+`memory.events`, and selected final-read `memory.stat` values. On an OOM kill,
+the sampled maxima identify whether anonymous memory or dirty file cache
+saturated the cap.
+It fails loudly if cgroup v2, the root memory controller, passwordless `sudo`,
+or peak accounting are unavailable.
 Treat a passing or failing guard verdict as the memory-budget signal. The
 printed cgroup `memory.peak` is the ongoing trend to watch, but it can read near
 the cap when page cache saturates the cgroup.
