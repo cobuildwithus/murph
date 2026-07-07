@@ -11,10 +11,10 @@ jobs:
     name: Run post-deploy contract migrations
     if: ${{ github.event.deployment_status.state == 'success' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     concurrency:
       group: hosted-web-contract-migrations-production
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -48,7 +48,7 @@ jobs:
         if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version-file: .nvmrc
+          node-version: 24.14.1
           cache: pnpm
 
       - name: Install deps
@@ -65,6 +65,7 @@ jobs:
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
           HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
+          HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS: ${{ vars.HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS || '300' }}
         run: |
           set -euo pipefail
 
@@ -88,6 +89,16 @@ jobs:
             exit 1
           fi
 
+          if ! [[ "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}" =~ ^[0-9]+$ ]]; then
+            echo "::error::HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS must be a non-negative integer."
+            exit 1
+          fi
+
+          if [ "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}" -gt 600 ]; then
+            echo "::error::HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS must be 600 or less unless the workflow timeout is also raised."
+            exit 1
+          fi
+
           alias_host="${HOSTED_WEB_PRODUCTION_BASE_URL#http://}"
           alias_host="${alias_host#https://}"
           alias_host="${alias_host%%/*}"
@@ -100,6 +111,11 @@ jobs:
           alias_url="https://api.vercel.com/v4/aliases/${alias_host}?projectId=${HOSTED_WEB_VERCEL_PROJECT_ID}"
           if [ -n "${HOSTED_WEB_VERCEL_TEAM_ID}" ]; then
             alias_url="${alias_url}&teamId=${HOSTED_WEB_VERCEL_TEAM_ID}"
+          fi
+
+          if [ "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}" -gt 0 ]; then
+            echo "::notice::Waiting ${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}s for prior production function executions to drain before contract migrations."
+            sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"
           fi
 
           alias_response="$(

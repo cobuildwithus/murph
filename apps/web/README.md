@@ -566,27 +566,33 @@ generic `pnpm --dir apps/web build` script is intentionally non-mutating and
 only generates artifacts plus validation output. The predeploy migration
 wrapper uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel
 production, rejects known pooled Postgres ports such as `6432` and `6543`, and
-blocks future destructive or incompatible Prisma migration SQL after
-`20260707170000_drop_stale_linq_recency_columns`; keep `DATABASE_URL` available
-for app runtime traffic. Because a successful predeploy migration cannot roll
-back automatically if a later deploy step fails, normal production Prisma
-migrations must stay backward compatible with the currently deployed app and
-avoid old-code-breaking changes such as required columns, drops, renames,
-`SET NOT NULL`, or column type changes. Those changes need an
-expand/backfill/switch/final-cleanup sequence: add the new nullable shape first,
-backfill or dual-write as needed, switch application reads/writes in a later
-deploy, then clean up the old shape only after the replacement deployment is
-live.
+blocks destructive or incompatible Prisma migration SQL outside the frozen
+historical `20260707170000_drop_stale_linq_recency_columns` baseline; keep
+`DATABASE_URL` available for app runtime traffic. Because a successful
+predeploy migration cannot roll back automatically if a later deploy step
+fails, normal production Prisma migrations must stay backward compatible with
+the currently deployed app and avoid old-code-breaking changes such as required
+columns, drops, renames, `SET NOT NULL`, or column type changes. Those changes
+need an expand/backfill/switch/final-cleanup sequence: add the new nullable
+shape first, backfill or dual-write as needed, switch application reads/writes
+in a later deploy, then clean up the old shape only after the replacement
+deployment is live and the prior production function window has drained.
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
 successful production deployment. That workflow only accepts Vercel-originated
 deployment statuses, checks out the exact deployed commit, verifies it is
-reachable from `origin/main`, verifies the configured Vercel production alias
-still points at that commit before exposing the database secret, requires
+reachable from `origin/main`, waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS`
+seconds for prior production function executions to drain, then verifies the
+configured Vercel production alias still points at that commit before exposing
+the database secret. It requires
 `HOSTED_WEB_VERCEL_TOKEN`, `HOSTED_WEB_VERCEL_PROJECT_ID`,
 `HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
-GitHub Actions, and calls
+GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
+`300` and is capped at `600` unless the workflow timeout is raised. The workflow
+does not cancel in-progress runs when stale deployment-status events arrive;
+the final alias check and the contract migration advisory lock make stale or
+duplicate runs skip safely. After those gates, it calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated

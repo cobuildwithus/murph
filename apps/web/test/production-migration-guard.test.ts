@@ -523,7 +523,9 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /github\.event\.deployment_status\.state == 'success'/u);
     assert.match(workflow, /deployment_status\.creator\.login == 'vercel\[bot\]'/u);
     assert.match(workflow, /deployment\.creator\.login == 'vercel\[bot\]'/u);
-    assert.match(workflow, /cancel-in-progress: true/u);
+    assert.match(workflow, /timeout-minutes: 20/u);
+    assert.match(workflow, /cancel-in-progress: false/u);
+    assert.doesNotMatch(workflow, /cancel-in-progress: true/u);
     assert.match(workflow, /github\.event\.deployment\.sha/u);
     assert.match(workflow, /fetch-depth: 0/u);
     assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOYED_SHA\}" origin\/main/u);
@@ -533,6 +535,15 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /HOSTED_WEB_VERCEL_PROJECT_ID/u);
     assert.match(workflow, /HOSTED_WEB_DIRECT_DATABASE_URL/u);
     assert.match(workflow, /DIRECT_DATABASE_URL="\$\{HOSTED_WEB_DIRECT_DATABASE_URL\}"/u);
+    assert.match(workflow, /HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS/u);
+    assert.match(
+      workflow,
+      /vars\.HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS \|\| '300'/u,
+    );
+    assert.match(
+      workflow,
+      /sleep "\$\{HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS\}"/u,
+    );
     assert.match(
       workflow,
       /steps\.production-branch\.outputs\.should_run == 'true'/u,
@@ -540,22 +551,25 @@ describe("hosted web production migration guard", () => {
     assert.doesNotMatch(workflow, /steps\.current-production/u);
     assert.doesNotMatch(workflow, /deployment\.ref == 'main'/u);
     assert.match(workflow, /release:production:contract-migrate/u);
-
-    const nodeVersionFiles = Array.from(
-      workflow.matchAll(/node-version-file:\s*([^\s#]+)/gu),
-      (match) => match[1] ?? "",
+    assert.ok(
+      workflow.indexOf('sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"')
+        < workflow.indexOf('alias_response="$('),
+      "contract migrations must wait for production drain before the final alias check",
     );
-    assert.deepEqual(nodeVersionFiles, [".nvmrc"]);
+    assert.ok(
+      workflow.indexOf('alias_response="$(')
+        < workflow.indexOf("release:production:contract-migrate"),
+      "contract migrations must re-check the current production alias before SQL",
+    );
 
-    const nodeVersion = (
-      await readFile(path.join(workflowRoot, nodeVersionFiles[0]!), "utf8")
-    ).trim();
+    const nodeVersion = workflow.match(/node-version:\s*([^\s#]+)/u)?.[1] ?? "";
     const escapedNodeVersion = nodeVersion.replaceAll(".", "\\.");
     const workspaceConfig = await readFile(
       path.join(workflowRoot, "pnpm-workspace.yaml"),
       "utf8",
     );
 
+    assert.doesNotMatch(workflow, /node-version-file/u);
     assert.match(nodeVersion, /^\d+\.\d+\.\d+$/u);
     assert.match(
       workspaceConfig,
