@@ -8,7 +8,7 @@ The package boundary is intentionally small:
 
 - source-system and FHIR resource constants
 - clinical raw FHIR retrieval manifest contracts
-- deterministic FHIR external-reference helpers
+- deterministic FHIR external-reference helpers namespaced by FHIR base and patient hashes
 - clinical import-plan and Tier 1 candidate contracts
 
 FHIR/MyChart data remains raw evidence. Canonical Murph records stay in the

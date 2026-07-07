@@ -47,6 +47,8 @@ describe("clinical records contracts", () => {
     expect(clinicalFacetSlug("Systolic BP (mmHg)")).toBe("systolic-bp-mm-hg");
     expect(
       externalRefForFhir({
+        fhirBaseUrlHash: "base-url-sha256",
+        patientIdHash: "patient-id-sha256",
         sourceSystem: "epic-fhir",
         resourceType: "Observation",
         resourceId: "obs-1",
@@ -54,12 +56,31 @@ describe("clinical records contracts", () => {
         facet: "BP Systolic",
       }),
     ).toEqual({
-      system: "epic-fhir",
+      system: "epic-fhir-base-url-sha256-patient-id-sha256",
       resourceType: "observation",
       resourceId: "obs-1",
       version: "3",
       facet: "bp-systolic",
     });
+    expect(
+      externalRefForFhir({
+        fhirBaseUrlHash: "base-url-sha256",
+        patientIdHash: "other-patient-id-sha256",
+        sourceSystem: "epic-fhir",
+        resourceType: "Observation",
+        resourceId: "obs-1",
+        facet: "BP Systolic",
+      }).system,
+    ).not.toBe(
+      externalRefForFhir({
+        fhirBaseUrlHash: "base-url-sha256",
+        patientIdHash: "patient-id-sha256",
+        sourceSystem: "epic-fhir",
+        resourceType: "Observation",
+        resourceId: "obs-1",
+        facet: "BP Systolic",
+      }).system,
+    );
   });
 
   it("rejects raw path parent traversal at the contract boundary", () => {

@@ -62,6 +62,10 @@ const NO_KNOWN_ALLERGY_CODES = new Set(["716186003"]);
 const LABORATORY_CATEGORY_CODES = new Set(["laboratory", "lab"]);
 const RESULT_STATUS_NORMAL_CODES = new Set(["n", "normal"]);
 const RESULT_STATUS_ABNORMAL_CODES = new Set(["a", "aa", "h", "hh", "l", "ll", "abnormal", "high", "low"]);
+const MEASUREMENT_UNIT_PATTERN = /^[A-Za-z0-9._/%-]+$/u;
+const FHIR_VITAL_UNIT_ALIASES = new Map<string, string>([
+  ["mm[hg]", "mmHg"],
+]);
 
 export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInput): Promise<ClinicalImportPlan> {
   const manifestPath = clinicalRawPathSchema.parse(input.manifestPath);
@@ -192,7 +196,7 @@ function mapObservation(context: FhirResourceContext<Observation>): ClinicalImpo
       title: vital.title,
       facet: vital.facet,
       metric: vital.metric,
-      unit: value.unit ?? vital.unit,
+      unit: normalizeVitalUnit(value.unit, vital),
       value: value.value,
     }));
   }
@@ -211,7 +215,7 @@ function mapObservation(context: FhirResourceContext<Observation>): ClinicalImpo
         title: vital.title,
         facet: vital.facet,
         metric: vital.metric,
-        unit: quantity.unit ?? vital.unit,
+        unit: normalizeVitalUnit(quantity.unit, vital),
         value: quantity.value,
       }),
     ];
@@ -251,13 +255,7 @@ function mapObservation(context: FhirResourceContext<Observation>): ClinicalImpo
         results,
         rawRefs: [context.rawRef],
         evidence: [evidenceForResource(context, resourceId)],
-        externalRef: externalRefForFhir({
-          sourceSystem: context.manifest.sourceSystem,
-          resourceType: "Observation",
-          resourceId,
-          version: readResourceVersion(context.resource),
-          facet: "lab-observation",
-        }),
+        externalRef: externalRefForResource(context, "Observation", resourceId, "lab-observation"),
       },
     },
   ];
@@ -291,13 +289,12 @@ function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): Cl
           reportedAt: readIsoDateTime(context.resource.issued),
           rawRefs: [context.rawRef],
           evidence: [evidenceForResource(context, resourceId)],
-          externalRef: externalRefForFhir({
-            sourceSystem: context.manifest.sourceSystem,
-            resourceType: "DiagnosticReport",
+          externalRef: externalRefForResource(
+            context,
+            "DiagnosticReport",
             resourceId,
-            version: readResourceVersion(context.resource),
-            facet: "diagnostic-report-summary",
-          }),
+            "diagnostic-report-summary",
+          ),
         },
       },
     ];
@@ -336,13 +333,7 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
         authoredAt: readIsoDateTime(context.resource.date),
         rawRefs: [context.rawRef],
         evidence: [evidenceForResource(context, resourceId)],
-        externalRef: externalRefForFhir({
-          sourceSystem: context.manifest.sourceSystem,
-          resourceType: "DocumentReference",
-          resourceId,
-          version: readResourceVersion(context.resource),
-          facet: "document-note",
-        }),
+        externalRef: externalRefForResource(context, "DocumentReference", resourceId, "document-note"),
       },
     },
   ];
@@ -380,13 +371,12 @@ function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>)
           sourceLabel: "FHIR AllergyIntolerance",
           rawRefs: [context.rawRef],
           evidence: [evidenceForResource(context, resourceId)],
-          externalRef: externalRefForFhir({
-            sourceSystem: context.manifest.sourceSystem,
-            resourceType: "AllergyIntolerance",
+          externalRef: externalRefForResource(
+            context,
+            "AllergyIntolerance",
             resourceId,
-            version: readResourceVersion(context.resource),
-            facet: "no-known-allergies",
-          }),
+            "no-known-allergies",
+          ),
         },
       },
     ],
@@ -423,15 +413,20 @@ function buildVitalsCandidate(
       ],
       rawRefs: [context.rawRef],
       evidence: [evidenceForResource(context, input.resourceId)],
-      externalRef: externalRefForFhir({
-        sourceSystem: context.manifest.sourceSystem,
-        resourceType: "Observation",
-        resourceId: input.resourceId,
-        version: readResourceVersion(context.resource),
-        facet: input.facet,
-      }),
+      externalRef: externalRefForResource(context, "Observation", input.resourceId, input.facet),
     },
   };
+}
+
+function normalizeVitalUnit(rawUnit: string | undefined, vital: VitalDefinition): string {
+  const trimmedUnit = rawUnit?.trim();
+  if (!trimmedUnit) {
+    return vital.unit;
+  }
+
+  const alias = FHIR_VITAL_UNIT_ALIASES.get(trimmedUnit.toLowerCase());
+  const unit = alias ?? trimmedUnit;
+  return MEASUREMENT_UNIT_PATTERN.test(unit) ? unit : vital.unit;
 }
 
 function buildBloodTestResult(resource: Observation | ObservationComponent): BloodTestResultRecord | null {
@@ -473,6 +468,23 @@ function sourceRef(context: FhirResourceContext, resourceId: string, facet: stri
     facet: clinicalFacetSlug(facet),
     rawRef: context.rawRef,
   };
+}
+
+function externalRefForResource(
+  context: FhirResourceContext,
+  resourceType: string,
+  resourceId: string,
+  facet: string,
+) {
+  return externalRefForFhir({
+    fhirBaseUrlHash: context.manifest.fhirBaseUrlHash,
+    patientIdHash: context.manifest.patientIdHash,
+    sourceSystem: context.manifest.sourceSystem,
+    resourceType,
+    resourceId,
+    version: readResourceVersion(context.resource),
+    facet,
+  });
 }
 
 function evidenceForResource(context: FhirResourceContext, resourceId: string) {
@@ -532,9 +544,7 @@ function isLaboratoryObservation(resource: Observation): boolean {
     }
   }
 
-  return codingsForCodeableConcept(resource.code).some((coding) =>
-    typeof coding.system === "string" && coding.system.toLowerCase().includes("loinc")
-  );
+  return false;
 }
 
 function isNoKnownAllergy(resource: AllergyIntolerance): boolean {

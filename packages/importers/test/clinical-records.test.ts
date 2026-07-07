@@ -24,7 +24,7 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "Observation",
           relativePath: "Observation/page-1.json",
-          count: 3,
+          count: 4,
           sha256: SHA256,
         },
       ],
@@ -46,13 +46,13 @@ describe("buildClinicalImportPlan", () => {
                     code: {
                       coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
                     },
-                    valueQuantity: { value: 128, unit: "mmHg" },
+                    valueQuantity: { value: 128, system: "http://unitsofmeasure.org", code: "mm[Hg]" },
                   },
                   {
                     code: {
                       coding: [{ system: "http://loinc.org", code: "8462-4", display: "Diastolic blood pressure" }],
                     },
-                    valueQuantity: { value: 82, unit: "mmHg" },
+                    valueQuantity: { value: 82, unit: "mm[Hg]" },
                   },
                 ],
               },
@@ -80,6 +80,28 @@ describe("buildClinicalImportPlan", () => {
                 },
                 interpretation: [{ coding: [{ code: "N", display: "Normal" }] }],
                 valueQuantity: { value: 91, unit: "mg/dL" },
+              },
+            },
+            {
+              resource: {
+                resourceType: "Observation",
+                id: "height-1",
+                effectiveDateTime: "2026-07-01T12:07:00.000Z",
+                category: [
+                  {
+                    coding: [
+                      {
+                        system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                        code: "vital-signs",
+                      },
+                    ],
+                  },
+                ],
+                code: {
+                  text: "Body height",
+                  coding: [{ system: "http://loinc.org", code: "8302-2", display: "Body height" }],
+                },
+                valueQuantity: { value: 180, unit: "cm" },
               },
             },
             {
@@ -121,7 +143,7 @@ describe("buildClinicalImportPlan", () => {
       { metric: "systolic-blood-pressure", unit: "mmHg", value: 128 },
     ]);
     expect(systolic?.payload.externalRef).toEqual({
-      system: "epic-fhir",
+      system: "epic-fhir-base-url-sha256-patient-id-sha256",
       resourceType: "observation",
       resourceId: "bp-panel-1",
       version: "7",
@@ -232,9 +254,64 @@ describe("buildClinicalImportPlan", () => {
       }),
     );
   });
+
+  it("namespaces FHIR external refs by source base and patient", async () => {
+    const resourceFiles = [
+      {
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+        sha256: SHA256,
+      },
+    ];
+    const pages = {
+      "Observation/page-1.json": {
+        resourceType: "Observation",
+        id: "shared-bp",
+        effectiveDateTime: "2026-07-01T12:00:00.000Z",
+        code: {
+          coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+        },
+        valueQuantity: { value: 128, unit: "mmHg" },
+      },
+    };
+    const firstVaultRoot = await writeClinicalFixture({ pages, resourceFiles });
+    const secondVaultRoot = await writeClinicalFixture({
+      manifest: { patientIdHash: "other-patient-id-sha256" },
+      pages,
+      resourceFiles,
+    });
+
+    const firstPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: firstVaultRoot });
+    const secondPlan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: secondVaultRoot });
+    const firstRef = firstPlan.candidates[0]?.payload.externalRef;
+    const secondRef = secondPlan.candidates[0]?.payload.externalRef;
+
+    expect(firstRef).toEqual(
+      expect.objectContaining({
+        system: "epic-fhir-base-url-sha256-patient-id-sha256",
+        resourceType: "observation",
+        resourceId: "shared-bp",
+        facet: "bp-systolic",
+      }),
+    );
+    expect(secondRef).toEqual(
+      expect.objectContaining({
+        system: "epic-fhir-base-url-sha256-other-patient-id-sha256",
+        resourceType: "observation",
+        resourceId: "shared-bp",
+        facet: "bp-systolic",
+      }),
+    );
+    expect(firstRef?.system).not.toBe(secondRef?.system);
+  });
 });
 
 async function writeClinicalFixture(input: {
+  manifest?: {
+    fhirBaseUrlHash?: string;
+    patientIdHash?: string;
+  };
   pages: Record<string, unknown>;
   resourceFiles: Array<{
     count: number;
@@ -252,8 +329,8 @@ async function writeClinicalFixture(input: {
     connectionId: "clinical-connection-1",
     retrievalJobId: "retrieval-job-1",
     sourceSystem: "epic-fhir",
-    fhirBaseUrlHash: "base-url-sha256",
-    patientIdHash: "patient-id-sha256",
+    fhirBaseUrlHash: input.manifest?.fhirBaseUrlHash ?? "base-url-sha256",
+    patientIdHash: input.manifest?.patientIdHash ?? "patient-id-sha256",
     fetchedAt: "2026-07-01T12:00:00.000Z",
     resourceFiles: input.resourceFiles,
     requestedScopes: ["patient/*.read"],

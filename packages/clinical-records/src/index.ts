@@ -285,15 +285,32 @@ export function clinicalFacetSlug(value: string): string {
   return fhirResourceTypeToSlug(value);
 }
 
+function clinicalNamespaceSlug(value: string): string {
+  const slug = clinicalFacetSlug(value);
+  if (!slug) {
+    throw new Error("FHIR namespace hash must include at least one alphanumeric character.");
+  }
+
+  return slug;
+}
+
 export function externalRefForFhir(input: {
+  fhirBaseUrlHash: string;
+  patientIdHash: string;
   sourceSystem: ClinicalSourceSystem;
   resourceType: string;
   resourceId: string;
   version?: string | undefined;
   facet?: string | undefined;
 }) {
+  const system = [
+    input.sourceSystem,
+    clinicalNamespaceSlug(input.fhirBaseUrlHash),
+    clinicalNamespaceSlug(input.patientIdHash),
+  ].join("-");
+
   return externalRefSchema.parse({
-    system: input.sourceSystem,
+    system,
     resourceType: fhirResourceTypeToSlug(input.resourceType),
     resourceId: input.resourceId,
     version: input.version,
