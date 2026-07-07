@@ -178,6 +178,7 @@ import {
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
   enqueueHostedPendingAssistantInputId,
+  readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
@@ -17898,6 +17899,209 @@ describe("hosted workspace runtime entrypoint", () => {
     } finally {
       shutdownController.abort();
       vi.useRealTimers();
+      await resultPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("e2e aborts a foreground projection stall after staging pending input", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const checkpointWatermarks: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdownController = new AbortController();
+    const projectionStarted = createDeferred<void>();
+    const projectionAborted = createDeferred<void>();
+    const assistantSecondPassObserved = createDeferred<void>();
+    const runtimeTransitionTimeoutMs = 15_000;
+    let assistantPhaseCalls = 0;
+    let conversationImportAttempts = 0;
+    let pendingInputId: string | null = null;
+    const projectionStall = createDeferred<never>();
+    const projectionNeverResolved = projectionStall.promise;
+    void projectionNeverResolved.catch(() => undefined);
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_projection_stall_preempt",
+            idleCheckpointDelayMs: 180_000,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            const watermark = await readCheckpointConversationWatermark(snapshotInput, vaultRoot);
+            checkpointWatermarks.push(watermark);
+            events.push(`snapshot:${snapshotInput.reason}:${watermark}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: `${checkpointWatermarks.length}`.repeat(64),
+                key: `users/bundles/member-synthetic/projection-stall-${checkpointWatermarks.length}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item, context) {
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            conversationImportAttempts += 1;
+            events.push(`conversation-import:${conversationImportAttempts}`);
+            if (conversationImportAttempts === 1) {
+              pendingInputId = await stagePendingLinqAssistantInputForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              });
+              context?.onConversationInputStaged?.();
+              assert.ok(context?.signal);
+              const signal = context.signal;
+              const rejectForAbort = () => {
+                events.push("projection:aborted");
+                projectionAborted.resolve();
+                projectionStall.reject(
+                  signal.reason ?? new DOMException("Projection aborted.", "AbortError"),
+                );
+              };
+              if (signal.aborted) {
+                rejectForAbort();
+              } else {
+                signal.addEventListener("abort", rejectForAbort, { once: true });
+              }
+              projectionStarted.resolve();
+              return await projectionNeverResolved;
+            }
+
+            assert.equal(
+              (await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation,
+              "0",
+            );
+            assert.ok(pendingInputId);
+            assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+              pendingInputId,
+            ]);
+            return {
+              assistantInputId: pendingInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            events,
+            logRequests,
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant:${assistantPhaseCalls}`);
+
+            if (assistantPhaseCalls === 1) {
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_projection_stall",
+                laneSeq: "1",
+                occurredAt: "2026-04-27T00:00:01.000Z",
+              }));
+              runtimeWakeSignal.notify();
+              await withRealTimeout(
+                projectionStarted.promise,
+                runtimeTransitionTimeoutMs,
+                () => events.join(","),
+              );
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                progressed: true,
+              };
+            }
+
+            if (assistantPhaseCalls === 2) {
+              await withRealTimeout(
+                projectionAborted.promise,
+                runtimeTransitionTimeoutMs,
+                () => events.join(","),
+              );
+              assert.equal(conversationImportAttempts, 2);
+              assert.ok(pendingInputId);
+              assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+                pendingInputId,
+              ]);
+              assistantSecondPassObserved.resolve();
+              shutdownController.abort();
+              return {
+                progressed: false,
+              };
+            }
+
+            // The staged pending input is never terminally answered by this
+            // stub, so the runtime may legitimately keep waking for it until
+            // the shutdown signal engages; later passes are benign no-ops.
+            return {
+              progressed: false,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      void resultPromise.catch(() => undefined);
+
+      await withRealTimeout(
+        assistantSecondPassObserved.promise,
+        runtimeTransitionTimeoutMs,
+        () => events.join(","),
+      );
+      const result = await withRealTimeout(
+        resultPromise,
+        runtimeTransitionTimeoutMs,
+        () => events.join(","),
+      );
+
+      // At least the stall pass and the reply-wake pass; the unanswered
+      // pending input may legitimately draw extra benign passes while the
+      // shutdown signal engages.
+      assert.ok(assistantPhaseCalls >= 2);
+      assert.equal(conversationImportAttempts, 2);
+      // The aborted first import must not have advanced the watermark: the
+      // attempt-2 stub asserts it still read "0" before importing. Snapshot
+      // ordering relative to that import is timing-dependent, so no assertion
+      // on which watermark the first snapshot carried.
+      assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "1");
+      assert.ok(["idle", "scheduled"].includes(result.status));
+      assert.deepEqual(
+        logRequests
+          .flatMap((request) => request.entries)
+          .filter((entry) => entry.errorCode === "foreground_mailbox_import_failed")
+          .map((entry) => entry.errorCode),
+        [],
+      );
+      assert.ok(
+        fetchRequests.filter((request) =>
+          request.lanes.some((lane) =>
+            lane.lane === "conversation" && lane.importedSeq === "0"
+          )
+        ).length >= 2,
+      );
+    } finally {
+      projectionStall.reject(new DOMException("Projection cleanup.", "AbortError"));
+      shutdownController.abort();
       await resultPromise?.catch(() => undefined);
       await removeTempRoot(vaultRoot);
     }

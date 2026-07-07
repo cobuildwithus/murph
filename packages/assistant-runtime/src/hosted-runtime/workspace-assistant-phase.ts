@@ -413,6 +413,22 @@ export async function runHostedWorkspaceAssistantPhase(
         input,
         wake,
       });
+    const preManagedAutomationWakeAt = await resolvePreAutomationLaneAssistantWakeAt({
+      hasFreshConversationInput,
+      input,
+      pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
+    });
+    if (preManagedAutomationWakeAt) {
+      return withHostedDeviceSyncMaintenanceRan(
+        mergeContinuingSystemMailboxAssistantPhaseResult({
+          assistantResult: buildPreAutomationLaneSkippedAssistantWakeResult({
+            wakeAt: preManagedAutomationWakeAt,
+          }),
+          systemMailboxResult: systemMailboxMaintenance.result,
+        }),
+        systemMailboxMaintenance.deviceSyncMaintenanceRan,
+      );
+    }
     const managedAutomationsResult = hasFreshConversationInput
       || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
       ? null

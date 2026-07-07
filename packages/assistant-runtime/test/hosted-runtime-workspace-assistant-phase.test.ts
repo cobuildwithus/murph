@@ -1764,7 +1764,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(result).toEqual(expect.objectContaining({
         checkpointReason: "assistant_runtime_commit",
         nextWakeAt: "2026-04-27T00:00:00.000Z",
-        nextWakeReason: "assistant",
         progressed: true,
         redactedStatus: expect.objectContaining({
           assistantContextSnapshotPendingDirtyDomainCount: 1,
@@ -8903,7 +8902,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("schedules an immediate assistant wake when the pending input index has work after system mailbox work", async () => {
+  it("skips managed automation seeding when pending input appears after system mailbox work", async () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_processed",
@@ -8927,6 +8926,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const postCheckpoint = await result.afterCheckpoint?.();
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result.nextWakeAt).toBe("2026-04-27T00:10:00.000Z");
     expect(postCheckpoint).toEqual(expect.objectContaining({

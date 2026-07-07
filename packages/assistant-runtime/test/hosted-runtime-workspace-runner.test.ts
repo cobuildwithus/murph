@@ -3729,6 +3729,157 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("foreground stop aborts projection-stalled import after conversation staging", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const lateOccurredAt = "2026-04-26T00:00:02.000Z";
+    const lateWake: HostedExecutionConversationMessageWake = {
+      ...createRunnerConversationWake(),
+      eventId: "evt_synthetic_runner_stop_aborts_projection",
+      occurredAt: lateOccurredAt,
+    };
+    const items: HostedMailboxItem[] = [];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const yieldStates: boolean[] = [];
+    let projectionAbortObserved = false;
+    let projectionFinished = false;
+    const projectionStall = {
+      reject(_error: unknown): void {},
+    };
+    let projectionStarted = (): void => {};
+    const projectionStartedPromise = new Promise<void>((resolve) => {
+      projectionStarted = resolve;
+    });
+    const conversationImportItem = createHostedConversationMailboxImportItem({
+      decodePayload: {
+        async decode() {
+          return {
+            status: "decoded",
+            wake: lateWake,
+          };
+        },
+      },
+      async importConversationWake({ signal }) {
+        projectionStarted();
+        await new Promise<never>((_, reject) => {
+          projectionStall.reject = reject;
+          const abort = () => {
+            projectionAbortObserved = true;
+            reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+          };
+          if (signal?.aborted) {
+            abort();
+            return;
+          }
+          signal?.addEventListener("abort", abort, { once: true });
+        });
+        projectionFinished = true;
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      runtime: createConversationRuntime(),
+      vaultRoot,
+    });
+
+    try {
+      const result = await withTestTimeout(
+        runHostedWorkspaceUntilIdleOrBudget({
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: "attempt_synthetic_runner_stop_aborts_projection",
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "4",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          foregroundImportItem: async (item, context) => {
+            importedSeqs.push(item.item.laneSeq);
+            return await conversationImportItem(item, context);
+          },
+          async importItem(item) {
+            importedSeqs.push(item.item.laneSeq);
+            return { status: "imported" };
+          },
+          limitPerLane: 10,
+          platform: createPlatform({
+            logRequests,
+            mailboxPort,
+            workspacePort: createWorkspacePort({ checkpointRequests }),
+          }),
+          requestId: "request_synthetic_runner_stop_aborts_projection",
+          runtimeLogContext: {
+            attemptId: "attempt_synthetic_runner_stop_aborts_projection",
+            leaseGeneration: "4",
+            workspaceVersion: "0",
+          },
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+            items.push(createMailboxItem({
+              dedupeKey: lateWake.eventId,
+              id: "mailbox_item_runner_stop_aborts_projection",
+              laneSeq: "1",
+              occurredAt: lateOccurredAt,
+            }));
+            runtimeWakeSignal.notify();
+            await withTestTimeout(projectionStartedPromise, 1_000);
+            assert.equal(projectionFinished, false);
+            yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+          workspace: createWorkspaceState({ version: "0" }),
+          now: () => TEST_NOW,
+        }),
+        1_000,
+      );
+
+      assert.deepEqual(importedSeqs, ["1"]);
+      assert.deepEqual(yieldStates, [false, true]);
+      assert.equal(projectionAbortObserved, true);
+      assert.equal(projectionFinished, false);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "0");
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+      ]);
+      assert.deepEqual(fetchRequests[0]?.lanes, [
+        { importedSeq: "0", lane: "conversation" },
+      ]);
+      assert.ok(
+        fetchRequests.slice(1).some((request) =>
+          request.lanes.some((lane) =>
+            lane.lane === "conversation" && lane.importedSeq === "0"
+          )
+        ),
+        "aborted item should remain eligible for a later conversation fetch",
+      );
+      assert.equal(
+        logRequests.flatMap((request) => request.entries)
+          .some((entry) => entry.errorCode === "foreground_mailbox_import_failed"),
+        false,
+      );
+    } finally {
+      projectionStall.reject(new DOMException("Test cleanup", "AbortError"));
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("foreground system lane import does not flip background yield", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items: HostedMailboxItem[] = [];
