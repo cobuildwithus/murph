@@ -30,6 +30,10 @@ export function splitAssistantReplyBubbles(text: string): string[] {
   }
   pushAssistantReplyBubble(bubbles, currentLines)
 
+  if (bubbles.length === 0) {
+    return [text]
+  }
+
   if (bubbles.length <= MAX_ASSISTANT_REPLY_BUBBLES) {
     return bubbles
   }

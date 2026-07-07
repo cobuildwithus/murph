@@ -1093,7 +1093,71 @@ describe("assistant delivery orchestration seam", () => {
     ]);
   });
 
-  it("strips delimiter lines into one email reply", async () => {
+  it("delivers linq delimiter-only replies as the original literal text", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "linq-actor",
+        channel: "linq",
+        conversationKey: "linq-conversation",
+        delivery: {
+          kind: "thread",
+          target: "linq-thread",
+        },
+        identityId: "linq-identity",
+        threadId: "linq-thread",
+        threadIsDirect: false,
+      },
+    });
+    runtimeState.outbox.deliverMessage.mockResolvedValue({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "delivery-linq-delimiter-only",
+        messageLength: 13,
+        providerMessageId: "provider-linq-delimiter-only",
+        providerThreadId: null,
+        sentAt: "2026-04-08T11:00:00.000Z",
+        target: "linq-thread",
+        targetKind: "thread",
+      },
+      intent: {
+        intentId: "intent-linq-delimiter-only",
+      },
+      kind: "sent",
+      session: null,
+    });
+
+    const response = " \n---\n \n---\n";
+    await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "linq-delimiter-only",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      response,
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "linq",
+            threadIsDirect: false,
+          },
+        },
+      }),
+      turnId: "turn-linq-delimiter-only",
+    });
+
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledTimes(1);
+    expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dedupeToken: "linq-delimiter-only",
+        deliveryIdempotencyKey: "linq-delimiter-only",
+        message: response,
+      }),
+    );
+  });
+
+  it("delivers email delimiter lines byte-identically", async () => {
     const session = createAssistantSession({
       binding: {
         actorId: "email-actor",
@@ -1126,6 +1190,7 @@ describe("assistant delivery orchestration seam", () => {
       session: null,
     });
 
+    const response = "First.\n---\nSecond.";
     await deliverAssistantReply({
       input: {
         deliverResponse: true,
@@ -1133,7 +1198,7 @@ describe("assistant delivery orchestration seam", () => {
         prompt: "hello",
         vault: "/vault",
       },
-      response: "First.\n---\nSecond.",
+      response,
       session,
       sharedPlan: createSharedPlan({
         conversationPolicy: {
@@ -1150,7 +1215,7 @@ describe("assistant delivery orchestration seam", () => {
       expect.objectContaining({
         dedupeToken: "email-base",
         deliveryIdempotencyKey: "email-base",
-        message: "First.\n\nSecond.",
+        message: response,
       }),
     );
   });
@@ -1304,6 +1369,102 @@ describe("assistant delivery orchestration seam", () => {
       },
       {
         deliveryIdempotencyKey: null,
+        dispatchMode: "queue-only",
+        message: "Third.",
+      },
+    ]);
+  });
+
+  it("demotes remaining immediate bubble sends to queue-only after an earlier bubble queues", async () => {
+    const session = createAssistantSession({
+      binding: {
+        actorId: "telegram-actor",
+        channel: "telegram",
+        conversationKey: "telegram-conversation",
+        delivery: {
+          kind: "thread",
+          target: "telegram-thread",
+        },
+        identityId: "telegram-identity",
+        threadId: "telegram-thread",
+        threadIsDirect: true,
+      },
+    });
+    const deliveryError = createDeliveryError({
+      code: "ASSISTANT_DELIVERY_RETRYABLE",
+      message: "retry later",
+    });
+    runtimeState.outbox.deliverMessage
+      .mockResolvedValueOnce({
+        deliveryError,
+        intent: {
+          intentId: "intent-bubble-one",
+        },
+        kind: "queued",
+        session: null,
+      })
+      .mockResolvedValueOnce({
+        deliveryError: null,
+        intent: {
+          intentId: "intent-bubble-two",
+        },
+        kind: "queued",
+        session: null,
+      })
+      .mockResolvedValueOnce({
+        deliveryError: null,
+        intent: {
+          intentId: "intent-bubble-three",
+        },
+        kind: "queued",
+        session: null,
+      });
+
+    const outcome = await deliverAssistantReply({
+      input: {
+        deliverResponse: true,
+        deliveryIdempotencyKey: "telegram-base",
+        prompt: "hello",
+        vault: "/vault",
+      },
+      response: "First.\n---\nSecond.\n---\nThird.",
+      session,
+      sharedPlan: createSharedPlan({
+        conversationPolicy: {
+          audience: {
+            channel: "telegram",
+          },
+        },
+      }),
+      turnId: "turn-bubble-immediate-queued",
+    });
+
+    expect(outcome).toEqual({
+      error: null,
+      intentId: "intent-bubble-three",
+      kind: "queued",
+      media: [],
+      session,
+    });
+    expect(
+      runtimeState.outbox.deliverMessage.mock.calls.map((call) => ({
+        deliveryIdempotencyKey: call[0]?.deliveryIdempotencyKey,
+        dispatchMode: call[0]?.dispatchMode,
+        message: call[0]?.message,
+      })),
+    ).toEqual([
+      {
+        deliveryIdempotencyKey: "telegram-base:bubble:0",
+        dispatchMode: undefined,
+        message: "First.",
+      },
+      {
+        deliveryIdempotencyKey: "telegram-base:bubble:1",
+        dispatchMode: "queue-only",
+        message: "Second.",
+      },
+      {
+        deliveryIdempotencyKey: "telegram-base",
         dispatchMode: "queue-only",
         message: "Third.",
       },
@@ -2884,8 +3045,9 @@ describe("assistant delivery orchestration seam", () => {
     expect(seamMocks.normalizeAssistantDeliveryError).toHaveBeenCalledTimes(1);
   });
 
-  it("strips reply bubble delimiters from turn delivery receipts", () => {
+  it("preserves caller-provided response text in turn delivery receipts", () => {
     const session = createAssistantSession();
+    const response = "First.\n---\nSecond.";
 
     expect(
       buildAssistantTurnDeliveryFinalizationPlan({
@@ -2906,12 +3068,12 @@ describe("assistant delivery orchestration seam", () => {
           media: [],
           session,
         },
-        response: "First.\n---\nSecond.",
+        response,
         turnId: "turn-receipt-bubbles",
       }).receipt,
     ).toMatchObject({
       deliveryDisposition: "sent",
-      response: "First.\n\nSecond.",
+      response,
       status: "completed",
     });
   });

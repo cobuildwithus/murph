@@ -66,8 +66,9 @@ describe('assistant reply bubbles', () => {
     )
   })
 
-  it('collapses delimiter-only text to an empty stripped reply', () => {
-    expect(splitAssistantReplyBubbles(' \n---\n \n---\n')).toEqual([])
-    expect(stripAssistantReplyBubbleDelimiters(' \n---\n \n---\n')).toBe('')
+  it('preserves delimiter-only text as one unsplit reply', () => {
+    const text = ' \n---\n \n---\n'
+    expect(splitAssistantReplyBubbles(text)).toEqual([text])
+    expect(stripAssistantReplyBubbleDelimiters(text)).toBe(text)
   })
 })

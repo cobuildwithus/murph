@@ -10,6 +10,7 @@ import { shouldCreateAssistantProgressDelivery } from './progress-constants.js'
 import { markAssistantFirstContactSeen } from './first-contact.js'
 import { createHostedDeliveryId } from './hosted-delivery-id.js'
 import {
+  type AssistantOutboxDispatchMode,
   type AssistantOutboxDispatchMessage,
   deliverAssistantOutboxReaction,
   normalizeAssistantDeliveryError,
@@ -41,7 +42,6 @@ import {
 import {
   assistantChannelSupportsReplyBubbles,
   splitAssistantReplyBubbles,
-  stripAssistantReplyBubbleDelimiters,
 } from './reply-bubbles.js'
 
 export interface AssistantPrecedingReplySegment {
@@ -191,7 +191,7 @@ export async function deliverAssistantReply(input: {
       deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
       input: input.input,
       media: deliveryMedia,
-      message: stripAssistantReplyBubbleDelimiters(input.response),
+      message: input.response,
       session: input.session,
       sharedPlan: input.sharedPlan,
       turnId: input.turnId,
@@ -207,7 +207,7 @@ export async function deliverAssistantReply(input: {
       deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
       input: input.input,
       media: deliveryMedia,
-      message: replyBubbles[0] ?? '',
+      message: replyBubbles[0]!,
       session: input.session,
       sharedPlan: input.sharedPlan,
       turnId: input.turnId,
@@ -215,6 +215,7 @@ export async function deliverAssistantReply(input: {
   }
 
   let session = input.session
+  let remainingBubbleDispatchMode: AssistantOutboxDispatchMode | null = null
   for (let bubbleIndex = 0; bubbleIndex < replyBubbles.length - 1; bubbleIndex += 1) {
     const bubbleIdempotencyKey = buildAssistantReplyBubbleDeliveryIdempotencyKey({
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
@@ -238,10 +239,17 @@ export async function deliverAssistantReply(input: {
       session,
       sharedPlan: input.sharedPlan,
       turnId: input.turnId,
+      dispatchMode: remainingBubbleDispatchMode,
     })
     session = outcome.session
     if (outcome.kind === 'failed') {
       return outcome
+    }
+    if (
+      outcome.kind === 'queued' &&
+      input.input.deliveryDispatchMode !== 'queue-only'
+    ) {
+      remainingBubbleDispatchMode = 'queue-only'
     }
   }
 
@@ -256,6 +264,7 @@ export async function deliverAssistantReply(input: {
     session,
     sharedPlan: input.sharedPlan,
     turnId: input.turnId,
+    dispatchMode: remainingBubbleDispatchMode,
   })
 }
 
@@ -822,6 +831,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   answeredMailboxItemIds?: readonly string[] | null
   dedupeToken: string | null
   deliveryIdempotencyKey: string | null
+  dispatchMode?: AssistantOutboxDispatchMode | null
   deliveryTransportIdempotent: boolean | undefined
   input: AssistantMessageInput
   media: AssistantResponseMedia[]
@@ -851,7 +861,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     turnId: input.turnId,
     turnTrigger: input.input.turnTrigger ?? null,
     dependencies: undefined,
-    dispatchMode: input.input.deliveryDispatchMode,
+    dispatchMode: input.dispatchMode ?? input.input.deliveryDispatchMode,
   })
   const session = outcome.session ?? input.session
 
@@ -978,7 +988,7 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   vault: string
 }): Promise<void> {
   const completedAt = new Date().toISOString()
-  const response = stripAssistantReplyBubbleDelimiters(input.response)
+  const response = input.response
   const plan = buildAssistantTurnDeliveryFinalizationPlan({
     completedAt,
     outcome: input.outcome,
@@ -1020,7 +1030,7 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
   response: string
   turnId: string
 }): AssistantTurnDeliveryFinalizationPlan {
-  const response = stripAssistantReplyBubbleDelimiters(input.response)
+  const response = input.response
   switch (input.outcome.kind) {
     case 'not-requested':
       return {

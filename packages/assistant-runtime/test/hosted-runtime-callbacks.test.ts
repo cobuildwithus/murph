@@ -64,42 +64,48 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
-vi.mock("@murphai/assistant-engine", () => ({
-  applyAssistantVaultFileSendApprovalResult:
-    mocks.applyAssistantVaultFileSendApprovalResult,
-  beginAssistantOutboxIntentMirrorDispatch:
-    mocks.beginAssistantOutboxIntentMirrorDispatch,
-  beginAssistantOutboxIntentMirrorPreparedDispatch:
-    mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
-  buildAssistantVaultFileSendApprovalRequest:
-    mocks.buildAssistantVaultFileSendApprovalRequest,
-  deferAssistantVaultFileApprovalCheck:
-    mocks.deferAssistantVaultFileApprovalCheck,
-  dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
-  findAssistantAutoReplyDeliveryIntentIds:
-    mocks.findAssistantAutoReplyDeliveryIntentIds,
-  hasAssistantAutoReplyChannel: mocks.hasAssistantAutoReplyChannel,
-  listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
-  markAssistantOutboxIntentMirrorTerminalById:
-    mocks.markAssistantOutboxIntentMirrorTerminalById,
-  normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
-  readAssistantAutomationState: mocks.readAssistantAutomationState,
-  readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
-  readAssistantOutboxIntentMirrorState:
-    mocks.readAssistantOutboxIntentMirrorState,
-  readAssistantVaultFileMedia: mocks.readAssistantVaultFileMedia,
-  readVerifiedAssistantVaultFileBytes:
-    mocks.readVerifiedAssistantVaultFileBytes,
-  resetAssistantOutboxPreparedDispatchById:
-    mocks.resetAssistantOutboxPreparedDispatchById,
-  saveAssistantOutboxIntentIfUnchanged:
-    mocks.saveAssistantOutboxIntentIfUnchanged,
-  sendLinqMessage: mocks.sendLinqMessage,
-  sendTelegramMessage: mocks.sendTelegramMessage,
-  sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
-  sendWhatsAppMessage: mocks.sendWhatsAppMessage,
-  shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
-}));
+vi.mock("@murphai/assistant-engine", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-engine")>(
+    "@murphai/assistant-engine",
+  );
+  return {
+    ...actual,
+    applyAssistantVaultFileSendApprovalResult:
+      mocks.applyAssistantVaultFileSendApprovalResult,
+    beginAssistantOutboxIntentMirrorDispatch:
+      mocks.beginAssistantOutboxIntentMirrorDispatch,
+    beginAssistantOutboxIntentMirrorPreparedDispatch:
+      mocks.beginAssistantOutboxIntentMirrorPreparedDispatch,
+    buildAssistantVaultFileSendApprovalRequest:
+      mocks.buildAssistantVaultFileSendApprovalRequest,
+    deferAssistantVaultFileApprovalCheck:
+      mocks.deferAssistantVaultFileApprovalCheck,
+    dispatchAssistantOutboxIntent: mocks.dispatchAssistantOutboxIntent,
+    findAssistantAutoReplyDeliveryIntentIds:
+      mocks.findAssistantAutoReplyDeliveryIntentIds,
+    hasAssistantAutoReplyChannel: mocks.hasAssistantAutoReplyChannel,
+    listAssistantOutboxIntents: mocks.listAssistantOutboxIntents,
+    markAssistantOutboxIntentMirrorTerminalById:
+      mocks.markAssistantOutboxIntentMirrorTerminalById,
+    normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
+    readAssistantAutomationState: mocks.readAssistantAutomationState,
+    readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
+    readAssistantOutboxIntentMirrorState:
+      mocks.readAssistantOutboxIntentMirrorState,
+    readAssistantVaultFileMedia: mocks.readAssistantVaultFileMedia,
+    readVerifiedAssistantVaultFileBytes:
+      mocks.readVerifiedAssistantVaultFileBytes,
+    resetAssistantOutboxPreparedDispatchById:
+      mocks.resetAssistantOutboxPreparedDispatchById,
+    saveAssistantOutboxIntentIfUnchanged:
+      mocks.saveAssistantOutboxIntentIfUnchanged,
+    sendLinqMessage: mocks.sendLinqMessage,
+    sendTelegramMessage: mocks.sendTelegramMessage,
+    sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
+    sendWhatsAppMessage: mocks.sendWhatsAppMessage,
+    shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
+  };
+});
 
 vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
   const actual = await vi.importActual<typeof import("@murphai/assistant-engine/assistant-channel-runtime")>(
@@ -250,6 +256,35 @@ function createDispatchResult(
       ...intentOverrides,
     },
     session: null,
+  };
+}
+
+function createPendingHostedDeliveryIntent(
+  overrides: Record<string, unknown>,
+) {
+  return {
+    actorId: "actor_1",
+    bindingDelivery: null,
+    channel: "telegram",
+    createdAt: "2026-04-08T00:01:00.000Z",
+    dedupeKey: "dedupe_intent",
+    deliveryIdempotencyKey: "delivery-final",
+    deliveryTransportIdempotent: false,
+    explicitTarget: "chat_1",
+    identityId: "identity_1",
+    intentId: "intent_pending",
+    lastError: null,
+    message: "pending reply",
+    nextAttemptAt: "2026-04-08T00:01:00.000Z",
+    replyToMessageId: "message-one",
+    sessionId: "session_1",
+    status: "pending",
+    subject: null,
+    targetFingerprint: "target_chat_1",
+    threadId: "thread_1",
+    threadIsDirect: true,
+    turnId: "turn_1",
+    ...overrides,
   };
 }
 
@@ -1405,6 +1440,138 @@ describe("hosted runtime callbacks", () => {
       "intent_z_segment_0",
       "intent_a_segment_1",
       "intent_m_final",
+    ]);
+  });
+
+  it("uses bubble ordinals when same-boundary bubble intents share a timestamp", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_base",
+        deliveryIdempotencyKey: "delivery-final",
+        intentId: "intent_m_base",
+        message: "base final reply",
+        replyToMessageId: "message-three",
+        targetFingerprint: "target_chat_1_reply_three",
+        turnId: "turn_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_bubble_1",
+        deliveryIdempotencyKey: "delivery-final:bubble:1",
+        intentId: "intent_a_bubble_1",
+        message: "second bubble",
+        replyToMessageId: "message-two",
+        targetFingerprint: "target_chat_1_reply_two",
+        turnId: "turn_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_bubble_0",
+        deliveryIdempotencyKey: "delivery-final:bubble:0",
+        intentId: "intent_z_bubble_0",
+        message: "first bubble",
+        replyToMessageId: "message-one",
+        targetFingerprint: "target_chat_1_reply_one",
+        turnId: "turn_bubbles",
+      }),
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_m_base"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_z_bubble_0",
+      "intent_a_bubble_1",
+      "intent_m_base",
+    ]);
+  });
+
+  it("orders composed segment bubble intents before their segment final reply", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_base",
+        deliveryIdempotencyKey: "delivery-final",
+        intentId: "intent_m_base",
+        message: "base final reply",
+        replyToMessageId: "message-three",
+        targetFingerprint: "target_chat_1_reply_three",
+        turnId: "turn_segment_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_segment_final",
+        deliveryIdempotencyKey: "delivery-final:segment:0",
+        intentId: "intent_a_segment_final",
+        message: "segment final reply",
+        replyToMessageId: "message-two",
+        targetFingerprint: "target_chat_1_reply_two",
+        turnId: "turn_segment_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_segment_bubble",
+        deliveryIdempotencyKey: "delivery-final:segment:0:bubble:0",
+        intentId: "intent_z_segment_bubble_0",
+        message: "segment bubble reply",
+        replyToMessageId: "message-one",
+        targetFingerprint: "target_chat_1_reply_one",
+        turnId: "turn_segment_bubbles",
+      }),
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_m_base"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_z_segment_bubble_0",
+      "intent_a_segment_final",
+      "intent_m_base",
+    ]);
+  });
+
+  it("orders fallback bubble intents before their same-turn null-key base reply", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_base",
+        deliveryIdempotencyKey: null,
+        intentId: "intent_m_base",
+        message: "base final reply",
+        replyToMessageId: "message-three",
+        targetFingerprint: "target_chat_1_reply_three",
+        turnId: "turn_fallback_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_bubble_1",
+        deliveryIdempotencyKey: "assistant-bubble:turn_fallback_bubbles:bubble:1",
+        intentId: "intent_a_bubble_1",
+        message: "second fallback bubble",
+        replyToMessageId: "message-two",
+        targetFingerprint: "target_chat_1_reply_two",
+        turnId: "turn_fallback_bubbles",
+      }),
+      createPendingHostedDeliveryIntent({
+        dedupeKey: "dedupe_bubble_0",
+        deliveryIdempotencyKey: "assistant-bubble:turn_fallback_bubbles:bubble:0",
+        intentId: "intent_z_bubble_0",
+        message: "first fallback bubble",
+        replyToMessageId: "message-one",
+        targetFingerprint: "target_chat_1_reply_one",
+        turnId: "turn_fallback_bubbles",
+      }),
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_m_base"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_z_bubble_0",
+      "intent_a_bubble_1",
+      "intent_m_base",
     ]);
   });
 
