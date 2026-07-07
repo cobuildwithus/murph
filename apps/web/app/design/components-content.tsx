@@ -36,6 +36,10 @@ import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import { Alert, AlertTitle, AlertDescription } from "@/src/components/ui/alert";
 import { Toggle } from "@/src/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/src/components/ui/toggle-group";
+import {
+  SegmentedControl,
+  type SegmentedControlOption,
+} from "@/src/components/ui/segmented-control";
 import { ScrollArea } from "@/src/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/src/components/ui/tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/src/components/ui/dialog";
@@ -121,10 +125,24 @@ const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   },
 ];
 
+type SegmentedControlDemoValue = "phone" | "email" | "telegram";
+
+const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
+  SegmentedControlOption<SegmentedControlDemoValue>
+> = [
+  { label: "Phone", value: "phone" },
+  { label: "Email", value: "email" },
+  { label: "Telegram", value: "telegram" },
+];
+
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
+  const [segmentedControlValue, setSegmentedControlValue] =
+    useState<SegmentedControlDemoValue>("phone");
+  const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
+    useState<SegmentedControlDemoValue>("email");
   const [addedContactAvatar, setAddedContactAvatar] =
     useState<MurphContactAvatarOption | null>(null);
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
@@ -282,6 +300,37 @@ export function ComponentsContent() {
               <ToggleGroupItem value="21d">21d</ToggleGroupItem>
               <ToggleGroupItem value="all">All</ToggleGroupItem>
             </ToggleGroup>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Segmented Control">
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="flex flex-col gap-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Default tokens
+              </p>
+              <SegmentedControl
+                aria-label="Contact method"
+                options={SEGMENTED_CONTROL_OPTIONS}
+                value={segmentedControlValue}
+                onValueChange={setSegmentedControlValue}
+              />
+            </div>
+            <div className="flex flex-col gap-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Family invite palette
+              </p>
+              <SegmentedControl
+                aria-label="Invite by"
+                options={SEGMENTED_CONTROL_OPTIONS}
+                value={warmSegmentedControlValue}
+                onValueChange={setWarmSegmentedControlValue}
+                className="border-[#c4a882]/25 bg-[#f5f0e8]"
+                itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
+              />
+            </div>
           </div>
         </Section>
 
