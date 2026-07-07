@@ -116,8 +116,10 @@ test("HostedFamilyManager keeps the created invite visible for manual sharing", 
 
     try {
       await clickButton(container, window, "Invite member");
-      assert.match(container.textContent ?? "", /Murph won't message them/);
-      assertInviteFieldOrder(container);
+      assert.match(
+        container.textContent ?? "",
+        /You'll get a link to send them yourself\. Murph won't message them\./,
+      );
 
       await act(async () => {
         setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
@@ -125,8 +127,8 @@ test("HostedFamilyManager keeps the created invite visible for manual sharing", 
       await clickButton(container, window, "Create invite");
 
       assert.match(container.textContent ?? "", /Invite created/);
-      assert.match(container.textContent ?? "", /Murph won't send this for you/);
-      assert.match(container.textContent ?? "", /copy the link and text it to them yourself/i);
+      assert.match(container.textContent ?? "", /Copy the link and send it to them yourself\./);
+      assert.match(container.textContent ?? "", /Only they can use this invite\./);
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
         expect.objectContaining({
           payload: expect.objectContaining({
@@ -153,6 +155,51 @@ test("HostedFamilyManager keeps the created invite visible for manual sharing", 
 });
 
 test("HostedFamilyManager copies a Telegram deep link for Telegram-bound invites", async () => {
+  const writeText = vi.fn(() => Promise.resolve());
+  vi.useFakeTimers();
+
+  try {
+    const { HostedFamilyManager } = await import(
+      "@/src/components/settings/hosted-family-settings-actions"
+    );
+    const { cleanup, container, window } = await renderClientComponent(
+      createElement(HostedFamilyManager, baseFamilyManagerProps()),
+      { requireButton: false },
+    );
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+
+    try {
+      await clickButton(container, window, "Invite member");
+      await clickButton(container, window, "Telegram");
+      await act(async () => {
+        setInputValue(window, inputById(container, "family-invite-telegram"), "@dad_username");
+      });
+      await clickButton(container, window, "Create invite");
+
+      expect(submittedPayload()).toMatchObject({
+        addSeatIfNeeded: false,
+        targetTelegramUsername: "@dad_username",
+      });
+      expect(submittedPayload()).not.toHaveProperty("targetPhoneNumber");
+      expect(submittedPayload()).not.toHaveProperty("targetEmail");
+
+      await clickButton(container, window, "Copy invite link");
+      expect(writeText).toHaveBeenCalledWith(
+        "https://t.me/withmurph_bot?start=family_NEWCODE",
+      );
+
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+    } finally {
+      await cleanup();
+    }
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("HostedFamilyManager copies a Telegram deep link for pending Telegram invites", async () => {
   const writeText = vi.fn(() => Promise.resolve());
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
@@ -212,11 +259,14 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
   try {
     assert.match(
       container.textContent ?? "",
-      /Invites with a phone, email, or Telegram add a paid seat/,
+      /No open seats\. Inviting with a contact adds a paid seat at \$7\/mo\./,
     );
 
     await clickButton(container, window, "Invite member");
-    assert.match(container.textContent ?? "", /Add a phone, email, or Telegram username/);
+    assert.match(
+      container.textContent ?? "",
+      /Add a contact to invite\. It adds a paid seat at \$7\/mo\./,
+    );
 
     await act(async () => {
       setInputValue(window, inputById(container, "family-invite-label"), "Mom");
@@ -226,11 +276,27 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
 
     await act(async () => {
+      setInputValue(window, inputById(container, "family-invite-phone"), "12");
+    });
+    assert.match(
+      container.textContent ?? "",
+      /Enter a valid phone number to invite\. It adds a paid seat at \$7\/mo\./,
+    );
+    assert.equal(buttonByText(container, "Create invite").disabled, true);
+
+    await act(async () => {
       setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
     });
     const contactBoundSubmit = buttonByText(container, "Create invite & add seat");
     assert.equal(contactBoundSubmit.disabled, false);
 
+    await clickButton(container, window, "Email");
+    assert.equal(queryInputById(container, "family-invite-phone"), null);
+    assert.ok(inputById(container, "family-invite-email"));
+    const inactivePhoneSubmit = buttonByText(container, "Create invite");
+    assert.equal(inactivePhoneSubmit.disabled, true);
+
+    await clickButton(container, window, "iMessage");
     await clickButton(container, window, "Create invite & add seat");
 
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
@@ -241,6 +307,91 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
           targetPhoneNumber: "+48600000000",
         }),
       }),
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager defaults to the phone channel with name first", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+
+    assert.equal(inputById(container, "family-invite-label").placeholder, "Mom");
+    assert.ok(inputById(container, "family-invite-phone"));
+    assert.equal(queryInputById(container, "family-invite-email"), null);
+    assert.equal(queryInputById(container, "family-invite-telegram"), null);
+    assertInviteNameFirst(container);
+    assert.match(container.textContent ?? "", /No contact\? Anyone with the link can join\./);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager submits only the active email contact", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+    await act(async () => {
+      setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
+    });
+
+    await clickButton(container, window, "Email");
+    assert.equal(queryInputById(container, "family-invite-phone"), null);
+    assert.ok(inputById(container, "family-invite-email"));
+    assert.equal(queryInputById(container, "family-invite-telegram"), null);
+
+    await act(async () => {
+      setInputValue(window, inputById(container, "family-invite-email"), "mom@example.com");
+    });
+    await clickButton(container, window, "Create invite");
+
+    expect(submittedPayload()).toMatchObject({
+      addSeatIfNeeded: false,
+      targetEmail: "mom@example.com",
+    });
+    expect(submittedPayload()).not.toHaveProperty("targetPhoneNumber");
+    expect(submittedPayload()).not.toHaveProperty("targetTelegramUsername");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager hides the no-contact hint when the active contact has a value", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+    assert.match(container.textContent ?? "", /No contact\? Anyone with the link can join\./);
+
+    await act(async () => {
+      setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
+    });
+
+    assert.doesNotMatch(
+      container.textContent ?? "",
+      /No contact\? Anyone with the link can join\./,
     );
   } finally {
     await cleanup();
@@ -297,6 +448,10 @@ function inputById(container: HTMLElement, id: string): HTMLInputElement {
   return input;
 }
 
+function queryInputById(container: HTMLElement, id: string): HTMLInputElement | null {
+  return container.querySelector<HTMLInputElement>(`#${id}`);
+}
+
 function setInputValue(
   window: Window & typeof globalThis,
   input: HTMLInputElement,
@@ -311,15 +466,24 @@ function setInputValue(
   input.dispatchEvent(new window.Event("change", { bubbles: true }));
 }
 
-function assertInviteFieldOrder(container: HTMLElement) {
-  const text = container.textContent ?? "";
-  const phoneIndex = text.indexOf("Phone number (optional)");
-  const emailIndex = text.indexOf("Email (optional)");
-  const telegramIndex = text.indexOf("Telegram username (optional)");
-  const nameIndex = text.indexOf("Name (optional)");
+function submittedPayload(): Record<string, unknown> {
+  const lastCall = mocks.requestHostedOnboardingJson.mock.lastCall;
+  assert.ok(lastCall, "Expected invite request");
+  const payload = lastCall[0]?.payload;
+  assert.equal(typeof payload, "object");
+  assert.ok(payload);
+  return payload as Record<string, unknown>;
+}
 
-  assert.ok(phoneIndex >= 0, "Expected phone field");
-  assert.ok(emailIndex > phoneIndex, "Expected email after phone");
-  assert.ok(telegramIndex > emailIndex, "Expected Telegram after email");
-  assert.ok(nameIndex > telegramIndex, "Expected name after Telegram");
+function assertInviteNameFirst(container: HTMLElement) {
+  const inputs = [...container.querySelectorAll<HTMLInputElement>("input")];
+  assert.ok(inputs.length > 0, "Expected invite inputs");
+  assert.equal(inputs[0]?.id, "family-invite-label");
+
+  const text = container.textContent ?? "";
+  const nameIndex = text.indexOf("Name");
+  const phoneIndex = text.indexOf("Phone number");
+
+  assert.ok(nameIndex >= 0, "Expected name field");
+  assert.ok(phoneIndex > nameIndex, "Expected phone after name");
 }
