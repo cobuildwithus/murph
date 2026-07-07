@@ -45,6 +45,9 @@ import {
   readHostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
 import {
+  hasHostedMemberEstablishedLinqHomeRoute,
+} from "../hosted-onboarding/hosted-member-routing-store";
+import {
   hasHostedLinqInboundWithinDays,
 } from "../hosted-onboarding/linq-daily-state";
 import {
@@ -156,6 +159,10 @@ export async function readHostedRuntimeReconciliationFacts(
       freshConversationMailboxLag,
       now,
       workspace: projectedWorkspace,
+    })
+    && await hasHostedMemberEstablishedLinqHomeRoute({
+      memberId: input.userId,
+      prisma,
     })
     && !(await hasHostedLinqInboundWithinDays({
       memberId: input.userId,

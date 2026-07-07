@@ -31,6 +31,7 @@ export const POST = withJsonError(async (request: Request) => {
   const routeAuthority = parseHostedLinqEgressRouteAuthority(body.routeAuthority);
 
   await assertHostedLinqRecentInboundEngagementForRuntime({
+    currentInbound: parseHostedLinqLegacyCurrentInboundProof(body.currentInbound),
     directRecipientPhoneNumber: readOptionalBodyString(body.directRecipientPhoneNumber),
     engagementKind: parseHostedLinqEgressEngagementKind(body.engagementKind),
     fromPhoneNumber: readOptionalBodyString(body.fromPhoneNumber),
@@ -50,6 +51,58 @@ export const POST = withJsonError(async (request: Request) => {
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function parseHostedLinqLegacyCurrentInboundProof(value: unknown): {
+  dedupeKey: string;
+  eventId: string;
+  mailboxItemId: string;
+  occurredAt: string;
+  replyToMessageId: string;
+  target: string;
+} | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throwHostedLinqCurrentInboundInvalid();
+  }
+
+  const record = value as Record<string, unknown>;
+  const dedupeKey = readOptionalBodyString(record.dedupeKey);
+  const eventId = readOptionalBodyString(record.eventId);
+  const mailboxItemId = readOptionalBodyString(record.mailboxItemId);
+  const occurredAt = readOptionalBodyString(record.occurredAt);
+  const replyToMessageId = readOptionalBodyString(record.replyToMessageId);
+  const target = readOptionalBodyString(record.target);
+  if (
+    !dedupeKey
+    || !eventId
+    || !mailboxItemId
+    || !occurredAt
+    || !replyToMessageId
+    || !target
+  ) {
+    throwHostedLinqCurrentInboundInvalid();
+  }
+
+  return {
+    dedupeKey,
+    eventId,
+    mailboxItemId,
+    occurredAt,
+    replyToMessageId,
+    target,
+  };
+}
+
+function throwHostedLinqCurrentInboundInvalid(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_EGRESS_CURRENT_INBOUND_INVALID",
+    httpStatus: 400,
+    message: "Hosted Linq egress current inbound proof is invalid.",
+    retryable: false,
+  });
 }
 
 function parseHostedLinqEgressEngagementKind(

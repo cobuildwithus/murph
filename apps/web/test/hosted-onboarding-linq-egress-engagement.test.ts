@@ -232,7 +232,7 @@ describe("hosted Linq egress engagement", () => {
     })).toThrow(/Linq egress route authority/u);
   });
 
-  it("accepts old-runner currentInbound payloads on the engagement route", async () => {
+  it("accepts old-runner currentInbound payloads for external thread engagement assertions", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
     });
@@ -242,10 +242,15 @@ describe("hosted Linq egress engagement", () => {
       new Request("https://internal.example.test/engagement", {
         body: JSON.stringify({
           currentInbound: {
-            legacy: "accepted-and-ignored",
+            dedupeKey: "linq_external_event",
+            eventId: "linq_external_event",
+            mailboxItemId: "mailbox_external",
+            occurredAt: "2026-06-01T12:00:00.000Z",
+            replyToMessageId: "message_external",
+            target: "chat-external",
           },
           engagementKind: "requires_recent_inbound",
-          target: "chat-home",
+          target: "chat-external",
           targetKind: "thread",
         }),
         headers: {
@@ -258,6 +263,7 @@ describe("hosted Linq egress engagement", () => {
     await expect(response.json()).resolves.toEqual({ ok: true });
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
   });
 });
 

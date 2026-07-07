@@ -19,6 +19,14 @@ import {
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 type HostedLinqEgressEngagementKind = "first_contact" | "requires_recent_inbound";
+type HostedLinqLegacyCurrentInboundProof = {
+  dedupeKey: string;
+  eventId: string;
+  mailboxItemId: string;
+  occurredAt: string;
+  replyToMessageId: string;
+  target: string;
+};
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 
@@ -52,6 +60,7 @@ export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
 }
 
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
+  currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   engagementKind?: HostedLinqEgressEngagementKind | null;
   fromPhoneNumber?: string | null;
@@ -108,6 +117,16 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       prisma: input.prisma,
       recipientPhone: input.fromPhoneNumber ?? null,
     });
+    return;
+  }
+
+  if (legacyCurrentInboundMatchesRequestedTarget({
+    currentInbound: input.currentInbound ?? null,
+    target: input.target,
+  })) {
+    // Temporary CF-rollout follow-up compatibility: old warm runner bundles
+    // sent currentInbound before external thread routeAuthority existed. Delete
+    // this with the engagement assertion route after that rollout window is gone.
     return;
   }
 
@@ -203,6 +222,18 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   }
 
   throwHostedLinqRouteAuthorityMismatch();
+}
+
+function legacyCurrentInboundMatchesRequestedTarget(input: {
+  currentInbound: HostedLinqLegacyCurrentInboundProof | null;
+  target: string | null;
+}): boolean {
+  if (!input.currentInbound) {
+    return false;
+  }
+
+  const target = normalizeNullable(input.target);
+  return Boolean(target && normalizeNullable(input.currentInbound.target) === target);
 }
 
 function throwHostedLinqRouteAuthorityMismatch(): never {
