@@ -636,7 +636,6 @@ describe("hosted-member-store", () => {
         memberId: true,
         pendingLinqChatIdEncrypted: true,
         pendingLinqChatLookupKey: true,
-        pendingLinqLastInboundAt: true,
         pendingLinqParticipantContactEncrypted: true,
         pendingLinqParticipantContactKind: true,
         pendingLinqParticipantContactLookupKey: true,
@@ -738,7 +737,6 @@ describe("hosted-member-store", () => {
         memberId: true,
         pendingLinqChatIdEncrypted: true,
         pendingLinqChatLookupKey: true,
-        pendingLinqLastInboundAt: true,
         pendingLinqParticipantContactEncrypted: true,
         pendingLinqParticipantContactKind: true,
         pendingLinqParticipantContactLookupKey: true,
@@ -1125,7 +1123,6 @@ describe("hosted-member-store", () => {
         pendingLinqParticipantContactObservedAt: null,
         pendingLinqRecipientPhoneEncrypted: null,
         pendingLinqRecipientPhoneLookupKey: null,
-        pendingLinqLastInboundAt: null,
       },
     });
     expect(updateMany).toHaveBeenNthCalledWith(2, {
@@ -1149,7 +1146,6 @@ describe("hosted-member-store", () => {
         pendingLinqParticipantContactObservedAt: null,
         pendingLinqRecipientPhoneEncrypted: null,
         pendingLinqRecipientPhoneLookupKey: null,
-        pendingLinqLastInboundAt: null,
       },
     });
     expect(executeRaw).toHaveBeenCalledTimes(1);
@@ -1183,17 +1179,14 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("promotes pending Linq inbound freshness when pending chat binding becomes home", async () => {
+  it("does not promote pending Linq inbound freshness when pending chat binding becomes home", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
-    const pendingLinqLastInboundAt = new Date("2026-06-25T12:00:00.000Z");
     const pendingLinqChatLookupKey = createHostedLinqChatLookupKeyReadCandidates("chat_123")[0];
     const findUnique = vi.fn().mockResolvedValue({
       linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_old")[0],
-      linqLastInboundAt: new Date("2026-06-01T12:00:00.000Z"),
       linqRecipientPhoneLookupKey: null,
       pendingLinqChatLookupKey,
-      pendingLinqLastInboundAt,
       pendingLinqRecipientPhoneLookupKey: null,
     });
     const upsert = vi.fn().mockResolvedValue({});
@@ -1215,47 +1208,24 @@ describe("hosted-member-store", () => {
       recipientPhone: "+15550100001",
     });
 
-    expect(findUnique).toHaveBeenCalledWith({
-      where: {
-        memberId: "member_123",
-      },
-      select: {
-        pendingLinqChatLookupKey: true,
-        pendingLinqLastInboundAt: true,
-        pendingLinqRecipientPhoneLookupKey: true,
-      },
-    });
+    expect(findUnique).not.toHaveBeenCalled();
     const upsertUpdate = upsert.mock.calls[0]?.[0]?.update;
     expect(upsertUpdate).toEqual(expect.objectContaining({
       pendingLinqChatIdEncrypted: null,
       pendingLinqChatLookupKey: null,
-      pendingLinqLastInboundAt: null,
     }));
     expect(upsertUpdate).not.toHaveProperty("linqLastInboundAt");
-    expect(updateMany).toHaveBeenLastCalledWith({
-      data: {
-        linqLastInboundAt: pendingLinqLastInboundAt,
-      },
-      where: {
-        memberId: "member_123",
-        OR: [
-          { linqLastInboundAt: null },
-          { linqLastInboundAt: { lt: pendingLinqLastInboundAt } },
-        ],
-      },
-    });
+    expect(upsertUpdate).not.toHaveProperty("pendingLinqLastInboundAt");
+    expect(updateMany).toHaveBeenCalledTimes(2);
   });
 
-  it("preserves Linq inbound freshness when a different pending chat becomes home", async () => {
-    const linqLastInboundAt = new Date("2026-06-25T12:00:00.000Z");
+  it("does not write Linq inbound freshness when a different pending chat becomes home", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const findUnique = vi.fn().mockResolvedValue({
       linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_a")[0],
-      linqLastInboundAt,
       linqRecipientPhoneLookupKey: null,
       pendingLinqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_b")[0],
-      pendingLinqLastInboundAt: new Date("2026-06-26T12:00:00.000Z"),
       pendingLinqRecipientPhoneLookupKey: null,
     });
     const upsert = vi.fn().mockResolvedValue({});
@@ -1281,18 +1251,18 @@ describe("hosted-member-store", () => {
     expect(upsertUpdate).toEqual(expect.objectContaining({
       linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_c")[0],
       pendingLinqChatLookupKey: null,
-      pendingLinqLastInboundAt: null,
     }));
     expect(upsertUpdate).not.toHaveProperty("linqLastInboundAt");
+    expect(upsertUpdate).not.toHaveProperty("pendingLinqLastInboundAt");
+    expect(findUnique).not.toHaveBeenCalled();
     expect(updateMany).toHaveBeenCalledTimes(2);
   });
 
-  it("clears pending Linq inbound freshness when pending chat binding is rewritten", async () => {
+  it("does not write pending Linq inbound freshness when pending chat binding is rewritten", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const findUnique = vi.fn().mockResolvedValue({
       pendingLinqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_old")[0],
-      pendingLinqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
     });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
@@ -1315,9 +1285,10 @@ describe("hosted-member-store", () => {
     expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
       update: expect.objectContaining({
         pendingLinqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_new")[0],
-        pendingLinqLastInboundAt: null,
       }),
     }));
+    expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("pendingLinqLastInboundAt");
+    expect(findUnique).not.toHaveBeenCalled();
   });
 
   it("clears Linq chat conflicts across readable blind-index versions before rebinding", async () => {
@@ -1571,19 +1542,15 @@ describe("hosted-member-store", () => {
         pendingLinqParticipantContactObservedAt: null,
         pendingLinqRecipientPhoneEncrypted: null,
         pendingLinqRecipientPhoneLookupKey: null,
-        pendingLinqLastInboundAt: null,
       },
     });
   });
 
-  it("promotes pending Linq inbound freshness when pending recipient route becomes home", async () => {
-    const pendingLinqLastInboundAt = new Date("2026-06-25T12:00:00.000Z");
+  it("does not promote pending Linq inbound freshness when pending recipient route becomes home", async () => {
     const findUnique = vi.fn().mockResolvedValue({
       linqChatLookupKey: null,
-      linqLastInboundAt: null,
       linqRecipientPhoneLookupKey: null,
       pendingLinqChatLookupKey: null,
-      pendingLinqLastInboundAt,
       pendingLinqRecipientPhoneLookupKey: createHostedPhoneLookupKeyReadCandidates("+15550100001")[0],
     });
     const upsert = vi.fn().mockResolvedValue({});
@@ -1606,22 +1573,12 @@ describe("hosted-member-store", () => {
     const upsertUpdate = upsert.mock.calls[0]?.[0]?.update;
     expect(upsertUpdate).toEqual(expect.objectContaining({
       pendingLinqChatLookupKey: null,
-      pendingLinqLastInboundAt: null,
       pendingLinqRecipientPhoneLookupKey: null,
     }));
     expect(upsertUpdate).not.toHaveProperty("linqLastInboundAt");
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
-        linqLastInboundAt: pendingLinqLastInboundAt,
-      },
-      where: {
-        memberId: "member_123",
-        OR: [
-          { linqLastInboundAt: null },
-          { linqLastInboundAt: { lt: pendingLinqLastInboundAt } },
-        ],
-      },
-    });
+    expect(upsertUpdate).not.toHaveProperty("pendingLinqLastInboundAt");
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("counts active home-line assignments and pre-activation reservations by recipient phone", async () => {

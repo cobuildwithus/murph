@@ -93,7 +93,6 @@ describe("hosted thread route store", () => {
           owner,
         },
         containerMemberId: "member_container_123",
-        lastInboundAt: new Date("2026-06-24T12:00:00.000Z"),
       },
     ]);
 
@@ -107,7 +106,6 @@ describe("hosted thread route store", () => {
       channel: "linq",
       container,
       containerMemberId: "member_container_123",
-      lastInboundAt: new Date("2026-06-24T12:00:00.000Z"),
       owner,
     });
 
@@ -146,7 +144,6 @@ describe("hosted thread route store", () => {
           },
         },
         containerMemberId: "member_container_123",
-        lastInboundAt: new Date("2026-06-24T12:00:00.000Z"),
       },
     ]);
     prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
@@ -166,7 +163,6 @@ describe("hosted thread route store", () => {
     ).resolves.toMatchObject({
       channel: "linq",
       containerMemberId: "member_container_123",
-      lastInboundAt: new Date("2026-06-24T12:00:00.000Z"),
     });
 
     expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledWith(
@@ -209,7 +205,6 @@ describe("hosted thread route store", () => {
           },
         },
         containerMemberId: "member_container_123",
-        lastInboundAt: null,
       },
     ]);
     prisma.hostedMember.findUnique.mockResolvedValueOnce(buildThreadContainerAccessRecord({
@@ -228,7 +223,6 @@ describe("hosted thread route store", () => {
     ).resolves.toMatchObject({
       channel: "linq",
       containerMemberId: "member_container_123",
-      lastInboundAt: null,
     });
   });
 
@@ -255,7 +249,6 @@ describe("hosted thread route store", () => {
           owner,
         },
         containerMemberId: "member_container_123",
-        lastInboundAt: null,
       },
     ]);
 
@@ -268,7 +261,6 @@ describe("hosted thread route store", () => {
     ).resolves.toMatchObject({
       channel: "linq",
       containerMemberId: "member_container_123",
-      lastInboundAt: null,
       owner,
     });
   });
@@ -496,7 +488,6 @@ describe("hosted thread route store", () => {
           owner: memberState,
         },
         containerMemberId: "member_container_1",
-        lastInboundAt: null,
       },
       {
         channel: "linq",
@@ -508,7 +499,6 @@ describe("hosted thread route store", () => {
           owner: memberState,
         },
         containerMemberId: "member_container_2",
-        lastInboundAt: null,
       },
     ]);
 

@@ -38,15 +38,15 @@ import {
   releaseHostedAiUsageLimitNotice,
 } from "../hosted-execution/usage-allowance";
 import {
-  buildAiUsageQuotaReplyResponse,
-} from "../hosted-onboarding/webhook-provider-linq-shared";
-import {
-  drainHostedLinqSideEffectsDirect,
-} from "../hosted-onboarding/webhook-transport";
+  sendClaimedHostedAiUsageLimitNoticeToLinqChat,
+} from "../hosted-execution/usage-limit-notice";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   readHostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
+import {
+  hasHostedLinqInboundWithinDays,
+} from "../hosted-onboarding/linq-daily-state";
 import {
   readHostedWorkspace,
   type HostedWorkspaceRecord,
@@ -69,6 +69,8 @@ type HostedRuntimeReconciliationDecisionSource = "workflow" | "status";
 const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.v1";
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS = 15_000;
+const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
+  24 * 60 * 60 * 1000;
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 
 export async function readHostedRuntimeReconciliationFacts(
@@ -144,8 +146,43 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
+  const freshConversationMailboxLag = hasHostedFreshConversationMailboxLag({
+    consumedSeqByLane,
+    mailboxLag,
+  });
+
+  if (
+    hostedRuntimeReconciliationNeedsAutomationEngagement({
+      freshConversationMailboxLag,
+      now,
+      workspace: projectedWorkspace,
+    })
+    && !(await hasHostedLinqInboundWithinDays({
+      memberId: input.userId,
+      now,
+      prisma,
+    }))
+  ) {
+    const facts = buildHostedRuntimeBlockedFacts({
+      mailboxLag,
+      reason: "automation_engagement_paused",
+      retryAt: new Date(
+        now.getTime() + HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS,
+      ).toISOString(),
+      workspace: projectedWorkspace,
+    });
+    emitHostedRuntimeReconciliationFacts({
+      facts,
+      request: input,
+      usageGateRequired: false,
+      usageGateStatus: "not_required",
+    });
+    return facts;
+  }
+
   const usageGateRequired = await hostedRuntimeReconciliationNeedsAiUsageGate({
     consumedSeqByLane,
+    freshConversationMailboxLag,
     mailboxLag,
     now,
     prisma,
@@ -256,16 +293,14 @@ function buildHostedRuntimeBlockedFacts(input: {
 
 async function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
   consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
+  freshConversationMailboxLag: boolean;
   mailboxLag: readonly HostedMailboxLaneLag[];
   now: Date;
   prisma: Parameters<typeof readHostedMailboxMaxSeqByLane>[0]["prisma"];
   userId: string;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
 }): Promise<boolean> {
-  if (hasHostedFreshConversationMailboxLag({
-    consumedSeqByLane: input.consumedSeqByLane,
-    mailboxLag: input.mailboxLag,
-  })) {
+  if (input.freshConversationMailboxLag) {
     return true;
   }
 
@@ -282,6 +317,16 @@ async function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
   }
 
   return isHostedRuntimeWakeDue(input.workspace.nextWakeAt, input.now)
+    && isHostedRuntimeModelCapableWorkspaceWakeReason(input.workspace.nextWakeReason);
+}
+
+function hostedRuntimeReconciliationNeedsAutomationEngagement(input: {
+  freshConversationMailboxLag: boolean;
+  now: Date;
+  workspace: HostedRuntimeReconciliationFactsWorkspace;
+}): boolean {
+  return !input.freshConversationMailboxLag
+    && isHostedRuntimeWakeDue(input.workspace.nextWakeAt, input.now)
     && isHostedRuntimeModelCapableWorkspaceWakeReason(input.workspace.nextWakeReason);
 }
 
@@ -376,6 +421,9 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
   if (!isHostedLinqConversationMessageWake(wake)) {
     return;
   }
+  if (decision.userNotice.code === "trial_conversion_pending") {
+    return;
+  }
 
   const sentAt = input.now;
   const claimed = await claimHostedAiUsageLimitNotice({
@@ -388,22 +436,20 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     return;
   }
 
-  await drainHostedLinqSideEffectsDirect({
+  await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
+    chatId: wake.message.linqMessage.chatId,
+    claimToken: {
+      periodStart: decision.periodStart.toISOString(),
+      sentAt: sentAt.toISOString(),
+    },
+    memberId: input.userId,
+    message: decision.userNotice.message,
+    noticeCode: decision.userNotice.code,
+    occurredAt: wake.occurredAt,
     prisma: input.prisma,
-    sideEffects: buildAiUsageQuotaReplyResponse({
-      chatId: wake.message.linqMessage.chatId,
-      claimToken: {
-        periodStart: decision.periodStart.toISOString(),
-        sentAt: sentAt.toISOString(),
-      },
-      memberId: input.userId,
-      message: decision.userNotice.message,
-      messageId: wake.message.linqMessage.messageId,
-      noticeCode: decision.userNotice.code,
-      occurredAt: wake.occurredAt,
-      routeAuthority: wake.message.routeAuthority ?? null,
-      sourceEventId: wake.eventId,
-    }).desiredSideEffects,
+    replyToMessageId: wake.message.linqMessage.messageId,
+    routeAuthority: wake.message.routeAuthority ?? null,
+    sourceEventId: wake.eventId,
   });
 }
 

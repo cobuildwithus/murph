@@ -10,9 +10,9 @@ const UNSAFE_SENTINEL = "UNSAFE_STATUS_SENTINEL";
 const mocks = vi.hoisted(() => ({
   claimHostedAiUsageLimitNotice: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
-  drainHostedLinqSideEffectsDirect: vi.fn(),
   fetch: vi.fn(),
   getPrisma: vi.fn(),
+  hasHostedLinqInboundWithinDays: vi.fn(),
   hostedThreadContainerParticipantFindFirst: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedCloudflareCallbackRequest: vi.fn(),
   releaseHostedAiUsageLimitNotice: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
+  sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -54,20 +55,25 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async (importOriginal) => 
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/webhook-transport", async (importOriginal) => {
-  const original = await importOriginal<
-    typeof import("@/src/lib/hosted-onboarding/webhook-transport")
-  >();
-
-  return {
-    ...original,
-    drainHostedLinqSideEffectsDirect: mocks.drainHostedLinqSideEffectsDirect,
-  };
-});
+vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
+  sendClaimedHostedAiUsageLimitNoticeToLinqChat:
+    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/linq-daily-state")
+  >();
+
+  return {
+    ...original,
+    hasHostedLinqInboundWithinDays: mocks.hasHostedLinqInboundWithinDays,
+  };
+});
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   readHostedWorkspace: mocks.readHostedWorkspace,
@@ -104,6 +110,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord());
+    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(true);
     mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
@@ -118,7 +125,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate.mockResolvedValue(false);
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
     mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(false);
-    mocks.drainHostedLinqSideEffectsDirect.mockResolvedValue(undefined);
+    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue(undefined);
     mocks.fetch.mockResolvedValue(
       new Response(JSON.stringify({ ok: true, result: { message_id: 7001 } }), {
         headers: { "content-type": "application/json" },
@@ -275,7 +282,7 @@ describe("hosted orchestration reconciliation facts", () => {
         userId: MEMBER_ID,
       });
     expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
-    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
   it("does not AI-gate a due inbox media retention wake", async () => {
@@ -328,7 +335,7 @@ describe("hosted orchestration reconciliation facts", () => {
     ]);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
-    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
   it("AI-gates pending system work even when inbox media retention is due", async () => {
@@ -483,7 +490,7 @@ describe("hosted orchestration reconciliation facts", () => {
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
-    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
   it("sends the current-chat Linq usage-limit notice when pending conversation work is runtime-denied", async () => {
@@ -543,24 +550,21 @@ describe("hosted orchestration reconciliation facts", () => {
       prisma: expect.objectContaining({ kind: "prisma" }),
       sentAt: new Date(FIXED_NOW),
     });
-    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith({
+      chatId: "chat_runtime_denied",
+      claimToken: {
+        periodStart: deniedDecision.periodStart.toISOString(),
+        sentAt: FIXED_NOW,
+      },
+      memberId: MEMBER_ID,
+      message: deniedDecision.userNotice.message,
+      noticeCode: deniedDecision.userNotice.code,
+      occurredAt: FIXED_NOW,
       prisma: expect.objectContaining({ kind: "prisma" }),
-      sideEffects: [
-        expect.objectContaining({
-          payload: expect.objectContaining({
-            chatId: "chat_runtime_denied",
-            memberId: MEMBER_ID,
-            message: deniedDecision.userNotice.message,
-            noticeCode: deniedDecision.userNotice.code,
-            replyToMessageId: "msg_runtime_denied",
-            routeAuthority,
-            template: "ai_usage_quota",
-          }),
-        }),
-      ],
+      replyToMessageId: "msg_runtime_denied",
+      routeAuthority,
+      sourceEventId: "linq_event_runtime_denied",
     });
-    const linqDrainInput = mocks.drainHostedLinqSideEffectsDirect.mock.calls[0]?.[0];
-    expect(linqDrainInput).not.toHaveProperty("currentInboundReply");
   });
 
   it("sends the current-chat Telegram usage-limit notice when pending conversation work is runtime-denied", async () => {
@@ -623,7 +627,7 @@ describe("hosted orchestration reconciliation facts", () => {
       reply_to_message_id: 7000,
       text: deniedDecision.userNotice.message,
     });
-    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
   it("releases the Telegram usage-limit notice claim when provider delivery fails", async () => {
@@ -722,7 +726,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.fetch).not.toHaveBeenCalled();
-    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
   it("does not claim the Telegram usage-limit notice when Telegram delivery is unconfigured", async () => {
@@ -765,7 +769,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.fetch).not.toHaveBeenCalled();
-    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
   it("does not gate replay-only conversation lag above local import but at or below consumed", async () => {
@@ -904,7 +908,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
     expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
-    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
   it("does not gate future model-capable workspace wakes", async () => {
@@ -954,6 +958,103 @@ describe("hosted orchestration reconciliation facts", () => {
         containerMemberId: MEMBER_ID,
         removedAt: null,
       }),
+    });
+  });
+
+  it("pauses due automation wakes when the member has no recent Linq inbound day", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:59:59.000Z",
+      nextWakeReason: "assistant_due",
+    }));
+    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "automation_engagement_paused",
+      retryAt: "2026-05-21T12:00:00.000Z",
+    });
+    expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("allows due automation wakes when a qualifying Linq inbound day exists", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:59:59.000Z",
+      nextWakeReason: "assistant_due",
+    }));
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      retryAt: "2026-05-20T12:00:30.000Z",
+      status: "unavailable",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_gate_unavailable",
+      retryAt: "2026-05-20T12:00:30.000Z",
+    });
+    expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "mutating",
+      now: new Date(FIXED_NOW),
+      userId: MEMBER_ID,
+    });
+  });
+
+  it("never pauses fresh conversation mailbox lag for engagement", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:59:59.000Z",
+      nextWakeReason: "assistant_due",
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      retryAt: "2026-05-20T12:00:30.000Z",
+      status: "unavailable",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_gate_unavailable",
+      retryAt: "2026-05-20T12:00:30.000Z",
+    });
+    expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "mutating",
+      now: new Date(FIXED_NOW),
+      userId: MEMBER_ID,
     });
   });
 
