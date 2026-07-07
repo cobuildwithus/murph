@@ -57,6 +57,38 @@ Success criteria:
 This spans web and hosted runtime bundle behavior. Web must tolerate old runtime
 calls during rollout; runtime-side deletion of the old assertion call should
 deploy after the web route accepts the simplified authority contract.
+
+Safe deploy order:
+
+1. Deploy web with the simplified engagement route and the stale-column drop.
+2. Deploy Cloudflare/runner bundles that stop sending the deleted delivery
+   engagement assertion.
+
+Gradual rollout behavior:
+
+- Warm old runner bundles can still call the web engagement route with either
+  `routeAuthority` or legacy `currentInbound`; the web route keeps both inputs
+  accepted during this rollout.
+- `container_rollout=immediate` is not required. Immediate rollout is acceptable
+  if operationally convenient, but not required for correctness.
+
+Schema-drop proof:
+
+- The dropped `hosted_member_routing` and `hosted_thread_route` recency columns
+  are not referenced by application source on the base branch; the remaining
+  references are Prisma schema, migration DDL, and migration tests.
+- Base-branch application reads of the affected tables use explicit Prisma
+  `select` shapes, so a warm old web process or code rollback does not
+  implicitly select the dropped scalar fields.
+- Runtime recency decisions are already owned by reconciliation facts and
+  `hosted_linq_daily_state`, not by these columns.
+
+Rollback floor:
+
+- Web and Cloudflare can roll back to the base branch for this PR because the
+  base application source does not read or write the dropped columns.
+- Rolling back to any older revision that explicitly names these recency columns
+  outside schema/migration/test code requires restoring the columns first.
 Status: completed
 Updated: 2026-07-07
 Completed: 2026-07-07

@@ -12,6 +12,9 @@ import {
 import {
   hostedOnboardingError,
 } from "./errors";
+import {
+  readActiveHostedMemberAccess,
+} from "./member-access";
 import { normalizePhoneNumber } from "./phone";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
@@ -95,6 +98,10 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   }
 
   if (routeAuthority) {
+    await assertHostedLinqRouteAuthorityActiveAccess({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
     return;
   }
 
@@ -186,6 +193,25 @@ function throwHostedLinqRouteAuthorityMismatch(): never {
     code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
     httpStatus: 403,
     message: "Linq egress target does not match the runtime user's Linq route.",
+    retryable: false,
+  });
+}
+
+async function assertHostedLinqRouteAuthorityActiveAccess(input: {
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+}): Promise<void> {
+  if (await readActiveHostedMemberAccess({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  })) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_EGRESS_ACCESS_REQUIRED",
+    httpStatus: 403,
+    message: "Linq route-authority egress requires active hosted member access.",
     retryable: false,
   });
 }
