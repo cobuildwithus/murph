@@ -1019,8 +1019,12 @@ describe("hosted Family plan", () => {
     });
   });
 
-  it("notifies the owner when an unbound invite is claimed", async () => {
+  it("notifies the owner when a bound invite is accepted", async () => {
     const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce({
+      ...createPendingInvite(),
+      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+    });
     tx.hostedMemberIdentity.findUnique.mockResolvedValueOnce({
       maskedPhoneNumberHint: "+1 *** *** 1111",
       memberId: "member_owner",
@@ -1072,10 +1076,25 @@ describe("hosted Family plan", () => {
     expect(mailboxMocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     const appendInput = mailboxMocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0];
     expect(appendInput).toEqual(expect.objectContaining({ tx }));
-    expect(JSON.stringify(appendInput?.envelope)).toContain(
+    expect(appendInput?.envelope).toMatchObject({
+      kind: "assistant.notification.requested",
+      userId: "member_owner",
+      notification: {
+        responsePolicy: {
+          kind: "require_send",
+        },
+      },
+    });
+    expect(appendInput?.envelope.notification.instructions).toContain(
+      "Saved invite label",
+    );
+    expect(appendInput?.envelope.notification.instructions).toContain("\"Mom\"");
+    expect(JSON.stringify(appendInput?.envelope)).not.toContain(
       "Mom just joined your family plan.",
     );
-    expect(JSON.stringify(appendInput?.envelope)).toContain("member_owner");
+    expect(JSON.stringify(appendInput?.envelope)).not.toContain(
+      "require_send_exact_text",
+    );
   });
 
   it("rejects web acceptance of a Telegram-only invite", async () => {

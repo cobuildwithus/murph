@@ -735,6 +735,7 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     expect(envelope).toMatchObject({
       kind: "assistant.notification.requested",
       notification: {
+        instructions: "Send the selected Murph Family welcome variant in responsePolicy.",
         responsePolicy: {
           kind: "require_send_exact_text",
           text: renderUserFacingMessage({

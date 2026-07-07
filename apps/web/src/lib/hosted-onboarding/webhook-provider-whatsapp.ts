@@ -24,7 +24,7 @@ import {
 } from "./errors";
 import {
   appendHostedFamilyChatNotificationTx,
-  buildHostedFamilyInviteAcceptedReplyText,
+  buildHostedFamilyInviteAcceptedNotification,
   acceptHostedFamilyInviteFromPhoneTx,
   resolveHostedFamilyInviteTokenForInbound,
 } from "./family-plan";
@@ -195,9 +195,6 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     const notification = await appendHostedWhatsAppFamilyChatNotification({
       inboundText: input.inboundText,
       memberId: familyAcceptance.memberId,
-      message: buildHostedFamilyInviteAcceptedReplyText({
-        memberId: familyAcceptance.memberId,
-      }),
       prisma: input.prisma,
       reason: "family-invite-accepted",
     });
@@ -358,14 +355,15 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
 async function appendHostedWhatsAppFamilyChatNotification(input: {
   inboundText: WhatsAppInboundText;
   memberId: string;
-  message: string;
   prisma: Prisma.TransactionClient;
   reason: string;
 }): Promise<{ wakeHandoff: HostedWebhookWakeHandoff | null }> {
   const sourceEventId = `${buildHostedWhatsAppWebhookEventId(input.inboundText.externalMessageId)}:${input.reason}`;
   const notification = await appendHostedFamilyChatNotificationTx({
     memberId: input.memberId,
-    message: input.message,
+    notification: buildHostedFamilyInviteAcceptedNotification({
+      memberId: input.memberId,
+    }),
     occurredAt: input.inboundText.receivedAt.toISOString(),
     route: buildHostedWhatsAppFamilyChatNotificationRoute(input.inboundText),
     sourceEventId,

@@ -567,6 +567,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           eventId: "assistant.notification.requested:family-chat:member_telegram_family:telegram:update:333",
           kind: "assistant.notification.requested",
           notification: expect.objectContaining({
+            instructions: "Send the selected Murph Family welcome variant in responsePolicy.",
             responsePolicy: {
               kind: "require_send_exact_text",
               text: renderUserFacingMessage({

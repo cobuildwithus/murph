@@ -10,7 +10,7 @@ import {
 } from "./errors";
 import {
   appendHostedFamilyChatNotificationTx,
-  buildHostedFamilyInviteAcceptedReplyText,
+  buildHostedFamilyInviteAcceptedNotification,
   acceptHostedFamilyInviteFromTelegramTx,
   resolveHostedFamilyInviteTokenForInbound,
   resolveHostedFamilyChatNotificationRouteTx,
@@ -91,7 +91,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     });
     const notification = await appendHostedFamilyChatNotificationTx({
       memberId: familyAcceptance.memberId,
-      message: buildHostedFamilyInviteAcceptedReplyText({
+      notification: buildHostedFamilyInviteAcceptedNotification({
         memberId: familyAcceptance.memberId,
       }),
       occurredAt: summary.occurredAt,
