@@ -1664,6 +1664,7 @@
                           "items": {
                             "type": "string",
                             "enum": [
+                              "group-email.v0",
                               "sleep-times.v0",
                               "activity-days.v0",
                               "workout-days.v0",

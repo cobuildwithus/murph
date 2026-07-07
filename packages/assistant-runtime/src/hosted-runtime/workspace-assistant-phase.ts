@@ -9,6 +9,9 @@ import {
 } from "@murphai/hosted-execution";
 import {
   type HostedRuntimeGroupToolLinqThreadContext,
+  type HostedRuntimeGroupToolSelfOptOutContext,
+  type HostedRuntimeNewsletterScheduledAuthority,
+  type HostedRuntimeNewsletterToolRequest,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -106,6 +109,9 @@ import type {
   HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
 import type {
+  HostedAssistantEmailDeliveryContext,
+} from "./email-delivery-context.ts";
+import type {
   HostedRuntimePlatform,
 } from "./platform.ts";
 import type {
@@ -202,11 +208,20 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
  * model never supplies its own thread target.
  */
 export function createHostedGroupToolWithLinqThreadContext(input: {
+  emailDeliveryContexts?: readonly HostedAssistantEmailDeliveryContext[] | null;
   groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]>;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
 }): NonNullable<HostedRuntimePlatform["groupToolPort"]> {
   return {
     async request(request) {
+      if (request.action === "revoke_own_email_share") {
+        const selfOptOut = resolveHostedGroupToolSelfOptOutContext({
+          linqDeliveryContexts: input.linqDeliveryContexts,
+        });
+        return await input.groupToolPort.request(
+          selfOptOut ? { action: request.action, selfOptOut } : { action: request.action },
+        );
+      }
       if (
         request.action !== "read_chat_participants"
         && request.action !== "post_join_offer"
@@ -222,6 +237,169 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       );
     },
   };
+}
+
+function resolveHostedGroupToolSelfOptOutContext(input: {
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+}): HostedRuntimeGroupToolSelfOptOutContext | null {
+  const eligible = new Map<string, HostedRuntimeGroupToolSelfOptOutContext>();
+  // Hosted email reply aliases authenticate the route, not the human From
+  // header. Do not turn parsed From into self-opt-out authority.
+  for (const context of input.linqDeliveryContexts) {
+    if (context.threadIsDirect !== false) {
+      continue;
+    }
+    const senderHandle = context.directRecipientPhoneNumber?.trim();
+    if (!senderHandle) {
+      continue;
+    }
+    eligible.set(JSON.stringify(["linq", senderHandle]), {
+      senderHandle,
+      source: "linq",
+    });
+  }
+
+  return eligible.size === 1 ? [...eligible.values()][0] ?? null : null;
+}
+
+export function createHostedNewsletterToolWithEmailSend(input: {
+  effectsPort: Pick<HostedRuntimePlatform["effectsPort"], "sendEmail">;
+  newsletterToolPort: NonNullable<HostedRuntimePlatform["newsletterToolPort"]>;
+  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
+}): NonNullable<HostedRuntimePlatform["newsletterToolPort"]> {
+  return {
+    async request(request) {
+      if (request.action === "read_stats") {
+        return await input.newsletterToolPort.request(request);
+      }
+
+      const scheduledAutomationAuthority =
+        input.scheduledAutomationAuthority ??
+        request.scheduledAutomationAuthority ??
+        null;
+      if (!scheduledAutomationAuthority) {
+        return {
+          action: "send",
+          result: {
+            status: "unavailable",
+            unavailableReason: "scheduled_automation_required",
+          },
+        };
+      }
+
+      const participants = await input.newsletterToolPort.request({
+        action: "read_stats",
+        groupId: request.groupId,
+      });
+      if (participants.action !== "read_stats") {
+        return {
+          action: "send",
+          result: {
+            status: "unavailable",
+            unavailableReason: "newsletter_stats_unavailable",
+          },
+        };
+      }
+      if (participants.result.status !== "ok") {
+        return {
+          action: "send",
+          result: {
+            status: "unavailable",
+            unavailableReason: participants.result.unavailableReason,
+          },
+        };
+      }
+
+      const participantCount = participants.result.participants
+        .filter((participant) => participant.hasEmail)
+        .length;
+      const skippedNoEmailMemberIds = participants.result.participants
+        .filter((participant) => !participant.hasEmail)
+        .map((participant) => participant.memberId);
+      if (participantCount === 0) {
+        return {
+          action: "send",
+          result: {
+            participantCount: 0,
+            skippedNoEmailMemberIds,
+            status: "no_recipients",
+          },
+        };
+      }
+
+      let emailResult: Awaited<ReturnType<typeof input.effectsPort.sendEmail>>;
+      try {
+        emailResult = await input.effectsPort.sendEmail({
+          html: request.html,
+          idempotencyKey: buildHostedNewsletterEmailIdempotencyKey({
+            request,
+            scheduledAutomationAuthority,
+          }),
+          message: request.text ?? "Open this email in an HTML-capable mail client.",
+          subject: request.subject,
+          target: request.groupId,
+          targetKind: "group",
+        });
+      } catch {
+        return {
+          action: "send",
+          result: {
+            status: "unavailable",
+            unavailableReason: "send_failed",
+          },
+        };
+      }
+
+      if (emailResult?.delivery?.failedCount && emailResult.delivery.failedCount > 0) {
+        if (
+          emailResult.delivery.sentCount === 0 ||
+          emailResult.delivery.status === "failed"
+        ) {
+          return {
+            action: "send",
+            result: {
+              status: "unavailable",
+              unavailableReason: "send_failed",
+            },
+          };
+        }
+
+        return {
+          action: "send",
+          result: {
+            failedRecipientCount: emailResult.delivery.failedCount,
+            participantCount,
+            sentRecipientCount: emailResult.delivery.sentCount,
+            skippedNoEmailMemberIds,
+            status: "partial_failure",
+          },
+        };
+      }
+
+      return {
+        action: "send",
+        result: {
+          participantCount,
+          skippedNoEmailMemberIds,
+          status: "sent",
+        },
+      };
+    },
+  };
+}
+
+function buildHostedNewsletterEmailIdempotencyKey(
+  input: {
+    request: Extract<HostedRuntimeNewsletterToolRequest, { action: "send" }>;
+    scheduledAutomationAuthority: HostedRuntimeNewsletterScheduledAuthority;
+  },
+): string {
+  return [
+    "group-newsletter",
+    input.scheduledAutomationAuthority.automationId,
+    input.scheduledAutomationAuthority.occurrenceAt,
+    input.request.groupId,
+  ].join(":");
 }
 
 function resolveHostedGroupToolLinqThreadContext(
@@ -278,6 +456,12 @@ function resolveHostedInitialMailboxLinqDeliveryContexts(
     : [];
 }
 
+function resolveHostedInitialMailboxEmailDeliveryContexts(
+  importResult: HostedMailboxImportLoopResult,
+): readonly HostedAssistantEmailDeliveryContext[] {
+  return importResult.emailDeliveryContexts ?? [];
+}
+
 function buildHostedAssistantLinqEgressLatencyTrace(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): HostedAssistantLinqEgressLatencyTrace | null {
@@ -315,6 +499,9 @@ export async function runHostedWorkspaceAssistantPhase(
     input,
   });
   const initialLinqDeliveryContexts = resolveHostedInitialMailboxLinqDeliveryContexts(
+    input.initialMailboxImport.importResult,
+  );
+  const initialEmailDeliveryContexts = resolveHostedInitialMailboxEmailDeliveryContexts(
     input.initialMailboxImport.importResult,
   );
   const linqEgressLatencyTrace = buildHostedAssistantLinqEgressLatencyTrace(input);
@@ -364,8 +551,17 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.runtime.platform.groupToolPort
           ? {
               groupTool: createHostedGroupToolWithLinqThreadContext({
+                emailDeliveryContexts: initialEmailDeliveryContexts,
                 groupToolPort: input.runtime.platform.groupToolPort,
                 linqDeliveryContexts: initialLinqDeliveryContexts,
+              }),
+            }
+          : {}),
+        ...(input.runtime.platform.newsletterToolPort
+          ? {
+              newsletterTool: createHostedNewsletterToolWithEmailSend({
+                effectsPort: input.runtime.platform.effectsPort,
+                newsletterToolPort: input.runtime.platform.newsletterToolPort,
               }),
             }
           : {}),

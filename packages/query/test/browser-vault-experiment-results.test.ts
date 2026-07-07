@@ -1343,6 +1343,87 @@ test("counts browser cycling adherence from provider ride activity sessions", ()
   assert.equal(result?.progress?.adherence.loggedSessions, 1);
 });
 
+test("counts browser generic workout modality from any activity sessions", () => {
+  const slug = "generic-workout-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_generic_workout_block",
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Workout",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        activitySessionEvent({ id: "evt_generic_workout_ride", date: "2026-06-02", activityType: "Cycling" }),
+        activitySessionEvent({ id: "evt_generic_workout_strength", date: "2026-06-04", activityType: "Strength" }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const evidence = result?.adherence?.targets[0]?.evidence;
+
+  assert.ok(result);
+  assert.equal(result.progress?.adherence.completedSessions, 2);
+  assert.equal(result.progress?.adherence.loggedSessions, 2);
+  assert.equal(evidence?.kind, "linkedEventCount");
+  if (evidence?.kind === "linkedEventCount") {
+    assert.equal(evidence.eventKind, "activity_session");
+    assert.equal(evidence.activityKind, undefined);
+  }
+});
+
+test("keeps browser cardio modality on manual intervention-session evidence", () => {
+  const slug = "cardio-manual-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_cardio_manual_block",
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "cardio",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        sessionEvent("2026-06-02", "completed", {
+          experimentId: "exp_cardio_manual_block",
+          experimentSlug: slug,
+          id: "evt_cardio_manual_1",
+          title: "Cardio session",
+        }),
+        activitySessionEvent({ id: "evt_cardio_strength", date: "2026-06-04", activityType: "Strength" }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const evidence = result?.adherence?.targets[0]?.evidence;
+
+  assert.ok(result);
+  assert.equal(result.progress?.adherence.completedSessions, 1);
+  assert.equal(result.progress?.adherence.loggedSessions, 1);
+  assert.equal(evidence?.kind, "linkedEventCount");
+  if (evidence?.kind === "linkedEventCount") {
+    assert.equal(evidence.eventKind, "intervention_session");
+    assert.equal(evidence.activityKind, undefined);
+  }
+});
+
 test("counts browser running adherence after replica skips generic activity type for nested sport", async () => {
   const slug = "nested-workout-run-block";
   const replica = await createBrowserVaultReplica({
@@ -1633,6 +1714,427 @@ test("counts mixed browser manual and device sessions for running adherence", ()
 
   assert.equal(result?.progress?.adherence.completedSessions, 2);
   assert.equal(result?.progress?.adherence.loggedSessions, 2);
+});
+
+for (const scenario of [
+  {
+    name: "prefers a same-date sensed run over a manual missed-wearable run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGA",
+    slug: "browser-same-date-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BA",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGA",
+        experimentSlug: "browser-same-date-manual-device-run",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_device_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+    ],
+  },
+  {
+    name: "counts a surplus same-date done manual run beside one sensed run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGG",
+    slug: "browser-same-date-surplus-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_surplus_manual_run_1a",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGG",
+        experimentSlug: "browser-same-date-surplus-manual-device-run",
+        occurredAt: "2026-06-01T13:00:00.000Z",
+      }),
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_surplus_manual_run_1b",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGG",
+        experimentSlug: "browser-same-date-surplus-manual-device-run",
+        occurredAt: "2026-06-01T15:00:00.000Z",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_surplus_device_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+    ],
+  },
+  {
+    name: "lets two same-date sensed runs suppress two done manual rows",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGH",
+    slug: "browser-same-date-two-manual-two-device-runs",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_pair_manual_run_1a",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGH",
+        experimentSlug: "browser-same-date-two-manual-two-device-runs",
+        occurredAt: "2026-06-01T13:00:00.000Z",
+      }),
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_pair_manual_run_1b",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGH",
+        experimentSlug: "browser-same-date-two-manual-two-device-runs",
+        occurredAt: "2026-06-01T15:00:00.000Z",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_pair_device_run_1a",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_pair_device_run_1b",
+        date: "2026-06-01",
+        activityType: "Run",
+      }),
+    ],
+  },
+  {
+    name: "prefers a same-date device run over a manual activity run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGK",
+    slug: "browser-same-date-manual-activity-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      activitySessionEvent({
+        id: "evt_browser_same_date_manual_activity_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+        source: "manual",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_device_activity_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+        source: "device",
+      }),
+    ],
+  },
+  {
+    name: "counts a manual activity run when it is the only evidence",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGP",
+    slug: "browser-manual-activity-only-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      activitySessionEvent({
+        id: "evt_browser_manual_activity_only_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+        source: "manual",
+      }),
+    ],
+  },
+  {
+    name: "suppresses only one non-device done row for one same-date device run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGM",
+    slug: "browser-same-date-one-device-two-non-device-runs",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      activitySessionEvent({
+        id: "evt_browser_one_device_two_non_device_manual_activity",
+        date: "2026-06-01",
+        activityType: "Running",
+        source: "manual",
+      }),
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE3BM",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGM",
+        experimentSlug: "browser-same-date-one-device-two-non-device-runs",
+        occurredAt: "2026-06-01T15:00:00.000Z",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_one_device_two_non_device_device_activity",
+        date: "2026-06-01",
+        activityType: "Running",
+        source: "device",
+      }),
+    ],
+  },
+  {
+    name: "counts different-date manual and sensed runs separately",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGB",
+    slug: "browser-different-date-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BB",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGB",
+        experimentSlug: "browser-different-date-manual-device-run",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_different_date_device_run_1",
+        date: "2026-06-02",
+        activityType: "Running",
+      }),
+    ],
+  },
+  {
+    name: "counts two same-date sensed runs separately",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGC",
+    slug: "browser-same-date-two-device-runs",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      activitySessionEvent({
+        id: "evt_browser_same_date_device_run_2a",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_device_run_2b",
+        date: "2026-06-01",
+        activityType: "Run",
+      }),
+    ],
+  },
+  {
+    name: "keeps a same-date missed manual annotation beside one sensed run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGI",
+    slug: "browser-same-date-missed-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    expectedMissedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "missed", {
+        id: "evt_browser_same_date_missed_manual_run_1",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGI",
+        experimentSlug: "browser-same-date-missed-manual-device-run",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_missed_device_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+    ],
+  },
+  {
+    name: "keeps a manual-only missed-wearable run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGD",
+    slug: "browser-manual-only-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BC",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGD",
+        experimentSlug: "browser-manual-only-device-run",
+      }),
+    ],
+  },
+  {
+    name: "leaves non-sensable manual sauna logs unchanged",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGE",
+    slug: "browser-manual-sauna-unchanged",
+    modality: "sauna",
+    expectedCompletedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BD",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGE",
+        experimentSlug: "browser-manual-sauna-unchanged",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_manual_sauna_device_run_ignored",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+    ],
+  },
+] satisfies Array<{
+  events: BrowserVaultEntity[];
+  expectedCompletedSessions: number;
+  expectedMissedSessions?: number;
+  experimentId: string;
+  modality: string;
+  name: string;
+  slug: string;
+}>) {
+  test(`counts browser adherence when it ${scenario.name}`, () => {
+    const client = createBrowserVaultQueryClient(
+      createReplica({
+        generatedAt: "2026-06-09T12:00:00.000Z",
+        entities: [
+          experimentEntity({
+            id: scenario.experimentId,
+            slug: scenario.slug,
+            runPlan: {
+              baselineStart: "2026-05-25",
+              baselineEnd: "2026-05-31",
+              interventionStart: "2026-06-01",
+              interventionEnd: "2026-06-28",
+              modality: scenario.modality,
+              targetSessions: 4,
+              minimumUsefulSessions: 1,
+            },
+          }),
+          ...scenario.events,
+        ],
+      }),
+    );
+
+    const result = selectBrowserVaultExperimentResults(client, { slug: scenario.slug });
+
+    assert.equal(result?.progress?.adherence.completedSessions, scenario.expectedCompletedSessions);
+    assert.equal(result?.progress?.adherence.loggedSessions, scenario.expectedCompletedSessions);
+    assert.equal(result?.progress?.adherence.missedSessions ?? 0, scenario.expectedMissedSessions ?? 0);
+  });
+}
+
+test("browser adherence calendar suppresses same-date manual fallback when a sensed run matches", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QKGF";
+  const slug = "browser-calendar-same-date-manual-device-run";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-03T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-01",
+            modality: "Run",
+            targetSessions: 1,
+            minimumUsefulSessions: 1,
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+          },
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BE",
+          experimentId,
+          experimentSlug: slug,
+        }),
+        activitySessionEvent({
+          id: "evt_browser_calendar_same_date_device_run_1",
+          date: "2026-06-01",
+          activityType: "Running",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const cell = result?.schedule?.cells.find((entry) => entry.localDate === "2026-06-01");
+
+  assert.equal(result?.schedule?.completedSessions, 1);
+  assert.deepEqual(cell?.evidenceIds, ["evt_browser_calendar_same_date_device_run_1"]);
+});
+
+test("browser adherence calendar suppresses same-date manual activity when a device run matches", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QKGN";
+  const slug = "browser-calendar-same-date-manual-activity-device-run";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-03T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-01",
+            modality: "Run",
+            targetSessions: 1,
+            minimumUsefulSessions: 1,
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+          },
+        }),
+        activitySessionEvent({
+          id: "evt_browser_calendar_same_date_manual_activity_run_1",
+          date: "2026-06-01",
+          activityType: "Running",
+          source: "manual",
+        }),
+        activitySessionEvent({
+          id: "evt_browser_calendar_same_date_device_activity_run_1",
+          date: "2026-06-01",
+          activityType: "Running",
+          source: "device",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const cell = result?.schedule?.cells.find((entry) => entry.localDate === "2026-06-01");
+
+  assert.equal(result?.schedule?.completedSessions, 1);
+  assert.deepEqual(cell?.evidenceIds, ["evt_browser_calendar_same_date_device_activity_run_1"]);
+});
+
+test("browser adherence calendar keeps surplus same-date manual evidence after one sensed run", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QKGJ";
+  const slug = "browser-calendar-same-date-surplus-manual-device-run";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-03T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-01",
+            modality: "Run",
+            targetSessions: 1,
+            minimumUsefulSessions: 1,
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+          },
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_browser_calendar_surplus_manual_run_1a",
+          experimentId,
+          experimentSlug: slug,
+          occurredAt: "2026-06-01T13:00:00.000Z",
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_browser_calendar_surplus_manual_run_1b",
+          experimentId,
+          experimentSlug: slug,
+          occurredAt: "2026-06-01T15:00:00.000Z",
+        }),
+        activitySessionEvent({
+          id: "evt_browser_calendar_surplus_device_run_1",
+          date: "2026-06-01",
+          activityType: "Running",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const cell = result?.schedule?.cells.find((entry) => entry.localDate === "2026-06-01");
+
+  assert.equal(cell?.kind, "completed");
+  assert.deepEqual(cell?.evidenceIds, [
+    "evt_browser_calendar_surplus_manual_run_1b",
+    "evt_browser_calendar_surplus_device_run_1",
+  ]);
 });
 
 test("uses canonical activity date for scheduled browser running adherence", () => {
@@ -2286,6 +2788,7 @@ function canonicalActivitySessionEvent(input: {
   date: string;
   id: string;
   name?: string;
+  source?: string;
   sportName?: string;
   workout?: Record<string, unknown>;
 }): CanonicalEntity {
@@ -2293,6 +2796,7 @@ function canonicalActivitySessionEvent(input: {
     attributes: {
       activityType: input.activityType,
       ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.source === undefined ? {} : { source: input.source }),
       ...(input.sportName === undefined ? {} : { sportName: input.sportName }),
       ...(input.workout === undefined ? {} : { workout: input.workout }),
     },
@@ -2457,12 +2961,14 @@ function activitySessionEvent(input: {
   date: string;
   id: string;
   occurredAt?: string;
+  source?: string;
   sportName?: string;
   title?: string;
 }): BrowserVaultEntity {
   return {
     attributes: {
       activityType: input.activityType,
+      ...(input.source === undefined ? {} : { source: input.source }),
       sportName: input.sportName ?? input.activityType,
     },
     bodyPreview: null,

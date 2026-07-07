@@ -444,9 +444,6 @@ export function HostedFamilyManager(props: {
                 : "All seats are full. Remove a member or cancel an invite to free one."
               : `${props.seats.remaining} paid ${props.seats.remaining === 1 ? "seat" : "seats"} open`}
           </p>
-          <p className="text-xs text-muted-foreground">
-            Family supports {props.seats.min} to {props.seats.max} people.
-          </p>
           {seatError ? (
             <p role="alert" className="max-w-sm text-xs leading-tight text-destructive">
               {seatError}

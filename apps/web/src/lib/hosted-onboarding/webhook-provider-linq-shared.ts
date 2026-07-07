@@ -329,22 +329,18 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
   occurredAt: string;
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
-  routeAlreadyBound?: boolean;
 }) {
-  if (input.routeAlreadyBound !== true) {
-    await upsertHostedMemberHomeLinqBindingTx({
-      clearPending: true,
-      homeLineAssignedAt: input.homeLineAssignedAt ?? null,
-      linqChatId: input.chatId,
-      memberId: input.memberId,
-      prisma: input.prisma,
-      recipientPhone: input.recipientPhone,
-    });
-  }
+  await upsertHostedMemberHomeLinqBindingTx({
+    clearPending: true,
+    homeLineAssignedAt: input.homeLineAssignedAt ?? null,
+    linqChatId: input.chatId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    recipientPhone: input.recipientPhone,
+  });
 
   await recordHostedMemberLinqInboundEngagementTx({
-    chatId: input.chatId,
-    linePhoneNumber: input.recipientPhone,
+    binding: "home",
     memberId: input.memberId,
     occurredAt: input.occurredAt,
     prisma: input.prisma,
@@ -401,8 +397,7 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
   });
 
   await recordHostedMemberLinqInboundEngagementTx({
-    chatId: input.chatId,
-    linePhoneNumber: input.recipientPhone,
+    binding: "pending",
     memberId: input.memberId,
     occurredAt: input.occurredAt,
     prisma: input.prisma,

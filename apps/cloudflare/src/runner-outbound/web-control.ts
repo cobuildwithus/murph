@@ -150,6 +150,8 @@ export async function handleRunnerWebControlRequest(input: {
   const isGroupToolRequest =
     input.url.pathname === HOSTED_RUNTIME_GROUP_TOOL_PATH
     && input.request.method === "POST";
+  const isNewsletterToolRequest = policy.operation === "newsletter_tool"
+    && input.request.method === "POST";
   const isComputerUseRequest = policy.operation === "computer_use"
     && input.request.method === "POST";
   const isConnectedAppsRequest = policy.operation === "connected_apps"
@@ -172,6 +174,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isLinqContactCardShareAfterOutboundRequest
     || isVaultShareDeliverRequest
     || isGroupToolRequest
+    || isNewsletterToolRequest
     || isComputerUseRequest
     || isConnectedAppsRequest
     || isCodexAuthUpdateRequest

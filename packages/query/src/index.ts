@@ -90,6 +90,7 @@ export {
 export {
   buildOverviewMetrics,
   isActiveOverviewExperimentStatus,
+  buildOverviewWeeklyStatsFromDailySampleSummaries,
   buildOverviewWeeklyStats,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
@@ -98,6 +99,7 @@ export type {
   OverviewExperiment,
   OverviewJournalEntry,
   OverviewMetric,
+  OverviewWeeklySampleSummary,
   OverviewWeeklyStat,
 } from "./overview.ts";
 export {
@@ -113,6 +115,7 @@ export type {
   ExperimentProgressCardConfounderInput,
 } from "./experiment-progress-card.ts";
 export {
+  resolveAdherenceObservationActivityKind,
   synthesizeLegacySessionAdherenceTargets,
 } from "./experiment-adherence.ts";
 export type {
