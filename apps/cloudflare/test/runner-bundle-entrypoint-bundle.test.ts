@@ -60,6 +60,35 @@ function staticBootClosureMetafile(inputPath: string): Metafile {
   };
 }
 
+function dynamicImportMetafile(inputPath: string): Metafile {
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 600, imports: [] },
+      [inputPath]: { bytes: 5_000, imports: [] },
+    },
+    outputs: {
+      "dist-bundled/container-entrypoint.js": {
+        bytes: 2_000,
+        entryPoint: "dist/container-entrypoint.js",
+        exports: [],
+        imports: [{ kind: "dynamic-import", path: "./device-sync-LAZY.js" }],
+        inputs: {
+          "dist/container-entrypoint.js": { bytesInOutput: 600 },
+        },
+      },
+      "dist-bundled/device-sync-LAZY.js": {
+        bytes: 4_000,
+        entryPoint: "dist/device-sync.js",
+        exports: [],
+        imports: [],
+        inputs: {
+          [inputPath]: { bytesInOutput: 4_000 },
+        },
+      },
+    },
+  };
+}
+
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -233,6 +262,48 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     );
   });
 
+  it.each([
+    [
+      "staged device-sync service",
+      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/service.js",
+      /node_modules\/@murphai\/device-syncd\/dist\/service\.js/,
+    ],
+    [
+      "workspace device-sync service",
+      "packages/device-syncd/dist/service.js",
+      /packages\/device-syncd\/dist\/service\.js/,
+    ],
+    [
+      "device-sync registry",
+      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/registry.js",
+      /node_modules\/@murphai\/device-syncd\/dist\/registry\.js/,
+    ],
+    [
+      "device-sync provider graph",
+      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/providers/oura.js",
+      /node_modules\/@murphai\/device-syncd\/dist\/providers\/oura\.js/,
+    ],
+    [
+      "importers",
+      ".deploy/runner-bundle/node_modules/@murphai/importers/dist/index.js",
+      /node_modules\/@murphai\/importers\/dist\/index\.js/,
+    ],
+    [
+      "Junction SDK",
+      ".deploy/runner-bundle/node_modules/@junction-api/sdk/index.js",
+      /node_modules\/@junction-api\/sdk\/index\.js/,
+    ],
+  ])("rejects %s inputs from the static boot closure", (_label, inputPath, expected) => {
+    const metafile = staticBootClosureMetafile(inputPath);
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, {
+        entryBytes: 10_000,
+        totalBytes: 10_000,
+      }),
+    ).toThrow(expected);
+  });
+
   it("allows provider connector inputs behind dynamic imports", () => {
     const metafile: Metafile = {
       inputs: {
@@ -263,6 +334,19 @@ describe("runner bundle container-entrypoint esbuild step", () => {
 
     expect(
       assertRunnerEntrypointBundleWithinBudgets(metafile, {
+        entryBytes: 10_000,
+        totalBytes: 10_000,
+      }),
+    ).toEqual({ entryBytes: 2_000, totalBytes: 6_000 });
+  });
+
+  it.each([
+    ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/service.js",
+    ".deploy/runner-bundle/node_modules/@murphai/importers/dist/index.js",
+    ".deploy/runner-bundle/node_modules/@junction-api/sdk/index.js",
+  ])("allows %s behind dynamic imports", (inputPath) => {
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(dynamicImportMetafile(inputPath), {
         entryBytes: 10_000,
         totalBytes: 10_000,
       }),
@@ -340,11 +424,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
   it("resolves the production budgets as the ratcheted entry baseline plus tolerance", () => {
     const budgets = resolveRunnerEntrypointBundleBudgets();
 
-    // Entry = measured baseline (2,288,516B on 2026-07-06) + 48,000B noise
+    // Entry = measured baseline (1,267,937B on 2026-07-06) + 48,000B noise
     // band. Locking the exact value makes any silent change to the ratchet a
     // failing, reviewed diff.
     expect(budgets).toEqual({
-      entryBytes: 2_288_516 + 48_000,
+      entryBytes: 1_267_937 + 48_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling

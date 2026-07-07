@@ -8198,6 +8198,123 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("foreground conversation budget survives system mailbox churn", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-system-churn-"));
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const imported: string[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const pushSystemItem = (seq: string) => {
+      mailboxItems.push(createMailboxItem({
+        id: `mailbox_item_entrypoint_foreground_system_churn_system_${seq.padStart(3, "0")}`,
+        kind: "runtime.browser-vault-refresh-requested",
+        lane: "system",
+        laneSeq: seq,
+        occurredAt: `2026-04-27T00:00:${seq.padStart(2, "0")}.000Z`,
+      }));
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_foreground_system_churn",
+            budget: {
+              maxMailboxItems: 2,
+            },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/foreground-system-churn.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            imported.push(`${item.item.lane}:${item.item.laneSeq}`);
+            events.push(`import:${item.item.lane}:${item.item.laneSeq}`);
+            return item.item.lane === "conversation"
+              ? {
+                  assistantInputId: "assistant_input_foreground_system_churn",
+                  status: "imported",
+                }
+              : { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            pushSystemItem("1");
+            runtimeWakeSignal.notify();
+            await waitUntil(() => {
+              assert.ok(imported.includes("system:1"));
+            });
+
+            pushSystemItem("2");
+            runtimeWakeSignal.notify();
+            await waitUntil(() => {
+              assert.ok(imported.includes("system:2"));
+            });
+
+            pushSystemItem("3");
+            mailboxItems.push(createMailboxItem({
+              id: "mailbox_item_entrypoint_foreground_system_churn_conversation_001",
+              laneSeq: "1",
+              occurredAt: "2026-04-27T00:00:03.500Z",
+            }));
+            runtimeWakeSignal.notify();
+            await waitUntil(() => {
+              assert.ok(imported.includes("conversation:1"));
+            });
+
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.ok(imported.includes("conversation:1"));
+      assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "1");
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "1",
+      );
+      assert.ok(
+        fetchRequests.some((request) =>
+          readConversationImportedSeq(request) === "0"
+          && request.lanes.some((lane) => lane.lane === "system")
+        ),
+      );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("initial mailbox budget resumes from the restored watermark before importing the fresh tail", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-replay-initial-budget-"));
     const events: string[] = [];
