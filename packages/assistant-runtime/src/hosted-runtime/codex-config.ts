@@ -49,10 +49,10 @@ import {
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
-// Codex's built-in OpenAI provider id. With hosted-local subscription auth in
-// CODEX_HOME, Codex routes this provider to the ChatGPT subscription backend
-// itself; configuring a base_url would misroute subscription bearer tokens.
-const HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID = "openai";
+// Custom provider id for ChatGPT-auth OpenAI. The provider intentionally omits
+// base_url/env_key: Codex routes auth-backed providers with no base_url to the
+// ChatGPT backend while still honoring provider-level transport settings.
+const HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID = "hosted-chatgpt-openai";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
@@ -71,7 +71,8 @@ const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
-const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 5;
+const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 0;
+const HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
 const HOSTED_CODEX_OPERATOR_MEMORY_CONFIG = {
   disableOnExternalContext: false,
   featureEnabled: true,
@@ -106,6 +107,13 @@ export const HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS = {
   codexOperatorMemoryMode: "codex-native-operator-context",
   codexOperatorMemoryUseMemories:
     HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.useMemories,
+} as const;
+export const HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS = {
+  codexProviderRequestMaxRetries: HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
+  codexProviderStreamIdleTimeoutMs:
+    HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
+  codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
+  codexProviderTransportMode: "codex-native-provider-transport",
 } as const;
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
@@ -160,10 +168,6 @@ export async function prepareHostedCodexRuntimeEnvironment(
     provider: normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER),
     runtimeEnv: input.runtimeEnv,
   });
-  const usesTestProviderBaseUrlOverride =
-    normalizeHostedCodexEnvString(
-      input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
-    ) !== null;
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
@@ -229,7 +233,6 @@ export async function prepareHostedCodexRuntimeEnvironment(
     codexConfigPath,
     buildHostedCodexConfigToml({
       chatGptAuth,
-      writeProviderRetryDefaults: usesTestProviderBaseUrlOverride,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
       provider: providerConfig,
       reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
@@ -504,35 +507,32 @@ function normalizeHostedCodexUrlHostname(hostname: string): string {
 
 export function buildHostedCodexConfigToml(input: {
   chatGptAuth?: boolean;
-  writeProviderRetryDefaults?: boolean;
   model: string | null;
   provider: AssistantCodexModelProviderConfig;
   reasoningEffort: string;
 }): string {
-  // ChatGPT-subscription auth uses Codex's built-in provider so Codex itself
-  // selects the subscription backend; a custom provider entry with base_url or
-  // env_key would bypass that routing.
-  const providerConfigLines = input.chatGptAuth ? [] : [
-    `[model_providers.${tomlQuotedKey(input.provider.id)}]`,
+  const modelProviderId = input.chatGptAuth
+    ? HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID
+    : input.provider.id;
+  const providerConfigLines = [
+    `[model_providers.${tomlQuotedKey(modelProviderId)}]`,
     `name = ${tomlString(input.provider.name)}`,
-    `base_url = ${tomlString(input.provider.baseUrl)}`,
-    `env_key = ${tomlString(input.provider.envKey)}`,
+    ...(input.chatGptAuth
+      ? []
+      : [
+          `base_url = ${tomlString(input.provider.baseUrl)}`,
+          `env_key = ${tomlString(input.provider.envKey)}`,
+        ]),
     `wire_api = ${tomlString(input.provider.wireApi)}`,
     ...(input.provider.supportsWebSockets
       ? ["supports_websockets = true"]
       : []),
-    "requires_openai_auth = false",
-    ...(input.writeProviderRetryDefaults
-      ? [
-          `request_max_retries = ${HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES}`,
-          `stream_max_retries = ${HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES}`,
-        ]
-      : []),
+    `stream_idle_timeout_ms = ${HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS}`,
+    `requires_openai_auth = ${input.chatGptAuth ? "true" : "false"}`,
+    `request_max_retries = ${HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES}`,
+    `stream_max_retries = ${HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES}`,
     "",
   ];
-  const modelProviderId = input.chatGptAuth
-    ? HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID
-    : input.provider.id;
 
   return [
     ...(input.model ? [`model = ${tomlString(input.model)}`] : []),

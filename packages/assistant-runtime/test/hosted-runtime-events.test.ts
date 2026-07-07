@@ -680,6 +680,95 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
   });
 
+  it("captures hosted Codex transport diagnostics without raw payloads", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_codex_transport_diagnostics",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_codex_transport",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_123",
+      },
+      event: {
+        codexThreadId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-codex-transport-diagnostics.v1",
+          type: "assistant.codex.transport_diagnostics",
+          codexTransportAdditionalDetailsPresent: true,
+          codexTransportErrorMessage: "raw provider message must not appear",
+          codexTransportErrorMessageLength: 144,
+          codexTransportErrorMessagePresent: true,
+          codexTransportEventKind: "stream-idle-timeout",
+          codexTransportFallbackActivated: false,
+          codexTransportIdleTimeout: true,
+          codexTransportProviderActionCount: 0,
+          codexTransportRetryCount: 2,
+          codexTransportRetryMax: 5,
+          codexTransportSourceMethod: "error",
+          codexTransportStreamDisconnected: true,
+          codexTransportThreadId: "raw-thread-id",
+          codexTransportThreadIdPresent: true,
+          codexTransportTransport: "websocket",
+          codexTransportTurnId: "raw-turn-id",
+          codexTransportTurnIdPresent: true,
+          codexTransportUrl: "https://api.openai.com/v1/responses",
+          codexTransportWillRetry: true,
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_codex_transport_diagnostics",
+      level: "info",
+      message: "Hosted assistant Codex transport diagnostics captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        codexTransportAdditionalDetailsPresent: true,
+        codexTransportErrorMessageLength: 144,
+        codexTransportErrorMessagePresent: true,
+        codexTransportEventKind: "stream-idle-timeout",
+        codexTransportFallbackActivated: false,
+        codexTransportIdleTimeout: true,
+        codexTransportProviderActionCount: 0,
+        codexTransportRetryCount: 2,
+        codexTransportRetryMax: 5,
+        codexTransportSourceMethod: "error",
+        codexTransportStreamDisconnected: true,
+        codexTransportThreadIdPresent: true,
+        codexTransportTraceType: "transport-diagnostics",
+        codexTransportTransport: "websocket",
+        codexTransportTurnIdPresent: true,
+        codexTransportWillRetry: true,
+        providerTraceKind: "codex.transport_diagnostics",
+        requestId: "req_123",
+        schema: "murph.assistant-codex-transport-diagnostics.v1",
+      }),
+    });
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw provider message");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-turn-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("api.openai.com");
+  });
+
   it("captures hosted Codex warm app-server timing traces", () => {
     for (const stage of ["warm-reused", "warm-idle", "warm-abort-poisoned"]) {
       const eventId = `evt_codex_${stage.replaceAll("-", "_")}_timing`;
