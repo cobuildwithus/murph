@@ -98,6 +98,7 @@ import {
   type AssistantActiveTurnInputAdmissionResult,
 } from './turn-input.js'
 import {
+  assistantDeliveryOutcomeSupersedesTypingIndicator,
   startAssistantChannelTypingIndicator,
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
@@ -419,7 +420,7 @@ export async function sendAssistantMessageLocal(
         value: null,
       }
       let currentSession = resolved.session
-      let finalReplyDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
+      let deliverySupersededTypingIndicator = false
 
       try {
         const turnInputController = createAssistantActiveTurnInputController({
@@ -1440,6 +1441,11 @@ export async function sendAssistantMessageLocal(
           }
         }
         for (const precedingOutcome of precedingDeliveryOutcomes) {
+          deliverySupersededTypingIndicator =
+            deliverySupersededTypingIndicator ||
+            assistantDeliveryOutcomeSupersedesTypingIndicator(
+              precedingOutcome.kind,
+            )
           if (precedingOutcome.kind !== 'failed') {
             continue
           }
@@ -1473,9 +1479,11 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
-        if (finalResponseText !== null) {
-          finalReplyDeliveryOutcomeKind = deliveryOutcome.kind
-        }
+        deliverySupersededTypingIndicator =
+          deliverySupersededTypingIndicator ||
+          assistantDeliveryOutcomeSupersedesTypingIndicator(
+            finalResponseText !== null ? deliveryOutcome.kind : null,
+          )
         const reactionDeliveryResult = await deliverAssistantProviderReactions({
           currentInput,
           providerResult,
@@ -1628,9 +1636,7 @@ export async function sendAssistantMessageLocal(
       } finally {
         activeTurnInputController?.close()
         await stopAssistantChannelTypingIndicator(typingIndicator, {
-          providerStop: !assistantDeliveryOutcomeSupersedesTypingIndicator(
-            finalReplyDeliveryOutcomeKind,
-          ),
+          providerStop: !deliverySupersededTypingIndicator,
         })
         if (
           !(
@@ -2127,12 +2133,6 @@ function resolveAssistantNoReplyDeliveryOutcome(input: {
     media: [],
     session: input.session,
   }
-}
-
-function assistantDeliveryOutcomeSupersedesTypingIndicator(
-  kind: AssistantDeliveryOutcome['kind'] | null,
-): boolean {
-  return kind === 'sent' || kind === 'queued'
 }
 
 function buildActiveTurnInput(input: {

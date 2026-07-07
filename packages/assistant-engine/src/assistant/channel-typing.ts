@@ -10,7 +10,11 @@ import {
   resolveAssistantCurrentAudienceDeliveryFields,
 } from './delivery-service.js'
 import type { AssistantChannelActivityStopOptions } from './channels/types.js'
-import type { AssistantMessageInput, AssistantTurnSharedPlan } from './service-contracts.js'
+import type {
+  AssistantDeliveryOutcome,
+  AssistantMessageInput,
+  AssistantTurnSharedPlan,
+} from './service-contracts.js'
 
 const ASSISTANT_TYPING_STOP_WAIT_MS = 2_000
 
@@ -114,6 +118,12 @@ export async function stopAssistantChannelTypingIndicator(
   }
 
   await indicator.stop(options)
+}
+
+export function assistantDeliveryOutcomeSupersedesTypingIndicator(
+  kind: AssistantDeliveryOutcome['kind'] | null,
+): boolean {
+  return kind === 'sent' || kind === 'queued'
 }
 
 async function runAssistantTypingBestEffort(

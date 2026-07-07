@@ -834,7 +834,13 @@ test('sendAssistantMessageLocal reports preceding delivery failure when no final
   const session = createAssistantSession({
     sessionId: 'session-no-reply-preceding-failure',
   })
+  const stopTyping = vi.fn(async () => undefined)
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        stop: stopTyping,
+      })),
+    },
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
@@ -891,13 +897,22 @@ test('sendAssistantMessageLocal reports preceding delivery failure when no final
       kind: 'failed',
       intentId: 'intent-preceding-failed',
     })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: true,
+  })
 })
 
 test('sendAssistantMessageLocal reports preceding queued delivery when no final reply exists', async () => {
   const session = createAssistantSession({
     sessionId: 'session-no-reply-preceding-queued',
   })
+  const stopTyping = vi.fn(async () => undefined)
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        stop: stopTyping,
+      })),
+    },
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
@@ -954,6 +969,9 @@ test('sendAssistantMessageLocal reports preceding queued delivery when no final 
       kind: 'queued',
       intentId: 'intent-preceding-queued',
     })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: false,
+  })
 })
 
 test('sendAssistantMessageLocal reports thrown preceding delivery when no final reply exists', async () => {

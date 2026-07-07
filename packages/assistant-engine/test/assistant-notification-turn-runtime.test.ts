@@ -1757,6 +1757,8 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     createAssistantTurnId: () => 'turn-notification-skip',
   }))
   vi.doMock('../src/assistant/channel-typing.js', () => ({
+    assistantDeliveryOutcomeSupersedesTypingIndicator: (kind: string | null) =>
+      kind === 'sent' || kind === 'queued',
     startAssistantChannelTypingIndicator:
       mocks.startAssistantChannelTypingIndicator,
     stopAssistantChannelTypingIndicator:
@@ -3228,6 +3230,8 @@ async function loadNotificationTurnHarness(input: {
     createAssistantTurnId: () => input.turnId,
   }))
   vi.doMock('../src/assistant/channel-typing.js', () => ({
+    assistantDeliveryOutcomeSupersedesTypingIndicator: (kind: string | null) =>
+      kind === 'sent' || kind === 'queued',
     startAssistantChannelTypingIndicator:
       mocks.startAssistantChannelTypingIndicator,
     stopAssistantChannelTypingIndicator:

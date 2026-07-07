@@ -63,6 +63,7 @@ import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
 import {
+  assistantDeliveryOutcomeSupersedesTypingIndicator,
   startAssistantChannelTypingIndicator,
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
@@ -643,7 +644,7 @@ export async function sendAssistantNotificationLocal(
         }
       } finally {
         await stopAssistantChannelTypingIndicator(typingIndicator, {
-          providerStop: !assistantNotificationDeliveryOutcomeSupersedesTypingIndicator(
+          providerStop: !assistantDeliveryOutcomeSupersedesTypingIndicator(
             committedDeliveryOutcomeKind,
           ),
         })
@@ -848,12 +849,6 @@ function assistantNotificationDeliveryAcceptedFirstContact(input: {
   }
 
   return input.dispatchMode === 'queue-only' && input.deliveryOutcome.kind === 'queued'
-}
-
-function assistantNotificationDeliveryOutcomeSupersedesTypingIndicator(
-  kind: AssistantDeliveryOutcome['kind'] | null,
-): boolean {
-  return kind === 'sent' || kind === 'queued'
 }
 
 async function persistAssistantExactTextNotificationSession(input: {
