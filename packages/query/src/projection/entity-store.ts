@@ -1,6 +1,7 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { compareCanonicalEntities } from "../canonical-entities.ts";
 import type { QueryRecordData } from "../query-record-data.ts";
+import type { QueryCanonicalEntityFilters } from "../query-projection-types.ts";
 import type { VaultSourceSnapshot } from "../vault-source.ts";
 import {
   assertQueryProjectionTables,
@@ -87,6 +88,74 @@ export function readStoredVaultSource(
   } finally {
     database.close();
   }
+}
+
+export function listStoredCanonicalEntities(
+  location: QueryProjectionLocation,
+  filters: QueryCanonicalEntityFilters,
+): CanonicalEntity[] {
+  const database = openQueryProjectionDatabase(location, {
+    create: false,
+    readOnly: true,
+  });
+
+  try {
+    assertQueryProjectionTables(database, location);
+    return queryStoredCanonicalEntities(database, filters);
+  } finally {
+    database.close();
+  }
+}
+
+function queryStoredCanonicalEntities(
+  database: DatabaseSync,
+  filters: QueryCanonicalEntityFilters,
+): CanonicalEntity[] {
+  const whereClauses: string[] = [];
+  const parameters: Array<string | number> = [];
+
+  if (filters.family) {
+    whereClauses.push("family = ?");
+    parameters.push(filters.family);
+  }
+  if (filters.kinds && filters.kinds.length > 0) {
+    whereClauses.push(`kind IN (${filters.kinds.map(() => "?").join(", ")})`);
+    parameters.push(...filters.kinds);
+  }
+  if (filters.from) {
+    whereClauses.push("(date >= ? OR occurred_at >= ?)");
+    parameters.push(filters.from, `${filters.from}T00:00:00.000Z`);
+  }
+  if (filters.to) {
+    whereClauses.push("(date <= ? OR occurred_at <= ?)");
+    parameters.push(filters.to, `${filters.to}T23:59:59.999Z`);
+  }
+
+  const limit = filters.limit === null ? null : normalizeCanonicalEntityLimit(filters.limit ?? 1_000);
+  const limitSql = limit === null ? "" : "LIMIT ?";
+  if (limit !== null) {
+    parameters.push(limit);
+  }
+  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  const rows = database.prepare(`
+    SELECT entity_json
+    FROM query_entities
+    ${whereSql}
+    ORDER BY COALESCE(date, substr(occurred_at, 1, 10)) DESC, occurred_at DESC, sort_rank ASC
+    ${limitSql}
+  `).all(...parameters).map((row) => decodeQueryProjectionEntityRow(row));
+
+  return rows
+    .map((row) => parseJsonValue<CanonicalEntity | null>(row.entity_json, null))
+    .filter((entity): entity is CanonicalEntity => entity !== null)
+    .sort(compareCanonicalEntities);
+}
+
+function normalizeCanonicalEntityLimit(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    return 1_000;
+  }
+  return Math.min(value, 10_000);
 }
 
 function decodeQueryProjectionEntityRow(row: SqliteRow): QueryProjectionEntityRow {

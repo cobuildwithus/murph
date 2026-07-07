@@ -22,6 +22,14 @@ export interface QueryMetricPointFilters {
   to?: string;
 }
 
+export interface QueryCanonicalEntityFilters {
+  family?: string;
+  from?: string;
+  kinds?: readonly string[];
+  limit?: number | null;
+  to?: string;
+}
+
 export interface QueryMetricTarget {
   goalId: string;
   id: string;

@@ -202,6 +202,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('"activityKind": "<alias>"')
     expect(raw).toContain('narrowest matching scope')
     expect(raw).toContain('unsupported instead of')
+    expect(raw).toContain('vault-cli group shared --kind steps-days.v0')
+    expect(raw).toContain(
+      'vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>',
+    )
+    expect(raw).toContain('Never pass selector scopes through `--kind`')
   })
 
   it('builds stable symbolic skill file references', () => {

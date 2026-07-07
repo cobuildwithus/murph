@@ -759,6 +759,26 @@ describe("selectProjectableActivityMinutesDays", () => {
     }
   });
 
+  it("keeps activity-minute reads bounded to query projection entities", async () => {
+    const source = await readFile(
+      new URL("../src/hosted-runtime/vault-share-projection.ts", import.meta.url),
+      "utf8",
+    );
+    const readerStart = source.indexOf("async function readProjectableActivitySessionRows");
+    const readerEnd = source.indexOf("function toActivitySessionProjectionRow");
+
+    expect(readerStart).toBeGreaterThanOrEqual(0);
+    expect(readerEnd).toBeGreaterThan(readerStart);
+    const activitySessionReader = source.slice(readerStart, readerEnd);
+
+    expect(activitySessionReader).toContain("listCanonicalEntities");
+    expect(activitySessionReader).toContain('family: "event"');
+    expect(activitySessionReader).toContain('from: cutoffDate');
+    expect(activitySessionReader).toContain('"activity_session"');
+    expect(activitySessionReader).toContain('"intervention_session"');
+    expect(activitySessionReader).not.toContain("readVault(");
+  });
+
   it("shares one cached session read across activity-minute scopes in an offer", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",

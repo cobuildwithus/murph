@@ -487,6 +487,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedVaultShareProjectionScopesMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260707180000_hosted_vault_share_projection_scopes/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const deviceOauthSessionConsumedAtMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260703160000_device_oauth_session_consumed_at/migration.sql",
@@ -1260,6 +1267,33 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedVaultShareActiveIndexesMigrationSql.match(/WHERE "status" = 'granted'/gu))
       .toHaveLength(2);
+    expect(hostedVaultShareProjectionScopesMigrationSql).toContain(
+      "CREATE OR REPLACE FUNCTION hosted_vault_share_projection_scope_compat()",
+    );
+    expect(hostedVaultShareProjectionScopesMigrationSql).toContain(
+      "CREATE TRIGGER hosted_vault_share_projection_scope_compat",
+    );
+    expect(hostedVaultShareProjectionScopesMigrationSql).toContain(
+      'NEW."projection_scope_key" := NEW."projection_kind"',
+    );
+    expect(hostedVaultShareProjectionScopesMigrationSql).toContain(
+      "jsonb_build_object('projectionKind', NEW.\"projection_kind\")",
+    );
+    expect(hostedVaultShareProjectionScopesMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_vault_share_grantor_scope_destination_key"',
+    );
+    expect(hostedVaultShareProjectionScopesMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_vault_share_legacy_fixed_kind_destination_key"',
+    );
+    expect(hostedVaultShareProjectionScopesMigrationSql).toContain(
+      'WHERE "projection_scope_key" = "projection_kind"',
+    );
+    expect(hostedVaultShareProjectionScopesMigrationSql).not.toContain(
+      'DROP INDEX IF EXISTS "hosted_vault_share_active_grantor_projection_idx"',
+    );
+    expect(hostedVaultShareProjectionScopesMigrationSql).not.toContain(
+      'DROP INDEX IF EXISTS "hosted_vault_share_active_destination_projection_idx"',
+    );
   });
 
   it("makes eligible stuck device connections due even when their reconcile is scheduled in the future", () => {

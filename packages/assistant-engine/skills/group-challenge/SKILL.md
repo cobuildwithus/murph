@@ -149,7 +149,11 @@ Schedule one dispatch a day with `vault-cli automation save` (dailyLocal
 schedule, `continuityPolicy: preserve`). Each run:
 
 1. Read the challenge page.
-2. Read fresh standings: `vault-cli group shared --kind <metric kind>`.
+2. Read fresh standings with the same scope shape used for the challenge
+   share: fixed projections use `vault-cli group shared --kind steps-days.v0`;
+   selector activity-minute projections use
+   `vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>`.
+   Never pass selector scopes through `--kind`.
    Never reuse remembered numbers — wrong scores turn jokes into noise. If
    the data is empty or missing for a member, say so plainly; never invent
    figures.

@@ -18,8 +18,8 @@ import {
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
-  readVault,
   type ProjectedWearableSleepSummary,
+  listCanonicalEntities,
   listMetricPoints,
   listMetricPointsBatch,
   readProfileDocumentRuntime,
@@ -732,10 +732,15 @@ async function readProjectableActivitySessionRows(
     return read;
   }
 
-  const vault = await readVault(vaultRoot);
+  const entities = await listCanonicalEntities(vaultRoot, {
+    family: "event",
+    from: cutoffDate,
+    kinds: ["activity_session", "intervention_session"],
+    limit: null,
+  });
   const rows: ActivitySessionProjectionRow[] = [];
 
-  for (const entity of vault.events) {
+  for (const entity of entities) {
     const row = toActivitySessionProjectionRow(entity);
     if (row && row.date >= cutoffDate) {
       rows.push(row);

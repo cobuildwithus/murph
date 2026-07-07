@@ -1,4 +1,6 @@
+import type { CanonicalEntity } from "./canonical-entities.ts";
 import type {
+  QueryCanonicalEntityFilters,
   QueryMetricPointFilters,
   QueryMetricTarget,
   QueryProjectionStatus,
@@ -214,6 +216,7 @@ export {
   type MetricRowEvidence,
 } from "./metrics/index.ts";
 export {
+  type QueryCanonicalEntityFilters,
   type QueryMetricPointFilters,
   type QueryMetricTarget,
   type QueryMetricTargetRow,
@@ -384,6 +387,14 @@ export async function listMetricPoints(
 ): Promise<import("@murphai/health-metrics").MetricPoint[]> {
   const mod = await import("./query-projection.ts");
   return mod.listMetricPointsRuntime(vaultRoot, filters);
+}
+
+export async function listCanonicalEntities(
+  vaultRoot: string,
+  filters: QueryCanonicalEntityFilters = {},
+): Promise<CanonicalEntity[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.listCanonicalEntitiesRuntime(vaultRoot, filters);
 }
 
 export async function listMetricPointsBatch(
