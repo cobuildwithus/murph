@@ -416,7 +416,7 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.143.0-alpha.35");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.142.5");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -848,7 +848,7 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain("cwdRebound: process.cwd() === expectedVaultRoot");
     expect(hostedRunnerSmokeChild).toContain('model = "gpt-5.5"');
     expect(hostedRunnerSmokeChild).toContain('model_reasoning_effort = "low"');
-    expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 128000");
+    expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 164000");
     expect(hostedRunnerSmokeChild).toContain("runCodexVaultCliProof");
     expect(hostedRunnerSmokeChild).toContain('"vault-show-default"');
     expect(hostedRunnerSmokeChild).toContain('"vault-show-explicit"');

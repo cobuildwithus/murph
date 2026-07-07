@@ -1,4 +1,4 @@
-ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.143.0-alpha.35
+ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.142.5
 
 FROM ${HOSTED_RUNNER_BASE_IMAGE}
 
@@ -9,8 +9,8 @@ ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle
 ENV MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON="/usr/local/share/murph/codex-model-catalog.openai-flex.json"
 
 # use_responses_lite must stay false: the OpenAI API rejects gpt-5.4-nano when
-# Codex >= 0.143 sends the x-openai-internal-codex-responses-lite header
-# ("This model is not supported when using X-OpenAI-Internal-Codex-Responses-Lite").
+# Keep use_responses_lite false for the smoke model so future Codex upgrades do
+# not hit the OpenAI response-lite rejection path for `gpt-5.4-nano`.
 RUN mkdir -p /usr/local/share/murph \
   && codex debug models --bundled \
     | jq 'def add_gpt_55_flex: (.service_tiers) |= ((. // []) | if any(.[]?; .id == "flex") then . else . + [{"id":"flex","name":"Flex","description":"Lower-cost flexible processing"}] end); def first_model($slug): ([.models[]? | select(.slug == $slug)][0] // error("missing Codex model catalog entry: " + $slug)); def gpt_54_nano_from($model): $model | .slug = "gpt-5.4-nano" | .display_name = "GPT-5.4-Nano" | .description = "Fast, low-cost model for deploy smoke checks." | .priority = 5 | .service_tiers = [] | .supports_search_tool = false | .supports_parallel_tool_calls = false | .use_responses_lite = false; (.models[] | select(.slug == "gpt-5.5")) |= add_gpt_55_flex | if any(.models[]?; .slug == "gpt-5.4-nano") then (.models[] | select(.slug == "gpt-5.4-nano")) |= gpt_54_nano_from(.) else first_model("gpt-5.4-mini") as $mini | .models += [gpt_54_nano_from($mini)] end' \
