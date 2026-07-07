@@ -378,7 +378,7 @@ export async function sendLinqChatMessage(
   })
 }
 
-export async function createLinqAttachmentUpload(
+async function createLinqAttachmentUpload(
   input: {
     contentType: string
     filename: string
@@ -417,7 +417,7 @@ export async function createLinqAttachmentUpload(
   return parseLinqAttachmentUploadResponse(response)
 }
 
-export async function uploadLinqAttachmentBytes(
+async function uploadLinqAttachmentBytes(
   input: {
     bytes: Uint8Array
     requiredHeaders: Record<string, string>
@@ -498,6 +498,49 @@ export async function uploadLinqAttachmentBytes(
       false,
     )
   }
+}
+
+export async function uploadLinqAttachment(
+  input: {
+    bytes: Uint8Array
+    contentType: string
+    filename: string
+  },
+  dependencies: {
+    env?: NodeJS.ProcessEnv
+    fetchImplementation?: LinqFetch
+    publicFetchImplementation?: LinqFetch
+    signal?: AbortSignal
+  } = {},
+): Promise<{ attachmentId: string }> {
+  const bytes = normalizeLinqAttachmentBytes(input.bytes)
+  const upload = await createLinqAttachmentUpload(
+    {
+      contentType: input.contentType,
+      filename: input.filename,
+      sizeBytes: bytes.byteLength,
+    },
+    {
+      env: dependencies.env,
+      fetchImplementation: dependencies.fetchImplementation,
+      ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+    },
+  )
+  await uploadLinqAttachmentBytes(
+    {
+      bytes,
+      requiredHeaders: upload.requiredHeaders,
+      uploadUrl: upload.uploadUrl,
+    },
+    {
+      fetchImplementation:
+        dependencies.publicFetchImplementation
+        ?? dependencies.fetchImplementation,
+      ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+    },
+  )
+
+  return { attachmentId: upload.attachmentId }
 }
 
 export async function sendLinqVoiceMemo(

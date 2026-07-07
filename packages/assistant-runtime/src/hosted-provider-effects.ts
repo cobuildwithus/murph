@@ -47,6 +47,7 @@ export interface HostedProviderEffectDependencies {
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch | null;
+  publicFetchImplementation?: typeof fetch | null;
   onProviderDispatchEntered?: (() => void) | null;
   signal?: AbortSignal;
 }
@@ -55,6 +56,7 @@ interface HostedProviderEffectContext {
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch;
+  publicFetchImplementation?: typeof fetch;
   signal?: AbortSignal;
 }
 
@@ -309,6 +311,9 @@ async function sendHostedProviderLinqMessageDirect(
     env: context.env,
     fetchImplementation: context.fetchImplementation,
     signal: context.signal,
+    ...(context.publicFetchImplementation
+      ? { publicFetchImplementation: context.publicFetchImplementation }
+      : {}),
     ...(context.loadVaultFile ? { loadVaultFile: context.loadVaultFile } : {}),
   });
 }
@@ -317,8 +322,12 @@ function createHostedProviderEffectContext(
   dependencies: HostedProviderEffectDependencies,
   operation: string,
 ): HostedProviderEffectContext {
+  const { publicFetchImplementation, ...providerDependencies } = dependencies;
   return {
-    ...requireHostedProviderFetchDependencies(dependencies, operation),
+    ...requireHostedProviderFetchDependencies(providerDependencies, operation),
+    ...(publicFetchImplementation
+      ? { publicFetchImplementation }
+      : {}),
     ...(dependencies.loadVaultFile
       ? { loadVaultFile: dependencies.loadVaultFile }
       : {}),

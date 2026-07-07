@@ -17,7 +17,6 @@ import {
 import { resolveExternalUrlBrowserCommands } from '../src/device-sync-browser-opener.ts'
 import { createDeviceSyncClient } from '../src/device-sync-client.ts'
 import {
-  createLinqAttachmentUpload,
   createLinqChat,
   createLinqWebhookSubscription,
   deleteLinqMessage,
@@ -27,7 +26,7 @@ import {
   sendLinqVoiceMemo,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
-  uploadLinqAttachmentBytes,
+  uploadLinqAttachment,
 } from '../src/linq-runtime.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
 
@@ -584,36 +583,17 @@ test('linq runtime creates, uploads, and sends voice memo attachments without re
   })
 
   await expect(
-    createLinqAttachmentUpload(
+    uploadLinqAttachment(
       {
+        bytes: audioBytes,
         contentType: 'audio/mpeg',
         filename: ' voice-memo.mp3 ',
-        sizeBytes: audioBytes.byteLength,
       },
       { env, fetchImplementation },
     ),
   ).resolves.toEqual({
     attachmentId: 'attachment_voice_1',
-    downloadUrl: 'https://cdn.example.test/voice-memo.mp3',
-    expiresAt: '2026-04-08T00:05:00.000Z',
-    requiredHeaders: {
-      'content-type': 'audio/mpeg',
-      'x-upload-token': 'upload-token',
-    },
-    uploadUrl: 'https://uploads.example.test/upload/voice-memo',
   })
-
-  await uploadLinqAttachmentBytes(
-    {
-      bytes: audioBytes,
-      requiredHeaders: {
-        'content-type': 'audio/mpeg',
-        'x-upload-token': 'upload-token',
-      },
-      uploadUrl: ' https://uploads.example.test/upload/voice-memo ',
-    },
-    { fetchImplementation },
-  )
 
   await expect(
     sendLinqVoiceMemo(
@@ -676,6 +656,110 @@ test('linq runtime creates, uploads, and sends voice memo attachments without re
   }
 })
 
+test('linq runtime uploads attachment bytes with public fetch for the presigned PUT', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const bytes = new Uint8Array([1, 2, 3, 4])
+  const providerFetch = vi.fn(async (url: string, init) => {
+    assert.equal(init.method, 'POST')
+    assert.ok(url.endsWith('/attachments'))
+    assert.deepEqual(parseJsonRequestBody(init.body), {
+      content_type: 'application/pdf',
+      filename: 'report.pdf',
+      size_bytes: bytes.byteLength,
+    })
+    return createJsonResponse({
+      attachment_id: 'attachment_pdf_1',
+      download_url: 'https://cdn.example.test/report.pdf',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+        'x-upload-token': 'upload-token',
+      },
+      upload_url: 'https://uploads.example.test/upload/report',
+    })
+  })
+  const publicFetch = vi.fn(async (url: string, init) => {
+    assert.equal(url, 'https://uploads.example.test/upload/report')
+    assert.equal(init.method, 'PUT')
+    assert.deepEqual(init.headers, {
+      'content-type': 'application/pdf',
+      'x-upload-token': 'upload-token',
+    })
+    return new Response(null, { status: 204 })
+  })
+
+  await expect(
+    uploadLinqAttachment(
+      {
+        bytes,
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+  ).resolves.toEqual({ attachmentId: 'attachment_pdf_1' })
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(1)
+})
+
+test('linq runtime falls back to provider fetch for attachment PUT when public fetch is absent', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const seenRequests: Array<{ method: string; url: string }> = []
+  const fetchImplementation = vi.fn(async (url: string, init) => {
+    seenRequests.push({ method: init.method, url })
+    if (url.endsWith('/attachments')) {
+      return createJsonResponse({
+        attachment_id: 'attachment_pdf_1',
+        download_url: 'https://cdn.example.test/report.pdf',
+        expires_at: '2026-04-08T00:05:00.000Z',
+        http_method: 'PUT',
+        required_headers: {
+          'content-type': 'application/pdf',
+        },
+        upload_url: 'https://uploads.example.test/upload/report',
+      })
+    }
+    if (url === 'https://uploads.example.test/upload/report') {
+      return new Response(null, { status: 204 })
+    }
+    throw new Error(`Unexpected request: ${init.method} ${url}`)
+  })
+
+  await expect(
+    uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      { env, fetchImplementation },
+    ),
+  ).resolves.toEqual({ attachmentId: 'attachment_pdf_1' })
+
+  expect(seenRequests).toEqual([
+    {
+      method: 'POST',
+      url: 'https://linq.example.test/custom/attachments',
+    },
+    {
+      method: 'PUT',
+      url: 'https://uploads.example.test/upload/report',
+    },
+  ])
+})
+
 test('linq runtime rejects unsafe attachment upload URLs before uploading bytes', async () => {
   const env = {
     LINQ_API_BASE_URL: ' https://linq.example.test/custom/ ',
@@ -700,11 +784,11 @@ test('linq runtime rejects unsafe attachment upload URLs before uploading bytes'
 
   await assert.rejects(
     () =>
-      createLinqAttachmentUpload(
+      uploadLinqAttachment(
         {
+          bytes: new Uint8Array([1, 2, 3, 4]),
           contentType: 'audio/mpeg',
           filename: 'voice-memo.mp3',
-          sizeBytes: 4,
         },
         { env, fetchImplementation: createFetch },
       ),
@@ -716,17 +800,35 @@ test('linq runtime rejects unsafe attachment upload URLs before uploading bytes'
   expect(createFetch).toHaveBeenCalledTimes(1)
 
   const uploadFetch = vi.fn()
+  const unsafeUploadFetch = vi.fn(async (url: string, init) => {
+    if (url.endsWith('/attachments') && init.method === 'POST') {
+      return createJsonResponse({
+        attachment_id: 'attachment_voice_1',
+        download_url: 'https://cdn.example.test/voice-memo.mp3',
+        expires_at: '2026-04-08T00:05:00.000Z',
+        http_method: 'PUT',
+        required_headers: {
+          'content-type': 'audio/mpeg',
+        },
+        upload_url: 'https://127.0.0.1/upload/voice-memo',
+      })
+    }
+
+    throw new Error(`Unexpected request: ${init.method} ${url}`)
+  })
   await assert.rejects(
     () =>
-      uploadLinqAttachmentBytes(
+      uploadLinqAttachment(
         {
           bytes: new Uint8Array([1, 2, 3, 4]),
-          requiredHeaders: {
-            'content-type': 'audio/mpeg',
-          },
-          uploadUrl: 'https://127.0.0.1/upload/voice-memo',
+          contentType: 'audio/mpeg',
+          filename: 'voice-memo.mp3',
         },
-        { fetchImplementation: uploadFetch },
+        {
+          env,
+          fetchImplementation: unsafeUploadFetch,
+          publicFetchImplementation: uploadFetch,
+        },
       ),
     (error) =>
       error instanceof VaultCliError &&

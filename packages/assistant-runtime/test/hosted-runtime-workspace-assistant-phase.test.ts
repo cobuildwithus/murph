@@ -86,14 +86,21 @@ vi.mock("@murphai/assistant-engine/assistant-store", () => ({
 
 vi.mock("@murphai/assistant-engine", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@murphai/assistant-engine")>();
+  const automation =
+    await vi.importActual<typeof import("@murphai/assistant-engine/assistant-automation")>(
+      "@murphai/assistant-engine/assistant-automation",
+    );
   return {
     ...actual,
     applyMurphManagedAutomations: mocks.applyMurphManagedAutomations,
     getAssistantCronStatus: mocks.getAssistantCronStatus,
     readAssistantInputEvent: mocks.readAssistantInputEvent,
     readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
+    recordHostedMailboxAssistantInputItem:
+      automation.recordHostedMailboxAssistantInputItem,
     scheduleDeviceActivityTriggeredAutomations:
       mocks.scheduleDeviceActivityTriggeredAutomations,
+    upsertAssistantInputEvent: automation.upsertAssistantInputEvent,
   };
 });
 
@@ -179,6 +186,9 @@ import {
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import {
+  readExistingHostedPendingAssistantInputIds,
+} from "../src/hosted-runtime/pending-input-index.ts";
 import {
   isHostedDeviceSyncMaintenanceModuleLoadError,
   loadHostedDeviceSyncMaintenanceModule,
@@ -5909,6 +5919,175 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         nextWakeAt: consumedWakeAt,
       }),
     }));
+  });
+
+  it("stages one pending assistant input when terminal member-facing delivery fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-terminal-failure-",
+    ));
+    try {
+      const now = "2026-05-08T16:00:08.000Z";
+      const baseEffect = createDeliveryEffect();
+      const deliveryEffect = {
+        ...baseEffect,
+        effectId: "intent_vault_file_terminal_failure",
+        fingerprint: "fingerprint_vault_file_terminal_failure",
+        payload: {
+          ...baseEffect.payload,
+          channel: "linq" as const,
+          idempotencyKey: "assistant-outbox:intent_vault_file_terminal_failure",
+          media: [{
+            approvalGeneration: "b".repeat(64),
+            approvalId: "approval_vault_file_terminal_failure",
+            contentType: "application/pdf",
+            filename: "lab-results.pdf",
+            kind: "vault_file" as const,
+            ref: "documents/lab-results.pdf",
+            sha256: "a".repeat(64),
+            sizeBytes: 1234,
+          }],
+        },
+      };
+      const terminalFailure = {
+        ...createFailedDeliveryOutcome({
+          deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+          effectId: deliveryEffect.effectId,
+        }),
+        deliveryStatus: "failed" as const,
+        effectFingerprint: deliveryEffect.fingerprint,
+        retryable: false,
+      };
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      let deliveryDrained = false;
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(async () => {
+        deliveryDrained = true;
+        return [terminalFailure];
+      });
+      mocks.resolveHostedPendingAssistantInputWakeAt.mockImplementation(async (input) => {
+        if (!deliveryDrained) {
+          return null;
+        }
+        const inputIds = await readExistingHostedPendingAssistantInputIds({
+          vaultRoot,
+        });
+        return inputIds.length > 0 ? input.now?.() ?? now : null;
+      });
+
+      const firstResult = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const firstPostCheckpoint = firstResult.afterCheckpoint
+        ? await firstResult.afterCheckpoint()
+        : firstResult;
+
+      expect(firstPostCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: now,
+        nextWakeReason: "assistant",
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 1,
+          hostedOutboxTerminalizedSending: 1,
+        }),
+      }));
+      let pendingInputIds = await readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      });
+      expect(pendingInputIds).toHaveLength(1);
+      const actualAssistantAutomation =
+        await vi.importActual<typeof import("@murphai/assistant-engine/assistant-automation")>(
+          "@murphai/assistant-engine/assistant-automation",
+        );
+      const event = await actualAssistantAutomation.readAssistantInputEvent({
+        inputId: pendingInputIds[0]!,
+        vault: vaultRoot,
+      });
+      expect(event?.content.text).toContain(
+        "outgoing message failed to send and was NOT delivered",
+      );
+      expect(event?.content.text).toContain("channel: linq");
+      expect(event?.content.text).toContain("failure code: LINQ_API_REQUEST_FAILED");
+      expect(event?.content.text).toContain('vault file "lab-results.pdf"');
+      expect(event?.content.text).toContain(
+        "Any consumed vault-file approval must be re-requested before retrying",
+      );
+      expect(event?.content.text).not.toContain("documents/lab-results.pdf");
+      expect(event?.content.text).not.toContain("presigned");
+
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      deliveryDrained = false;
+
+      const secondResult = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      if (secondResult.afterCheckpoint) {
+        await secondResult.afterCheckpoint();
+      }
+
+      pendingInputIds = await readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      });
+      expect(pendingInputIds).toHaveLength(1);
+      expect(pendingInputIds[0]).toBe(event?.inputId);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not stage pending assistant input for retryable delivery failures", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-retryable-failure-",
+    ));
+    try {
+      const deliveryEffect = createDeliveryEffect();
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([
+        createFailedDeliveryOutcome({
+          deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+          effectId: deliveryEffect.effectId,
+        }),
+      ]);
+      mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(null);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = result.afterCheckpoint
+        ? await result.afterCheckpoint()
+        : result;
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 0,
+        }),
+      }));
+      await expect(readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      })).resolves.toEqual([]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
   });
 
   it("fast-dispatches idempotent active nudge delivery before the runner checkpoint", async () => {

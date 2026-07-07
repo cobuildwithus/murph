@@ -7617,6 +7617,12 @@ describe("hosted runtime callbacks", () => {
       target: "chat_123",
       targetKind: "thread",
     });
+    const providerFetch = vi.fn<typeof fetch>(
+      async () => new Response(null, { status: 204 }),
+    );
+    const publicInternetFetch = vi.fn<typeof fetch>(
+      async () => new Response(null, { status: 204 }),
+    );
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         idempotencyKey: "assistant-outbox:intent_123",
@@ -7643,9 +7649,8 @@ describe("hosted runtime callbacks", () => {
       actionApprovalPort,
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub(),
-      providerFetch: vi.fn<typeof fetch>(
-        async () => new Response(null, { status: 204 }),
-      ),
+      providerFetch,
+      publicInternetFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
@@ -7667,6 +7672,8 @@ describe("hosted runtime callbacks", () => {
       }),
       expect.objectContaining({
         loadVaultFile: expect.any(Function),
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicInternetFetch,
       }),
     );
     expect(outcomes).toEqual([

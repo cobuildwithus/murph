@@ -14,9 +14,8 @@ import {
   resolveElevenLabsVoiceId,
 } from '@murphai/operator-config/elevenlabs-runtime'
 import {
-  createLinqAttachmentUpload,
   resolveLinqApiToken,
-  uploadLinqAttachmentBytes,
+  uploadLinqAttachment,
 } from '@murphai/operator-config/linq-runtime'
 import {
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
@@ -346,26 +345,16 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
       }
 
       const linqFilename = `${request.filenameBase}.${audio.filenameExtension}`
-      const upload = await createLinqAttachmentUpload(
+      const upload = await uploadLinqAttachment(
         {
+          bytes: audio.bytes,
           contentType: audio.contentType,
           filename: linqFilename,
-          sizeBytes: audio.bytes.byteLength,
         },
         {
           env: input.env,
           fetchImplementation,
-          signal: request.signal ?? undefined,
-        },
-      )
-      await uploadLinqAttachmentBytes(
-        {
-          bytes: audio.bytes,
-          requiredHeaders: upload.requiredHeaders,
-          uploadUrl: upload.uploadUrl,
-        },
-        {
-          fetchImplementation: uploadFetchImplementation,
+          publicFetchImplementation: uploadFetchImplementation,
           signal: request.signal ?? undefined,
         },
       )
@@ -425,4 +414,3 @@ function describeVoiceMemoGeneration(
       return { label: 'song', transcript: null }
   }
 }
-

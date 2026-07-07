@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   buildHostedExecutionRuntimeTimerWake,
@@ -23,10 +25,12 @@ import {
   HOSTED_ASSISTANT_TURN_TIMING_TYPE,
   applyMurphManagedAutomations,
   getAssistantCronStatus,
+  recordHostedMailboxAssistantInputItem,
   readAssistantOutboxIntent,
   readAssistantInputEvent,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
+  upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
   type AssistantExecutionContext,
   type HostedAssistantTurnTimingStage,
@@ -88,6 +92,9 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
+  enqueueHostedPendingAssistantInputId,
+} from "./pending-input-index.ts";
+import {
   drainHostedProviderCleanupAfterCommit,
   recordHostedProviderCleanupAfterDelivery,
   resolveHostedProviderCleanupScheduledWakeAt,
@@ -145,6 +152,13 @@ import {
 
 const HOSTED_DEVICE_SYNC_DIRTY_ACK_FAILURE_RETRY_DELAY_MS = 60_000;
 const HOSTED_OUTBOX_DELIVERY_ERROR_LOG_LIMIT = 16;
+const OUTBOX_DELIVERY_FAILED_INPUT_PREFIX = "outbox-delivery-failed";
+const OUTBOX_DELIVERY_FAILED_PAYLOAD_SCHEMA =
+  "murph.outbox-delivery-failed.v1";
+const OUTBOX_DELIVERY_FAILED_WAKE_SCHEMA =
+  "murph.hosted-runtime-outbox-delivery.v1";
+const ASSISTANT_INPUT_EVENT_SAFE_TOKEN_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u;
 
 const HOSTED_RUNTIME_REDACTED_TEXT_MAX_LENGTH = 2048;
 const HOSTED_RUNTIME_BLOCKED_LOG_KEY_PARTS = [
@@ -531,6 +545,7 @@ export async function runHostedWorkspaceAssistantPhase(
           linqEgressLatencyTrace,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
+          publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
           signal: channelAbortController.signal,
           userEnv: input.runtime.userEnv,
           wake,
@@ -3880,6 +3895,7 @@ async function drainHostedPostCheckpointDelivery(input: {
         platformEnv: input.input.runtime.platformEnv,
         preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
         providerFetch: input.input.runtime.platform.providerFetch ?? null,
+        publicInternetFetch: input.input.runtime.platform.publicInternetFetch ?? null,
         shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDrain ?? null,
         signal: input.input.signal ?? null,
         userEnv: input.input.runtime.userEnv,
@@ -3906,6 +3922,16 @@ async function drainHostedPostCheckpointDelivery(input: {
     shouldYieldBackgroundDrain: input.shouldYieldBackgroundDrain ?? null,
     wake: input.wake,
   });
+  const stagedTerminalFailureInputCount =
+    await stageHostedTerminalOutboxFailureInputs({
+      deliveryEffects: input.assistantDeliveryEffects,
+      now: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
+      outcomes,
+      vaultRoot: input.input.restored.vaultRoot,
+    });
+  const postFailurePendingAssistantInputWakeAt = stagedTerminalFailureInputCount > 0
+    ? await resolvePendingAssistantInputWakeAt(input.input)
+    : null;
   const postOutboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
@@ -3948,6 +3974,10 @@ async function drainHostedPostCheckpointDelivery(input: {
     postAssistantCronWakeCandidate,
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
+    createHostedRuntimeWakeCandidate(
+      postFailurePendingAssistantInputWakeAt,
+      "assistant",
+    ),
     providerCleanup.wake,
   ]);
   const postNextWakeAt = postNextWake.at;
@@ -3972,6 +4002,7 @@ async function drainHostedPostCheckpointDelivery(input: {
           hostedOutboxDeliverySent: sentCount,
           hostedOutboxPendingDeliveryEffects: 0,
           hostedOutboxTerminalizedSending: terminalizedSendingCount,
+          hostedOutboxTerminalFailureInputsStaged: stagedTerminalFailureInputCount,
         }
       : {};
 
@@ -4092,6 +4123,176 @@ function isHostedAssistantDeliveryOutcomeTerminalized(
     && outcome.deliveryStatus !== "pending"
     && outcome.deliveryStatus !== "retryable"
     && outcome.deliveryStatus !== "sending";
+}
+
+async function stageHostedTerminalOutboxFailureInputs(input: {
+  deliveryEffects: HostedAssistantDeliveryEffects;
+  outcomes: readonly HostedAssistantDeliveryOutcome[];
+  now: string;
+  vaultRoot: string;
+}): Promise<number> {
+  const effectsById = new Map(
+    input.deliveryEffects.map((effect) => [effect.effectId, effect]),
+  );
+  let staged = 0;
+
+  for (const outcome of input.outcomes) {
+    if (!shouldStageHostedTerminalOutboxFailureInput(outcome)) {
+      continue;
+    }
+    const identity = safeHostedAssistantInputTokenOrHash(
+      `${OUTBOX_DELIVERY_FAILED_INPUT_PREFIX}:${outcome.effectId}`,
+    );
+    const text = renderHostedTerminalOutboxFailureSystemNote({
+      effect: effectsById.get(outcome.effectId) ?? null,
+      outcome,
+    });
+    const event = await upsertAssistantInputEvent({
+      event: {
+        content: {
+          attachmentDescriptors: [],
+          text,
+          transcriptText: text,
+          userMessageContent: [{ text, type: "text" }],
+        },
+        conversation: null,
+        occurredAt: input.now,
+        receivedAt: input.now,
+        replyTarget: null,
+        sourceMetadata: null,
+        sourceRef: {
+          dedupeKey: identity,
+          eventId: identity,
+          itemId: identity,
+          kind: "hosted-mailbox",
+          lane: "system",
+          laneSeq: identity,
+          payloadSchema: OUTBOX_DELIVERY_FAILED_PAYLOAD_SCHEMA,
+          payloadSource: "inline",
+          source: "hosted-mailbox",
+          wakeSchema: OUTBOX_DELIVERY_FAILED_WAKE_SCHEMA,
+        },
+      },
+      vault: input.vaultRoot,
+    });
+    await recordHostedMailboxAssistantInputItem({
+      inputId: event.inputId,
+      mailboxItemId: identity,
+      vault: input.vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot: input.vaultRoot,
+    });
+    staged += 1;
+  }
+
+  return staged;
+}
+
+function shouldStageHostedTerminalOutboxFailureInput(
+  outcome: HostedAssistantDeliveryOutcome,
+): boolean {
+  if (outcome.deliveryStatus !== "failed" || outcome.retryable === true) {
+    return false;
+  }
+  return isHostedMemberFacingDeliveryChannel(outcome.deliveryChannel);
+}
+
+function isHostedMemberFacingDeliveryChannel(channel: string | null): boolean {
+  return channel === "email"
+    || channel === "linq"
+    || channel === "telegram"
+    || channel === "whatsapp";
+}
+
+function renderHostedTerminalOutboxFailureSystemNote(input: {
+  effect: HostedAssistantDeliveryEffects[number] | null;
+  outcome: HostedAssistantDeliveryOutcome;
+}): string {
+  const channel = normalizeHostedFailureNoteToken(
+    input.outcome.deliveryChannel ?? input.effect?.payload.channel,
+    "unknown",
+  );
+  const failureCode = normalizeHostedFailureNoteToken(
+    input.outcome.deliveryErrorCode,
+    "unknown",
+  );
+  const mediaDescription = renderHostedFailureNoteMedia(input.effect);
+  const hasVaultFile = input.effect?.payload.media.some((item) =>
+    item.kind === "vault_file"
+  ) === true;
+
+  const lines = [
+    "System note: The assistant's outgoing message failed to send and was NOT delivered to the user.",
+    `channel: ${channel}.`,
+    `failure code: ${failureCode}.`,
+    `attached media: ${mediaDescription}.`,
+  ];
+  if (hasVaultFile) {
+    lines.push(
+      "Any consumed vault-file approval must be re-requested before retrying.",
+    );
+  }
+  lines.push("Do not claim the failed message or file was sent.");
+  return lines.join(" ");
+}
+
+function renderHostedFailureNoteMedia(
+  effect: HostedAssistantDeliveryEffects[number] | null,
+): string {
+  const media = effect?.payload.media ?? [];
+  if (media.length === 0) {
+    return "none";
+  }
+
+  return media.map((item) => {
+    if (item.kind === "vault_file") {
+      return `vault file "${normalizeHostedFailureNoteFilename(item.filename)}"`;
+    }
+    if (item.kind === "voice_memo") {
+      return "voice memo";
+    }
+    return "image";
+  }).join(", ");
+}
+
+function normalizeHostedFailureNoteFilename(filename: string): string {
+  const normalized = filename.replace(/[\u0000-\u001F\u007F\\/]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return (normalized || "attached file").slice(0, 120);
+}
+
+function normalizeHostedFailureNoteToken(
+  value: string | null | undefined,
+  fallback: string,
+): string {
+  const normalized = value?.trim() ?? "";
+  return /^[A-Za-z0-9_.:-]{1,80}$/u.test(normalized)
+    ? normalized
+    : fallback;
+}
+
+function safeHostedAssistantInputTokenOrHash(value: string): string {
+  const normalized = value.trim();
+  if (
+    normalized.length > 0
+    && normalized.length <= 192
+    && ASSISTANT_INPUT_EVENT_SAFE_TOKEN_PATTERN.test(normalized)
+    && !isUnsafeHostedAssistantInputToken(normalized)
+  ) {
+    return normalized;
+  }
+
+  return `tok_${createHash("sha256").update(normalized || "empty").digest("hex").slice(0, 32)}`;
+}
+
+function isUnsafeHostedAssistantInputToken(value: string): boolean {
+  return value.includes("://")
+    || value.includes("@")
+    || value.includes("/")
+    || value.toLowerCase().includes("authorization");
 }
 
 async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
