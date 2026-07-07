@@ -31,6 +31,7 @@ import {
   MurphHeadshotAvatar,
   type MurphHeadshotSrc,
 } from "./murph-headshot-avatar";
+import { VoiceMemoPlayer } from "./voice-memo-player";
 
 type BloodworkMarker = {
   label: string;
@@ -77,6 +78,7 @@ type OrderItem = { kind: "order"; id: number; result: OrderResult };
 type ChallengeItem = { kind: "challenge"; id: number };
 type NewsletterItem = { kind: "newsletter"; id: number };
 type TimestampItem = { kind: "timestamp"; id: number; text: string };
+type AudioItem = { kind: "audio"; id: number; src: string };
 type ContactItem = {
   kind: "contact";
   id: number;
@@ -91,6 +93,7 @@ type StreamItem =
   | ChallengeItem
   | NewsletterItem
   | TimestampItem
+  | AudioItem
   | ContactItem;
 
 type Exchange = {
@@ -345,10 +348,15 @@ const GROUP_MESSAGES = {
   murphStandings:
     "Standings, day 5 of 7. Maya is one sunrise walk from taking the lead. Theo, bold words for a man who logged 11 minutes yesterday.",
   mayaReply: "😂 not the sunrise walk pressure",
-  userNewsletterQuestion: "how does everyone keep up with this?",
+  murphRoastIntro: "made the group a little anthem for week one",
+  sundayTimestamp: "Sunday 8:02 AM",
   murphNewsletter:
-    "Weekly recap lands in everyone's inbox on Sunday morning. Family included, no app needed.",
+    "This week's wins just landed in everyone's inbox. Family included, no app needed.",
 } as const;
+
+// Placeholder track until the ElevenLabs challenge-roast song is dropped in
+// at its own path; swap the src, keep the beat.
+const CHALLENGE_ROAST_AUDIO_SRC = "/audio/one-foot-two-foot.mp3";
 
 function findExchangeByTopic(topic: string): Exchange {
   const exchange = EXCHANGES.find(
@@ -805,9 +813,10 @@ export function HeroClocksIn({
           {
             kind: "text",
             id: nextId(),
-            from: "user",
-            text: GROUP_MESSAGES.userNewsletterQuestion,
+            from: "murph",
+            text: GROUP_MESSAGES.murphRoastIntro,
           },
+          { kind: "audio", id: nextId(), src: CHALLENGE_ROAST_AUDIO_SRC },
         ]);
       },
       GROUP_BEATS_START_AT + GROUP_BEAT_GAP * 3,
@@ -817,6 +826,11 @@ export function HeroClocksIn({
     queue(
       () => {
         appendItems([
+          {
+            kind: "timestamp",
+            id: nextId(),
+            text: GROUP_MESSAGES.sundayTimestamp,
+          },
           { kind: "newsletter", id: nextId() },
           {
             kind: "text",
@@ -826,7 +840,7 @@ export function HeroClocksIn({
           },
         ]);
       },
-      GROUP_BEATS_START_AT + GROUP_BEAT_GAP * 3 + 1100,
+      GROUP_BEATS_START_AT + GROUP_BEAT_GAP * 4,
       { allowAfterEngaged },
     );
   };
@@ -920,8 +934,14 @@ export function HeroClocksIn({
             {
               kind: "text",
               id: nextId(),
-              from: "user",
-              text: GROUP_MESSAGES.userNewsletterQuestion,
+              from: "murph",
+              text: GROUP_MESSAGES.murphRoastIntro,
+            },
+            { kind: "audio", id: nextId(), src: CHALLENGE_ROAST_AUDIO_SRC },
+            {
+              kind: "timestamp",
+              id: nextId(),
+              text: GROUP_MESSAGES.sundayTimestamp,
             },
             { kind: "newsletter", id: nextId() },
             {
@@ -1355,6 +1375,16 @@ export function HeroClocksIn({
                           if (it.kind === "timestamp") {
                             return (
                               <TimestampSeparator key={it.id} text={it.text} />
+                            );
+                          }
+                          if (it.kind === "audio") {
+                            return (
+                              <div
+                                key={it.id}
+                                className="hero-msg-in mr-auto w-full max-w-[86%] shrink-0 rounded-[17px] bg-white p-1.5"
+                              >
+                                <VoiceMemoPlayer src={it.src} />
+                              </div>
                             );
                           }
                           const next = items[i + 1];

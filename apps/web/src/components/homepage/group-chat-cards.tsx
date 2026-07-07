@@ -38,6 +38,7 @@ const CHALLENGE_ROWS = [
 ] as const;
 
 const NEWSLETTER_ROWS = [
+  "You · every walk day logged",
   "Theo · best sleep week since May",
   "Maya · 4 sunrise walks logged",
   "Sam · steps up 12% on baseline",

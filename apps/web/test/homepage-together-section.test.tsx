@@ -37,10 +37,7 @@ test("TogetherSection renders the static social feature reframe", () => {
     markup,
     /Every Sunday the group gets an email recap of the week\. Wins, trends, and gentle callouts\. Grandparents included\./,
   );
-  assert.match(
-    markup,
-    /Everyone opts in when they join\. Scores are adherence and change against your own baseline, never raw body stats\./,
-  );
+  assert.match(markup, /so proud of you kids/);
+  assert.match(markup, /Grandpa/);
   assert.doesNotMatch(markup, /leaderboard/i);
-  assert.doesNotMatch(markup, /raw body stats.*rank/i);
 });

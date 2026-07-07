@@ -200,10 +200,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /Do it with your people\./);
   assert.match(markup, /Walk challenge · Day 5 of 7/);
   assert.match(markup, /Weekly newsletter · Sunday 8:02 AM/);
-  assert.match(
-    markup,
-    /Everyone opts in when they join\. Scores are adherence and change against your own baseline, never raw body stats\./,
-  );
+  assert.match(markup, /Your personal health assistant, too\./);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
     markup,

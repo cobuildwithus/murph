@@ -43,19 +43,39 @@ export function TogetherSection() {
             eyebrow="The weekly newsletter"
             headline="I send the whole family a weekly health newsletter."
             body="Every Sunday the group gets an email recap of the week. Wins, trends, and gentle callouts. Grandparents included."
-            bubble="how does everyone keep up with this?"
+            bubble="can you send grandpa our weekly wins?"
+            artifactAlign="center"
             artifact={
-              <div className="mx-auto w-full max-w-[340px]">
-                <NewsletterCard />
+              <div className="mx-auto w-full max-w-[360px]">
+                <div className="relative">
+                  <div
+                    aria-hidden="true"
+                    className="absolute inset-0 -translate-y-2 translate-x-3 rotate-[1.8deg] rounded-[18px] bg-white/40 ring-1 ring-[#c4a882]/15"
+                  />
+                  <div className="relative">
+                    <NewsletterCard />
+                  </div>
+                </div>
+                <div className="mt-3.5 flex items-end gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className="mb-0.5 flex size-[22px] shrink-0 items-center justify-center rounded-full bg-[#8a6428]/25 text-[10px] font-semibold text-[#6b4d1e]"
+                  >
+                    G
+                  </span>
+                  <div>
+                    <p className="mb-0.5 pl-1 font-mono text-[9px] tracking-[0.08em] text-[#736a58]">
+                      Grandpa
+                    </p>
+                    <div className="w-fit rounded-2xl rounded-bl-[6px] bg-white px-4 py-2.5 text-[0.9375rem] leading-[1.4] text-[#2d3436] shadow-[0_8px_24px_-6px_rgba(60,40,20,0.2)]">
+                      so proud of you kids
+                    </div>
+                  </div>
+                </div>
               </div>
             }
           />
         </div>
-
-        <p className="mt-6 max-w-[820px] text-[0.8125rem] leading-[1.65] text-[#736a58]">
-          Everyone opts in when they join. Scores are adherence and change
-          against your own baseline, never raw body stats.
-        </p>
       </div>
     </section>
   );
