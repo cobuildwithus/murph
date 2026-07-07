@@ -4233,6 +4233,16 @@ function buildHostedTerminalOutboxFailureRouteFromIntent(
     return null;
   }
 
+  if (
+    intent?.answeredMailboxItemIds.some((mailboxItemId) =>
+      mailboxItemId.startsWith(`${OUTBOX_DELIVERY_FAILED_INPUT_PREFIX}:`)
+    ) === true
+  ) {
+    // Failure notes use outbox-delivery-failed:<intentId>; answering one must
+    // not create another failure-note obligation.
+    return null;
+  }
+
   if (intent?.threadIsDirect !== true) {
     return null;
   }

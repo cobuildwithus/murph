@@ -6485,6 +6485,84 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("does not stage pending assistant input when a terminal failure was itself replying to a failure note", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-terminal-failure-one-hop-",
+    ));
+    try {
+      const now = "2026-05-08T16:00:08.000Z";
+      const intentCreatedAt = "2026-05-08T16:00:00.000Z";
+      const deliveryEffect = {
+        ...createDeliveryEffect(),
+        effectId: "intent_terminal_failure_recovery_reply",
+        fingerprint: "fingerprint_terminal_failure_recovery_reply",
+        payload: {
+          ...createDeliveryEffect().payload,
+          channel: "telegram" as const,
+          idempotencyKey:
+            "assistant-outbox:intent_terminal_failure_recovery_reply",
+        },
+      };
+      mocks.readAssistantOutboxIntent.mockResolvedValue(
+        createTerminalFailureOutboxIntent({
+          actorId: "actor_telegram_direct",
+          answeredMailboxItemIds: [
+            "outbox-delivery-failed:intent_original_terminal_failure",
+          ],
+          bindingDeliveryTarget: "telegram_chat_direct",
+          channel: "telegram",
+          createdAt: intentCreatedAt,
+          effectId: deliveryEffect.effectId,
+          explicitTarget: null,
+          identityId: "identity_telegram_direct",
+          replyToMessageId: "telegram_message_direct",
+          threadId: "thread_telegram_direct",
+          threadIsDirect: true,
+        }),
+      );
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([
+        {
+          ...createFailedDeliveryOutcome({
+            deliveryChannel: "telegram",
+            deliveryErrorCode: "TELEGRAM_SEND_FAILED",
+            effectId: deliveryEffect.effectId,
+          }),
+          deliveryStatus: "failed" as const,
+          effectFingerprint: deliveryEffect.fingerprint,
+          retryable: false,
+        },
+      ]);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = result.afterCheckpoint
+        ? await result.afterCheckpoint()
+        : result;
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 0,
+          hostedOutboxTerminalizedSending: 1,
+        }),
+      }));
+      await expect(readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      })).resolves.toEqual([]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("does not stage pending assistant input for terminal failures without a durable direct route on the intent", async () => {
     const vaultRoot = await mkdtemp(path.join(
       tmpdir(),
@@ -11628,6 +11706,7 @@ async function seedDirectLinqAssistantInputRoute(input: {
 
 function createTerminalFailureOutboxIntent(input: {
   actorId?: string | null;
+  answeredMailboxItemIds?: readonly string[];
   bindingDelivery?: { kind: "participant" | "thread"; target: string } | null;
   bindingDeliveryTarget?: string | null;
   channel?: string | null;
@@ -11662,7 +11741,7 @@ function createTerminalFailureOutboxIntent(input: {
     : true;
   return {
     actorId,
-    answeredMailboxItemIds: [],
+    answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     bindingDelivery,
     channel,
     createdAt: input.createdAt,
