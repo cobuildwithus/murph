@@ -1,10 +1,24 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CONFIG_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const HOSTED_WEB_PRISMA_MIGRATIONS_DIR = path.join(CONFIG_DIR, "prisma", "migrations");
 const KNOWN_POOLER_PORTS = new Set(["6432", "6543"]);
+
+export const hostedWebPrismaPredeployDestructiveMigrationBaseline =
+  "20260707170000_drop_stale_linq_recency_columns";
+
+const destructivePredeploySqlPatterns = [
+  { label: "DROP COLUMN", pattern: /\bDROP\s+COLUMN\b/iu },
+  { label: "DROP CONSTRAINT", pattern: /\bDROP\s+CONSTRAINT\b/iu },
+  { label: "DROP INDEX", pattern: /\bDROP\s+INDEX\b/iu },
+  { label: "DROP TABLE", pattern: /\bDROP\s+TABLE\b/iu },
+  { label: "DROP TYPE", pattern: /\bDROP\s+TYPE\b/iu },
+  { label: "DROP VIEW", pattern: /\bDROP\s+(?:MATERIALIZED\s+)?VIEW\b/iu },
+] as const;
 
 export const hostedWebPrismaMigrateDeployCommand = {
   command: resolvePnpmCommand(),
@@ -19,9 +33,19 @@ export type HostedWebMigrationRunner = (
   environment: NodeJS.ProcessEnv,
 ) => Promise<void>;
 
+export interface HostedWebPrismaMigrateDeployOptions {
+  prismaMigrationsDir?: string;
+}
+
 export interface HostedWebMigrationDatabaseUrl {
   source: "DIRECT_DATABASE_URL" | "DATABASE_URL";
   url: string;
+}
+
+export interface HostedWebPredeployDestructiveMigration {
+  migrationId: string;
+  reason: string;
+  sqlPath: string;
 }
 
 export function resolveHostedWebMigrationDatabaseUrl(
@@ -74,7 +98,12 @@ export function assertDirectMigrationDatabaseUrl(
 export async function runHostedWebPrismaMigrateDeploy(
   environment: HostedWebMigrationEnvironment = process.env,
   runCommand: HostedWebMigrationRunner = runCommandInherited,
+  options: HostedWebPrismaMigrateDeployOptions = {},
 ): Promise<void> {
+  await assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
+    options.prismaMigrationsDir,
+  );
+
   const migrationDatabaseUrl = resolveHostedWebMigrationDatabaseUrl(environment);
   console.log(`Applying hosted web Prisma migrations with ${migrationDatabaseUrl.source}.`);
   await runCommand(
@@ -86,6 +115,57 @@ export async function runHostedWebPrismaMigrateDeploy(
       DATABASE_URL: migrationDatabaseUrl.url,
     },
   );
+}
+
+export async function assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
+  migrationsDir = HOSTED_WEB_PRISMA_MIGRATIONS_DIR,
+): Promise<void> {
+  const destructiveMigrations =
+    await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+  if (destructiveMigrations.length === 0) {
+    return;
+  }
+
+  const summary = destructiveMigrations
+    .map((migration) => `${migration.migrationId} (${migration.reason})`)
+    .join(", ");
+
+  throw new Error(
+    `Destructive hosted web Prisma migration(s) cannot run in the predeploy Prisma path after ${hostedWebPrismaPredeployDestructiveMigrationBaseline}: ${summary}. Move contract SQL to apps/web/prisma/contract-migrations so it runs after the production deployment is promoted.`,
+  );
+}
+
+export async function findHostedWebPrismaPredeployDestructiveMigrations(
+  migrationsDir = HOSTED_WEB_PRISMA_MIGRATIONS_DIR,
+): Promise<HostedWebPredeployDestructiveMigration[]> {
+  const entries = await readdir(migrationsDir, { withFileTypes: true });
+  const violations: HostedWebPredeployDestructiveMigration[] = [];
+
+  for (const entry of entries) {
+    if (
+      !entry.isDirectory() ||
+      entry.name <= hostedWebPrismaPredeployDestructiveMigrationBaseline
+    ) {
+      continue;
+    }
+
+    const sqlPath = path.join(migrationsDir, entry.name, "migration.sql");
+    const sql = stripSqlComments(await readFile(sqlPath, "utf8"));
+    const destructivePattern = destructivePredeploySqlPatterns.find(({ pattern }) =>
+      pattern.test(sql),
+    );
+
+    if (destructivePattern !== undefined) {
+      violations.push({
+        migrationId: entry.name,
+        reason: destructivePattern.label,
+        sqlPath,
+      });
+    }
+  }
+
+  return violations;
 }
 
 async function main(): Promise<void> {
@@ -113,6 +193,10 @@ function shouldRequireDirectDatabaseUrl(environment: HostedWebMigrationEnvironme
 function nonEmptyEnv(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+}
+
+function stripSqlComments(sql: string): string {
+  return sql.replace(/--.*$/gmu, "").replace(/\/\*[\s\S]*?\*\//gu, "");
 }
 
 function runCommandInherited(

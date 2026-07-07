@@ -574,10 +574,10 @@ migrations must stay backward compatible with the currently deployed app.
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
-successful production deployment for `main`. That workflow checks out the exact
-deployed commit, requires `HOSTED_WEB_DIRECT_DATABASE_URL` as a GitHub Actions
-secret, and calls `pnpm --dir apps/web release:production:contract-migrate` with
-explicit opt-in.
+successful production deployment. That workflow checks out the exact deployed
+commit, verifies it is reachable from `origin/main`, requires
+`HOSTED_WEB_DIRECT_DATABASE_URL` as a GitHub Actions secret, and calls
+`pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during

@@ -15,18 +15,18 @@ import {
   type HostedWebContractMigrationDatabase,
 } from "../scripts/run-production-contract-migrations";
 import {
-  assertHostedWebPrismaPredeployMigrationsAreExpandOnly,
-  findHostedWebPrismaPredeployDestructiveMigrations,
   hostedWebProductionLinqLineSyncCommand,
   hostedWebProductionMigrationCommand,
   hostedWebProductionPrismaGenerateCommand,
-  hostedWebPrismaPredeployDestructiveMigrationBaseline,
   runHostedWebProductionMigrationsIfNeeded,
   shouldRunHostedWebProductionMigrations,
   type HostedWebProductionMigrationEnvironment,
 } from "../scripts/run-production-migrations";
 import {
+  assertHostedWebPrismaPredeployMigrationsAreExpandOnly,
+  findHostedWebPrismaPredeployDestructiveMigrations,
   hostedWebPrismaMigrateDeployCommand,
+  hostedWebPrismaPredeployDestructiveMigrationBaseline,
   runHostedWebPrismaMigrateDeploy,
   resolveHostedWebMigrationDatabaseUrl,
 } from "../scripts/run-prisma-migrate-deploy";
@@ -157,7 +157,7 @@ describe("hosted web production migration guard", () => {
     }
   });
 
-  test("stops the production build before Prisma when a future destructive migration is present", async () => {
+  test("stops Prisma deploy before the database when a future destructive migration is present", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
     );
@@ -172,11 +172,9 @@ describe("hosted web production migration guard", () => {
 
       await assert.rejects(
         () =>
-          runHostedWebProductionMigrationsIfNeeded(
+          runHostedWebPrismaMigrateDeploy(
             {
-              VERCEL: "1",
-              VERCEL_ENV: "production",
-              VERCEL_GIT_COMMIT_REF: "main",
+              DIRECT_DATABASE_URL: "postgresql://direct.example.com:5432/app",
             },
             async () => {
               commandRan = true;
@@ -430,8 +428,14 @@ describe("hosted web production migration guard", () => {
 
     assert.match(workflow, /deployment_status/u);
     assert.match(workflow, /github\.event\.deployment_status\.state == 'success'/u);
-    assert.match(workflow, /github\.event\.deployment\.ref == 'main'/u);
     assert.match(workflow, /github\.event\.deployment\.sha/u);
+    assert.match(workflow, /fetch-depth: 0/u);
+    assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOYED_SHA\}" origin\/main/u);
+    assert.match(
+      workflow,
+      /steps\.production-branch\.outputs\.should_run == 'true'/u,
+    );
+    assert.doesNotMatch(workflow, /deployment\.ref == 'main'/u);
     assert.match(workflow, /HOSTED_WEB_DIRECT_DATABASE_URL/u);
     assert.match(workflow, /release:production:contract-migrate/u);
   });

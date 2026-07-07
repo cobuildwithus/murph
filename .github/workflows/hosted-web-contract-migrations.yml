@@ -9,33 +9,56 @@ permissions:
 jobs:
   production-contract-migrations:
     name: Run post-deploy contract migrations
-    if: ${{ github.event.deployment_status.state == 'success' && github.event.deployment.ref == 'main' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) }}
+    if: ${{ github.event.deployment_status.state == 'success' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     concurrency:
       group: hosted-web-contract-migrations-production
       cancel-in-progress: false
-    env:
-      DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}
-      MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"
-      MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ github.event.deployment.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
+      - name: Verify deployed commit is from main
+        id: production-branch
+        shell: bash
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha }}
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+          if git merge-base --is-ancestor "${DEPLOYED_SHA}" origin/main; then
+            echo "should_run=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "should_run=false" >> "${GITHUB_OUTPUT}"
+          echo "::notice::Skipping hosted web contract migrations because deployed SHA is not reachable from origin/main."
+
       - name: Setup pnpm
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install deps
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         run: pnpm install --frozen-lockfile
 
       - name: Apply hosted web contract migrations
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
+        env:
+          DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}
+          MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"
+          MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"
         run: pnpm --dir apps/web release:production:contract-migrate
