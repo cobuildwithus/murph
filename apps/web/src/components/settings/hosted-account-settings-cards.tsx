@@ -1,6 +1,6 @@
 "use client";
 
-import { ContactRound, Mail, Phone, Send } from "lucide-react";
+import { Mail, Phone, Send } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useState, type ReactNode } from "react";
 
@@ -9,7 +9,7 @@ import { Button } from "@/src/components/ui/button";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
-import { SettingsContactLink } from "./connected-account-card";
+import { SettingsContactAction, SettingsContactLink } from "./connected-account-card";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-helpers";
 
@@ -41,6 +41,26 @@ export function HostedAccountSettingsCards({
   const emailVerified = Boolean(account.email.verifiedAt);
   const murphEmailAddress = account.email.murphEmailAddress;
   const murphSmsHref = phoneNumber && murphPhoneNumber ? `sms:${murphPhoneNumber}` : null;
+  const customizeMurphContactAction = murphPhoneNumber ? (
+    <SettingsContactAction onClick={() => setContactPickerOpen(true)}>
+      Customize contact card
+    </SettingsContactAction>
+  ) : null;
+  const phoneMeta =
+    murphSmsHref && customizeMurphContactAction ? (
+      <div className="flex flex-wrap items-center gap-x-3">
+        <SettingsContactLink href={murphSmsHref} label="Text Murph">
+          Text Murph
+        </SettingsContactLink>
+        {customizeMurphContactAction}
+      </div>
+    ) : murphSmsHref ? (
+      <SettingsContactLink href={murphSmsHref} label="Text Murph">
+        Text Murph
+      </SettingsContactLink>
+    ) : (
+      customizeMurphContactAction
+    );
 
   return (
     <>
@@ -50,34 +70,13 @@ export function HostedAccountSettingsCards({
           label="Phone"
           value={phoneNumber ? formatMaskedPhoneNumber(phoneNumber) : "Not connected"}
           empty={!phoneNumber}
-          meta={murphSmsHref ? (
-            <SettingsContactLink href={murphSmsHref} label="Text Murph">
-              Text Murph
-            </SettingsContactLink>
-          ) : null}
+          meta={phoneMeta}
           action={
             <Button type="button" size="default" variant={phoneNumber ? "ghost" : "default"} onClick={() => setLinkMode("phone")}>
               {phoneNumber ? (phoneVerified ? "Change" : "Verify") : "Link phone"}
             </Button>
           }
         />
-        {murphPhoneNumber ? (
-          <SettingsRow
-            icon={<ContactRound className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
-            label="Murph contact"
-            value="Pick a look and save the updated card."
-            action={
-              <Button
-                onClick={() => setContactPickerOpen(true)}
-                size="default"
-                type="button"
-                variant="ghost"
-              >
-                Customize
-              </Button>
-            }
-          />
-        ) : null}
         <SettingsRow
           icon={<Send className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Telegram"
