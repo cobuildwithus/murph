@@ -124,6 +124,13 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
     view.container.querySelector('[data-hero-recipient-chip="Murph"]'),
   );
 
+  // The sheet is a decorative stage prop: hidden from assistive tech, with
+  // no operable controls inside.
+  const sheet = view.container.querySelector(".hero-compose-sheet");
+  assert.ok(sheet);
+  assert.equal(sheet.getAttribute("aria-hidden"), "true");
+  assert.equal(sheet.querySelectorAll("button").length, 0);
+
   await act(async () => {
     await vi.advanceTimersByTimeAsync(750);
   });
@@ -136,17 +143,26 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
   assert.match(view.container.textContent ?? "", /4 People/);
   assert.match(view.container.textContent ?? "", /Murph keeps score\./);
 
+  // While the sheet covers the thread, every floater is inert so no topic
+  // exchange can pollute the fresh conversation before the reveal.
   const saunaButton = view.container.querySelector<HTMLButtonElement>(
     'button[aria-label="Ask Murph about Sauna"]',
   );
   assert.ok(saunaButton);
+  assert.equal(saunaButton.disabled, true);
 
   await act(async () => {
-    saunaButton.click();
+    await vi.advanceTimersByTimeAsync(1_900);
   });
 
+  // Mid-burst all three member flights animate concurrently.
+  assert.equal(
+    view.container.querySelectorAll(".hero-floater--active").length,
+    3,
+  );
+
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(3_400);
+    await vi.advanceTimersByTimeAsync(1_500);
   });
 
   assert.ok(
@@ -158,6 +174,17 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
   assert.ok(
     view.container.querySelector('[data-hero-recipient-chip="Sam"]'),
   );
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_300);
+  });
+
+  // Sheet revealed: topic floaters work again and interleave into the story.
+  assert.equal(view.container.querySelector(".hero-compose-sheet"), null);
+  assert.equal(saunaButton.disabled, false);
+  await act(async () => {
+    saunaButton.click();
+  });
 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(14_000);

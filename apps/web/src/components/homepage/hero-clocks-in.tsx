@@ -332,7 +332,7 @@ const HERO_COPY = {
     line1: "Get healthy with your people.",
     line2: "Murph keeps score.",
     paragraph:
-      "Start a health challenge with your friends, right in your group chat. Murph sets fair baselines, referees the week, and calls the winner. Every Sunday, family and friends get a newsletter on how everyone is doing.",
+      "Start a health challenge with your friends, right in your group chat. Murph sets fair baselines, referees the week, calls the winner, and keeps everyone in the loop.",
   },
 } as const;
 
@@ -490,7 +490,11 @@ export function HeroClocksIn({
   murphHeadshotSrc: MurphHeadshotSrc;
 }) {
   const [items, setItems] = useState<ReadonlyArray<StreamItem>>([]);
-  const [activeIdx, setActiveIdx] = useState<number | null>(null);
+  // Floaters currently flying toward the phone. A set (not a single index)
+  // because the group burst launches three staggered flights that overlap.
+  const [activeFloaterIdxs, setActiveFloaterIdxs] = useState<
+    ReadonlySet<number>
+  >(() => new Set());
   const [typing, setTyping] = useState(false);
   const [composerValue, setComposerValue] = useState("");
   const [groupMode, setGroupModeState] = useState(false);
@@ -515,6 +519,26 @@ export function HeroClocksIn({
 
   const nextId = () => ++idRef.current;
 
+  const activateFloater = (idx: number | null) => {
+    if (idx === null) return;
+    setActiveFloaterIdxs((prev) => {
+      if (prev.has(idx)) return prev;
+      const next = new Set(prev);
+      next.add(idx);
+      return next;
+    });
+  };
+
+  const deactivateFloater = (idx: number | null) => {
+    if (idx === null) return;
+    setActiveFloaterIdxs((prev) => {
+      if (!prev.has(idx)) return prev;
+      const next = new Set(prev);
+      next.delete(idx);
+      return next;
+    });
+  };
+
   const appendItems = (nextItems: ReadonlyArray<StreamItem>) => {
     setItems((prev) => [...prev, ...nextItems].slice(-MAX_ITEMS));
   };
@@ -528,7 +552,7 @@ export function HeroClocksIn({
     timersRef.current = [];
     if (resetVisualState) {
       setTyping(false);
-      setActiveIdx(null);
+      setActiveFloaterIdxs(new Set());
     }
   };
 
@@ -644,7 +668,7 @@ export function HeroClocksIn({
 
       queue(
         () => {
-          setActiveIdx(idx);
+          activateFloater(idx);
         },
         startsAt,
         { allowAfterEngaged },
@@ -653,7 +677,7 @@ export function HeroClocksIn({
       queue(
         () => {
           markFloaterUsed(idx);
-          setActiveIdx((current) => (current === idx ? null : current));
+          deactivateFloater(idx);
         },
         startsAt + GROUP_FACE_FLIGHT_MS,
         { allowAfterEngaged },
@@ -929,7 +953,7 @@ export function HeroClocksIn({
       }
 
       const idx = FLOATER_INDEX_BY_TEXT[ex.topic.toLowerCase()] ?? null;
-      setActiveIdx(idx);
+      activateFloater(idx);
 
       queue(() => {
         appendItems([
@@ -941,7 +965,7 @@ export function HeroClocksIn({
           },
         ]);
         markFloaterUsed(idx);
-        setActiveIdx(null);
+        deactivateFloater(idx);
       }, USER_BUBBLE_AT);
 
       queue(() => setTyping(true), TYPING_AT);
@@ -1017,7 +1041,7 @@ export function HeroClocksIn({
     }
 
     const idx = FLOATER_INDEX_BY_TEXT[ex.topic.toLowerCase()] ?? null;
-    setActiveIdx(idx);
+    activateFloater(idx);
 
     queue(
       () => {
@@ -1030,7 +1054,7 @@ export function HeroClocksIn({
           },
         ]);
         markFloaterUsed(idx);
-        setActiveIdx(null);
+        deactivateFloater(idx);
       },
       USER_BUBBLE_AT,
       { allowAfterEngaged: true },
@@ -1053,6 +1077,7 @@ export function HeroClocksIn({
   };
 
   const handleFloaterClick = (f: Floater) => {
+    if (composeSheet !== "hidden") return;
     if (f.member) {
       if (groupSequenceStartedRef.current) return;
       engagedRef.current = true;
@@ -1152,11 +1177,15 @@ export function HeroClocksIn({
       <div className="pointer-events-none absolute inset-0 z-20 hidden lg:block">
         {FLOATERS.map((f, i) => {
           if (usedFloaters.has(f.text)) return null;
-          const isActive = activeIdx === i;
+          const isActive = activeFloaterIdxs.has(i);
           const isPerson = Boolean(f.member);
+          // Every floater is inert while the compose sheet covers the thread:
+          // a topic exchange injected under the sheet would break the
+          // fresh-empty-conversation reveal.
           const isDisabled =
             isActive ||
-            (isPerson && (composeSheet !== "hidden" || groupMode));
+            composeSheet !== "hidden" ||
+            (isPerson && groupMode);
           const floaterStyle: FloaterStyle = {
             top: f.top,
             bottom: f.bottom,
@@ -1442,7 +1471,9 @@ function ComposeSheet({
 }) {
   return (
     <div
-      aria-hidden={state !== "up"}
+      // Purely decorative stage prop: it can never be operated (the phone
+      // mock's demo drives it), so keep the whole sheet out of the a11y tree.
+      aria-hidden="true"
       className={cn(
         "hero-compose-sheet pointer-events-none absolute inset-x-0 bottom-0 top-0 z-30 rounded-t-[18px] bg-[#faf6ee] shadow-[0_-12px_32px_-18px_rgba(45,52,54,0.45)] ring-1 ring-inset ring-[#c4a882]/15 transition-[opacity,transform]",
         state === "up" &&
@@ -1457,12 +1488,7 @@ function ComposeSheet({
         <p className="text-[15px] font-semibold tracking-tight text-[#2d3436]">
           New Message
         </p>
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label="Close new message composer"
-          className="absolute right-3 top-1/2 flex size-[30px] -translate-y-1/2 items-center justify-center rounded-full bg-[#2d3436]/[0.08]"
-        >
+        <span className="absolute right-3 top-1/2 flex size-[30px] -translate-y-1/2 items-center justify-center rounded-full bg-[#2d3436]/[0.08]">
           <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
             <path
               d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5"
@@ -1471,7 +1497,7 @@ function ComposeSheet({
               strokeLinecap="round"
             />
           </svg>
-        </button>
+        </span>
       </div>
 
       <div className="px-3.5">
@@ -1496,12 +1522,7 @@ function ComposeSheet({
               className="hero-compose-caret h-[16px] w-[1.5px] shrink-0 rounded-full bg-[#5a6e32]"
             />
           </div>
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-label="Add recipient"
-            className="absolute right-2.5 top-1/2 flex size-[26px] -translate-y-1/2 items-center justify-center rounded-full bg-[#2d3436]/[0.08]"
-          >
+          <span className="absolute right-2.5 top-1/2 flex size-[26px] -translate-y-1/2 items-center justify-center rounded-full bg-[#2d3436]/[0.08]">
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
               <path
                 d="M6 1.2V10.8M1.2 6H10.8"
@@ -1510,7 +1531,7 @@ function ComposeSheet({
                 strokeLinecap="round"
               />
             </svg>
-          </button>
+          </span>
         </div>
       </div>
     </div>
