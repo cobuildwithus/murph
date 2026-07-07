@@ -135,6 +135,7 @@ rationale, not a live mechanism.
 ## User-Facing Message Sends
 
 - Do not hard-code messages that automatically send to users, except for the AI usage gate, signup link delivery, first welcome, Linq daily text quota, Linq home-thread redirect, and billing cancellation feedback email. The Linq quota and home-thread redirects are narrowly scoped policy responses that preserve admission/routing invariants before assistant generation runs. All other automatic outbound user messages must come from the normal AI-gated assistant path, an explicit user/operator-authored message, or another reviewed product-copy surface that is not sent automatically.
+- Any deterministic message that can send identically to more than one recipient renders from the seeded variant bank in `apps/web/src/lib/hosted-messages/user-facing-messages.ts`: at least 20 structurally distinct variants per class, selected by a stable per-recipient seed, never a single fixed string. Sending identical copy to many recipients is an iMessage spam signal (`agent-docs/operations/imessage-deliverability.md`), so the variant floor is enforced at module import and in the corpus test. This binds the allowed hard-coded classes above and any transactional onboarding, family, or group reply that would otherwise send fixed text. Managed automations satisfy it by composing each send through the AI-gated path instead of a fixed script, which is why they carry instructions rather than message text.
 
 ## Hosted Foreground Priority
 
