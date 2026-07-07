@@ -6,11 +6,14 @@ import { cn } from "@/src/lib/utils";
 
 const BAR_COUNT = 32;
 
+// Fixed-precision strings: the server and client build pipelines stringify
+// raw floats at different precision, which trips React hydration on the
+// style attribute.
 const BAR_HEIGHTS = Array.from({ length: BAR_COUNT }, (_, i) => {
   const t = i / (BAR_COUNT - 1);
   const base = Math.sin(t * Math.PI) * 0.6 + 0.3;
   const wobble = Math.sin(t * Math.PI * 3.7 + 0.4) * 0.18;
-  return Math.max(0.22, Math.min(1, base + wobble));
+  return `${(Math.max(0.22, Math.min(1, base + wobble)) * 100).toFixed(2)}%`;
 });
 
 export function VoiceMemoPlayer({
@@ -137,7 +140,7 @@ export function VoiceMemoPlayer({
                   "block w-[3px] rounded-full transition-colors",
                   filled ? fillClassName : trackClassName,
                 )}
-                style={{ height: `${h * 100}%` }}
+                style={{ height: h }}
               />
             );
           })}
