@@ -510,6 +510,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGrowthDailySnapshotMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260706130000_hosted_growth_daily_snapshot/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -590,6 +597,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260703160000_device_oauth_session_consumed_at",
       "20260705120000_hosted_mailbox_item_consumed_at",
       "20260706120000_hosted_thread_container_participant",
+      "20260706130000_hosted_growth_daily_snapshot",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -637,6 +645,15 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedThreadContainerParticipantMigrationSql).not.toContain('"handle" TEXT');
     expect(hostedThreadContainerParticipantMigrationSql).not.toMatch(
       /"(?:raw_)?(?:message|body|payload)[^"]*"/iu,
+    );
+    expect(hostedGrowthDailySnapshotMigrationSql).toContain(
+      'CREATE TABLE "hosted_growth_daily_snapshot"',
+    );
+    expect(hostedGrowthDailySnapshotMigrationSql).toContain(
+      '"snapshot_date" DATE NOT NULL',
+    );
+    expect(hostedGrowthDailySnapshotMigrationSql).toContain(
+      'PRIMARY KEY ("snapshot_date")',
     );
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
     expect(schema).not.toContain("@@index([memberId, profileKey, updatedAt])");
