@@ -2274,6 +2274,13 @@ export const experimentProgressSnapshotSchema = z
     adherence: z
       .object({
         completedSessions: integerSchema(0),
+        evidence: z
+          .object({
+            eventKind: z.enum(["activity_session", "intervention_session"]),
+            activityKind: boundedString(1, 80).optional(),
+          })
+          .strict()
+          .optional(),
         expectedSessionsByNow: integerSchema(0).nullable(),
         loggedSessions: integerSchema(0).optional(),
         minimumUsefulSessions: integerSchema(0).nullable(),
@@ -2286,6 +2293,7 @@ export const experimentProgressSnapshotSchema = z
     confounders: z.array(boundedString(1, 4000)).max(100),
     dataCoverage: z
       .object({
+        activityProviders: z.array(boundedString(1, 160)).max(20).optional(),
         baselineDaysAvailable: integerSchema(0),
         interventionDaysAvailable: integerSchema(0),
         primaryBiomarkerKey: healthCommonsKeySchema.nullable().optional(),

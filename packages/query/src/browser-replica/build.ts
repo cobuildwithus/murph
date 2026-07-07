@@ -439,8 +439,12 @@ function projectSafeEventAttributes(entity: CanonicalEntity): Record<string, unk
 
   switch (entity.kind) {
     case "activity_session": {
+      const attributes = projectSafeAttributeKeys(entity, ["source"]);
       const activityKind = resolveAdherenceObservationActivityKind({ attributes: entity.attributes });
-      return activityKind ? { activityKind } : {};
+      if (activityKind) {
+        attributes.activityKind = activityKind;
+      }
+      return attributes;
     }
     case "intervention_session":
       return projectSafeAttributeKeys(entity, [
@@ -453,6 +457,7 @@ function projectSafeEventAttributes(entity: CanonicalEntity): Record<string, unk
         "sessionStatus",
         "sessionLocalDate",
         "scheduledLocalDate",
+        "source",
         "symptoms",
       ]);
     case "experiment_context":

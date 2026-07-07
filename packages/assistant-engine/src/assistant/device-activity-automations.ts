@@ -5,6 +5,7 @@ import {
   deviceActivityCoverageKeyIsAfterCursor,
   listAutomations,
   readVaultRawTolerant,
+  resolveAdherenceObservationActivityKind,
   resolveNextDeviceActivityCoverageCursor,
   type AutomationQueryRecord,
   type VaultReadModel,
@@ -339,37 +340,14 @@ function resolveDeviceActivityKind(entity: ActivityEntity & { kind: DeviceActivi
     return 'sleep'
   }
 
-  for (const candidate of listActivityKindTextCandidates(entity)) {
-    const normalized = normalizeActivityKindToken(candidate)
-    if (normalized) {
-      return normalized
-    }
+  const structuredKind = resolveAdherenceObservationActivityKind({
+    attributes: entity.attributes,
+  })
+  if (structuredKind) {
+    return structuredKind
   }
 
-  return 'activity'
-}
-
-function listActivityKindTextCandidates(entity: ActivityEntity): string[] {
-  const workout = readRecord(entity.attributes.workout)
-  const sport = readRecord(entity.attributes.sport)
-  const workoutSport = readRecord(workout?.sport)
-  return [
-    readString(entity.attributes.activityType),
-    readString(entity.attributes.type),
-    readString(entity.attributes.sport),
-    readString(sport?.slug),
-    readString(sport?.name),
-    readString(sport?.type),
-    readString(entity.attributes.name),
-    readString(workout?.activityType),
-    readString(workout?.type),
-    readString(workout?.sport),
-    readString(workoutSport?.slug),
-    readString(workoutSport?.name),
-    readString(workoutSport?.type),
-    readString(workout?.name),
-    readEntityTitle(entity),
-  ].filter((entry): entry is string => entry !== null)
+  return normalizeActivityKindToken(readEntityTitle(entity)) ?? 'activity'
 }
 
 function deviceActivityKindMatches(

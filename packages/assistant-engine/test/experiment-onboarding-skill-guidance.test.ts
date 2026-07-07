@@ -71,6 +71,12 @@ describe('experiment onboarding skill guidance', () => {
       'First-session prep and planned-session support are separate.',
     )
     expect(raw).toContain(
+      'Logging applies to experiments whose sessions Murph cannot currently sense; for device-observable experiments with activity coverage, sensing handles the record after the session.',
+    )
+    expect(raw).toContain(
+      'If `progress.adherence.evidence.eventKind` is `activity_session` but `progress.dataCoverage.activityProviders` is empty, keep the standard planned-session support and logging behavior until workouts start syncing.',
+    )
+    expect(raw).toContain(
       'planned-session support is default-on once the user agrees to a run plan with assistant support',
     )
     expect(raw).toContain('Do not ask the user to choose cadence by default')
@@ -197,6 +203,88 @@ describe('experiment onboarding skill guidance', () => {
       'experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>',
     )
     expect(raw).toContain('--kind missed-log --date <sessionDate>')
+    expect(raw).toContain('skip when `decision.action` is `skip`')
+    expect(raw).toContain('send only when `decision.action` is `notify`')
+  })
+
+  it('branches device-observable experiments from progress evidence', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain('## Device-observable experiments')
+    expect(raw).toContain(
+      'read `vault-cli experiment progress <id> --format json` and check both `progress.adherence.evidence` and `progress.dataCoverage.activityProviders`',
+    )
+    expect(raw).toContain('`progress.adherence.evidence.eventKind` is `activity_session`')
+    expect(raw).toContain(
+      'The device lane applies only when `progress.adherence.evidence.eventKind` is `activity_session` and `progress.dataCoverage.activityProviders` is non-empty.',
+    )
+    expect(raw).toContain(
+      'Do not ask the user to log sessions, do not create per-session "log it" reminders',
+    )
+    expect(raw).toContain(
+      'do not save the workout through any other logging surface either; the wearable record is the log',
+    )
+    expect(raw).toContain(
+      'Your runs count automatically from your WHOOP. No need to tell me when you run.',
+    )
+    expect(raw).toContain(
+      'Once your workouts start syncing, your runs will count automatically.',
+    )
+    expect(raw).toContain('do not create the activity nudge automation')
+    expect(raw).toContain('`progress.dataCoverage.activityProviders` is that evidence')
+    expect(raw).toContain(
+      'Device sensing changes what happens after a session, not before it.',
+    )
+    expect(raw).toContain('--trigger-kind deviceActivity')
+    expect(raw).toContain(
+      'If `progress.adherence.evidence.activityKind` is present, pass `--activity-kind <progress.adherence.evidence.activityKind>`',
+    )
+    expect(raw).toContain(
+      'If it is absent for a generic any-activity target, pass `--activity-kind activity`',
+    )
+    expect(raw).toContain('the deviceActivity scanner treats `activity` as any workout session')
+    expect(raw).toContain('Do not pass `--device-source`')
+    expect(raw).toContain('experiment-activity-nudge-<experiment-slug>')
+    expect(raw).toContain('activity_nudge_automation_slug')
+    expect(raw).toContain(
+      'if declined or blocked, record that result in setup answers too',
+    )
+    expect(raw).toContain(
+      'Tell that turn to run `vault-cli experiment progress <experiment-slug> --format json`',
+    )
+    expect(raw).toContain(
+      'send a short celebratory progress line only when it earns a send',
+    )
+    expect(raw).toContain(
+      'Archive this automation when the experiment is no longer active or today is past the intervention end date.',
+    )
+    expect(raw).toContain('The final-results automation also archives it at experiment end')
+    expect(raw).toContain(
+      'Nice run, that\'s 8 of 24 for your base block.',
+    )
+    expect(raw).toContain('Never ask a question and never ask the user to log.')
+  })
+
+  it('scopes manual session logging to unsensed or missed-device cases', async () => {
+    const raw = await readExperimentOnboardingSkill()
+
+    expect(raw).toContain(
+      'Log sessions with typed flags only for experiments whose `progress.adherence.evidence.eventKind` is `intervention_session`, `activity_session` experiments while `progress.dataCoverage.activityProviders` is empty',
+    )
+    expect(raw).toContain('sessions the user says the wearable missed')
+    expect(raw).not.toContain('and corrections')
+    expect(raw).toContain(
+      'Never save a synced workout through any logging surface',
+    )
+    expect(raw).toContain(
+      'if the wearable later backfills a missed workout, counting automatically prefers the sensed record, so no cleanup is needed',
+    )
+    expect(raw).toContain(
+      'If a sensed workout happened but deviated from the protocol, capture that as context/confounders with `vault-cli experiment context log <id> ...`, not by re-logging the session.',
+    )
+    expect(raw).toContain('`progress.setupReadiness`')
+    expect(raw).toContain('`progress.analysisReadiness`')
+    expect(raw).toContain('`progress.dataCoverage`')
   })
 
   it('requires context-backed reminder time suggestions before open-ended time questions', async () => {
