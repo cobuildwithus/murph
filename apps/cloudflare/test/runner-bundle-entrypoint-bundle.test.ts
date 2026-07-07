@@ -31,6 +31,43 @@ function entryOnlyMetafile(entryBytes: number): Metafile {
   };
 }
 
+function staticBootClosureBytesMetafile(staticClosureBytes: number): Metafile {
+  const entryBytes = 1_000;
+  const staticChunkBytes = staticClosureBytes - entryBytes;
+  if (staticChunkBytes < 0) {
+    throw new Error("static closure bytes must include the entry chunk");
+  }
+
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 100, imports: [] },
+      "dist/static-heavy.js": { bytes: staticChunkBytes, imports: [] },
+    },
+    outputs: {
+      "dist-bundled/container-entrypoint.js": {
+        bytes: entryBytes,
+        entryPoint: "dist/container-entrypoint.js",
+        exports: [],
+        imports: [
+          { kind: "import-statement", path: "dist-bundled/static-heavy.js" },
+        ],
+        inputs: {
+          "dist/container-entrypoint.js": { bytesInOutput: 100 },
+        },
+      },
+      "dist-bundled/static-heavy.js": {
+        bytes: staticChunkBytes,
+        entryPoint: undefined,
+        exports: [],
+        imports: [],
+        inputs: {
+          "dist/static-heavy.js": { bytesInOutput: staticChunkBytes },
+        },
+      },
+    },
+  };
+}
+
 function staticBootClosureMetafile(inputPath: string): Metafile {
   return {
     inputs: {
@@ -54,6 +91,35 @@ function staticBootClosureMetafile(inputPath: string): Metafile {
         imports: [],
         inputs: {
           [inputPath]: { bytesInOutput: 4_000 },
+        },
+      },
+    },
+  };
+}
+
+function dynamicOnlyChunkMetafile(dynamicChunkBytes: number): Metafile {
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 100, imports: [] },
+      "dist/lazy-heavy.js": { bytes: dynamicChunkBytes, imports: [] },
+    },
+    outputs: {
+      "dist-bundled/container-entrypoint.js": {
+        bytes: 1_000,
+        entryPoint: "dist/container-entrypoint.js",
+        exports: [],
+        imports: [{ kind: "dynamic-import", path: "./lazy-heavy.js" }],
+        inputs: {
+          "dist/container-entrypoint.js": { bytesInOutput: 100 },
+        },
+      },
+      "dist-bundled/lazy-heavy.js": {
+        bytes: dynamicChunkBytes,
+        entryPoint: "dist/lazy-heavy.js",
+        exports: [],
+        imports: [],
+        inputs: {
+          "dist/lazy-heavy.js": { bytesInOutput: dynamicChunkBytes },
         },
       },
     },
@@ -90,6 +156,11 @@ function dynamicImportMetafile(inputPath: string): Metafile {
 }
 
 const temporaryDirectories: string[] = [];
+const ROOMY_TEST_BUDGETS = {
+  entryBytes: 10_000,
+  staticClosureBytes: 10_000,
+  totalBytes: 10_000,
+};
 
 afterEach(async () => {
   await Promise.all(
@@ -207,6 +278,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     expect(() =>
       assertRunnerEntrypointBundleWithinBudgets(metafile, {
         entryBytes: 1_000,
+        staticClosureBytes: 10_000,
         totalBytes: 3_000,
       }),
     ).toThrow(
@@ -214,21 +286,19 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     );
 
     expect(
-      assertRunnerEntrypointBundleWithinBudgets(metafile, {
-        entryBytes: 10_000,
-        totalBytes: 10_000,
-      }),
-    ).toEqual({ entryBytes: 2_000, totalBytes: 6_000 });
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
+    ).toEqual({
+      entryBytes: 2_000,
+      staticClosureBytes: 2_000,
+      totalBytes: 6_000,
+    });
   });
 
   it("rejects provider connector inputs from the static boot closure", () => {
     const metafile = staticBootClosureMetafile("node_modules/grammy/out/mod.js");
 
     expect(() =>
-      assertRunnerEntrypointBundleWithinBudgets(metafile, {
-        entryBytes: 10_000,
-        totalBytes: 10_000,
-      }),
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
     ).toThrow(/forbidden inputs in the static boot closure[\s\S]*node_modules\/grammy\/out\/mod\.js/);
   });
 
@@ -238,10 +308,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     const metafile = staticBootClosureMetafile(inputPath);
 
     expect(() =>
-      assertRunnerEntrypointBundleWithinBudgets(metafile, {
-        entryBytes: 10_000,
-        totalBytes: 10_000,
-      }),
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
     ).toThrow(
       /forbidden inputs in the static boot closure[\s\S]*\.deploy\/runner-bundle\/node_modules\/@murphai\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
     );
@@ -253,10 +320,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     );
 
     expect(() =>
-      assertRunnerEntrypointBundleWithinBudgets(metafile, {
-        entryBytes: 10_000,
-        totalBytes: 10_000,
-      }),
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
     ).toThrow(
       /forbidden inputs in the static boot closure[\s\S]*packages\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
     );
@@ -317,10 +381,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     const metafile = staticBootClosureMetafile(inputPath);
 
     expect(() =>
-      assertRunnerEntrypointBundleWithinBudgets(metafile, {
-        entryBytes: 10_000,
-        totalBytes: 10_000,
-      }),
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
     ).toThrow(expected);
   });
 
@@ -353,11 +414,12 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     };
 
     expect(
-      assertRunnerEntrypointBundleWithinBudgets(metafile, {
-        entryBytes: 10_000,
-        totalBytes: 10_000,
-      }),
-    ).toEqual({ entryBytes: 2_000, totalBytes: 6_000 });
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
+    ).toEqual({
+      entryBytes: 2_000,
+      staticClosureBytes: 2_000,
+      totalBytes: 6_000,
+    });
   });
 
   it.each([
@@ -366,11 +428,15 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ".deploy/runner-bundle/node_modules/@junction-api/sdk/index.js",
   ])("allows %s behind dynamic imports", (inputPath) => {
     expect(
-      assertRunnerEntrypointBundleWithinBudgets(dynamicImportMetafile(inputPath), {
-        entryBytes: 10_000,
-        totalBytes: 10_000,
-      }),
-    ).toEqual({ entryBytes: 2_000, totalBytes: 6_000 });
+      assertRunnerEntrypointBundleWithinBudgets(
+        dynamicImportMetafile(inputPath),
+        ROOMY_TEST_BUDGETS,
+      ),
+    ).toEqual({
+      entryBytes: 2_000,
+      staticClosureBytes: 2_000,
+      totalBytes: 6_000,
+    });
   });
 
   it("collects output chunks reachable only through dynamic imports", () => {
@@ -441,19 +507,22 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ]);
   });
 
-  it("resolves the production budgets as the ratcheted entry baseline plus tolerance", () => {
+  it("resolves the production budgets as the ratcheted baselines plus tolerance", () => {
     const budgets = resolveRunnerEntrypointBundleBudgets();
 
     // Entry = measured baseline (1,267,937B on 2026-07-06) + 48,000B noise
-    // band. Locking the exact value makes any silent change to the ratchet a
-    // failing, reviewed diff.
+    // band. Static closure = measured baseline (6,382,690B on 2026-07-07) +
+    // 96,000B noise band. Locking exact values makes any silent change to a
+    // ratchet a failing, reviewed diff.
     expect(budgets).toEqual({
       entryBytes: 1_267_937 + 48_000,
+      staticClosureBytes: 6_382_690 + 96_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling
     // it replaced, so real boot-path creep can no longer hide in headroom.
     expect(budgets.entryBytes).toBeLessThan(2_900_000);
+    expect(budgets.staticClosureBytes).toBeLessThan(6_600_000);
   });
 
   it("gates the entry chunk at the production ratchet boundary", () => {
@@ -462,7 +531,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // At the boundary the default (production) budgets accept the bundle.
     expect(
       assertRunnerEntrypointBundleWithinBudgets(entryOnlyMetafile(entryBytes)),
-    ).toEqual({ entryBytes, totalBytes: entryBytes });
+    ).toEqual({
+      entryBytes,
+      staticClosureBytes: entryBytes,
+      totalBytes: entryBytes,
+    });
 
     // One byte over the baseline + tolerance trips the assembly.
     expect(() =>
@@ -470,6 +543,42 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         entryOnlyMetafile(entryBytes + 1),
       ),
     ).toThrow(/entry chunk .* exceeds budget/);
+  });
+
+  it("gates the static boot closure at the production ratchet boundary", () => {
+    const { staticClosureBytes } = resolveRunnerEntrypointBundleBudgets();
+
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(
+        staticBootClosureBytesMetafile(staticClosureBytes),
+      ),
+    ).toEqual({
+      entryBytes: 1_000,
+      staticClosureBytes,
+      totalBytes: staticClosureBytes,
+    });
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(
+        staticBootClosureBytesMetafile(staticClosureBytes + 1),
+      ),
+    ).toThrow(/static boot closure .* exceeds budget/);
+  });
+
+  it("does not count dynamic-only chunks toward the static boot closure budget", () => {
+    const { staticClosureBytes, totalBytes } = resolveRunnerEntrypointBundleBudgets();
+    const dynamicChunkBytes = staticClosureBytes + 500_000;
+    expect(dynamicChunkBytes + 1_000).toBeLessThan(totalBytes);
+
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(
+        dynamicOnlyChunkMetafile(dynamicChunkBytes),
+      ),
+    ).toEqual({
+      entryBytes: 1_000,
+      staticClosureBytes: 1_000,
+      totalBytes: dynamicChunkBytes + 1_000,
+    });
   });
 
   it("rejects metafiles without a container-entrypoint.js entry output", () => {

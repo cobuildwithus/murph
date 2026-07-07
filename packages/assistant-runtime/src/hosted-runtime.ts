@@ -2030,9 +2030,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return passResult;
       };
       const importThenRunForegroundPassIfWork = async (input: {
+        importItem?: HostedWorkspaceRunnerInput["importItem"];
         lanes: readonly ("conversation" | "system")[];
         latencySeed: HostedRuntimeWakeLatencySeed | null;
+        limitPerLane?: number;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
+        requestIdLane?: "conversation" | "system";
         shouldRun(initialMailboxImport: HostedMailboxImportCheckpointResult): boolean;
       }): Promise<boolean> => {
         const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
@@ -2042,13 +2045,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           checkpointRequestBuilder,
           checkpointReason: "active_turn_input",
           deferCheckpoint: true,
-          importItem: importForegroundMailboxItem,
+          importItem: input.importItem ?? importForegroundMailboxItem,
           importItemContext: initialMailboxImportContext,
           input: baseRunnerInput,
           lanes: input.lanes,
-          limitPerLane: foregroundMailboxBudget.fetchLimitPerLane,
+          limitPerLane: input.limitPerLane ?? foregroundMailboxBudget.fetchLimitPerLane,
           requestId:
-            `${requestId}:${input.requestIdKind}-foreground-import:${idleWakeOrdinal + 1}`,
+            `${requestId}:${input.requestIdKind}-foreground-import:${idleWakeOrdinal + 1}${
+              input.requestIdLane ? `:${input.requestIdLane}` : ""
+            }`,
           signal: runtimeAbortController.signal,
         });
         if (!input.shouldRun(initialMailboxImport)) {
@@ -2083,15 +2088,31 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
       const runPostCheckpointMailboxWake = async (
         latencySeed: HostedRuntimeWakeLatencySeed | null,
-      ): Promise<boolean> =>
-        await importThenRunForegroundPassIfWork({
-          lanes: ["system", "conversation"],
+      ): Promise<boolean> => {
+        const conversationWakeHandled = await importThenRunForegroundPassIfWork({
+          lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
           latencySeed,
           requestIdKind: "checkpoint-wake",
+          requestIdLane: "conversation",
+          shouldRun: (initialMailboxImport) =>
+            hostedMailboxImportHasForegroundConversationWork(initialMailboxImport),
+        });
+        if (conversationWakeHandled) {
+          return true;
+        }
+
+        return await importThenRunForegroundPassIfWork({
+          importItem: importMailboxItem,
+          lanes: ["system"],
+          latencySeed,
+          limitPerLane: mailboxBudget.fetchLimitPerLane,
+          requestIdKind: "checkpoint-wake",
+          requestIdLane: "system",
           shouldRun: (initialMailboxImport) =>
             initialMailboxImport.importResult.importedCount > 0
             || initialMailboxImport.importResult.blocked.some((item) => item.retryable),
         });
+      };
 
       result = await runForegroundPass({
         initialMailboxImport,

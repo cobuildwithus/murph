@@ -13,7 +13,17 @@ import {
 } from './turn-input.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantSessionLocator } from './store/types.js'
-import { normalizeNullableString } from './shared.js'
+import type { ConversationRef } from './conversation-ref.js'
+import {
+  conversationRefFromAssistantInputConversation,
+} from './conversation-ref.js'
+import {
+  readAssistantInputEvent,
+} from './input-store.js'
+import {
+  normalizeNullableString,
+  warnAssistantBestEffortFailure,
+} from './shared.js'
 import { resolveAssistantConversationLookupKey } from './store/paths.js'
 import {
   mergeAssistantReplyDeliveryContextOverrides,
@@ -685,6 +695,49 @@ export async function notifyAssistantActiveTurnInputAvailable(
   return undefined
 }
 
+export async function notifyAssistantActiveTurnInputAvailableForInputIds(input: {
+  inputIds: readonly string[]
+  signal?: AbortSignal
+  vault: string
+}): Promise<void> {
+  const conversationsByKey = new Map<string, ConversationRef>()
+  for (const inputId of new Set(input.inputIds)) {
+    try {
+      const event = await readAssistantInputEvent({
+        inputId,
+        vault: input.vault,
+      })
+      if (!event?.conversation) {
+        continue
+      }
+
+      const conversation = conversationRefFromAssistantInputConversation(event.conversation)
+      conversationsByKey.set(
+        formatAssistantActiveTurnConversationNotificationKey(conversation),
+        conversation,
+      )
+    } catch (error: unknown) {
+      warnAssistantBestEffortFailure({
+        error,
+        operation: 'hosted active-turn input notification',
+      })
+    }
+  }
+
+  for (const conversation of conversationsByKey.values()) {
+    await notifyAssistantActiveTurnInputAvailable({
+      conversation,
+      ...(input.signal ? { signal: input.signal } : {}),
+      vault: input.vault,
+    }).catch((error: unknown) => {
+      warnAssistantBestEffortFailure({
+        error,
+        operation: 'hosted active-turn input notification',
+      })
+    })
+  }
+}
+
 export async function notifyAssistantActiveTurnInputsAvailableForVault(input: {
   signal?: AbortSignal
   vault: string
@@ -752,6 +805,20 @@ function formatAssistantActiveTurnInputControllerKey(input: {
   vault: string
 }): AssistantActiveTurnInputControllerKey {
   return `${input.vault}\u0000${input.kind}\u0000${input.value}`
+}
+
+function formatAssistantActiveTurnConversationNotificationKey(
+  conversation: ConversationRef,
+): string {
+  return [
+    conversation.alias ?? '',
+    conversation.channel ?? '',
+    conversation.directness ?? '',
+    conversation.identityId ?? '',
+    conversation.participantId ?? '',
+    conversation.sessionId ?? '',
+    conversation.threadId ?? '',
+  ].join('\u0000')
 }
 
 function formatAssistantActiveTurnLiveProviderTurnKey(
