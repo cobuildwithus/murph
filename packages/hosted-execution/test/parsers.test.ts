@@ -8,6 +8,8 @@ import {
   parseHostedRuntimeFamilyPlanToolResponse,
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
+  parseHostedRuntimeNewsletterToolRequest,
+  parseHostedRuntimeNewsletterToolResponse,
 } from "../src/parsers.ts";
 
 describe("parseHostedExecutionEvent", () => {
@@ -397,6 +399,36 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
+  it("parses group newsletter email-needed events and wakes", () => {
+    expect(parseHostedExecutionEvent({
+      groupDisplayName: "Tempo Crew",
+      groupId: "hgrp_123",
+      kind: "group-newsletter.email-needed",
+      userId: "member_123",
+    })).toEqual({
+      groupDisplayName: "Tempo Crew",
+      groupId: "hgrp_123",
+      kind: "group-newsletter.email-needed",
+      userId: "member_123",
+    });
+
+    expect(parseHostedExecutionWake({
+      eventId: "group-newsletter.email-needed:member_123:hgrp_123",
+      groupDisplayName: "Tempo Crew",
+      groupId: "hgrp_123",
+      kind: "group-newsletter.email-needed",
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      userId: "member_123",
+    })).toEqual({
+      eventId: "group-newsletter.email-needed:member_123:hgrp_123",
+      groupDisplayName: "Tempo Crew",
+      groupId: "hgrp_123",
+      kind: "group-newsletter.email-needed",
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      userId: "member_123",
+    });
+  });
+
   it("parses device-sync reconcile_due wakes", () => {
     expect(
       parseHostedExecutionEvent({
@@ -531,12 +563,25 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
       joinOffer: {
-        projectionKinds: ["sleep-times.v0", "activity-days.v0"],
+        projectionKinds: ["group-email.v0"],
       },
     })).toEqual({
       action: "post_join_offer",
       joinOffer: {
-        projectionKinds: ["sleep-times.v0", "activity-days.v0"],
+        projectionKinds: ["group-email.v0"],
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "revoke_own_email_share",
+      selfOptOut: {
+        senderHandle: "person@example.test",
+        source: "email",
+      },
+    })).toEqual({
+      action: "revoke_own_email_share",
+      selfOptOut: {
+        senderHandle: "person@example.test",
+        source: "email",
       },
     });
 
@@ -589,6 +634,12 @@ describe("parseHostedRuntimeGroupTool", () => {
         joinOffer: { projectionKinds: ["profile-name.v0"] },
       })
     ).toThrow(/unsupported projection kind/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "revoke_own_email_share",
+        selfOptOut: { senderHandle: "person@example.test", source: "sms" },
+      })
+    ).toThrow(/not supported/u);
   });
 
   it("parses create_join_link responses", () => {
@@ -910,6 +961,247 @@ describe("parseHostedRuntimeGroupTool", () => {
         result: { status: "sent", messageId: "msg_1" },
       })
     ).toThrow(/not allowed/u);
+  });
+
+  it("parses revoke_own_email_share responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "revoke_own_email_share",
+      result: { revokedCount: 1, status: "revoked" },
+    })).toEqual({
+      action: "revoke_own_email_share",
+      result: { revokedCount: 1, status: "revoked" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "revoke_own_email_share",
+      result: { revokedCount: 0, status: "already_removed" },
+    })).toEqual({
+      action: "revoke_own_email_share",
+      result: { revokedCount: 0, status: "already_removed" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "revoke_own_email_share",
+      result: { status: "unavailable", unavailableReason: "sender_unavailable" },
+    })).toEqual({
+      action: "revoke_own_email_share",
+      result: { status: "unavailable", unavailableReason: "sender_unavailable" },
+    });
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "revoke_own_email_share",
+        result: { revokedCount: 2, status: "revoked" },
+      })
+    ).toThrow(/must be 1/u);
+  });
+});
+
+describe("parseHostedRuntimeNewsletterTool", () => {
+  const PARTICIPANT = {
+    displayName: "Alex",
+    hasEmail: true,
+    memberId: "member_123",
+  };
+
+  it("parses read_stats and scheduled send requests", () => {
+    expect(parseHostedRuntimeNewsletterToolRequest({
+      action: "read_stats",
+      groupId: "group_123",
+    })).toEqual({
+      action: "read_stats",
+      groupId: "group_123",
+    });
+
+    expect(parseHostedRuntimeNewsletterToolRequest({
+      action: "send",
+      groupId: "group_123",
+      html: "<p>Weekly health note</p>",
+      subject: "Weekly health note",
+      text: "Weekly health note",
+    })).toEqual({
+      action: "send",
+      groupId: "group_123",
+      html: "<p>Weekly health note</p>",
+      subject: "Weekly health note",
+      text: "Weekly health note",
+    });
+
+    expect(parseHostedRuntimeNewsletterToolRequest({
+      action: "send",
+      groupId: "group_123",
+      html: "<p>Weekly health note</p>",
+      subject: "Weekly health note",
+    })).toEqual({
+      action: "send",
+      groupId: "group_123",
+      html: "<p>Weekly health note</p>",
+      subject: "Weekly health note",
+      text: null,
+    });
+
+    expect(() =>
+      parseHostedRuntimeNewsletterToolRequest({
+        action: "send",
+        groupId: "group_123",
+        html: "<p>Weekly health note</p>",
+        scheduledAutomationAuthority: {
+          automationId: "automation_123",
+          occurrenceAt: "2026-07-12T13:00:00.000Z",
+        },
+        subject: "Weekly health note",
+      })
+    ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeNewsletterToolRequest({
+        action: "send",
+        groupId: "group_123",
+        html: " ",
+        subject: "Weekly health note",
+      })
+    ).toThrow(/html must not be blank/u);
+    expect(() =>
+      parseHostedRuntimeNewsletterToolRequest({
+        action: "send",
+        groupId: "group_123",
+        html: "<p>Weekly health note</p>",
+        subject: " ",
+      })
+    ).toThrow(/subject must not be blank/u);
+  });
+
+  it("parses read_stats responses without exposing email addresses", () => {
+    expect(parseHostedRuntimeNewsletterToolResponse({
+      action: "read_stats",
+      result: {
+        groupId: "group_123",
+        missingEmailParticipants: [{ ...PARTICIPANT, hasEmail: false }],
+        participants: [PARTICIPANT],
+        status: "ok",
+      },
+    })).toEqual({
+      action: "read_stats",
+      result: {
+        groupId: "group_123",
+        missingEmailParticipants: [{ ...PARTICIPANT, hasEmail: false }],
+        participants: [PARTICIPANT],
+        status: "ok",
+      },
+    });
+
+    expect(parseHostedRuntimeNewsletterToolResponse({
+      action: "read_stats",
+      result: {
+        status: "unavailable",
+        unavailableReason: "not_group_runtime",
+      },
+    })).toEqual({
+      action: "read_stats",
+      result: {
+        status: "unavailable",
+        unavailableReason: "not_group_runtime",
+      },
+    });
+
+    expect(() =>
+      parseHostedRuntimeNewsletterToolResponse({
+        action: "read_stats",
+        result: {
+          groupId: "group_123",
+          missingEmailParticipants: [],
+          participants: [{ ...PARTICIPANT, email: "alex@example.test" }],
+          status: "ok",
+        },
+      })
+    ).toThrow(/not allowed/u);
+  });
+
+  it("parses newsletter send outcomes and validates partial counts", () => {
+    expect(parseHostedRuntimeNewsletterToolResponse({
+      action: "send",
+      result: {
+        participantCount: 2,
+        skippedNoEmailMemberIds: ["member_without_email"],
+        status: "sent",
+      },
+    })).toEqual({
+      action: "send",
+      result: {
+        participantCount: 2,
+        skippedNoEmailMemberIds: ["member_without_email"],
+        status: "sent",
+      },
+    });
+
+    expect(parseHostedRuntimeNewsletterToolResponse({
+      action: "send",
+      result: {
+        failedRecipientCount: 1,
+        participantCount: 3,
+        sentRecipientCount: 1,
+        skippedNoEmailMemberIds: ["member_without_email"],
+        status: "partial_failure",
+      },
+    })).toEqual({
+      action: "send",
+      result: {
+        failedRecipientCount: 1,
+        participantCount: 3,
+        sentRecipientCount: 1,
+        skippedNoEmailMemberIds: ["member_without_email"],
+        status: "partial_failure",
+      },
+    });
+
+    expect(parseHostedRuntimeNewsletterToolResponse({
+      action: "send",
+      result: {
+        participantCount: 0,
+        skippedNoEmailMemberIds: ["member_without_email"],
+        status: "no_recipients",
+      },
+    })).toEqual({
+      action: "send",
+      result: {
+        participantCount: 0,
+        skippedNoEmailMemberIds: ["member_without_email"],
+        status: "no_recipients",
+      },
+    });
+
+    expect(parseHostedRuntimeNewsletterToolResponse({
+      action: "send",
+      result: {
+        status: "unavailable",
+        unavailableReason: "scheduled_authority_required",
+      },
+    })).toEqual({
+      action: "send",
+      result: {
+        status: "unavailable",
+        unavailableReason: "scheduled_authority_required",
+      },
+    });
+
+    expect(() =>
+      parseHostedRuntimeNewsletterToolResponse({
+        action: "send",
+        result: {
+          participantCount: 1,
+          skippedNoEmailMemberIds: [],
+          status: "no_recipients",
+        },
+      })
+    ).toThrow(/participantCount must be 0/u);
+    expect(() =>
+      parseHostedRuntimeNewsletterToolResponse({
+        action: "send",
+        result: {
+          failedRecipientCount: -1,
+          participantCount: 1,
+          sentRecipientCount: 1,
+          skippedNoEmailMemberIds: [],
+          status: "partial_failure",
+        },
+      })
+    ).toThrow(/failedRecipientCount must be a non-negative integer/u);
   });
 });
 

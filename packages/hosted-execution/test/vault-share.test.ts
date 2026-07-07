@@ -5,6 +5,7 @@ import { HOSTED_MAILBOX_KINDS } from "../src/runtime-control.ts";
 import {
   buildHostedVaultShareDeliveryDedupeKey,
   buildHostedVaultShareRevokeDedupeKey,
+  getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
@@ -93,8 +94,9 @@ describe("vault-share contracts", () => {
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.revoke");
   });
 
-  it("exposes challenge health projections as selectable closed kinds", () => {
+  it("exposes email and challenge health projections as selectable closed kinds", () => {
     expect(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS).toEqual([
+      "group-email.v0",
       "sleep-times.v0",
       "activity-days.v0",
       "workout-days.v0",
@@ -112,6 +114,7 @@ describe("vault-share contracts", () => {
       "resting-heart-rate-days.v0",
       "hrv-days.v0",
     ]);
+    expect(getHostedVaultShareDailyMetricProjectionSpec("group-email.v0")).toBeNull();
   });
 
   it("derives the delivery dedupe key from share id, record key, and revision", () => {

@@ -156,6 +156,7 @@ async function handleRunnerEmailSendRequest(input: {
     });
 
     return json({
+      delivery: payload.delivery ?? null,
       ok: true,
       target: payload.target,
     });

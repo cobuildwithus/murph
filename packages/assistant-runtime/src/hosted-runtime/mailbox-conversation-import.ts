@@ -10,6 +10,10 @@ import {
   isHostedWhatsAppConversationMessageWake,
   readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
+import {
+  parseHostedEmailThreadTarget,
+  redactHostedGroupEmailPromptText,
+} from "@murphai/runtime-state";
 import type {
   HostedRuntimeLatencyTraceStagedMilestones,
 } from "@murphai/hosted-execution/runtime-control";
@@ -48,6 +52,10 @@ import {
   buildHostedAssistantLinqDeliveryContextFromWake,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
+import {
+  buildHostedAssistantEmailDeliveryContextFromWake,
+  type HostedAssistantEmailDeliveryContext,
+} from "./email-delivery-context.ts";
 import type {
   HostedConversationWakeMetrics,
   NormalizedHostedAssistantRuntimeConfig,
@@ -208,6 +216,7 @@ export type HostedConversationMailboxImportOutcome =
   | {
       assistantInputId?: string | null;
       captureId: string | null;
+      emailDeliveryContext?: HostedAssistantEmailDeliveryContext | null;
       linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
       metrics: HostedConversationWakeMetrics;
       reasonCode?: string | null;
@@ -374,6 +383,7 @@ export async function importHostedConversationMailboxItem(input: {
     decoded.wake,
     input.item.item,
   );
+  const emailDeliveryContext = buildHostedAssistantEmailDeliveryContextFromWake(decoded.wake);
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
     importConversationWake,
@@ -395,6 +405,7 @@ export async function importHostedConversationMailboxItem(input: {
   return {
     assistantInputId: stagedInput.inputId,
     captureId: null,
+    ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
     ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
     metrics: createEmptyHostedConversationWakeMetrics(),
     ...(projectionEffect.effect.reasonCode ? { reasonCode: projectionEffect.effect.reasonCode } : {}),
@@ -731,7 +742,7 @@ async function importHostedConversationWakeWithLocalInbox(input: {
   } = await loadHostedConversationEventsModule();
   const result = await importHostedConversationMessageWakeIntoLocalInbox(input);
   return {
-    captureId: result.capture.captureId,
+    captureId: result.capture?.captureId ?? null,
     metrics: result.metrics,
   };
 }
@@ -1073,16 +1084,17 @@ function createHostedEmailConversationAssistantInputText(
     >;
   },
 ): string {
+  const promptFields = buildHostedEmailConversationPromptFields(wake.message);
   const bodyPreview = normalizeHostedAssistantInputText(
-    wake.message.textPreview ?? "",
+    promptFields.textPreview ?? "",
   );
   if (!bodyPreview) {
     const lines = [
       "Received an email message.",
-      renderHostedEmailPromptLine("Sender summary", wake.message.from),
-      renderHostedEmailPromptListLine("Recipient summary", wake.message.to),
-      renderHostedEmailPromptListLine("Cc summary", wake.message.cc),
-      renderHostedEmailPromptLine("Email subject", wake.message.subject),
+      renderHostedEmailPromptLine("Sender summary", promptFields.from),
+      renderHostedEmailPromptListLine("Recipient summary", promptFields.to),
+      renderHostedEmailPromptListLine("Cc summary", promptFields.cc),
+      renderHostedEmailPromptLine("Email subject", promptFields.subject),
       "Email body unavailable.",
     ];
     return normalizeHostedAssistantInputText(
@@ -1092,16 +1104,82 @@ function createHostedEmailConversationAssistantInputText(
 
   const lines = [
     "Received an email message.",
-    renderHostedEmailPromptLine("Sender summary", wake.message.from),
-    renderHostedEmailPromptListLine("Recipient summary", wake.message.to),
-    renderHostedEmailPromptListLine("Cc summary", wake.message.cc),
-    renderHostedEmailPromptLine("Email subject", wake.message.subject),
+    renderHostedEmailPromptLine("Sender summary", promptFields.from),
+    renderHostedEmailPromptListLine("Recipient summary", promptFields.to),
+    renderHostedEmailPromptListLine("Cc summary", promptFields.cc),
+    renderHostedEmailPromptLine("Email subject", promptFields.subject),
     `Email body preview - ${bodyPreview}`,
   ];
   return normalizeHostedAssistantInputText(
     lines.filter((line): line is string => line !== null).join("\n"),
   ) ?? "Received an email message.";
 }
+
+function buildHostedEmailConversationPromptFields(
+  message: Extract<HostedExecutionConversationMessageWake["message"], { channel: "email" }>,
+): {
+  cc?: string[];
+  from?: string | null;
+  subject?: string | null;
+  textPreview?: string | null;
+  to?: string[];
+} {
+  if (isHostedEmailGroupThreadTarget(message.threadTarget)) {
+    return {
+      from: buildHostedGroupEmailSenderSummary(message.from),
+      subject: redactHostedGroupEmailPromptText(message.subject),
+      textPreview: redactHostedGroupEmailPromptText(message.textPreview),
+    };
+  }
+
+  return {
+    cc: message.cc,
+    from: message.from,
+    subject: message.subject,
+    textPreview: message.textPreview,
+    to: message.to,
+  };
+}
+
+function isHostedEmailGroupThreadTarget(value: string | null | undefined): boolean {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0
+    && parseHostedEmailThreadTarget(normalized)?.targetKind === "group";
+}
+
+function buildHostedGroupEmailSenderSummary(value: string | null | undefined): string {
+  const normalized = normalizeHostedAssistantInputText(value ?? "");
+  if (
+    normalized
+    && normalized.startsWith(HOSTED_EMAIL_GROUP_PARTICIPANT_SUMMARY)
+    && !HOSTED_EMAIL_ADDRESS_PATTERN.test(normalized)
+  ) {
+    return normalized;
+  }
+
+  const displayName = normalizeHostedAssistantInputText(
+    extractHostedEmailDisplayName(value) ?? "",
+  );
+  if (displayName && !HOSTED_EMAIL_ADDRESS_PATTERN.test(displayName)) {
+    return `${HOSTED_EMAIL_GROUP_PARTICIPANT_SUMMARY}: ${displayName}`;
+  }
+
+  return HOSTED_EMAIL_GROUP_PARTICIPANT_SUMMARY;
+}
+
+function extractHostedEmailDisplayName(value: string | null | undefined): string | null {
+  const normalized = value?.replace(/\s+/gu, " ").trim() ?? "";
+  const angleIndex = normalized.indexOf("<");
+  if (angleIndex <= 0) {
+    return null;
+  }
+
+  const candidate = normalized.slice(0, angleIndex).trim().replace(/^"|"$/gu, "");
+  return candidate.length > 0 ? candidate : null;
+}
+
+const HOSTED_EMAIL_GROUP_PARTICIPANT_SUMMARY = "Email reply from group participant";
+const HOSTED_EMAIL_ADDRESS_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu;
 
 function renderHostedEmailPromptLine(
   label: string,
@@ -1266,10 +1344,14 @@ function createHostedConversationAssistantInputReplyTarget(
   }
 
   if (isHostedEmailConversationMessageWake(wake)) {
+    const groupThreadTarget = isHostedEmailGroupThreadTarget(wake.message.threadTarget);
     return {
       channel: "email",
+      // Group reply threading uses the threadTarget References payload. Keep the
+      // separate Message-ID off the runtime projection because providers can put
+      // address-like tokens in that header.
       messageId: normalizeHostedAssistantInputReplyTargetIdentifier(
-        wake.message.messageId,
+        groupThreadTarget ? null : wake.message.messageId,
       ),
       threadId: normalizeHostedAssistantInputReplyTargetIdentifier(
         wake.message.threadTarget,
@@ -1419,6 +1501,7 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
   }
 
   if (isHostedEmailConversationMessageWake(wake)) {
+    const redactFileNameForGroup = isHostedEmailGroupThreadTarget(wake.message.threadTarget);
     return (wake.message.attachmentSummaries ?? []).map((attachment, index) => ({
       attachmentId: hashHostedAssistantConversationIdentifier(
         identifierBlind,
@@ -1430,7 +1513,13 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
         ].join(":"),
       ),
       contentType: normalizeHostedAssistantInputMimeType(attachment.contentType),
-      fileName: normalizeAssistantInputFileName(attachment.fileName),
+      // Worker ingress redacts group filenames before append; keep this
+      // fallback for replayed or deploy-skewed wakes before model rendering.
+      fileName: normalizeAssistantInputFileName(
+        redactFileNameForGroup
+          ? redactHostedGroupEmailPromptText(attachment.fileName)
+          : attachment.fileName,
+      ),
       kind: "email_attachment",
       sizeBytes: normalizeHostedAssistantInputSize(attachment.sizeBytes),
     }));

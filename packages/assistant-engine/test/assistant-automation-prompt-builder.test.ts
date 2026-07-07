@@ -736,6 +736,36 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).not.toContain('att_voice_1')
   })
 
+  it('renders omitted attachment filenames without address-like prompt tokens', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        attachmentDescriptors: [
+          {
+            attachmentId: 'att_group_email_1',
+            contentType: 'application/pdf',
+            fileName: null,
+            kind: 'email_attachment',
+            sizeBytes: 1234,
+          },
+        ],
+        captureOverrides: {
+          attachmentCount: 1,
+          attachments: [],
+          text: 'Group reply attachment received.',
+        },
+        projectionStatus: 'succeeded',
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain('Attachment 1\nfileName: unknown')
+    expect(result.prompt).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu)
+    expect(result.prompt).not.toContain('att_group_email_1')
+  })
+
   it('renders lifecycle detail for each provider descriptor without ids', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({

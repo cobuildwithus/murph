@@ -5,6 +5,7 @@ import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionGroupNewsletterEmailNeededWake,
   HostedExecutionEmailConversationMessagePayload,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionLinqConversationMessage,
@@ -124,6 +125,7 @@ type HostedExecutionMemberOwnedWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
+  | HostedExecutionGroupNewsletterEmailNeededWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake;
 
@@ -518,5 +520,24 @@ export function buildHostedExecutionDeviceSyncWake(input: {
     ...(input.provider === undefined ? {} : { provider: input.provider }),
     reason: input.reason,
     userId: input.userId,
+  };
+}
+
+export function buildHostedExecutionGroupNewsletterEmailNeededWake(input: {
+  eventId: string;
+  groupDisplayName: string | null;
+  groupId: string;
+  memberId: string;
+  occurredAt: string;
+}): HostedExecutionGroupNewsletterEmailNeededWake {
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "group-newsletter.email-needed",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
+    groupDisplayName: input.groupDisplayName,
+    groupId: input.groupId,
   };
 }

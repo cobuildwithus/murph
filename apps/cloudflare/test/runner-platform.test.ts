@@ -6010,7 +6010,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     expect(readResult).toEqual(rawMessage);
-    expect(sendResult).toEqual({ target: "assistant@example.com" });
+    expect(sendResult).toEqual({
+      delivery: null,
+      target: "assistant@example.com",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     const readRequest = fetchMock.mock.calls[0]?.[0] as Request;

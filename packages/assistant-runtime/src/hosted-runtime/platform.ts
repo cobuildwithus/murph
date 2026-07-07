@@ -24,6 +24,8 @@ import type {
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
+  HostedRuntimeNewsletterToolRequest,
+  HostedRuntimeNewsletterToolResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
   HostedCodexAuthUpdate,
@@ -71,6 +73,7 @@ import type {
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedEmailSendRequest,
+  HostedEmailSendResult,
 } from "../hosted-email.ts";
 import type {
   AssistantConnectedAppsPort,
@@ -282,7 +285,7 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeLinqDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
-  sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;
+  sendEmail(request: HostedEmailSendRequest): Promise<HostedEmailSendResult | void>;
   writeAssistantDeliveryRecord?(
     record: HostedAssistantDeliveryRecord,
   ): Promise<HostedAssistantDeliveryRecord>;
@@ -342,6 +345,12 @@ export interface HostedRuntimeGroupToolPort {
   request(
     request: HostedRuntimeGroupToolRequest,
   ): Promise<HostedRuntimeGroupToolResponse>;
+}
+
+export interface HostedRuntimeNewsletterToolPort {
+  request(
+    request: HostedRuntimeNewsletterToolRequest,
+  ): Promise<HostedRuntimeNewsletterToolResponse>;
 }
 
 export interface HostedRuntimeCodexAuthPort {
@@ -485,6 +494,7 @@ export interface HostedRuntimePlatform {
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
+  newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;
   runtimeLivenessIntervalMs?: number | null;
