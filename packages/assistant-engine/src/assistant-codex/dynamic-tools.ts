@@ -329,7 +329,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", update the current hosted group database display name with action="update_display_name", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". update_display_name changes only Murph\'s database group label, not the upstream iMessage/SMS chat title. A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -338,6 +338,7 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: [
           'read_current',
+          'update_display_name',
           'create_join_link',
           'post_join_offer',
           'read_chat_participants',
@@ -350,7 +351,7 @@ export const MURPH_GROUP_TOOL = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
         description:
-          'Optional group display name shown on the join page when creating a join link.',
+          'Group display name. Required for action="update_display_name"; optional for action="create_join_link" to name the join page.',
       },
       kind: {
         type: 'string',
@@ -774,6 +775,16 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_current'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('update_display_name'),
+      displayName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH),
     })
     .strict(),
   z
@@ -2870,6 +2881,17 @@ function parseGroupArguments(
         Object.keys(joinLink).length > 0
           ? { action: 'create_join_link', joinLink }
           : { action: 'create_join_link' },
+    }
+  }
+  if (parsed.data.action === 'update_display_name') {
+    return {
+      ok: true,
+      request: {
+        action: 'update_display_name',
+        updateDisplayName: {
+          displayName: parsed.data.displayName,
+        },
+      },
     }
   }
   if (parsed.data.action === 'post_join_offer') {

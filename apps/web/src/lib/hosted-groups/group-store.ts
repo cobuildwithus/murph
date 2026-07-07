@@ -234,6 +234,44 @@ export async function readHostedGroupByRuntimeMemberId(input: {
   return group ? readHostedGroupSummaryById(prisma, group.id) : null;
 }
 
+export async function updateHostedGroupDisplayNameByRuntimeMemberIdTx(input: {
+  displayName: string;
+  runtimeMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupSummary | null> {
+  const displayName = normalizeNullableString(input.displayName)?.replace(/\s+/gu, " ") ?? null;
+  if (!displayName) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_DISPLAY_NAME_REQUIRED",
+      httpStatus: 400,
+      message: "Hosted group display name is required.",
+      retryable: false,
+    });
+  }
+  if (displayName.length > 120) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_DISPLAY_NAME_TOO_LONG",
+      httpStatus: 400,
+      message: "Hosted group display name is too long.",
+      retryable: false,
+    });
+  }
+
+  const group = await input.tx.hostedGroup.findUnique({
+    where: { runtimeMemberId: input.runtimeMemberId },
+    select: { id: true },
+  });
+  if (!group) return null;
+
+  await lockHostedGroupRow(input.tx, group.id);
+  await input.tx.hostedGroup.update({
+    where: { id: group.id },
+    data: { displayName },
+    select: { id: true },
+  });
+  return readHostedGroupSummaryById(input.tx, group.id);
+}
+
 export async function createOrReadHostedGroupJoinLinkTx(input: {
   tx: Prisma.TransactionClient;
   actorMemberId: string;

@@ -759,6 +759,7 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
 
 export type HostedRuntimeGroupToolAction =
   | "read_current"
+  | "update_display_name"
   | "create_join_link"
   | "post_join_offer"
   | "read_chat_participants"
@@ -813,6 +814,10 @@ export interface HostedRuntimeGroupPostJoinOfferRequest {
   projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
 }
 
+export interface HostedRuntimeGroupUpdateDisplayNameRequest {
+  displayName: string;
+}
+
 /**
  * Injected by the hosted runtime from the current wake's Linq delivery
  * context; never supplied by the model. The web handler asserts the authority
@@ -837,6 +842,10 @@ export interface HostedRuntimeGroupChatParticipant {
 
 export type HostedRuntimeGroupToolRequest =
   | { action: "read_current" }
+  | {
+      action: "update_display_name";
+      updateDisplayName: HostedRuntimeGroupUpdateDisplayNameRequest;
+    }
   | { action: "create_join_link"; joinLink?: HostedRuntimeGroupCreateJoinLinkRequest | null }
   | {
       action: "post_join_offer";
@@ -862,6 +871,12 @@ export type HostedRuntimeGroupToolResponse =
       action: "create_join_link";
       result:
         | { status: "ok"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "update_display_name";
+      result:
+        | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
   | {
