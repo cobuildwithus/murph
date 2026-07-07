@@ -453,13 +453,9 @@ describe("hosted web production migration guard", () => {
   });
 
   test("runs hosted web contract migrations after successful production deployment status", async () => {
+    const workflowRoot = path.resolve(appRoot, "..", "..");
     const workflow = await readFile(
-      path.resolve(
-        appRoot,
-        "..",
-        "..",
-        ".github/workflows/hosted-web-contract-migrations.yml",
-      ),
+      path.join(workflowRoot, ".github/workflows/hosted-web-contract-migrations.yml"),
       "utf8",
     );
 
@@ -484,6 +480,27 @@ describe("hosted web production migration guard", () => {
     assert.doesNotMatch(workflow, /steps\.current-production/u);
     assert.doesNotMatch(workflow, /deployment\.ref == 'main'/u);
     assert.match(workflow, /release:production:contract-migrate/u);
+
+    const nodeVersionFiles = Array.from(
+      workflow.matchAll(/node-version-file:\s*([^\s#]+)/gu),
+      (match) => match[1] ?? "",
+    );
+    assert.deepEqual(nodeVersionFiles, [".nvmrc"]);
+
+    const nodeVersion = (
+      await readFile(path.join(workflowRoot, nodeVersionFiles[0]!), "utf8")
+    ).trim();
+    const escapedNodeVersion = nodeVersion.replaceAll(".", "\\.");
+    const workspaceConfig = await readFile(
+      path.join(workflowRoot, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+
+    assert.match(nodeVersion, /^\d+\.\d+\.\d+$/u);
+    assert.match(
+      workspaceConfig,
+      new RegExp(`^nodeVersion: ${escapedNodeVersion}$`, "mu"),
+    );
   });
 
   test("does not register device-sync recovery as a Vercel cron", async () => {
