@@ -22,6 +22,11 @@ import {
 import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
+import { SegmentedControl } from "@/src/components/ui/segmented-control";
+import {
+  normalizeHostedEmailAddress,
+  normalizeHostedTelegramUsernameForLookup,
+} from "@/src/lib/hosted-onboarding/contact-normalization";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/shared";
 import { cn } from "@/src/lib/utils";
 
@@ -216,6 +221,8 @@ export function HostedFamilyManager(props: {
   const trimmedLabel = label.trim();
   const trimmedEmail = email.trim();
   const trimmedTelegram = telegram.trim();
+  const normalizedEmail = normalizeHostedEmailAddress(email);
+  const normalizedTelegram = normalizeHostedTelegramUsernameForLookup(telegram);
   const activeContactInput = (() => {
     if (inviteChannel === "imessage") {
       return phone.trim();
@@ -232,8 +239,14 @@ export function HostedFamilyManager(props: {
     inviteChannel === "imessage"
       ? Boolean(normalizedPhone)
       : inviteChannel === "email"
-        ? Boolean(trimmedEmail)
-        : Boolean(trimmedTelegram);
+        ? Boolean(normalizedEmail)
+        : Boolean(normalizedTelegram);
+  const activeContactInputNoun =
+    inviteChannel === "imessage"
+      ? "phone number"
+      : inviteChannel === "email"
+        ? "email"
+        : "Telegram username";
   const inviteWillAddSeat = planCanGrow && hasStableTarget;
   const inviteNeedsStableTargetForSeat = planCanGrow && !hasStableTarget;
   const inviteSubmitDisabled = isInviting || inviteNeedsStableTargetForSeat;
@@ -273,6 +286,14 @@ export function HostedFamilyManager(props: {
       setInviteError(`Enter a valid phone number for ${selectedPhoneCountry.label}.`);
       return;
     }
+    if (inviteChannel === "email" && trimmedEmail && !normalizedEmail) {
+      setInviteError("Enter a valid email address.");
+      return;
+    }
+    if (inviteChannel === "telegram" && trimmedTelegram && !normalizedTelegram) {
+      setInviteError("Enter a valid Telegram username.");
+      return;
+    }
     setInviteError(null);
     setCreatedInvite(null);
     setCreatedInviteCopied(false);
@@ -290,20 +311,19 @@ export function HostedFamilyManager(props: {
           ...(inviteChannel === "imessage" && normalizedPhone
             ? { targetPhoneNumber: normalizedPhone }
             : {}),
-          ...(inviteChannel === "email" && trimmedEmail ? { targetEmail: trimmedEmail } : {}),
-          ...(inviteChannel === "telegram" && trimmedTelegram
-            ? { targetTelegramUsername: trimmedTelegram }
+          ...(inviteChannel === "email" && normalizedEmail ? { targetEmail: normalizedEmail } : {}),
+          ...(inviteChannel === "telegram" && normalizedTelegram
+            ? { targetTelegramUsername: normalizedTelegram }
             : {}),
         },
         url: "/api/settings/billing/family/invite",
       });
       setCreatedInvite({
         ...response.invite,
-        targetEmail: inviteChannel === "email" ? trimmedEmail || null : null,
+        targetEmail: inviteChannel === "email" ? normalizedEmail : null,
         targetPhoneHint:
           inviteChannel === "imessage" && normalizedPhone ? response.invite.targetPhoneHint : null,
-        targetTelegramUsername:
-          inviteChannel === "telegram" ? trimmedTelegram.replace(/^@/, "") || null : null,
+        targetTelegramUsername: inviteChannel === "telegram" ? normalizedTelegram : null,
       });
       router.refresh();
     } catch (error) {
@@ -645,26 +665,14 @@ export function HostedFamilyManager(props: {
                   />
                 </div>
 
-                <div
-                  role="group"
+                <SegmentedControl
                   aria-label="Invite by"
-                  className="flex w-full items-center gap-1 rounded-lg border border-[#c4a882]/25 bg-[#f5f0e8] p-1"
-                >
-                  {INVITE_CHANNEL_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      aria-pressed={inviteChannel === option.value}
-                      onClick={() => changeInviteChannel(option.value)}
-                      className={cn(
-                        "h-8 flex-1 rounded-md px-2.5 text-sm font-medium text-[#736a58] transition-colors hover:bg-[#fffcf6]/70 hover:text-[#2d3436] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none",
-                        inviteChannel === option.value && "bg-[#fffcf6] text-[#2d3436]",
-                      )}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
+                  options={INVITE_CHANNEL_OPTIONS}
+                  value={inviteChannel}
+                  onValueChange={changeInviteChannel}
+                  className="border-[#c4a882]/25 bg-[#f5f0e8]"
+                  itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
+                />
 
                 {inviteChannel === "imessage" ? (
                   <div className="flex flex-col gap-1.5">
@@ -710,7 +718,7 @@ export function HostedFamilyManager(props: {
                 {inviteNeedsStableTargetForSeat ? (
                   <p role="status" className="text-xs leading-5 text-[#736a58]">
                     {activeContactInput
-                      ? `Enter a valid phone number to invite. It adds a paid seat at ${props.seatPrice}.`
+                      ? `Enter a valid ${activeContactInputNoun} to invite. It adds a paid seat at ${props.seatPrice}.`
                       : `Add a contact to invite. It adds a paid seat at ${props.seatPrice}.`}
                   </p>
                 ) : !activeContactInput ? (

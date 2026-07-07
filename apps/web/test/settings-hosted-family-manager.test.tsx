@@ -154,7 +154,7 @@ test("HostedFamilyManager keeps the created invite visible for manual sharing", 
   }
 });
 
-test("HostedFamilyManager copies a Telegram deep link for Telegram-bound invites", async () => {
+test("HostedFamilyManager submits a normalized Telegram username", async () => {
   const writeText = vi.fn(() => Promise.resolve());
   vi.useFakeTimers();
 
@@ -172,13 +172,13 @@ test("HostedFamilyManager copies a Telegram deep link for Telegram-bound invites
       await clickButton(container, window, "Invite member");
       await clickButton(container, window, "Telegram");
       await act(async () => {
-        setInputValue(window, inputById(container, "family-invite-telegram"), "@dad_username");
+        setInputValue(window, inputById(container, "family-invite-telegram"), "@Dad_Username");
       });
       await clickButton(container, window, "Create invite");
 
       expect(submittedPayload()).toMatchObject({
         addSeatIfNeeded: false,
-        targetTelegramUsername: "@dad_username",
+        targetTelegramUsername: "dad_username",
       });
       expect(submittedPayload()).not.toHaveProperty("targetPhoneNumber");
       expect(submittedPayload()).not.toHaveProperty("targetEmail");
@@ -196,6 +196,54 @@ test("HostedFamilyManager copies a Telegram deep link for Telegram-bound invites
     }
   } finally {
     vi.useRealTimers();
+  }
+});
+
+test("HostedFamilyManager rejects an invalid email before submitting", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+    await clickButton(container, window, "Email");
+    await act(async () => {
+      setInputValue(window, inputById(container, "family-invite-email"), "not-an-email");
+    });
+    await clickButton(container, window, "Create invite");
+
+    assert.match(container.textContent ?? "", /Enter a valid email address\./);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager rejects an invalid Telegram username before submitting", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, baseFamilyManagerProps()),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+    await clickButton(container, window, "Telegram");
+    await act(async () => {
+      setInputValue(window, inputById(container, "family-invite-telegram"), "@dad");
+    });
+    await clickButton(container, window, "Create invite");
+
+    assert.match(container.textContent ?? "", /Enter a valid Telegram username\./);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  } finally {
+    await cleanup();
   }
 });
 
@@ -231,6 +279,44 @@ test("HostedFamilyManager copies a Telegram deep link for pending Telegram invit
     expect(writeText).toHaveBeenCalledWith(
       "https://t.me/withmurph_bot?start=family_TELEGRAM",
     );
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager disables paid-seat submit for an invalid email", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      seats: {
+        active: 1,
+        billed: 2,
+        invited: 1,
+        max: 6,
+        min: 2,
+        remaining: 0,
+        used: 2,
+      },
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(container, window, "Invite member");
+    await clickButton(container, window, "Email");
+    await act(async () => {
+      setInputValue(window, inputById(container, "family-invite-email"), "not-an-email");
+    });
+
+    assert.match(
+      container.textContent ?? "",
+      /Enter a valid email to invite\. It adds a paid seat at \$7\/mo\./,
+    );
+    assert.equal(buttonByText(container, "Create invite").disabled, true);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   } finally {
     await cleanup();
   }
