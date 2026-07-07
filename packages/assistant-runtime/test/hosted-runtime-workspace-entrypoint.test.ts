@@ -12056,11 +12056,23 @@ describe("hosted workspace runtime entrypoint", () => {
               return {
                 afterCheckpoint: async () => {
                   mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_foreground_preempt_conversation",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:01.000Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                  await waitUntil(() => {
+                    assert.ok(events.includes(
+                      "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation",
+                    ));
+                  });
+
+                  mailboxItems.push(createMailboxItem({
                     id: "mailbox_item_entrypoint_foreground_preempt_system_deferred",
                     kind: "device-sync.wake",
                     lane: "system",
                     laneSeq: "2",
-                    occurredAt: "2026-04-27T00:00:01.000Z",
+                    occurredAt: "2026-04-27T00:00:02.000Z",
                   }));
                   runtimeWakeSignal.notify();
                   await waitUntil(() => {
@@ -12070,18 +12082,6 @@ describe("hosted workspace runtime entrypoint", () => {
                       && request.lanes.some((lane) =>
                         lane.lane === "system" && lane.importedSeq === "1"
                       )
-                    ));
-                  });
-
-                  mailboxItems.push(createMailboxItem({
-                    id: "mailbox_item_entrypoint_foreground_preempt_conversation",
-                    laneSeq: "1",
-                    occurredAt: "2026-04-27T00:00:02.000Z",
-                  }));
-                  runtimeWakeSignal.notify();
-                  await waitUntil(() => {
-                    assert.ok(events.includes(
-                      "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation",
                     ));
                   });
                   events.push("system.afterCheckpoint");

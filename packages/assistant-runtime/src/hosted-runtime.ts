@@ -1972,6 +1972,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         preserveDueAssistantWakeOnNoProgress?: boolean;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
       }): Promise<HostedWorkspaceRunnerResult> => {
+        const resolveForegroundRerunMailboxImport = (
+          passResult: HostedWorkspaceRunnerResult,
+        ): HostedMailboxImportCheckpointResult | null => {
+          const assistantInputImport = passResult.latestAssistantInputMailboxImport;
+          if (
+            assistantInputImport
+            && assistantInputImport !== passResult.initialMailboxImport
+            && hostedMailboxImportHasAssistantInputWork(assistantInputImport)
+          ) {
+            return assistantInputImport;
+          }
+
+          return null;
+        };
         const runSingleForegroundPass = async (
           singleWakeInput: typeof wakeInput,
         ): Promise<HostedWorkspaceRunnerResult> => {
@@ -1999,22 +2013,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
         let passResult = await runSingleForegroundPass(wakeInput);
         // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
+        let rerunMailboxImport = resolveForegroundRerunMailboxImport(passResult);
         while (
-          passResult.latestMailboxImport !== passResult.initialMailboxImport
-          && hostedMailboxImportHasAssistantInputWork(
-            passResult.latestMailboxImport,
-          )
+          rerunMailboxImport
           && (
             passResult.assistantPhaseResult?.checkpointReason !== "assistant_runtime_commit"
             || passResult.assistantPhaseResult?.deviceSyncMaintenanceRan === true
           )
         ) {
           passResult = await runSingleForegroundPass({
-            initialMailboxImport: passResult.latestMailboxImport,
+            initialMailboxImport: rerunMailboxImport,
             initialMailboxImportContext: null,
             latencySeed: wakeInput.latencySeed ?? null,
             requestIdKind: "checkpoint-interrupt",
           });
+          rerunMailboxImport = resolveForegroundRerunMailboxImport(passResult);
         }
         return passResult;
       };

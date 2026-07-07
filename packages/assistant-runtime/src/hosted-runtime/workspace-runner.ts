@@ -155,6 +155,7 @@ interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
   discardMailboxPostCheckpointEffects(): void;
   hasRuntimeStateDirty(): boolean;
+  latestAssistantInputMailboxImport(): HostedMailboxImportCheckpointResult | null;
   latestMailboxImportCoveredByWorkspace(): boolean;
   latestMailboxImport(): HostedMailboxImportCheckpointResult | null;
   latestWorkspace(): HostedWorkspaceState | null;
@@ -315,6 +316,7 @@ export interface HostedWorkspaceRunnerResult {
   afterDurableCheckpoint: readonly HostedWorkspaceDurableCheckpointEffect[];
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
   initialMailboxImport: HostedMailboxImportCheckpointResult;
+  latestAssistantInputMailboxImport: HostedMailboxImportCheckpointResult | null;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
   latestWorkspace: HostedWorkspaceState | null;
   mailboxPostCheckpointEffectsFinished: Promise<void> | null;
@@ -516,6 +518,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       initialMailboxImport,
       latestMailboxImport: checkpointRequestSession.latestMailboxImport()
         ?? initialMailboxImport,
+      latestAssistantInputMailboxImport:
+        checkpointRequestSession.latestAssistantInputMailboxImport(),
       latestWorkspace: checkpointRequestSession.latestWorkspace()
         ?? initialMailboxImport.checkpoint?.workspace
         ?? input.workspace,
@@ -844,6 +848,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     initialMailboxImport,
     latestMailboxImport: checkpointRequestSession.latestMailboxImport()
       ?? initialMailboxImport,
+    latestAssistantInputMailboxImport:
+      checkpointRequestSession.latestAssistantInputMailboxImport(),
     latestWorkspace: checkpointRequestSession.latestWorkspace()
       ?? initialMailboxImport.checkpoint?.workspace
       ?? input.workspace,
@@ -1233,6 +1239,12 @@ function hasHostedMailboxImportForegroundConversationWork(
       item.retryable && item.lane === "conversation"
     )
   );
+}
+
+function hasHostedMailboxImportAssistantInputWork(
+  result: HostedMailboxImportCheckpointResult | null | undefined,
+): boolean {
+  return (result?.importResult.assistantInputIds?.length ?? 0) > 0;
 }
 
 async function notifyHostedActiveTurnInputForMailboxImport(input: {
@@ -1731,6 +1743,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   let latestMailboxImportSequence = 0;
   let latestWorkspaceMailboxImportSequence = 0;
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
+  let latestAssistantInputMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
   let mailboxRetryAt: string | null = null;
@@ -1768,6 +1781,9 @@ function createHostedWorkspaceCheckpointRequestSession(
     latestMailboxImport() {
       return latestMailboxImport;
     },
+    latestAssistantInputMailboxImport() {
+      return latestAssistantInputMailboxImport;
+    },
     latestMailboxImportCoveredByWorkspace() {
       return latestMailboxImportSequence === latestWorkspaceMailboxImportSequence;
     },
@@ -1783,6 +1799,9 @@ function createHostedWorkspaceCheckpointRequestSession(
     recordCheckpointResult(result) {
       latestMailboxImportSequence += 1;
       latestMailboxImport = result;
+      if (hasHostedMailboxImportAssistantInputWork(result)) {
+        latestAssistantInputMailboxImport = result;
+      }
       mailboxRetryAt = selectHostedRuntimeWakeCandidate([
         createHostedRuntimeWakeCandidate(mailboxRetryAt, "mailbox"),
         createHostedRuntimeWakeCandidate(
