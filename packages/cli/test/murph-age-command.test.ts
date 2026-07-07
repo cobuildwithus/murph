@@ -6,8 +6,12 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 import { CURRENT_VAULT_FORMAT_VERSION } from '@murphai/contracts'
 import {
-  MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
   METRIC_POINT_SCHEMA_VERSION,
+  normalizeMetricValue,
+  type MetricPoint,
+} from '@murphai/health-metrics'
+import {
+  MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
   MURPH_AGE_RESEARCH_CALCULATOR_VIEW_SCHEMA_VERSION,
@@ -17,8 +21,6 @@ import {
   MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   listMurphAgeSubmittedCalculatorInputBundleSpecs,
   listMurphAgeSubmittedCalculatorMetricInputSpecs,
-  normalizeMetricValue,
-  type MetricPoint,
   type MurphAgePublicCalculatorReport,
   type MurphAgePublicCalculatorView,
   type MurphAgePublicDisplaySummary,
@@ -26,11 +28,9 @@ import {
   type MurphAgeRiskModel,
   type MurphAgeSubmittedCalculatorViewBundle,
   type MurphAgeWearableResidualParameterPack,
-} from '@murphai/health-metrics'
-import {
-  defaultMurphAgeModelCardArtifactRoot,
-  rebuildQueryProjection,
-} from '@murphai/query'
+} from '@murphai/health-metrics/murph-age'
+import { rebuildQueryProjection } from '@murphai/query'
+import { defaultMurphAgeModelCardArtifactRoot } from '@murphai/query/murph-age'
 import { QUERY_DB_RELATIVE_PATH, openSqliteRuntimeDatabase } from '@murphai/runtime-state/node'
 import {
   createIntegratedVaultServices,

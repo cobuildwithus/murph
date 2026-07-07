@@ -6,7 +6,7 @@ import {
   MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_CARD_SCHEMA_VERSION,
   listMurphAgeWearableActivityBenchmarkCards,
   validateMurphAgeWearableActivityBenchmarkCard,
-} from "../src/index.ts";
+} from "@murphai/health-metrics/murph-age";
 
 test("locks the NHANES activity wearable shadow benchmark card before local adapter execution", () => {
   const cards = listMurphAgeWearableActivityBenchmarkCards();

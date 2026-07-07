@@ -10,7 +10,7 @@ import {
   type MurphAgeLocalModelCardArtifact,
   type MurphAgeRiskModel,
   type MurphAgeWearableResidualParameterPack,
-} from "../src/index.ts";
+} from "@murphai/health-metrics/murph-age";
 
 test("builds a product-blocked labs plus wearable research preview from model cards and residual packs", () => {
   const modelCard = fixtureL1bModelCard();
