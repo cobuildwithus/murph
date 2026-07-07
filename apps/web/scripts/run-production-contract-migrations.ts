@@ -20,6 +20,8 @@ const DEFAULT_CONTRACT_MIGRATIONS_DIR = path.join(
 );
 const CONTRACT_MIGRATION_TABLE = '"_hosted_web_contract_migration"';
 const CONTRACT_MIGRATION_LOCK_NAME = "hosted_web_contract_migrations";
+const CONTRACT_MIGRATION_LOCK_TIMEOUT = "5s";
+const CONTRACT_MIGRATION_STATEMENT_TIMEOUT = "30s";
 
 export interface HostedWebContractMigration {
   checksum: string;
@@ -156,6 +158,12 @@ export async function applyHostedWebContractMigrations(
         );
       }
 
+      await database.query(
+        `SET LOCAL lock_timeout = '${CONTRACT_MIGRATION_LOCK_TIMEOUT}'`,
+      );
+      await database.query(
+        `SET LOCAL statement_timeout = '${CONTRACT_MIGRATION_STATEMENT_TIMEOUT}'`,
+      );
       await database.query(migration.sql);
       await database.query(
         `INSERT INTO ${CONTRACT_MIGRATION_TABLE} (migration_id, checksum) VALUES ($1, $2)`,

@@ -22,5 +22,7 @@ as successful and the production alias still points at that deployment.
 
 Contract migration SQL must be safe to run inside one transaction and should be
 idempotent where PostgreSQL supports it, for example `DROP COLUMN IF EXISTS`.
-Do not use commands that PostgreSQL forbids inside a transaction, such as
-`CREATE INDEX CONCURRENTLY`.
+The runner sets short transaction-local lock and statement timeouts before each
+migration body; if cleanup cannot run without waiting on live traffic, let it
+fail and retry later. Do not use commands that PostgreSQL forbids inside a
+transaction, such as `CREATE INDEX CONCURRENTLY`.

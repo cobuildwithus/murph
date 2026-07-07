@@ -371,6 +371,16 @@ describe("hosted web production migration guard", () => {
       await applyHostedWebContractMigrations(database, [migration]),
       { applied: 1, skipped: 0 },
     );
+    assert.ok(
+      database.queries.indexOf("SET LOCAL lock_timeout = '5s'")
+        < database.queries.indexOf(migration.sql),
+      "contract migrations must set a short lock timeout before DDL",
+    );
+    assert.ok(
+      database.queries.indexOf("SET LOCAL statement_timeout = '30s'")
+        < database.queries.indexOf(migration.sql),
+      "contract migrations must bound statement runtime before DDL",
+    );
     assert.deepEqual(
       await applyHostedWebContractMigrations(database, [migration]),
       { applied: 0, skipped: 1 },
@@ -465,16 +475,14 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /deployment\?\.meta\?\.githubCommitSha/u);
     assert.match(workflow, /HOSTED_WEB_VERCEL_TOKEN/u);
     assert.match(workflow, /HOSTED_WEB_VERCEL_PROJECT_ID/u);
+    assert.match(workflow, /HOSTED_WEB_DIRECT_DATABASE_URL/u);
+    assert.match(workflow, /DIRECT_DATABASE_URL="\$\{HOSTED_WEB_DIRECT_DATABASE_URL\}"/u);
     assert.match(
       workflow,
       /steps\.production-branch\.outputs\.should_run == 'true'/u,
     );
-    assert.match(
-      workflow,
-      /steps\.current-production\.outputs\.should_run == 'true'/u,
-    );
+    assert.doesNotMatch(workflow, /steps\.current-production/u);
     assert.doesNotMatch(workflow, /deployment\.ref == 'main'/u);
-    assert.match(workflow, /HOSTED_WEB_DIRECT_DATABASE_URL/u);
     assert.match(workflow, /release:production:contract-migrate/u);
   });
 
@@ -548,11 +556,14 @@ async function writeMigrationSql(
 
 class FakeContractMigrationDatabase implements HostedWebContractMigrationDatabase {
   readonly checksums = new Map<string, string>();
+  readonly queries: string[] = [];
 
   async query(
     text: string,
     values?: unknown[],
   ): Promise<{ rows: Array<Record<string, unknown>> }> {
+    this.queries.push(text);
+
     if (text.includes("SELECT checksum")) {
       const migrationId = String(values?.[0] ?? "");
       const checksum = this.checksums.get(migrationId);

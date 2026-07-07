@@ -55,11 +55,11 @@ jobs:
         if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         run: pnpm install --frozen-lockfile
 
-      - name: Verify current Vercel production deployment
-        id: current-production
+      - name: Verify current Vercel production deployment and apply contract migrations
         if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         shell: bash
         env:
+          HOSTED_WEB_DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}
           DEPLOYED_SHA: ${{ github.event.deployment.sha }}
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
@@ -70,6 +70,11 @@ jobs:
 
           if [ -z "${HOSTED_WEB_VERCEL_TOKEN}" ]; then
             echo "::error::HOSTED_WEB_VERCEL_TOKEN is required to verify the current Vercel production deployment."
+            exit 1
+          fi
+
+          if [ -z "${HOSTED_WEB_DIRECT_DATABASE_URL}" ]; then
+            echo "::error::HOSTED_WEB_DIRECT_DATABASE_URL is required to apply hosted web contract migrations."
             exit 1
           fi
 
@@ -125,17 +130,11 @@ jobs:
           fi
 
           if [ "${current_sha}" = "${DEPLOYED_SHA}" ]; then
-            echo "should_run=true" >> "${GITHUB_OUTPUT}"
-            exit 0
+            DIRECT_DATABASE_URL="${HOSTED_WEB_DIRECT_DATABASE_URL}" \
+              MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS=1 \
+              MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS=1 \
+              pnpm --dir apps/web release:production:contract-migrate
+            exit $?
           fi
 
-          echo "should_run=false" >> "${GITHUB_OUTPUT}"
           echo "::notice::Skipping hosted web contract migrations because current Vercel production is ${current_sha}, not ${DEPLOYED_SHA}."
-
-      - name: Apply hosted web contract migrations
-        if: ${{ steps.production-branch.outputs.should_run == 'true' && steps.current-production.outputs.should_run == 'true' }}
-        env:
-          DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}
-          MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"
-          MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"
-        run: pnpm --dir apps/web release:production:contract-migrate
