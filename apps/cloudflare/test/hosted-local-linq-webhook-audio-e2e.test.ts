@@ -61,7 +61,9 @@ describe("hosted local Linq webhook audio e2e", () => {
     });
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
 
-    requireScenario().queueAssistantResponses([hostedLinqVoiceNoteAssistantReplyText]);
+    requireScenario().queueAssistantResponses([hostedLinqVoiceNoteAssistantReplyText], {
+      matchInputContains: "Audio Message.wav",
+    });
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       materializedChatId,

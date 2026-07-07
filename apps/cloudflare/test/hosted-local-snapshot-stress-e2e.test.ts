@@ -174,13 +174,16 @@ describe("hosted local snapshot stress e2e", () => {
     const beforeInboundStatus = await requireScenario().harness.readUserStatus(userId);
     const beforeInboundWorkspaceVersion = beforeInboundStatus.workspace?.version ?? null;
     expect(beforeInboundWorkspaceVersion).not.toBeNull();
-    requireScenario().queueAssistantResponses([replyText]);
+    const inboundText = "Can you reply after restoring this large local hosted workspace?";
+    requireScenario().queueAssistantResponses([replyText], {
+      matchInputContains: inboundText,
+    });
     const inboundReplyLatencyStartedAt = performance.now();
     const webhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, materializedChatId, {
         eventId: `evt_snapshot_stress_${userId}`,
         messageId: `msg_snapshot_stress_${userId}`,
-        text: "Can you reply after restoring this large local hosted workspace?",
+        text: inboundText,
       }),
     );
     expect(webhookResponse.status).toBe(202);

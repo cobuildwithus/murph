@@ -313,14 +313,14 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", or mint the shareable group join link with action="create_join_link" and include the returned join URL plainly in your reply. Joining through that link grants group membership and shares the joiner\'s profile display name with this group runtime; optional health permissions stay individually selected on the join page. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or opt anyone into email.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional health permissions stay individually selected on the join page. A join offer tells people to like the server-owned offer message, then liking grants membership plus only the posted health-permission snapshot. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or opt anyone into email.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       action: {
         type: 'string',
-        enum: ['read_current', 'create_join_link', 'read_chat_participants', 'share_contact_card'],
+        enum: ['read_current', 'create_join_link', 'post_join_offer', 'read_chat_participants', 'share_contact_card'],
       },
       displayName: {
         type: 'string',
@@ -343,6 +343,16 @@ export const MURPH_GROUP_TOOL = {
         },
         description:
           'Optional bounded health projections the join page may offer joining members. Joining never shares them automatically; each member approves their own selection.',
+      },
+      projectionKinds: {
+        type: 'array',
+        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length,
+        items: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
+        },
+        description:
+          'Optional bounded health projections that liking the server-owned offer message will grant as a fixed snapshot. The server copy always states that profile display name is shared too.',
       },
     },
     required: ['action'],
@@ -685,6 +695,15 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('share_contact_card'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('post_join_offer'),
+      projectionKinds: z
+        .array(z.enum(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS))
+        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length)
+        .optional(),
     })
     .strict(),
   z
@@ -2497,6 +2516,20 @@ function parseGroupArguments(
         Object.keys(joinLink).length > 0
           ? { action: 'create_join_link', joinLink }
           : { action: 'create_join_link' },
+    }
+  }
+  if (parsed.data.action === 'post_join_offer') {
+    const joinOffer = {
+      ...(parsed.data.projectionKinds !== undefined
+        ? { projectionKinds: parsed.data.projectionKinds }
+        : {}),
+    }
+    return {
+      ok: true,
+      request:
+        Object.keys(joinOffer).length > 0
+          ? { action: 'post_join_offer', joinOffer }
+          : { action: 'post_join_offer' },
     }
   }
   if (
