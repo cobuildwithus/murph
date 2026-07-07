@@ -497,9 +497,13 @@ describe("startHostedContainerEntrypoint", () => {
     const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();
     const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const observedRuntime = {
+      shutdownSignal: null as AbortSignal | null,
+    };
     let runtimeWakeCount = 0;
     vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
       async (_job, options) => {
+        observedRuntime.shutdownSignal = options?.shutdownSignal ?? null;
         options?.onRuntimeWakeReady?.(() => {
           runtimeWakeCount += 1;
           return true;
@@ -534,7 +538,9 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     await invocationReady.promise;
+    expect(observedRuntime.shutdownSignal?.aborted).toBe(false);
     process.emit("SIGTERM", "SIGTERM");
+    expect(observedRuntime.shutdownSignal?.aborted).toBe(true);
 
     const lateWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
       body: JSON.stringify({

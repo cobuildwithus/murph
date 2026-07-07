@@ -173,6 +173,15 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
             : null,
           reason: checkpointInput.reason,
           redactedStatus: checkpointInput.redactedStatus ?? null,
+          ...(checkpointInput.idleCheckpointTrigger
+            ? { idleCheckpointTrigger: checkpointInput.idleCheckpointTrigger }
+            : {}),
+          ...(checkpointInput.runtimeWakePendingAtCheckpoint === undefined
+            ? {}
+            : {
+                runtimeWakePendingAtCheckpoint:
+                  checkpointInput.runtimeWakePendingAtCheckpoint,
+              }),
           snapshotRef: null,
         },
         previousWorkspaceCheckpointedAt: input.request.workspace?.checkpointedAt ?? null,
@@ -800,6 +809,15 @@ async function writeHostedCheckpointSnapshotLifecycleLog(input: {
 
   const redactedJson: HostedRuntimeRedactedJson = {
     checkpointReason: input.request.reason,
+    ...(input.request.idleCheckpointTrigger
+      ? { idleCheckpointTrigger: input.request.idleCheckpointTrigger }
+      : {}),
+    ...(input.request.runtimeWakePendingAtCheckpoint === undefined
+      ? {}
+      : {
+          runtimeWakePendingAtCheckpoint:
+            input.request.runtimeWakePendingAtCheckpoint,
+        }),
     ...(input.details ?? {}),
   };
   appendHostedCheckpointSnapshotFailureDiagnostics(redactedJson, input.error);
@@ -1016,6 +1034,15 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   const redactedJson: HostedRuntimeRedactedJson = {
     browserVaultReplicaState: "omitted",
     checkpointReason: input.request.reason,
+    ...(input.request.idleCheckpointTrigger
+      ? { idleCheckpointTrigger: input.request.idleCheckpointTrigger }
+      : {}),
+    ...(input.request.runtimeWakePendingAtCheckpoint === undefined
+      ? {}
+      : {
+          runtimeWakePendingAtCheckpoint:
+            input.request.runtimeWakePendingAtCheckpoint,
+        }),
     leaseCheckCount: input.leaseCheckCount,
     ...(input.prunedRuntimeSymlinkCount > 0
       ? {

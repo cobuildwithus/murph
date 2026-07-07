@@ -301,6 +301,39 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
   });
 
+  it("carries idle checkpoint trigger metadata through the production bridge snapshot path", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const options = createBridgeOptions({
+      platform,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot({
+      ...createCheckpointInput("idle_shutdown"),
+      idleCheckpointTrigger: "shutdown_signal",
+      runtimeWakePendingAtCheckpoint: false,
+    });
+
+    const checkpointRequest =
+      calls.completeSnapshotSession.mock.calls[0]?.[0].checkpointRequest;
+    expect(checkpointRequest?.idleCheckpointTrigger).toBe("shutdown_signal");
+    expect(checkpointRequest?.runtimeWakePendingAtCheckpoint).toBe(false);
+
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    for (const eventCode of [
+      "checkpoint.snapshot_plan",
+      "checkpoint.snapshot_started",
+      "checkpoint.snapshot_finished",
+    ]) {
+      const entry = entries.find((candidate) => candidate.eventCode === eventCode);
+      expect(entry?.redactedJson).toMatchObject({
+        idleCheckpointTrigger: "shutdown_signal",
+        runtimeWakePendingAtCheckpoint: false,
+      });
+    }
+  });
+
   it("uses the current checkpoint expected workspace version for bridge snapshots", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();

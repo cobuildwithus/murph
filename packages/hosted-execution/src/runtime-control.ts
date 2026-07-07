@@ -1635,16 +1635,26 @@ export const HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS = [
 export type HostedWorkspaceCheckpointConflictReason =
   (typeof HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS)[number];
 
+export const HOSTED_IDLE_CHECKPOINT_TRIGGERS = [
+  "idle_window",
+  "shutdown_signal",
+] as const;
+
+export type HostedIdleCheckpointTrigger =
+  (typeof HOSTED_IDLE_CHECKPOINT_TRIGGERS)[number];
+
 export interface HostedWorkspaceCheckpointRequest {
   attemptId: string;
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   expectedWorkspaceVersion: string;
+  idleCheckpointTrigger?: HostedIdleCheckpointTrigger;
   inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   reason: HostedWorkspaceCheckpointReason;
   redactedStatus?: HostedRuntimeRedactedJson | null;
+  runtimeWakePendingAtCheckpoint?: boolean;
   snapshotRef: HostedExecutionSnapshotRefState;
 }
 
