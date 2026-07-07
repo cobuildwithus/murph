@@ -157,7 +157,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Start Family/);
   });
 
-  test("routes Family owners through Family billing before choosing individual plans", async () => {
+  test("routes family-plan owners through Family billing before choosing individual plans", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {

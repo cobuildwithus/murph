@@ -91,7 +91,9 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     });
     const notification = await appendHostedFamilyChatNotificationTx({
       memberId: familyAcceptance.memberId,
-      message: buildHostedFamilyInviteAcceptedReplyText(),
+      message: buildHostedFamilyInviteAcceptedReplyText({
+        memberId: familyAcceptance.memberId,
+      }),
       occurredAt: summary.occurredAt,
       route,
       sourceEventId: eventId,

@@ -83,7 +83,6 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 });
 
 import {
-  MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE,
   activateHostedMemberForFamilySponsorshipTx,
   activateHostedMemberForPositiveSourceTx,
   buildHostedMemberActivationWelcomeRoute,
@@ -317,7 +316,11 @@ describe("hosted onboarding member activation", () => {
         notification: expect.objectContaining({
           responsePolicy: {
             kind: "require_send_exact_text",
-            text: MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE,
+            text: renderUserFacingMessage({
+              context: {},
+              key: "assistant.family_welcome",
+              seed: "member_123",
+            }).text,
           },
         }),
       }),

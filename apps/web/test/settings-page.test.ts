@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import { HostedBillingStatus } from "@prisma/client";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
@@ -36,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   HostedDataPrivacySettings: vi.fn((props: { authenticated: boolean }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
   HostedFamilySettings: vi.fn(() => React.createElement("div", null, "Hosted family settings")),
+  routerRefresh: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
   prisma: {
@@ -60,6 +62,9 @@ const redirectMock = vi.hoisted(() => vi.fn((path: string) => {
 
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
+  useRouter: () => ({
+    refresh: mocks.routerRefresh,
+  }),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
@@ -125,6 +130,50 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
+});
+
+test("HostedFamilySettings explains family member privacy without enumerating data categories", async () => {
+  const { HostedFamilySettings } = await vi.importActual<
+    typeof import("@/src/components/settings/hosted-family-settings")
+  >("@/src/components/settings/hosted-family-settings");
+
+  const ownerSnapshot = {
+    billingActive: true,
+    billingStatus: HostedBillingStatus.active,
+    displayName: "Family",
+    groupId: "hbag_family",
+    invites: [],
+    members: [
+      {
+        isOwner: true,
+        joinedAt: new Date("2026-06-18T12:00:00.000Z"),
+        label: "You",
+        memberId: "member_owner",
+        role: "owner",
+        status: "active",
+      },
+    ],
+    ownerMemberId: "member_owner",
+    seats: {
+      active: 1,
+      billed: 2,
+      invited: 0,
+      max: 4,
+      min: 2,
+      remaining: 3,
+      used: 1,
+    },
+    suspendedAt: null,
+  } satisfies Parameters<typeof HostedFamilySettings>[0]["ownerSnapshot"];
+
+  const markup = renderToStaticMarkup(React.createElement(HostedFamilySettings, {
+    ownerSnapshot,
+  }));
+
+  assert.match(
+    markup,
+    /You pay for your family&#x27;s access, but what they share with Murph stays private to them\./,
+  );
 });
 
 test("SettingsPage metadata uses the shared preview image", async () => {

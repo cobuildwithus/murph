@@ -32,8 +32,6 @@ vi.mock("@/src/lib/hosted-web/encryption", () => ({
   encryptHostedWebNullableString: encryptionMocks.encryptHostedWebNullableString,
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
-  MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE:
-    "You are in. Your Murph access is paid through a Family plan, but your Murph conversations, health data, vault data, exports, and deletion controls stay private to you. The Family owner cannot see them.",
   activateHostedMemberForFamilySponsorshipTx:
     activationMocks.activateHostedMemberForFamilySponsorshipTx,
 }));
@@ -499,7 +497,9 @@ describe("hosted Family plan", () => {
     expect(result.replyText).toContain(
       "When they open it they can join by text right from their phone.",
     );
-    expect(result.replyText).toContain("you cannot see their private Murph conversations");
+    expect(result.replyText).toContain(
+      "You pay for their Murph access, but everything they share with me stays private to them.",
+    );
   });
 
   it("reuses a pending invite for the same phone", async () => {
