@@ -17026,9 +17026,6 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             },
             vaultRoot,
-            async runAssistantPhase() {
-              return { progressed: false };
-            },
           },
         ),
         15_000,
