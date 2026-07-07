@@ -91,7 +91,9 @@ describe("hosted local Linq lost active-operation e2e", () => {
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall("sleep 3 && echo first-turn-held"),
       firstReplyText,
-    ]);
+    ], {
+      matchInputContains: "First message while starting the turn.",
+    });
 
     const firstWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
