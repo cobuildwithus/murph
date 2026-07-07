@@ -43,6 +43,60 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "experiments-track-themselves": (
+    <ChecklistMock
+      label="How Murph scores it"
+      items={[
+        { label: "Runs from your watch, counted automatically", done: true },
+        { label: "Sauna and tretinoin, assumed done on schedule", done: true },
+        { label: "Skipped a day? One text flips it to missed", done: true },
+      ]}
+    />
+  ),
+  "group-health-newsletter": (
+    <EmailMock
+      from="Murph"
+      subject="The crew, this week"
+      body={
+        <div className="space-y-1.5">
+          <p>Dana logged 6 workouts, a season high.</p>
+          <p>Everyone's sleep held above 7 hours except Fridays.</p>
+          <p>Nobody's touched the step goal yet, so that's the dare for next week.</p>
+        </div>
+      }
+    />
+  ),
+  "messages-preempt-background-work": (
+    <StatBlock
+      label="Interrupt during background work"
+      before="77s wait"
+      after="answered now"
+      caption="your text preempts the chore"
+    />
+  ),
+  "typing-holds-until-reply-lands": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "how'd I sleep last night?" },
+        { from: "murph", bare: true, body: "Murph is typing…" },
+        { from: "murph", body: "7h 42m, best all week. Deep sleep was up too." },
+      ]}
+    />
+  ),
+  "group-join-by-liking": (
+    <PhoneMock
+      channel="iMessage · Run club"
+      messages={[
+        {
+          from: "murph",
+          reaction: "❤️",
+          body: "Opening a group here. Already have Murph? Like this to join and share your daily steps.",
+        },
+        { from: "murph", body: "You're in, Dana. Here's the link to manage what you share." },
+      ]}
+    />
+  ),
   "group-challenge-referee": (
     <PhoneMock
       channel="iMessage · Sunday crew"

@@ -56,11 +56,112 @@ export interface ChangelogQuery {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-07",
+    publishedOn: "2026-07-07",
+    title: "Experiments that track themselves",
+    summary:
+      "Experiments now keep their own score: workouts from your watch count automatically with no nagging, and sessions Murph can't sense (sauna, tretinoin, supplements) count as done unless you say otherwise. Plus a weekly health newsletter for your group, faster answers when you interrupt background work, and a simpler family invite.",
+    items: [
+      {
+        id: "experiments-track-themselves",
+        kind: "feature",
+        priority: 5,
+        title: "Experiments track themselves",
+        summary:
+          "A running experiment counts the sessions your watch already recorded and never asks you to log them. One Murph can't sense, like sauna or tretinoin, counts each planned session as done by default; say you skipped a day and it flips with one message.",
+        details:
+          "Progress shows how Murph knows: sensed from a wearable, confirmed by you, or assumed on schedule. Results that rest mostly on assumed sessions read one confidence level lower, with the reason stated.",
+        relevanceTags: ["experiments", "wearables", "adherence"],
+        sourcePullRequests: [416, 441],
+        tryIt: {
+          label: "Check an experiment",
+          prompt: "How's my sauna experiment going?",
+        },
+      },
+      {
+        id: "group-health-newsletter",
+        kind: "feature",
+        priority: 4,
+        title: "A weekly health newsletter for your group",
+        summary:
+          "From inside a group chat, ask Murph to set up a weekly health newsletter. It emails one shared digest to everyone who opted in, celebrating wins and nudging gently, in the tone the group picks.",
+        details:
+          "It reads only the stats members already share into the group, never texts anyone's address to the model, and waits out an opt-out window before the first edition instead of sending right away.",
+        relevanceTags: ["groups", "newsletter", "email"],
+        sourcePullRequests: [400],
+        tryIt: {
+          label: "Start a newsletter",
+          prompt: "Set up a weekly health newsletter for our group.",
+        },
+      },
+      {
+        id: "messages-preempt-background-work",
+        kind: "improvement",
+        priority: 4,
+        title: "Your message cuts ahead of Murph's chores",
+        summary:
+          "Text Murph while it's mid background task, a scheduled scan or a big import, and it now stops and answers you right away instead of finishing the chore first. The background work retries on its own later.",
+        relevanceTags: ["performance", "messaging", "reliability"],
+        sourcePullRequests: [431],
+      },
+      {
+        id: "usage-limit-notice",
+        kind: "improvement",
+        priority: 3,
+        title: "You hear it when you hit your usage limit",
+        summary:
+          "When your AI allowance runs out, Murph finishes the reply in flight and then tells you once, instead of going quiet until you text in days later and get turned away.",
+        relevanceTags: ["messaging", "usage"],
+        sourcePullRequests: [437],
+      },
+      {
+        id: "typing-holds-until-reply-lands",
+        kind: "improvement",
+        priority: 3,
+        title: "The typing bubble stays up until the reply lands",
+        summary:
+          "On iMessage the typing indicator used to vanish a second or two before Murph's message arrived. It now holds until the reply actually sends, and replies land a touch sooner too.",
+        relevanceTags: ["imessage", "polish"],
+        sourcePullRequests: [421],
+      },
+      {
+        id: "simpler-family-invite",
+        kind: "improvement",
+        priority: 3,
+        title: "A simpler family invite",
+        summary:
+          "Inviting someone to your family plan is now one screen: name first, a single contact field that switches between Messages, email, and Telegram, and far less fine print. The privacy line always matches what you actually entered.",
+        relevanceTags: ["family", "invites", "polish"],
+        sourcePullRequests: [428, 434, 439],
+      },
+      {
+        id: "device-connect-confirmation-heals",
+        kind: "improvement",
+        priority: 3,
+        title: "Connecting a device lands on the right confirmation",
+        summary:
+          "After a wearable links up, the confirmation screen now reliably shows the connected source and a Text Murph button, even when the browser replays the callback or a fresh sign-in hasn't caught up yet.",
+        relevanceTags: ["wearables", "onboarding", "polish"],
+        sourcePullRequests: [430],
+      },
+      {
+        id: "better-generated-songs",
+        kind: "improvement",
+        priority: 3,
+        title: "Better reminder songs and challenge tracks",
+        summary:
+          "Murph got a dedicated playbook for writing music prompts, so the songs it generates for reminders, challenges, and celebrations land closer to the genre and mood it's going for.",
+        relevanceTags: ["assistant", "music"],
+        sourcePullRequests: [440],
+      },
+    ],
+  },
+  {
     id: "2026-07-06",
     publishedOn: "2026-07-06",
     title: "Murph referees your group challenge",
     summary:
-      "Group chats can now run multi-day challenges with Murph as referee, complete with daily standings in rotating formats. Family invites work over plain texting, workouts from your wearable count toward experiments, and replies got faster and steadier across the board.",
+      "Group chats can now run multi-day challenges with Murph as referee, complete with daily standings in rotating formats. Friends can join a group just by liking Murph's message, family invites work over plain texting, workouts from your wearable count toward experiments, and replies got faster and steadier across the board.",
     items: [
       {
         id: "group-challenge-referee",
@@ -103,6 +204,16 @@ const RAW_CHANGELOG_EDITIONS = [
           label: "Check an experiment",
           prompt: "How's my running experiment going?",
         },
+      },
+      {
+        id: "group-join-by-liking",
+        kind: "feature",
+        priority: 4,
+        title: "Join a group by liking Murph's message",
+        summary:
+          "When Murph opens a group, anyone who already has Murph can join and share the stats that message names just by liking it. A tapback like or a 👍 is the whole handshake, no web page.",
+        relevanceTags: ["groups", "onboarding", "privacy"],
+        sourcePullRequests: [412],
       },
       {
         id: "reminders-vary-approach",
@@ -153,6 +264,16 @@ const RAW_CHANGELOG_EDITIONS = [
           "When a wearable syncs after a day or more offline, Murph no longer narrates the days-old sleep and workouts in the backfill. Anything that ended more than 24 hours before the sync stays quiet.",
         relevanceTags: ["wearables", "notifications"],
         sourcePullRequests: [391],
+      },
+      {
+        id: "murph-contact-card-stays-yours",
+        kind: "improvement",
+        priority: 3,
+        title: "Your saved Murph contact stays the way you set it",
+        summary:
+          "Murph no longer re-pushes its contact card to people who already saved it, so the name and photo you chose stop getting overwritten. Settings gains a row to swap Murph's character and re-download the card whenever you want.",
+        relevanceTags: ["onboarding", "settings", "polish"],
+        sourcePullRequests: [422],
       },
       {
         id: "share-link-previews",
