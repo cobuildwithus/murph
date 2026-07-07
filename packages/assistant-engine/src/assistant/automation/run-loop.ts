@@ -872,6 +872,12 @@ export async function runAssistantAutomationPass(
     fault: 'automation',
     message: 'Injected assistant automation failure.',
   })
+  const passTiming = {
+    cronStatusDeferred: false,
+    cronStatusElapsedMs: null as number | null,
+    postScanTailElapsedMs: 0,
+    scanElapsedMs: 0,
+  }
   await maybeRunAssistantRuntimeMaintenance({
     vault: input.vault,
   }).catch((error) => {
@@ -928,6 +934,7 @@ export async function runAssistantAutomationPass(
   let state = await readAssistantAutomationState(input.vault)
   const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
 
+  const scanStartedAt = Date.now()
   const scanResult = await scanAssistantAutomationOnce({
     applyCanonicalWrites,
     allowSelfAuthored: input.allowSelfAuthored ?? false,
@@ -954,6 +961,8 @@ export async function runAssistantAutomationPass(
       })
     },
   })
+  passTiming.scanElapsedMs = Date.now() - scanStartedAt
+  const postScanTailStartedAt = Date.now()
   const shouldDrainOutboxAfterScan =
     applyCanonicalWrites
     && (input.drainOutbox ?? true)
@@ -1017,12 +1026,22 @@ export async function runAssistantAutomationPass(
     stateBeforeScan,
     state,
   )
-  const cronStatus = await getAssistantCronStatus(input.vault, {
-    executionContext,
-    shouldYieldBackgroundMaintenance:
-      input.shouldYieldBackgroundMaintenance ?? null,
-    turnEnvironment: input.turnEnvironment ?? null,
-  })
+  const shouldDeferCronStatus =
+    shouldDeferCronAfterHostedReply &&
+    scanResult.currentTurnDeliveryIntentIds.length > 0
+  passTiming.cronStatusDeferred = shouldDeferCronStatus
+  const cronStatusStartedAt = Date.now()
+  const cronStatus = shouldDeferCronStatus
+    ? null
+    : await getAssistantCronStatus(input.vault, {
+        executionContext,
+        shouldYieldBackgroundMaintenance:
+          input.shouldYieldBackgroundMaintenance ?? null,
+        turnEnvironment: input.turnEnvironment ?? null,
+      })
+  passTiming.cronStatusElapsedMs = shouldDeferCronStatus
+    ? null
+    : Date.now() - cronStatusStartedAt
   const cronNextRunAt = resolveAssistantCronNextWakeAt({
     applyCanonicalWrites,
     cronStatus,
@@ -1037,6 +1056,7 @@ export async function runAssistantAutomationPass(
     outboxResult.attempted > 0 ||
     cronResult.processed > 0 ||
     replies.checkpointRequired === true
+  passTiming.postScanTailElapsedMs = Date.now() - postScanTailStartedAt
 
   return {
     cronProcessed: cronResult.processed,
@@ -1049,6 +1069,7 @@ export async function runAssistantAutomationPass(
       outboxNextAttemptAt,
     ),
     outboxAttempted: outboxResult.attempted,
+    passTiming,
     progressed,
     replies,
     routing: scanResult.routing,
@@ -1076,10 +1097,10 @@ function appendHostedDynamicContextPrompt(input: {
 
 function resolveAssistantCronNextWakeAt(input: {
   applyCanonicalWrites: boolean
-  cronStatus: Awaited<ReturnType<typeof getAssistantCronStatus>>
+  cronStatus: Awaited<ReturnType<typeof getAssistantCronStatus>> | null
   shouldDeferCron: boolean
 }): string | null {
-  if (!input.applyCanonicalWrites) {
+  if (!input.applyCanonicalWrites || !input.cronStatus) {
     return null
   }
 

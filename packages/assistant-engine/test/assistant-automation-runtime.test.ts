@@ -5490,9 +5490,24 @@ describe('assistant auto-reply runtime', () => {
     expect(runLoopMocks.refreshAssistantStatusSnapshot).not.toHaveBeenCalled()
   })
 
-  it('defers cron scanning after fresh hosted queue-only replies', async () => {
-    runLoopMocks.getAssistantCronStatus.mockResolvedValueOnce({
-      nextRunAt: '2026-05-08T16:00:00.000Z',
+  it('defers cron scanning and status before fresh hosted queue-only reply delivery', async () => {
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: ['intent-current-reply'],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 1,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 1,
+        skipped: 0,
+      },
     })
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
@@ -5511,8 +5526,15 @@ describe('assistant auto-reply runtime', () => {
     })
 
     expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+    expect(runLoopMocks.getAssistantCronStatus).not.toHaveBeenCalled()
     expect(result.cronProcessed).toBe(0)
-    expect(result.nextWakeAt).toBe('2026-05-08T16:00:00.000Z')
+    expect(result.nextWakeAt).toBeNull()
+    expect(result.passTiming).toEqual(expect.objectContaining({
+      cronStatusDeferred: true,
+      cronStatusElapsedMs: null,
+      postScanTailElapsedMs: expect.any(Number),
+      scanElapsedMs: expect.any(Number),
+    }))
   })
 
   it('defers due cron when fresh hosted foreground input produces a skipped retry', async () => {

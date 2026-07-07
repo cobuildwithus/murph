@@ -3246,6 +3246,12 @@ describe("runHostedAssistantAutomationLane", () => {
       return {
         cronProcessed: shouldDeferCronDuringPass ? 0 : 1,
         nextWakeAt: shouldDeferCronDuringPass ? "2026-04-08T00:00:30.000Z" : null,
+        passTiming: {
+          cronStatusDeferred: true,
+          cronStatusElapsedMs: null,
+          postScanTailElapsedMs: 4,
+          scanElapsedMs: 12,
+        },
         progressed: false,
         replies: {
           considered: 1,
@@ -3285,6 +3291,10 @@ describe("runHostedAssistantAutomationLane", () => {
 
     expect(shouldDeferCronDuringPass).toBe(true);
     expect(result.assistantAutomationCronProcessed).toBe(0);
+    expect(result.assistantAutomationCronStatusDeferred).toBe(true);
+    expect(result.assistantAutomationCronStatusElapsedMs).toBeNull();
+    expect(result.assistantAutomationPostScanTailElapsedMs).toBe(4);
+    expect(result.assistantAutomationScanElapsedMs).toBe(12);
     const automationPassInput =
       mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
     expect(automationPassInput.shouldYieldBackgroundMaintenance).toBeNull();

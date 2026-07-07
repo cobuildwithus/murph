@@ -185,11 +185,15 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationAfterStateElapsedMs?: number | null;
   assistantAutomationBeforeStateElapsedMs?: number | null;
   assistantAutomationCronProcessed?: number | null;
+  assistantAutomationCronStatusDeferred?: boolean | null;
+  assistantAutomationCronStatusElapsedMs?: number | null;
   assistantAutomationCurrentTurnDeliveryIntentIds?: string[] | null;
   assistantAutomationElapsedMs?: number | null;
   assistantAutomationPassElapsedMs?: number | null;
+  assistantAutomationPostScanTailElapsedMs?: number | null;
   assistantAutomationProgressed?: boolean | null;
   assistantAutomationReplyFailed?: number | null;
+  assistantAutomationScanElapsedMs?: number | null;
   assistantAutomationTerminalLinqCleanup?: readonly string[] | null;
   assistantAutomationTotalElapsedMs?: number | null;
   assistantInputCandidateListed?: boolean | null;

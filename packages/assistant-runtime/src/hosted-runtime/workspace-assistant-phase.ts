@@ -4741,8 +4741,16 @@ async function writeHostedAssistantPassRuntimeLog(input: {
         assistantAutomationElapsedMs: input.assistantMetrics.assistantAutomationElapsedMs ?? null,
         assistantAutomationPassElapsedMs:
           input.assistantMetrics.assistantAutomationPassElapsedMs ?? null,
+        assistantAutomationCronStatusDeferred:
+          input.assistantMetrics.assistantAutomationCronStatusDeferred ?? null,
+        assistantAutomationCronStatusElapsedMs:
+          input.assistantMetrics.assistantAutomationCronStatusElapsedMs ?? null,
+        assistantAutomationPostScanTailElapsedMs:
+          input.assistantMetrics.assistantAutomationPostScanTailElapsedMs ?? null,
         assistantAutomationProgressed:
           input.assistantMetrics.assistantAutomationProgressed ?? null,
+        assistantAutomationScanElapsedMs:
+          input.assistantMetrics.assistantAutomationScanElapsedMs ?? null,
         assistantAutomationTotalElapsedMs:
           input.assistantMetrics.assistantAutomationTotalElapsedMs ?? null,
         assistantInputCandidateListed:

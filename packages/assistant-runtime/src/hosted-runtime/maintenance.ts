@@ -216,8 +216,15 @@ export async function runHostedAssistantAutomationLane(input: {
     assistantAutomationElapsedMs,
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
     assistantAutomationCronProcessed: assistantResult.cronProcessed,
+    assistantAutomationCronStatusDeferred:
+      assistantResult.timings?.cronStatusDeferred ?? null,
+    assistantAutomationCronStatusElapsedMs:
+      assistantResult.timings?.cronStatusElapsedMs ?? null,
+    assistantAutomationPostScanTailElapsedMs:
+      assistantResult.timings?.postScanTailElapsedMs ?? null,
     assistantAutomationProgressed: assistantResult.progressed,
     assistantAutomationReplyFailed: assistantResult.replyFailed,
+    assistantAutomationScanElapsedMs: assistantResult.timings?.scanElapsedMs ?? null,
     assistantAutomationTerminalLinqCleanup: assistantResult.terminalLinqCleanup,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
     assistantInputCandidateListed:
@@ -257,9 +264,13 @@ export async function runHostedAssistantAutomation(
     activeTurnInputIngested?: boolean | null;
     afterStateElapsedMs: number;
     beforeStateElapsedMs: number;
+    cronStatusDeferred?: boolean | null;
+    cronStatusElapsedMs?: number | null;
     inputCandidateListed?: boolean | null;
     inputCandidateQueryCount?: number | null;
     passElapsedMs: number;
+    postScanTailElapsedMs?: number | null;
+    scanElapsedMs?: number | null;
     totalElapsedMs: number;
   };
 }> {
@@ -539,9 +550,13 @@ export async function runHostedAssistantAutomation(
         activeTurnInputIngested,
         afterStateElapsedMs,
         beforeStateElapsedMs,
+        cronStatusDeferred: result.passTiming?.cronStatusDeferred ?? null,
+        cronStatusElapsedMs: result.passTiming?.cronStatusElapsedMs ?? null,
         inputCandidateListed,
         inputCandidateQueryCount,
         passElapsedMs,
+        postScanTailElapsedMs: result.passTiming?.postScanTailElapsedMs ?? null,
+        scanElapsedMs: result.passTiming?.scanElapsedMs ?? null,
         totalElapsedMs: elapsedSince(startedAt),
       },
     };

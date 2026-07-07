@@ -82,9 +82,17 @@ export interface AssistantAutomationPassResult {
   currentTurnDeliveryIntentIds: string[]
   nextWakeAt: string | null
   outboxAttempted: number
+  passTiming?: AssistantAutomationPassTiming
   progressed: boolean
   replies: AssistantAutoReplyScanResult
   routing: AssistantInboxScanResult
+}
+
+export interface AssistantAutomationPassTiming {
+  cronStatusDeferred: boolean
+  cronStatusElapsedMs: number | null
+  postScanTailElapsedMs: number
+  scanElapsedMs: number
 }
 
 export function compareAssistantCaptureOrder(
