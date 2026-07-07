@@ -162,6 +162,7 @@ describe("hosted Linq egress authority", () => {
 
     expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
@@ -178,6 +179,32 @@ describe("hosted Linq egress authority", () => {
       code: "HOSTED_LINQ_EGRESS_BOUND_USER_MISMATCH",
       httpStatus: 403,
     });
+  });
+
+  it("rejects same-user route authority when hosted member access is inactive", async () => {
+    const prisma = createPrismaStub({
+      activeMemberAccess: false,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:line-1",
+        channel: "linq",
+        containerMemberId: "member-1",
+        threadId: "chat-authorized",
+      },
+      target: "chat-authorized",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ACCESS_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
   });
 
   it("falls back to the durable home route when same-user route authority is stale", async () => {
@@ -273,12 +300,23 @@ describe("hosted Linq egress authority", () => {
 });
 
 function createPrismaStub(input: {
+  activeMemberAccess?: boolean;
   homeChatId?: string;
   homeLinePhone?: string;
   identityPhone?: string;
   pendingChatId?: string;
 }) {
   return {
+    hostedMember: {
+      findUnique: vi.fn().mockResolvedValue(input.activeMemberAccess === false
+        ? null
+        : {
+            accountGroupMemberships: [],
+            billingStatus: "active",
+            suspendedAt: null,
+            threadContainer: null,
+          }),
+    },
     hostedMemberIdentity: {
       findUnique: vi.fn().mockResolvedValue({
         phoneLookupKey: createRequiredPhoneLookupKey(input.identityPhone),
