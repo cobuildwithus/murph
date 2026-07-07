@@ -1464,8 +1464,10 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
       preparedDispatch,
     ]),
   );
+  let pendingTypingStopEffectIndex = 0;
   try {
     for (let index = 0; index < input.assistantDeliveryEffects.length; index += 1) {
+      pendingTypingStopEffectIndex = index;
       const assistantDeliveryEffect = input.assistantDeliveryEffects[index];
       if (!assistantDeliveryEffect) {
         continue;
@@ -1475,7 +1477,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         input,
         preparedDispatchByIntentId,
       })) {
-        recordHostedLinqTypingStopUnprocessedEffects({
+        recordHostedLinqTypingStopStillPendingEffects({
           effects: input.assistantDeliveryEffects.slice(index),
           linqDeliveryContexts,
           preparedDispatchByIntentId,
@@ -1518,6 +1520,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         preparedDispatch?.linqDeliveryContext
           ? [preparedDispatch.linqDeliveryContext, ...linqDeliveryContexts]
           : linqDeliveryContexts;
+      let currentEffectTypingStopRecorded = false;
       try {
         outcome = await deliverHostedPreparedAssistantDelivery({
           actionApprovalPort: input.actionApprovalPort ?? null,
@@ -1538,28 +1541,33 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           providerFetch: input.providerFetch ?? null,
           userId: input.wake.userId,
           vaultRoot: input.vaultRoot,
-          onTerminalLinqTypingStopFailure: (terminalOutcome) =>
+          onTerminalLinqTypingStopFailure: (terminalOutcome) => {
             recordHostedLinqTypingStopOutcome({
               assistantDeliveryEffect,
               linqDeliveryContexts: effectLinqDeliveryContexts,
               outcome: terminalOutcome,
               state: linqTypingStopDrain,
-            }),
+            });
+            currentEffectTypingStopRecorded = true;
+          },
         });
       } catch (error) {
+        pendingTypingStopEffectIndex = currentEffectTypingStopRecorded
+          ? index + 1
+          : index;
         const remainingEffects = input.assistantDeliveryEffects.slice(index + 1);
-        recordHostedLinqTypingStopUnprocessedEffects({
-          effects: remainingEffects,
-          linqDeliveryContexts,
-          preparedDispatchByIntentId,
-          state: linqTypingStopDrain,
-        });
         await resetHostedPreparedAssistantDeliveryEffects({
           effects: remainingEffects,
           preparedDispatchByIntentId,
           vaultRoot: input.vaultRoot,
         });
         if (isHostedBackgroundDeliveryYieldedError(error)) {
+          recordHostedLinqTypingStopStillPendingEffects({
+            effects: input.assistantDeliveryEffects.slice(pendingTypingStopEffectIndex),
+            linqDeliveryContexts,
+            preparedDispatchByIntentId,
+            state: linqTypingStopDrain,
+          });
           input.onBackgroundDeliveryYield?.({
             yieldedEffectCount: input.assistantDeliveryEffects.length - index,
           });
@@ -1574,12 +1582,13 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         outcome,
         state: linqTypingStopDrain,
       });
+      pendingTypingStopEffectIndex = index + 1;
       if (await maybeYieldHostedPreparedAssistantDeliveryDrain({
         effects: input.assistantDeliveryEffects.slice(index + 1),
         input,
         preparedDispatchByIntentId,
       })) {
-        recordHostedLinqTypingStopUnprocessedEffects({
+        recordHostedLinqTypingStopStillPendingEffects({
           effects: input.assistantDeliveryEffects.slice(index + 1),
           linqDeliveryContexts,
           preparedDispatchByIntentId,
@@ -1600,7 +1609,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
             readHostedAssistantDeliveryEffectBoundaryKey(effect) === boundaryKey
           );
         blockedForegroundDeliveryKeys.add(boundaryKey);
-        recordHostedLinqTypingStopUnprocessedEffects({
+        recordHostedLinqTypingStopStillPendingEffects({
           effects: blockedEffects,
           linqDeliveryContexts,
           preparedDispatchByIntentId,
@@ -1613,6 +1622,14 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         });
       }
     }
+  } catch (error) {
+    recordHostedLinqTypingStopStillPendingEffects({
+      effects: input.assistantDeliveryEffects.slice(pendingTypingStopEffectIndex),
+      linqDeliveryContexts,
+      preparedDispatchByIntentId,
+      state: linqTypingStopDrain,
+    });
+    throw error;
   } finally {
     flushHostedLinqTypingStopDrain({
       env: linqEnv,
@@ -1735,8 +1752,8 @@ type HostedLinqTypingStopDrainState = Map<
   string,
   {
     sent: boolean;
+    stillPending: boolean;
     terminalFailure: boolean;
-    unprocessed: boolean;
   }
 >;
 
@@ -1761,6 +1778,7 @@ function recordHostedLinqTypingStopOutcome(input: {
     input.outcome.deliveryStatus !== "sent"
     && !hostedAssistantDeliveryOutcomeShouldStopLinqTyping(input.outcome)
   ) {
+    readHostedLinqTypingStopDrainEntry(input.state, target).stillPending = true;
     return;
   }
 
@@ -1773,7 +1791,7 @@ function recordHostedLinqTypingStopOutcome(input: {
   entry.terminalFailure = true;
 }
 
-function recordHostedLinqTypingStopUnprocessedEffects(input: {
+function recordHostedLinqTypingStopStillPendingEffects(input: {
   effects: readonly HostedAssistantDeliveryEffect[];
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
   preparedDispatchByIntentId: ReadonlyMap<string, HostedAssistantDeliveryPreparedDispatch>;
@@ -1792,7 +1810,7 @@ function recordHostedLinqTypingStopUnprocessedEffects(input: {
     if (!target) {
       continue;
     }
-    readHostedLinqTypingStopDrainEntry(input.state, target).unprocessed = true;
+    readHostedLinqTypingStopDrainEntry(input.state, target).stillPending = true;
   }
 }
 
@@ -1805,7 +1823,7 @@ function flushHostedLinqTypingStopDrain(input: {
     if (
       !entry.terminalFailure
       || entry.sent
-      || entry.unprocessed
+      || entry.stillPending
     ) {
       continue;
     }
@@ -1828,8 +1846,8 @@ function readHostedLinqTypingStopDrainEntry(
   target: string,
 ): {
   sent: boolean;
+  stillPending: boolean;
   terminalFailure: boolean;
-  unprocessed: boolean;
 } {
   const existing = state.get(target);
   if (existing) {
@@ -1837,8 +1855,8 @@ function readHostedLinqTypingStopDrainEntry(
   }
   const entry = {
     sent: false,
+    stillPending: false,
     terminalFailure: false,
-    unprocessed: false,
   };
   state.set(target, entry);
   return entry;
