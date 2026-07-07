@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   AlertCircleIcon,
   Link2,
@@ -22,11 +23,11 @@ import {
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 import { cn } from "@/src/lib/utils";
 
-// Keys are duplicated here (rather than imported from the server-only
-// resolver modules) so this client component does not pull `server-only` into
-// the client bundle. The lists must stay in sync with the two redirect
-// builders in `device-sync/connect-completion.ts` and
-// `connected-apps/connect-completion.ts`.
+// Keys are duplicated here (rather than imported from the server-only resolver
+// modules) so this client component can preserve them for the one unverified
+// retry, then strip them without pulling `server-only` into the client bundle.
+// The lists must stay in sync with the two redirect builders in
+// `device-sync/connect-completion.ts` and `connected-apps/connect-completion.ts`.
 const COMPLETION_QUERY_KEYS = [
   "deviceSyncCompletion",
   "source",
@@ -41,12 +42,15 @@ const COMPLETION_QUERY_KEYS = [
   "connectedAppStatus",
 ] as const;
 
+let hasRetriedUnverifiedCompletionRefresh = false;
+
 export function DeviceSyncCompletionDialog({
   model,
 }: {
   model: DeviceSyncCompletionDialogModel;
 }) {
   const [open, setOpen] = useState(true);
+  const router = useRouter();
   const PrimaryIcon = model.failed
     ? RefreshCwIcon
     : model.contactAction?.kind === "telegram"
@@ -54,12 +58,19 @@ export function DeviceSyncCompletionDialog({
       : MessageCircleIcon;
 
   useEffect(() => {
+    if (model.unverified && !hasRetriedUnverifiedCompletionRefresh) {
+      hasRetriedUnverifiedCompletionRefresh = true;
+      router.refresh();
+      return;
+    }
+
     stripCompletionQueryParams();
-  }, []);
+  }, [model, router]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
+        data-completion-unverified={model.unverified ? "true" : undefined}
         showCloseButton={false}
         className="max-w-md gap-6 rounded-2xl border border-border bg-popover p-6 text-popover-foreground ring-border md:p-7"
       >

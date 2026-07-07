@@ -195,7 +195,9 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     const notification = await appendHostedWhatsAppFamilyChatNotification({
       inboundText: input.inboundText,
       memberId: familyAcceptance.memberId,
-      message: buildHostedFamilyInviteAcceptedReplyText(),
+      message: buildHostedFamilyInviteAcceptedReplyText({
+        memberId: familyAcceptance.memberId,
+      }),
       prisma: input.prisma,
       reason: "family-invite-accepted",
     });
