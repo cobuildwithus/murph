@@ -23,8 +23,6 @@ import {
   HOSTED_LOCAL_WORKTREE_ROOT,
   HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
   HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
-  HOSTED_WEB_DEV_DIST_DIR,
-  HOSTED_WEB_SMOKE_DIST_DIR,
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -107,6 +105,10 @@ import {
   parseHostedExecutionOidcIdentity,
   resolveVercelOidcToken,
 } from "./vercel.ts";
+import {
+  resolveHostedWebDevDistDirName,
+  shouldUseHostedWebProductionStart,
+} from "./web-production-start.ts";
 
 const HOSTED_WEB_HEALTH_PATH = "/api/internal/health";
 const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
@@ -853,7 +855,7 @@ export async function startHostedLocalDevStack(input: {
 
     const shouldUseWebProductionStart = config.skipWeb
       ? false
-      : await shouldUseHostedWebProductionStart(runtimeEnv);
+      : await shouldUseHostedWebProductionStart({ env: initialEnv });
 
     const webProcess = config.skipWeb
       ? null
@@ -1524,26 +1526,6 @@ function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
     || profile === "e2e:live";
 }
 
-async function shouldUseHostedWebProductionStart(env: NodeJS.ProcessEnv): Promise<boolean> {
-  const profile = env.MURPH_HOSTED_LOCAL_PROFILE?.trim();
-  if (profile !== "e2e:stub" && profile !== "e2e:live") {
-    return false;
-  }
-
-  const nextDistDirMode = env.NEXT_DIST_DIR_MODE?.trim();
-  if (nextDistDirMode !== "smoke") {
-    return false;
-  }
-
-  // Keep this predicate in exact agreement with
-  // shouldPreserveHostedLocalProductionWebDist in apps/cloudflare test helpers.
-  const buildId = await readFile(
-    path.join(webDir, resolveHostedWebDevDistDirName(env), "BUILD_ID"),
-    "utf8",
-  ).catch(() => null);
-  return buildId !== null && buildId.trim().length > 0;
-}
-
 function buildHostedWebProcessArgs(input: {
   config: HostedLocalDevConfig;
   shouldUseProductionStart: boolean;
@@ -2037,24 +2019,6 @@ function resolveHostedWebHealthCommonsDevCachePaths(env: NodeJS.ProcessEnv): str
   return [
     path.join(webDir, distDirName, "dev", "cache", "fetch-cache"),
   ];
-}
-
-function resolveHostedWebDevDistDirName(env: NodeJS.ProcessEnv): string {
-  const baseDistDir = env.NEXT_DIST_DIR_MODE === "smoke"
-    ? HOSTED_WEB_SMOKE_DIST_DIR
-    : HOSTED_WEB_DEV_DIST_DIR;
-  const configuredSuffix = env.NEXT_DIST_DIR_SUFFIX?.trim();
-
-  if (!configuredSuffix) {
-    return baseDistDir;
-  }
-
-  const normalizedSuffix = configuredSuffix.toLowerCase();
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(normalizedSuffix)) {
-    throw new Error("NEXT_DIST_DIR_SUFFIX must use lowercase letters, digits, and hyphens only.");
-  }
-
-  return `${baseDistDir}-${normalizedSuffix}`;
 }
 
 function writeHostedWebHealthCommonsInvalidationWarning(
@@ -2945,6 +2909,8 @@ export function terminateKnownHostedLocalProcessResidue(input: {
       ? []
       : [
         `apps/web/scripts/dev-local\\.ts.*--port ${input.config.webPort}`,
+        `pnpm --dir apps/web exec next start .*--port ${input.config.webPort}`,
+        `next/dist/bin/next start .*--port ${input.config.webPort}`,
         "next/dist/telemetry/detached-flush\\.js dev .*apps/web",
       ]),
     ...(!input.owned.linqTunnel
