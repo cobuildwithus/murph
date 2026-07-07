@@ -26,6 +26,8 @@ export function SourceCard({
   const canStart = authenticated && isAvailable;
   const canDisconnect = authenticated && Boolean(source.disconnectConnectionId);
   const actionLabel = source.requiresReconnect ? "Reconnect" : "Connect";
+  const disconnectActionLabel = source.disconnectActionLabel ?? "Disconnect";
+  const disconnectAriaLabel = source.disconnectAriaLabel ?? `Disconnect ${source.name}`;
   const reconnectUnavailable = source.requiresReconnect && !isAvailable;
   const unavailableMessage = !source.requiresReconnect && !isAvailable
     ? source.unavailableMessage
@@ -60,12 +62,12 @@ export function SourceCard({
             {canDisconnect ? (
               <button
                 type="button"
-                aria-label={`Disconnect ${source.name}`}
+                aria-label={disconnectAriaLabel}
                 disabled={pendingDisconnect}
                 onClick={() => onDisconnectTargetChange(source)}
                 className="relative self-start text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
               >
-                {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
+                {pendingDisconnect ? "Disconnecting..." : disconnectActionLabel}
               </button>
             ) : null}
             {errorMessage ? (
@@ -92,6 +94,14 @@ export function SourceCard({
               <AuthButton aria-label={`Sign in to connect ${source.name}`}>
                 Sign in
               </AuthButton>
+            ) : unavailableMessage && source.unavailableActionLabel ? (
+              <Button
+                type="button"
+                disabled
+                aria-label={`${source.name} web setup is not available yet`}
+              >
+                {source.unavailableActionLabel}
+              </Button>
             ) : reconnectUnavailable || unavailableMessage ? null : (
               <Button
                 type="button"
@@ -107,12 +117,12 @@ export function SourceCard({
             {reconnectUnavailable && canDisconnect ? (
               <button
                 type="button"
-                aria-label={`Disconnect ${source.name}`}
+                aria-label={disconnectAriaLabel}
                 disabled={pendingDisconnect}
                 onClick={() => onDisconnectTargetChange(source)}
                 className="relative self-start text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
               >
-                {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
+                {pendingDisconnect ? "Disconnecting..." : disconnectActionLabel}
               </button>
             ) : null}
             {errorMessage ? (

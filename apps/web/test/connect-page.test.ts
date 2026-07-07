@@ -70,6 +70,16 @@ const mocks = vi.hoisted(() => ({
   resolveHostedMurphContactOption: vi.fn(),
 }));
 
+const JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION = {
+  disconnectActionLabel: "Disconnect Junction account",
+  disconnectAriaLabel: "Disconnect Junction account",
+  disconnectDialogDescription:
+    "Murph will stop syncing new data from every source in this Junction connection. Your history is kept.",
+  disconnectDialogTitle: "Disconnect Junction account?",
+  disconnectFailureMessage: "We could not disconnect this Junction account right now.",
+  disconnectSuccessMessage: "Disconnected this Junction account. Your history is still saved.",
+};
+
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: { open?: boolean }) {
     mocks.authDialogProps = props;
@@ -285,12 +295,12 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 1);
   assert.match(markup, /disabled=""/);
-  assert.match(markup, /Apple Health connects through the Murph iOS app and appears here after the first sync\./);
-  assert.doesNotMatch(markup, /aria-label="Apple Health connection is not available yet"/);
+  assert.match(markup, /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./);
+  assert.match(markup, /aria-label="Apple Health web setup is not available yet"/);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
-  assert.doesNotMatch(markup, /Coming soon/u);
+  assert.match(markup, />Coming soon<\/button>/u);
   assert.doesNotMatch(markup, /Not connected/u);
   assert.doesNotMatch(markup, />Connected</u);
   assert.doesNotMatch(markup, />Health Connect</u);
@@ -498,8 +508,8 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
 
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, JUNCTION_DEFAULT_PROVIDER_FILTER.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
-  assert.match(markup, /Apple Health connects through the Murph iOS app and appears here after the first sync\./u);
-  assert.doesNotMatch(markup, /aria-label="Apple Health connection is not available yet"/u);
+  assert.match(markup, /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./u);
+  assert.match(markup, /aria-label="Apple Health web setup is not available yet"/u);
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Samsung Health</u);
 
@@ -711,7 +721,7 @@ test("ConnectPage marks iOS Apple Health Junction SDK source connected from host
   assert.ok(sourceHeadingIndex(markup, "Apple Health") < sourceHeadingIndex(markup, "Garmin"));
 });
 
-test("ConnectPage avoids source-specific disconnects for multi-source Junction accounts", async () => {
+test("ConnectPage shows account-scoped disconnects for multi-source Junction accounts", async () => {
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-01T00:00:00.000Z",
     ok: true,
@@ -746,6 +756,7 @@ test("ConnectPage avoids source-specific disconnects for multi-source Junction a
   assert.equal(markup.match(/data-connection-state="connected"/gu)?.length, 2);
   assert.doesNotMatch(markup, /aria-label="Disconnect Apple Health"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Whoop"/u);
+  assert.equal(markup.match(/aria-label="Disconnect Junction account"/gu)?.length, 2);
 });
 
 test("ConnectPage shows mobile-managed guidance for Apple Health reconnect states without web target", async () => {
@@ -986,7 +997,7 @@ test("ConnectPage maps Apple Health Junction upstream slugs to the visible sourc
   }
 });
 
-test("ConnectPage withholds Junction connection ids from multi-source upstream projections", async () => {
+test("ConnectPage carries account-scoped disconnect ids for multi-source upstream projections", async () => {
   const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
 
   assert.deepEqual(
@@ -1013,17 +1024,19 @@ test("ConnectPage withholds Junction connection ids from multi-source upstream p
     ]),
     [
       {
-        connectionId: null,
+        connectionId: "dsc_junction_multi_source",
         connectProvider: "junction",
         connectTarget: null,
+        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
         requiresReconnect: false,
         sourceId: "apple-health",
         state: "active",
       },
       {
-        connectionId: null,
+        connectionId: "dsc_junction_multi_source",
         connectProvider: "junction",
         connectTarget: null,
+        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
         requiresReconnect: false,
         sourceId: "whoop",
         state: "active",
@@ -1133,19 +1146,21 @@ test("ConnectPage keeps healthy Junction child sources connected when another ch
     ]),
     [
       {
-        connectionId: null,
+        connectionId: "dsc_junction_multi",
         connectProvider: "junction",
-        connectTarget: "whoop",
-        requiresReconnect: true,
-        sourceId: "whoop",
+        connectTarget: null,
+        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
+        requiresReconnect: false,
+        sourceId: "garmin",
         state: "active",
       },
       {
-        connectionId: null,
+        connectionId: "dsc_junction_multi",
         connectProvider: "junction",
         connectTarget: null,
-        requiresReconnect: false,
-        sourceId: "garmin",
+        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
+        requiresReconnect: true,
+        sourceId: "whoop",
         state: "active",
       },
     ],
@@ -1193,19 +1208,21 @@ test("ConnectPage gives each reconnect-required Junction child its own target", 
     ]),
     [
       {
-        connectionId: null,
+        connectionId: "dsc_junction_multi",
         connectProvider: "junction",
-        connectTarget: "whoop",
+        connectTarget: "garmin",
+        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
         requiresReconnect: true,
-        sourceId: "whoop",
+        sourceId: "garmin",
         state: "active",
       },
       {
-        connectionId: null,
+        connectionId: "dsc_junction_multi",
         connectProvider: "junction",
-        connectTarget: "garmin",
+        connectTarget: "whoop",
+        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
         requiresReconnect: true,
-        sourceId: "garmin",
+        sourceId: "whoop",
         state: "active",
       },
     ],

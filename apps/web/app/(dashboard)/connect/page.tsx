@@ -44,10 +44,20 @@ type ConnectSourceConnectionState = {
   connectionId: string | null;
   connectProvider: string | null;
   connectTarget: string | null;
+  disconnectPresentation?: ConnectSourceDisconnectPresentation;
   requiresReconnect: boolean;
   sourceId: string;
   state: "active" | "reauthorization_required";
 };
+type ConnectSourceDisconnectPresentation = Pick<
+  ConnectSource,
+  | "disconnectActionLabel"
+  | "disconnectAriaLabel"
+  | "disconnectDialogDescription"
+  | "disconnectDialogTitle"
+  | "disconnectFailureMessage"
+  | "disconnectSuccessMessage"
+>;
 
 const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>(["apple-health"]);
 const SOURCE_ID_BY_JUNCTION_UPSTREAM_ALIAS = new Map<string, string>([
@@ -59,7 +69,8 @@ const CONNECT_SOURCE_UI = {
     description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
     logo: logoAsset("apple-health.png"),
     name: "Apple Health",
-    unavailableMessage: "Apple Health connects through the Murph iOS app and appears here after the first sync.",
+    unavailableActionLabel: "Coming soon",
+    unavailableMessage: "Apple Health web setup is coming soon. Connect from the Murph iOS app for now.",
   },
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
@@ -237,6 +248,7 @@ export default async function ConnectPage({
   const reconnectProviderBySourceId = new Map<string, string>();
   const reconnectTargetBySourceId = new Map<string, string>();
   const disconnectConnectionIdBySourceId = new Map<string, string>();
+  const disconnectPresentationBySourceId = new Map<string, ConnectSourceDisconnectPresentation>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
   const recoveryContactAction = await resolveDeviceConnectRecoveryContactAction(
     Boolean(auth.authenticatedMember),
@@ -256,6 +268,9 @@ export default async function ConnectPage({
         }
         if (connection.connectionId) {
           disconnectConnectionIdBySourceId.set(sourceId, connection.connectionId);
+        }
+        if (connection.disconnectPresentation) {
+          disconnectPresentationBySourceId.set(sourceId, connection.disconnectPresentation);
         }
         if (connection.requiresReconnect) {
           if (connection.connectProvider) {
@@ -280,6 +295,7 @@ export default async function ConnectPage({
   const sources = resolveConfiguredConnectSources(CONNECT_SOURCES, {
     connectedSourceIds,
     disconnectConnectionIdBySourceId,
+    disconnectPresentationBySourceId,
     reconnectProviderBySourceId,
     reconnectSourceIds,
     reconnectTargetBySourceId,
@@ -318,6 +334,7 @@ export function listVisibleConnectSources(): ConnectSource[] {
             id: source.connectSourceId,
             logo: ui.logo,
             name: ui.name,
+            ...(ui.unavailableActionLabel ? { unavailableActionLabel: ui.unavailableActionLabel } : {}),
             ...(ui.unavailableMessage ? { unavailableMessage: ui.unavailableMessage } : {}),
           },
         ]
@@ -351,6 +368,7 @@ export function resolveConfiguredConnectSources(
   options: {
     connectedSourceIds?: ReadonlySet<string>;
     disconnectConnectionIdBySourceId?: ReadonlyMap<string, string>;
+    disconnectPresentationBySourceId?: ReadonlyMap<string, ConnectSourceDisconnectPresentation>;
     reconnectProviderBySourceId?: ReadonlyMap<string, string>;
     reconnectSourceIds?: ReadonlySet<string>;
     reconnectTargetBySourceId?: ReadonlyMap<string, string>;
@@ -368,6 +386,7 @@ export function resolveConfiguredConnectSources(
       const connected = options.connectedSourceIds?.has(source.id) === true;
       const requiresReconnect = !connected && options.reconnectSourceIds?.has(source.id) === true;
       const disconnectConnectionId = options.disconnectConnectionIdBySourceId?.get(source.id);
+      const disconnectPresentation = options.disconnectPresentationBySourceId?.get(source.id);
       const reconnectProvider = options.reconnectProviderBySourceId?.get(source.id);
       const reconnectTarget = options.reconnectTargetBySourceId?.get(source.id);
       const resolvedConnectTarget = reconnectTarget ?? connectTarget;
@@ -377,6 +396,7 @@ export function resolveConfiguredConnectSources(
         ...(reconnectProvider ? { connectProvider: reconnectProvider } : {}),
         ...(resolvedConnectTarget ? { connectTarget: resolvedConnectTarget } : {}),
         ...(disconnectConnectionId ? { disconnectConnectionId } : {}),
+        ...(disconnectPresentation ?? {}),
         ...(requiresReconnect ? { requiresReconnect } : {}),
         ...(connected ? { connected } : {}),
       };
@@ -454,14 +474,21 @@ function resolveConnectSourceConnectionMatches(
     const connectTarget = typeof source.connectTarget === "string" && source.connectTarget.trim()
       ? source.connectTarget
       : null;
-    const disconnectConnectionId = resolveSourceScopedDisconnectConnectionId(source, connectionId);
+    const disconnect = resolveConnectSourceDisconnect(source, connectionId);
+    const hasJunctionUpstreamSources = provider === "junction" && source.upstreamSources.length > 0;
 
     const configuredSourceId = normalizeDeviceConnectSourceId(source.connectSourceId ?? null);
-    if (sourceState && configuredSourceId && visibleSourceIds.has(configuredSourceId)) {
+    if (
+      sourceState
+      && configuredSourceId
+      && visibleSourceIds.has(configuredSourceId)
+      && !hasJunctionUpstreamSources
+    ) {
       upsertConnectSourceConnection(connectedConnections, {
-        connectionId: disconnectConnectionId,
+        connectionId: disconnect.connectionId,
         connectProvider: provider,
         connectTarget,
+        ...(disconnect.presentation ? { disconnectPresentation: disconnect.presentation } : {}),
         requiresReconnect,
         sourceId: configuredSourceId,
         state: sourceState,
@@ -472,9 +499,10 @@ function resolveConnectSourceConnectionMatches(
       const sourceId = sourceIdByDirectProvider.get(provider);
       if (sourceId) {
         upsertConnectSourceConnection(connectedConnections, {
-          connectionId: disconnectConnectionId,
+          connectionId: disconnect.connectionId,
           connectProvider: provider,
           connectTarget,
+          ...(disconnect.presentation ? { disconnectPresentation: disconnect.presentation } : {}),
           requiresReconnect,
           sourceId,
           state: sourceState,
@@ -495,7 +523,7 @@ function resolveConnectSourceConnectionMatches(
       const upstreamConnectTarget =
         typeof upstreamSource.connectTarget === "string" && upstreamSource.connectTarget.trim()
           ? upstreamSource.connectTarget
-          : connectTarget;
+          : null;
 
       if (
         sourceState === "active"
@@ -512,9 +540,10 @@ function resolveConnectSourceConnectionMatches(
         : null;
       if (sourceId) {
         upsertConnectSourceConnection(connectedConnections, {
-          connectionId: disconnectConnectionId,
+          connectionId: disconnect.connectionId,
           connectProvider: upstreamRequiresReconnect ? upstreamConnectProvider : provider,
           connectTarget: upstreamRequiresReconnect ? upstreamConnectTarget : null,
+          ...(disconnect.presentation ? { disconnectPresentation: disconnect.presentation } : {}),
           requiresReconnect: upstreamRequiresReconnect,
           sourceId,
           state: sourceState,
@@ -526,20 +555,35 @@ function resolveConnectSourceConnectionMatches(
   return [...connectedConnections.values()];
 }
 
-function resolveSourceScopedDisconnectConnectionId(
+function resolveConnectSourceDisconnect(
   source: ConnectSettingsSourceMatch,
   connectionId: string | null,
-): string | null {
+): { connectionId: string | null; presentation: ConnectSourceDisconnectPresentation | null } {
   if (!connectionId) {
-    return null;
+    return { connectionId: null, presentation: null };
   }
 
   const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
   if (provider !== "junction") {
-    return connectionId;
+    return { connectionId, presentation: null };
   }
 
-  return countLiveJunctionUpstreamSources(source.upstreamSources) <= 1 ? connectionId : null;
+  if (countLiveJunctionUpstreamSources(source.upstreamSources) <= 1) {
+    return { connectionId, presentation: null };
+  }
+
+  return {
+    connectionId,
+    presentation: {
+      disconnectActionLabel: "Disconnect Junction account",
+      disconnectAriaLabel: "Disconnect Junction account",
+      disconnectDialogDescription:
+        "Murph will stop syncing new data from every source in this Junction connection. Your history is kept.",
+      disconnectDialogTitle: "Disconnect Junction account?",
+      disconnectFailureMessage: "We could not disconnect this Junction account right now.",
+      disconnectSuccessMessage: "Disconnected this Junction account. Your history is still saved.",
+    },
+  };
 }
 
 function countLiveJunctionUpstreamSources(

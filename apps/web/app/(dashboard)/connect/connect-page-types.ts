@@ -9,12 +9,19 @@ export type ConnectSource = {
   connectProvider?: string;
   connectTarget?: string;
   connected?: boolean;
+  disconnectActionLabel?: string;
+  disconnectAriaLabel?: string;
   description: string;
+  disconnectDialogDescription?: string;
+  disconnectDialogTitle?: string;
   disconnectConnectionId?: string;
+  disconnectFailureMessage?: string;
+  disconnectSuccessMessage?: string;
   id: string;
   logo: LogoAsset;
   name: string;
   requiresReconnect?: boolean;
+  unavailableActionLabel?: string;
   unavailableMessage?: string;
 };
 

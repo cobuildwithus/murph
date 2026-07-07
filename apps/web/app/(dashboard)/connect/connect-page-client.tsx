@@ -276,11 +276,13 @@ export function ConnectSourcesGrid({
         kind: result.warning?.message ? "warning" : "success",
         title: "Source disconnected",
         message: result.warning?.message
-          ? `Disconnected ${source.name}. Your history is still saved. The provider did not fully confirm, so check that account if you want access removed there too.`
-          : `Disconnected ${source.name}. Your history is still saved.`,
+          ? `${resolveDisconnectSuccessMessage(source)} The provider did not fully confirm, so check that account if you want access removed there too.`
+          : resolveDisconnectSuccessMessage(source),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : `We could not disconnect ${source.name} right now.`;
+      const message = error instanceof Error
+        ? error.message
+        : source.disconnectFailureMessage ?? `We could not disconnect ${source.name} right now.`;
       setActionError({
         message,
         sourceId: source.id,
@@ -404,4 +406,8 @@ export function ConnectSourcesGrid({
 
     </section>
   );
+}
+
+function resolveDisconnectSuccessMessage(source: ConnectSource): string {
+  return source.disconnectSuccessMessage ?? `Disconnected ${source.name}. Your history is still saved.`;
 }

@@ -71,10 +71,11 @@ export function ConnectDisconnectDialog({
       <DialogContent className="max-w-md gap-6 p-6 md:p-7">
         <DialogHeader className="pr-10">
           <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-            Disconnect {source?.name ?? "source"}?
+            {source?.disconnectDialogTitle ?? `Disconnect ${source?.name ?? "source"}?`}
           </DialogTitle>
           <DialogDescription>
-            Murph will stop syncing new data from this connection. Your history is kept.
+            {source?.disconnectDialogDescription
+              ?? "Murph will stop syncing new data from this connection. Your history is kept."}
           </DialogDescription>
         </DialogHeader>
         {errorMessage ? (
