@@ -2,23 +2,23 @@
 
 review_gpt_config_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 review_gpt_repo_root="$(CDPATH= cd -- "$review_gpt_config_dir/.." && pwd -P)"
-review_gpt_phlebas_app="$review_gpt_repo_root/output-packages/review-gpt-profiles/phlebas/Phlebas.app"
+review_gpt_eragon_app="$review_gpt_repo_root/output-packages/review-gpt-profiles/eragon/Eragon.app"
 
-if [[ ! -d "$review_gpt_phlebas_app" ]] && command -v mdfind >/dev/null 2>&1; then
-  review_gpt_phlebas_app="$(
-    mdfind "kMDItemDisplayName == 'Phlebas.app' || kMDItemFSName == 'Phlebas.app'" | head -n 1
+if [[ ! -d "$review_gpt_eragon_app" ]] && command -v mdfind >/dev/null 2>&1; then
+  review_gpt_eragon_app="$(
+    mdfind "kMDItemDisplayName == 'Eragon.app' || kMDItemFSName == 'Eragon.app'" | head -n 1
   )"
 fi
 
-review_gpt_phlebas_binary="$review_gpt_phlebas_app/Contents/MacOS/Brave Browser"
-if [[ -x "$review_gpt_phlebas_binary" ]]; then
-  browser_binary_path="${browser_binary_path:-$review_gpt_phlebas_binary}"
+review_gpt_eragon_binary="$review_gpt_eragon_app/Contents/MacOS/Brave Browser"
+if [[ -x "$review_gpt_eragon_binary" ]]; then
+  browser_binary_path="${browser_binary_path:-$review_gpt_eragon_binary}"
 else
   browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
 fi
-managed_browser_user_data_dir="${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Phlebas}"
+managed_browser_user_data_dir="${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Eragon}"
 managed_browser_profile="${managed_browser_profile:-Default}"
-managed_browser_port="${managed_browser_port:-9442}"
+managed_browser_port="${managed_browser_port:-9448}"
 
 name_prefix="murph-chatgpt-audit"
 repo_context_url=""
@@ -29,7 +29,7 @@ preset_dir="scripts/chatgpt-review-presets"
 # PR review runs pass REVIEW_GPT_PR_URL so this package wrapper can add
 # review-gpt-pr-context/pr.diff and changed-files.txt to repo.snapshot.zip.
 package_script="scripts/package-audit-context-full.sh"
-# `current` skips connector selection. The PR loop requires the Phlebas composer
+# `current` skips connector selection. The PR loop requires the Eragon composer
 # to have no selected app connector before auto-send because review context must
 # come from the guarded ZIP and repomix attachments.
 app_connector="current"
