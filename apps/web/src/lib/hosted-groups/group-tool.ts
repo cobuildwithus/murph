@@ -490,7 +490,7 @@ function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): b
   return hasPlaceholderExactlyOnce(
     messageTemplate,
     HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
-  ) && hasPlaceholderZeroOrOneTimes(
+  ) && hasPlaceholderExactlyOnce(
     messageTemplate,
     HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
   );
@@ -501,11 +501,6 @@ function hasPlaceholderExactlyOnce(messageTemplate: string, placeholder: string)
     messageTemplate.includes(placeholder)
     && messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
   );
-}
-
-function hasPlaceholderZeroOrOneTimes(messageTemplate: string, placeholder: string): boolean {
-  return !messageTemplate.includes(placeholder)
-    || messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder);
 }
 
 function renderHostedGroupJoinOfferShareScope(

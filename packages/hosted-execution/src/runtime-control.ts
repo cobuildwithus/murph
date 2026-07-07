@@ -806,7 +806,7 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
   // Model-authored natural group-chat message with server-filled
-  // {{share_scope}} placeholder and optional {{join_url}} placeholder.
+  // {{share_scope}} and {{join_url}} placeholders.
   messageTemplate?: string | null;
   // Closed over the individually selectable kinds; the server-filled share
   // scope always includes the membership-implied profile-name.v0 share.

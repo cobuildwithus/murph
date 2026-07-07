@@ -202,7 +202,7 @@ If a member never granted email sharing and expresses interest, or the group
 asks how someone can join the newsletter, post a join offer scoped to
 `group-email.v0`, `sleep-times.v0`, `activity-days.v0`, `workout-days.v0`,
 `resting-heart-rate-days.v0`, and `hrv-days.v0` unless the group chose a
-different set. For the join offer, lead with "react to this message to join,"
+different set. Every join offer must lead with "react to this message to join,"
 plainly say what reacting shares, include `{{share_scope}}` exactly once, and
 include `{{join_url}}` exactly once as the customize link so a member can share
 more or less. Reacting grants the disclosed snapshot; the link lets a member

@@ -41,7 +41,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Join offers | Lead with **react to this message to join**, state the exact `{{share_scope}}`, and include the customize link. Reacting grants the disclosed snapshot; the link is the fine-tune path. |
 | Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
 | Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link before joining. |
-| Projection window | Each vault-share delivery can carry **the last 7 days per projection kind**, matching receiver retention. |
+| Projection retention | Each vault-share delivery can carry **the 7 most recent records per projection kind**, matching count-based receiver retention. |
 
 ## Canonical Objects
 
@@ -139,7 +139,7 @@ Add a `group-newsletter` entry to `ASSISTANT_SKILLS` (`packages/assistant-engine
 2. Group-send path in the hosted-email transport: assemble the participant address list web-side, build one shared MIME (`To`: all, stable `Message-ID`/`References`), HTML body, send one envelope copy per participant.
 3. Typed **reader** for `murph.shared-vault-projections.v1` (write side exists; no read side yet) feeding the rollup engine.
 4. `group-newsletter` skill + the automation it authors (group-chosen name as title, schedule as cron, tone in instruction text), including setup questions, announce-before-first-send + opt-out window, and Murph taking part in email-thread replies via the existing inbound ingress.
-5. Seven-day vault-share projection delivery windows for weekly newsletter stats, still bounded by existing per-kind receiver retention.
+5. Latest-7-record vault-share projection delivery for weekly newsletter stats, still bounded by existing per-kind receiver retention.
 6. `?addEmail=true` settings deep-link + private missing-email reminder through the member's own Murph.
 
 Everything else is reuse: scheduling, health projections, rollup engine, roster, grant plumbing, tone guardrails, outbound email transport, inbound email ingress.

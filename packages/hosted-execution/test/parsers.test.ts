@@ -575,20 +575,6 @@ describe("parseHostedRuntimeGroupTool", () => {
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
-      action: "post_join_offer",
-      joinOffer: {
-        messageTemplate:
-          "  React to this message to join. Shares {{share_scope}}.  ",
-        projectionKinds: ["group-email.v0"],
-      },
-    })).toEqual({
-      action: "post_join_offer",
-      joinOffer: {
-        messageTemplate: "React to this message to join. Shares {{share_scope}}.",
-        projectionKinds: ["group-email.v0"],
-      },
-    });
-    expect(parseHostedRuntimeGroupToolRequest({
       action: "revoke_own_email_share",
       selfOptOut: {
         senderHandle: "person@example.test",

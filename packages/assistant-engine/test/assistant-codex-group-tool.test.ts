@@ -60,6 +60,8 @@ describe("murph.group dynamic tool", () => {
       .toContain("{{join_url}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("{{share_scope}}");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
+      .toContain("Include {{join_url}} exactly once");
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
@@ -89,23 +91,6 @@ describe("murph.group dynamic tool", () => {
         joinOffer: {
           messageTemplate:
             "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
-          projectionKinds: ["sleep-times.v0"],
-        },
-      },
-    });
-
-    expect(readMurphDynamicToolRequest(groupToolCall({
-      action: "post_join_offer",
-      messageTemplate:
-        "React to this message to join. This shares {{share_scope}} with the group.",
-      projectionKinds: ["sleep-times.v0"],
-    }))).toEqual({
-      kind: "group",
-      request: {
-        action: "post_join_offer",
-        joinOffer: {
-          messageTemplate:
-            "React to this message to join. This shares {{share_scope}} with the group.",
           projectionKinds: ["sleep-times.v0"],
         },
       },
@@ -213,6 +198,20 @@ describe("murph.group dynamic tool", () => {
       action: "post_join_offer",
       messageTemplate: "React here to join. Details: {{join_url}}.",
       projectionKinds: ["sleep-times.v0"],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React to this message to join. This shares {{share_scope}} with the group.",
+      projectionKinds: [
+        "group-email.v0",
+        "sleep-times.v0",
+        "activity-days.v0",
+        "workout-days.v0",
+        "resting-heart-rate-days.v0",
+        "hrv-days.v0",
+      ],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
