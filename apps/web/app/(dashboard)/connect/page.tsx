@@ -44,20 +44,12 @@ type ConnectSourceConnectionState = {
   connectionId: string | null;
   connectProvider: string | null;
   connectTarget: string | null;
-  disconnectPresentation?: ConnectSourceDisconnectPresentation;
+  disconnectScope?: ConnectSourceDisconnectScope;
   requiresReconnect: boolean;
   sourceId: string;
   state: "active" | "reauthorization_required";
 };
-type ConnectSourceDisconnectPresentation = Pick<
-  ConnectSource,
-  | "disconnectActionLabel"
-  | "disconnectAriaLabel"
-  | "disconnectDialogDescription"
-  | "disconnectDialogTitle"
-  | "disconnectFailureMessage"
-  | "disconnectSuccessMessage"
->;
+type ConnectSourceDisconnectScope = NonNullable<ConnectSource["disconnectScope"]>;
 
 const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>(["apple-health"]);
 const SOURCE_ID_BY_JUNCTION_UPSTREAM_ALIAS = new Map<string, string>([
@@ -248,7 +240,7 @@ export default async function ConnectPage({
   const reconnectProviderBySourceId = new Map<string, string>();
   const reconnectTargetBySourceId = new Map<string, string>();
   const disconnectConnectionIdBySourceId = new Map<string, string>();
-  const disconnectPresentationBySourceId = new Map<string, ConnectSourceDisconnectPresentation>();
+  const disconnectScopeBySourceId = new Map<string, ConnectSourceDisconnectScope>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
   const recoveryContactAction = await resolveDeviceConnectRecoveryContactAction(
     Boolean(auth.authenticatedMember),
@@ -269,8 +261,8 @@ export default async function ConnectPage({
         if (connection.connectionId) {
           disconnectConnectionIdBySourceId.set(sourceId, connection.connectionId);
         }
-        if (connection.disconnectPresentation) {
-          disconnectPresentationBySourceId.set(sourceId, connection.disconnectPresentation);
+        if (connection.disconnectScope) {
+          disconnectScopeBySourceId.set(sourceId, connection.disconnectScope);
         }
         if (connection.requiresReconnect) {
           if (connection.connectProvider) {
@@ -295,7 +287,7 @@ export default async function ConnectPage({
   const sources = resolveConfiguredConnectSources(CONNECT_SOURCES, {
     connectedSourceIds,
     disconnectConnectionIdBySourceId,
-    disconnectPresentationBySourceId,
+    disconnectScopeBySourceId,
     reconnectProviderBySourceId,
     reconnectSourceIds,
     reconnectTargetBySourceId,
@@ -368,7 +360,7 @@ export function resolveConfiguredConnectSources(
   options: {
     connectedSourceIds?: ReadonlySet<string>;
     disconnectConnectionIdBySourceId?: ReadonlyMap<string, string>;
-    disconnectPresentationBySourceId?: ReadonlyMap<string, ConnectSourceDisconnectPresentation>;
+    disconnectScopeBySourceId?: ReadonlyMap<string, ConnectSourceDisconnectScope>;
     reconnectProviderBySourceId?: ReadonlyMap<string, string>;
     reconnectSourceIds?: ReadonlySet<string>;
     reconnectTargetBySourceId?: ReadonlyMap<string, string>;
@@ -386,7 +378,7 @@ export function resolveConfiguredConnectSources(
       const connected = options.connectedSourceIds?.has(source.id) === true;
       const requiresReconnect = !connected && options.reconnectSourceIds?.has(source.id) === true;
       const disconnectConnectionId = options.disconnectConnectionIdBySourceId?.get(source.id);
-      const disconnectPresentation = options.disconnectPresentationBySourceId?.get(source.id);
+      const disconnectScope = options.disconnectScopeBySourceId?.get(source.id);
       const reconnectProvider = options.reconnectProviderBySourceId?.get(source.id);
       const reconnectTarget = options.reconnectTargetBySourceId?.get(source.id);
       const resolvedConnectTarget = reconnectTarget ?? connectTarget;
@@ -396,7 +388,7 @@ export function resolveConfiguredConnectSources(
         ...(reconnectProvider ? { connectProvider: reconnectProvider } : {}),
         ...(resolvedConnectTarget ? { connectTarget: resolvedConnectTarget } : {}),
         ...(disconnectConnectionId ? { disconnectConnectionId } : {}),
-        ...(disconnectPresentation ?? {}),
+        ...(disconnectScope ? { disconnectScope } : {}),
         ...(requiresReconnect ? { requiresReconnect } : {}),
         ...(connected ? { connected } : {}),
       };
@@ -488,7 +480,7 @@ function resolveConnectSourceConnectionMatches(
         connectionId: disconnect.connectionId,
         connectProvider: provider,
         connectTarget,
-        ...(disconnect.presentation ? { disconnectPresentation: disconnect.presentation } : {}),
+        ...(disconnect.scope ? { disconnectScope: disconnect.scope } : {}),
         requiresReconnect,
         sourceId: configuredSourceId,
         state: sourceState,
@@ -502,7 +494,7 @@ function resolveConnectSourceConnectionMatches(
           connectionId: disconnect.connectionId,
           connectProvider: provider,
           connectTarget,
-          ...(disconnect.presentation ? { disconnectPresentation: disconnect.presentation } : {}),
+          ...(disconnect.scope ? { disconnectScope: disconnect.scope } : {}),
           requiresReconnect,
           sourceId,
           state: sourceState,
@@ -543,7 +535,7 @@ function resolveConnectSourceConnectionMatches(
           connectionId: disconnect.connectionId,
           connectProvider: upstreamRequiresReconnect ? upstreamConnectProvider : provider,
           connectTarget: upstreamRequiresReconnect ? upstreamConnectTarget : null,
-          ...(disconnect.presentation ? { disconnectPresentation: disconnect.presentation } : {}),
+          ...(disconnect.scope ? { disconnectScope: disconnect.scope } : {}),
           requiresReconnect: upstreamRequiresReconnect,
           sourceId,
           state: sourceState,
@@ -558,31 +550,23 @@ function resolveConnectSourceConnectionMatches(
 function resolveConnectSourceDisconnect(
   source: ConnectSettingsSourceMatch,
   connectionId: string | null,
-): { connectionId: string | null; presentation: ConnectSourceDisconnectPresentation | null } {
+): { connectionId: string | null; scope: ConnectSourceDisconnectScope | null } {
   if (!connectionId) {
-    return { connectionId: null, presentation: null };
+    return { connectionId: null, scope: null };
   }
 
   const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
   if (provider !== "junction") {
-    return { connectionId, presentation: null };
+    return { connectionId, scope: null };
   }
 
   if (countLiveJunctionUpstreamSources(source.upstreamSources) <= 1) {
-    return { connectionId, presentation: null };
+    return { connectionId, scope: null };
   }
 
   return {
     connectionId,
-    presentation: {
-      disconnectActionLabel: "Disconnect Junction account",
-      disconnectAriaLabel: "Disconnect Junction account",
-      disconnectDialogDescription:
-        "Murph will stop syncing new data from every source in this Junction connection. Your history is kept.",
-      disconnectDialogTitle: "Disconnect Junction account?",
-      disconnectFailureMessage: "We could not disconnect this Junction account right now.",
-      disconnectSuccessMessage: "Disconnected this Junction account. Your history is still saved.",
-    },
+    scope: "junction_account",
   };
 }
 

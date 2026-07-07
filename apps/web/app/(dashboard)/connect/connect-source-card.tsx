@@ -26,8 +26,8 @@ export function SourceCard({
   const canStart = authenticated && isAvailable;
   const canDisconnect = authenticated && Boolean(source.disconnectConnectionId);
   const actionLabel = source.requiresReconnect ? "Reconnect" : "Connect";
-  const disconnectActionLabel = source.disconnectActionLabel ?? "Disconnect";
-  const disconnectAriaLabel = source.disconnectAriaLabel ?? `Disconnect ${source.name}`;
+  const disconnectActionLabel = resolveDisconnectActionLabel(source);
+  const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
   const reconnectUnavailable = source.requiresReconnect && !isAvailable;
   const unavailableMessage = !source.requiresReconnect && !isAvailable
     ? source.unavailableMessage
@@ -135,6 +135,18 @@ export function SourceCard({
       </div>
     </div>
   );
+}
+
+function resolveDisconnectActionLabel(source: ConnectSource): string {
+  return source.disconnectScope === "junction_account"
+    ? "Disconnect Junction account"
+    : "Disconnect";
+}
+
+function resolveDisconnectAriaLabel(source: ConnectSource): string {
+  return source.disconnectScope === "junction_account"
+    ? "Disconnect Junction account"
+    : `Disconnect ${source.name}`;
 }
 
 function SourceStatusDot({

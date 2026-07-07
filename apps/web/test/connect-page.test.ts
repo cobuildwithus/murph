@@ -70,16 +70,6 @@ const mocks = vi.hoisted(() => ({
   resolveHostedMurphContactOption: vi.fn(),
 }));
 
-const JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION = {
-  disconnectActionLabel: "Disconnect Junction account",
-  disconnectAriaLabel: "Disconnect Junction account",
-  disconnectDialogDescription:
-    "Murph will stop syncing new data from every source in this Junction connection. Your history is kept.",
-  disconnectDialogTitle: "Disconnect Junction account?",
-  disconnectFailureMessage: "We could not disconnect this Junction account right now.",
-  disconnectSuccessMessage: "Disconnected this Junction account. Your history is still saved.",
-};
-
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: { open?: boolean }) {
     mocks.authDialogProps = props;
@@ -1027,7 +1017,7 @@ test("ConnectPage carries account-scoped disconnect ids for multi-source upstrea
         connectionId: "dsc_junction_multi_source",
         connectProvider: "junction",
         connectTarget: null,
-        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
+        disconnectScope: "junction_account",
         requiresReconnect: false,
         sourceId: "apple-health",
         state: "active",
@@ -1036,7 +1026,7 @@ test("ConnectPage carries account-scoped disconnect ids for multi-source upstrea
         connectionId: "dsc_junction_multi_source",
         connectProvider: "junction",
         connectTarget: null,
-        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
+        disconnectScope: "junction_account",
         requiresReconnect: false,
         sourceId: "whoop",
         state: "active",
@@ -1149,7 +1139,7 @@ test("ConnectPage keeps healthy Junction child sources connected when another ch
         connectionId: "dsc_junction_multi",
         connectProvider: "junction",
         connectTarget: null,
-        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
+        disconnectScope: "junction_account",
         requiresReconnect: false,
         sourceId: "garmin",
         state: "active",
@@ -1158,7 +1148,7 @@ test("ConnectPage keeps healthy Junction child sources connected when another ch
         connectionId: "dsc_junction_multi",
         connectProvider: "junction",
         connectTarget: null,
-        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
+        disconnectScope: "junction_account",
         requiresReconnect: true,
         sourceId: "whoop",
         state: "active",
@@ -1211,7 +1201,7 @@ test("ConnectPage gives each reconnect-required Junction child its own target", 
         connectionId: "dsc_junction_multi",
         connectProvider: "junction",
         connectTarget: "garmin",
-        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
+        disconnectScope: "junction_account",
         requiresReconnect: true,
         sourceId: "garmin",
         state: "active",
@@ -1220,7 +1210,7 @@ test("ConnectPage gives each reconnect-required Junction child its own target", 
         connectionId: "dsc_junction_multi",
         connectProvider: "junction",
         connectTarget: "whoop",
-        disconnectPresentation: JUNCTION_ACCOUNT_DISCONNECT_PRESENTATION,
+        disconnectScope: "junction_account",
         requiresReconnect: true,
         sourceId: "whoop",
         state: "active",
@@ -2046,6 +2036,129 @@ test("ConnectSourcesGrid disconnects a connected source after confirmation", asy
   });
   assert.match(rendered.container.textContent ?? "", /Whoop not connected/);
   assert.equal(rendered.container.querySelector("button[aria-label='Connect Whoop']")?.textContent, "Connect");
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconnect", async () => {
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({});
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connected: true,
+        description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
+        disconnectConnectionId: "dsc_apple_health_123",
+        id: "apple-health",
+        logo: {
+          className: "h-9 w-auto object-contain",
+          height: 48,
+          src: "/brand-logos/connect/apple-health.png",
+          width: 48,
+        },
+        name: "Apple Health",
+        unavailableActionLabel: "Coming soon",
+        unavailableMessage: "Apple Health web setup is coming soon. Connect from the Murph iOS app for now.",
+      },
+    ],
+  }));
+
+  const disconnectButton = rendered.container.querySelector("button[aria-label='Disconnect Apple Health']");
+  assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  const confirmButton = [...rendered.container.querySelectorAll("button")]
+    .filter((button) => button.textContent === "Disconnect")
+    .at(-1);
+  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Disconnected Apple Health\. Your history is still saved\./);
+  });
+
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/connections/dsc_apple_health_123/disconnect");
+  assert.match(rendered.container.textContent ?? "", /Apple Health not connected/);
+  assert.match(rendered.container.textContent ?? "", /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./);
+  assert.equal(rendered.container.querySelector("button[aria-label='Apple Health web setup is not available yet']")?.textContent, "Coming soon");
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Not available/u);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid uses account-scoped Junction disconnect copy", async () => {
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({});
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connected: true,
+        description: "Recovery, strain, sleep, and heart rate.",
+        disconnectConnectionId: "dsc_junction_multi",
+        disconnectScope: "junction_account",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }));
+
+  const disconnectButton = rendered.container.querySelector("button[aria-label='Disconnect Junction account']");
+  assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(disconnectButton.textContent, "Disconnect Junction account");
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  assert.match(rendered.container.textContent ?? "", /Disconnect Junction account\?/);
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Murph will stop syncing new data from every source in this Junction connection\. Your history is kept\./,
+  );
+
+  const confirmButton = [...rendered.container.querySelectorAll("button")]
+    .filter((button) => button.textContent === "Disconnect")
+    .at(-1);
+  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Disconnected this Junction account\. Your history is still saved\./);
+  });
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/connections/dsc_junction_multi/disconnect");
 
   await rendered.cleanup();
 });

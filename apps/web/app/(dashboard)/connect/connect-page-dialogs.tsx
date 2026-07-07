@@ -71,11 +71,10 @@ export function ConnectDisconnectDialog({
       <DialogContent className="max-w-md gap-6 p-6 md:p-7">
         <DialogHeader className="pr-10">
           <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-            {source?.disconnectDialogTitle ?? `Disconnect ${source?.name ?? "source"}?`}
+            {resolveDisconnectDialogTitle(source)}
           </DialogTitle>
           <DialogDescription>
-            {source?.disconnectDialogDescription
-              ?? "Murph will stop syncing new data from this connection. Your history is kept."}
+            {resolveDisconnectDialogDescription(source)}
           </DialogDescription>
         </DialogHeader>
         {errorMessage ? (
@@ -111,6 +110,22 @@ export function ConnectDisconnectDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function resolveDisconnectDialogTitle(source: ConnectSource | null): string {
+  if (source?.disconnectScope === "junction_account") {
+    return "Disconnect Junction account?";
+  }
+
+  return `Disconnect ${source?.name ?? "source"}?`;
+}
+
+function resolveDisconnectDialogDescription(source: ConnectSource | null): string {
+  if (source?.disconnectScope === "junction_account") {
+    return "Murph will stop syncing new data from every source in this Junction connection. Your history is kept.";
+  }
+
+  return "Murph will stop syncing new data from this connection. Your history is kept.";
 }
 
 export function ConnectRedirectDialog({ sourceName }: { sourceName: string | null }) {

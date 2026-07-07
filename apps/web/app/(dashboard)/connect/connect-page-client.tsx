@@ -282,7 +282,7 @@ export function ConnectSourcesGrid({
     } catch (error) {
       const message = error instanceof Error
         ? error.message
-        : source.disconnectFailureMessage ?? `We could not disconnect ${source.name} right now.`;
+        : resolveDisconnectFailureMessage(source);
       setActionError({
         message,
         sourceId: source.id,
@@ -409,5 +409,13 @@ export function ConnectSourcesGrid({
 }
 
 function resolveDisconnectSuccessMessage(source: ConnectSource): string {
-  return source.disconnectSuccessMessage ?? `Disconnected ${source.name}. Your history is still saved.`;
+  return source.disconnectScope === "junction_account"
+    ? "Disconnected this Junction account. Your history is still saved."
+    : `Disconnected ${source.name}. Your history is still saved.`;
+}
+
+function resolveDisconnectFailureMessage(source: ConnectSource): string {
+  return source.disconnectScope === "junction_account"
+    ? "We could not disconnect this Junction account right now."
+    : `We could not disconnect ${source.name} right now.`;
 }
