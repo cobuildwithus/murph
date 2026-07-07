@@ -77,7 +77,12 @@ describe("hosted local container continuity e2e", () => {
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
-    requireScenario().queueAssistantResponses([firstReplyText, secondReplyText]);
+    requireScenario().queueAssistantResponses([firstReplyText], {
+      matchInputContains: firstUserText,
+    });
+    requireScenario().queueAssistantResponses([secondReplyText], {
+      matchInputContains: secondUserText,
+    });
 
     const firstWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
