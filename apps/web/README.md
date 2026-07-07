@@ -556,19 +556,28 @@ Generate the client and apply migrations with Prisma:
 pnpm --dir apps/web prisma:generate
 pnpm --dir apps/web prisma:migrate:deploy
 pnpm --dir apps/web release:production:migrate
+pnpm --dir apps/web release:production:contract-migrate
 ```
 
 The checked-in Vercel build command runs
 `pnpm release:production:migrate && pnpm build`, so Vercel deploys still run
 the guarded production migration wrapper automatically before building. The
 generic `pnpm --dir apps/web build` script is intentionally non-mutating and
-only generates artifacts plus validation output. The migration wrapper uses
-`DIRECT_DATABASE_URL` when it is set, requires it in Vercel production, and
-rejects known pooled Postgres ports such as `6432` and `6543`; keep
-`DATABASE_URL` available for app runtime traffic. Because a successful
-migration cannot roll back automatically if a later deploy step fails,
-production migrations must stay backward compatible with the currently deployed
-app and use expand/contract sequencing for breaking changes.
+only generates artifacts plus validation output. The predeploy migration
+wrapper uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel
+production, rejects known pooled Postgres ports such as `6432` and `6543`, and
+blocks future destructive Prisma migration SQL after
+`20260707170000_drop_stale_linq_recency_columns`; keep `DATABASE_URL` available
+for app runtime traffic. Because a successful predeploy migration cannot roll
+back automatically if a later deploy step fails, normal production Prisma
+migrations must stay backward compatible with the currently deployed app.
+Destructive contract cleanup belongs under
+`apps/web/prisma/contract-migrations` and runs through the
+`Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
+successful production deployment for `main`. That workflow checks out the exact
+deployed commit, requires `HOSTED_WEB_DIRECT_DATABASE_URL` as a GitHub Actions
+secret, and calls `pnpm --dir apps/web release:production:contract-migrate` with
+explicit opt-in.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during
