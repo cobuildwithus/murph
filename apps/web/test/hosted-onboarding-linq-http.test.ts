@@ -242,7 +242,7 @@ describe("updateHostedLinqChatAvatar", () => {
     Reflect.deleteProperty(globalThis, "fetch");
   });
 
-  it("updates a chat with a public group icon URL", async () => {
+  it("updates a chat with the SDK-backed group icon field", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
       void _init;
@@ -276,6 +276,18 @@ describe("updateHostedLinqChatAvatar", () => {
       chatId: "chat_123",
       groupChatIconUrl: "http://example.com/avatar.png",
     })).rejects.toThrow(/HTTPS URL/u);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-hosted icon URLs before calling Linq", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl: "https://example.com/avatar.png",
+    })).rejects.toThrow(/hosted Cloudflare Images URL/u);
 
     expect(fetchMock).not.toHaveBeenCalled();
   });

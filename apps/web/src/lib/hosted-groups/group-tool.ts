@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   type HostedRuntimeGroupChatParticipant,
@@ -634,7 +635,12 @@ function normalizeHostedGroupJoinOfferMessageTemplate(
 
 function normalizeHostedGroupChatIconUrl(value: string): string | null {
   const normalized = value.trim();
-  if (!normalized) return null;
+  if (
+    !normalized
+    || normalized.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH
+  ) {
+    return null;
+  }
   let parsed: URL;
   try {
     parsed = new URL(normalized);
@@ -644,7 +650,17 @@ function normalizeHostedGroupChatIconUrl(value: string): string | null {
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
     return null;
   }
+  if (!isHostedGroupChatIconDeliveryUrl(parsed)) {
+    return null;
+  }
   return parsed.toString();
+}
+
+function isHostedGroupChatIconDeliveryUrl(url: URL): boolean {
+  if (url.hostname !== "imagedelivery.net" || url.search || url.hash) {
+    return false;
+  }
+  return url.pathname.split("/").filter(Boolean).length >= 3;
 }
 
 function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): boolean {

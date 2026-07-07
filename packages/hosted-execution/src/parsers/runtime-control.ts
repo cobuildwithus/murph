@@ -876,7 +876,17 @@ function parseHostedRuntimeGroupChatIconUrl(value: unknown): string {
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
     throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl must be HTTPS.");
   }
+  if (!isHostedRuntimeGroupChatIconDeliveryUrl(parsed)) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
   return parsed.toString();
+}
+
+function isHostedRuntimeGroupChatIconDeliveryUrl(url: URL): boolean {
+  if (url.hostname !== "imagedelivery.net" || url.search || url.hash) {
+    return false;
+  }
+  return url.pathname.split("/").filter(Boolean).length >= 3;
 }
 
 function parseHostedRuntimeGroupToolLinqThreadContext(

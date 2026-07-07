@@ -1,9 +1,13 @@
 import "server-only";
 
+import {
+  HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
+} from "@murphai/hosted-execution/runtime-control";
 import type { TextPart } from "@linqapp/sdk/resources";
 import type {
   ChatCreateParams,
   ChatCreateResponse,
+  ChatUpdateParams,
   MessageSendParams,
   MessageSendResponse,
 } from "@linqapp/sdk/resources/chats";
@@ -101,13 +105,14 @@ export async function updateHostedLinqChatAvatar(input: {
   groupChatIconUrl: string;
   signal?: AbortSignal;
 }): Promise<void> {
+  // Mirrors @linqapp/sdk Chats.update / ChatUpdateParams.group_chat_icon while
+  // preserving this wrapper's shared auth, timeout, and redacted-error behavior.
+  const body: ChatUpdateParams = {
+    group_chat_icon: normalizeHostedLinqGroupChatIconUrl(input.groupChatIconUrl),
+  };
+
   const response = await fetchHostedLinqApiOrThrow({
-    body: JSON.stringify({
-      group_chat_icon: normalizeRequiredHttpsUrl(
-        input.groupChatIconUrl,
-        "group chat icon url",
-      ),
-    }),
+    body: JSON.stringify(body),
     method: "PUT",
     operation: "chat avatar update",
     path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}`,
@@ -450,6 +455,24 @@ function normalizeRequiredHttpsUrl(value: unknown, label: string): string {
     throw new TypeError(`${label} must be an HTTPS URL.`);
   }
   return parsed.toString();
+}
+
+function normalizeHostedLinqGroupChatIconUrl(value: unknown): string {
+  const normalized = normalizeRequiredHttpsUrl(value, "group chat icon url");
+  if (normalized.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH) {
+    throw new TypeError("group chat icon url must be a hosted Cloudflare Images URL.");
+  }
+  const parsed = new URL(normalized);
+  const pathSegments = parsed.pathname.split("/").filter(Boolean);
+  if (
+    parsed.hostname !== "imagedelivery.net"
+    || parsed.search
+    || parsed.hash
+    || pathSegments.length < 3
+  ) {
+    throw new TypeError("group chat icon url must be a hosted Cloudflare Images URL.");
+  }
+  return normalized;
 }
 
 function normalizeRequiredStringList(values: readonly string[], label: string): string[] {

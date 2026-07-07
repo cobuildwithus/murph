@@ -781,6 +781,25 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
+  it("rejects external HTTPS group avatar URLs before calling Linq", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "set_chat_avatar",
+        groupChatIconUrl: "https://example.com/avatar.png",
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_chat_icon_url_unavailable",
+      },
+    });
+
+    expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
+  });
+
   it("preflights group avatar access without updating Linq", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",

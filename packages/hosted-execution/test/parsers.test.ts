@@ -720,6 +720,18 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "set_chat_avatar",
+        groupChatIconUrl: "https://example.com/avatar.png",
+      })
+    ).toThrow(/groupChatIconUrl is invalid/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "set_chat_avatar",
+        groupChatIconUrl: "https://imagedelivery.net/account/avatar",
+      })
+    ).toThrow(/groupChatIconUrl is invalid/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "set_chat_avatar",
         chatId: "chat_hijack",
         groupChatIconUrl: "https://example.com/avatar.png",
       })
