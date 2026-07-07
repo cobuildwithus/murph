@@ -920,6 +920,44 @@ test("ConnectPage surfaces active sources with reconnect action as reconnectable
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
 
+test("ConnectPage preserves unambiguous Junction source reconnects with upstream projections", async () => {
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_whoop",
+        primaryAction: {
+          kind: "reconnect",
+          label: "Reconnect",
+        },
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            connectProvider: "junction",
+            connectSourceId: "whoop",
+            connectTarget: "whoop",
+            providerLabel: "WHOOP",
+            resourceCount: 3,
+            sourceProviderSlug: "whoop_v2",
+            status: "connected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Whoop needs reconnect/u);
+  assert.match(markup, /Please reconnect Whoop to resume syncing\./u);
+  assert.match(markup, /aria-label="Reconnect Whoop"/u);
+  assert.match(markup, /data-connection-state="needs-access"/u);
+  assert.doesNotMatch(markup, /Whoop connected/u);
+});
+
 test("ConnectPage lets active state win when duplicate rows mention the same source", async () => {
   const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
 

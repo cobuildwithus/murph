@@ -459,7 +459,8 @@ function resolveConnectSourceConnectionMatches(
       ? source.state
       : null;
     const parentRequiresReconnect = isReauthorizationRequiredConnectSourceState(source.state);
-    const requiresReconnect = source.primaryAction?.kind === "reconnect" || parentRequiresReconnect;
+    const sourceRequiresReconnect = source.primaryAction?.kind === "reconnect";
+    const requiresReconnect = sourceRequiresReconnect || parentRequiresReconnect;
     const connectionId = typeof source.connectionId === "string" && source.connectionId.trim()
       ? source.connectionId
       : null;
@@ -468,6 +469,9 @@ function resolveConnectSourceConnectionMatches(
       : null;
     const disconnect = resolveConnectSourceDisconnect(source, connectionId);
     const hasJunctionUpstreamSources = provider === "junction" && source.upstreamSources.length > 0;
+    const unambiguousJunctionReconnectUpstreamCount = hasJunctionUpstreamSources && sourceRequiresReconnect
+      ? countLiveJunctionUpstreamSources(source.upstreamSources)
+      : 0;
 
     const configuredSourceId = normalizeDeviceConnectSourceId(source.connectSourceId ?? null);
     if (
@@ -507,8 +511,14 @@ function resolveConnectSourceConnectionMatches(
     }
 
     for (const upstreamSource of source.upstreamSources) {
+      const upstreamOwnRequiresReconnect = upstreamSource.requiresReconnect === true;
+      const upstreamInheritsSourceReconnect =
+        sourceRequiresReconnect
+        && unambiguousJunctionReconnectUpstreamCount === 1
+        && isLiveJunctionUpstreamSource(upstreamSource);
       const upstreamRequiresReconnect = parentRequiresReconnect
-        || upstreamSource.requiresReconnect === true;
+        || upstreamOwnRequiresReconnect
+        || upstreamInheritsSourceReconnect;
       const upstreamConnectProvider = upstreamSource.connectProvider
         ? normalizeDeviceSyncConnectTargetKey(upstreamSource.connectProvider)
         : provider;
@@ -573,11 +583,15 @@ function resolveConnectSourceDisconnect(
 function countLiveJunctionUpstreamSources(
   upstreamSources: ConnectSettingsSourceMatch["upstreamSources"],
 ): number {
-  return upstreamSources.filter((source) =>
-    source.status === "connected"
+  return upstreamSources.filter(isLiveJunctionUpstreamSource).length;
+}
+
+function isLiveJunctionUpstreamSource(
+  source: ConnectSettingsSourceMatch["upstreamSources"][number],
+): boolean {
+  return source.status === "connected"
     || source.status === "error"
-    || source.requiresReconnect === true
-  ).length;
+    || source.requiresReconnect === true;
 }
 
 function upsertConnectSourceConnection(
