@@ -70,7 +70,7 @@ test("HeroClocksIn renders the reduced-motion group seed", async () => {
   assert.match(text, /Weekly newsletter · Sunday 8:02 AM/);
   assert.match(text, /Your crew: week 3 in health/);
   assert.match(text, /4 People/);
-  assert.match(text, /Murph makes it easy\./);
+  assert.match(text, /Murph keeps score\./);
   assert.equal(
     view.container.querySelector(
       'button[aria-label="Start a group chat with Theo"]',

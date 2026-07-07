@@ -125,6 +125,14 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
   {
     topic: "Bone density",
     user: "Book me a DEXA scan nearby.",
+    order: {
+      eyebrow: "Appointment booked · today",
+      status: "Confirmed",
+      title: "BodySpec DEXA scan",
+      detail: "Thursday · 2:00 pm · Mission St, 1.4 mi away",
+      arriving: "Added to your calendar",
+      price: "$49",
+    },
     murph:
       "Booked BodySpec on Mission for Thursday at 2pm: $49, 1.4 miles away. I added the confirmation and prep notes to your calendar.",
   },
@@ -306,16 +314,27 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
 
 const AUTO_RUN_TOPICS = [
   "Magnesium",
-  "LDL cholesterol",
-  "Dentist",
+  "Bone density",
 ] as const;
 
 // Unnamed iMessage groups are titled by participant count (excluding you):
 // Murph plus the three joined members.
 const GROUP_HEADER_LABEL = `${GROUP_MEMBERS.length + 1} People`;
 
-const HERO_PARAGRAPH =
-  "Murph is your personal health assistant. Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep. Murph runs it all and helps you figure out what actually makes you healthier, then build habits that stick. It also runs health challenges with your friends and sends your family a weekly health newsletter.";
+const HERO_COPY = {
+  act1: {
+    line1: "Health is overwhelming.",
+    line2: "Murph makes it easy.",
+    paragraph:
+      "Murph is your personal health assistant. Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep. Murph runs it all and helps you figure out what actually makes you healthier, then build habits that stick.",
+  },
+  act2: {
+    line1: "Get healthy with your people.",
+    line2: "Murph keeps score.",
+    paragraph:
+      "Start a health challenge with your friends, right in your group chat. Murph sets fair baselines, referees the week, and calls the winner. Every Sunday, family and friends get a newsletter on how everyone is doing.",
+  },
+} as const;
 
 const GROUP_MESSAGES = {
   theoQuestion: "ok who's actually winning this thing",
@@ -381,13 +400,16 @@ const FLOATERS: ReadonlyArray<Floater> = [
   { text: "Daily walk", bottom: "4%", left: "5%", flyX: "58vw", flyY: "-42vh", delay: 1.3, duration: 10.5 },
   { text: "Sleep quality", bottom: "5%", left: "26%", flyX: "44vw", flyY: "-40vh", delay: 2.7, duration: 13.5 },
   { text: "Blood pressure", bottom: "4%", right: "28%", flyX: "6vw", flyY: "-42vh", delay: 2.6, duration: 14 },
+  // Person floaters stay in the top strip and right edge with the topic
+  // labels: those bands clear the phone mock; free-floating offsets like the
+  // old top:138px landed on the phone's corner at wide viewports.
   {
     text: "Theo",
     member: GROUP_MEMBERS[0],
-    top: "138px",
-    right: "20%",
-    flyX: "-8vw",
-    flyY: "36vh",
+    top: "78px",
+    right: "22%",
+    flyX: "2vw",
+    flyY: "42vh",
     delay: 0.2,
     duration: 10.8,
   },
@@ -426,8 +448,10 @@ const USER_BUBBLE_AT = 1400;
 const TYPING_AT = 2200;
 const REPLY_AT = 3600;
 const CYCLE_LENGTH = 7800;
-const GROUP_JOIN_STAGGER = 1800;
-const GROUP_JOIN_LINE_AT = 1400;
+// Members fly in as one quick burst: barely staggered so the group forms
+// together instead of trickling in one by one.
+const GROUP_JOIN_STAGGER = 450;
+const GROUP_JOIN_LINE_AT = 900;
 const GROUP_BEAT_GAP = 6500;
 const MAX_ITEMS = 30;
 
@@ -901,6 +925,7 @@ export function HeroClocksIn({
     ) : (
       <IMessageLogo className="size-[18px]" />
     );
+  const activeCopy = groupMode ? HERO_COPY.act2 : HERO_COPY.act1;
 
   return (
     <section className="relative min-h-svh overflow-hidden bg-[#f5f0e8]">
@@ -958,7 +983,7 @@ export function HeroClocksIn({
           .hero-floater, .hero-floater--active, .hero-msg-in, .hero-typing-dot {
             animation: none !important;
           }
-          .hero-header-layer {
+          .hero-copy-layer, .hero-header-layer {
             transition: none !important;
           }
         }
@@ -1027,17 +1052,19 @@ export function HeroClocksIn({
 
       <div className="relative z-10 mx-auto grid min-h-svh max-w-[1280px] grid-cols-1 items-center gap-6 px-5 pt-20 pb-10 sm:gap-10 sm:px-10 sm:pb-16 lg:grid-cols-12 lg:gap-20 lg:px-16 lg:pt-24">
         <div className="relative z-10 lg:col-span-7">
-          <h1 className="font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-black">
-            <span className="block">Health is</span>
-            <span className="block">overwhelming.</span>
-          </h1>
-          <p className="mt-3 font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-[#5a6e32] lg:whitespace-nowrap">
-            Murph makes it easy.
-          </p>
-
-          <p className="mt-6 max-w-[52ch] text-[1.0625rem] leading-[1.7] text-pretty text-[#3a322a] lg:mt-10">
-            {HERO_PARAGRAPH}
-          </p>
+          <h1 className="sr-only">{`${activeCopy.line1} ${activeCopy.line2}`}</h1>
+          <div className="grid">
+            <HeroCopyLayer
+              active={!groupMode}
+              ariaHidden={groupMode}
+              copy={HERO_COPY.act1}
+            />
+            <HeroCopyLayer
+              active={groupMode}
+              ariaHidden={!groupMode}
+              copy={HERO_COPY.act2}
+            />
+          </div>
 
           <div className="mt-10 hidden lg:block">
             <LandingAuthActions
@@ -1187,6 +1214,44 @@ export function HeroClocksIn({
         </div>
       </div>
     </section>
+  );
+}
+
+// Visual crossfade layers stacked in one grid cell so height is the max of
+// both variants (zero layout shift). The document's single h1 lives outside
+// as a stable sr-only element, so the accessible heading survives the swap.
+function HeroCopyLayer({
+  active,
+  ariaHidden,
+  copy,
+}: {
+  active: boolean;
+  ariaHidden: boolean;
+  copy: {
+    line1: string;
+    line2: string;
+    paragraph: string;
+  };
+}) {
+  return (
+    <div
+      aria-hidden={ariaHidden}
+      className={cn(
+        "hero-copy-layer col-start-1 row-start-1 transition-opacity duration-500 ease-out",
+        active ? "opacity-100" : "pointer-events-none opacity-0",
+      )}
+    >
+      <div className="font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-black">
+        <span className="block">{copy.line1}</span>
+        <span className="mt-3 block text-[#5a6e32] lg:whitespace-nowrap">
+          {copy.line2}
+        </span>
+      </div>
+
+      <p className="mt-6 max-w-[52ch] text-[1.0625rem] leading-[1.7] text-pretty text-[#3a322a] lg:mt-10">
+        {copy.paragraph}
+      </p>
+    </div>
   );
 }
 
