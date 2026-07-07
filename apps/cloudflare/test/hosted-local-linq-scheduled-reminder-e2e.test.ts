@@ -227,14 +227,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     ], {
       matchInputContains: overlapForegroundInboundText,
     });
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "deliver overlap sleep reminder after foreground reply",
-        text: overlapReminderText,
-      }),
-    ], {
-      matchInputContains: scheduledReminderInstructions,
-    });
     const overlapProviderBaselineCount = countAssistantProviderResponsesApiRequests();
     const overlapForegroundReplyMatcher =
       createObservedLinqMessageTextMatcher(overlapForegroundReplyText);
@@ -284,6 +276,14 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       });
       expect(requireLinqStub().readObservedMessageText(overlapForegroundSend))
         .toBe(overlapForegroundReplyText);
+      requireScenario().queueAssistantResponses([
+        buildHostedAssistantNotificationDecisionResponse({
+          privateSummary: "deliver overlap sleep reminder after foreground reply",
+          text: overlapReminderText,
+        }),
+      ], {
+        matchInputContains: scheduledReminderInstructions,
+      });
       heldOverlapReminderResponse.release();
       const overlapReminderSend = await requireLinqStub().waitForAdditionalSend({
         baselineCount: overlapReminderSendBaselineCount,
