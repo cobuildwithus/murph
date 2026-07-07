@@ -65,7 +65,7 @@ export function HostedAccountSettingsCards({
           <SettingsRow
             icon={<ContactRound className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
             label="Murph contact"
-            value="Pick a look and save the updated card."
+            value="Pick a new look for Murph in your contacts."
             action={
               <Button
                 onClick={() => setContactPickerOpen(true)}
@@ -132,10 +132,11 @@ export function HostedAccountSettingsCards({
       {contactPickerOpen ? (
         <MurphContactCardPicker
           copy={{
-            description: "Pick a look and save the updated card.",
-            primaryAction: "Save updated card",
+            description:
+              "iPhone only applies the photo when the card is saved as a new contact. Delete your current Murph contact first, then save this one fresh.",
+            primaryAction: "Save new card",
             secondaryAction: "Close",
-            title: "Customize Murph contact",
+            title: "Pick a new look",
           }}
           onAddToContacts={() => setContactPickerOpen(false)}
           onOpenChange={setContactPickerOpen}
