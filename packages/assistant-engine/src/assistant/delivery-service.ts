@@ -10,7 +10,6 @@ import { shouldCreateAssistantProgressDelivery } from './progress-constants.js'
 import { markAssistantFirstContactSeen } from './first-contact.js'
 import { createHostedDeliveryId } from './hosted-delivery-id.js'
 import {
-  type AssistantOutboxDispatchMode,
   type AssistantOutboxDispatchMessage,
   deliverAssistantOutboxReaction,
   normalizeAssistantDeliveryError,
@@ -215,7 +214,12 @@ export async function deliverAssistantReply(input: {
   }
 
   let session = input.session
-  let remainingBubbleDispatchMode: AssistantOutboxDispatchMode | null = null
+  // Bubbles deliver sequentially with per-bubble idempotency keys. Persisted
+  // intent ordering is owned by the outbox drain comparator
+  // (`compareAssistantOutboxDeliverySequenceOrder`) plus hosted boundary
+  // gating, so hosted queue-only delivery stays strictly ordered across
+  // retries; local immediate retry behavior remains best-effort like steered
+  // segments.
   for (let bubbleIndex = 0; bubbleIndex < replyBubbles.length - 1; bubbleIndex += 1) {
     const bubbleIdempotencyKey = buildAssistantReplyBubbleDeliveryIdempotencyKey({
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
@@ -239,17 +243,10 @@ export async function deliverAssistantReply(input: {
       session,
       sharedPlan: input.sharedPlan,
       turnId: input.turnId,
-      dispatchMode: remainingBubbleDispatchMode,
     })
     session = outcome.session
     if (outcome.kind === 'failed') {
       return outcome
-    }
-    if (
-      outcome.kind === 'queued' &&
-      input.input.deliveryDispatchMode !== 'queue-only'
-    ) {
-      remainingBubbleDispatchMode = 'queue-only'
     }
   }
 
@@ -264,7 +261,6 @@ export async function deliverAssistantReply(input: {
     session,
     sharedPlan: input.sharedPlan,
     turnId: input.turnId,
-    dispatchMode: remainingBubbleDispatchMode,
   })
 }
 
@@ -831,7 +827,6 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   answeredMailboxItemIds?: readonly string[] | null
   dedupeToken: string | null
   deliveryIdempotencyKey: string | null
-  dispatchMode?: AssistantOutboxDispatchMode | null
   deliveryTransportIdempotent: boolean | undefined
   input: AssistantMessageInput
   media: AssistantResponseMedia[]
@@ -861,7 +856,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
     turnId: input.turnId,
     turnTrigger: input.input.turnTrigger ?? null,
     dependencies: undefined,
-    dispatchMode: input.dispatchMode ?? input.input.deliveryDispatchMode,
+    dispatchMode: input.input.deliveryDispatchMode,
   })
   const session = outcome.session ?? input.session
 
