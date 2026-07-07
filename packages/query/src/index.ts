@@ -113,6 +113,7 @@ export type {
   ExperimentProgressCardConfounderInput,
 } from "./experiment-progress-card.ts";
 export {
+  resolveAdherenceObservationActivityKind,
   synthesizeLegacySessionAdherenceTargets,
 } from "./experiment-adherence.ts";
 export type {

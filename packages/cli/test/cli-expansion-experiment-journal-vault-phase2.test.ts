@@ -2224,10 +2224,13 @@ test.sequential(
             targetSessions: number | null
           }
           dataCoverage: {
+            activityProviders: string[]
             baselineDaysAvailable: number
             interventionDaysAvailable: number
+            primaryBiomarkerKey: string | null
             primaryMetricDaysAvailable: number
             status: string
+            wearableProviders: string[]
           }
           recommendation: {
             action: string
@@ -2460,6 +2463,7 @@ test.sequential(
         targetSessions: 4,
       })
       assert.deepEqual(requireData(progress).progress.dataCoverage, {
+        activityProviders: [],
         baselineDaysAvailable: 0,
         interventionDaysAvailable: 0,
         primaryBiomarkerKey: 'biomarker:resting-heart-rate',

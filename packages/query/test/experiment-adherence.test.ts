@@ -306,6 +306,12 @@ test("maps generic workout modalities to unscoped activity evidence", () => {
   assert.deepEqual(resolveAdherenceEvidence("cardio"), {
     eventKind: "activity_session",
   });
+  assert.deepEqual(resolveAdherenceEvidence("movement"), {
+    eventKind: "intervention_session",
+  });
+  assert.deepEqual(resolveAdherenceEvidence("activity"), {
+    eventKind: "intervention_session",
+  });
   assert.deepEqual(resolveAdherenceEvidence("sauna"), {
     eventKind: "intervention_session",
   });
@@ -324,6 +330,22 @@ test("maps generic workout modalities to unscoped activity evidence", () => {
     eventKind: "activity_session",
     missing: "missed_after_grace",
   });
+
+  for (const modality of ["movement", "activity"]) {
+    const manualTargets = synthesizeLegacySessionAdherenceTargets({
+      runPlan: {
+        modality,
+        targetSessions: 3,
+        minimumUsefulSessions: 2,
+      },
+    });
+
+    assert.deepEqual(manualTargets[0]?.evidence, {
+      kind: "linkedEventCount",
+      eventKind: "intervention_session",
+      missing: "missed_after_grace",
+    });
+  }
 });
 
 test("synthesizes count-less run-plan targets without rollup metadata", () => {

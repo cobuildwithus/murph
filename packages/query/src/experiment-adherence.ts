@@ -114,8 +114,6 @@ const GENERIC_WORKOUT_MODALITIES = new Set([
   "training",
   "cardio",
   "fitness",
-  "movement",
-  "activity",
 ]);
 const GENERIC_ACTIVITY_KIND_TOKENS = new Set([
   "workout",
