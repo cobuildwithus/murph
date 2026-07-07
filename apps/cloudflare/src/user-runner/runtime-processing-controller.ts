@@ -371,7 +371,7 @@ export class RuntimeProcessingController {
     ) {
       await this.syncRunnerAlarm(record);
       return createRuntimeProcessingRetryLater({
-        reason: "container_rpc_timeout",
+        reason: "starting_fence_preserved",
         userId: input.input.userId,
       });
     }
@@ -391,7 +391,7 @@ export class RuntimeProcessingController {
     }
     if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
       return createRuntimeProcessingRetryLater({
-        reason: "container_rpc_timeout",
+        reason: "command_budget_exhausted",
         userId: input.input.userId,
       });
     }
