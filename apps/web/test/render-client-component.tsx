@@ -15,6 +15,7 @@ type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
   container: HTMLElement;
   open: ReturnType<typeof vi.fn>;
   reload: ReturnType<typeof vi.fn>;
+  replaceState: ReturnType<typeof vi.fn>;
   window: Window & typeof globalThis;
 };
 
@@ -44,6 +45,7 @@ export async function renderClientComponent(
   const assign = vi.fn();
   const open = vi.fn();
   const reload = vi.fn();
+  const replaceState = vi.fn();
   Object.defineProperty(window, "location", {
     configurable: true,
     value: {
@@ -51,6 +53,15 @@ export async function renderClientComponent(
       reload,
       ...(options.location ?? {}),
     },
+  });
+  const history = Object.create(window.history ?? null) as History;
+  Object.defineProperty(history, "replaceState", {
+    configurable: true,
+    value: replaceState,
+  });
+  Object.defineProperty(window, "history", {
+    configurable: true,
+    value: history,
   });
   Object.defineProperty(window, "open", {
     configurable: true,
@@ -81,6 +92,7 @@ export async function renderClientComponent(
     container,
     open,
     reload,
+    replaceState,
     window,
   };
 }

@@ -111,6 +111,7 @@ export async function resolveDeviceSyncCompletionDialogModel(input: {
     kind: "device-sync",
     retryHref: failed ? "/connect" : null,
     title,
+    unverified: !failed && callback.status === "connected" && !connected,
   };
 }
 
