@@ -482,6 +482,7 @@ function HabitArtifact() {
 
       <div className="mt-4">
         <VoiceMemoPlayer
+          bars={56}
           src="/audio/one-foot-two-foot.mp3"
           caption="Murph sent a hype track. Press play."
         />
