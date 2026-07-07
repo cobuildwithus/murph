@@ -1287,6 +1287,7 @@ function buildAdherenceObservations(
                   event.date ??
                   extractDate(event.occurredAt) ??
                   context.asOfDate,
+            source: readString(event.attributes.source),
             status: readSessionScheduleStatus(event),
             targetId: target.targetId,
           })));

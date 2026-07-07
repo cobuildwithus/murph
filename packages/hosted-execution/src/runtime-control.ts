@@ -40,6 +40,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  "group-newsletter.email-needed",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -761,7 +762,8 @@ export type HostedRuntimeGroupToolAction =
   | "create_join_link"
   | "post_join_offer"
   | "read_chat_participants"
-  | "share_contact_card";
+  | "share_contact_card"
+  | "revoke_own_email_share";
 
 export const HOSTED_RUNTIME_GROUP_KINDS = [
   "couple",
@@ -817,6 +819,11 @@ export interface HostedRuntimeGroupToolLinqThreadContext {
   chatId: string;
 }
 
+export interface HostedRuntimeGroupToolSelfOptOutContext {
+  senderHandle: string;
+  source: "email" | "linq";
+}
+
 export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
 
 export interface HostedRuntimeGroupChatParticipant {
@@ -833,7 +840,11 @@ export type HostedRuntimeGroupToolRequest =
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
   | { action: "read_chat_participants"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
-  | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null };
+  | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
+  | {
+      action: "revoke_own_email_share";
+      selfOptOut?: HostedRuntimeGroupToolSelfOptOutContext | null;
+    };
 
 export type HostedRuntimeGroupToolResponse =
   | {
@@ -867,6 +878,86 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "sent" }
         | { status: "already_shared" }
         | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "revoke_own_email_share";
+      result:
+        | { status: "revoked"; revokedCount: number }
+        | { status: "already_removed"; revokedCount: 0 }
+        | { status: "unavailable"; unavailableReason: string };
+    };
+
+export type HostedRuntimeNewsletterToolAction =
+  | "read_stats"
+  | "send";
+
+export const HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH = 160;
+export const HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH = 100_000;
+export const HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH = 500_000;
+export const HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX = 100;
+
+export interface HostedRuntimeNewsletterParticipantSummary {
+  displayName: string | null;
+  hasEmail: boolean;
+  memberId: string;
+}
+
+export interface HostedRuntimeNewsletterScheduledAuthority {
+  automationId: string;
+  occurrenceAt: string;
+}
+
+export interface HostedRuntimeNewsletterToolSendRequest {
+  groupId: string;
+  html: string;
+  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
+  subject: string;
+  text?: string | null;
+}
+
+export type HostedRuntimeNewsletterToolRequest =
+  | { action: "read_stats"; groupId: string }
+  | ({ action: "send" } & HostedRuntimeNewsletterToolSendRequest);
+
+export type HostedRuntimeNewsletterToolResponse =
+  | {
+      action: "read_stats";
+      result:
+        | {
+            groupId: string;
+            missingEmailParticipants: HostedRuntimeNewsletterParticipantSummary[];
+            participants: HostedRuntimeNewsletterParticipantSummary[];
+            status: "ok";
+          }
+        | {
+            status: "unavailable";
+            unavailableReason: string;
+          };
+    }
+  | {
+      action: "send";
+      result:
+        | {
+            participantCount: number;
+            skippedNoEmailMemberIds: string[];
+            status: "sent";
+          }
+        | {
+            failedRecipientCount: number;
+            participantCount: number;
+            sentRecipientCount: number;
+            skippedNoEmailMemberIds: string[];
+            status: "partial_failure";
+          }
+        | {
+            participantCount: 0;
+            skippedNoEmailMemberIds: string[];
+            status: "no_recipients";
+          }
+        | {
+            status: "unavailable";
+            unavailableReason: string;
+          };
     };
 
 export type HostedRuntimeFamilyPlanToolAction =

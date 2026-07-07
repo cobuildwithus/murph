@@ -92,8 +92,24 @@ export interface HostedGroupJoinOfferAcceptanceTxResult
   selectedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
 }
 
+export type HostedGroupMemberEmailShareRevocationTxResult =
+  | {
+      groupId: string;
+      kind: "ok";
+      revokedCount: number;
+      vaultShareCleanupSignals: HostedVaultShareCleanupSignal[];
+    }
+  | {
+      kind: "group_not_found" | "not_group_member";
+      revokedCount: 0;
+      vaultShareCleanupSignals: [];
+    };
+
 export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
+const DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_KINDS = [
+  "group-email.v0",
+] as const satisfies readonly HostedVaultShareProjectionKind[];
 
 export async function ensureHostedGroupForThreadContainerTx(input: {
   tx: Prisma.TransactionClient;
@@ -126,6 +142,10 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
   const requested = normalizeHostedVaultShareProjectionKinds(
     input.requestedVaultShareProjectionKinds ?? [],
   );
+  const createdRequested = normalizeHostedVaultShareProjectionKinds([
+    ...DEFAULT_HOSTED_GROUP_REQUESTED_VAULT_SHARE_PROJECTION_KINDS,
+    ...requested,
+  ]);
   const existing = await input.tx.hostedGroup.findUnique({
     where: { runtimeMemberId: container.memberId },
     select: { id: true },
@@ -142,10 +162,10 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
       memberId: container.ownerMemberId,
       now: input.now,
     });
-    if (requested.length > 0) {
+    if (createdRequested.length > 0) {
       await mergeHostedGroupRequestedProjectionsTx(input.tx, {
         groupId: existing.id,
-        requestedVaultShareProjectionKinds: requested,
+        requestedVaultShareProjectionKinds: createdRequested,
       });
     }
     const summary = await readHostedGroupSummaryById(input.tx, existing.id);
@@ -163,10 +183,10 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     data: {
       id: generateHostedGroupId(),
       displayName: normalizeHostedGroupDisplayName(input.displayName ?? null),
-      joinPolicyJson: requested.length > 0
+      joinPolicyJson: createdRequested.length > 0
         ? {
             ...emptyHostedGroupJoinPolicy(),
-            requestedVaultShareProjectionKinds: requested,
+            requestedVaultShareProjectionKinds: createdRequested,
           }
         : undefined,
       kind: normalizeHostedGroupKind(input.kind),
@@ -181,6 +201,11 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     now: input.now,
   });
   await grantHostedGroupMembershipProfileNameTx(input.tx, {
+    groupRuntimeMemberId: container.memberId,
+    memberId: container.ownerMemberId,
+    now: input.now,
+  });
+  await grantHostedGroupMembershipEmailTx(input.tx, {
     groupRuntimeMemberId: container.memberId,
     memberId: container.ownerMemberId,
     now: input.now,
@@ -732,6 +757,58 @@ async function acceptHostedGroupJoinTx(input: {
   };
 }
 
+export async function revokeHostedGroupMemberEmailShareTx(input: {
+  groupRuntimeMemberId: string;
+  memberId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupMemberEmailShareRevocationTxResult> {
+  const group = await input.tx.hostedGroup.findUnique({
+    where: { runtimeMemberId: input.groupRuntimeMemberId },
+    select: { id: true, runtimeMemberId: true },
+  });
+  if (!group?.runtimeMemberId) {
+    return {
+      kind: "group_not_found",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    };
+  }
+  await lockHostedGroupRow(input.tx, group.id);
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const membership = await input.tx.hostedGroupMember.findUnique({
+    where: {
+      groupId_memberId: {
+        groupId: group.id,
+        memberId: input.memberId,
+      },
+    },
+    select: { id: true },
+  });
+  if (!membership) {
+    return {
+      kind: "not_group_member",
+      revokedCount: 0,
+      vaultShareCleanupSignals: [],
+    };
+  }
+
+  const revoked = await revokeHostedVaultSharesWithCleanupTx({
+    destinationMemberId: group.runtimeMemberId,
+    grantorMemberId: input.memberId,
+    now: input.now,
+    projectionKinds: ["group-email.v0"],
+    tx: input.tx,
+  });
+
+  return {
+    groupId: group.id,
+    kind: "ok",
+    revokedCount: revoked.revokedCount,
+    vaultShareCleanupSignals: revoked.cleanupSignals,
+  };
+}
+
 async function ensureHostedGroupOwnerMembershipTx(
   tx: Prisma.TransactionClient,
   input: { groupId: string; memberId: string; now: Date },
@@ -807,16 +884,41 @@ async function grantHostedGroupMembershipProfileNameTx(
   tx: Prisma.TransactionClient,
   input: { groupRuntimeMemberId: string; memberId: string; now: Date },
 ): Promise<void> {
+  await grantHostedGroupMembershipProjectionTx(tx, {
+    ...input,
+    projectionKind: "profile-name.v0",
+  });
+}
+
+async function grantHostedGroupMembershipEmailTx(
+  tx: Prisma.TransactionClient,
+  input: { groupRuntimeMemberId: string; memberId: string; now: Date },
+): Promise<void> {
+  await grantHostedGroupMembershipProjectionTx(tx, {
+    ...input,
+    projectionKind: "group-email.v0",
+  });
+}
+
+async function grantHostedGroupMembershipProjectionTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    groupRuntimeMemberId: string;
+    memberId: string;
+    now: Date;
+    projectionKind: HostedVaultShareProjectionKind;
+  },
+): Promise<void> {
   await assertHostedGroupVaultShareGrantLimitTx(tx, {
     destinationMemberId: input.groupRuntimeMemberId,
     grantorMemberId: input.memberId,
-    projectionKind: "profile-name.v0",
+    projectionKind: input.projectionKind,
   });
   await grantHostedVaultShareTx({
     destinationMemberId: input.groupRuntimeMemberId,
     grantorMemberId: input.memberId,
     now: input.now,
-    projectionKind: "profile-name.v0",
+    projectionKind: input.projectionKind,
     tx,
   });
 }

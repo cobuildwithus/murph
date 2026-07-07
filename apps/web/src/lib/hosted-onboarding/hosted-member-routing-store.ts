@@ -80,6 +80,22 @@ export async function readHostedMemberIdByReplyAliasLookupKey(input: {
   return routingRecord?.memberId ?? null;
 }
 
+export async function hasHostedMemberEstablishedLinqHomeRoute(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      linqChatLookupKey: true,
+    },
+  });
+
+  return Boolean(routingRecord?.linqChatLookupKey);
+}
+
 export async function upsertHostedMemberReplyAliasLookupKeyTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;

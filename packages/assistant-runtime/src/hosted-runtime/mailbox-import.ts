@@ -27,6 +27,9 @@ import type {
 import type {
   HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
+import type {
+  HostedAssistantEmailDeliveryContext,
+} from "./email-delivery-context.ts";
 
 const HOSTED_MAILBOX_RETRYABLE_BLOCK_RETRY_DELAY_MS = 15 * 1000;
 export const HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE = "budget.mailbox_items";
@@ -44,6 +47,7 @@ export type HostedMailboxItemImportOutcome =
   | {
       status: "imported" | "skipped";
       assistantInputId?: string | null;
+      emailDeliveryContext?: HostedAssistantEmailDeliveryContext | null;
       linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
       reasonCode?: string | null;
       afterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
@@ -86,6 +90,7 @@ export interface HostedMailboxImportLoopResult {
   fetchedCount: number;
   importedCount: number;
   importedSystemMailboxItemIds?: string[];
+  emailDeliveryContexts?: HostedAssistantEmailDeliveryContext[];
   latestLinqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: HostedAssistantLinqDeliveryContext[];
   conversationImportTiming?: HostedMailboxConversationImportTiming;
@@ -198,6 +203,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   let conversationImportedCount = 0;
   let importedCount = 0;
   const importedSystemMailboxItemIds: string[] = [];
+  const emailDeliveryContexts: HostedAssistantEmailDeliveryContext[] = [];
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
   let latestLinqDeliveryContext: HostedAssistantLinqDeliveryContext | null = null;
   const linqDeliveryContexts: HostedAssistantLinqDeliveryContext[] = [];
@@ -449,10 +455,16 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       }
       const replyableConversationInput =
         route.action === "import-conversation-message" && !itemIsDurablyConsumedReplay;
+      const foregroundAssistantInput =
+        replyableConversationInput
+        || (
+          route.action === "import-group-newsletter-email-needed"
+          && !itemIsDurablyConsumedReplay
+        );
       if (replyableConversationInput) {
         conversationImportedCount += 1;
       }
-      if (replyableConversationInput && outcome.assistantInputId) {
+      if (foregroundAssistantInput && outcome.assistantInputId) {
         assistantInputIds.push(outcome.assistantInputId);
       }
     }
@@ -465,6 +477,9 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         conversationImportTiming,
         outcome.conversationImportTiming ?? null,
       );
+    }
+    if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.emailDeliveryContext) {
+      emailDeliveryContexts.push(outcome.emailDeliveryContext);
     }
     expectedSeqByLane[lane] += 1n;
   }
@@ -487,6 +502,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     fetchedCount: fetched.items.length,
     importedCount,
     ...(importedSystemMailboxItemIds.length > 0 ? { importedSystemMailboxItemIds } : {}),
+    ...(emailDeliveryContexts.length > 0 ? { emailDeliveryContexts } : {}),
     ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
     ...(linqDeliveryContexts.length > 0 ? { linqDeliveryContexts } : {}),
     ...(conversationImportTiming ? { conversationImportTiming } : {}),

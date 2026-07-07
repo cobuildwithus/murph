@@ -140,6 +140,50 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.markHostedLinqDeliverySkippedTx).not.toHaveBeenCalled();
   });
 
+  it("accepts a group-email scoped liked offer with the email sharing display label", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue({
+      alreadyMember: true,
+      grantedVaultShareProjectionKinds: ["group-email.v0"],
+      groupId: "group_1",
+      joinCode: "join_1",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      membershipId: "membership_1",
+      revokedVaultShareProjectionKinds: [],
+      selectedVaultShareProjectionKinds: ["group-email.v0"],
+      vaultShareCleanupSignals: [],
+    });
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
+    });
+
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "member_reactor",
+      }),
+    );
+    expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sideEffects: [
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              message: expect.stringContaining("email address"),
+              template: "group_join_offer_accepted",
+            }),
+          }),
+        ],
+      }),
+    );
+  });
+
   it("uses read candidates for rotated offer lookup and keys confirmation to the stored offer row", async () => {
     restoreKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",

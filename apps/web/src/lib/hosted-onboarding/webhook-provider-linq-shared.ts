@@ -8,9 +8,6 @@ import {
   incrementHostedLinqInboundDailyState,
 } from "./linq-daily-state";
 import {
-  recordHostedMemberLinqInboundEngagementTx,
-} from "./linq-egress-engagement";
-import {
   type HostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqOccurredAt,
@@ -329,25 +326,14 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
   occurredAt: string;
   prisma: Prisma.TransactionClient;
   recipientPhone: string | null;
-  routeAlreadyBound?: boolean;
 }) {
-  if (input.routeAlreadyBound !== true) {
-    await upsertHostedMemberHomeLinqBindingTx({
-      clearPending: true,
-      homeLineAssignedAt: input.homeLineAssignedAt ?? null,
-      linqChatId: input.chatId,
-      memberId: input.memberId,
-      prisma: input.prisma,
-      recipientPhone: input.recipientPhone,
-    });
-  }
-
-  await recordHostedMemberLinqInboundEngagementTx({
-    chatId: input.chatId,
-    linePhoneNumber: input.recipientPhone,
+  await upsertHostedMemberHomeLinqBindingTx({
+    clearPending: true,
+    homeLineAssignedAt: input.homeLineAssignedAt ?? null,
+    linqChatId: input.chatId,
     memberId: input.memberId,
-    occurredAt: input.occurredAt,
     prisma: input.prisma,
+    recipientPhone: input.recipientPhone,
   });
 
   return incrementHostedLinqInboundDailyState({
@@ -398,14 +384,6 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
     participantContactObservedAt: new Date(input.occurredAt),
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
-  });
-
-  await recordHostedMemberLinqInboundEngagementTx({
-    chatId: input.chatId,
-    linePhoneNumber: input.recipientPhone,
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    prisma: input.prisma,
   });
 
   return incrementHostedLinqInboundDailyState({

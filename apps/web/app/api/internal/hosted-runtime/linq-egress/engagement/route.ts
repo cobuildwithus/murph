@@ -10,7 +10,6 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
-  type HostedLinqCurrentInboundProof,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   hostedOnboardingError,
@@ -32,12 +31,11 @@ export const POST = withJsonError(async (request: Request) => {
   const routeAuthority = parseHostedLinqEgressRouteAuthority(body.routeAuthority);
 
   await assertHostedLinqRecentInboundEngagementForRuntime({
-    currentInbound: parseHostedLinqEgressCurrentInbound(body.currentInbound),
+    currentInbound: parseHostedLinqLegacyCurrentInboundProof(body.currentInbound),
     directRecipientPhoneNumber: readOptionalBodyString(body.directRecipientPhoneNumber),
     engagementKind: parseHostedLinqEgressEngagementKind(body.engagementKind),
     fromPhoneNumber: readOptionalBodyString(body.fromPhoneNumber),
     idempotencyKey: readOptionalBodyString(body.idempotencyKey),
-    intentId: readOptionalBodyString(body.intentId),
     memberId: userId,
     prisma: getPrisma(),
     routeAuthority,
@@ -50,19 +48,24 @@ export const POST = withJsonError(async (request: Request) => {
   });
 });
 
-function parseHostedLinqEgressCurrentInbound(
-  value: unknown,
-): HostedLinqCurrentInboundProof | null {
+function readOptionalBodyString(value: unknown): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+function parseHostedLinqLegacyCurrentInboundProof(value: unknown): {
+  dedupeKey: string;
+  eventId: string;
+  mailboxItemId: string;
+  occurredAt: string;
+  replyToMessageId: string;
+  target: string;
+} | null {
   if (value === undefined || value === null) {
     return null;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_EGRESS_CURRENT_INBOUND_INVALID",
-      httpStatus: 400,
-      message: "Hosted Linq egress current inbound proof is invalid.",
-      retryable: false,
-    });
+    throwHostedLinqCurrentInboundInvalid();
   }
 
   const record = value as Record<string, unknown>;
@@ -80,12 +83,7 @@ function parseHostedLinqEgressCurrentInbound(
     || !replyToMessageId
     || !target
   ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_EGRESS_CURRENT_INBOUND_INVALID",
-      httpStatus: 400,
-      message: "Hosted Linq egress current inbound proof is incomplete.",
-      retryable: false,
-    });
+    throwHostedLinqCurrentInboundInvalid();
   }
 
   return {
@@ -98,9 +96,13 @@ function parseHostedLinqEgressCurrentInbound(
   };
 }
 
-function readOptionalBodyString(value: unknown): string | null {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  return normalized.length > 0 ? normalized : null;
+function throwHostedLinqCurrentInboundInvalid(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_EGRESS_CURRENT_INBOUND_INVALID",
+    httpStatus: 400,
+    message: "Hosted Linq egress current inbound proof is invalid.",
+    retryable: false,
+  });
 }
 
 function parseHostedLinqEgressEngagementKind(

@@ -10,10 +10,30 @@ import {
 import { getPrisma } from "../prisma";
 import {
   accountHostedAiUsageForAllowanceTx,
+  claimHostedAiUsageLimitNotice,
+  releaseHostedAiUsageLimitNotice,
+  type HostedAiUsageLimitNoticeCandidate,
 } from "./usage-allowance";
+import {
+  sendClaimedHostedAiUsageLimitNoticeToLinqChat,
+} from "./usage-limit-notice";
+import {
+  readHostedMemberRoutingState,
+} from "../hosted-onboarding/hosted-member-routing-store";
+import {
+  readHostedLinqHomeLineAuthority,
+} from "../hosted-onboarding/linq-home-routing";
+import {
+  sanitizeHostedOnboardingStructuredLogDetails,
+  toHostedOnboardingLogIdSuffix,
+} from "../hosted-onboarding/logging";
 
 export interface RecordHostedAiUsageResult {
   recordedIds: string[];
+}
+
+interface RecordHostedAiUsageAccountingResult extends RecordHostedAiUsageResult {
+  limitNoticeCandidates: HostedAiUsageLimitNoticeCandidate[];
 }
 
 type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
@@ -80,10 +100,16 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageResult> {
-  // Historical name kept for route compatibility. User-visible limit notices
-  // must be sent by the inbound gate-denied path that knows the current chat.
   const prisma = input.prisma ?? getPrisma();
   const result = await recordHostedAiUsageRecordsForAccounting({ ...input, prisma });
+  for (const candidate of dedupeHostedAiUsageLimitNoticeCandidates(
+    result.limitNoticeCandidates,
+  )) {
+    await sendHostedAiUsageLimitNoticeAtCrossing({
+      candidate,
+      prisma,
+    });
+  }
 
   return {
     recordedIds: result.recordedIds,
@@ -95,14 +121,15 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
   prisma?: HostedAiUsageClient;
   trustedUserId?: string | null;
   usage: readonly unknown[];
-}): Promise<RecordHostedAiUsageResult> {
+}): Promise<RecordHostedAiUsageAccountingResult> {
   const prisma = input.prisma ?? getPrisma();
   const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
   const recordedIds: string[] = [];
+  const limitNoticeCandidates: HostedAiUsageLimitNoticeCandidate[] = [];
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+    const limitNoticeCandidate = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
       const storedRecord = await tx.hostedAiUsage.upsert({
         where: {
           id: record.usageId,
@@ -123,19 +150,137 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
       });
 
       if (input.accountAllowance === true) {
-        await accountHostedAiUsageForAllowanceTx({
+        return accountHostedAiUsageForAllowanceTx({
           memberId,
           record,
           tx,
         });
       }
+
+      return null;
     });
+    if (limitNoticeCandidate) {
+      limitNoticeCandidates.push(limitNoticeCandidate);
+    }
     recordedIds.push(record.usageId);
   }
 
   return {
+    limitNoticeCandidates,
     recordedIds,
   };
+}
+
+function dedupeHostedAiUsageLimitNoticeCandidates(
+  candidates: readonly HostedAiUsageLimitNoticeCandidate[],
+): HostedAiUsageLimitNoticeCandidate[] {
+  const byPeriod = new Map<string, HostedAiUsageLimitNoticeCandidate>();
+  for (const candidate of candidates) {
+    const key = `${candidate.memberId}\u0000${candidate.periodStart.toISOString()}`;
+    if (!byPeriod.has(key)) {
+      byPeriod.set(key, candidate);
+    }
+  }
+  return [...byPeriod.values()];
+}
+
+async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
+  candidate: HostedAiUsageLimitNoticeCandidate;
+  prisma: HostedAiUsageClient;
+}): Promise<void> {
+  const sentAt = new Date();
+  let claimed = false;
+  try {
+    claimed = await claimHostedAiUsageLimitNotice({
+      memberId: input.candidate.memberId,
+      periodStart: input.candidate.periodStart,
+      prisma: input.prisma,
+      sentAt,
+    });
+  } catch (error) {
+    logHostedAiUsageLimitNoticeAtCrossing("claim_failed", input.candidate, error);
+    return;
+  }
+
+  if (!claimed) {
+    return;
+  }
+
+  try {
+    const route = readHostedLinqHomeLineAuthority(
+      await readHostedMemberRoutingState({
+        memberId: input.candidate.memberId,
+        prisma: input.prisma,
+      }),
+    );
+    if (!("chatId" in route) || !route.chatId) {
+      await releaseHostedAiUsageLimitNoticeAtCrossingClaim({
+        candidate: input.candidate,
+        prisma: input.prisma,
+        sentAt,
+      });
+      logHostedAiUsageLimitNoticeAtCrossing("home_route_missing", input.candidate);
+      return;
+    }
+
+    await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
+      chatId: route.chatId,
+      claimToken: {
+        periodStart: input.candidate.periodStart.toISOString(),
+        sentAt: sentAt.toISOString(),
+      },
+      memberId: input.candidate.memberId,
+      message: input.candidate.userNotice.message,
+      noticeCode: input.candidate.userNotice.code,
+      occurredAt: input.candidate.crossedAt.toISOString(),
+      prisma: input.prisma,
+      sourceEventId: input.candidate.sourceUsageId,
+    });
+  } catch (error) {
+    await releaseHostedAiUsageLimitNoticeAtCrossingClaim({
+      candidate: input.candidate,
+      prisma: input.prisma,
+      sentAt,
+    });
+    logHostedAiUsageLimitNoticeAtCrossing("send_failed", input.candidate, error);
+  }
+}
+
+async function releaseHostedAiUsageLimitNoticeAtCrossingClaim(input: {
+  candidate: HostedAiUsageLimitNoticeCandidate;
+  prisma: HostedAiUsageClient;
+  sentAt: Date;
+}): Promise<void> {
+  try {
+    await releaseHostedAiUsageLimitNotice({
+      memberId: input.candidate.memberId,
+      periodStart: input.candidate.periodStart,
+      prisma: input.prisma,
+      sentAt: input.sentAt,
+    });
+  } catch (error) {
+    logHostedAiUsageLimitNoticeAtCrossing("release_failed", input.candidate, error);
+  }
+}
+
+function logHostedAiUsageLimitNoticeAtCrossing(
+  reason: "claim_failed" | "home_route_missing" | "release_failed" | "send_failed",
+  candidate: HostedAiUsageLimitNoticeCandidate,
+  error?: unknown,
+): void {
+  const details = sanitizeHostedOnboardingStructuredLogDetails({
+    errorName: error instanceof Error ? error.name : error ? "UnknownError" : null,
+    noticeCode: candidate.userNotice.code,
+    reason,
+    sourceUsageIdSuffix: toHostedOnboardingLogIdSuffix(candidate.sourceUsageId),
+  });
+
+  if (reason === "home_route_missing") {
+    console.warn("Hosted AI usage-limit notice at crossing skipped.", details);
+    return;
+  }
+
+  console.warn("Hosted AI usage-limit notice at crossing failed.", details);
 }
 
 async function runHostedAiUsageRecordTransaction<T>(

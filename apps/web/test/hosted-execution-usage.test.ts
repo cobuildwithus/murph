@@ -7,10 +7,36 @@ import {
 
 const allowanceMocks = vi.hoisted(() => ({
   accountHostedAiUsageForAllowanceTx: vi.fn(),
+  claimHostedAiUsageLimitNotice: vi.fn(),
+  releaseHostedAiUsageLimitNotice: vi.fn(),
+}));
+
+const routingMocks = vi.hoisted(() => ({
+  readHostedLinqHomeLineAuthority: vi.fn(),
+  readHostedMemberRoutingState: vi.fn(),
+}));
+
+const noticeMocks = vi.hoisted(() => ({
+  sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   accountHostedAiUsageForAllowanceTx: allowanceMocks.accountHostedAiUsageForAllowanceTx,
+  claimHostedAiUsageLimitNotice: allowanceMocks.claimHostedAiUsageLimitNotice,
+  releaseHostedAiUsageLimitNotice: allowanceMocks.releaseHostedAiUsageLimitNotice,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
+  sendClaimedHostedAiUsageLimitNoticeToLinqChat:
+    noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  readHostedMemberRoutingState: routingMocks.readHostedMemberRoutingState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-home-routing", () => ({
+  readHostedLinqHomeLineAuthority: routingMocks.readHostedLinqHomeLineAuthority,
 }));
 
 const BASE_USAGE_RECORD = {
@@ -66,11 +92,28 @@ const BASE_USAGE_RECORD = {
 
 describe("recordHostedAiUsageRecords", () => {
   beforeEach(() => {
-    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockReset();
+    vi.clearAllMocks();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
+    allowanceMocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
+    allowanceMocks.releaseHostedAiUsageLimitNotice.mockResolvedValue(undefined);
+    noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue(undefined);
+    routingMocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "chat_home_123",
+      linqHomeLineAssignedAt: new Date("2026-03-01T00:00:00.000Z"),
+      linqRecipientPhone: "+15555550123",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqRecipientPhone: null,
+    });
+    routingMocks.readHostedLinqHomeLineAuthority.mockReturnValue({
+      assignedAt: new Date("2026-03-01T00:00:00.000Z"),
+      chatId: "chat_home_123",
+      kind: "home",
+      recipientPhone: "+15555550123",
+    });
   });
 
-  it("records allowance crossings without proactively claiming the user notice", async () => {
+  it("sends the claimed home-route usage-limit notice after accounting reports a crossing", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const hostedAiUsageFindUnique = vi.fn(async () => null);
     const prisma = makeUsagePrismaClient(
@@ -78,7 +121,9 @@ describe("recordHostedAiUsageRecords", () => {
       undefined,
       hostedAiUsageFindUnique,
     );
-    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -101,12 +146,66 @@ describe("recordHostedAiUsageRecords", () => {
       }),
     });
     expect(hostedAiUsageFindUnique).not.toHaveBeenCalled();
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
+      memberId: "member_123",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      prisma,
+      sentAt: expect.any(Date),
+    });
+    expect(routingMocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+    });
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .toHaveBeenCalledExactlyOnceWith({
+        chatId: "chat_home_123",
+        claimToken: {
+          periodStart: "2026-03-01T00:00:00.000Z",
+          sentAt: expect.any(String),
+        },
+        memberId: "member_123",
+        message: "You hit your monthly Murph AI limit.",
+        noticeCode: "edge_usage_limit_reached",
+        occurredAt: "2026-03-29T12:00:05.000Z",
+        prisma,
+        sourceEventId: "turn_123.attempt-1",
+      });
+    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["inbound reply", "user-message"],
+    ["cron automation", "runtime_timer"],
+  ])("sends the crossing notice after recording a %s usage row", async (_label, triggerKind) => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [{
+        ...BASE_USAGE_RECORD,
+        triggerKind,
+      }],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(hostedAiUsageUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        triggerKind,
+      }),
+    }));
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledOnce();
   });
 
   it("keeps the compatibility wrapper usable with transaction-compatible clients", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
-    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -119,12 +218,15 @@ describe("recordHostedAiUsageRecords", () => {
 
     expect(hostedAiUsageUpsert).toHaveBeenCalledOnce();
     expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledOnce();
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
   it("keeps the transaction-compatible recorder DB-only when accounting reports a crossing", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
-    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(undefined);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
 
     await expect(recordHostedAiUsageRecords({
       accountAllowance: true,
@@ -136,6 +238,8 @@ describe("recordHostedAiUsageRecords", () => {
     });
 
     expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledOnce();
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
   it("records usage normally when accounting reports no crossing", async () => {
@@ -150,6 +254,156 @@ describe("recordHostedAiUsageRecords", () => {
     });
 
     expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledOnce();
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+  });
+
+  it("dedupes multiple crossing records in one flush to one notice claim", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx
+      .mockResolvedValueOnce(buildUsageLimitNoticeCandidate({
+        sourceUsageId: "turn_123.attempt-1",
+      }))
+      .mockResolvedValueOnce(buildUsageLimitNoticeCandidate({
+        sourceUsageId: "turn_123.request-1.attempt-1",
+      }));
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [
+        BASE_USAGE_RECORD,
+        {
+          ...BASE_USAGE_RECORD,
+          providerRequestOrdinal: 1,
+          usageId: "turn_123.request-1.attempt-1",
+        },
+      ],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1", "turn_123.request-1.attempt-1"],
+    });
+
+    expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledTimes(2);
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledOnce();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledOnce();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceEventId: "turn_123.attempt-1",
+      }),
+    );
+  });
+
+  it("passes Family-sponsored notice codes through the same crossing send path", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate({
+        noticeCode: "family_usage_limit_reached",
+        noticeMessage:
+          "Hey, you've reached your usage limit for the month. Murph will resume when your Family usage resets.",
+      }),
+    );
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Hey, you've reached your usage limit for the month. Murph will resume when your Family usage resets.",
+        noticeCode: "family_usage_limit_reached",
+      }),
+    );
+  });
+
+  it("skips crossing notices when the once-per-period claim is already taken", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
+    allowanceMocks.claimHostedAiUsageLimitNotice.mockResolvedValue(false);
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledOnce();
+    expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+  });
+
+  it("releases the crossing claim when no home Linq route is available", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
+    routingMocks.readHostedLinqHomeLineAuthority.mockReturnValue({
+      kind: "none",
+    });
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+    consoleWarnSpy.mockRestore();
+
+    const sentAt = allowanceMocks.claimHostedAiUsageLimitNotice.mock.calls[0]?.[0]?.sentAt;
+    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).toHaveBeenCalledWith({
+      memberId: "member_123",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      prisma,
+      sentAt,
+    });
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+  });
+
+  it("swallows crossing notice send failures after releasing the claim", async () => {
+    const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+      buildUsageLimitNoticeCandidate(),
+    );
+    noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat
+      .mockRejectedValue(new Error("provider unavailable"));
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).resolves.toEqual({
+      recordedIds: ["turn_123.attempt-1"],
+    });
+    consoleWarnSpy.mockRestore();
+
+    const sentAt = allowanceMocks.claimHostedAiUsageLimitNotice.mock.calls[0]?.[0]?.sentAt;
+    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).toHaveBeenCalledWith({
+      memberId: "member_123",
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      prisma,
+      sentAt,
+    });
   });
 
   it("does not account allowance when accounting is disabled", async () => {
@@ -707,5 +961,25 @@ function makeUsagePrismaClient(
   return {
     ...tx,
     $transaction: vi.fn(async <T>(run: (transaction: typeof tx) => Promise<T>) => run(tx)),
+  };
+}
+
+function buildUsageLimitNoticeCandidate(overrides: Partial<{
+  memberId: string;
+  noticeCode: string;
+  noticeMessage: string;
+  periodStart: Date;
+  sourceUsageId: string;
+}> = {}) {
+  return {
+    crossedAt: new Date("2026-03-29T12:00:05.000Z"),
+    memberId: overrides.memberId ?? "member_123",
+    periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+    periodStart: overrides.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+    sourceUsageId: overrides.sourceUsageId ?? "turn_123.attempt-1",
+    userNotice: {
+      code: overrides.noticeCode ?? "edge_usage_limit_reached",
+      message: overrides.noticeMessage ?? "You hit your monthly Murph AI limit.",
+    },
   };
 }

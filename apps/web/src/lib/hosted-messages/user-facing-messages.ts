@@ -2,6 +2,7 @@ const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20
 
 const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "assistant.signup_welcome",
+  "assistant.family_welcome",
   "linq.invite_signup",
   "linq.daily_quota",
   "linq.home_redirect",
@@ -16,6 +17,7 @@ export type UserFacingMessageTemplateKey =
 
 export interface UserFacingMessageContextByKey {
   "assistant.signup_welcome": Record<string, never>
+  "assistant.family_welcome": Record<string, never>
   "linq.invite_signup": {
     joinUrl: string
   }
@@ -191,6 +193,68 @@ Text me anything health-related you're paying attention to. Over time I'll help 
 I'm especially good with small experiments. A new supplement, a workout change, a sleep change, a sauna habit. I'll help you see whether it's actually moving things.
 
 Ready to dive in?`,
+  ],
+  "assistant.family_welcome": [
+    `You're in. A family member covers your Murph access, but everything you share with me stays private to you. They can't see any of it.
+
+Ready to get started?`,
+    `Welcome in. Your access is covered by family, and everything you share with me stays between us. The person paying can't see it.
+
+Ready?`,
+    `You're all set. Family covers the bill, but your conversations with me are yours alone. Whoever pays can't read them.
+
+Want to dive in?`,
+    `Hey, you're in. Someone in your family pays for your access, but nothing you share with me is visible to them. It's all private to you.
+
+Ready to go?`,
+    `You made it. Your plan is covered by a family member, but everything here stays private. They can't see what we talk about.
+
+Sound good?`,
+    `Welcome. A family member picked up the bill, but what happens here stays between you and me. They can't see any of it.
+
+Ready to start?`,
+    `You're in. Family pays for your access, but your conversations and data stay private to you. They can't see what you share with me.
+
+Want to get started?`,
+    `All set. Your Murph access is covered by family, but they can't see anything you share with me. That's yours alone.
+
+Ready?`,
+    `You're in. Quick note on privacy: a family member covers your plan, but everything you and I talk about stays private to you.
+
+Sound good?`,
+    `Welcome aboard. Your access comes through a family plan, but your conversations with me stay private. The person paying can't see them.
+
+Ready to dive in?`,
+    `You're set up. A family member covers your plan, but everything you tell me stays with me. They can't see any of it.
+
+Want to start?`,
+    `Good news, you're in. Family picks up the bill, but nothing you share with me is visible to them.
+
+Ready?`,
+    `You're in. One thing worth knowing: whoever pays for your access can't see what you share with me. That stays private to you.
+
+Sound good?`,
+    `Welcome in. Your access is paid for by family, but they can't see what you share with me. Everything here is private to you.
+
+Ready to get going?`,
+    `Invite accepted, you're in. A family member handles the bill, but your conversations with me are private. They can't see them.
+
+Want to dive in?`,
+    `You're all set up. Family pays for your Murph access, but nothing here is visible to them. What you share with me stays between us.
+
+Ready to start?`,
+    `Welcome. Your plan is covered by a family member, but your side of Murph is yours alone. They can't see what you share with me.
+
+Ready?`,
+    `You're in. Your access is covered through family, but everything you share with me is private. The person paying can't see any of it.
+
+Want to get going?`,
+    `All set, you're in. A family member pays for your access, but they can't see your conversations with me. That's all private to you.
+
+Ready to go?`,
+    `Hey, welcome in. Family covers your Murph access, but what you share with me stays private to you. They can't see it.
+
+Sound good?`,
   ],
   "linq.invite_signup": [
     `Hey, I'm Murph. Tap to verify your number so I can reply here:

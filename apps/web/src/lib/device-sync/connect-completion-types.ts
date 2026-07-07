@@ -22,4 +22,8 @@ export interface DeviceSyncCompletionDialogModel {
   kind: CompletionDialogKind;
   retryHref: string | null;
   title: string;
+  // True when the URL asserted a successful device connect but the server could
+  // not verify it: no member session, no matching active source, or a transient
+  // load error.
+  unverified: boolean;
 }

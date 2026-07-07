@@ -1281,6 +1281,7 @@ export default async function ChangelogPage() {
       <main className="min-h-dvh bg-[#f5f0e8] text-[#2d3436] antialiased">
         <StickyNav
           authenticated={authenticated}
+          darkTop
           githubStarCount={githubStarCount}
         />
         <section className="bg-[#1f241c] px-6 pt-24 pb-12 text-[#f5f0e8] sm:px-10 sm:pt-28 sm:pb-14 lg:px-16 lg:pt-32 lg:pb-16">

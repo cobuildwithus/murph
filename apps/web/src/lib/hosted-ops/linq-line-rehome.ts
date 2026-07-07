@@ -52,7 +52,6 @@ export interface HostedLinqLineRehomeRoutingSummary {
   currentLinePhoneHint: string | null;
   homeChatBound: boolean;
   linqHomeLineAssignedAt: string | null;
-  linqLastInboundAt: string | null;
   linqRecipientPhoneLookupKey: string | null;
 }
 
@@ -278,32 +277,17 @@ async function readHostedLinqRehomeRoutingState(input: {
   memberId: string;
   prisma: HostedLinqRehomeClient;
 }): Promise<{
-  linqLastInboundAt: Date | null;
   routing: HostedMemberRoutingStateSnapshot | null;
 }> {
-  const [routing, inbound] = await Promise.all([
-    readHostedMemberRoutingState({
+  return {
+    routing: await readHostedMemberRoutingState({
       memberId: input.memberId,
       prisma: input.prisma,
     }),
-    input.prisma.hostedMemberRouting.findUnique({
-      where: {
-        memberId: input.memberId,
-      },
-      select: {
-        linqLastInboundAt: true,
-      },
-    }),
-  ]);
-
-  return {
-    linqLastInboundAt: inbound?.linqLastInboundAt ?? null,
-    routing,
   };
 }
 
 function summarizeHostedLinqRehomeRouting(input: {
-  linqLastInboundAt: Date | null;
   routing: HostedMemberRoutingStateSnapshot | null;
 }): HostedLinqLineRehomeRoutingSummary {
   const authority = readHostedLinqHomeLineAuthority(input.routing);
@@ -316,7 +300,6 @@ function summarizeHostedLinqRehomeRouting(input: {
     homeChatBound: Boolean(input.routing?.linqChatId),
     linqHomeLineAssignedAt:
       input.routing?.linqHomeLineAssignedAt?.toISOString() ?? null,
-    linqLastInboundAt: input.linqLastInboundAt?.toISOString() ?? null,
     linqRecipientPhoneLookupKey:
       input.routing?.linqRecipientPhoneLookupKey ?? null,
   };

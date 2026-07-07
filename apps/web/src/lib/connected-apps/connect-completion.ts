@@ -80,6 +80,7 @@ export async function resolveConnectedAppCompletionDialogModel(input: {
       kind: "connected-app",
       retryHref: null,
       title: `${accountLabel} connection did not finish`,
+      unverified: false,
     };
   }
 
@@ -97,6 +98,7 @@ export async function resolveConnectedAppCompletionDialogModel(input: {
     kind: "connected-app",
     retryHref: null,
     title: `${accountLabel} is connected`,
+    unverified: false,
   };
 }
 

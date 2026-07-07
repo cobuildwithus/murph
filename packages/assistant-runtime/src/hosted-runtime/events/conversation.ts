@@ -12,6 +12,9 @@ import {
   resolveHostedEmailSelfAddresses,
 } from "@murphai/hosted-execution/hosted-email";
 import {
+  parseHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
+import {
   normalizeHostedEmailConversationCapture,
   normalizeHostedLinqConversationCapture,
   normalizeHostedTelegramConversationCapture,
@@ -56,7 +59,7 @@ import type {
 const HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS = 60_000;
 
 export interface HostedConversationWakeLocalImportResult {
-  capture: PersistedCapture;
+  capture: PersistedCapture | null;
   metrics: HostedConversationWakeMetrics;
 }
 
@@ -74,6 +77,13 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedConversationWakeLocalImportResult> {
+  if (shouldSkipHostedEmailRawInboxProjection(input.wake)) {
+    return {
+      capture: null,
+      metrics: createHostedConversationParserMetrics(),
+    };
+  }
+
   const capture = await normalizeHostedConversationMessageWake(input);
   const runtime = await openInboxRuntime({
     vaultRoot: input.vaultRoot,
@@ -448,6 +458,25 @@ async function normalizeHostedConversationMessageWake(input: {
   }
 
   throw new TypeError("Unsupported hosted conversation message wake kind.");
+}
+
+function shouldSkipHostedEmailRawInboxProjection(
+  wake: HostedExecutionConversationMessageWake,
+): boolean {
+  if (!isHostedEmailConversationMessageWake(wake)) {
+    return false;
+  }
+
+  const threadTarget = wake.message.threadTarget?.trim() ?? "";
+  if (!threadTarget) {
+    return false;
+  }
+
+  // Group email prompt fields are already minimized on the Worker path; raw
+  // .eml bytes can carry group addresses, subjects, bodies, and quoted
+  // headers. Threading uses threadTarget, so the runtime vault does not need a
+  // raw inbox projection for group-routed email wakes.
+  return parseHostedEmailThreadTarget(threadTarget)?.targetKind === "group";
 }
 
 function buildHostedLinqAttachmentDownloadEnv(input: Pick<

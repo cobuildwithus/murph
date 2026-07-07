@@ -30,6 +30,7 @@ export interface ExperimentAdherenceObservation {
   eventKind?: string | null;
   localDate: string;
   metricKey?: string | null;
+  source?: string | null;
   status?: "completed" | "partial" | "missed" | "skipped" | null;
   targetId?: string | null;
   value?: number | null;
@@ -106,6 +107,14 @@ const DEVICE_OBSERVABLE_ACTIVITY_KINDS = [
   "strength",
   "elliptical",
 ] as const;
+// Modality terms classify run plans; observation tokens below classify sensed event labels.
+const GENERIC_WORKOUT_MODALITIES = new Set([
+  "workout",
+  "workouts",
+  "exercise",
+  "training",
+  "fitness",
+]);
 const GENERIC_ACTIVITY_KIND_TOKENS = new Set([
   "workout",
   "activity",
@@ -132,9 +141,16 @@ export function resolveAdherenceEvidence(
   modality: string | null | undefined,
 ): { eventKind: "activity_session" | "intervention_session"; activityKind?: string } {
   const activityKind = resolveDeviceObservableActivityKind(modality);
-  return activityKind
-    ? { eventKind: "activity_session", activityKind }
-    : { eventKind: "intervention_session" };
+  if (activityKind) {
+    return { eventKind: "activity_session", activityKind };
+  }
+
+  const normalizedModality = normalizeActivityKindToken(modality);
+  if (normalizedModality && GENERIC_WORKOUT_MODALITIES.has(normalizedModality)) {
+    return { eventKind: "activity_session" };
+  }
+
+  return { eventKind: "intervention_session" };
 }
 
 export function eventKindIsCandidateForEvidence(
@@ -366,6 +382,7 @@ export function countCompletedAdherenceSessions(input: {
   if (target.calendar) {
     return emptyAdherenceSessionCounts();
   }
+  const evidence = target.evidence;
 
   const range = resolveTargetDateRange(target.phase, input.windows);
   if (!range || input.asOfDate < range.start) {
@@ -373,16 +390,17 @@ export function countCompletedAdherenceSessions(input: {
   }
 
   const end = minLocalDate(range.end, input.asOfDate);
-  const counts = emptyAdherenceSessionCounts();
-  for (const observation of input.observations) {
-    if (
-      observation.localDate < range.start ||
-      observation.localDate > end ||
-      !linkedEventObservationMatchesEvidence(observation, target.evidence)
-    ) {
-      continue;
-    }
+  const matchingObservations = suppressManualActivityDuplicates(
+    input.observations.filter((observation) =>
+      observation.localDate >= range.start &&
+      observation.localDate <= end &&
+      linkedEventObservationMatchesEvidence(observation, evidence)
+    ),
+    evidence,
+  );
 
+  const counts = emptyAdherenceSessionCounts();
+  for (const observation of matchingObservations) {
     switch (observation.status) {
       case "partial":
         counts.partialSessions += 1;
@@ -583,8 +601,8 @@ function collectMatchingObservations(
   target: ExperimentAdherenceTarget,
   localDate: string,
   observations: readonly ExperimentAdherenceObservation[],
-): ExperimentAdherenceObservation[] {
-  return observations.filter((observation) => {
+): readonly ExperimentAdherenceObservation[] {
+  const matchingObservations = observations.filter((observation) => {
     if (observation.localDate !== localDate) {
       return false;
     }
@@ -600,6 +618,10 @@ function collectMatchingObservations(
         return observation.metricKey === target.evidence.metricKey;
     }
   });
+
+  return target.evidence.kind === "linkedEventCount"
+    ? suppressManualActivityDuplicates(matchingObservations, target.evidence)
+    : matchingObservations;
 }
 
 function metricValueSatisfiesRule(
@@ -632,6 +654,76 @@ function linkedEventObservationMatchesEvidence(
   }
 
   return true;
+}
+
+function suppressManualActivityDuplicates(
+  observations: readonly ExperimentAdherenceObservation[],
+  evidence: LinkedEventCountEvidence,
+): readonly ExperimentAdherenceObservation[] {
+  if (evidence.eventKind !== "activity_session") {
+    return observations;
+  }
+
+  const deviceCountsByLocalDate = new Map<string, number>();
+  for (const observation of observations) {
+    if (isDeviceEquivalentActivityObservation(observation)) {
+      deviceCountsByLocalDate.set(
+        observation.localDate,
+        (deviceCountsByLocalDate.get(observation.localDate) ?? 0) + 1,
+      );
+    }
+  }
+
+  if (deviceCountsByLocalDate.size === 0) {
+    return observations;
+  }
+
+  return observations.filter((observation) => {
+    if (
+      !isSuppressibleNonDeviceDoneObservation(observation)
+    ) {
+      return true;
+    }
+
+    const remainingSuppressions = deviceCountsByLocalDate.get(observation.localDate) ?? 0;
+    if (remainingSuppressions <= 0) {
+      return true;
+    }
+
+    deviceCountsByLocalDate.set(observation.localDate, remainingSuppressions - 1);
+    return false;
+  });
+}
+
+function isDeviceEquivalentActivityObservation(
+  observation: ExperimentAdherenceObservation,
+): boolean {
+  if (observation.eventKind !== "activity_session") {
+    return false;
+  }
+  const source = normalizeObservationSource(observation.source);
+  return source !== "manual" && source !== "derived";
+}
+
+function isSuppressibleNonDeviceDoneObservation(
+  observation: ExperimentAdherenceObservation,
+): boolean {
+  if (observation.status !== "completed" && observation.status !== "partial") {
+    return false;
+  }
+  if (observation.eventKind === "intervention_session") {
+    return true;
+  }
+  if (observation.eventKind !== "activity_session") {
+    return false;
+  }
+  const source = normalizeObservationSource(observation.source);
+  return source === "manual" || source === "derived";
+}
+
+function normalizeObservationSource(source: string | null | undefined): string | null {
+  const normalized = source?.trim().toLowerCase();
+  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 function resolveDeviceObservableActivityKind(modality: string | null | undefined): string | null {

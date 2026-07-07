@@ -4,6 +4,9 @@ import type { Prisma } from "@prisma/client";
 type HostedLinqDailyStateClient = PrismaClient | Prisma.TransactionClient;
 
 export const HOSTED_LINQ_DAILY_TEXT_LIMIT = 100;
+export const HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS = 28;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export function resolveHostedLinqDayUtc(value: Date | string): Date {
   const occurredAt = value instanceof Date ? value : new Date(value);
@@ -90,6 +93,35 @@ export async function readHostedLinqDailyState(input: {
       },
     },
   });
+}
+
+export async function hasHostedLinqInboundWithinDays(input: {
+  memberId: string;
+  now: Date | string;
+  prisma: HostedLinqDailyStateClient;
+  windowDays?: number;
+}): Promise<boolean> {
+  const now = input.now instanceof Date ? input.now : new Date(input.now);
+  const thresholdDayUtc = resolveHostedLinqDayUtc(
+    new Date(now.getTime() - (input.windowDays ?? HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS) * MS_PER_DAY),
+  );
+
+  const row = await input.prisma.hostedLinqDailyState.findFirst({
+    where: {
+      dayUtc: {
+        gte: thresholdDayUtc,
+      },
+      inboundCount: {
+        gt: 0,
+      },
+      memberId: input.memberId,
+    },
+    select: {
+      memberId: true,
+    },
+  });
+
+  return row !== null;
 }
 
 export async function claimHostedLinqOnboardingLinkNotice(input: {
