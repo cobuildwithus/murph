@@ -283,9 +283,10 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
 
   assert.equal(sources.length, 28);
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
-  assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length);
+  assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 1);
   assert.match(markup, /disabled=""/);
-  assert.match(markup, /aria-label="Apple Health connection is not available yet"/);
+  assert.match(markup, /Apple Health connects through the Murph iOS app and appears here after the first sync\./);
+  assert.doesNotMatch(markup, /aria-label="Apple Health connection is not available yet"/);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
@@ -496,8 +497,9 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, JUNCTION_DEFAULT_PROVIDER_FILTER.length);
-  assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 1);
-  assert.match(markup, /aria-label="Apple Health connection is not available yet"/u);
+  assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
+  assert.match(markup, /Apple Health connects through the Murph iOS app and appears here after the first sync\./u);
+  assert.doesNotMatch(markup, /aria-label="Apple Health connection is not available yet"/u);
   assert.doesNotMatch(markup, />Accu-Chek</u);
   assert.doesNotMatch(markup, />Samsung Health</u);
 

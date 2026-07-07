@@ -15,6 +15,7 @@ export type ConnectSource = {
   logo: LogoAsset;
   name: string;
   requiresReconnect?: boolean;
+  unavailableMessage?: string;
 };
 
 export type ConnectPageInitialLoadError = {

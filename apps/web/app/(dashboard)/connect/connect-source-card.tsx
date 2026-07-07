@@ -27,6 +27,9 @@ export function SourceCard({
   const canDisconnect = authenticated && Boolean(source.disconnectConnectionId);
   const actionLabel = source.requiresReconnect ? "Reconnect" : "Connect";
   const reconnectUnavailable = source.requiresReconnect && !isAvailable;
+  const unavailableMessage = !source.requiresReconnect && !isAvailable
+    ? source.unavailableMessage
+    : undefined;
 
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
@@ -80,11 +83,16 @@ export function SourceCard({
                   : `Please reconnect ${source.name} to resume syncing.`}
               </p>
             ) : null}
+            {unavailableMessage ? (
+              <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-muted-foreground">
+                {unavailableMessage}
+              </p>
+            ) : null}
             {!authenticated ? (
               <AuthButton aria-label={`Sign in to connect ${source.name}`}>
                 Sign in
               </AuthButton>
-            ) : reconnectUnavailable ? null : (
+            ) : reconnectUnavailable || unavailableMessage ? null : (
               <Button
                 type="button"
                 disabled={!canStart || pending}

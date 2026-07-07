@@ -59,6 +59,7 @@ const CONNECT_SOURCE_UI = {
     description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
     logo: logoAsset("apple-health.png"),
     name: "Apple Health",
+    unavailableMessage: "Apple Health connects through the Murph iOS app and appears here after the first sync.",
   },
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
@@ -317,6 +318,7 @@ export function listVisibleConnectSources(): ConnectSource[] {
             id: source.connectSourceId,
             logo: ui.logo,
             name: ui.name,
+            ...(ui.unavailableMessage ? { unavailableMessage: ui.unavailableMessage } : {}),
           },
         ]
       : [];
