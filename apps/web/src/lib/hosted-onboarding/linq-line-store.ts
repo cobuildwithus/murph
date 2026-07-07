@@ -453,6 +453,9 @@ export async function projectHostedLinqLineForProviderEventTx(input: {
       return projectMessageFailed(input.prisma, lineLookupKey, input.event);
     case "phone_number.status_updated":
       return projectPhoneNumberStatusUpdated(input.prisma, lineLookupKey, input.event);
+    case "reaction.added":
+    case "reaction.removed":
+      return false;
   }
 }
 

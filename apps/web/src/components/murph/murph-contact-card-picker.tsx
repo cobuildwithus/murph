@@ -184,14 +184,24 @@ export function MurphAddToContactsButton({
 const PICKER_TITLE = "Add Murph to your contacts";
 const PICKER_DESCRIPTION =
   "Pick the photo Murph shows up with in your contacts. Same Murph either way.";
+const DEFAULT_PICKER_COPY = {
+  description: PICKER_DESCRIPTION,
+  primaryAction: "Add Murph to Contacts",
+  secondaryAction: "Skip for now",
+  title: PICKER_TITLE,
+};
+
+export type MurphContactCardPickerCopy = Partial<typeof DEFAULT_PICKER_COPY>;
 
 export function MurphContactCardPicker({
+  copy,
   initialAvatarId = DEFAULT_MURPH_CONTACT_AVATAR_ID,
   onAddToContacts,
   onOpenChange,
   onSkip,
   open,
 }: {
+  copy?: MurphContactCardPickerCopy;
   initialAvatarId?: string;
   onAddToContacts?: (option: MurphContactAvatarOption) => void;
   onOpenChange: (open: boolean) => void;
@@ -201,6 +211,10 @@ export function MurphContactCardPicker({
   const isMobile = useIsMobile();
   const [selectedId, setSelectedId] = useState(initialAvatarId);
   const selected = findMurphContactAvatarOption(selectedId);
+  const pickerCopy = {
+    ...DEFAULT_PICKER_COPY,
+    ...copy,
+  };
 
   const actions = (
     <div className="flex flex-col gap-2">
@@ -213,7 +227,7 @@ export function MurphContactCardPicker({
         onClick={() => onAddToContacts?.(selected)}
       >
         <ContactRoundIcon data-icon="inline-start" />
-        Add Murph to Contacts
+        {pickerCopy.primaryAction}
       </a>
       <Button
         className="w-full"
@@ -225,7 +239,7 @@ export function MurphContactCardPicker({
         type="button"
         variant="ghost"
       >
-        Skip for now
+        {pickerCopy.secondaryAction}
       </Button>
     </div>
   );
@@ -236,10 +250,10 @@ export function MurphContactCardPicker({
         <DrawerContent className="h-[92dvh] max-h-[92dvh]">
           <DrawerHeader className="items-center text-center">
             <DrawerTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
-              {PICKER_TITLE}
+              {pickerCopy.title}
             </DrawerTitle>
             <DrawerDescription className="text-sm leading-6 text-muted-foreground">
-              {PICKER_DESCRIPTION}
+              {pickerCopy.description}
             </DrawerDescription>
           </DrawerHeader>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-1">
@@ -274,10 +288,10 @@ export function MurphContactCardPicker({
       >
         <DialogHeader className="items-center gap-2 text-center">
           <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
-            {PICKER_TITLE}
+            {pickerCopy.title}
           </DialogTitle>
           <DialogDescription className="text-sm leading-6 text-muted-foreground">
-            {PICKER_DESCRIPTION}
+            {pickerCopy.description}
           </DialogDescription>
         </DialogHeader>
         {body}

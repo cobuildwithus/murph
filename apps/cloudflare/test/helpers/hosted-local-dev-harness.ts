@@ -26,6 +26,10 @@ import {
   type HostedLocalDevStack,
 } from "@murphai/hosted-local-harness/dev-hosted-local/stack";
 import {
+  resolveHostedWebDevDistDirName,
+  shouldUseHostedWebProductionStart,
+} from "@murphai/hosted-local-harness/dev-hosted-local/web-production-start";
+import {
   createHostedWebCallbackSignatureHeaders,
   readHostedWebCallbackSigningEnvironment,
 } from "../../src/web-callback-auth.ts";
@@ -111,6 +115,7 @@ export async function startHostedLocalDevHarness(input: {
   const nextDistDirSuffix = `e2e-${randomUUID()}`.toLowerCase();
   const nextEnvPath = path.join(repoRoot, "apps/web/next-env.d.ts");
   const originalNextEnvContents = await readFile(nextEnvPath, "utf8").catch(() => null);
+  let harnessRuntimeEnv: NodeJS.ProcessEnv | null = null;
   let nextDistDir: string | null = null;
   let stack: HostedLocalDevStack | null = null;
 
@@ -144,10 +149,8 @@ export async function startHostedLocalDevHarness(input: {
       MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
       NEXT_DIST_DIR_SUFFIX: resolvedNextDistDirSuffix,
     };
-    nextDistDir = resolveHostedLocalHarnessDistDir(
-      runtimeEnv.NEXT_DIST_DIR_MODE,
-      resolvedNextDistDirSuffix,
-    );
+    harnessRuntimeEnv = runtimeEnv;
+    nextDistDir = resolveHostedWebDevDistDirName(runtimeEnv);
 
     stack = await startHostedLocalDevStack({
       env: runtimeEnv,
@@ -477,9 +480,9 @@ export async function startHostedLocalDevHarness(input: {
       : path.join(repoRoot, "apps/web", nextDistDir);
     if (
       nextDistPath !== null
-      && !await shouldPreserveHostedLocalProductionWebDist({
+      && !await shouldUseHostedWebProductionStart({
         distDir: nextDistPath,
-        env: input.env,
+        env: harnessRuntimeEnv ?? input.env,
       })
     ) {
       await rm(nextDistPath, {
@@ -791,37 +794,6 @@ function readHostedStatusActivityAtMs(
 function hostedStatusHasCompletedWithError(status: HostedRunnerStatusResponse): boolean {
   return !status.inFlight
     && Boolean(status.lastErrorCode);
-}
-
-function resolveHostedLocalHarnessDistDir(
-  nextDistDirMode: string | undefined,
-  nextDistDirSuffix: string,
-): string {
-  const baseDistDir = nextDistDirMode === "smoke" ? ".next-smoke" : ".next-dev";
-  return `${baseDistDir}-${nextDistDirSuffix}`;
-}
-
-async function shouldPreserveHostedLocalProductionWebDist(input: {
-  distDir: string;
-  env: NodeJS.ProcessEnv;
-}): Promise<boolean> {
-  if (!usesHostedLocalProductionWebProfile(input.env)) {
-    return false;
-  }
-
-  const nextDistDirMode = input.env.NEXT_DIST_DIR_MODE?.trim();
-  if (nextDistDirMode !== "smoke") {
-    return false;
-  }
-
-  const buildId = await readFile(path.join(input.distDir, "BUILD_ID"), "utf8")
-    .catch(() => null);
-  return buildId !== null && buildId.trim().length > 0;
-}
-
-function usesHostedLocalProductionWebProfile(env: NodeJS.ProcessEnv): boolean {
-  const profile = env.MURPH_HOSTED_LOCAL_PROFILE?.trim();
-  return profile === "e2e:stub" || profile === "e2e:live";
 }
 
 async function readHostedUserStatus(input: {

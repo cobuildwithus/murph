@@ -510,6 +510,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGroupJoinOfferMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260706130000_hosted_group_join_offer/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedGrowthDailySnapshotMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260706130000_hosted_growth_daily_snapshot/migration.sql",
@@ -597,6 +604,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260703160000_device_oauth_session_consumed_at",
       "20260705120000_hosted_mailbox_item_consumed_at",
       "20260706120000_hosted_thread_container_participant",
+      "20260706130000_hosted_group_join_offer",
       "20260706130000_hosted_growth_daily_snapshot",
       "migration_lock.toml",
     ]);
@@ -645,6 +653,18 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedThreadContainerParticipantMigrationSql).not.toContain('"handle" TEXT');
     expect(hostedThreadContainerParticipantMigrationSql).not.toMatch(
       /"(?:raw_)?(?:message|body|payload)[^"]*"/iu,
+    );
+    expect(hostedGroupJoinOfferMigrationSql).toContain(
+      'CREATE TABLE "hosted_group_join_offer"',
+    );
+    expect(hostedGroupJoinOfferMigrationSql).toContain('"message_lookup_key" TEXT NOT NULL');
+    expect(hostedGroupJoinOfferMigrationSql).toContain('"projection_kinds_json" JSONB NOT NULL');
+    expect(hostedGroupJoinOfferMigrationSql).toContain('"revoked_at" TIMESTAMP(3)');
+    expect(hostedGroupJoinOfferMigrationSql).toContain(
+      'REFERENCES "hosted_group"("id")',
+    );
+    expect(hostedGroupJoinOfferMigrationSql).not.toContain(
+      'ALTER TABLE "hosted_group"',
     );
     expect(hostedGrowthDailySnapshotMigrationSql).toContain(
       'CREATE TABLE "hosted_growth_daily_snapshot"',

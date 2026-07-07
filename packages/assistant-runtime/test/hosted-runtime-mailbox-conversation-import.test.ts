@@ -3,15 +3,17 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+  readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution/contracts";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
+  hashNullableHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
 import type {
   HostedExecutionConversationMessageWake,
@@ -26,7 +28,9 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
+  createAssistantActiveTurnInputController,
   listAssistantInputEvents,
+  resolveAssistantConversationLookupKey,
   updateAssistantInputAttachmentEvidence,
 } from "@murphai/assistant-engine";
 import {
@@ -239,6 +243,272 @@ describe("hosted mailbox conversation import adapter", () => {
     );
     assert.equal(afterProjection.events[0]?.attachmentEvidence.source, "hosted-inbox-projection");
     assert.equal(afterProjection.events[0]?.attachmentEvidence.attachments.length, 0);
+  });
+
+  test("notifies active turn input after staging and before inbox projection completes", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-early-notify-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_early_notify",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_early_notify",
+          parts: [
+            {
+              type: "text",
+              value: "please fold this into the turn",
+            },
+          ],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const notificationObserved = createDeferred<void>();
+    const projectionRelease = createDeferred<void>();
+    const signalController = new AbortController();
+    const order: string[] = [];
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook: async (input) => {
+        assert.equal(input.signal, signalController.signal);
+        order.push("notify");
+        notificationObserved.resolve(undefined);
+        return {
+          kind: "no-new-input",
+        };
+      },
+      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
+      sessionId: "session_early_notify",
+      turnId: "turn_early_notify",
+      vault: vaultRoot,
+    });
+
+    const importPromise = importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        order.push("projection-started");
+        await projectionRelease.promise;
+        order.push("projection-finished");
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {
+        order.push("projection-prepared");
+      },
+      item,
+      runtime: createRuntime(),
+      signal: signalController.signal,
+      vaultRoot,
+    });
+
+    try {
+      await withTestTimeout(
+        notificationObserved.promise,
+        "active turn notify did not fire before projection",
+      );
+      assert.deepEqual(order, ["notify"]);
+
+      projectionRelease.resolve(undefined);
+      const outcome = await importPromise;
+      if (outcome.status !== "imported") {
+        throw new Error("Expected imported mailbox outcome.");
+      }
+
+      const listed = await listAssistantInputEvents({ vault: vaultRoot });
+      assert.equal(listed.events.length, 1);
+      assert.deepEqual(order, [
+        "notify",
+        "projection-prepared",
+        "projection-started",
+        "projection-finished",
+      ]);
+      assert.equal(outcome.assistantInputId, listed.events[0]?.inputId);
+      assert.equal(outcome.captureId, null);
+      assert.deepEqual(outcome.metrics, {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      });
+      const currentInbound = outcome.linqDeliveryContext?.currentInbound;
+      assert.ok(currentInbound);
+      assert.equal(currentInbound.mailboxItemId, item.item.id);
+      assert.equal(currentInbound.eventId, decodedWake.eventId);
+      assert.equal(outcome.linqDeliveryContext?.replyToMessageId, "msg_early_notify");
+      assert.equal("reasonCode" in outcome, false);
+      assert.equal("afterCheckpoint" in outcome, false);
+    } finally {
+      projectionRelease.resolve(undefined);
+      controller.close();
+      await importPromise.catch(() => undefined);
+    }
+  });
+
+  test("does not notify active turn input early for durably consumed replay imports", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-replay-notify-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_replay_notify",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_replay_notify",
+          parts: [
+            {
+              type: "text",
+              value: "already consumed",
+            },
+          ],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    const item: HostedMailboxResolvedImportItem = {
+      ...createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_replay_notify",
+      }),
+      durablyConsumed: true,
+    };
+    let notificationCount = 0;
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook: async () => {
+        notificationCount += 1;
+        return {
+          kind: "no-new-input",
+        };
+      },
+      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
+      sessionId: "session_replay_notify",
+      turnId: "turn_replay_notify",
+      vault: vaultRoot,
+    });
+
+    try {
+      const outcome = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          return {
+            captureId: null,
+            metrics: {
+              nextWakeAt: null,
+              parserProcessed: 0,
+            },
+          };
+        },
+        async prepareWakeContext() {},
+        item,
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+
+      assert.equal(outcome.status, "imported");
+      assert.equal(notificationCount, 0);
+    } finally {
+      controller.close();
+    }
+  });
+
+  test("keeps mailbox import imported when early active turn notification fails", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-notify-failure-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem();
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "linq",
+        linqMessage: {
+          chatId: "chat_notify_failure",
+          from: "redacted-contact-sentinel",
+          isFromMe: false,
+          messageId: "msg_notify_failure",
+          parts: [
+            {
+              type: "text",
+              value: "still import me",
+            },
+          ],
+          threadIsDirect: true,
+        },
+        phoneLookupKey: "redacted-contact-sentinel",
+      },
+    });
+    let notificationAttempts = 0;
+    const controller = createAssistantActiveTurnInputController({
+      admissionHook: async () => {
+        notificationAttempts += 1;
+        throw new Error("synthetic active-turn notify failure");
+      },
+      conversationKeys: [createLinqConversationLookupKey({ item, wake: decodedWake })],
+      sessionId: "session_notify_failure",
+      turnId: "turn_notify_failure",
+      vault: vaultRoot,
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const outcome = await importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(decodedWake),
+        async importConversationWake() {
+          return {
+            captureId: null,
+            metrics: {
+              nextWakeAt: null,
+              parserProcessed: 0,
+            },
+          };
+        },
+        async prepareWakeContext() {},
+        item,
+        runtime: createRuntime(),
+        vaultRoot,
+      });
+
+      const listed = await listAssistantInputEvents({ vault: vaultRoot });
+      assert.equal(notificationAttempts, 1);
+      assert.equal(warn.mock.calls.length > 0, true);
+      assert.deepEqual(outcome, {
+        assistantInputId: listed.events[0]?.inputId,
+        captureId: null,
+        linqDeliveryContext: {
+          currentInbound: {
+            dedupeKey: decodedWake.eventId,
+            eventId: decodedWake.eventId,
+            mailboxItemId: item.item.id,
+            occurredAt: TEST_NOW,
+            replyToMessageId: "msg_notify_failure",
+            target: "chat_notify_failure",
+          },
+          directRecipientPhoneNumber: "redacted-contact-sentinel",
+          fromPhoneNumber: null,
+          replyToMessageId: "msg_notify_failure",
+          routeAuthority: null,
+          service: null,
+          target: "chat_notify_failure",
+          threadIsDirect: true,
+        },
+        metrics: {
+          nextWakeAt: null,
+          parserProcessed: 0,
+        },
+        status: "imported",
+      });
+    } finally {
+      warn.mockRestore();
+      controller.close();
+    }
   });
 
   test("stages a durably consumed conversation item with a null reply target", async () => {
@@ -3301,6 +3571,82 @@ describe("hosted mailbox conversation import adapter", () => {
     );
   });
 });
+
+function createDeferred<T = void>(): {
+  promise: Promise<T>;
+  reject(error: unknown): void;
+  resolve(value: T | PromiseLike<T>): void;
+} {
+  let reject!: (error: unknown) => void;
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    reject = innerReject;
+    resolve = innerResolve;
+  });
+  return {
+    promise,
+    reject,
+    resolve,
+  };
+}
+
+async function withTestTimeout<T>(
+  promise: Promise<T>,
+  message: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const timer = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), 1_000);
+  });
+  try {
+    return await Promise.race([promise, timer]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function createLinqConversationLookupKey(input: {
+  item: HostedMailboxResolvedImportItem;
+  wake: HostedExecutionConversationMessageWake;
+}): string {
+  if (input.wake.message.channel !== "linq") {
+    throw new Error("Expected Linq conversation wake.");
+  }
+
+  const accountLookupKey = readHostedLinqConversationMessageAccountLookupKey(
+    input.wake.message,
+  );
+  const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+    secret: accountLookupKey,
+    userId: input.item.item.userId,
+  });
+  const conversationKey = resolveAssistantConversationLookupKey({
+    conversation: {
+      channel: "linq",
+      directness: input.wake.message.linqMessage.threadIsDirect === false
+        ? "group"
+        : "direct",
+      identityId: hashNullableHostedAssistantConversationIdentifier(
+        identifierBlind,
+        accountLookupKey,
+      ),
+      participantId: hashNullableHostedAssistantConversationIdentifier(
+        identifierBlind,
+        input.wake.message.linqMessage.from,
+      ),
+      threadId: hashNullableHostedAssistantConversationIdentifier(
+        identifierBlind,
+        input.wake.message.linqMessage.chatId,
+      ),
+    },
+  });
+  if (!conversationKey) {
+    throw new Error("Expected Linq conversation lookup key.");
+  }
+  return conversationKey;
+}
 
 function createDecodedPayloadDecoder(
   wake: HostedExecutionConversationMessageWake,

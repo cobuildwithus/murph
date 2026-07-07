@@ -57,6 +57,19 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       },
     });
 
+    await groupTool.request({
+      action: "post_join_offer",
+      joinOffer: { projectionKinds: ["sleep-times.v0"] },
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "post_join_offer",
+      joinOffer: { projectionKinds: ["sleep-times.v0"] },
+      linqThread: {
+        authority: ROUTE_AUTHORITY,
+        chatId: "chat_group_1",
+      },
+    });
+
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
   });
@@ -80,8 +93,8 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       ],
     });
 
-    await groupTool.request({ action: "share_contact_card" });
-    expect(request).toHaveBeenLastCalledWith({ action: "share_contact_card" });
+    await groupTool.request({ action: "post_join_offer" });
+    expect(request).toHaveBeenLastCalledWith({ action: "post_join_offer" });
   });
 
   it("dedupes repeated contexts for the same thread and skips non-iMessage or direct contexts", async () => {
@@ -137,5 +150,14 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({ action: "read_chat_participants" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
+
+    await groupTool.request({
+      action: "post_join_offer",
+      joinOffer: { projectionKinds: ["sleep-times.v0"] },
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "post_join_offer",
+      joinOffer: { projectionKinds: ["sleep-times.v0"] },
+    });
   });
 });

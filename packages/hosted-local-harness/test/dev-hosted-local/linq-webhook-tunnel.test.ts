@@ -18,6 +18,12 @@ type LinqWebhookSubscriptionResult = {
   updatedAt: string | null;
 };
 
+const HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS = [
+  "message.received",
+  "reaction.added",
+  "reaction.removed",
+] as const;
+
 const createLinqWebhookSubscription = vi.fn<
   (
     input: {
@@ -33,7 +39,7 @@ const createLinqWebhookSubscription = vi.fn<
   isActive: true,
   phoneNumbers: ["+15550000001"],
   signingSecret: "linq-webhook-secret",
-  subscribedEvents: ["message.received"],
+  subscribedEvents: HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS,
   targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
   updatedAt: "2026-05-02T00:00:00.000Z",
 }));
@@ -313,7 +319,7 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
 });
 
 describe("registerHostedLocalLinqWebhookSubscription", () => {
-  it("registers message.received against the resolved target", async () => {
+  it("registers messages and reactions against the resolved target", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
       "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
@@ -348,7 +354,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
     }
     expect(call[0]).toEqual({
       phoneNumbers: ["+15550000001"],
-      subscribedEvents: ["message.received"],
+      subscribedEvents: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
       targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
     });
     expect(call[1].env).toEqual({
@@ -375,7 +381,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
             is_active: true,
             phone_numbers: ["+15550000001"],
             signing_secret: "linq-webhook-secret",
-            subscribed_events: ["message.received"],
+            subscribed_events: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
             target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
           },
         ],
@@ -460,7 +466,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
             is_active: true,
             phone_numbers: ["+15550000001"],
             signing_secret: "different-secret",
-            subscribed_events: ["message.received"],
+            subscribed_events: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
             target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
           },
         ],
@@ -516,7 +522,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
             is_active: true,
             phone_numbers: ["+15550000001"],
             signing_secret: "linq-webhook-secret",
-            subscribed_events: ["message.received"],
+            subscribed_events: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
             target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
           },
         ],
@@ -582,7 +588,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
             id: "subscription-1",
             is_active: true,
             phone_numbers: ["+15550000001"],
-            subscribed_events: ["message.received"],
+            subscribed_events: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
             target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
           },
         ],
@@ -651,7 +657,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
             id: "subscription-1",
             is_active: true,
             phone_numbers: ["+15550000002", "+15550000001"],
-            subscribed_events: ["message.received"],
+            subscribed_events: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
             target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
           },
         ],
@@ -713,7 +719,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
             is_active: true,
             phone_numbers: ["+15550000001"],
             signing_secret: "different-secret",
-            subscribed_events: ["message.received"],
+            subscribed_events: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
             target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
           },
         ],
@@ -759,7 +765,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
             id: "subscription-1",
             is_active: true,
             phone_numbers: ["+15550000001"],
-            subscribed_events: ["message.received"],
+            subscribed_events: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
             target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
           },
         ],
@@ -869,7 +875,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
             id: "subscription-filtered",
             is_active: true,
             phone_numbers: ["+15550000001"],
-            subscribed_events: ["message.received"],
+            subscribed_events: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
             target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
           },
         ],
@@ -915,7 +921,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       isActive: true,
       phoneNumbers: [],
       signingSecret: "different-secret",
-      subscribedEvents: ["message.received"],
+      subscribedEvents: [...HOSTED_LOCAL_LINQ_WEBHOOK_EVENTS],
       targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
       updatedAt: null,
     });

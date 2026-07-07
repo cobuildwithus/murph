@@ -79,7 +79,6 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
-  type HostedRuntimeLinqContactCardShareAfterOutboundRequest,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
@@ -90,6 +89,7 @@ import {
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupKind,
+  type HostedRuntimeGroupPostJoinOfferRequest,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupToolRequest,
@@ -601,40 +601,6 @@ export function parseHostedRuntimeUsageRecordResponse(
   };
 }
 
-export function parseHostedRuntimeLinqContactCardShareAfterOutboundRequest(
-  value: unknown,
-): HostedRuntimeLinqContactCardShareAfterOutboundRequest {
-  const record = requireObject(value, "Hosted runtime Linq contact-card share after-outbound request");
-  assertAllowedObjectKeys(
-    record,
-    new Set(["authority", "chatId", "service", "threadIsDirect"]),
-    "Hosted runtime Linq contact-card share after-outbound request",
-  );
-
-  return {
-    authority: record.authority === undefined || record.authority === null
-      ? null
-      : parseHostedRuntimeLinqExternalThreadRouteAuthority(
-        record.authority,
-        "Hosted runtime Linq contact-card share after-outbound request authority",
-      ),
-    chatId: requireString(
-      record.chatId,
-      "Hosted runtime Linq contact-card share after-outbound request chatId",
-    ),
-    service: readNullableString(
-      record.service,
-      "Hosted runtime Linq contact-card share after-outbound request service",
-    ),
-    threadIsDirect: record.threadIsDirect === null
-      ? null
-      : requireBoolean(
-          record.threadIsDirect,
-          "Hosted runtime Linq contact-card share after-outbound request threadIsDirect",
-        ),
-  };
-}
-
 export function parseHostedRuntimeProductFeedbackRecordRequest(
   value: unknown,
 ): HostedRuntimeProductFeedbackRecordRequest {
@@ -738,6 +704,27 @@ export function parseHostedRuntimeGroupToolRequest(
       joinLink: parseHostedRuntimeGroupCreateJoinLinkRequest(record.joinLink),
     };
   }
+  if (action === "post_join_offer") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "joinOffer", "linqThread"]),
+      "Hosted runtime group tool post_join_offer request",
+    );
+    return {
+      action,
+      ...(record.joinOffer === undefined || record.joinOffer === null
+        ? {}
+        : { joinOffer: parseHostedRuntimeGroupPostJoinOfferRequest(record.joinOffer) }),
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool post_join_offer request linqThread",
+            ),
+          }),
+    };
+  }
   if (action === "read_chat_participants" || action === "share_contact_card") {
     assertAllowedObjectKeys(
       record,
@@ -770,6 +757,24 @@ function parseHostedRuntimeGroupToolLinqThreadContext(
       `${label} authority`,
     ),
     chatId: requireString(record.chatId, `${label} chatId`),
+  };
+}
+
+function parseHostedRuntimeGroupPostJoinOfferRequest(
+  value: unknown,
+): HostedRuntimeGroupPostJoinOfferRequest {
+  const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["projectionKinds"]),
+    "Hosted runtime group tool post_join_offer joinOffer",
+  );
+  return {
+    projectionKinds: parseHostedRuntimeGroupProjectionKindArray(
+      record.projectionKinds,
+      "Hosted runtime group tool post_join_offer projectionKinds",
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    ),
   };
 }
 
@@ -860,6 +865,33 @@ export function parseHostedRuntimeGroupToolResponse(
     }
     if (status === "unavailable") {
       assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool create_join_link unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "post_join_offer") {
+    const result = requireObject(record.result, "Hosted runtime group tool post_join_offer response result");
+    const status = requireString(result.status, "Hosted runtime group tool post_join_offer response status");
+    if (status === "sent") {
+      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), "Hosted runtime group tool post_join_offer sent response result");
+      return {
+        action,
+        result: {
+          status,
+          group: parseHostedRuntimeGroupSummary(result.group),
+          joinUrl: requireString(result.joinUrl, "Hosted runtime group tool post_join_offer joinUrl"),
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool post_join_offer unavailable response result");
       return {
         action,
         result: {

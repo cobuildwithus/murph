@@ -175,6 +175,8 @@ function resolveHostedLinqAlertKind(event: ParsedHostedLinqProviderEvent): strin
       return "phone_number_status_updated";
     case "message.delivered":
     case "message.received":
+    case "reaction.added":
+    case "reaction.removed":
       return null;
   }
 }

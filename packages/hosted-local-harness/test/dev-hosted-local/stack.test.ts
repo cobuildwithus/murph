@@ -1291,6 +1291,72 @@ describe("hosted local dev stack", () => {
     }));
   });
 
+  it("keeps production web start selection on harness env instead of merged app env files", async () => {
+    const configModule = await import("../../src/dev-hosted-local/config.ts");
+    vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+      ...defaultConfig,
+      linqWebhookTunnelMode: "disabled",
+      skipLinqWebhookRegister: true,
+      skipStripeListen: true,
+      webPort: 31001,
+      workerPersistDir: ".tmp/e2e/wrangler",
+      workerPort: 32001,
+    });
+    const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
+    vi.mocked(environmentModule.readOptionalSimpleEnvFile).mockResolvedValue({
+      HOSTED_ASSISTANT_PROVIDER: "openai",
+      MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+      OPENAI_API_KEY: "local-openai-key",
+    });
+    vi.mocked(readFile).mockImplementationOnce(async (filePath) => {
+      if (/apps[/\\]web[/\\]\.next-smoke-e2e-fixture[/\\]BUILD_ID$/u.test(String(filePath))) {
+        return "smoke-build-id\n";
+      }
+
+      const error = new Error("File not found") as Error & { code: string };
+      error.code = "ENOENT";
+      throw error;
+    });
+    spawnChildProcess
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 107 }))
+      .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 108 }));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: {
+        ...process.env,
+        MURPH_DEV_CF_PERSIST_DIR: ".tmp/e2e/wrangler",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+        MURPH_DEV_WEB_PORT: "31001",
+        MURPH_DEV_WORKER_PORT: "32001",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+      },
+    });
+    await stack.ready;
+    await stack.stop();
+
+    const resolveInput = vi.mocked(environmentModule.resolveCloudflareLocalEnv).mock.calls.at(-1)?.[0];
+    expect(resolveInput?.overrides).toMatchObject({
+      MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+    });
+    const webCall = spawnChildProcess.mock.calls.find(([name]) => name === "web");
+    expect(webCall?.[2]).toEqual([
+      "--dir",
+      ".",
+      "exec",
+      "tsx",
+      "apps/web/scripts/dev-local.ts",
+      "--",
+      "--hostname",
+      "localhost",
+      "--port",
+      "31001",
+    ]);
+  });
+
   it("isolates worktree runner cleanup and generated crypto state without E2E-only skips", async () => {
     vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
     const configModule = await import("../../src/dev-hosted-local/config.ts");
@@ -1844,6 +1910,8 @@ describe("hosted local dev stack", () => {
         ["-SIGKILL", "-f", "wrangler dev.*--port 8787"],
         ["-SIGKILL", "-f", "workerd.*127\\.0\\.0\\.1:8787"],
         ["-SIGKILL", "-f", "apps/web/scripts/dev-local\\.ts.*--port 3000"],
+        ["-SIGKILL", "-f", "pnpm --dir apps/web exec next start .*--port 3000"],
+        ["-SIGKILL", "-f", "next/dist/bin/next start .*--port 3000"],
         ["-SIGKILL", "-f", "next/dist/telemetry/detached-flush\\.js dev .*apps/web"],
         [
           "-SIGKILL",
