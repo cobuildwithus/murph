@@ -247,6 +247,8 @@ const HOSTED_PRE_AUTO_REPLY_SYSTEM_IMPORT_MAX_PAGES = 4;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
+  onConversationInputStaged?: (() => void) | null;
+  runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;
 }
 
@@ -606,7 +608,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     if (foregroundMailboxImportLoopStopped) {
       return;
     }
-    await foregroundMailboxImportLoop.stop();
+    await foregroundMailboxImportLoop.stop({
+      shouldAbortInFlightImport: () => foregroundConversationWorkObserved,
+    });
     foregroundMailboxImportLoopStopped = true;
   };
   let foregroundRuntimeWakeObservedAfterStop = false;
@@ -651,10 +655,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     if (!foregroundConversationWorkObserved) {
       return;
     }
-    // stop() drains any foreground import already in flight. Preserve the
-    // selected durable wake, but nudge the outer dirty loop to run the new
-    // foreground pass before idle checkpointing when there is assistant work
-    // queued from that import.
+    // Preserve the selected durable wake, and nudge the outer dirty loop to run
+    // the new foreground pass before idle checkpointing when assistant work was
+    // staged by a foreground import.
     await notifyPendingForegroundAssistantInputWake({
       now: input.now,
       runtimeWakeSignal: input.runtimeWakeSignal ?? null,
@@ -862,7 +865,9 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   input: HostedWorkspaceRunnerInput;
   onForegroundConversationWorkObserved?: (() => void) | null;
 }): {
-  stop(): Promise<void>;
+  stop(options?: {
+    shouldAbortInFlightImport?: (() => boolean) | null;
+  }): Promise<void>;
 } {
   const runtimeWakeSignal = input.input.runtimeWakeSignal ?? null;
   if (!runtimeWakeSignal) {
@@ -878,6 +883,28 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   };
   outerSignal?.addEventListener("abort", abort, { once: true });
   let wakeOrdinal = 0;
+  let stopRequested = false;
+  let shouldAbortInFlightImportOnStop: (() => boolean) | null = null;
+  const inFlightImportController = new AbortController();
+  const abortInFlightImportAfterObservedWork = (): void => {
+    if (
+      !stopRequested
+      || inFlightImportController.signal.aborted
+      || shouldAbortInFlightImportOnStop?.() !== true
+    ) {
+      return;
+    }
+    inFlightImportController.abort(
+      new DOMException(
+        "Foreground mailbox import stopped after conversation work was staged.",
+        "AbortError",
+      ),
+    );
+  };
+  const observeForegroundConversationWork = (): void => {
+    input.onForegroundConversationWorkObserved?.();
+    abortInFlightImportAfterObservedWork();
+  };
 
   const loop = (async () => {
     while (!waitController.signal.aborted) {
@@ -921,7 +948,7 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
             signal: outerSignal,
           });
           if (hasHostedMailboxImportForegroundConversationWork(result)) {
-            input.onForegroundConversationWorkObserved?.();
+            observeForegroundConversationWork();
           }
           await notifyHostedActiveTurnInputForMailboxImport({
             input: input.input,
@@ -929,42 +956,67 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
             signal: outerSignal,
           });
         };
-        const conversationResult = await importHostedMailboxForWorkspaceRunner({
-          checkpointRequestBuilder: input.checkpointRequestBuilder,
-          checkpointReason: "active_turn_input",
-          deferCheckpoint: true,
-          importItem: foregroundConversationImportItem,
-          importItemContext: {
-            latencyMilestones,
-          },
-          input: input.input,
-          lanes: ["conversation"],
-          limitPerLane: input.input.foregroundLimitPerLane ?? input.input.limitPerLane,
-          requestId: `${requestId}:conversation`,
-          signal: outerSignal,
-        });
+        const conversationImportSignal =
+          composeHostedForegroundMailboxImportSignal(
+            outerSignal,
+            inFlightImportController.signal,
+          );
+        const conversationResult = await (async () => {
+          try {
+            return await importHostedMailboxForWorkspaceRunner({
+              checkpointRequestBuilder: input.checkpointRequestBuilder,
+              checkpointReason: "active_turn_input",
+              deferCheckpoint: true,
+              importItem: foregroundConversationImportItem,
+              importItemContext: {
+                latencyMilestones,
+                onConversationInputStaged: observeForegroundConversationWork,
+                runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
+              },
+              input: input.input,
+              lanes: ["conversation"],
+              limitPerLane: input.input.foregroundLimitPerLane ?? input.input.limitPerLane,
+              requestId: `${requestId}:conversation`,
+              signal: conversationImportSignal.signal,
+            });
+          } finally {
+            conversationImportSignal.dispose();
+          }
+        })();
         await handleForegroundImportResult(conversationResult);
         if (hasHostedMailboxImportForegroundConversationWork(conversationResult)) {
           continue;
         }
 
-        const systemResult = await importHostedMailboxForWorkspaceRunner({
-          checkpointRequestBuilder: input.checkpointRequestBuilder,
-          checkpointReason: "active_turn_input",
-          deferCheckpoint: true,
-          importItem: input.input.importItem,
-          importItemContext: {
-            latencyMilestones,
-          },
-          input: input.input,
-          lanes: ["system"],
-          limitPerLane: input.input.limitPerLane,
-          requestId: `${requestId}:system`,
-          signal: outerSignal,
-        });
+        const systemImportSignal =
+          composeHostedForegroundMailboxImportSignal(
+            outerSignal,
+            inFlightImportController.signal,
+          );
+        const systemResult = await (async () => {
+          try {
+            return await importHostedMailboxForWorkspaceRunner({
+              checkpointRequestBuilder: input.checkpointRequestBuilder,
+              checkpointReason: "active_turn_input",
+              deferCheckpoint: true,
+              importItem: input.input.importItem,
+              importItemContext: {
+                latencyMilestones,
+                runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
+              },
+              input: input.input,
+              lanes: ["system"],
+              limitPerLane: input.input.limitPerLane,
+              requestId: `${requestId}:system`,
+              signal: systemImportSignal.signal,
+            });
+          } finally {
+            systemImportSignal.dispose();
+          }
+        })();
         await handleForegroundImportResult(systemResult);
       } catch (error) {
-        if (outerSignal?.aborted) {
+        if (outerSignal?.aborted || inFlightImportController.signal.aborted) {
           break;
         }
         await writeHostedForegroundMailboxImportFailureRuntimeLog({
@@ -976,13 +1028,67 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   })();
 
   return {
-    async stop() {
+    async stop(options) {
+      stopRequested = true;
+      shouldAbortInFlightImportOnStop = options?.shouldAbortInFlightImport ?? null;
       outerSignal?.removeEventListener("abort", abort);
       if (!waitController.signal.aborted) {
         waitController.abort(new DOMException("Foreground mailbox import loop stopped.", "AbortError"));
       }
+      abortInFlightImportAfterObservedWork();
       await loop.catch(() => undefined);
     },
+  };
+}
+
+function composeHostedForegroundMailboxImportSignal(
+  outerSignal: AbortSignal | null,
+  inFlightImportSignal: AbortSignal,
+): {
+  dispose(): void;
+  signal: AbortSignal;
+} {
+  if (!outerSignal) {
+    return {
+      dispose: () => undefined,
+      signal: inFlightImportSignal,
+    };
+  }
+
+  const abortSignalConstructor: typeof AbortSignal & {
+    any?: (signals: AbortSignal[]) => AbortSignal;
+  } = AbortSignal;
+  if (typeof abortSignalConstructor.any === "function") {
+    return {
+      dispose: () => undefined,
+      signal: abortSignalConstructor.any([outerSignal, inFlightImportSignal]),
+    };
+  }
+
+  const controller = new AbortController();
+  const abort = (signal: AbortSignal): void => {
+    if (!controller.signal.aborted) {
+      controller.abort(signal.reason);
+    }
+  };
+  if (outerSignal.aborted) {
+    abort(outerSignal);
+  } else if (inFlightImportSignal.aborted) {
+    abort(inFlightImportSignal);
+  }
+  const abortFromOuterSignal = () => abort(outerSignal);
+  const abortFromInFlightSignal = () => abort(inFlightImportSignal);
+  if (!controller.signal.aborted) {
+    outerSignal.addEventListener("abort", abortFromOuterSignal, { once: true });
+    inFlightImportSignal.addEventListener("abort", abortFromInFlightSignal, { once: true });
+  }
+
+  return {
+    dispose() {
+      outerSignal.removeEventListener("abort", abortFromOuterSignal);
+      inFlightImportSignal.removeEventListener("abort", abortFromInFlightSignal);
+    },
+    signal: controller.signal,
   };
 }
 
@@ -1244,6 +1350,7 @@ async function writeHostedMailboxImportRuntimeLog(input: {
         fetchedCount: input.result.importResult.fetchedCount,
         importedCount: input.result.importResult.importedCount,
         laneCount: lanes.length,
+        ...(input.result.importResult.conversationImportTiming ?? {}),
         retryableBlockedCount,
         stateChanged: input.result.stateChanged,
         systemSeqEnd: input.result.state.watermarks.system,

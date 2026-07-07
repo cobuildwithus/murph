@@ -1764,7 +1764,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(result).toEqual(expect.objectContaining({
         checkpointReason: "assistant_runtime_commit",
         nextWakeAt: "2026-04-27T00:00:00.000Z",
-        nextWakeReason: "assistant",
         progressed: true,
         redactedStatus: expect.objectContaining({
           assistantContextSnapshotPendingDirtyDomainCount: 1,
@@ -2323,13 +2322,36 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("skips hosted managed automation work when background maintenance yields", async () => {
     const shouldYieldBackgroundMaintenance = vi.fn(() => true);
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       shouldYieldBackgroundMaintenance,
     }));
 
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
-    expectAssistantLaneCallWithoutDeviceSyncOptions();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: expect.any(String),
+      nextWakeReason: "assistant",
+      progressed: false,
+    }));
+  });
+
+  it("runs the automation lane for fresh conversation input even when background maintenance yields", async () => {
+    const shouldYieldBackgroundMaintenance = vi.fn(() => true);
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
+      }),
+    );
   });
 
   it("uses the fresh hosted conversation route for managed automation seeding", async () => {
@@ -2817,17 +2839,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("skips system mailbox maintenance after foreground input arrives during the run", async () => {
     const shouldYieldBackgroundMaintenance = vi.fn(() => true);
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       shouldYieldBackgroundMaintenance,
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
-    expectAssistantLaneCallWithoutDeviceSyncOptions();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: expect.any(String),
+      nextWakeReason: "assistant",
+      progressed: false,
+    }));
   });
 
-  it("continues the assistant lane when foreground input arrives during system mailbox preparation", async () => {
+  it("skips the assistant lane when foreground input arrives during system mailbox preparation", async () => {
     let shouldYield = false;
     let fetchSnapshotCalls = 0;
     const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
@@ -2894,11 +2921,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(fetchSnapshotCalls).toBe(0);
-    expectAssistantLaneCallWithoutDeviceSyncOptions();
-    expect(
-      mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0]
-        .executionContext.hosted?.dynamicContextPrompts,
-    ).toBeUndefined();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
 
     await result.afterCheckpoint?.();
 
@@ -2964,7 +2987,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      nextWakeAt: "2026-04-27T00:09:00.000Z",
       progressed: true,
     }));
 
@@ -3037,7 +3060,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      nextWakeAt: "2026-04-27T00:09:00.000Z",
       progressed: true,
     }));
 
@@ -3250,7 +3273,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
-    expect(result.progressed).toBe(true);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:00.000Z",
+      nextWakeReason: "assistant",
+      progressed: false,
+    }));
   });
 
   it("does not pass foreground-input yield hooks into the assistant lane", async () => {
@@ -4558,7 +4585,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
   });
 
-  it("leaves pending-input device context suppression to the automation lane", async () => {
+  it("skips lazy device context when pending input appears before the automation lane", async () => {
     const fetchSnapshot = vi.fn(async () => ({
       connections: [],
       generatedAt: "2026-04-29T00:00:00.000Z",
@@ -4603,7 +4630,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       totalJobs: 1,
     });
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       resolvedDeviceSync: {
         providerConfigs: {
           junction: {
@@ -4618,9 +4645,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtimeDeviceSyncPort: deviceSyncPort,
     }));
 
-    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
-    expect(assistantLaneCall).toHaveProperty("buildBackgroundDynamicContextPrompt");
-    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-29T00:00:00.000Z",
+      progressed: true,
+    }));
     expect(fetchSnapshot).not.toHaveBeenCalled();
   });
 
@@ -8873,7 +8902,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("schedules an immediate assistant wake when the pending input index has work after system mailbox work", async () => {
+  it("skips managed automation seeding when pending input appears after system mailbox work", async () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_processed",
@@ -8897,6 +8926,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const postCheckpoint = await result.afterCheckpoint?.();
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result.nextWakeAt).toBe("2026-04-27T00:10:00.000Z");
     expect(postCheckpoint).toEqual(expect.objectContaining({
@@ -8912,16 +8942,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ).toBe("2026-04-27T00:10:00.000Z");
   });
 
-  it("runs pending assistant input before due system mailbox work", async () => {
+  it("skips the automation lane when pending assistant input exists before background work", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
     );
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
-      assistantAutomationProgressed: true,
-      nextWakeAt: null,
-      redactedLogEntries: [],
-    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
@@ -8930,9 +8954,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalled();
+    expect(mocks.prepareHostedAssistantAutomationForWake).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      progressed: true,
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "assistant",
+      progressed: false,
     }));
     expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
       now: expect.any(Function),
@@ -8943,7 +8970,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ).toBe("2026-04-27T00:10:00.000Z");
   });
 
-  it("preserves queued provider cleanup when pending assistant input runs first", async () => {
+  it("defers queued provider cleanup behind a pending assistant wake", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
     );
@@ -8953,12 +8980,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
       "2026-04-27T00:14:00.000Z",
     );
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
-      assistantAutomationProgressed: true,
-      nextWakeAt: null,
-      redactedLogEntries: [],
-    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
@@ -8966,25 +8987,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledWith("/tmp/murph-vault");
+    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "canonical_runtime_commit",
-      nextWakeAt: "2026-04-27T00:14:00.000Z",
-      progressed: true,
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "assistant",
+      progressed: false,
     }));
   });
 
-  it("runs pending assistant input before due device-sync work", async () => {
+  it("skips due device-sync work when pending assistant input is ready first", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
     );
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
-      assistantAutomationProgressed: true,
-      nextWakeAt: null,
-      redactedLogEntries: [],
-    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => "2026-04-27T00:10:00.000Z",
@@ -9015,28 +9030,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:30.000Z",
-      nextWakeReason: "device-sync.reconcile",
-      progressed: true,
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "assistant",
+      progressed: false,
     }));
   });
 
-  it("runs due system mailbox work after pending assistant input defers to retry", async () => {
+  it("leaves due system mailbox work pending when assistant input is ready", async () => {
     const callOrder: string[] = [];
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
     );
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
-      callOrder.push("assistant");
-      return {
-        assistantAutomationCurrentTurnDeliveryIntentIds: [],
-        assistantAutomationProgressed: true,
-        nextWakeAt: "2026-04-27T00:10:30.000Z",
-        redactedLogEntries: [],
-      };
-    });
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
       callOrder.push("system-mailbox");
       return {
@@ -9057,42 +9063,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:10:00.000Z",
     }));
 
-    expect(callOrder).toEqual(["assistant", "system-mailbox"]);
+    expect(callOrder).toEqual([]);
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:30.000Z",
-      progressed: true,
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "assistant",
+      progressed: false,
     }));
 
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
-      item: expect.objectContaining({
-        itemId: "system_mailbox_item_processed",
-      }),
-      operatorHomeRoot: "/tmp/murph-operator-home",
-      runtime: expect.any(Object),
-      vaultRoot: "/tmp/murph-vault",
-    });
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:30.000Z",
-    }));
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+    expect(postCheckpoint).toBeUndefined();
   });
 
-  it("runs due device-sync work after pending assistant input defers to retry", async () => {
+  it("leaves due device-sync work pending when assistant input is ready", async () => {
     const callOrder: string[] = [];
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
     );
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
-      callOrder.push("assistant");
-      return {
-        assistantAutomationCurrentTurnDeliveryIntentIds: [],
-        assistantAutomationProgressed: true,
-        nextWakeAt: "2026-04-27T00:10:30.000Z",
-        redactedLogEntries: [],
-      };
-    });
     mocks.runHostedDeviceSyncWakeLane.mockImplementationOnce(async () => {
       callOrder.push("device-sync");
       return {
@@ -9131,24 +9121,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    expect(callOrder).toEqual(["assistant", "device-sync"]);
+    expect(callOrder).toEqual([]);
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:30.000Z",
-      progressed: true,
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "assistant",
+      progressed: false,
     }));
   });
 
-  it("backs off pending assistant input when the attempted pass returns no retry", async () => {
+  it("does not attempt pending assistant input inside the background automation lane", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
     );
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
-      assistantAutomationProgressed: false,
-      nextWakeAt: null,
-      redactedLogEntries: [],
-    });
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_processed",
@@ -9166,43 +9153,39 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:10:00.000Z",
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:30.000Z",
-      progressed: true,
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "assistant",
+      progressed: false,
     }));
 
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:30.000Z",
-    }));
+    expect(postCheckpoint).toBeUndefined();
   });
 
-  it("backs off pending assistant input when deferred maintenance has no work", async () => {
+  it("preserves the pending assistant wake when deferred maintenance has no work", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",
     );
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
-      assistantAutomationProgressed: false,
-      nextWakeAt: null,
-      redactedLogEntries: [],
-    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:10:00.000Z",
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt: "2026-04-27T00:10:30.000Z",
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      nextWakeReason: "assistant",
       progressed: false,
     }));
   });
 
-  it("runs a second assistant pass after deferred manual runtime-control work", async () => {
+  it("runs an assistant pass after deferred manual runtime-control work", async () => {
     const callOrder: string[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const manualRuntimeItem = {
@@ -9217,9 +9200,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         userId: "member_synthetic_phase",
       },
     };
-    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
-      "2026-04-27T00:10:00.000Z",
-    );
     mocks.runHostedAssistantAutomationLane
       .mockImplementationOnce(async () => {
         callOrder.push("assistant-1");
@@ -9282,8 +9262,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:10:00.000Z",
     }));
 
-    expect(callOrder).toEqual(["assistant-1", "system-mailbox", "assistant-2"]);
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(2);
+    expect(callOrder).toEqual(["system-mailbox", "assistant-1"]);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(
       logRequests
         .map((request) => request.entries[0]?.redactedJson)
@@ -9292,7 +9272,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           redactedJson?.type === "assistant.turn.timing"
         )
         .map((redactedJson) => redactedJson?.turnTimingStage),
-    ).toEqual(["provider-result-returned", "usage-recorded"]);
+    ).toEqual(["provider-result-returned"]);
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-27T00:10:30.000Z",
       progressed: true,
@@ -9308,7 +9288,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
-  it("flushes buffered first-pass detail logs when a deferred assistant rerun fails", async () => {
+  it("keeps buffered first-pass detail logs when deferred manual runtime-control work runs once", async () => {
     const callOrder: string[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const manualRuntimeItem = {
@@ -9323,50 +9303,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         userId: "member_synthetic_phase",
       },
     };
-    const failure = new Error("second assistant pass failed");
-    Object.defineProperty(failure, "hostedAssistantAutomationRedactedLogEntries", {
-      configurable: true,
-      value: [{
-        component: "runtime.provider",
-        level: "info",
-        message: "Second assistant pass timing.",
-        phase: "wake.running",
-        redacted: {
-          schema: "murph.assistant-turn-timing.v1",
-          type: "assistant.turn.timing",
-          turnTimingElapsedMs: 29,
-          turnTimingStage: "reply-dispatched",
-        },
-      }],
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      callOrder.push("assistant-1");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        nextWakeAt: "2026-04-27T00:10:30.000Z",
+        redactedLogEntries: [{
+          component: "runtime.provider",
+          level: "info",
+          message: "First assistant pass timing.",
+          phase: "wake.running",
+          redacted: {
+            schema: "murph.assistant-turn-timing.v1",
+            type: "assistant.turn.timing",
+            turnTimingElapsedMs: 11,
+            turnTimingStage: "provider-result-returned",
+          },
+        }],
+      };
     });
-    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
-      "2026-04-27T00:10:00.000Z",
-    );
-    mocks.runHostedAssistantAutomationLane
-      .mockImplementationOnce(async () => {
-        callOrder.push("assistant-1");
-        return {
-          assistantAutomationCurrentTurnDeliveryIntentIds: [],
-          assistantAutomationProgressed: true,
-          nextWakeAt: "2026-04-27T00:10:30.000Z",
-          redactedLogEntries: [{
-            component: "runtime.provider",
-            level: "info",
-            message: "First assistant pass timing.",
-            phase: "wake.running",
-            redacted: {
-              schema: "murph.assistant-turn-timing.v1",
-              type: "assistant.turn.timing",
-              turnTimingElapsedMs: 11,
-              turnTimingStage: "provider-result-returned",
-            },
-          }],
-        };
-      })
-      .mockImplementationOnce(async () => {
-        callOrder.push("assistant-2");
-        throw failure;
-      });
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
       callOrder.push("system-mailbox");
       return {
@@ -9382,15 +9338,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       };
     });
 
-    await expect(
-      runHostedWorkspaceAssistantPhase(createPhaseInput({
-        importedCount: 0,
-        logRequests,
-        now: () => "2026-04-27T00:10:00.000Z",
-      })),
-    ).rejects.toThrow("second assistant pass failed");
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      logRequests,
+      now: () => "2026-04-27T00:10:00.000Z",
+    }));
 
-    expect(callOrder).toEqual(["assistant-1", "system-mailbox", "assistant-2"]);
+    expect(callOrder).toEqual(["system-mailbox", "assistant-1"]);
     expect(
       logRequests
         .map((request) => request.entries[0]?.redactedJson)
@@ -9399,7 +9353,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           redactedJson?.type === "assistant.turn.timing"
         )
         .map((redactedJson) => redactedJson?.turnTimingStage),
-    ).toEqual(["provider-result-returned", "reply-dispatched"]);
+    ).toEqual(["provider-result-returned"]);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:10:30.000Z",
+      progressed: true,
+    }));
   });
 
   it("uses a full bootstrap checkpoint reason for member activation work", async () => {

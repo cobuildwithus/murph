@@ -1184,6 +1184,13 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     activeRuntimePassStartedAtEpochMs?: number;
     activeRuntimePassForeground?: boolean;
   };
+  import?: {
+    decodeStartedAtEpochMs?: number;
+    decodeDoneAtEpochMs?: number;
+    autoReplyPreparedAtEpochMs?: number;
+    pendingIndexEnsuredAtEpochMs?: number;
+    stagedAtEpochMs?: number;
+  };
   provider?: {
     turnLockWaitMs?: number;
     sessionResolveMs?: number;
@@ -1200,6 +1207,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS = [
   "restore",
   "boot",
   "wake",
+  "import",
   "provider",
 ] as const;
 
@@ -1266,6 +1274,13 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "activeRuntimePassStartedAtEpochMs",
     "activeRuntimePassForeground",
   ],
+  import: [
+    "decodeStartedAtEpochMs",
+    "decodeDoneAtEpochMs",
+    "autoReplyPreparedAtEpochMs",
+    "pendingIndexEnsuredAtEpochMs",
+    "stagedAtEpochMs",
+  ],
   provider: [
     "turnLockWaitMs",
     "sessionResolveMs",
@@ -1317,6 +1332,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   restore: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.restore),
   boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),
   wake: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.wake),
+  import: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.import),
   provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
 };
 

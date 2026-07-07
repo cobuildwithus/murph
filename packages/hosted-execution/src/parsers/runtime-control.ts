@@ -323,6 +323,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   restore: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.restore),
   boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),
   wake: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.wake),
+  import: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.import),
   provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
 };
 const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
@@ -2216,6 +2217,23 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(wake, "activeRuntimePassOrdinal", wakeLabel),
       ...requireOptionalNonNegativeInteger(wake, "activeRuntimePassStartedAtEpochMs", wakeLabel),
       ...requireOptionalBoolean(wake, "activeRuntimePassForeground", wakeLabel),
+    };
+  }
+
+  if (record.import !== undefined) {
+    const importLabel = `${label}.import`;
+    const importBreakdown = requireObject(record.import, importLabel);
+    assertAllowedObjectKeys(
+      importBreakdown,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.import,
+      importLabel,
+    );
+    breakdown.import = {
+      ...requireOptionalNonNegativeInteger(importBreakdown, "decodeStartedAtEpochMs", importLabel),
+      ...requireOptionalNonNegativeInteger(importBreakdown, "decodeDoneAtEpochMs", importLabel),
+      ...requireOptionalNonNegativeInteger(importBreakdown, "autoReplyPreparedAtEpochMs", importLabel),
+      ...requireOptionalNonNegativeInteger(importBreakdown, "pendingIndexEnsuredAtEpochMs", importLabel),
+      ...requireOptionalNonNegativeInteger(importBreakdown, "stagedAtEpochMs", importLabel),
     };
   }
 
