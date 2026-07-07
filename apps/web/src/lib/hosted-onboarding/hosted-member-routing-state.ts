@@ -22,7 +22,6 @@ export const hostedMemberRoutingStateSelect =
     memberId: true,
     pendingLinqChatIdEncrypted: true,
     pendingLinqChatLookupKey: true,
-    pendingLinqLastInboundAt: true,
     pendingLinqParticipantContactEncrypted: true,
     pendingLinqParticipantContactKind: true,
     pendingLinqParticipantContactLookupKey: true,
@@ -48,7 +47,6 @@ export const hostedMemberRoutingLookupSelect =
     memberId: true,
     pendingLinqChatIdEncrypted: true,
     pendingLinqChatLookupKey: true,
-    pendingLinqLastInboundAt: true,
     pendingLinqParticipantContactEncrypted: true,
     pendingLinqParticipantContactKind: true,
     pendingLinqParticipantContactLookupKey: true,
@@ -133,7 +131,6 @@ export async function projectHostedMemberRoutingState(
     hasPendingLinqRouteState: [
       routing.pendingLinqChatIdEncrypted,
       routing.pendingLinqChatLookupKey,
-      routing.pendingLinqLastInboundAt,
       routing.pendingLinqParticipantContactEncrypted,
       routing.pendingLinqParticipantContactKind,
       routing.pendingLinqParticipantContactLookupKey,

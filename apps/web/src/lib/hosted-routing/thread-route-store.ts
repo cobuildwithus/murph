@@ -36,7 +36,6 @@ export interface HostedThreadRouteSnapshot {
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
-  lastInboundAt: Date | null;
   owner: HostedThreadRouteOwnerState;
 }
 
@@ -85,7 +84,6 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
         },
       },
       containerMemberId: true,
-      lastInboundAt: true,
     },
     where: {
       channel: input.channel,
@@ -127,9 +125,25 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
     channel: row.channel,
     container: row.container.member,
     containerMemberId: row.containerMemberId,
-    lastInboundAt: row.lastInboundAt,
     owner: row.container.owner,
   };
+}
+
+export async function hasHostedMemberEstablishedLinqThreadRoute(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const route = await input.prisma.hostedThreadRoute.findFirst({
+    select: {
+      containerMemberId: true,
+    },
+    where: {
+      channel: "linq",
+      containerMemberId: input.memberId,
+    },
+  });
+
+  return Boolean(route);
 }
 
 export async function assertHostedThreadRouteEgressAuthority(input: {
