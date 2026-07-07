@@ -31,6 +31,10 @@ const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   "murph.assistant-codex-app-server-timing.v1";
 const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   "assistant.codex.app_server_timing";
+const ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
+  "murph.assistant-codex-transport-diagnostics.v1";
+const ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_TYPE =
+  "assistant.codex.transport_diagnostics";
 const ASSISTANT_CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA =
   "murph.assistant-codex-action-diagnostics.v1";
 const ASSISTANT_CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE =
@@ -150,6 +154,21 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "warm-abort-poisoned",
   "warm-idle",
   "warm-reused",
+]);
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_EVENT_KIND_VALUES = new Set([
+  "stream-disconnected",
+  "stream-idle-timeout",
+  "stream-retry",
+  "transport-fallback",
+]);
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_METHOD_VALUES = new Set([
+  "error",
+  "warning",
+]);
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_VALUES = new Set([
+  "http",
+  "unknown",
+  "websocket",
 ]);
 const HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES = new Set([
   "command.execution",
@@ -272,6 +291,22 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS = [
 const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_BOOLEAN_KEYS = [
   "codexActionThreadIdPresent",
   "codexActionTurnIdPresent",
+] as const;
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_BOOLEAN_KEYS = [
+  "codexTransportAdditionalDetailsPresent",
+  "codexTransportErrorMessagePresent",
+  "codexTransportFallbackActivated",
+  "codexTransportIdleTimeout",
+  "codexTransportStreamDisconnected",
+  "codexTransportThreadIdPresent",
+  "codexTransportTurnIdPresent",
+  "codexTransportWillRetry",
+] as const;
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_NUMBER_KEYS = [
+  "codexTransportErrorMessageLength",
+  "codexTransportProviderActionCount",
+  "codexTransportRetryCount",
+  "codexTransportRetryMax",
 ] as const;
 const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS = [
   "codexActionCachedInputUnitMax",
@@ -408,6 +443,15 @@ function readHostedAssistantProviderDiagnosticTrace(
     return {
       details: appServerTimingDiagnostic,
       message: "Hosted assistant Codex app-server timing captured.",
+    };
+  }
+
+  const transportDiagnostic =
+    readHostedAssistantCodexTransportDiagnosticTrace(event);
+  if (transportDiagnostic) {
+    return {
+      details: transportDiagnostic,
+      message: "Hosted assistant Codex transport diagnostics captured.",
     };
   }
 
@@ -994,6 +1038,68 @@ function readHostedAssistantCodexAppServerTimingTrace(
   return details;
 }
 
+function readHostedAssistantCodexTransportDiagnosticTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA
+    || type !== ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const eventKind = readHostedAssistantProviderDiagnosticAllowedString(
+    record,
+    "codexTransportEventKind",
+    HOSTED_ASSISTANT_CODEX_TRANSPORT_EVENT_KIND_VALUES,
+  );
+  const sourceMethod = readHostedAssistantProviderDiagnosticAllowedString(
+    record,
+    "codexTransportSourceMethod",
+    HOSTED_ASSISTANT_CODEX_TRANSPORT_METHOD_VALUES,
+  );
+  const transport = readHostedAssistantProviderDiagnosticAllowedString(
+    record,
+    "codexTransportTransport",
+    HOSTED_ASSISTANT_CODEX_TRANSPORT_VALUES,
+  );
+  if (!eventKind || !sourceMethod || !transport) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {
+    codexTransportEventKind: eventKind,
+    codexTransportSourceMethod: sourceMethod,
+    codexTransportTraceType: "transport-diagnostics",
+    codexTransportTransport: transport,
+    providerTraceKind: "codex.transport_diagnostics",
+    schema: ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
+  };
+
+  for (const key of HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_BOOLEAN_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticBoolean(record, key),
+    );
+  }
+  for (const key of HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_NUMBER_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+    );
+  }
+  return details;
+}
+
 function readHostedAssistantCodexActionDiagnosticTrace(
   event: unknown,
 ): HostedExecutionStructuredLogDetails | null {
@@ -1388,4 +1494,3 @@ function readHostedAssistantProviderDiagnosticNumberArray(
   );
   return output.length > 0 ? output : undefined;
 }
-

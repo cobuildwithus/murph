@@ -99,6 +99,8 @@ const MURPH_DYNAMIC_TOOLS_WITH_COMPUTER_WITHOUT_PROGRESS = resolveMurphDynamicTo
   computerToolsAvailable: true,
   progressUpdatesAvailable: false,
 })
+const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
+  'murph.assistant-codex-transport-diagnostics.v1'
 
 const tempRoots: string[] = []
 
@@ -5743,6 +5745,160 @@ describe('assistant codex runtime', () => {
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('secretPath')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('thread-diagnostics')
     expect(JSON.stringify(diagnosticEvent?.rawEvent)).not.toContain('turn-diagnostics')
+  })
+
+  it('emits metadata-only Codex transport diagnostics for stream retry and fallback', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-transport-diagnostics-')
+    const onTraceEvent = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-transport',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-transport',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/started',
+              params: {
+                turn: {
+                  id: 'turn-transport',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'error',
+              params: {
+                error: {
+                  message: 'Reconnecting... 2/5',
+                  codexErrorInfo: {
+                    responseStreamDisconnected: {
+                      httpStatusCode: null,
+                    },
+                  },
+                  additionalDetails:
+                    'stream disconnected before completion: idle timeout waiting for websocket at https://api.openai.com/v1/responses',
+                },
+                threadId: 'thread-transport',
+                turnId: 'turn-transport',
+                willRetry: true,
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'warning',
+              params: {
+                threadId: 'thread-transport',
+                message:
+                  'Falling back from WebSockets to HTTPS transport. raw endpoint https://api.openai.com/v1/responses',
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-transport',
+                  type: 'assistant_message',
+                  message: 'Recovered.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-transport',
+                  status: 'completed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        onTraceEvent,
+        prompt: 'diagnose transport',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Recovered.',
+      sessionId: 'thread-transport',
+      turnId: 'turn-transport',
+    })
+
+    const diagnosticEvents = onTraceEvent.mock.calls
+      .map(([event]) => event)
+      .filter((event) => {
+        const rawEvent = asRecord(event.rawEvent)
+        return rawEvent.schema === CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA
+      })
+    expect(diagnosticEvents).toHaveLength(2)
+
+    const retryDiagnostic = asRecord(diagnosticEvents[0]?.rawEvent)
+    expect(retryDiagnostic).toMatchObject({
+      schema: CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
+      type: 'assistant.codex.transport_diagnostics',
+      codexTransportAdditionalDetailsPresent: true,
+      codexTransportEventKind: 'stream-idle-timeout',
+      codexTransportFallbackActivated: false,
+      codexTransportIdleTimeout: true,
+      codexTransportRetryCount: 2,
+      codexTransportRetryMax: 5,
+      codexTransportSourceMethod: 'error',
+      codexTransportStreamDisconnected: true,
+      codexTransportThreadIdPresent: true,
+      codexTransportTransport: 'websocket',
+      codexTransportTurnIdPresent: true,
+      codexTransportWillRetry: true,
+    })
+
+    const fallbackDiagnostic = asRecord(diagnosticEvents[1]?.rawEvent)
+    expect(fallbackDiagnostic).toMatchObject({
+      schema: CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
+      type: 'assistant.codex.transport_diagnostics',
+      codexTransportEventKind: 'transport-fallback',
+      codexTransportFallbackActivated: true,
+      codexTransportSourceMethod: 'warning',
+      codexTransportTransport: 'websocket',
+      codexTransportWillRetry: null,
+    })
+
+    expect(JSON.stringify(diagnosticEvents)).not.toContain('api.openai.com')
   })
 
   it('keeps Codex action diagnostics scoped and deduped per active turn', () => {
