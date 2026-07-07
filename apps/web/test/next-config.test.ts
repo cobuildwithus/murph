@@ -312,7 +312,7 @@ test("production build bounds Turbopack memory and skips source maps to fit the 
     productionNextConfig.experimental?.turbopackMemoryLimit,
     HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES,
   );
-  assert.equal(HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES, 4 * 1024 * 1024 * 1024);
+  assert.equal(HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES, 3 * 1024 * 1024 * 1024);
   assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
 });
 

@@ -305,7 +305,7 @@ report_sampled_maxima() {
   local state_file="$1"
   local sampled_maxima
 
-  if [[ -r "$state_file" ]]; then
+  if [[ -n "$state_file" && -r "$state_file" ]]; then
     sampled_maxima="$(cat "$state_file" 2>/dev/null || true)"
     if [[ -n "$sampled_maxima" ]]; then
       printf '[apps/web build memory guard] sampled maxima: %s\n' "$sampled_maxima" >&2
@@ -362,9 +362,13 @@ if [[ ! -r "$memory_peak_file" ]]; then
   fail "cannot read ${memory_peak_file}; memory peak accounting is unavailable."
 fi
 
-sampler_state_file="$(mktemp "${TMPDIR:-/tmp}/murph-web-build-memory-samples.XXXXXX")"
-sample_cgroup_memory "$sampler_state_file" "$memory_current_file" "$memory_stat_file" &
-sampler_pid=$!
+if sampler_state_file="$(mktemp "${TMPDIR:-/tmp}/murph-web-build-memory-samples.XXXXXX" 2>/dev/null)"; then
+  sample_cgroup_memory "$sampler_state_file" "$memory_current_file" "$memory_stat_file" &
+  sampler_pid=$!
+else
+  printf '[apps/web build memory guard] warning: sampler disabled: could not create state file\n' >&2
+  sampler_state_file=""
+fi
 
 status=0
 (
@@ -388,7 +392,9 @@ if [[ -n "${sampler_pid:-}" ]]; then
 fi
 
 report_failed=0
-report_sampled_maxima "$sampler_state_file"
+if [[ -n "$sampler_state_file" ]]; then
+  report_sampled_maxima "$sampler_state_file"
+fi
 report_cgroup_memory "$status" || report_failed=1
 if [[ "$report_failed" -ne 0 && "$status" -eq 0 ]]; then
   status=1
