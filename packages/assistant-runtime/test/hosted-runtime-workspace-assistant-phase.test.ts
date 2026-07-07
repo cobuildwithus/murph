@@ -72,13 +72,18 @@ const mocks = vi.hoisted(() => ({
   scheduleDeviceActivityTriggeredAutomations: vi.fn(),
 }));
 
-vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
-  findAssistantAutoReplyDeliveryIntentIds:
-    mocks.findAssistantAutoReplyDeliveryIntentIds,
-  listPendingAssistantAutoReplyLinqCleanupEvidence:
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence,
-  markAssistantAutoReplyLinqCleanupQueued: mocks.markAssistantAutoReplyLinqCleanupQueued,
-}));
+vi.mock("@murphai/assistant-engine/assistant-automation", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@murphai/assistant-engine/assistant-automation")>();
+  return {
+    ...actual,
+    findAssistantAutoReplyDeliveryIntentIds:
+      mocks.findAssistantAutoReplyDeliveryIntentIds,
+    listPendingAssistantAutoReplyLinqCleanupEvidence:
+      mocks.listPendingAssistantAutoReplyLinqCleanupEvidence,
+    markAssistantAutoReplyLinqCleanupQueued: mocks.markAssistantAutoReplyLinqCleanupQueued,
+  };
+});
 
 vi.mock("@murphai/assistant-engine/assistant-store", () => ({
   readAssistantAutomationState: mocks.readAssistantAutomationState,
@@ -93,6 +98,11 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
   return {
     ...actual,
     applyMurphManagedAutomations: mocks.applyMurphManagedAutomations,
+    compareAssistantInputCursors: automation.compareAssistantInputCursors,
+    createStoreBackedAssistantInputSource:
+      automation.createStoreBackedAssistantInputSource,
+    DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT:
+      automation.DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
     getAssistantCronStatus: mocks.getAssistantCronStatus,
     readAssistantInputEvent: mocks.readAssistantInputEvent,
     readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
@@ -181,7 +191,12 @@ import {
 import {
   markAssistantContextSnapshotDirty,
   readAssistantContextSnapshotState,
+  saveAssistantAutomationState,
+  saveAssistantSession,
 } from "@murphai/assistant-engine";
+import {
+  parseAssistantSessionRecord,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import {
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
@@ -216,6 +231,8 @@ type RuntimeUsageRecordPort = NonNullable<
 type RuntimeDeviceSyncConnectLinkRequest = Parameters<
   RuntimeDeviceSyncPort["createConnectLink"]
 >[0];
+type HostedPendingAssistantInputModule =
+  typeof import("../src/hosted-runtime/pending-assistant-input.ts");
 
 function withoutAssistantTurnTimingLogs(
   logRequests: HostedRuntimeLogRequest[],
@@ -271,6 +288,17 @@ function createNoDirtyRuntimeDeviceSyncPortMethods(): Pick<
       };
     },
   };
+}
+
+async function resolveHostedPendingAssistantInputWakeAtWithRealImplementation(
+  input: Parameters<
+    HostedPendingAssistantInputModule["resolveHostedPendingAssistantInputWakeAt"]
+  >[0],
+): Promise<string | null> {
+  const actual = await vi.importActual<HostedPendingAssistantInputModule>(
+    "../src/hosted-runtime/pending-assistant-input.ts",
+  );
+  return actual.resolveHostedPendingAssistantInputWakeAt(input);
 }
 
 async function runHostedWorkspaceDurableCheckpointEffects(
@@ -5921,13 +5949,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("stages one pending assistant input when terminal member-facing delivery fails", async () => {
+  it("keeps terminal member-facing delivery failure pending input replyable and idempotent", async () => {
     const vaultRoot = await mkdtemp(path.join(
       tmpdir(),
       "murph-outbox-terminal-failure-",
     ));
     try {
       const now = "2026-05-08T16:00:08.000Z";
+      const laterNow = "2026-05-08T16:05:08.000Z";
+      const intentCreatedAt = "2026-05-08T16:00:00.000Z";
+      await seedDirectLinqAssistantInputRoute({
+        enabledAt: intentCreatedAt,
+        vaultRoot,
+      });
+      mocks.resolveHostedPendingAssistantInputWakeAt.mockImplementation(
+        resolveHostedPendingAssistantInputWakeAtWithRealImplementation,
+      );
+      const actualAssistantAutomation =
+        await vi.importActual<typeof import("@murphai/assistant-engine/assistant-automation")>(
+          "@murphai/assistant-engine/assistant-automation",
+        );
+      mocks.readAssistantInputEvent.mockImplementation(
+        actualAssistantAutomation.readAssistantInputEvent,
+      );
       const baseEffect = createDeliveryEffect();
       const deliveryEffect = {
         ...baseEffect,
@@ -5958,25 +6002,23 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         effectFingerprint: deliveryEffect.fingerprint,
         retryable: false,
       };
+      mocks.readAssistantOutboxIntent.mockImplementation(async (
+        _vaultRoot: string,
+        intentId: string,
+      ) => intentId === deliveryEffect.effectId
+        ? createTerminalFailureOutboxIntent({
+          createdAt: intentCreatedAt,
+          effectId: deliveryEffect.effectId,
+        })
+        : null);
       mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
         deliveryEffect,
       ]);
       mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
         preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
       });
-      let deliveryDrained = false;
       mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(async () => {
-        deliveryDrained = true;
         return [terminalFailure];
-      });
-      mocks.resolveHostedPendingAssistantInputWakeAt.mockImplementation(async (input) => {
-        if (!deliveryDrained) {
-          return null;
-        }
-        const inputIds = await readExistingHostedPendingAssistantInputIds({
-          vaultRoot,
-        });
-        return inputIds.length > 0 ? input.now?.() ?? now : null;
       });
 
       const firstResult = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -6001,14 +6043,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot,
       });
       expect(pendingInputIds).toHaveLength(1);
-      const actualAssistantAutomation =
-        await vi.importActual<typeof import("@murphai/assistant-engine/assistant-automation")>(
-          "@murphai/assistant-engine/assistant-automation",
-        );
+      await expect(resolveHostedPendingAssistantInputWakeAtWithRealImplementation({
+        now: () => now,
+        vaultRoot,
+      })).resolves.toBe(now);
+      pendingInputIds = await readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      });
+      expect(pendingInputIds).toHaveLength(1);
       const event = await actualAssistantAutomation.readAssistantInputEvent({
         inputId: pendingInputIds[0]!,
         vault: vaultRoot,
       });
+      expect(event?.conversation?.source).toBe("linq");
+      expect(event?.replyTarget).toEqual({
+        channel: "linq",
+        messageId: null,
+        threadId: "linq_chat_direct",
+      });
+      expect(event?.occurredAt).toBe(intentCreatedAt);
+      expect(event?.receivedAt).toBe(intentCreatedAt);
       expect(event?.content.text).toContain(
         "outgoing message failed to send and was NOT delivered",
       );
@@ -6021,28 +6075,133 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(event?.content.text).not.toContain("documents/lab-results.pdf");
       expect(event?.content.text).not.toContain("presigned");
 
-      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
-        deliveryEffect,
-      ]);
-      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
-        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      const noteTextsSeenByAssistantPass: string[] = [];
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+        expect(laneInput.freshAssistantInputIds).toEqual([event?.inputId]);
+        for (const inputId of laneInput.freshAssistantInputIds) {
+          const actualEvent = await actualAssistantAutomation.readAssistantInputEvent({
+            inputId,
+            vault: vaultRoot,
+          });
+          if (actualEvent?.content.text) {
+            noteTextsSeenByAssistantPass.push(actualEvent.content.text);
+          }
+        }
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
       });
-      deliveryDrained = false;
 
       const secondResult = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-        now: () => now,
+        assistantInputIds: [event!.inputId],
+        importedCount: 1,
+        now: () => laterNow,
         vaultRoot,
         workspace: createDueAssistantWorkspace(),
       }));
-      if (secondResult.afterCheckpoint) {
-        await secondResult.afterCheckpoint();
-      }
+
+      expect(secondResult).toEqual(expect.objectContaining({
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 1,
+        }),
+      }));
+      expect(noteTextsSeenByAssistantPass).toHaveLength(1);
+      expect(noteTextsSeenByAssistantPass[0]).toContain(
+        "outgoing message failed to send and was NOT delivered",
+      );
 
       pendingInputIds = await readExistingHostedPendingAssistantInputIds({
         vaultRoot,
       });
       expect(pendingInputIds).toHaveLength(1);
       expect(pendingInputIds[0]).toBe(event?.inputId);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not stage pending assistant input for terminal failures without a direct route", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-terminal-failure-no-route-",
+    ));
+    try {
+      const now = "2026-05-08T16:00:08.000Z";
+      const intentCreatedAt = "2026-05-08T16:00:00.000Z";
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: intentCreatedAt,
+        }],
+        updatedAt: intentCreatedAt,
+        version: 1,
+      });
+      mocks.resolveHostedPendingAssistantInputWakeAt.mockImplementation(
+        resolveHostedPendingAssistantInputWakeAtWithRealImplementation,
+      );
+      const actualAssistantAutomation =
+        await vi.importActual<typeof import("@murphai/assistant-engine/assistant-automation")>(
+          "@murphai/assistant-engine/assistant-automation",
+        );
+      mocks.readAssistantInputEvent.mockImplementation(
+        actualAssistantAutomation.readAssistantInputEvent,
+      );
+      const deliveryEffect = {
+        ...createDeliveryEffect(),
+        effectId: "intent_vault_file_terminal_failure_no_route",
+        fingerprint: "fingerprint_vault_file_terminal_failure_no_route",
+        payload: {
+          ...createDeliveryEffect().payload,
+          channel: "linq" as const,
+          idempotencyKey:
+            "assistant-outbox:intent_vault_file_terminal_failure_no_route",
+        },
+      };
+      mocks.readAssistantOutboxIntent.mockResolvedValue(
+        createTerminalFailureOutboxIntent({
+          createdAt: intentCreatedAt,
+          effectId: deliveryEffect.effectId,
+        }),
+      );
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([
+        {
+          ...createFailedDeliveryOutcome({
+            deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+            effectId: deliveryEffect.effectId,
+          }),
+          deliveryStatus: "failed" as const,
+          effectFingerprint: deliveryEffect.fingerprint,
+          retryable: false,
+        },
+      ]);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = result.afterCheckpoint
+        ? await result.afterCheckpoint()
+        : result;
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 0,
+        }),
+      }));
+      await expect(readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      })).resolves.toEqual([]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -10811,6 +10970,92 @@ function createDeliveryEffect(): HostedAssistantDeliverySideEffect {
       transportIdempotent: true,
       turnId: "turn_synthetic",
     },
+  };
+}
+
+async function seedDirectLinqAssistantInputRoute(input: {
+  enabledAt: string;
+  vaultRoot: string;
+}): Promise<void> {
+  await saveAssistantSession(input.vaultRoot, parseAssistantSessionRecord({
+    alias: null,
+    binding: {
+      actorId: "actor_linq_direct",
+      channel: "linq",
+      conversationKey: null,
+      delivery: {
+        kind: "thread",
+        target: "linq_chat_direct",
+      },
+      identityId: "identity_linq_direct",
+      threadId: "thread_linq_direct",
+      threadIsDirect: true,
+    },
+    createdAt: input.enabledAt,
+    lastTurnAt: null,
+    resumeState: null,
+    schema: "murph.assistant-session.v1",
+    sessionId: "asst_linq_direct",
+    target: {
+      adapter: "codex-cli",
+      approvalPolicy: "never",
+      codexCommand: null,
+      codexHome: null,
+      model: "gpt-5.5",
+      modelProvider: "vercel-ai-gateway",
+      oss: false,
+      profile: null,
+      reasoningEffort: "medium",
+      sandbox: "danger-full-access",
+    },
+    turnCount: 0,
+    updatedAt: input.enabledAt,
+  }));
+  await saveAssistantAutomationState(input.vaultRoot, {
+    autoReply: [{
+      channel: "linq",
+      eligibleAfter: null,
+      enabledAt: input.enabledAt,
+    }],
+    updatedAt: input.enabledAt,
+    version: 1,
+  });
+}
+
+function createTerminalFailureOutboxIntent(input: {
+  createdAt: string;
+  effectId: string;
+}) {
+  return {
+    actorId: "actor_linq_direct",
+    answeredMailboxItemIds: [],
+    bindingDelivery: { kind: "thread", target: "linq_chat_direct" },
+    channel: "linq",
+    createdAt: input.createdAt,
+    dedupeKey: `dedupe_${input.effectId}`,
+    delivery: null,
+    deliveryConfirmationPending: false,
+    deliveryIdempotencyKey: `assistant-outbox:${input.effectId}`,
+    deliveryTransportIdempotent: true,
+    explicitTarget: null,
+    identityId: "identity_linq_direct",
+    intentId: input.effectId,
+    lastAttemptAt: null,
+    lastError: null,
+    media: [],
+    message: "Synthetic delivery",
+    nextAttemptAt: null,
+    operation: null,
+    replyToMessageId: "linq_message_direct",
+    sentAt: null,
+    sessionId: "asst_linq_direct",
+    status: "failed",
+    subject: null,
+    targetFingerprint: `target_${input.effectId}`,
+    threadId: "thread_linq_direct",
+    threadIsDirect: true,
+    turnId: "turn_synthetic",
+    updatedAt: input.createdAt,
   };
 }
 

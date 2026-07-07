@@ -4,23 +4,19 @@ import type {
   HostedExecutionGroupNewsletterEmailNeededWake,
 } from "@murphai/hosted-execution/contracts";
 import {
-  listAssistantSessions,
   recordHostedMailboxAssistantInputItem,
   upsertAssistantInputEvent,
   type AssistantInputEventRecord,
   type UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
-import {
-  type AssistantSession,
-} from "@murphai/operator-config/assistant-cli-contracts";
-import {
-  normalizeAssistantRouteString,
-} from "@murphai/operator-config/assistant/current-delivery-route";
 
 import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
+import {
+  readCurrentDirectAssistantSessionRoute,
+} from "./direct-assistant-session-route.ts";
 import {
   enqueueHostedPendingAssistantInputId,
 } from "./pending-input-index.ts";
@@ -31,7 +27,6 @@ const GROUP_NEWSLETTER_EMAIL_NEEDED_NO_ROUTE_REASON =
   "group-newsletter.email-needed.no-direct-route";
 const ASSISTANT_INPUT_EVENT_SAFE_TOKEN_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u;
-const DELIVERY_CHANNELS: readonly string[] = ["linq", "telegram"];
 
 export async function importHostedGroupNewsletterEmailNeededMailboxItem(input: {
   item: HostedMailboxResolvedImportItem;
@@ -93,55 +88,6 @@ export async function importHostedGroupNewsletterEmailNeededMailboxItem(input: {
     ...(input.item.durablyConsumed === true ? {} : { assistantInputId: event.inputId }),
     reasonCode: GROUP_NEWSLETTER_EMAIL_NEEDED_STAGED_REASON,
     status: "imported",
-  };
-}
-
-async function readCurrentDirectAssistantSessionRoute(
-  vaultRoot: string,
-): Promise<Pick<AssistantInputEventRecord, "conversation" | "replyTarget"> | null> {
-  const sessions = await listAssistantSessions(vaultRoot);
-  for (const session of sessions) {
-    const route = readDirectAssistantSessionRoute(session);
-    if (route) {
-      return route;
-    }
-  }
-
-  return null;
-}
-
-function readDirectAssistantSessionRoute(
-  session: Pick<AssistantSession, "binding">,
-): Pick<AssistantInputEventRecord, "conversation" | "replyTarget"> | null {
-  const binding = session.binding;
-  if (binding.threadIsDirect !== true) {
-    return null;
-  }
-
-  const channel = normalizeAssistantRouteString(binding.channel);
-  if (!channel || !DELIVERY_CHANNELS.includes(channel)) {
-    return null;
-  }
-
-  const deliveryTarget = normalizeAssistantRouteString(binding.delivery?.target);
-  if (!deliveryTarget) {
-    return null;
-  }
-
-  return {
-    conversation: {
-      accountId: normalizeAssistantRouteString(binding.identityId),
-      actorId: normalizeAssistantRouteString(binding.actorId),
-      actorIsSelf: false,
-      source: channel,
-      threadId: normalizeAssistantRouteString(binding.threadId),
-      threadIsDirect: true,
-    },
-    replyTarget: {
-      channel,
-      messageId: null,
-      threadId: deliveryTarget,
-    },
   };
 }
 

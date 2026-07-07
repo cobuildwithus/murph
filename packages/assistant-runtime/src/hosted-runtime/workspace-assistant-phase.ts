@@ -75,6 +75,9 @@ import {
   resolveUnambiguousCurrentDeliveryRoute,
 } from "./current-delivery-route.ts";
 import {
+  readCurrentDirectAssistantSessionRoute,
+} from "./direct-assistant-session-route.ts";
+import {
   runHostedAssistantAutomationLane,
 } from "./maintenance.ts";
 import {
@@ -3925,7 +3928,6 @@ async function drainHostedPostCheckpointDelivery(input: {
   const stagedTerminalFailureInputCount =
     await stageHostedTerminalOutboxFailureInputs({
       deliveryEffects: input.assistantDeliveryEffects,
-      now: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
       outcomes,
       vaultRoot: input.input.restored.vaultRoot,
     });
@@ -4128,16 +4130,29 @@ function isHostedAssistantDeliveryOutcomeTerminalized(
 async function stageHostedTerminalOutboxFailureInputs(input: {
   deliveryEffects: HostedAssistantDeliveryEffects;
   outcomes: readonly HostedAssistantDeliveryOutcome[];
-  now: string;
   vaultRoot: string;
 }): Promise<number> {
+  const terminalFailures = input.outcomes.filter((outcome) =>
+    shouldStageHostedTerminalOutboxFailureInput(outcome)
+  );
+  if (terminalFailures.length === 0) {
+    return 0;
+  }
+  const route = await readCurrentDirectAssistantSessionRoute(input.vaultRoot);
+  if (!route) {
+    return 0;
+  }
   const effectsById = new Map(
     input.deliveryEffects.map((effect) => [effect.effectId, effect]),
   );
   let staged = 0;
 
-  for (const outcome of input.outcomes) {
-    if (!shouldStageHostedTerminalOutboxFailureInput(outcome)) {
+  for (const outcome of terminalFailures) {
+    const occurredAt = await readHostedTerminalOutboxFailureInputOccurredAt({
+      effectId: outcome.effectId,
+      vaultRoot: input.vaultRoot,
+    });
+    if (!occurredAt) {
       continue;
     }
     const identity = safeHostedAssistantInputTokenOrHash(
@@ -4155,10 +4170,10 @@ async function stageHostedTerminalOutboxFailureInputs(input: {
           transcriptText: text,
           userMessageContent: [{ text, type: "text" }],
         },
-        conversation: null,
-        occurredAt: input.now,
-        receivedAt: input.now,
-        replyTarget: null,
+        conversation: route.conversation,
+        occurredAt,
+        receivedAt: occurredAt,
+        replyTarget: route.replyTarget,
         sourceMetadata: null,
         sourceRef: {
           dedupeKey: identity,
@@ -4188,6 +4203,17 @@ async function stageHostedTerminalOutboxFailureInputs(input: {
   }
 
   return staged;
+}
+
+async function readHostedTerminalOutboxFailureInputOccurredAt(input: {
+  effectId: string;
+  vaultRoot: string;
+}): Promise<string | null> {
+  const intent = await readAssistantOutboxIntent(input.vaultRoot, input.effectId);
+  const createdAt = intent?.createdAt ?? null;
+  return typeof createdAt === "string" && Number.isFinite(Date.parse(createdAt))
+    ? createdAt
+    : null;
 }
 
 function shouldStageHostedTerminalOutboxFailureInput(
