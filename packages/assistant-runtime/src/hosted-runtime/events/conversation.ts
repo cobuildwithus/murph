@@ -78,6 +78,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
   const runtime = await openInboxRuntime({
     vaultRoot: input.vaultRoot,
   });
+  assertHostedConversationProjectionLive(input.signal ?? null);
   let pipeline: Awaited<ReturnType<typeof createInboxPipeline>> | null = null;
 
   try {
@@ -85,20 +86,26 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       runtime,
       vaultRoot: input.vaultRoot,
     });
+    assertHostedConversationProjectionLive(input.signal ?? null);
     let persistedCapture: PersistedCapture;
     try {
       persistedCapture = await pipeline.processCapture(capture);
     } catch (error) {
+      if (isHostedConversationProjectionAbortError(error, input.signal ?? null)) {
+        throw readHostedConversationProjectionAbortReason(error, input.signal ?? null);
+      }
       throw new HostedConversationInboxProjectionError(
         "Canonical inbox capture projection failed.",
         { cause: error },
       );
     }
+    assertHostedConversationProjectionLive(input.signal ?? null);
     const metrics = await drainHostedConversationParsers({
       captureId: persistedCapture.captureId,
       parserToolchain: input.runtime.parserToolchain ?? null,
       platform: input.runtime.platform,
       runtime,
+      signal: input.signal ?? null,
       vaultRoot: input.vaultRoot,
     });
 
@@ -120,6 +127,7 @@ async function drainHostedConversationParsers(input: {
   parserToolchain: NormalizedHostedAssistantRuntimeConfig["parserToolchain"];
   platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
   runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedConversationWakeMetrics> {
   const hasPendingJob = input.runtime.listAttachmentParseJobs({
@@ -160,6 +168,9 @@ async function drainHostedConversationParsers(input: {
       vaultRoot: input.vaultRoot,
     });
   } catch (error) {
+    if (isHostedConversationProjectionAbortError(error, input.signal ?? null)) {
+      throw readHostedConversationProjectionAbortReason(error, input.signal ?? null);
+    }
     return await logHostedConversationParserRetryFailure({
       captureId: input.captureId,
       error,
@@ -169,9 +180,12 @@ async function drainHostedConversationParsers(input: {
   }
 
   try {
+    assertHostedConversationProjectionLive(input.signal ?? null);
     const results = await parserService.drain({
       captureId: input.captureId,
+      ...(input.signal ? { signal: input.signal } : {}),
     });
+    assertHostedConversationProjectionLive(input.signal ?? null);
     const failedResults = results.filter((result) => result.status === "failed");
     const observedFailedJobs = input.runtime.listAttachmentParseJobs({
       captureId: input.captureId,
@@ -211,6 +225,9 @@ async function drainHostedConversationParsers(input: {
       parserProcessed: results.length,
     });
   } catch (error) {
+    if (isHostedConversationProjectionAbortError(error, input.signal ?? null)) {
+      throw readHostedConversationProjectionAbortReason(error, input.signal ?? null);
+    }
     return await logHostedConversationParserRetryFailure({
       captureId: input.captureId,
       error,
@@ -253,6 +270,37 @@ async function logHostedConversationParserRetryFailure(input: {
   return createHostedConversationParserMetrics({
     nextWakeAt,
   });
+}
+
+function assertHostedConversationProjectionLive(signal: AbortSignal | null): void {
+  if (signal?.aborted) {
+    throw readHostedConversationProjectionAbortReason(
+      new DOMException("Aborted", "AbortError"),
+      signal,
+    );
+  }
+}
+
+function isHostedConversationProjectionAbortError(
+  error: unknown,
+  signal: AbortSignal | null,
+): boolean {
+  return signal?.aborted === true
+    || (
+      error instanceof DOMException
+      && error.name === "AbortError"
+    )
+    || (
+      error instanceof Error
+      && error.name === "AbortError"
+    );
+}
+
+function readHostedConversationProjectionAbortReason(
+  error: unknown,
+  signal: AbortSignal | null,
+): unknown {
+  return signal?.reason ?? error;
 }
 
 function createHostedConversationParserMetrics(input: {

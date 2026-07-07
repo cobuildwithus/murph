@@ -594,6 +594,7 @@ async function projectHostedConversationAssistantInputBestEffort(input: {
       wake: input.wake,
     });
     timing.projectionPrepareMs = elapsedHostedConversationImportMs(prepareStartedAt);
+    assertHostedConversationMailboxImportLive(input.signal ?? null);
     importStartedAt = Date.now();
     imported = await input.importConversationWake({
       runtime: input.runtime,
@@ -817,6 +818,7 @@ function createHostedConversationAttachmentEvidenceFromCapture(input: {
 
 async function importHostedConversationWakeWithLocalInbox(input: {
   runtime: HostedConversationMailboxRuntime;
+  signal?: AbortSignal | null;
   vaultRoot: string;
   wake: HostedExecutionConversationMessageWake;
 }): Promise<HostedConversationMailboxLocalImportResult> {

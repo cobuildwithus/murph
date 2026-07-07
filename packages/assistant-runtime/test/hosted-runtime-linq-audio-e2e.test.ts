@@ -53,6 +53,149 @@ import {
 } from "../src/hosted-runtime/events/conversation.ts";
 
 describe("hosted Linq audio conversation ingestion", () => {
+  it("threads stop aborts through real local-inbox projection parser drain", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-linq-audio-abort-"));
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const fakeFfmpeg = path.join(workspaceRoot, "fake-ffmpeg");
+    const audioBytes = Uint8Array.from([7, 6, 5, 4, 3, 2, 1]);
+    const controller = new AbortController();
+    const abortReason = new DOMException("Stopped", "AbortError");
+    const providerSignals: Array<AbortSignal | undefined> = [];
+
+    await initializeVault({ vaultRoot, createdAt: "2026-04-29T00:00:00.000Z" });
+    await writeExecutableNodeScript(
+      fakeFfmpeg,
+      [
+        "const fs = require('node:fs');",
+        "const path = require('node:path');",
+        "const outputPath = process.argv.at(-1);",
+        "fs.mkdirSync(path.dirname(outputPath), { recursive: true });",
+        "fs.writeFileSync(outputPath, 'normalized wav bytes');",
+      ].join("\n"),
+    );
+
+    const abortingAudioProvider: ParserProvider = {
+      id: "fake-hosted-audio-parser-abort",
+      locality: "local",
+      openness: "open_source",
+      priority: 500,
+      runtime: "node",
+      async discover() {
+        return {
+          available: true,
+          reason: "available for hosted Linq audio abort test",
+        };
+      },
+      supports(request) {
+        return (request.preparedKind ?? request.artifact.kind) === "audio";
+      },
+      async run(request) {
+        providerSignals.push(request.signal);
+        controller.abort(abortReason);
+        return {
+          text: "This transcript must not be committed after abort.",
+        };
+      },
+    };
+    const downloadDriver = {
+      downloadPart: vi.fn(async (part: { url?: string | null }) => {
+        assert.equal(part.url, "https://cdn.example.test/attachments/aborted-audio.m4a");
+        return audioBytes;
+      }),
+      downloadUrl: vi.fn(async (url: string) => {
+        assert.equal(url, "https://cdn.example.test/attachments/aborted-audio.m4a");
+        return audioBytes;
+      }),
+    };
+
+    mocks.createHostedLinqAttachmentDownloadDriver.mockReturnValue(downloadDriver);
+    mocks.createConfiguredParserRegistry.mockResolvedValue({
+      ffmpeg: {
+        allowSystemLookup: false,
+        commandCandidates: [fakeFfmpeg],
+      },
+      registry: createParserRegistry([abortingAudioProvider]),
+    });
+    mocks.markLinqChatRead.mockResolvedValue(undefined);
+
+    try {
+      await assert.rejects(
+        withTestTimeout(
+          importHostedConversationMessageWakeIntoLocalInbox({
+            runtime: {
+              forwardedEnv: {},
+              userEnv: {},
+              platform: {
+                artifactStore: {
+                  async get() {
+                    return null;
+                  },
+                  async put() {},
+                },
+                deviceSyncPort: null,
+                effectsPort: createHostedRuntimeEffectsPortStub(),
+                usageRecordPort: null,
+              },
+              platformEnv: {},
+            },
+            signal: controller.signal,
+            vaultRoot,
+            wake: buildHostedExecutionLinqConversationMessageWake({
+              eventId: "evt_linq_audio_abort",
+              linqMessage: {
+                chatId: "chat_linq_audio_abort",
+                from: "+15551234567",
+                isFromMe: false,
+                messageId: "msg_linq_audio_abort",
+                parts: [
+                  {
+                    attachmentId: "att_audio_abort",
+                    fileName: "Audio Abort.m4a",
+                    mimeType: "audio/mp4",
+                    size: audioBytes.byteLength,
+                    type: "media",
+                    url: "https://cdn.example.test/attachments/aborted-audio.m4a",
+                  },
+                ],
+                service: "iMessage",
+              },
+              occurredAt: "2026-04-29T17:22:20.000Z",
+              phoneLookupKey: "15551234567",
+              userId: "member_linq_audio",
+            }),
+          }),
+          "aborted parser projection did not settle",
+        ),
+        (error) => error === abortReason,
+      );
+
+      assert.deepEqual(providerSignals, [controller.signal]);
+      const runtime = await openInboxRuntime({ vaultRoot });
+      try {
+        const captures = runtime.listCaptures({
+          limit: 10,
+          source: "linq",
+        });
+        assert.equal(captures.length, 1);
+        const capture = captures[0];
+        assert.ok(capture);
+        const attachment = capture.attachments[0];
+        assert.ok(attachment);
+        assert.equal(attachment.parseState, "pending");
+        assert.equal(attachment.transcriptText ?? null, null);
+      } finally {
+        runtime.close();
+      }
+    } finally {
+      await rm(workspaceRoot, {
+        force: true,
+        maxRetries: 5,
+        recursive: true,
+        retryDelay: 50,
+      });
+    }
+  });
+
   it("stores and transcribes generic iMessage audio media without requiring voice_memo classification", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-linq-audio-"));
     const vaultRoot = path.join(workspaceRoot, "vault");
@@ -226,4 +369,21 @@ describe("hosted Linq audio conversation ingestion", () => {
 async function writeExecutableNodeScript(filePath: string, body: string): Promise<void> {
   await writeFile(filePath, `#!/usr/bin/env node\n${body}\n`, "utf8");
   await chmod(filePath, 0o755);
+}
+
+async function withTestTimeout<T>(
+  promise: Promise<T>,
+  message: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const timer = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), 1_000);
+  });
+  try {
+    return await Promise.race([promise, timer]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }

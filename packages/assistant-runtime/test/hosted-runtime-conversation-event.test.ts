@@ -1053,6 +1053,136 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     ]);
   });
 
+  it("rejects promptly when projection aborts after canonical capture persistence", async () => {
+    const abortController = new AbortController();
+    const abortReason = new DOMException("Stop requested.", "AbortError");
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const pipelineClose = vi.fn();
+    const processCapture = vi.fn(async () => {
+      abortController.abort(abortReason);
+      return {
+        captureId: "capture_after_process_abort",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        deduped: false,
+        envelopePath: "raw/inbox/linq/capture_after_process_abort/envelope.json",
+        eventId: "evt_capture_after_process_abort",
+      };
+    });
+    mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
+      close: pipelineClose,
+      processCapture,
+      runtime: input.runtime,
+    }));
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+    mockOpenInboxRuntimeWithParseJobs({
+      pendingJobs: [
+        createParseJobRecord({
+          captureId: "capture_after_process_abort",
+          jobId: "job_after_process_abort",
+          state: "pending",
+        }),
+      ],
+    });
+
+    await expect(
+      importHostedConversationMessageWakeIntoLocalInbox({
+        runtime: createRuntimeWithLogPort(logRequests),
+        signal: abortController.signal,
+        vaultRoot: "/tmp/assistant-runtime-conversation",
+        wake: buildHostedExecutionLinqConversationMessageWake({
+          eventId: "evt_linq_after_process_abort",
+          linqMessage: {
+            chatId: "chat_after_process_abort",
+            from: "+15551234567",
+            isFromMe: false,
+            messageId: "msg_after_process_abort",
+            parts: [],
+          },
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          phoneLookupKey: "15551234567",
+          userId: "member_123",
+        }),
+      }),
+    ).rejects.toBe(abortReason);
+
+    expect(processCapture).toHaveBeenCalledTimes(1);
+    expect(mocks.createConfiguredParserRegistry).not.toHaveBeenCalled();
+    expect(mocks.createInboxParserService).not.toHaveBeenCalled();
+    expect(logRequests).toHaveLength(0);
+    expect(pipelineClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the abort signal to parser drain and treats drain-boundary aborts as retryable", async () => {
+    const abortController = new AbortController();
+    const abortReason = new DOMException("Stop requested.", "AbortError");
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const pipelineClose = vi.fn();
+    const observedDrainSignals: Array<AbortSignal | null> = [];
+    const drain = vi.fn(async (input: { signal?: AbortSignal | null }) => {
+      observedDrainSignals.push(input.signal ?? null);
+      abortController.abort(abortReason);
+      return [];
+    });
+    mocks.createInboxPipeline.mockImplementationOnce(async (input) => ({
+      close: pipelineClose,
+      processCapture: vi.fn(async () => ({
+        captureId: "capture_abort_at_parser_drain",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        deduped: false,
+        envelopePath: "raw/inbox/linq/capture_abort_at_parser_drain/envelope.json",
+        eventId: "evt_capture_abort_at_parser_drain",
+      })),
+      runtime: input.runtime,
+    }));
+    mocks.createInboxParserService.mockReturnValueOnce({
+      drain,
+    });
+    mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
+      source: "linq",
+    });
+    mockOpenInboxRuntimeWithParseJobs({
+      pendingJobs: [
+        createParseJobRecord({
+          captureId: "capture_abort_at_parser_drain",
+          jobId: "job_abort_at_parser_drain",
+          state: "pending",
+        }),
+      ],
+    });
+
+    await expect(
+      importHostedConversationMessageWakeIntoLocalInbox({
+        runtime: createRuntimeWithLogPort(logRequests),
+        signal: abortController.signal,
+        vaultRoot: "/tmp/assistant-runtime-conversation",
+        wake: buildHostedExecutionLinqConversationMessageWake({
+          eventId: "evt_linq_abort_at_parser_drain",
+          linqMessage: {
+            chatId: "chat_abort_at_parser_drain",
+            from: "+15551234567",
+            isFromMe: false,
+            messageId: "msg_abort_at_parser_drain",
+            parts: [],
+          },
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          phoneLookupKey: "15551234567",
+          userId: "member_123",
+        }),
+      }),
+    ).rejects.toBe(abortReason);
+
+    expect(drain).toHaveBeenCalledWith({
+      captureId: "capture_abort_at_parser_drain",
+      signal: abortController.signal,
+    });
+    expect(observedDrainSignals).toEqual([abortController.signal]);
+    expect(mocks.createInboxParserService).toHaveBeenCalledTimes(1);
+    expect(logRequests).toHaveLength(0);
+    expect(pipelineClose).toHaveBeenCalledTimes(1);
+  });
+
   it("does not initialize parser tooling for legacy non-media pending jobs", async () => {
     mocks.normalizeHostedLinqConversationCapture.mockResolvedValueOnce({
       source: "linq",

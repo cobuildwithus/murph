@@ -3279,6 +3279,46 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(projectionUpdates.length, 0);
   });
 
+  test("rethrows mid-projection aborts after staging without recording projection failure", async () => {
+    const abortReason = new DOMException("Stopped", "AbortError");
+    const controller = new AbortController();
+    const projectionUpdates: unknown[] = [];
+    const order: string[] = [];
+
+    await assert.rejects(
+      () =>
+        importHostedConversationMailboxItem({
+          decodePayload: createDecodedPayloadDecoder(createConversationWake()),
+          async importConversationWake(input) {
+            order.push("import");
+            assert.equal(input.signal, controller.signal);
+            controller.abort(abortReason);
+            throw abortReason;
+          },
+          async prepareWakeContext(input) {
+            order.push("prepare");
+            assert.equal(input.wake.eventId, "evt_synthetic_conversation_001");
+          },
+          item: createResolvedConversationMailboxItem(),
+          runtime: createRuntime(),
+          signal: controller.signal,
+          stageAssistantInputEvent: createAssistantInputEventStager({
+            order,
+            projectionUpdates,
+          }),
+          vaultRoot: "synthetic-vault-root",
+        }),
+      (error) => error === abortReason,
+    );
+
+    assert.deepEqual(order, [
+      "stage:evt_synthetic_conversation_001",
+      "prepare",
+      "import",
+    ]);
+    assert.deepEqual(projectionUpdates, []);
+  });
+
   test("keeps staged mailbox input imported when projection preparation fails", async () => {
     const item = createResolvedConversationMailboxItem();
     const projectionUpdates: unknown[] = [];
