@@ -227,6 +227,9 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'Murph product notes',
     })
     expectCronSchedule(productUpdatesRecord?.schedule)
+    expect(productUpdatesRecord?.assistantTargetOverride).toEqual({
+      reasoningEffort: 'high',
+    })
     expect(productUpdatesRecord?.tags).toContain('murph-managed:weekly-product-updates')
     expect(productUpdatesRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
@@ -251,7 +254,8 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(productUpdatesRecord?.instructions).toContain('Drop items the user is already using')
     expect(productUpdatesRecord?.instructions).toContain('context already surfaced for ordinary assistance')
     expect(productUpdatesRecord?.instructions).toContain('Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used')
-    expect(productUpdatesRecord?.instructions).toContain('Drop items already pitched in a ledger section from roughly the last three months')
+    expect(productUpdatesRecord?.instructions).toContain('Drop items already pitched in any prior ledger section; never repeat a feature pitch')
+    expect(productUpdatesRecord?.instructions).toContain('If an item lists a requires prerequisite')
     expect(productUpdatesRecord?.instructions).toContain('Drop items this conversation cannot actually do right now')
     expect(productUpdatesRecord?.instructions).toContain('Keep this scheduled note text-only')
     expect(productUpdatesRecord?.instructions).not.toContain('Choose 3-7 items')

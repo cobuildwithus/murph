@@ -10,6 +10,7 @@ export interface FeatureCatalogItem {
   id: string;
   priority: 1 | 2 | 3 | 4 | 5;
   relevanceTags: readonly string[];
+  requires?: string;
   sourcePullRequests?: readonly number[];
   summary: string;
   title: string;
@@ -57,7 +58,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "family-private-accounts",
     title: "Private family accounts",
     summary:
-      "A family owner can sponsor Murph for household members while each person keeps a private account. The owner cannot read another member's chats, vault, or health data.",
+      "A family owner can sponsor Murph for household members at a lower per-person price than the standard individual plan, while each person keeps a private account. The owner cannot read another member's chats, vault, or health data.",
     relevanceTags: ["family", "privacy", "plans"],
     priority: 4,
     tryIt: {
@@ -72,7 +73,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "connect-wearables",
     title: "Connect wearable data",
     summary:
-      "Murph can use connected wearable data from sources like WHOOP, Oura, Garmin, and Apple Health to answer questions about sleep, activity, workouts, recovery, and experiment progress.",
+      "Murph can use connected wearable data from sources like WHOOP, Oura, and Garmin to answer questions about sleep, activity, workouts, recovery, and experiment progress.",
     relevanceTags: ["wearables", "data", "assistant"],
     priority: 5,
     tryIt: {
@@ -80,22 +81,8 @@ const RAW_FEATURE_CATALOG_ITEMS = [
       prompt: "Connect my wearable so you can help me understand sleep and workouts.",
     },
     alreadyUsing:
-      "the user has any active wearable, device, or Apple Health connection",
+      "the user has any active wearable or device connection",
     sourcePullRequests: [72, 73, 138, 336],
-  },
-  {
-    id: "apple-health-relay",
-    title: "Apple Health relay",
-    summary:
-      "The iOS companion can relay Apple Health series like wrist temperature, caffeine, water, mindfulness, heart-rate recovery, glucose, blood pressure, menstrual cycles, ECG, and more into Murph.",
-    relevanceTags: ["apple-health", "wearables", "companion"],
-    priority: 4,
-    tryIt: {
-      label: "Connect Apple Health",
-      prompt: "Can we connect Apple Health so you can see more than just workouts?",
-    },
-    alreadyUsing: "the user has connected Apple Health through the companion relay",
-    sourcePullRequests: [138],
   },
   {
     id: "meal-app-imports",
@@ -110,6 +97,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     },
     alreadyUsing:
       "the user has connected a meal logging provider or asked Murph about imported meals",
+    requires: "a meal logging app like MyFitnessPal or Cronometer",
     sourcePullRequests: [72],
   },
   {
@@ -126,6 +114,20 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     alreadyUsing:
       "the user has asked Murph to look up a food label or saved a label-backed food",
     sourcePullRequests: [169],
+  },
+  {
+    id: "food-contaminant-checks",
+    title: "Contaminant checks on foods you eat",
+    summary:
+      "Ask about a food or brand you eat and Murph can check whether that exact product has been flagged in third-party contaminant testing, like heavy metals, and how concerning the result looks.",
+    relevanceTags: ["food", "safety", "data"],
+    priority: 5,
+    tryIt: {
+      label: "Check a food",
+      prompt: "Has my protein powder ever been flagged for heavy metals?",
+    },
+    alreadyUsing:
+      "the user has asked Murph about contaminants, heavy metals, recalls, or product safety flags",
   },
   {
     id: "supplement-label-lookup",
@@ -200,7 +202,23 @@ const RAW_FEATURE_CATALOG_ITEMS = [
       prompt: "After every WHOOP workout, drop me a one-line recovery prompt.",
     },
     alreadyUsing: "the user has an activity-triggered automation",
+    requires: "a connected wearable",
     sourcePullRequests: [59],
+  },
+  {
+    id: "sleep-review-followups",
+    title: "Morning sleep and recovery check-ins",
+    summary:
+      "After your wearable syncs a night of sleep, Murph can follow up in the morning to talk through how you slept and what your recovery means for the day ahead.",
+    relevanceTags: ["sleep", "wearables", "automations"],
+    priority: 4,
+    tryIt: {
+      label: "Set up a morning check-in",
+      prompt: "After my sleep syncs each morning, check in with me about my recovery.",
+    },
+    alreadyUsing:
+      "the user has a sleep-triggered or morning recovery check-in automation",
+    requires: "a connected wearable that records sleep",
   },
   {
     id: "exercise-image-demos",
@@ -272,6 +290,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
       prompt: "Reply with a quick voice memo summarizing my workouts this week.",
     },
     alreadyUsing: "the user has asked for or received a generated voice memo",
+    requires: "a chat channel that can receive audio messages",
     sourcePullRequests: [221],
   },
   {
@@ -316,6 +335,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
       prompt: "Write me a 30-second hype song for tonight's workout, upbeat and no lyrics.",
     },
     alreadyUsing: "the user has asked Murph to create a song",
+    requires: "a chat channel that can receive audio messages",
     sourcePullRequests: [279],
   },
   {
@@ -338,7 +358,7 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     summary:
       "Connect apps like Gmail, Outlook, Google Drive, OneDrive, Dropbox, Notion, Todoist, or Google Tasks and Murph can use them when you ask.",
     details:
-      "Useful for drafting email, pulling a document, capturing a note, checking task context, or keeping a health-related workflow in chat.",
+      "Useful for drafting a note to your trainer from Gmail, saving a meal plan to Notion, pulling a lab PDF from Drive, or adding supplement refills to your task list.",
     relevanceTags: ["integrations", "automation", "tools"],
     priority: 5,
     tryIt: {
@@ -353,29 +373,44 @@ const RAW_FEATURE_CATALOG_ITEMS = [
     id: "calendar-event-creation",
     title: "Calendar event creation",
     summary:
-      "With a connected Google or Outlook calendar, Murph can add the event you described with title, start time, duration, location, and notes.",
+      "With a connected Google or Outlook calendar, Murph can block workout time, add a doctor or dentist appointment, or protect a wind-down hour, with the title, time, location, and notes you described.",
     details:
       "Calendar writes stay scoped to the event you asked for. Murph does not add surprise invites or online meeting rooms by default.",
     relevanceTags: ["integrations", "calendar", "automation"],
     priority: 5,
     tryIt: {
       label: "Add an event",
-      prompt: "Add a 45-minute call with Sam to my calendar tomorrow at 2pm.",
+      prompt: "Add my Thursday 6pm lifting session to my calendar every week.",
     },
     alreadyUsing:
       "the user has asked Murph to create a calendar event through a connected calendar",
+    requires: "a connected Google or Outlook calendar",
     sourcePullRequests: [284],
+  },
+  {
+    id: "supplement-ordering",
+    title: "Murph can order your supplements",
+    summary:
+      "Running low on a supplement? Murph can get the reorder ready online, like your usual magnesium on Amazon, and pause for you to confirm before anything is placed.",
+    relevanceTags: ["supplements", "orders", "automation"],
+    priority: 5,
+    tryIt: {
+      label: "Reorder a supplement",
+      prompt: "I'm almost out of creatine. Can you get a reorder ready?",
+    },
+    alreadyUsing:
+      "the user has asked Murph to prepare, reorder, or track a supplement purchase",
   },
   {
     id: "browser-automation",
     title: "Browser tasks with handoff",
     summary:
-      "Murph can drive websites for health-relevant tasks like booking appointments, filling forms, finding information, or preparing orders, then pause for logins, payment, or final confirmation.",
+      "Murph can handle website tasks for your health life, like booking a dentist or doctor appointment, filling out a patient intake form, or tracking down a product, then pause for you to sign in or confirm anything final.",
     relevanceTags: ["browser", "automation", "handoff"],
     priority: 5,
     tryIt: {
       label: "Delegate a browser task",
-      prompt: "Help me complete this website task and pause before anything that needs my login, payment, or final confirmation.",
+      prompt: "Book me a dentist cleaning and pause before anything final.",
     },
     alreadyUsing:
       "the user has asked Murph to use the browser or has an active or completed browser handoff",
@@ -441,6 +476,9 @@ export function validateFeatureCatalogItems(
     assertText(item.tryIt.label, "try-it label", 120, true);
     assertText(item.tryIt.prompt, "try-it prompt", 500, true);
     assertText(item.alreadyUsing, "already-using signal", 700, false);
+    if (item.requires !== undefined) {
+      assertText(item.requires, "requires note", 200, true);
+    }
     if (
       item.sourcePullRequests?.some(
         (pullRequest) => !Number.isInteger(pullRequest) || pullRequest <= 0,

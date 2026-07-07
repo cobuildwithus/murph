@@ -365,6 +365,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       expression: '30 11 * * 4',
     },
     continuityPolicy: 'fresh',
+    assistantTargetOverride: {
+      reasoningEffort: 'high',
+    },
     tags: [
       'murph-managed:weekly-product-updates',
     ],
@@ -391,8 +394,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Treat that catalog as the only source of truth for what Murph can do. Do not invent capabilities, availability, or try-it instructions beyond it.',
       '- If the catalog is unavailable or invalid, do not fabricate capabilities; fall back to the changelog kind.',
       "- Drop items the user is already using. Each item's alreadyUsing field says what to check; judge it using only context Murph already has for normal assistance, and do not inspect raw health values solely to personalize suggestions. Judge alreadyUsing only from context already surfaced for ordinary assistance: connected providers and channels, active experiments and automations, group memberships, and recurring request categories. Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used.",
-      '- Drop items already pitched in a ledger section from roughly the last three months.',
+      '- Drop items already pitched in any prior ledger section; never repeat a feature pitch.',
       '- Drop items this conversation cannot actually do right now: if the capability behind an item, such as phone calls, voice memos, songs, or a connected-app action, is not available as a tool in this runtime or supported on this channel, do not pitch it. When unsure, prefer items you are certain work here.',
+      "- If an item lists a requires prerequisite, check it from the same ordinary context. When the user clearly lacks the prerequisite, either skip the item or make the prerequisite an explicit, honest part of the pitch, such as connecting a wearable first.",
       '- From the remainder pick the 2-3 items this user is most likely to genuinely value right now, judged by user-fit, practical benefit, and editorial priority. Each needs a concrete reason grounded in this user\'s context. One strong item beats padding.',
       "- Frame each as something the user can try right now in this chat, weaving the item's tryIt prompt in naturally rather than quoting it mechanically.",
       '',
