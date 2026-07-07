@@ -4229,6 +4229,10 @@ function readHostedTerminalOutboxFailureInputOccurredAt(
 function buildHostedTerminalOutboxFailureRouteFromIntent(
   intent: HostedTerminalOutboxFailureIntent | null,
 ): HostedTerminalOutboxFailureRoute | null {
+  if (intent?.operation) {
+    return null;
+  }
+
   if (intent?.threadIsDirect !== true) {
     return null;
   }

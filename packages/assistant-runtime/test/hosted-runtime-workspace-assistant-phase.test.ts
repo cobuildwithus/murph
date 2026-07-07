@@ -8,6 +8,9 @@ import type {
   HostedRuntimeLatencyTraceRequest,
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  AssistantOutboxIntent,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
@@ -6571,6 +6574,85 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("does not stage pending assistant input for terminal reaction operation failures", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-terminal-failure-reaction-",
+    ));
+    try {
+      const now = "2026-05-08T16:00:08.000Z";
+      const intentCreatedAt = "2026-05-08T16:00:00.000Z";
+      const deliveryEffect = {
+        ...createDeliveryEffect(),
+        effectId: "intent_telegram_reaction_terminal_failure",
+        fingerprint: "fingerprint_telegram_reaction_terminal_failure",
+        payload: {
+          ...createDeliveryEffect().payload,
+          channel: "telegram" as const,
+          idempotencyKey:
+            "assistant-outbox:intent_telegram_reaction_terminal_failure",
+        },
+      };
+      mocks.readAssistantOutboxIntent.mockResolvedValue(
+        createTerminalFailureOutboxIntent({
+          actorId: "actor_telegram_direct",
+          bindingDeliveryTarget: "telegram_chat_direct",
+          channel: "telegram",
+          createdAt: intentCreatedAt,
+          effectId: deliveryEffect.effectId,
+          explicitTarget: null,
+          identityId: "identity_telegram_direct",
+          operation: {
+            kind: "message-reaction",
+            reaction: "heart",
+          },
+          replyToMessageId: "telegram_message_direct",
+          threadId: "thread_telegram_direct",
+          threadIsDirect: true,
+        }),
+      );
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([
+        {
+          ...createFailedDeliveryOutcome({
+            deliveryChannel: "telegram",
+            deliveryErrorCode: "TELEGRAM_REACTION_DELIVERY_FAILED",
+            effectId: deliveryEffect.effectId,
+          }),
+          deliveryStatus: "failed" as const,
+          effectFingerprint: deliveryEffect.fingerprint,
+          retryable: false,
+        },
+      ]);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = result.afterCheckpoint
+        ? await result.afterCheckpoint()
+        : result;
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 0,
+          hostedOutboxTerminalizedSending: 1,
+        }),
+      }));
+      await expect(readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      })).resolves.toEqual([]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("does not stage pending assistant input for participant terminal failure delivery candidates", async () => {
     const vaultRoot = await mkdtemp(path.join(
       tmpdir(),
@@ -11556,6 +11638,7 @@ function createTerminalFailureOutboxIntent(input: {
   replyToMessageId?: string | null;
   threadId?: string | null;
   threadIsDirect?: boolean | null;
+  operation?: AssistantOutboxIntent["operation"];
 }) {
   const bindingDeliveryTarget = "bindingDeliveryTarget" in input
     ? input.bindingDeliveryTarget
@@ -11596,7 +11679,7 @@ function createTerminalFailureOutboxIntent(input: {
     media: [],
     message: "Synthetic delivery",
     nextAttemptAt: null,
-    operation: null,
+    operation: input.operation ?? null,
     replyToMessageId,
     sentAt: null,
     sessionId: "asst_linq_direct",
