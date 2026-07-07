@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/src/lib/utils";
 
-const BAR_COUNT = 56;
+const BAR_COUNT = 32;
 
 const BAR_HEIGHTS = Array.from({ length: BAR_COUNT }, (_, i) => {
   const t = i / (BAR_COUNT - 1);
@@ -134,7 +134,7 @@ export function VoiceMemoPlayer({
               <span
                 key={i}
                 className={cn(
-                  "block w-[2px] rounded-full transition-colors",
+                  "block w-[3px] rounded-full transition-colors",
                   filled ? fillClassName : trackClassName,
                 )}
                 style={{ height: `${h * 100}%` }}
