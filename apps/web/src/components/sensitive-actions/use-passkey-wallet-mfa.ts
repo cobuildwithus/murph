@@ -102,6 +102,7 @@ export function usePasskeyWalletMfa() {
   }
 
   return {
+    clientAuthenticated: user !== null,
     configured,
     ensureConfigured,
     error,

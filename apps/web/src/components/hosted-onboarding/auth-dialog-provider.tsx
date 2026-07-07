@@ -50,6 +50,11 @@ export function AuthProvider({
   }, []);
 
   const handleAuthCompleted = useCallback((payload: HostedPrivyCompletionPayload) => {
+    if (authenticated) {
+      navigateHostedAuthRedirect(readCurrentBrowserPath());
+      return;
+    }
+
     if (shouldResumeCurrentAuthUrl(payload)) {
       navigateHostedAuthRedirect(readCurrentBrowserPath());
       return;
@@ -61,7 +66,7 @@ export function AuthProvider({
     }
 
     navigateHostedAuthRedirect(payload.joinUrl);
-  }, []);
+  }, [authenticated]);
 
   const value = useMemo(
     () => ({ authenticated, openAuthDialog }),
@@ -71,14 +76,14 @@ export function AuthProvider({
   return (
     <AuthContext.Provider value={value}>
       {children}
-      {!authenticated ? (
-        <AuthDialog
-          open={open}
-          onCompleted={handleAuthCompleted}
-          onOpenChange={setOpen}
-          requireLaunchConsentOnCompletion
-        />
-      ) : null}
+      <AuthDialog
+        open={open}
+        title={authenticated ? "Sign in again" : undefined}
+        description={authenticated ? "Verify this device to manage secure approvals." : undefined}
+        onCompleted={handleAuthCompleted}
+        onOpenChange={setOpen}
+        requireLaunchConsentOnCompletion={!authenticated}
+      />
     </AuthContext.Provider>
   );
 }
