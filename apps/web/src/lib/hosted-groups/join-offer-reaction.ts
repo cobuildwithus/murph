@@ -13,6 +13,10 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
+import {
+  signalHostedMailboxAppendRuntime,
+  signalHostedRuntimeMaintenanceRuntime,
+} from "../hosted-orchestration/signal-runtime";
 import { acceptHostedGroupJoinOfferTx } from "./group-store";
 
 type HostedGroupJoinOfferReactionSkipReason =
@@ -88,8 +92,9 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     threadId: input.event.linqChatId,
   });
 
+  let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
   try {
-    await input.prisma.$transaction(async (tx) =>
+    result = await input.prisma.$transaction(async (tx) =>
       acceptHostedGroupJoinOfferTx({
         memberId: member.id,
         messageLookupKeyReadCandidates,
@@ -107,7 +112,33 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
 
+  if (result.grantedVaultShareProjectionKinds.length > 0) {
+    try {
+      await signalHostedRuntimeMaintenanceRuntime({ userId: member.id });
+    } catch {
+      // Durable join/grants already committed; the runtime will offer projections later.
+    }
+  }
+
+  await signalVaultShareCleanupRuntimesBestEffort(result.vaultShareCleanupSignals);
+
   return { status: "accepted", reason: "accepted" };
+}
+
+async function signalVaultShareCleanupRuntimesBestEffort(
+  signals: readonly { mailboxItemId: string; memberId: string }[],
+): Promise<void> {
+  await Promise.all(signals.map(async (signal) => {
+    try {
+      await signalHostedMailboxAppendRuntime({
+        expectedUserId: signal.memberId,
+        mailboxItemId: signal.mailboxItemId,
+      });
+    } catch {
+      // The revoke mailbox item is durable; the destination runtime will import it on a
+      // later wake if this best-effort signal fails.
+    }
+  }));
 }
 
 function normalizeLookupKeyCandidates(values: readonly (string | null | undefined)[]): string[] {
