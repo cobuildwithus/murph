@@ -265,7 +265,7 @@ describe('experiment onboarding skill guidance', () => {
       'Never write a manual session for a workout that synced or will sync',
     )
     expect(raw).toContain(
-      'sensed events and manual logs both count, so duplicating creates double counts',
+      'if the wearable later backfills a missed workout, counting automatically prefers the sensed record, so no cleanup is needed',
     )
     expect(raw).toContain('`progress.setupReadiness`')
     expect(raw).toContain('`progress.analysisReadiness`')

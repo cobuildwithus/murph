@@ -142,7 +142,7 @@ If sending, ask whether the planned session happened and collect only the missin
 
 ## Active experiment support
 
-- Log sessions with typed flags only for experiments whose `progress.adherence.evidence.eventKind` is `intervention_session`, sessions the user says the wearable missed, and corrections: `vault-cli experiment session log <id> ...`. Never write a manual session for a workout that synced or will sync; sensed events and manual logs both count, so duplicating creates double counts.
+- Log sessions with typed flags only for experiments whose `progress.adherence.evidence.eventKind` is `intervention_session`, sessions the user says the wearable missed, and corrections: `vault-cli experiment session log <id> ...`. Never write a manual session for a workout that synced or will sync; if the wearable later backfills a missed workout, counting automatically prefers the sensed record, so no cleanup is needed.
 - Log confounders with typed flags: `vault-cli experiment context log <id> ...`
 - Check-ins: `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` - skip when `decision.action` is `skip`; send only when `decision.action` is `notify`.
 - Progress: `vault-cli experiment progress <id> --format json`; inspect `progress.setupReadiness`, `progress.analysisReadiness`, and `progress.dataCoverage` separately before saying wearable data is missing.

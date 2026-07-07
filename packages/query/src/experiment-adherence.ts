@@ -366,6 +366,7 @@ export function countCompletedAdherenceSessions(input: {
   if (target.calendar) {
     return emptyAdherenceSessionCounts();
   }
+  const evidence = target.evidence;
 
   const range = resolveTargetDateRange(target.phase, input.windows);
   if (!range || input.asOfDate < range.start) {
@@ -373,16 +374,17 @@ export function countCompletedAdherenceSessions(input: {
   }
 
   const end = minLocalDate(range.end, input.asOfDate);
-  const counts = emptyAdherenceSessionCounts();
-  for (const observation of input.observations) {
-    if (
-      observation.localDate < range.start ||
-      observation.localDate > end ||
-      !linkedEventObservationMatchesEvidence(observation, target.evidence)
-    ) {
-      continue;
-    }
+  const matchingObservations = suppressManualActivityDuplicates(
+    input.observations.filter((observation) =>
+      observation.localDate >= range.start &&
+      observation.localDate <= end &&
+      linkedEventObservationMatchesEvidence(observation, evidence)
+    ),
+    evidence,
+  );
 
+  const counts = emptyAdherenceSessionCounts();
+  for (const observation of matchingObservations) {
     switch (observation.status) {
       case "partial":
         counts.partialSessions += 1;
@@ -583,8 +585,8 @@ function collectMatchingObservations(
   target: ExperimentAdherenceTarget,
   localDate: string,
   observations: readonly ExperimentAdherenceObservation[],
-): ExperimentAdherenceObservation[] {
-  return observations.filter((observation) => {
+): readonly ExperimentAdherenceObservation[] {
+  const matchingObservations = observations.filter((observation) => {
     if (observation.localDate !== localDate) {
       return false;
     }
@@ -600,6 +602,10 @@ function collectMatchingObservations(
         return observation.metricKey === target.evidence.metricKey;
     }
   });
+
+  return target.evidence.kind === "linkedEventCount"
+    ? suppressManualActivityDuplicates(matchingObservations, target.evidence)
+    : matchingObservations;
 }
 
 function metricValueSatisfiesRule(
@@ -632,6 +638,34 @@ function linkedEventObservationMatchesEvidence(
   }
 
   return true;
+}
+
+function suppressManualActivityDuplicates(
+  observations: readonly ExperimentAdherenceObservation[],
+  evidence: LinkedEventCountEvidence,
+): readonly ExperimentAdherenceObservation[] {
+  if (evidence.eventKind !== "activity_session") {
+    return observations;
+  }
+
+  const deviceMatchedLocalDates = new Set<string>();
+  for (const observation of observations) {
+    if (
+      observation.eventKind === "activity_session" &&
+      linkedEventObservationMatchesEvidence(observation, evidence)
+    ) {
+      deviceMatchedLocalDates.add(observation.localDate);
+    }
+  }
+
+  if (deviceMatchedLocalDates.size === 0) {
+    return observations;
+  }
+
+  return observations.filter((observation) =>
+    observation.eventKind !== "intervention_session" ||
+    !deviceMatchedLocalDates.has(observation.localDate)
+  );
 }
 
 function resolveDeviceObservableActivityKind(modality: string | null | undefined): string | null {

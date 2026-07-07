@@ -1635,6 +1635,181 @@ test("counts mixed browser manual and device sessions for running adherence", ()
   assert.equal(result?.progress?.adherence.loggedSessions, 2);
 });
 
+for (const scenario of [
+  {
+    name: "prefers a same-date sensed run over a manual missed-wearable run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGA",
+    slug: "browser-same-date-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BA",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGA",
+        experimentSlug: "browser-same-date-manual-device-run",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_device_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+    ],
+  },
+  {
+    name: "counts different-date manual and sensed runs separately",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGB",
+    slug: "browser-different-date-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BB",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGB",
+        experimentSlug: "browser-different-date-manual-device-run",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_different_date_device_run_1",
+        date: "2026-06-02",
+        activityType: "Running",
+      }),
+    ],
+  },
+  {
+    name: "counts two same-date sensed runs separately",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGC",
+    slug: "browser-same-date-two-device-runs",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      activitySessionEvent({
+        id: "evt_browser_same_date_device_run_2a",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_device_run_2b",
+        date: "2026-06-01",
+        activityType: "Run",
+      }),
+    ],
+  },
+  {
+    name: "keeps a manual-only missed-wearable run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGD",
+    slug: "browser-manual-only-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BC",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGD",
+        experimentSlug: "browser-manual-only-device-run",
+      }),
+    ],
+  },
+  {
+    name: "leaves non-sensable manual sauna logs unchanged",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGE",
+    slug: "browser-manual-sauna-unchanged",
+    modality: "sauna",
+    expectedCompletedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BD",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGE",
+        experimentSlug: "browser-manual-sauna-unchanged",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_manual_sauna_device_run_ignored",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+    ],
+  },
+] satisfies Array<{
+  events: BrowserVaultEntity[];
+  expectedCompletedSessions: number;
+  experimentId: string;
+  modality: string;
+  name: string;
+  slug: string;
+}>) {
+  test(`counts browser adherence when it ${scenario.name}`, () => {
+    const client = createBrowserVaultQueryClient(
+      createReplica({
+        generatedAt: "2026-06-09T12:00:00.000Z",
+        entities: [
+          experimentEntity({
+            id: scenario.experimentId,
+            slug: scenario.slug,
+            runPlan: {
+              baselineStart: "2026-05-25",
+              baselineEnd: "2026-05-31",
+              interventionStart: "2026-06-01",
+              interventionEnd: "2026-06-28",
+              modality: scenario.modality,
+              targetSessions: 4,
+              minimumUsefulSessions: 1,
+            },
+          }),
+          ...scenario.events,
+        ],
+      }),
+    );
+
+    const result = selectBrowserVaultExperimentResults(client, { slug: scenario.slug });
+
+    assert.equal(result?.progress?.adherence.completedSessions, scenario.expectedCompletedSessions);
+    assert.equal(result?.progress?.adherence.loggedSessions, scenario.expectedCompletedSessions);
+  });
+}
+
+test("browser adherence calendar suppresses same-date manual fallback when a sensed run matches", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QKGF";
+  const slug = "browser-calendar-same-date-manual-device-run";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-03T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-01",
+            modality: "Run",
+            targetSessions: 1,
+            minimumUsefulSessions: 1,
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+          },
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BE",
+          experimentId,
+          experimentSlug: slug,
+        }),
+        activitySessionEvent({
+          id: "evt_browser_calendar_same_date_device_run_1",
+          date: "2026-06-01",
+          activityType: "Running",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const cell = result?.schedule?.cells.find((entry) => entry.localDate === "2026-06-01");
+
+  assert.equal(result?.schedule?.completedSessions, 1);
+  assert.deepEqual(cell?.evidenceIds, ["evt_browser_calendar_same_date_device_run_1"]);
+});
+
 test("uses canonical activity date for scheduled browser running adherence", () => {
   const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFH";
   const slug = "run-date-boundary";
