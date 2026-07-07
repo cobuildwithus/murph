@@ -70,7 +70,7 @@ test("HeroClocksIn renders the reduced-motion group seed", async () => {
   assert.match(text, /Weekly newsletter · Sunday 8:02 AM/);
   assert.match(text, /Your crew: week 3 in health/);
   assert.match(text, /4 People/);
-  assert.match(text, /Health is a team sport\./);
+  assert.match(text, /Murph makes it easy\./);
   assert.equal(
     view.container.querySelector(
       'button[aria-label="Start a group chat with Theo"]',
@@ -81,7 +81,7 @@ test("HeroClocksIn renders the reduced-motion group seed", async () => {
   await view.cleanup();
 });
 
-test("topic floater clicks during group mode keep scheduled group beats", async () => {
+test("group start clears the private 1:1 thread and topic clicks during group mode keep scheduled group beats", async () => {
   vi.useFakeTimers();
 
   const view = await renderHero({
@@ -90,6 +90,17 @@ test("topic floater clicks during group mode keep scheduled group beats", async 
     flushInitialTimers: false,
   });
 
+  // Play a private exchange first so the thread holds personal health talk.
+  const stepsButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Steps"]',
+  );
+  assert.ok(stepsButton);
+  await act(async () => {
+    stepsButton.click();
+    await vi.advanceTimersByTimeAsync(3_200);
+  });
+  assert.match(view.container.textContent ?? "", /How are my steps this week\?/);
+
   const theoButton = view.container.querySelector<HTMLButtonElement>(
     'button[aria-label="Start a group chat with Theo"]',
   );
@@ -97,16 +108,22 @@ test("topic floater clicks during group mode keep scheduled group beats", async 
 
   await act(async () => {
     theoButton.click();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(100);
   });
 
-  const stepsButton = view.container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Ask Murph about Steps"]',
+  // The group is a fresh conversation: the private exchange must be gone.
+  assert.doesNotMatch(
+    view.container.textContent ?? "",
+    /How are my steps this week\?/,
   );
-  assert.ok(stepsButton);
+
+  const saunaButton = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Ask Murph about Sauna"]',
+  );
+  assert.ok(saunaButton);
 
   await act(async () => {
-    stepsButton.click();
+    saunaButton.click();
   });
 
   await act(async () => {

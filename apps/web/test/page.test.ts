@@ -182,13 +182,10 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /font-serif text-\[clamp\(2\.25rem,4\.8vw,4\.25rem\)\][^"]* text-black/,
   );
-  assert.match(markup, /<span class="block">Health is overwhelming\.<\/span>/);
+  assert.match(markup, /<span class="block">Health is<\/span>/);
+  assert.match(markup, /<span class="block">overwhelming\.<\/span>/);
   assert.match(markup, /Murph makes it easy\./);
   assert.equal((markup.match(/<h1\b/g) ?? []).length, 1);
-  assert.match(
-    markup,
-    /<h1 class="sr-only">Health is overwhelming\. Murph makes it easy\.<\/h1>/,
-  );
   assert.match(
     markup,
     /Murph is your personal health assistant\. Wearables, bloodwork/,
@@ -197,9 +194,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /It also runs health challenges with your friends and sends your family a weekly health newsletter\./,
   );
-  assert.match(markup, /Health is a team sport\./);
-  assert.match(markup, /Murph is the referee\./);
-  assert.match(markup, /Start a health challenge with your friends in a group chat/);
   assert.match(markup, /Better together/);
   assert.match(markup, /Do it with your people\./);
   assert.match(markup, /Walk challenge · Day 5 of 7/);

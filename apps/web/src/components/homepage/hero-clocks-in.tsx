@@ -314,20 +314,8 @@ const AUTO_RUN_TOPICS = [
 // Murph plus the three joined members.
 const GROUP_HEADER_LABEL = `${GROUP_MEMBERS.length + 1} People`;
 
-const HERO_COPY = {
-  act1: {
-    line1: "Health is overwhelming.",
-    line2: "Murph makes it easy.",
-    paragraph:
-      "Murph is your personal health assistant. Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep. Murph runs it all and helps you figure out what actually makes you healthier, then build habits that stick. It also runs health challenges with your friends and sends your family a weekly health newsletter.",
-  },
-  act2: {
-    line1: "Health is a team sport.",
-    line2: "Murph is the referee.",
-    paragraph:
-      "Start a health challenge with your friends in a group chat. Murph sets fair baselines, keeps score, calls the winner, and sends everyone a weekly newsletter on how the crew is doing.",
-  },
-} as const;
+const HERO_PARAGRAPH =
+  "Murph is your personal health assistant. Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep. Murph runs it all and helps you figure out what actually makes you healthier, then build habits that stick. It also runs health challenges with your friends and sends your family a weekly health newsletter.";
 
 const GROUP_MESSAGES = {
   theoQuestion: "ok who's actually winning this thing",
@@ -584,6 +572,10 @@ export function HeroClocksIn({
 
       queue(
         () => {
+          // The group is a NEW conversation, not an audience added to the
+          // private 1:1 thread: clear the personal history so nothing the
+          // user just discussed with Murph reads as visible to joiners.
+          if (index === 0) setItems([]);
           setGroupMode(true);
           setActiveIdx(idx);
         },
@@ -909,7 +901,6 @@ export function HeroClocksIn({
     ) : (
       <IMessageLogo className="size-[18px]" />
     );
-  const activeCopy = groupMode ? HERO_COPY.act2 : HERO_COPY.act1;
 
   return (
     <section className="relative min-h-svh overflow-hidden bg-[#f5f0e8]">
@@ -967,7 +958,7 @@ export function HeroClocksIn({
           .hero-floater, .hero-floater--active, .hero-msg-in, .hero-typing-dot {
             animation: none !important;
           }
-          .hero-copy-layer, .hero-header-layer {
+          .hero-header-layer {
             transition: none !important;
           }
         }
@@ -1036,19 +1027,17 @@ export function HeroClocksIn({
 
       <div className="relative z-10 mx-auto grid min-h-svh max-w-[1280px] grid-cols-1 items-center gap-6 px-5 pt-20 pb-10 sm:gap-10 sm:px-10 sm:pb-16 lg:grid-cols-12 lg:gap-20 lg:px-16 lg:pt-24">
         <div className="relative z-10 lg:col-span-7">
-          <h1 className="sr-only">{`${activeCopy.line1} ${activeCopy.line2}`}</h1>
-          <div className="grid">
-            <HeroCopyLayer
-              active={!groupMode}
-              ariaHidden={groupMode}
-              copy={HERO_COPY.act1}
-            />
-            <HeroCopyLayer
-              active={groupMode}
-              ariaHidden={!groupMode}
-              copy={HERO_COPY.act2}
-            />
-          </div>
+          <h1 className="font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-black">
+            <span className="block">Health is</span>
+            <span className="block">overwhelming.</span>
+          </h1>
+          <p className="mt-3 font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-[#5a6e32] lg:whitespace-nowrap">
+            Murph makes it easy.
+          </p>
+
+          <p className="mt-6 max-w-[52ch] text-[1.0625rem] leading-[1.7] text-pretty text-[#3a322a] lg:mt-10">
+            {HERO_PARAGRAPH}
+          </p>
 
           <div className="mt-10 hidden lg:block">
             <LandingAuthActions
@@ -1198,41 +1187,6 @@ export function HeroClocksIn({
         </div>
       </div>
     </section>
-  );
-}
-
-function HeroCopyLayer({
-  active,
-  ariaHidden,
-  copy,
-}: {
-  active: boolean;
-  ariaHidden: boolean;
-  copy: {
-    line1: string;
-    line2: string;
-    paragraph: string;
-  };
-}) {
-  return (
-    <div
-      aria-hidden={ariaHidden}
-      className={cn(
-        "hero-copy-layer col-start-1 row-start-1 transition-opacity duration-500 ease-out",
-        active ? "opacity-100" : "pointer-events-none opacity-0",
-      )}
-    >
-      <div className="font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-black">
-        <span className="block">{copy.line1}</span>
-        <span className="mt-3 block text-[#5a6e32] lg:whitespace-nowrap">
-          {copy.line2}
-        </span>
-      </div>
-
-      <p className="mt-6 max-w-[52ch] text-[1.0625rem] leading-[1.7] text-pretty text-[#3a322a] lg:mt-10">
-        {copy.paragraph}
-      </p>
-    </div>
   );
 }
 
