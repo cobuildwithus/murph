@@ -36,9 +36,27 @@ provider traces, or private 1:1 data for a group challenge.
 - Sauna minutes or sauna minutes per week: `sauna-minutes-days.v0`
 - Running zone challenge: `running-heart-rate-zones-days.v0`
 - Steps: `steps-days.v0`
+- Distance: `distance-days.v0`
+- Elevation gain: `elevation-gain-days.v0`
+- Floors climbed: `floors-climbed-days.v0`
+- Active calories: `active-calories-days.v0`
 - Broad workout count/minutes: `workout-days.v0`
 - Broad active minutes: `activity-days.v0`
 - Broad workout heart-rate zones: `heart-rate-zones-days.v0`
+- Workout strain: `workout-strain-days.v0`
+- Day strain: `day-strain-days.v0`
+- Activity score: `activity-score-days.v0`
+- Max heart rate: `max-heart-rate-days.v0`
+- Sleep timing: `sleep-times.v0`
+- VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
+  `resting-heart-rate-days.v0`, or `hrv-days.v0`
+
+Do not default to biomarker or body-score leaderboards. Use those only when the
+group explicitly chose that metric, and frame the result as a light challenge
+signal rather than a body ranking. If a group names a metric not listed here,
+check the join-page selectable Vault Share projection kinds and choose the
+narrowest matching projection; if none exists, say it is unsupported instead of
+inventing a share kind.
 
 For weekly or two-week challenges, read fresh rolling shared records during
 the daily loop and append standings snapshots to the challenge page. The share

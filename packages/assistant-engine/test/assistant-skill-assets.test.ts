@@ -1,6 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import {
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+} from '@murphai/hosted-execution/vault-share'
 
 import {
   ASSISTANT_SKILLS,
@@ -178,6 +181,24 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('post a join offer scoped to')
     expect(raw).toContain('`group-email.v0` so a like grants it')
     expect(raw).toContain('never repeatedly re-offer')
+  })
+
+  it('keeps group challenge guidance aligned with selectable scoring projections', async () => {
+    const groupChallengeSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'group-challenge',
+    )
+    expect(groupChallengeSkill).toBeTruthy()
+    if (!groupChallengeSkill) return
+
+    const raw = await readSkillFile(groupChallengeSkill)
+    for (const projectionKind of HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS) {
+      if (projectionKind === 'group-email.v0') {
+        continue
+      }
+      expect(raw).toContain(projectionKind)
+    }
+    expect(raw).toContain('narrowest matching projection')
+    expect(raw).toContain('unsupported instead of')
   })
 
   it('builds stable symbolic skill file references', () => {
