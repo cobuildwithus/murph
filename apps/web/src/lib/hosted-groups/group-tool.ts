@@ -487,24 +487,41 @@ function normalizeHostedGroupJoinOfferMessageTemplate(
 }
 
 function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): boolean {
-  return (
-    messageTemplate.includes(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-    && messageTemplate.indexOf(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-    && messageTemplate.includes(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-    && messageTemplate.indexOf(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
+  return hasPlaceholderExactlyOnce(
+    messageTemplate,
+    HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+  ) && hasPlaceholderZeroOrOneTimes(
+    messageTemplate,
+    HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
   );
+}
+
+function hasPlaceholderExactlyOnce(messageTemplate: string, placeholder: string): boolean {
+  return (
+    messageTemplate.includes(placeholder)
+    && messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
+  );
+}
+
+function hasPlaceholderZeroOrOneTimes(messageTemplate: string, placeholder: string): boolean {
+  return !messageTemplate.includes(placeholder)
+    || messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder);
 }
 
 function renderHostedGroupJoinOfferShareScope(
   projectionKinds: readonly HostedVaultShareProjectionKind[],
 ): string {
   const labels = projectHostedVaultShareProjectionDisplays(projectionKinds)
-    .map((display) => display.label.toLowerCase());
-  return labels.length > 0
-    ? `your Murph profile name and ${formatHumanList(labels)}`
-    : "your Murph profile name";
+    .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
+  return `your ${formatHumanList(["Murph profile name", ...labels])}`;
+}
+
+function formatHostedGroupJoinOfferShareScopeLabel(label: string): string {
+  const first = label[0];
+  const second = label[1];
+  return first && second && second >= "a" && second <= "z"
+    ? `${first.toLowerCase()}${label.slice(1)}`
+    : label;
 }
 
 function formatHumanList(values: readonly string[]): string {

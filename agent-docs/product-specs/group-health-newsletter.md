@@ -1,15 +1,15 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-06
+Last verified: 2026-07-07
 Status: Specified (not yet implemented)
 
 ## Current State
 
-A member of a Murph group chat (family, friend group, couple, household, team) wants Murph to send a **recurring health newsletter by email** to the group. It celebrates wins, notes standouts, and gently nudges laggards, in a **tone the group picks** (supportive by default; coach-style roast only if the group explicitly asks for it). Setup happens conversationally from inside the group chat: "Murph, set up a weekly health newsletter for us."
+A member of a Murph group chat (family, friend group, couple, household, team) wants Murph to send a **recurring health newsletter by email** to the group. It celebrates wins, notes standouts, and gently nudges laggards, in a **tone the group picks** (supportive by default; coach-style roast only if the group explicitly asks for it). Setup happens conversationally from inside the group chat: "Murph, set up a weekly health newsletter for us." Murph asks a short setup question set before creating anything: name, schedule, email versus chat delivery, and optional tone.
 
 The newsletter is delivered as **one shared email thread** that the whole group is on, so members can reply-all and banter, and Murph takes part in the thread the way it does in the group chat.
 
-This is a thin feature over primitives that already exist. Group chats are already hosted runtimes with their own vault; members already share selected health metrics into that vault; recurring scheduled sends already exist as automations; and outbound email already ships through the Cloudflare `HOSTED_EMAIL` send binding. The newsletter is a **new consumer** of these primitives plus one new reusable consent grant.
+This is a thin feature over primitives that already exist. Group chats are already hosted runtimes with their own vault; members can share selected health metrics into that vault through disclosed grants; recurring scheduled sends already exist as automations; and outbound email already ships through the Cloudflare `HOSTED_EMAIL` send binding. The newsletter is a **new consumer** of these primitives plus one new reusable consent grant.
 
 ## Product Boundary
 
@@ -18,23 +18,30 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 - It is one **cron automation living in the group runtime's own vault**, authored the same way reminders are.
 - It **reuses** the Cloudflare outbound email path. It does not introduce a parallel Resend broadcast sender (Resend stays for web transactional mail only).
 - It sends **one shared email to the whole group** (a thread everyone is on), not a personalized email per member. Members reply-all; Murph participates in the thread.
-- It **reads health data that members already share** into the group vault. It does not expand the projection set or re-collect health permissions.
+- It **reads health data that members explicitly share** into the group vault through the disclosed reaction offer or the join page. It does not infer newsletter health access from private 1:1 Murph data.
 - Email addresses are **shared with the group by explicit grant** and are visible to co-members in the thread's `To` line — that visibility is the point of a shared reply-all thread and is exactly what the grant authorizes. Addresses are **not persisted in the group vault**; they are resolved web-side at send time and placed only in the outbound email headers.
 
-## Locked Decisions (2026-07-06)
+## Locked Decisions (2026-07-07)
 
 | Decision | Choice |
 | --- | --- |
 | Who can set up / edit / stop it | **Any member.** One shared automation per group; last-write-wins. |
 | Delivery shape | **One shared email thread** to all participants; addresses visible; reply-all; Murph present in-thread; a new thread each week. |
-| Email permission | One reusable group grant, **"share your email with this group,"** default-checked at group creation, uncheckable to decline. It is the single newsletter participation toggle. |
-| Newsletter content opt-in | **None separate.** Content is whatever health data the member already shares. |
+| Email permission | Included in the disclosed newsletter reaction-share scope and on the join page as **"share your email with this group."** The shared thread exposes addresses to co-members by design. |
+| Newsletter content opt-in | A reaction to the newsletter join offer grants the disclosed default scope: profile name, email, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. The customize link lets a member share more or less. |
+| Setup flow | **Ask before creating.** Murph asks for the name, schedule, and email-versus-chat delivery in one short message, with tone optional. If the group already answered or says "just set it up," Murph uses sensible defaults and confirms the essentials. |
+| Naming | The **group-chosen name** becomes the automation title, the group display name when a group join link is created, and the name in the setup notice. |
 | Individual opt-out | **Revoke email sharing** (self-service, in chat or by replying in the thread). Leaves challenge/health-sharing intact. Forward-only. |
 | First send | **Announced in the group with a short opt-out window.** Never a silent immediate first fire. |
 | No-email-yet member | Grants email permission at join anyway; **auto-joins** once they add + verify an email later. |
 | Tone | **Supportive by default, never shaming.** Coach-style roast only on explicit group opt-in ("be hard on us"). Optional custom note. |
 | Access gating | **Free for every group.** No entitlement checks. |
 | Cadence | Weekly default (Sunday morning local), natural-language configurable, per-group jitter. |
+| Chat delivery | If the group wants delivery in the group chat, use a normal scheduled group-chat update automation. The `group-health-newsletter` slug and email machinery are only for email delivery. |
+| Join offers | Lead with **react to this message to join**, state the exact `{{share_scope}}`, and include the customize link. Reacting grants the disclosed snapshot; the link is the fine-tune path. |
+| Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
+| Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link before joining. |
+| Projection window | Each vault-share delivery can carry **the last 7 days per projection kind**, matching receiver retention. |
 
 ## Canonical Objects
 
@@ -66,7 +73,7 @@ Derived at send time, not persisted:
 
 ```
 participants = group roster ∩ members who granted group-email.v0
-featured      = participants who have also shared health data (else nothing to feature)
+featured      = participants who also granted disclosed health projections (else nothing to feature)
 ```
 
 The single shared email is sent to all **participants** (`To`: all participant addresses). Its body features the **featured** members plus a few group superlatives. Roster + granted kinds come from `readHostedGroupMemberRoster` (`group-store.ts`); member id → display name from the auto-granted `profile-name.v0` share.
@@ -75,7 +82,7 @@ The single shared email is sent to all **participants** (`To`: all participant a
 
 ### Data source
 
-Whatever the member already shares, no more. Per-member weekly stats are built from the health projections that already land in the group vault as `murph.shared-vault-projections.v1` (`packages/assistant-runtime/src/hosted-runtime/vault-share-import.ts`), aggregated with the existing week-over-week engine `buildOverviewWeeklyStatsFromDailySampleSummaries` (`packages/query/src/overview-weekly-stats.ts`). One shared body; everyone on the thread sees the same digest.
+Whatever the member consented to share with the group, no more. Per-member weekly stats are built from the health projections that land in the group vault as `murph.shared-vault-projections.v1` (`packages/assistant-runtime/src/hosted-runtime/vault-share-import.ts`), aggregated with the existing week-over-week engine `buildOverviewWeeklyStatsFromDailySampleSummaries` (`packages/query/src/overview-weekly-stats.ts`). Projection delivery carries up to seven records per projection kind so a single delivery can refill a full weekly window after a quiet member runtime. One shared body; everyone on the thread sees the same digest.
 
 Default content: per featured member, steps total + Δ, avg sleep + Δ, workout count, one standout (PR or "most improved"), one gentle focus area; plus group superlatives (top mover, best sleeper, biggest improvement).
 
@@ -115,24 +122,25 @@ Individual and self-service. A member says "take me off the newsletter" **in the
 
 ## Security & Abuse
 
-- **Join is the consent gate.** Only members who (a) have a Murph account, (b) accepted this group's join link themselves, (c) kept email-sharing on, and (d) shared health data / have a verified email can be on the newsletter. Adding phone numbers to an iMessage group grants none of this — **you cannot enroll non-participants**, so there is no "blast a group of strangers" vector.
+- **Join is the consent gate.** Only members who (a) have a Murph account, (b) accepted this group's join link themselves or reacted to a disclosed server-owned offer, (c) granted email sharing, (d) granted any health projections the newsletter uses, and (e) have a verified email can be on the newsletter. Adding phone numbers to an iMessage group grants none of this — **you cannot enroll non-participants**, so there is no "blast a group of strangers" vector.
 - **Residual risk.** In a group people *have* joined, any member (per any-member setup) can create a newsletter that would immediately broadcast every participant's **email address** (visible thread) and **health summary** to the whole group. Email-sharing default-on amplifies this; the first send is an **irreversible exposure**; an immediate fire leaves no chance to opt out.
 - **Mitigation — announce + opt-out window before the first send.** Newsletter creation posts a clear group notice and the **first edition does not fire immediately or silently**; it respects a short opt-out window so every participant can decline before any exposure. Owner-only setup would not help (an attacker can be the owner), so the notice window is the control regardless of setup rights.
 - **Address visibility is by design** (shared reply-all thread) and authorized by the grant; consent copy must say plainly that the email is shared *with the group*. If in-group address privacy is ever required, the listserv/group-alias model hides addresses behind one group address (bigger build — see Open Items).
 - **Group-thread reply sender identity** uses the same web-owned `From`-address matching as the existing public-sender email lane; `From` spoofing is a shared, accepted residual of that model, with platform-level DKIM verification deferred because Cloudflare does not reliably expose `Authentication-Results` to Workers today.
-- **Health-data posture.** The emailed digest is a broadcast surface, so the announce + opt-out window also serves as the practical consent checkpoint for using already-shared health data in email. Review consent copy against `apps/web/src/lib/legal/consent.ts` and the FTC HBNR compliance docs before launch.
+- **Health-data posture.** The disclosed reaction offer or join page is the health-sharing consent checkpoint. The announce + opt-out window is an additional protection before the first irreversible email exposure, not a substitute for grant disclosure. Review consent copy against `apps/web/src/lib/legal/consent.ts` and the FTC HBNR compliance docs before launch.
 
 ## The Skill
 
-Add a `group-newsletter` entry to `ASSISTANT_SKILLS` (`packages/assistant-engine/src/assistant-skill-assets.ts`) and a `packages/assistant-engine/skills/group-newsletter/SKILL.md`, or extend `group-chat/SKILL.md` "Scheduled updates and automations." The skill teaches Murph to: confirm flavor + cadence, ensure email sharing is requested, author/edit/stop the automation, **announce before the first send and honor the opt-out window**, compose the shared digest in-tone from the shared projections, send the group thread, take part in thread replies, and handle opt-out. It carries no durable state itself; state lives in the automation and the grants.
+Add a `group-newsletter` entry to `ASSISTANT_SKILLS` (`packages/assistant-engine/src/assistant-skill-assets.ts`) and a `packages/assistant-engine/skills/group-newsletter/SKILL.md`, or extend `group-chat/SKILL.md` "Scheduled updates and automations." The skill teaches Murph to: ask the short setup question set before creating anything, apply the group-chosen name and schedule, route chat delivery to a normal scheduled group-chat update automation, ensure email sharing is requested for email delivery, author/edit/stop the email automation, **announce before the first send and honor the opt-out window**, compose the shared digest in-tone from the shared projections, send the group thread, take part in thread replies, and handle opt-out. It carries no durable state itself; state lives in the automation and the grants.
 
 ## Net-New Surface (summary)
 
-1. `group-email.v0` grant kind + join-policy display + default-checked at group creation + "shared with the group" consent copy.
+1. `group-email.v0` grant kind + join-policy display + disclosed newsletter reaction-share scope + "shared with the group" consent copy.
 2. Group-send path in the hosted-email transport: assemble the participant address list web-side, build one shared MIME (`To`: all, stable `Message-ID`/`References`), HTML body, send one envelope copy per participant.
 3. Typed **reader** for `murph.shared-vault-projections.v1` (write side exists; no read side yet) feeding the rollup engine.
-4. `group-newsletter` skill + the automation it authors (tone in instruction text), including announce-before-first-send + opt-out window, and Murph taking part in email-thread replies via the existing inbound ingress.
-5. `?addEmail=true` settings deep-link + private missing-email reminder through the member's own Murph.
+4. `group-newsletter` skill + the automation it authors (group-chosen name as title, schedule as cron, tone in instruction text), including setup questions, announce-before-first-send + opt-out window, and Murph taking part in email-thread replies via the existing inbound ingress.
+5. Seven-day vault-share projection delivery windows for weekly newsletter stats, still bounded by existing per-kind receiver retention.
+6. `?addEmail=true` settings deep-link + private missing-email reminder through the member's own Murph.
 
 Everything else is reuse: scheduling, health projections, rollup engine, roster, grant plumbing, tone guardrails, outbound email transport, inbound email ingress.
 

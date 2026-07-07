@@ -545,26 +545,26 @@ describe("hosted group join policy", () => {
     ])).toEqual([
       {
         description:
-          "Share your email so this group's Murph can send the newsletter. Your address is visible to the group.",
+          "Share your email so this group's Murph can send the newsletter. Your email is visible to the group.",
         label: "Email address",
         projectionKind: "group-email.v0",
       },
       {
         description:
-          "Allows this group to receive your recent sleep start and end times as bounded shared records.",
-        label: "Recent sleep timing",
+          "Lets this group see your sleep start and end times from the last 7 days.",
+        label: "Sleep timing",
         projectionKind: "sleep-times.v0",
       },
       {
         description:
-          "Allows this group to receive your recent daily active-minute totals as bounded shared records.",
-        label: "Recent activity minutes",
+          "Lets this group see your daily active minutes from the last 7 days.",
+        label: "Activity minutes",
         projectionKind: "activity-days.v0",
       },
       {
         description:
-          "Allows this group to receive your recent daily workout heart-rate zone minutes as bounded shared records.",
-        label: "Recent heart-rate zones",
+          "Lets this group see your workout heart-rate zone minutes from the last 7 days.",
+        label: "Heart-rate zones",
         projectionKind: "heart-rate-zones-days.v0",
       },
     ]);
@@ -642,15 +642,22 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
   });
 
-  it("posts a server-owned like-to-join offer and records the provider message binding", async () => {
+  it("posts a newsletter react-to-join offer whose disclosed scope matches the stored snapshot", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {
         action: "post_join_offer",
         joinOffer: {
           messageTemplate:
-            "React here and you're in. Joining shares {{share_scope}} with this group; manage it at {{join_url}}.",
-          projectionKinds: ["sleep-times.v0"],
+            "React here and you're in. Reacting shares {{share_scope}} with this group; customize at {{join_url}}.",
+          projectionKinds: [
+            "group-email.v0",
+            "sleep-times.v0",
+            "activity-days.v0",
+            "workout-days.v0",
+            "resting-heart-rate-days.v0",
+            "hrv-days.v0",
+          ],
         },
         linqThread: LINQ_THREAD,
       },
@@ -667,7 +674,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       expect.objectContaining({
         actorMemberId: "member_owner",
         containerMemberId: "member_container",
-        requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+        requestedVaultShareProjectionKinds: [
+          "group-email.v0",
+          "sleep-times.v0",
+          "activity-days.v0",
+          "workout-days.v0",
+          "resting-heart-rate-days.v0",
+          "hrv-days.v0",
+        ],
         tx: fakeTx,
       }),
     );
@@ -676,7 +690,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         chatId: "chat_group_1",
         idempotencyKey: expect.stringMatching(/^group-join-offer:hgrp_123:/u),
         message:
-          "React here and you're in. Joining shares your Murph profile name and recent sleep timing with this group; manage it at https://www.withmurph.ai/groups/join/abc123.",
+          "React here and you're in. Reacting shares your Murph profile name, email address, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV with this group; customize at https://www.withmurph.ai/groups/join/abc123.",
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -686,17 +700,141 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: expect.not.stringContaining("—"),
+        message: expect.not.stringContaining("\u2014"),
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
       messageId: "msg_offer_1",
       postedAt: expect.any(Date),
-      projectionKinds: ["sleep-times.v0"],
+      projectionKinds: [
+        "group-email.v0",
+        "sleep-times.v0",
+        "activity-days.v0",
+        "workout-days.v0",
+        "resting-heart-rate-days.v0",
+        "hrv-days.v0",
+      ],
       tx: fakeTx,
     });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+  });
+
+  it("renders profile-only share scope when no optional kinds are requested", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate: "Joining shares {{share_scope}}.",
+          projectionKinds: [],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Joining shares your Murph profile name.",
+      }),
+    );
+  });
+
+  it("renders email-only share scope as a two-item list", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate: "Joining shares {{share_scope}}.",
+          projectionKinds: ["group-email.v0"],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Joining shares your Murph profile name and email address.",
+      }),
+    );
+  });
+
+  it("renders multi-kind health share scope labels without lowercasing HRV", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate: "Scope: {{share_scope}}. Customize: {{join_url}}.",
+          projectionKinds: [
+            "sleep-times.v0",
+            "activity-days.v0",
+            "workout-days.v0",
+            "resting-heart-rate-days.v0",
+            "hrv-days.v0",
+          ],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Scope: your Murph profile name, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. Customize: https://www.withmurph.ai/groups/join/abc123.",
+      }),
+    );
+  });
+
+  it("keeps join links optional for non-newsletter offers", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "React to this message if you want to join. Joining shares {{share_scope}}.",
+          projectionKinds: ["hrv-days.v0", "vo2-max-days.v0"],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "sent",
+      },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "React to this message if you want to join. Joining shares your Murph profile name, VO2 max, and HRV.",
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.not.stringContaining("https://www.withmurph.ai/groups/join/abc123"),
+      }),
+    );
+    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      messageId: "msg_offer_1",
+      postedAt: expect.any(Date),
+      projectionKinds: ["vo2-max-days.v0", "hrv-days.v0"],
+      tx: fakeTx,
+    });
   });
 
   it("does not create or send a join offer without the required message template", async () => {

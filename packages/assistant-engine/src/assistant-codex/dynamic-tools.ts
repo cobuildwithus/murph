@@ -329,7 +329,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and, for newsletter offers, include the customize link with {{join_url}} so people can share more or less. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -350,7 +350,7 @@ export const MURPH_GROUP_TOOL = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
         description:
-          'Optional group display name shown on the join page when creating a join link.',
+          'Optional group display name the group chose, shown on the join page when creating a join link.',
       },
       kind: {
         type: 'string',
@@ -375,14 +375,14 @@ export const MURPH_GROUP_TOOL = {
           enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
         },
         description:
-          'Optional bounded health projections that liking the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that profile display name is shared too.',
+          'Optional bounded health projections that reacting to the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that profile display name is shared too.',
       },
       messageTemplate: {
         type: 'string',
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
         description:
-          'Required for action="post_join_offer". Write one short natural group-chat message, not a fixed script. Mention that liking or reacting to this message joins the group. Include {{join_url}} exactly once where the server should insert the exact join URL, and {{share_scope}} exactly once where the server should insert the exact shared-scope phrase. Do not include any other URL.',
+          'Required for action="post_join_offer". Write one short natural group-chat message, not a fixed script. Lead with reacting to this message to join. Include {{share_scope}} exactly once where the server inserts the exact shared-scope phrase. For newsletter offers, include {{join_url}} exactly once as the customize link so members can share more or less. Other offer types may omit {{join_url}} when there is no customize path. Do not include any other URL.',
       },
     },
     required: ['action'],
@@ -760,14 +760,25 @@ const GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = '{{join_url}}'
 const GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = '{{share_scope}}'
 
 function hasUsableGroupJoinOfferPlaceholders(messageTemplate: string): boolean {
-  return (
-    messageTemplate.includes(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-    && messageTemplate.indexOf(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-    && messageTemplate.includes(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-    && messageTemplate.indexOf(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
+  return hasPlaceholderExactlyOnce(
+    messageTemplate,
+    GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+  ) && hasPlaceholderZeroOrOneTimes(
+    messageTemplate,
+    GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
   )
+}
+
+function hasPlaceholderExactlyOnce(messageTemplate: string, placeholder: string): boolean {
+  return (
+    messageTemplate.includes(placeholder)
+    && messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
+  )
+}
+
+function hasPlaceholderZeroOrOneTimes(messageTemplate: string, placeholder: string): boolean {
+  return !messageTemplate.includes(placeholder)
+    || messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
 }
 
 const groupArgumentsSchema = z.discriminatedUnion('action', [
@@ -796,7 +807,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         .max(HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH)
         .refine(hasUsableGroupJoinOfferPlaceholders, {
           message:
-            'post_join_offer messageTemplate must contain {{join_url}} exactly once and {{share_scope}} exactly once',
+            'post_join_offer messageTemplate must contain {{share_scope}} exactly once and {{join_url}} at most once',
         }),
       projectionKinds: z
         .array(z.enum(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS))

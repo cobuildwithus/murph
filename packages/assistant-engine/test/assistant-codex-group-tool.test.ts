@@ -95,6 +95,23 @@ describe("murph.group dynamic tool", () => {
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React to this message to join. This shares {{share_scope}} with the group.",
+      projectionKinds: ["sleep-times.v0"],
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "React to this message to join. This shares {{share_scope}} with the group.",
+          projectionKinds: ["sleep-times.v0"],
+        },
+      },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
       action: "revoke_own_email_share",
     }))).toEqual({
       kind: "group",
@@ -195,6 +212,13 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
       messageTemplate: "React here to join. Details: {{join_url}}.",
+      projectionKinds: ["sleep-times.v0"],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React to join. This shares {{share_scope}}. Details: {{join_url}} and {{join_url}}.",
       projectionKinds: ["sleep-times.v0"],
     }))?.kind).toBe("invalid-group-arguments");
   });
