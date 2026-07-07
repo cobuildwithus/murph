@@ -484,6 +484,9 @@ importers:
       '@murphai/assistantd':
         specifier: workspace:*
         version: link:../assistantd
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -575,6 +578,15 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/clinical-records:
+    dependencies:
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/cloudflare-hosted-control:
     dependencies:
@@ -669,6 +681,9 @@ importers:
       '@junction-api/sdk':
         specifier: 1.2.0
         version: 1.2.0
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -729,6 +744,9 @@ importers:
 
   packages/importers:
     dependencies:
+      '@murphai/clinical-records':
+        specifier: workspace:*
+        version: link:../clinical-records
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -741,6 +759,10 @@ importers:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
+    devDependencies:
+      '@medplum/fhirtypes':
+        specifier: ^5.1.24
+        version: 5.1.24
 
   packages/inbox-services:
     dependencies:
@@ -2036,6 +2058,10 @@ packages:
     peerDependencies:
       react: ^17.0.2 || ^18.0.0 || ^19.0
       react-dom: ^17.0.2 || ^18.0.0 || ^19.0
+
+  '@medplum/fhirtypes@5.1.24':
+    resolution: {integrity: sha512-22TsFeSJOzchtAZdqfKBV12hvgari477BnHI6Lx9ZrX3kgnCjH79MKrfS5B8SchEKDQ8iVjow1Px9RZihKX5AQ==}
+    engines: {node: ^22.18.0 || >=24.2.0}
 
   '@metamask/eth-json-rpc-provider@1.0.1':
     resolution: {integrity: sha512-whiUMPlAOrVGmX8aKYVPvlKyG4CpQXiNNyt74vE1xb5sPvmx5oA7B/kOi/JdBvhGQq97U1/AVdXEdk2zkP8qyA==}
@@ -11161,6 +11187,8 @@ snapshots:
     dependencies:
       react: 19.2.6
       react-dom: 19.2.6(react@19.2.6)
+
+  '@medplum/fhirtypes@5.1.24': {}
 
   '@metamask/eth-json-rpc-provider@1.0.1':
     dependencies:

@@ -3,28 +3,18 @@
   "compilerOptions": {
     "noEmit": false,
     "rootDir": "src",
-    "outDir": "./dist",
+    "outDir": "dist",
     "tsBuildInfoFile": ".tsbuildinfo"
   },
   "references": [
     {
-      "path": "../clinical-records"
-    },
-    {
       "path": "../contracts/tsconfig.build.json"
-    },
-    {
-      "path": "../core/tsconfig.build.json"
-    },
-    {
-      "path": "../health-metrics"
     }
   ],
   "include": [
     "src/**/*.ts"
   ],
   "exclude": [
-    "dist",
-    ".dist-next"
+    "dist"
   ]
 }

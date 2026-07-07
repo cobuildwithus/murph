@@ -120,7 +120,7 @@ rationale, not a live mechanism.
 
 ## Write Authority
 
-- Only `packages/core` may mutate canonical vault data. `packages/importers` may parse and prepare external data, but all canonical writes call core APIs. `packages/cli` never writes vault files directly.
+- Only `packages/core` may mutate canonical vault data. `packages/clinical-records` may define pure Clinical Records Intake contracts, and `packages/importers` may parse and prepare external data, but all canonical writes call core APIs. `packages/cli` never writes vault files directly.
 
 ## Agent-Visible CLI Payloads
 
@@ -176,5 +176,5 @@ rationale, not a live mechanism.
 
 - Product CLI: `murph`. Raw explicit-vault CLI and operator surface: `vault-cli`.
 - Public packages: `@murphai/murph`, `@murphai/openclaw-plugin`, `@murphai/contracts`, `@murphai/hosted-execution`, `@murphai/gateway-core`.
-- Workspace-private package families: `core`, `query`, `importers`, `parsers`, `health-metrics`, `health-commons`, `exercise-library`, `device-syncd`, `inboxd`, `inbox-services`, `messaging-ingress`, `runtime-state`, `assistant-engine`, `assistant-runtime`, `assistantd`, `operator-config`, `vault-usecases`, `assistant-cli`, `setup-cli`, `hosted-orchestrator-temporal`, `cloudflare-hosted-control`, `hosted-local-harness`.
+- Workspace-private package families: `core`, `query`, `importers`, `parsers`, `clinical-records`, `health-metrics`, `health-commons`, `exercise-library`, `device-syncd`, `inboxd`, `inbox-services`, `messaging-ingress`, `runtime-state`, `assistant-engine`, `assistant-runtime`, `assistantd`, `operator-config`, `vault-usecases`, `assistant-cli`, `setup-cli`, `hosted-orchestrator-temporal`, `cloudflare-hosted-control`, `hosted-local-harness`.
 - This roster must match the actual `packages/*` manifests; update it in the same change that adds, removes, or renames a package.

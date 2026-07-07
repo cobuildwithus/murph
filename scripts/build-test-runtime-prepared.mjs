@@ -80,6 +80,7 @@ const workspaceSmokePackages = [
 ];
 const baseSmokeImportPaths = [
   "packages/contracts/dist/index.js",
+  "packages/clinical-records/dist/index.js",
   "packages/hosted-execution/dist/index.js",
   "packages/messaging-ingress/dist/linq-webhook.js",
   "packages/messaging-ingress/dist/telegram-webhook.js",

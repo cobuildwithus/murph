@@ -64,6 +64,7 @@ readonly node_syntax_check_scripts=(
 
 readonly typecheck_package_dirs=(
   "packages/contracts"
+  "packages/clinical-records"
   "packages/hosted-execution"
   "packages/hosted-orchestrator-temporal"
   "packages/runtime-state"
@@ -574,6 +575,7 @@ run_all_package_coverage() {
     # the active CLI window because contracts artifact verification rebuilds
     # shared dist outputs that CLI built-runtime tests import.
     "packages/contracts"
+    "packages/clinical-records"
     "packages/device-syncd"
     "packages/exercise-library"
     "packages/gateway-core"
@@ -601,6 +603,7 @@ run_all_package_coverage() {
     "Assistantd package coverage"
     "Cloudflare hosted control package coverage"
     "Contracts package coverage"
+    "Clinical records package coverage"
     "Device syncd package coverage"
     "Exercise library package coverage"
     "Gateway core package coverage"

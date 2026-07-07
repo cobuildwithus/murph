@@ -179,6 +179,7 @@ describe("runner bundle runtime artifact staging", () => {
       "@murphai/assistant-cli": "workspace:*",
       "@murphai/assistant-engine": "workspace:*",
       "@murphai/assistantd": "workspace:*",
+      "@murphai/clinical-records": "workspace:*",
       "@murphai/core": "workspace:*",
       "@murphai/device-syncd": "workspace:*",
       "@murphai/exercise-library": "workspace:*",

@@ -139,6 +139,7 @@
   },
   "dependencies": {
     "@junction-api/sdk": "1.2.0",
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
@@ -149,6 +150,7 @@
     "zod": "^4.4.3"
   },
   "bundleDependencies": [
+    "@murphai/clinical-records",
     "@murphai/core",
     "@murphai/device-syncd",
     "@murphai/health-metrics",

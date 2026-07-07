@@ -5,6 +5,8 @@ export {
   type AssessmentResponseImportInput,
 } from "./assessment/import-assessment-response.ts";
 export type { AssessmentImportPort, AssessmentResponseImportPayload } from "./assessment/core-port.ts";
+export { buildClinicalImportPlan } from "./clinical-records/index.ts";
+export type { BuildClinicalImportPlanInput } from "./clinical-records/index.ts";
 export {
   importCsvSamples,
   parseDelimitedRows,

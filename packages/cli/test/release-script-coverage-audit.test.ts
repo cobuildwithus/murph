@@ -311,12 +311,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).not.toContain('connected repository, PR diff, or touched files')
     expect(prDeepReviewPrompt).toContain('start the final message with a single `Checked:` line')
     expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
-    const prDeepReviewLoop = readFileSync(
-      path.join(repoRoot, 'agent-docs', 'operations', 'pr-deep-review-loop.md'),
+    const prReviewGptLoop = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'pr-reviewgpt-loop.md'),
       'utf8',
     )
-    expect(prDeepReviewLoop).toContain('local Codex CLI')
-    expect(prDeepReviewLoop).toContain('the earlier ReviewGPT packaging/preflight steps no longer apply')
+    expect(prReviewGptLoop).toContain('does **not** run the local Codex')
+    expect(prReviewGptLoop).toContain('scripts/review-gpt-pr-head-preflight.sh')
+    expect(prReviewGptLoop).toContain('REVIEW_COMPLETE')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
@@ -965,6 +966,7 @@ exit 1
 
     expect(summary.packages).toContainEqual(expect.objectContaining({
       bundledWorkspaceDependencies: [
+        '@murphai/clinical-records',
         '@murphai/core',
         '@murphai/device-syncd',
         '@murphai/health-metrics',
@@ -979,6 +981,7 @@ exit 1
         '@murphai/assistant-cli',
         '@murphai/assistant-engine',
         '@murphai/assistantd',
+        '@murphai/clinical-records',
         '@murphai/core',
         '@murphai/device-syncd',
         '@murphai/importers',

@@ -58,9 +58,13 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
+    "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/health-metrics": "workspace:*",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@medplum/fhirtypes": "^5.1.24"
   }
 }
