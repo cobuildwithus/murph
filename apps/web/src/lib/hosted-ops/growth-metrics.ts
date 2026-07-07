@@ -1,6 +1,6 @@
 import "server-only";
 
-import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
+import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
@@ -25,6 +25,26 @@ const CHURN_STATUS_KEYS = [
   HostedBillingStatus.paused,
   HostedBillingStatus.unpaid,
 ] as const;
+
+const paidHostedFamilyGroupWhere = {
+  billingRef: {
+    is: {
+      billedSeatCount: {
+        gte: 1,
+      },
+      currentBillingPhase: "paid",
+    },
+  },
+  billingStatus: HostedBillingStatus.active,
+  suspendedAt: null,
+} satisfies Prisma.HostedAccountGroupWhereInput;
+
+function activePaidFamilyMembershipWhere(): Prisma.HostedAccountGroupMembershipWhereInput {
+  return {
+    group: paidHostedFamilyGroupWhere,
+    status: "active",
+  };
+}
 
 type HostedGrowthPrisma = Pick<
   PrismaClient,
@@ -74,6 +94,7 @@ export interface HostedGrowthTrialStartRow {
   member: {
     suspendedAt: Date | null;
   };
+  paidViaFamily: boolean;
   pulseTrialRedeemedAt: Date | null;
 }
 
@@ -439,7 +460,8 @@ export function buildTrialCohortRows(input: {
       row.pulseTrialRedeemedAt < end
     );
     const converted = cohortRows.filter((row) =>
-      row.currentBillingPhase === "paid" && row.member.suspendedAt === null
+      row.member.suspendedAt === null &&
+      (row.currentBillingPhase === "paid" || row.paidViaFamily)
     ).length;
     const stillTrialing = cohortRows.filter((row) =>
       row.currentBillingPhase !== "paid" &&
@@ -518,7 +540,7 @@ export async function readHostedGrowthDashboard(
   const [
     current,
     memberRows,
-    trialStartRows,
+    rawTrialStartRows,
     snapshots,
     matureStarted,
     matureConverted,
@@ -540,6 +562,13 @@ export async function readHostedGrowthDashboard(
         currentBillingPhase: true,
         member: {
           select: {
+            accountGroupMemberships: {
+              select: {
+                id: true,
+              },
+              take: 1,
+              where: activePaidFamilyMembershipWhere(),
+            },
             suspendedAt: true,
           },
         },
@@ -573,8 +602,21 @@ export async function readHostedGrowthDashboard(
     }),
     prisma.hostedMemberBillingRef.count({
       where: {
-        currentBillingPhase: "paid",
         member: {
+          OR: [
+            {
+              billingRef: {
+                is: {
+                  currentBillingPhase: "paid",
+                },
+              },
+            },
+            {
+              accountGroupMemberships: {
+                some: activePaidFamilyMembershipWhere(),
+              },
+            },
+          ],
           suspendedAt: null,
         },
         pulseTrialRedeemedAt: {
@@ -583,6 +625,14 @@ export async function readHostedGrowthDashboard(
       },
     }),
   ]);
+  const trialStartRows = rawTrialStartRows.map((row): HostedGrowthTrialStartRow => ({
+    currentBillingPhase: row.currentBillingPhase,
+    member: {
+      suspendedAt: row.member.suspendedAt,
+    },
+    paidViaFamily: row.member.accountGroupMemberships.length > 0,
+    pulseTrialRedeemedAt: row.pulseTrialRedeemedAt,
+  }));
 
   const dailySeries = buildDailyGrowthSeries({
     dayCount: DAILY_SERIES_DAYS,
@@ -760,16 +810,7 @@ async function readCurrentHostedGrowthMetrics(
         },
       },
       where: {
-        billingRef: {
-          is: {
-            billedSeatCount: {
-              gte: 1,
-            },
-            currentBillingPhase: "paid",
-          },
-        },
-        billingStatus: HostedBillingStatus.active,
-        suspendedAt: null,
+        ...paidHostedFamilyGroupWhere,
       },
     }),
     prisma.hostedMember.findMany({

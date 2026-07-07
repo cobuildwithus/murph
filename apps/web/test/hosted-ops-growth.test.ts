@@ -241,6 +241,7 @@ describe("hosted ops growth metrics", () => {
           member: {
             suspendedAt: null,
           },
+          paidViaFamily: false,
           pulseTrialRedeemedAt: new Date("2026-06-25T12:00:00.000Z"),
         },
         {
@@ -248,6 +249,7 @@ describe("hosted ops growth metrics", () => {
           member: {
             suspendedAt: null,
           },
+          paidViaFamily: false,
           pulseTrialRedeemedAt: new Date("2026-06-26T12:00:00.000Z"),
         },
         {
@@ -255,6 +257,7 @@ describe("hosted ops growth metrics", () => {
           member: {
             suspendedAt: null,
           },
+          paidViaFamily: false,
           pulseTrialRedeemedAt: new Date("2026-06-24T12:00:00.000Z"),
         },
       ],
@@ -279,6 +282,7 @@ describe("hosted ops growth metrics", () => {
           member: {
             suspendedAt: null,
           },
+          paidViaFamily: false,
           pulseTrialRedeemedAt: new Date("2026-06-25T12:00:00.000Z"),
         },
         {
@@ -286,6 +290,7 @@ describe("hosted ops growth metrics", () => {
           member: {
             suspendedAt: new Date("2026-07-01T00:00:00.000Z"),
           },
+          paidViaFamily: false,
           pulseTrialRedeemedAt: new Date("2026-06-24T12:00:00.000Z"),
         },
       ],
@@ -300,7 +305,32 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
-  it("filters suspended members out of the mature converted count query", async () => {
+  it("counts mature unsuspended family-paid trial rows as converted", () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const rows = buildTrialCohortRows({
+      rowCount: 2,
+      trialStartRows: [
+        {
+          currentBillingPhase: null,
+          member: {
+            suspendedAt: null,
+          },
+          paidViaFamily: true,
+          pulseTrialRedeemedAt: new Date("2026-06-24T12:00:00.000Z"),
+        },
+      ],
+      windowEnd: now,
+    });
+
+    expect(rows[1]).toMatchObject({
+      converted: 1,
+      conversionPercent: 100,
+      started: 1,
+      stillTrialing: 0,
+    });
+  });
+
+  it("counts own-paid or family-paid members in the mature converted count query", async () => {
     queueCurrentMetricMocks();
     queueCurrentMetricMocks();
     mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
@@ -319,6 +349,27 @@ describe("hosted ops growth metrics", () => {
       select: {
         member: {
           select: {
+            accountGroupMemberships: {
+              select: {
+                id: true,
+              },
+              take: 1,
+              where: {
+                group: {
+                  billingRef: {
+                    is: {
+                      billedSeatCount: {
+                        gte: 1,
+                      },
+                      currentBillingPhase: "paid",
+                    },
+                  },
+                  billingStatus: HostedBillingStatus.active,
+                  suspendedAt: null,
+                },
+                status: "active",
+              },
+            },
             suspendedAt: true,
           },
         },
@@ -326,8 +377,35 @@ describe("hosted ops growth metrics", () => {
     });
     expect(mocks.hostedMemberBillingRef.count.mock.calls[1]?.[0]).toMatchObject({
       where: {
-        currentBillingPhase: "paid",
         member: {
+          OR: [
+            {
+              billingRef: {
+                is: {
+                  currentBillingPhase: "paid",
+                },
+              },
+            },
+            {
+              accountGroupMemberships: {
+                some: {
+                  group: {
+                    billingRef: {
+                      is: {
+                        billedSeatCount: {
+                          gte: 1,
+                        },
+                        currentBillingPhase: "paid",
+                      },
+                    },
+                    billingStatus: HostedBillingStatus.active,
+                    suspendedAt: null,
+                  },
+                  status: "active",
+                },
+              },
+            },
+          ],
           suspendedAt: null,
         },
         pulseTrialRedeemedAt: {
