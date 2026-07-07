@@ -11,10 +11,11 @@ import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   readHostedMemberEmailAuthorization,
 } from "../hosted-onboarding/hosted-member-store";
-import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
-import { readHostedMemberRoutingState } from "../hosted-onboarding/hosted-member-routing-store";
+import {
+  readHostedMemberRoutingState,
+  type HostedMemberRoutingStateSnapshot,
+} from "../hosted-onboarding/hosted-member-routing-store";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
-import { resolveHostedMemberMessagingState } from "../hosted-onboarding/messaging-state";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
 
@@ -254,18 +255,25 @@ async function hasHostedMemberDirectNewsletterNudgeRoute(input: {
   memberId: string;
   prisma: ReadClient;
 }): Promise<boolean> {
-  const [identity, routing] = await Promise.all([
-    readHostedMemberIdentity({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    }),
-    readHostedMemberRoutingState({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    }),
-  ]);
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
 
-  return resolveHostedMemberMessagingState({ identity, routing }).hasDirectMessagingChannel;
+  return hasEstablishedDirectNewsletterNudgeRoute(routing);
+}
+
+function hasEstablishedDirectNewsletterNudgeRoute(
+  routing: HostedMemberRoutingStateSnapshot | null,
+): boolean {
+  return (
+    hasNonEmptyHostedRouteId(routing?.linqChatId)
+    || hasNonEmptyHostedRouteId(routing?.telegramThreadId)
+  );
+}
+
+function hasNonEmptyHostedRouteId(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function buildGroupNewsletterEmailNeededEventId(input: {

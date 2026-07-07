@@ -8,6 +8,8 @@ import { afterEach, describe, test } from "vitest";
 import {
   listAssistantInputEvents,
   readAssistantInputEvent,
+  resolveAssistantSession,
+  type AssistantInputEventRecord,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import type {
@@ -49,40 +51,12 @@ afterEach(async () => {
 });
 
 describe("hosted group newsletter email-needed mailbox import", () => {
-  test("stages a redacted private system note on the member's own direct route", async () => {
+  test("stages a redacted private system note on the current direct route without prior direct input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
-    const priorDirectInput = await upsertAssistantInputEvent({
-      event: {
-        content: {
-          attachmentDescriptors: [],
-          text: "prior direct message",
-          transcriptText: "prior direct message",
-          userMessageContent: [{ text: "prior direct message", type: "text" }],
-        },
-        conversation: {
-          accountId: "acct_direct",
-          actorId: "actor_member",
-          actorIsSelf: false,
-          source: "linq",
-          threadId: "thread_direct",
-          threadIsDirect: true,
-        },
-        occurredAt: "2026-04-25T20:00:00.000Z",
-        replyTarget: {
-          channel: "linq",
-          messageId: "msg_prior_direct",
-          threadId: "chat_direct",
-        },
-        sourceRef: {
-          captureId: "capture_prior_direct",
-          kind: "inbox-capture",
-          source: "linq",
-          version: null,
-        },
-      },
-      vault: vaultRoot,
+    const currentRoute = await seedCurrentDirectSessionRoute(vaultRoot, {
+      threadId: "thread_direct_current",
     });
 
     const outcome = await importHostedGroupNewsletterEmailNeededMailboxItem({
@@ -100,9 +74,8 @@ describe("hosted group newsletter email-needed mailbox import", () => {
       vault: vaultRoot,
     });
     assert.ok(staged);
-    assert.notEqual(staged.inputId, priorDirectInput.inputId);
-    assert.deepEqual(staged.conversation, priorDirectInput.conversation);
-    assert.deepEqual(staged.replyTarget, priorDirectInput.replyTarget);
+    assert.deepEqual(staged.conversation, currentRoute.conversation);
+    assert.deepEqual(staged.replyTarget, currentRoute.replyTarget);
     assert.equal(staged.sourceRef.kind, "hosted-mailbox");
     assert.equal(staged.sourceRef.lane, "system");
     assert.equal(staged.content.text, "System note: The group Tempo Crew set up an email newsletter. This member granted email sharing for that group but has no verified email. If appropriate, mention once in the normal 1:1 conversation that they can add an email at /settings?addEmail=true. Keep it casual, private, and non-shaming.");
@@ -116,14 +89,133 @@ describe("hosted group newsletter email-needed mailbox import", () => {
     ]);
 
     const listed = await listAssistantInputEvents({ vault: vaultRoot });
+    assert.equal(listed.events.length, 1);
+  });
+
+  test("uses the current direct session route instead of stale input archaeology", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-current-route-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const staleRoute = await seedPriorDirectInput(vaultRoot, {
+      deliveryTarget: "chat_stale",
+      threadId: "thread_stale",
+    });
+    const currentRoute = await seedCurrentDirectSessionRoute(vaultRoot, {
+      threadId: "thread_current",
+    });
+
+    const outcome = await importHostedGroupNewsletterEmailNeededMailboxItem({
+      item: createResolvedGroupNewsletterEmailNeededMailboxItem(),
+      vaultRoot,
+      wake: createGroupNewsletterEmailNeededWake(),
+    });
+
+    assert.equal(outcome.status, "imported");
+    assert.ok(outcome.assistantInputId);
+
+    const staged = await readAssistantInputEvent({
+      inputId: outcome.assistantInputId,
+      vault: vaultRoot,
+    });
+    assert.ok(staged);
+    assert.deepEqual(staged.conversation, currentRoute.conversation);
+    assert.deepEqual(staged.replyTarget, currentRoute.replyTarget);
+    assert.notDeepEqual(staged.replyTarget, staleRoute.replyTarget);
+
+    const listed = await listAssistantInputEvents({ vault: vaultRoot });
     assert.equal(listed.events.length, 2);
+  });
+
+  test("ignores newer email sessions and uses the latest Linq or Telegram direct route", async () => {
+    for (const channel of ["linq", "telegram"] as const) {
+      const parentRoot = await mkdtemp(path.join(tmpdir(), `murph-group-newsletter-email-needed-${channel}-`));
+      tempRoots.push(parentRoot);
+      const vaultRoot = path.join(parentRoot, "vault");
+      const directRoute = await seedCurrentDirectSessionRoute(vaultRoot, {
+        actorId: `actor_${channel}`,
+        channel,
+        identityId: `acct_${channel}`,
+        now: "2026-04-25T21:00:00.000Z",
+        threadId: `thread_${channel}_direct`,
+      });
+      await seedCurrentDirectSessionRoute(vaultRoot, {
+        actorId: "actor_email",
+        channel: "email",
+        identityId: "acct_email",
+        now: "2026-04-25T22:00:00.000Z",
+        threadId: "thread_email_direct",
+      });
+
+      const outcome = await importHostedGroupNewsletterEmailNeededMailboxItem({
+        item: createResolvedGroupNewsletterEmailNeededMailboxItem(),
+        vaultRoot,
+        wake: createGroupNewsletterEmailNeededWake(),
+      });
+
+      assert.equal(outcome.status, "imported");
+      assert.ok(outcome.assistantInputId);
+
+      const staged = await readAssistantInputEvent({
+        inputId: outcome.assistantInputId,
+        vault: vaultRoot,
+      });
+      assert.ok(staged);
+      assert.deepEqual(staged.conversation, directRoute.conversation);
+      assert.deepEqual(staged.replyTarget, directRoute.replyTarget);
+      assert.ok(staged.replyTarget);
+      assert.equal(staged.replyTarget.channel, channel);
+    }
+  });
+
+  test("skips email-only direct sessions without spending assistant work", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-email-only-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    await seedCurrentDirectSessionRoute(vaultRoot, {
+      channel: "email",
+      threadId: "thread_email_direct",
+    });
+
+    const outcome = await importHostedGroupNewsletterEmailNeededMailboxItem({
+      item: createResolvedGroupNewsletterEmailNeededMailboxItem(),
+      vaultRoot,
+      wake: createGroupNewsletterEmailNeededWake(),
+    });
+
+    assert.equal(outcome.status, "skipped");
+    assert.equal(outcome.reasonCode, "group-newsletter.email-needed.no-direct-route");
+    assert.equal(outcome.assistantInputId, undefined);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+
+    const listed = await listAssistantInputEvents({ vault: vaultRoot });
+    assert.equal(listed.events.length, 0);
+  });
+
+  test("skips without spending assistant work when there is no current direct route", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-no-route-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+
+    const outcome = await importHostedGroupNewsletterEmailNeededMailboxItem({
+      item: createResolvedGroupNewsletterEmailNeededMailboxItem(),
+      vaultRoot,
+      wake: createGroupNewsletterEmailNeededWake(),
+    });
+
+    assert.equal(outcome.status, "skipped");
+    assert.equal(outcome.reasonCode, "group-newsletter.email-needed.no-direct-route");
+    assert.equal(outcome.assistantInputId, undefined);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+
+    const listed = await listAssistantInputEvents({ vault: vaultRoot });
+    assert.equal(listed.events.length, 0);
   });
 
   test("keeps durably consumed replays out of the pending assistant queue", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-replay-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
-    await seedPriorDirectInput(vaultRoot);
+    await seedCurrentDirectSessionRoute(vaultRoot);
 
     const outcome = await importHostedGroupNewsletterEmailNeededMailboxItem({
       item: createResolvedGroupNewsletterEmailNeededMailboxItem({ durablyConsumed: true }),
@@ -137,12 +229,61 @@ describe("hosted group newsletter email-needed mailbox import", () => {
     assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
 
     const listed = await listAssistantInputEvents({ vault: vaultRoot });
-    assert.equal(listed.events.length, 2);
+    assert.equal(listed.events.length, 1);
   });
 });
 
-async function seedPriorDirectInput(vaultRoot: string): Promise<void> {
-  await upsertAssistantInputEvent({
+async function seedCurrentDirectSessionRoute(
+  vaultRoot: string,
+  input: {
+    actorId?: string;
+    channel?: "email" | "linq" | "telegram" | "whatsapp";
+    identityId?: string;
+    now?: string;
+    threadId?: string;
+  } = {},
+): Promise<Pick<AssistantInputEventRecord, "conversation" | "replyTarget">> {
+  const actorId = input.actorId ?? "actor_member";
+  const channel = input.channel ?? "linq";
+  const identityId = input.identityId ?? "acct_direct";
+  const threadId = input.threadId ?? "thread_direct";
+  await resolveAssistantSession({
+    actorId,
+    channel,
+    identityId,
+    now: new Date(input.now ?? "2026-04-25T21:00:00.000Z"),
+    threadId,
+    threadIsDirect: true,
+    vault: vaultRoot,
+  });
+
+  return {
+    conversation: {
+      accountId: identityId,
+      actorId,
+      actorIsSelf: false,
+      source: channel,
+      threadId,
+      threadIsDirect: true,
+    },
+    replyTarget: {
+      channel,
+      messageId: null,
+      threadId,
+    },
+  };
+}
+
+async function seedPriorDirectInput(
+  vaultRoot: string,
+  input: {
+    deliveryTarget?: string;
+    threadId?: string;
+  } = {},
+): Promise<AssistantInputEventRecord> {
+  const threadId = input.threadId ?? "thread_direct";
+  const deliveryTarget = input.deliveryTarget ?? "chat_direct";
+  return await upsertAssistantInputEvent({
     event: {
       content: {
         attachmentDescriptors: [],
@@ -155,14 +296,14 @@ async function seedPriorDirectInput(vaultRoot: string): Promise<void> {
         actorId: "actor_member",
         actorIsSelf: false,
         source: "linq",
-        threadId: "thread_direct",
+        threadId,
         threadIsDirect: true,
       },
       occurredAt: "2026-04-25T20:00:00.000Z",
       replyTarget: {
         channel: "linq",
         messageId: "msg_prior_direct",
-        threadId: "chat_direct",
+        threadId: deliveryTarget,
       },
       sourceRef: {
         captureId: "capture_prior_direct",
