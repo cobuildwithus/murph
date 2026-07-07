@@ -558,6 +558,162 @@ describe("hosted Linq egress engagement", () => {
     });
   });
 
+  it("heals a drifted home Linq chat key without regressing newer inbound freshness", async () => {
+    const driftedKey = createHostedLinqChatLookupKey("api-chat-id");
+    const liveKey = createHostedLinqChatLookupKey("webhook-chat-id");
+    const pendingKey = createHostedLinqChatLookupKey("pending-chat-id");
+    const recipientLookupKey = createHostedPhoneLookupKey("+15550100001");
+    const pendingRecipientLookupKey = createHostedPhoneLookupKey("+15550100002");
+    if (!driftedKey || !liveKey || !pendingKey || !recipientLookupKey || !pendingRecipientLookupKey) {
+      throw new Error("Expected test Linq lookup keys.");
+    }
+
+    const newerInboundAt = new Date("2026-06-26T12:00:00.000Z");
+    const replayedOccurredAt = new Date("2026-06-25T12:00:00.000Z");
+    const routing: {
+      linqChatLookupKey: string | null;
+      linqLastInboundAt: Date | null;
+      linqRecipientPhoneLookupKey: string | null;
+      memberId: string;
+      pendingLinqChatLookupKey: string | null;
+      pendingLinqLastInboundAt: Date | null;
+      pendingLinqRecipientPhoneLookupKey: string | null;
+    } = {
+      linqChatLookupKey: driftedKey,
+      linqLastInboundAt: newerInboundAt,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member-1",
+      pendingLinqChatLookupKey: pendingKey,
+      pendingLinqLastInboundAt: null,
+      pendingLinqRecipientPhoneLookupKey: pendingRecipientLookupKey,
+    };
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue([]),
+      hostedLinqDailyState: {
+        upsert: vi.fn().mockResolvedValue({
+          dayUtc: new Date("2026-06-25T00:00:00.000Z"),
+          firstSeenAt: replayedOccurredAt,
+          inboundCount: 1,
+          lastSeenAt: replayedOccurredAt,
+          memberId: "member-1",
+        }),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockImplementation(() => Promise.resolve({
+          linqChatLookupKey: routing.linqChatLookupKey,
+          linqLastInboundAt: routing.linqLastInboundAt,
+          linqRecipientPhoneLookupKey: routing.linqRecipientPhoneLookupKey,
+          pendingLinqChatLookupKey: routing.pendingLinqChatLookupKey,
+          pendingLinqLastInboundAt: routing.pendingLinqLastInboundAt,
+          pendingLinqRecipientPhoneLookupKey: routing.pendingLinqRecipientPhoneLookupKey,
+        })),
+        updateMany: vi.fn().mockImplementation((input: {
+          data?: {
+            linqLastInboundAt?: Date | null;
+            pendingLinqLastInboundAt?: Date | null;
+          };
+          where?: {
+            memberId?: string;
+            OR?: Array<{
+              linqLastInboundAt?: null | { lt: Date };
+              pendingLinqLastInboundAt?: null | { lt: Date };
+            }>;
+          };
+        }) => {
+          if (input.where?.memberId !== routing.memberId) {
+            return Promise.resolve({ count: 0 });
+          }
+
+          if (input.data?.linqLastInboundAt instanceof Date) {
+            const shouldUpdate = input.where.OR?.some((condition) => {
+              const clause = condition.linqLastInboundAt;
+              if (clause === null) {
+                return routing.linqLastInboundAt === null;
+              }
+              return Boolean(
+                clause
+                && routing.linqLastInboundAt
+                && routing.linqLastInboundAt.getTime() < clause.lt.getTime(),
+              );
+            }) ?? true;
+            if (!shouldUpdate) {
+              return Promise.resolve({ count: 0 });
+            }
+            routing.linqLastInboundAt = input.data.linqLastInboundAt;
+            return Promise.resolve({ count: 1 });
+          }
+
+          if (input.data?.pendingLinqLastInboundAt instanceof Date) {
+            routing.pendingLinqLastInboundAt = input.data.pendingLinqLastInboundAt;
+            return Promise.resolve({ count: 1 });
+          }
+
+          return Promise.resolve({ count: 0 });
+        }),
+        upsert: vi.fn().mockImplementation((input: {
+          update: {
+            linqChatLookupKey?: string | null;
+            linqLastInboundAt?: Date | null;
+            linqRecipientPhoneLookupKey?: string | null;
+            pendingLinqChatLookupKey?: string | null;
+            pendingLinqLastInboundAt?: Date | null;
+            pendingLinqRecipientPhoneLookupKey?: string | null;
+          };
+        }) => {
+          if ("linqChatLookupKey" in input.update) {
+            routing.linqChatLookupKey = input.update.linqChatLookupKey ?? null;
+          }
+          if ("linqLastInboundAt" in input.update) {
+            routing.linqLastInboundAt = input.update.linqLastInboundAt ?? null;
+          }
+          if ("linqRecipientPhoneLookupKey" in input.update) {
+            routing.linqRecipientPhoneLookupKey = input.update.linqRecipientPhoneLookupKey ?? null;
+          }
+          if ("pendingLinqChatLookupKey" in input.update) {
+            routing.pendingLinqChatLookupKey = input.update.pendingLinqChatLookupKey ?? null;
+          }
+          if ("pendingLinqLastInboundAt" in input.update) {
+            routing.pendingLinqLastInboundAt = input.update.pendingLinqLastInboundAt ?? null;
+          }
+          if ("pendingLinqRecipientPhoneLookupKey" in input.update) {
+            routing.pendingLinqRecipientPhoneLookupKey =
+              input.update.pendingLinqRecipientPhoneLookupKey ?? null;
+          }
+          return Promise.resolve(routing);
+        }),
+      },
+    };
+
+    await bindHostedMemberHomeLinqChatAndTrackInbound({
+      chatId: "webhook-chat-id",
+      homeLineAssignedAt: null,
+      memberId: "member-1",
+      occurredAt: replayedOccurredAt.toISOString(),
+      prisma: prisma as never,
+      recipientPhone: "+15550100001",
+    });
+
+    expect(routing.linqChatLookupKey).toBe(liveKey);
+    expect(routing.linqRecipientPhoneLookupKey).toBe(recipientLookupKey);
+    expect(routing.linqLastInboundAt).toEqual(newerInboundAt);
+    expect(routing.pendingLinqChatLookupKey).toBeNull();
+    expect(routing.pendingLinqLastInboundAt).toBeNull();
+    expect(routing.pendingLinqRecipientPhoneLookupKey).toBeNull();
+    expect(prisma.hostedMemberRouting.updateMany).toHaveBeenLastCalledWith({
+      data: {
+        linqLastInboundAt: replayedOccurredAt,
+      },
+      where: {
+        memberId: "member-1",
+        OR: [
+          { linqLastInboundAt: null },
+          { linqLastInboundAt: { lt: replayedOccurredAt } },
+        ],
+      },
+    });
+  });
+
   it("records current-inbound member proof by member id instead of stored chat key", async () => {
     mailboxMocks.decodeHostedMailboxStoredPayload.mockReset();
     mailboxMocks.readHostedMailboxItemById.mockReset();
