@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedEmailSelfAddresses: vi.fn(),
 }));
 
-vi.mock("@murphai/inboxd", () => ({
+vi.mock("@murphai/inboxd/runtime", () => ({
   createInboxPipeline: mocks.createInboxPipeline,
   createParsedInboxPipeline: mocks.createParsedInboxPipeline,
   openInboxRuntime: mocks.openInboxRuntime,

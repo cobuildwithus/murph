@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import {
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
+  type HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  CloudflareHostedControlRuntimeEnsureProcessingTiming,
+} from "@murphai/cloudflare-hosted-control/client";
 
 import {
   readHostedExecutionControlClientIfConfigured,
@@ -13,6 +17,7 @@ import {
 } from "../hosted-orchestration/signal-runtime";
 import {
   recordHostedIngressAcceptedFromMailboxItem,
+  recordHostedIngressDirectEnsureTiming,
   recordHostedIngressTemporalSignalAccepted,
 } from "../hosted-runtime-latency/store";
 import {
@@ -114,6 +119,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   // already-consumed work finds nothing replyable and exits.
   const directEnsureWake = directEnsureEligible
     ? startHostedDirectEnsureWakeBestEffort({
+        mailboxItemId,
         source: "linq",
         userId,
       })
@@ -153,6 +159,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
 // promise exists only so callers can keep the request alive past the webhook
 // response; the Temporal signal never waits on it.
 function startHostedDirectEnsureWakeBestEffort(wake: {
+  mailboxItemId: string;
   source: "linq";
   userId: string;
 }): Promise<void> {
@@ -172,8 +179,12 @@ function startHostedDirectEnsureWakeBestEffort(wake: {
   }
 
   try {
+    let directEnsureTiming: CloudflareHostedControlRuntimeEnsureProcessingTiming | null = null;
     return client
       .ensureRuntimeProcessing({
+        onTiming: (timing) => {
+          directEnsureTiming = timing;
+        },
         orchestrationAttemptId: `web-ingress-${randomUUID()}`,
         userId: wake.userId,
       })
@@ -191,6 +202,17 @@ function startHostedDirectEnsureWakeBestEffort(wake: {
           errorName: deriveHostedOnboardingTimingErrorName(error),
           source: wakeSource,
         });
+      })
+      .finally(async () => {
+        if (!directEnsureTiming) {
+          return;
+        }
+        await recordHostedDirectEnsureWakeTimingBestEffort({
+          mailboxItemId: wake.mailboxItemId,
+          source: wakeSource,
+          timing: directEnsureTiming,
+          userId: wake.userId,
+        });
       });
   } catch (error) {
     console.warn("Hosted direct ensure wake failed.", {
@@ -198,6 +220,39 @@ function startHostedDirectEnsureWakeBestEffort(wake: {
       source: wakeSource,
     });
     return Promise.resolve();
+  }
+}
+
+async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
+  mailboxItemId: string;
+  source: "linq";
+  timing: CloudflareHostedControlRuntimeEnsureProcessingTiming;
+  userId: string;
+}): Promise<void> {
+  const phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown = {
+    schemaVersion: 1,
+    orchestration: {
+      tokenAcquireStartedAtEpochMs: timingRecord.timing.tokenAcquireStartedAtEpochMs,
+      tokenAcquiredAtEpochMs: timingRecord.timing.tokenAcquiredAtEpochMs,
+      directEnsureRequestStartedAtEpochMs:
+        timingRecord.timing.directEnsureRequestStartedAtEpochMs,
+      directEnsureResponseReceivedAtEpochMs:
+        timingRecord.timing.directEnsureResponseReceivedAtEpochMs,
+    },
+  };
+
+  try {
+    await recordHostedIngressDirectEnsureTiming({
+      expectedUserId: timingRecord.userId,
+      mailboxItemId: timingRecord.mailboxItemId,
+      phaseBreakdown,
+      source: timingRecord.source,
+    });
+  } catch (error) {
+    console.warn("Hosted direct ensure wake timing record failed.", {
+      errorName: deriveHostedOnboardingTimingErrorName(error),
+      source: timingRecord.source,
+    });
   }
 }
 

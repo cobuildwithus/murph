@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     void _input;
     return null;
   }),
+  resolveHostedFamilyInviteTokenForInbound: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
     envelope?: { eventId?: string };
   }) => ({
@@ -89,10 +90,14 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/family-plan")>(
     "@/src/lib/hosted-onboarding/family-plan",
   );
+  mocks.resolveHostedFamilyInviteTokenForInbound.mockImplementation(async (input: {
+    text: string | null | undefined;
+  }) => actual.parseHostedFamilyInviteStartToken(input.text));
 
   return {
     ...actual,
     acceptHostedFamilyInviteFromPhoneTx: mocks.acceptHostedFamilyInviteFromPhoneTx,
+    resolveHostedFamilyInviteTokenForInbound: mocks.resolveHostedFamilyInviteTokenForInbound,
   };
 });
 
@@ -611,6 +616,45 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
         message: expect.objectContaining({
           whatsappMessage: expect.objectContaining({
             text: "wiesz cos o family planie?",
+          }),
+        }),
+      }),
+      tx: prisma,
+    });
+  });
+
+  it("routes unknown token-shaped WhatsApp text to the assistant", async () => {
+    mocks.resolveHostedFamilyInviteTokenForInbound.mockResolvedValueOnce(null);
+    const prisma = createWhatsAppPrismaHarness({
+      consentGranted: true,
+      memberId: "member_whatsapp_123",
+    });
+    const rawBody = buildWhatsAppInboundTextBody("sending the family_photos album now");
+
+    await expect(handleHostedOnboardingWhatsAppWebhook({
+      prisma,
+      rawBody,
+      signature: signWhatsAppBody(rawBody),
+    })).resolves.toEqual({
+      commandHandledCount: 0,
+      ignored: false,
+      inboundTextCount: 1,
+      ok: true,
+      reason: "wake-appended-active-member",
+      routedTextCount: 1,
+    });
+
+    expect(mocks.resolveHostedFamilyInviteTokenForInbound).toHaveBeenCalledWith({
+      prisma,
+      text: "sending the family_photos album now",
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "whatsapp:message:wamid.test-message-1",
+        kind: "conversation.message",
+        message: expect.objectContaining({
+          whatsappMessage: expect.objectContaining({
+            text: "sending the family_photos album now",
           }),
         }),
       }),

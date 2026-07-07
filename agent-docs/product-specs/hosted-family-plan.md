@@ -155,6 +155,21 @@ Telegram `from.username`.
 
 The simplest acceptance path should be chat-first.
 
+Binding is optional targeting, not mandatory verification. A phone-, email-, or
+Telegram-bound invite can only be claimed by that matching identity. A fully
+unbound label-only invite is claimable by the first verified identity that
+presents the invite reference through an explicit act: sending the
+`family_<code>` message by text, opening the Telegram bot deep link, or tapping
+Accept after web sign-in. Acceptance must never happen as a side effect of an
+unrelated message, and the `family_<code>` token remains the messaging consent
+marker.
+
+The web accept page (`/family/accept/<code>`) selects the accept channels from
+the invite binding. Bound invites never offer channels other than their
+binding; unbound invites offer all configured claim channels. When an unbound
+invite is claimed, notify the plan owner that the label, or "Someone" when no
+label exists, joined the family plan.
+
 ### Telegram
 
 Telegram invites use a deep link such as:
@@ -176,15 +191,30 @@ missing or ambiguous, fail closed rather than guessing.
 Phone pre-bound invites may be accepted in chat when the response arrives from
 the invited phone number and the WhatsApp messaging consent path has been
 completed. For the MVP, the inbound family invite token is the WhatsApp
-consent-writing command for that phone-bound acceptance. The accepted member
-still gets their own `HostedMember` and routing rows.
+consent-writing command for that phone-bound acceptance. Fully unbound invites
+may also be claimed from phone messaging when the sender explicitly sends the
+family invite token; the sender's verified phone identity becomes the claimant.
+The accepted member still gets their own `HostedMember` and routing rows.
+
+### iMessage / SMS
+
+A phone pre-bound invite opened on the web accept page leads with a "Continue in
+Messages" action: an `sms:` deep link to Murph prefilled with the family invite
+token embedded in a human-readable sentence. Sending it reuses the same inbound
+phone-bound acceptance path, so the invitee joins from the thread they already
+use with no separate web sign-in or verification step. Prefer the Murph line an existing
+member already messages on so acceptance lands in their current thread instead
+of being redirected to their home line; fall back to a configured line for a
+brand-new invitee, whom the webhook assigns a home line on first contact.
 
 ### Web Fallback
 
 Web remains a fallback for unsupported verification, settings, wearable
 connection, export, deletion, and other account management tasks. The family
-MVP should not require a web visit for a straightforward Telegram or WhatsApp
-invite acceptance.
+MVP should not require a web visit for a straightforward Telegram, WhatsApp, or
+Messages invite acceptance. For unbound invites, a signed-in hosted member may
+tap Accept on the web page, and their verified phone or email identity becomes
+the claimant.
 
 ## Acceptance Copy
 

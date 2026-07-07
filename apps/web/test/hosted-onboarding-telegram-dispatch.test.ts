@@ -403,6 +403,88 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     );
   });
 
+  it("routes unknown token-shaped Telegram text to the assistant", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberRoutingFindUnique = vi.fn(async (args?: { where?: { memberId?: string } }) => {
+      if (args?.where?.memberId) {
+        return null;
+      }
+
+      return {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_telegram_123",
+          suspendedAt: null,
+        },
+        memberId: "member_telegram_123",
+      };
+    });
+    const hostedAccountGroupInviteFindUnique = vi.fn().mockResolvedValue(null);
+    const prisma = withPrismaTransaction({
+      hostedAccountGroupInvite: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: hostedAccountGroupInviteFindUnique,
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+            username: "alice_user",
+          },
+          message_id: 6,
+          text: "sending the family_photos album now",
+        },
+        update_id: 326,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(hostedAccountGroupInviteFindUnique).toHaveBeenCalledWith({
+      select: {
+        id: true,
+      },
+      where: {
+        inviteCode: "photos",
+      },
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          eventId: "telegram:update:326",
+          kind: "conversation.message",
+          message: expect.objectContaining({
+            telegramMessage: expect.objectContaining({
+              text: "sending the family_photos album now",
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_telegram_123",
+      mailboxItemId: "mailbox_telegram:update:326",
+    });
+  });
+
   it("ignores Telegram family invite tokens that are not acceptable for the sender", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedAccountGroupInviteFindUnique = vi.fn().mockResolvedValue({

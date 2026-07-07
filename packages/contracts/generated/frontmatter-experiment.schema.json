@@ -416,6 +416,11 @@
                           "unknown"
                         ]
                       },
+                      "activityKind": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
                       "partialCredit": {
                         "type": "number",
                         "minimum": 0,
@@ -553,7 +558,6 @@
               "targetId",
               "label",
               "phase",
-              "calendar",
               "evidence"
             ],
             "additionalProperties": false

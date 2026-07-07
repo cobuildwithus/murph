@@ -26,7 +26,7 @@ import {
   appendHostedFamilyChatNotificationTx,
   buildHostedFamilyInviteAcceptedReplyText,
   acceptHostedFamilyInviteFromPhoneTx,
-  parseHostedFamilyInviteStartToken,
+  resolveHostedFamilyInviteTokenForInbound,
 } from "./family-plan";
 import { readActiveHostedMemberAccess } from "./member-access";
 import { normalizePhoneNumber } from "./phone";
@@ -155,7 +155,10 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     return buildWhatsAppInboundTextNoWakePlan("invalid-whatsapp-sender");
   }
 
-  const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(input.inboundText.text) !== null;
+  const familyInviteTokenPresent = await resolveHostedFamilyInviteTokenForInbound({
+    prisma: input.prisma,
+    text: input.inboundText.text,
+  }) !== null;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
   try {
     familyAcceptance = await acceptHostedFamilyInviteFromPhoneTx({

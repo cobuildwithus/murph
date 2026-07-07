@@ -1,8 +1,10 @@
-import type {
-  ExperimentAdherenceEvidenceRule,
-  ExperimentAdherenceTarget,
-  ExperimentRunPlan,
-  ExperimentRunScheduleIntent,
+import {
+  activityTextMatchesKind,
+  normalizeActivityKindToken,
+  type ExperimentAdherenceEvidenceRule,
+  type ExperimentAdherenceTarget,
+  type ExperimentRunPlan,
+  type ExperimentRunScheduleIntent,
 } from "@murphai/contracts";
 import type { MetricComparator } from "./metrics/index.ts";
 
@@ -22,6 +24,7 @@ export interface ExperimentAdherenceWindows {
 }
 
 export interface ExperimentAdherenceObservation {
+  activityKind?: string | null;
   comparator?: MetricComparator | null;
   evidenceId: string;
   eventKind?: string | null;
@@ -93,12 +96,87 @@ interface AdherenceExpectation {
 const ISO_LOCAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const LOCAL_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 const MAX_ADHERENCE_CELLS = 3660;
+const DEVICE_OBSERVABLE_ACTIVITY_KINDS = [
+  "running",
+  "cycling",
+  "swimming",
+  "rowing",
+  "walking",
+  "hiking",
+  "strength",
+  "elliptical",
+] as const;
+const GENERIC_ACTIVITY_KIND_TOKENS = new Set([
+  "workout",
+  "activity",
+  "activity-session",
+  "session",
+  "exercise",
+  "cardio",
+  "fitness",
+  "general",
+  "other",
+  "unknown",
+]);
+
+export type LinkedEventCountEvidence = Extract<ExperimentAdherenceEvidenceRule, { kind: "linkedEventCount" }>;
+
+export interface AdherenceSessionCounts {
+  completedSessions: number;
+  missedSessions: number;
+  partialSessions: number;
+  skippedSessions: number;
+}
+
+export function resolveAdherenceEvidence(
+  modality: string | null | undefined,
+): { eventKind: "activity_session" | "intervention_session"; activityKind?: string } {
+  const activityKind = resolveDeviceObservableActivityKind(modality);
+  return activityKind
+    ? { eventKind: "activity_session", activityKind }
+    : { eventKind: "intervention_session" };
+}
+
+export function eventKindIsCandidateForEvidence(
+  eventKind: string | null | undefined,
+  evidence: LinkedEventCountEvidence,
+): boolean {
+  if (!eventKind) {
+    return false;
+  }
+
+  if (evidence.eventKind === "activity_session") {
+    return eventKind === "activity_session" || eventKind === "intervention_session";
+  }
+
+  return eventKind === evidence.eventKind;
+}
+
+export function resolveActivityEvidenceLocalDate(event: {
+  date?: string | null;
+  occurredAt?: string | null;
+}): string | null {
+  return event.date ?? extractDate(event.occurredAt);
+}
+
+export function resolveAdherenceObservationActivityKind(input: {
+  attributes: Record<string, unknown>;
+}): string | null {
+  for (const candidate of listActivityKindCandidates(input.attributes)) {
+    const normalized = normalizeActivityKindToken(candidate);
+    if (normalized && !GENERIC_ACTIVITY_KIND_TOKENS.has(normalized)) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
 
 export function buildExperimentAdherenceCalendar(
   input: BuildExperimentAdherenceCalendarInput,
 ): ExperimentAdherenceCalendarResult {
   const targets = input.targets.slice();
-  const timeZone = targets[0]?.calendar.timeZone ?? "UTC";
+  const timeZone = targets.find((target) => target.calendar)?.calendar?.timeZone ?? "UTC";
   const asOf = resolveAsOf(input.asOf, timeZone);
   const observations = input.observations ?? [];
   const expectationCount = targets.reduce(
@@ -140,6 +218,10 @@ export function expandExperimentAdherenceExpectations(
   target: ExperimentAdherenceTarget,
   windows: ExperimentAdherenceWindows,
 ): AdherenceExpectation[] {
+  if (!target.calendar) {
+    return [];
+  }
+
   const range = resolveTargetDateRange(target.phase, windows);
   if (!range) {
     return [];
@@ -182,6 +264,10 @@ function countExperimentAdherenceExpectations(
   target: ExperimentAdherenceTarget,
   windows: ExperimentAdherenceWindows,
 ): number {
+  if (!target.calendar) {
+    return 0;
+  }
+
   const range = resolveTargetDateRange(target.phase, windows);
   if (!range) {
     return 0;
@@ -211,20 +297,30 @@ export function synthesizeLegacySessionAdherenceTargets(input: {
   }
 
   const label = runPlan.modality?.trim() || "Session";
-  const base = {
+  const evidence = resolveAdherenceEvidence(runPlan.modality);
+  const rollup =
+    runPlan.targetSessions !== undefined || runPlan.minimumUsefulSessions !== undefined
+      ? {
+          ...(runPlan.targetSessions !== undefined
+            ? { targetCompletions: runPlan.targetSessions }
+            : {}),
+          ...(runPlan.minimumUsefulSessions !== undefined
+            ? { minimumUsefulCompletions: runPlan.minimumUsefulSessions }
+            : {}),
+        }
+      : null;
+  const base: ExperimentAdherenceTarget = {
     targetId: slugifyTargetId(label) ?? "session",
     label,
     phase: "intervention" as const,
     evidence: {
       kind: "linkedEventCount" as const,
-      eventKind: "intervention_session" as const,
+      eventKind: evidence.eventKind,
+      ...(evidence.activityKind ? { activityKind: evidence.activityKind } : {}),
       missing: "missed_after_grace" as const,
     },
     grace: { hours: 24 },
-    rollup: {
-      targetCompletions: runPlan.targetSessions,
-      minimumUsefulCompletions: runPlan.minimumUsefulSessions,
-    },
+    ...(rollup ? { rollup } : {}),
   };
 
   if (runPlan.schedule) {
@@ -234,7 +330,7 @@ export function synthesizeLegacySessionAdherenceTargets(input: {
     }
   }
 
-  return [];
+  return [base];
 }
 
 export function resolveExperimentAdherenceRollupTarget<
@@ -255,6 +351,55 @@ export function resolveExperimentAdherenceRollupTarget<
   }
 
   return targets.length === 1 ? targets[0] ?? null : null;
+}
+
+export function countCompletedAdherenceSessions(input: {
+  asOfDate: string;
+  observations: readonly ExperimentAdherenceObservation[];
+  target: ExperimentAdherenceTarget | null | undefined;
+  windows: ExperimentAdherenceWindows;
+}): AdherenceSessionCounts {
+  const target = input.target;
+  if (!target || target.evidence.kind !== "linkedEventCount") {
+    return emptyAdherenceSessionCounts();
+  }
+  if (target.calendar) {
+    return emptyAdherenceSessionCounts();
+  }
+
+  const range = resolveTargetDateRange(target.phase, input.windows);
+  if (!range || input.asOfDate < range.start) {
+    return emptyAdherenceSessionCounts();
+  }
+
+  const end = minLocalDate(range.end, input.asOfDate);
+  const counts = emptyAdherenceSessionCounts();
+  for (const observation of input.observations) {
+    if (
+      observation.localDate < range.start ||
+      observation.localDate > end ||
+      !linkedEventObservationMatchesEvidence(observation, target.evidence)
+    ) {
+      continue;
+    }
+
+    switch (observation.status) {
+      case "partial":
+        counts.partialSessions += 1;
+        break;
+      case "missed":
+        counts.missedSessions += 1;
+        break;
+      case "skipped":
+        counts.skippedSessions += 1;
+        break;
+      default:
+        counts.completedSessions += 1;
+        break;
+    }
+  }
+
+  return counts;
 }
 
 function evaluateExperimentAdherenceExpectation(input: {
@@ -449,7 +594,7 @@ function collectMatchingObservations(
 
     switch (target.evidence.kind) {
       case "linkedEventCount":
-        return observation.eventKind === target.evidence.eventKind;
+        return linkedEventObservationMatchesEvidence(observation, target.evidence);
       case "metricPresence":
       case "metricThreshold":
         return observation.metricKey === target.evidence.metricKey;
@@ -474,12 +619,89 @@ function metricValueSatisfiesRule(
   }
 }
 
+function linkedEventObservationMatchesEvidence(
+  observation: ExperimentAdherenceObservation,
+  evidence: LinkedEventCountEvidence,
+): boolean {
+  if (!eventKindIsCandidateForEvidence(observation.eventKind, evidence)) {
+    return false;
+  }
+
+  if (observation.eventKind === "activity_session" && evidence.activityKind) {
+    return activityTextMatchesKind(observation.activityKind, evidence.activityKind);
+  }
+
+  return true;
+}
+
+function resolveDeviceObservableActivityKind(modality: string | null | undefined): string | null {
+  const normalized = normalizeActivityKindToken(modality);
+  if (!normalized) {
+    return null;
+  }
+
+  return DEVICE_OBSERVABLE_ACTIVITY_KINDS.find((candidate) =>
+    activityTextMatchesKind(normalized, candidate)
+  ) ?? null;
+}
+
+function listActivityKindCandidates(attributes: Record<string, unknown>): string[] {
+  const workout = readRecord(attributes.workout);
+  const sport = readRecord(attributes.sport);
+  const workoutSport = readRecord(workout?.sport);
+  return [
+    readString(attributes.activityKind),
+    readString(attributes.activityType),
+    readString(attributes.sportName),
+    readString(attributes.type),
+    readString(attributes.sport),
+    readString(sport?.slug),
+    readString(sport?.name),
+    readString(sport?.type),
+    readString(workout?.activityKind),
+    readString(workout?.activityType),
+    readString(workout?.sportName),
+    readString(workout?.type),
+    readString(workout?.sport),
+    readString(workoutSport?.slug),
+    readString(workoutSport?.name),
+    readString(workoutSport?.type),
+  ].filter((candidate): candidate is string => candidate !== null);
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function extractDate(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.length >= 10 ? value.slice(0, 10) : null;
+}
+
+function emptyAdherenceSessionCounts(): AdherenceSessionCounts {
+  return {
+    completedSessions: 0,
+    missedSessions: 0,
+    partialSessions: 0,
+    skippedSessions: 0,
+  };
+}
+
+function minLocalDate(left: string, right: string): string {
+  return left <= right ? left : right;
+}
+
 function asOfWithinGrace(asOf: Date, expectation: AdherenceExpectation): boolean {
   const plannedTime = expectation.localTime ?? "23:59";
   const plannedAtMs = zonedLocalDateTimeToEpochMs(
     expectation.localDate,
     plannedTime,
-    expectation.target.calendar.timeZone,
+    expectation.target.calendar?.timeZone ?? "UTC",
   );
   const grace = expectation.target.grace ?? defaultGrace(expectation.target.evidence);
   const graceMs = "hours" in grace

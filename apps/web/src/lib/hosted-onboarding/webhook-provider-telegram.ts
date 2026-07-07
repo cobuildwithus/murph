@@ -12,7 +12,7 @@ import {
   appendHostedFamilyChatNotificationTx,
   buildHostedFamilyInviteAcceptedReplyText,
   acceptHostedFamilyInviteFromTelegramTx,
-  parseHostedFamilyInviteStartToken,
+  resolveHostedFamilyInviteTokenForInbound,
   resolveHostedFamilyChatNotificationRouteTx,
 } from "./family-plan";
 import { readActiveHostedMemberAccess } from "./member-access";
@@ -61,9 +61,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }
 
   const telegramMessage = buildHostedTelegramMessagePayload(input.update);
-  const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(
-    telegramMessage?.text ?? null,
-  ) !== null;
+  const familyInviteTokenPresent = await resolveHostedFamilyInviteTokenForInbound({
+    prisma: input.prisma,
+    text: telegramMessage?.text ?? null,
+  }) !== null;
   let familyInviteNotAccepted = false;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
   try {

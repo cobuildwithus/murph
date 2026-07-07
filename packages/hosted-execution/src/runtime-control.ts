@@ -1024,6 +1024,12 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   orchestration?: {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
+    tokenAcquireStartedAtEpochMs?: number;
+    tokenAcquiredAtEpochMs?: number;
+    directEnsureRequestStartedAtEpochMs?: number;
+    directEnsureResponseReceivedAtEpochMs?: number;
+    runtimeControlAuthStartedAtEpochMs?: number;
+    runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
     triggeredByWebDirect?: boolean;
     userRunnerEnsureStartedAtEpochMs?: number;
@@ -1110,6 +1116,12 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   orchestration: [
     "temporalActivityStartedAtEpochMs",
     "temporalActivityRequestStartedAtEpochMs",
+    "tokenAcquireStartedAtEpochMs",
+    "tokenAcquiredAtEpochMs",
+    "directEnsureRequestStartedAtEpochMs",
+    "directEnsureResponseReceivedAtEpochMs",
+    "runtimeControlAuthStartedAtEpochMs",
+    "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
     "triggeredByWebDirect",
     "userRunnerEnsureStartedAtEpochMs",
@@ -1597,6 +1609,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.dense_raw_retention",
   "device-sync.job_failed",
   "device-sync.legacy_platform_env_present",
+  "device-sync.module_load_failed",
   "device-sync.wake_projection_failed",
   // Legacy read compatibility only; reconnect notices are no longer produced.
   "device-sync.reconnect_notice_created",

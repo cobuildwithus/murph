@@ -23,10 +23,11 @@ import type { HostedOnboardingReadClient } from "./shared";
  * that already exist in the data model:
  *
  * - an active membership in an active, unsuspended account group (family), or
- * - for synthetic thread-container members, the container owner's access.
+ * - for synthetic thread-container members, the container owner's access, or
+ *   an active current participant through `readActiveHostedMemberAccess`.
  *
  * Owners cannot themselves be containers, so the derivation depth is at most
- * two and a single query loads everything `hasActiveHostedMemberAccess` needs.
+ * two and a single query loads everything the owner branch needs.
  * Every runtime, webhook, page, and egress gate must use this module; the
  * own-billing predicates in `entitlement.ts` are for billing surfaces that
  * genuinely mean "this member's own subscription".
@@ -97,7 +98,8 @@ export function hasActiveHostedMemberAccess(member: HostedMemberAccessState): bo
   }
 
   // A thread-container member is synthetic: its own billing status is not an
-  // access source. The container lives and dies with its owner.
+  // access source. Async gates must use `readActiveHostedMemberAccess`, which
+  // adds participant-aware access after this owner-only pure shortcut.
   if (member.threadContainer) {
     return hasActiveHostedPersonAccess(member.threadContainer.owner);
   }
@@ -113,11 +115,34 @@ export function hasActiveHostedThreadContainerAccess(input: {
     && hasActiveHostedPersonAccess(input.owner);
 }
 
+export async function hasActiveHostedThreadContainerAccessWithParticipants(input: {
+  container: Pick<HostedMemberPersonAccessState, "suspendedAt">;
+  containerMemberId: string;
+  owner: HostedMemberPersonAccessState;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  if (hasActiveHostedThreadContainerAccess({
+    container: input.container,
+    owner: input.owner,
+  })) {
+    return true;
+  }
+
+  if (isHostedMemberSuspended(input.container.suspendedAt)) {
+    return false;
+  }
+
+  return await hasAnyActiveHostedThreadContainerParticipant({
+    containerMemberId: input.containerMemberId,
+    prisma: input.prisma,
+  });
+}
+
 /**
- * Set-based projection of `hasActiveHostedMemberAccess` for queries that must
- * select access-holding members in the database (pagination, counts, sweeps).
- * Keep it semantically identical to the pure derivation above; the raw-SQL
- * due-reconcile sweep in device-sync mirrors the person branch of this shape.
+ * Set-based projection of the pure access branch for queries that must select
+ * access-holding members in the database (pagination, counts, sweeps). It
+ * intentionally cannot recurse into thread-container participant rosters; use
+ * `readActiveHostedMemberAccess` for user-visible async gates.
  */
 export function activeHostedMemberAccessWhere(): Prisma.HostedMemberWhereInput {
   const personAccess: Prisma.HostedMemberWhereInput["OR"] = [
@@ -168,7 +193,42 @@ export async function readActiveHostedMemberAccess(input: {
     },
   });
 
-  return member !== null && hasActiveHostedMemberAccess(member);
+  if (!member) {
+    return false;
+  }
+
+  if (member.threadContainer) {
+    return await hasActiveHostedThreadContainerAccessWithParticipants({
+      container: member,
+      containerMemberId: input.memberId,
+      owner: member.threadContainer.owner,
+      prisma,
+    });
+  }
+
+  return hasActiveHostedMemberAccess(member);
+}
+
+export async function hasAnyActiveHostedThreadContainerParticipant(input: {
+  containerMemberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  // Participant rows are a provider-roster projection. A departed member can
+  // remain active until the next successful complete roster reconcile; that
+  // stale-open window is accepted because false removal would drop live groups.
+  const participant = await prisma.hostedThreadContainerParticipant.findFirst({
+    select: {
+      participantMemberId: true,
+    },
+    where: {
+      containerMemberId: input.containerMemberId,
+      participant: activeHostedMemberAccessWhere(),
+      removedAt: null,
+    },
+  });
+
+  return participant !== null;
 }
 
 export async function assertActiveHostedMemberAccessAllowed(input: {

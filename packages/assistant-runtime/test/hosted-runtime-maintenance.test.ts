@@ -100,13 +100,15 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
-  resolveHostedDeviceSyncNextWakeAt,
   runHostedAssistantAutomation,
   runHostedAssistantAutomationLane,
-  runHostedDeviceSyncPass,
-  runHostedDeviceSyncWakeLane,
   runHostedNoopSystemWakeLane,
 } from "../src/hosted-runtime/maintenance.ts";
+import {
+  resolveHostedDeviceSyncNextWakeAt,
+  runHostedDeviceSyncPass,
+  runHostedDeviceSyncWakeLane,
+} from "../src/hosted-runtime/device-sync-maintenance.ts";
 import {
   readHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";

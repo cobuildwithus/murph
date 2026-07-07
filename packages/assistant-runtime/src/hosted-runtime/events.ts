@@ -24,7 +24,10 @@ import {
   type HostedMailboxOutcome,
 } from "./events/mailbox-outcome.ts";
 import { executeHostedCodexAuthWake } from "./events/codex-auth.ts";
-import { runHostedDeviceSyncWakeLane } from "./maintenance.ts";
+import {
+  isHostedDeviceSyncMaintenanceModuleLoadError,
+  loadHostedDeviceSyncMaintenanceModule,
+} from "./device-sync-maintenance-import.ts";
 import type {
   HostedMailboxExecutionMetrics,
   NormalizedHostedAssistantRuntimeConfig,
@@ -181,6 +184,15 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
       });
     case "device-sync.wake":
+      const {
+        runHostedDeviceSyncWakeLane,
+      } = await loadHostedDeviceSyncMaintenanceModule().catch((error: unknown) => {
+        emitHostedDeviceSyncMaintenanceModuleLoadFailureLog({
+          error,
+          wake: input.wake,
+        });
+        throw error;
+      });
       const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
@@ -269,6 +281,24 @@ function emitHostedDeviceActivityAutomationFailureLog(input: {
     error: input.error,
     level: "warn",
     message: "Hosted device activity automation pass failed; continuing device-sync wake.",
+    phase: "wake.running",
+    wake: input.wake,
+  });
+}
+
+function emitHostedDeviceSyncMaintenanceModuleLoadFailureLog(input: {
+  error: unknown;
+  wake: HostedExecutionSystemWake;
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      eventCode: "device-sync.module_load_failed",
+      moduleLoadError: isHostedDeviceSyncMaintenanceModuleLoadError(input.error),
+    },
+    error: input.error,
+    level: "error",
+    message: "Hosted device-sync wake failed to load the maintenance module.",
     phase: "wake.running",
     wake: input.wake,
   });

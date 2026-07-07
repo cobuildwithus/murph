@@ -49,11 +49,18 @@ export async function handleDeclarativeRoute<Context>(
 
     const authorizationContext = context as { request: Request } & Partial<WorkerRouteContext>;
     if (route.authorizeBeforeMethod) {
+      const authorizationStartedAtEpochMs = Date.now();
       const authorizationError = await authorizeRoute(
         route.authorization ?? null,
         authorizationContext,
         route.name,
         { signatureBodyLimitBytes: route.signatureBodyLimitBytes },
+      );
+      recordRuntimeControlAuthTiming(
+        authorizationContext,
+        route.name,
+        authorizationStartedAtEpochMs,
+        Date.now(),
       );
       if (authorizationError) {
         return authorizationError;
@@ -80,11 +87,18 @@ export async function handleDeclarativeRoute<Context>(
     }
 
     if (!route.authorizeBeforeMethod) {
+      const authorizationStartedAtEpochMs = Date.now();
       const authorizationError = await authorizeRoute(
         route.authorization ?? null,
         authorizationContext,
         route.name,
         { signatureBodyLimitBytes: route.signatureBodyLimitBytes },
+      );
+      recordRuntimeControlAuthTiming(
+        authorizationContext,
+        route.name,
+        authorizationStartedAtEpochMs,
+        Date.now(),
       );
       if (authorizationError) {
         return authorizationError;
@@ -95,6 +109,22 @@ export async function handleDeclarativeRoute<Context>(
   }
 
   return null;
+}
+
+function recordRuntimeControlAuthTiming(
+  context: Partial<WorkerRouteContext>,
+  routeName: string,
+  runtimeControlAuthStartedAtEpochMs: number,
+  runtimeControlAuthFinishedAtEpochMs: number,
+): void {
+  if (routeName !== "runtime-ensure-processing") {
+    return;
+  }
+
+  context.runtimeControlAuthTiming = {
+    runtimeControlAuthFinishedAtEpochMs,
+    runtimeControlAuthStartedAtEpochMs,
+  };
 }
 
 export function matchExactPath(...paths: readonly string[]): RouteMatcher {

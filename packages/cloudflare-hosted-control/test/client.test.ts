@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murphai/hosted-execution/contracts";
+import {
+  HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
+} from "@murphai/hosted-execution/contracts";
 
 import {
   type CloudflareHostedControlClientOptions,
@@ -28,6 +33,8 @@ describe("createCloudflareHostedControlClient", () => {
   });
 
   it("posts runtime ensure-processing requests to the user route and parses the response", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T12:00:00.000Z"));
     const fetchImpl = vi.fn(async () => createJsonResponse({
       action: "woken",
       kind: "runtime_processing_accepted",
@@ -37,18 +44,27 @@ describe("createCloudflareHostedControlClient", () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test",
       fetchImpl,
-      getBearerToken: async () => "token-123",
+      getBearerToken: async () => {
+        vi.setSystemTime(new Date("2026-07-06T12:00:00.010Z"));
+        return "token-123";
+      },
     });
+    const onTiming = vi.fn();
 
-    await expect(client.ensureRuntimeProcessing({
-      orchestrationAttemptId: "web-ingress-attempt-test",
-      userId: "user_123",
-    })).resolves.toEqual({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-07-02T00:03:00.000Z",
-      runtimeAttemptId: "runtime-attempt-test",
-    });
+    try {
+      await expect(client.ensureRuntimeProcessing({
+        onTiming,
+        orchestrationAttemptId: "web-ingress-attempt-test",
+        userId: "user_123",
+      })).resolves.toEqual({
+        action: "woken",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: "2026-07-02T00:03:00.000Z",
+        runtimeAttemptId: "runtime-attempt-test",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
@@ -60,6 +76,21 @@ describe("createCloudflareHostedControlClient", () => {
     const headers = new Headers(init.headers);
     expect(headers.get("authorization")).toBe("Bearer token-123");
     expect(headers.get("x-hosted-execution-user-id")).toBe("user_123");
+    expect(headers.get(
+      HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
+    )).toBe(String(Date.parse("2026-07-06T12:00:00.000Z")));
+    expect(headers.get(
+      HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
+    )).toBe(String(Date.parse("2026-07-06T12:00:00.010Z")));
+    expect(headers.get(
+      HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+    )).toBe(String(Date.parse("2026-07-06T12:00:00.010Z")));
+    expect(onTiming).toHaveBeenCalledWith({
+      directEnsureRequestStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
+      directEnsureResponseReceivedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
+      tokenAcquiredAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
+      tokenAcquireStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.000Z"),
+    });
   });
 
   it("rejects blank user identifiers for runtime ensure-processing before issuing requests", () => {

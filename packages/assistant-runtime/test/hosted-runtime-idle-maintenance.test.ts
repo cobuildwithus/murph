@@ -11,7 +11,7 @@ vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
   compactWarmCodexThread: (input: unknown) => compactWarmCodexThread(input),
 }));
 const runInboxMediaRetention = vi.fn();
-vi.mock("@murphai/inboxd", () => ({
+vi.mock("@murphai/inboxd/runtime", () => ({
   runInboxMediaRetention: (input: unknown) => runInboxMediaRetention(input),
 }));
 

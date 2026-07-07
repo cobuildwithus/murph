@@ -166,6 +166,63 @@ describe("experiment adherence targets", () => {
     ).toBe(false);
   });
 
+  it("accepts calendar-less linked activity targets", () => {
+    const target = {
+      targetId: "running",
+      label: "Running",
+      phase: "intervention",
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "activity_session",
+        activityKind: "running",
+        missing: "missed_after_grace",
+      },
+      rollup: {
+        targetCompletions: 24,
+        minimumUsefulCompletions: 12,
+      },
+    } as const;
+
+    expect(experimentAdherenceTargetsSchema.parse([target])).toEqual([target]);
+    expect(experimentRunPlanSchema.parse({ adherenceTargets: [target] }).adherenceTargets).toEqual([
+      target,
+    ]);
+  });
+
+  it("requires calendars for metric adherence targets", () => {
+    const calendar = {
+      kind: "daily",
+      timeZone: "America/New_York",
+    } as const;
+    const metricThresholdTarget = {
+      targetId: "step-floor",
+      label: "Step floor",
+      phase: "intervention",
+      evidence: {
+        kind: "metricThreshold",
+        metricKey: "steps",
+        op: ">=",
+        value: 8000,
+        missing: "unknown",
+      },
+    } as const;
+    const metricPresenceTarget = {
+      targetId: "steps-present",
+      label: "Steps present",
+      phase: "intervention",
+      evidence: {
+        kind: "metricPresence",
+        metricKey: "steps",
+        missing: "unknown",
+      },
+    } as const;
+
+    expect(experimentAdherenceTargetsSchema.safeParse([metricThresholdTarget]).success).toBe(false);
+    expect(experimentAdherenceTargetsSchema.safeParse([metricPresenceTarget]).success).toBe(false);
+    expect(experimentAdherenceTargetsSchema.safeParse([{ ...metricThresholdTarget, calendar }]).success).toBe(true);
+    expect(experimentAdherenceTargetsSchema.safeParse([{ ...metricPresenceTarget, calendar }]).success).toBe(true);
+  });
+
   it("rejects ambiguous target ids and invalid threshold rules", () => {
     const target = {
       targetId: "sauna",

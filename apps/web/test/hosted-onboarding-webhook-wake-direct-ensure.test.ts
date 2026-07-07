@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   ensureRuntimeProcessing: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   recordHostedIngressAcceptedFromMailboxItem: vi.fn(async () => undefined),
+  recordHostedIngressDirectEnsureTiming: vi.fn(async () => undefined),
   recordHostedIngressTemporalSignalAccepted: vi.fn(async () => undefined),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
@@ -26,6 +27,8 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
   recordHostedIngressAcceptedFromMailboxItem:
     mocks.recordHostedIngressAcceptedFromMailboxItem,
+  recordHostedIngressDirectEnsureTiming:
+    mocks.recordHostedIngressDirectEnsureTiming,
   recordHostedIngressTemporalSignalAccepted:
     mocks.recordHostedIngressTemporalSignalAccepted,
 }));
@@ -39,6 +42,15 @@ const response = {
   ok: true,
   reason: "wake-appended-active-member",
 } as never;
+
+type DirectEnsureInput = {
+  onTiming: (timing: {
+    directEnsureRequestStartedAtEpochMs: number;
+    directEnsureResponseReceivedAtEpochMs: number;
+    tokenAcquiredAtEpochMs: number;
+    tokenAcquireStartedAtEpochMs: number;
+  }) => void;
+};
 
 function buildWakeHandoff(
   overrides: Partial<NonNullable<Parameters<typeof maybeHandoffHostedExecutionWebhookWake>[0]["wakeHandoff"]>> = {},
@@ -84,8 +96,14 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         workflowId: "hosted-user-runtime:member_123",
       };
     });
-    mocks.ensureRuntimeProcessing.mockImplementationOnce(async () => {
+    mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
       wakeOrder.push("direct");
+      input.onTiming({
+        tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+        tokenAcquiredAtEpochMs: 1_777_000_000_010,
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+      });
       return {
         action: "woken",
         kind: "runtime_processing_accepted",
@@ -109,6 +127,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
 
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledWith({
+      onTiming: expect.any(Function),
       orchestrationAttemptId: expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u),
       userId: "member_123",
     });
@@ -123,6 +142,20 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
     expect(wakeOrder).toEqual(["temporal", "direct"]);
     await Promise.all(afterResponseTasks.map((task) => task()));
+    expect(mocks.recordHostedIngressDirectEnsureTiming).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_123",
+      phaseBreakdown: {
+        schemaVersion: 1,
+        orchestration: {
+          tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+          tokenAcquiredAtEpochMs: 1_777_000_000_010,
+          directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+          directEnsureResponseReceivedAtEpochMs: 1_777_000_000_120,
+        },
+      },
+      source: "linq",
+    });
   });
 
   it("keeps the Temporal signal and handoff result intact when the direct ensure fails", async () => {
