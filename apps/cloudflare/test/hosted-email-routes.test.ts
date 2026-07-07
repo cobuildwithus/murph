@@ -1,5 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH } from "@murphai/hosted-execution/hosted-email";
+import {
+  createHostedEmailGroupReplyAliasRoute,
+  HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
+} from "@murphai/hosted-execution/hosted-email";
 
 import { parseHostedEmailRouteCandidate } from "../src/hosted-email/route-addressing.ts";
 import { parseHostedEmailRouteToken } from "../src/hosted-email/route-crypto.ts";
@@ -90,6 +93,115 @@ describe("hosted email route callbacks", () => {
     );
   });
 
+  it("resolves signed group reply aliases through web-owned sender lookup and exposes group identity", async () => {
+    const config = createHostedEmailTestConfig();
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
+      JSON.stringify({
+        userId: "group-runtime-member",
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    const route = await createHostedEmailGroupReplyAliasRoute({
+      domain: config.domain,
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      localPart: config.localPart,
+      signingSecret: config.signingSecret,
+    });
+
+    await expect(resolveHostedEmailInboundRoute({
+      config,
+      envelopeFrom: "member@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Member <member@example.com>",
+      to: route.address,
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).resolves.toEqual({
+      authorization: "signed-reply-alias",
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      identityId: "murph@reply.example.com",
+      routeAddress: route.address,
+      userId: "group-runtime-member",
+    });
+
+    const resolveCall = webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]?.[0];
+    expect(JSON.parse(String(resolveCall?.body))).toEqual({
+      envelopeFrom: "member@example.com",
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Member <member@example.com>",
+    });
+  });
+
+  it("routes signed group reply alias misses through web-owned From matching without sender-auth proof", async () => {
+    const config = createHostedEmailTestConfig();
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
+      JSON.stringify({
+        userId: null,
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+    const route = await createHostedEmailGroupReplyAliasRoute({
+      domain: config.domain,
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      localPart: config.localPart,
+      signingSecret: config.signingSecret,
+    });
+
+    await expect(resolveHostedEmailInboundRoute({
+      config,
+      authenticatedSender: null,
+      envelopeFrom: "member@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Member <member@example.com>",
+      to: route.address,
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).resolves.toBeNull();
+
+    const resolveCall = webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]?.[0];
+    expect(JSON.parse(String(resolveCall?.body))).toEqual({
+      envelopeFrom: "member@example.com",
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Member <member@example.com>",
+    });
+  });
+
+  it("rejects tampered signed group reply aliases before the web alias lookup", async () => {
+    const config = createHostedEmailTestConfig();
+    const route = await createHostedEmailGroupReplyAliasRoute({
+      domain: config.domain,
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      localPart: config.localPart,
+      signingSecret: config.signingSecret,
+    });
+    const tamperedAddress = route.address.replace("g2-", "g2-rgroup_123-");
+
+    await expect(resolveHostedEmailInboundRoute({
+      config,
+      authenticatedSender: null,
+      envelopeFrom: "member@example.com",
+      hasRepeatedHeaderFrom: false,
+      headerFrom: "Member <member@example.com>",
+      to: tamperedAddress,
+      webCallbackSigning: TEST_CALLBACK_SIGNING,
+      webControlBaseUrl: "https://web.example.test",
+    })).resolves.toBeNull();
+
+    expect(webControlPlane.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+  });
+
   it("uses the current configured sender identity when resolving inbound reply aliases through web-owned lookup", async () => {
     const createConfig = createHostedEmailTestConfig();
     const resolveConfig = {
@@ -137,6 +249,7 @@ describe("hosted email route callbacks", () => {
       webControlBaseUrl: "https://web.example.test",
     })).resolves.toEqual({
       authorization: "signed-reply-alias",
+      groupId: null,
       identityId: "current@reply.example.com",
       routeAddress: address,
       userId: "user-123",
@@ -185,6 +298,7 @@ describe("hosted email route callbacks", () => {
       webControlBaseUrl: "https://web.example.test",
     })).resolves.toEqual({
       authorization: "signed-reply-alias",
+      groupId: null,
       identityId: "murph@reply.example.com",
       routeAddress: address,
       userId: "user-123",

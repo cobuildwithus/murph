@@ -17,6 +17,7 @@ import { createHostedWebDeviceSyncPort } from "./device-sync-port.ts";
 import { createCloudflareEffectsPort } from "./effects-port.ts";
 import { createHostedRuntimeFamilyPlanToolPort } from "./family-plan-tool-port.ts";
 import { createHostedRuntimeGroupToolPort } from "./group-tool-port.ts";
+import { createHostedRuntimeNewsletterToolPort } from "./newsletter-tool-port.ts";
 import { createCloudflareGeneratedImageUploader } from "./generated-image-uploader.ts";
 import { createHostedRuntimeIssueExportPort } from "./issue-export-port.ts";
 import { createHostedWebRuntimeLatencyTracePort } from "./latency-trace-port.ts";
@@ -216,6 +217,12 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport,
           }),
           groupToolPort: createHostedRuntimeGroupToolPort({
+            boundUserId: input.boundUserId,
+            fetchImpl,
+            timeoutMs,
+            transport,
+          }),
+          newsletterToolPort: createHostedRuntimeNewsletterToolPort({
             boundUserId: input.boundUserId,
             fetchImpl,
             timeoutMs,

@@ -34,6 +34,11 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   description: string;
   label: string;
 }> = {
+  "group-email.v0": {
+    label: "Email address",
+    description:
+      "Share your email so this group's Murph can send the newsletter. Your address is visible to the group.",
+  },
   "activity-days.v0": {
     label: "Recent activity minutes",
     description:

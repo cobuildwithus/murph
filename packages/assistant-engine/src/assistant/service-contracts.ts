@@ -43,6 +43,9 @@ import type {
 import type {
   CodexThreadIdentity,
 } from './codex-thread-route.js'
+import type {
+  HostedRuntimeNewsletterScheduledAuthority,
+} from '@murphai/hosted-execution/runtime-control'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import type { finalizeAssistantTurnReceipt } from './turns.js'
 
@@ -139,6 +142,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   turnContext?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
+  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null
   // Per-turn provider processing tier; never part of session/route identity.
   serviceTier?: AssistantProviderServiceTier | null
   showThinkingTraces?: boolean

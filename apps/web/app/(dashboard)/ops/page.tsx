@@ -18,6 +18,11 @@ export const metadata: Metadata = {
 
 const OPS_TOOLS = [
   {
+    description: "Review hosted growth, trial conversion, and daily revenue snapshots.",
+    href: "/ops/growth",
+    label: "Growth",
+  },
+  {
     description: "Wake checkpointed hosted workspaces and run runtime support diagnostics.",
     href: "/ops/runtime-maintenance",
     label: "Runtime maintenance",
