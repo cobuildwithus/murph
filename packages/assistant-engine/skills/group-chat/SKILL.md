@@ -145,12 +145,13 @@ or narrow that set. If they already gave some of that, or say "just set it up,"
 do not re-interrogate them. Use the sensible defaults and confirm the
 essentials in one line.
 
-Apply the answers directly. The chosen name is the automation title and the
-name used in the setup notice. If you are creating the group join link for a
-new group, pass that same chosen name as `displayName` on
-`murph.group action="create_join_link"`. The chosen schedule becomes the cron
-expression; `0 9 * * 0` is the Sunday 9am default. Tone and any custom notes
-belong in the automation instructions.
+Apply the answers directly. The chosen name is the automation title, the name
+used in the setup notice, and the group display name for the join surface. For
+the newsletter react-to-join path, pass that same chosen name as `displayName`
+on `murph.group action="post_join_offer"`. If you mint a standalone join link
+instead, pass the same `displayName` on `murph.group action="create_join_link"`.
+The chosen schedule becomes the cron expression; `0 9 * * 0` is the Sunday 9am
+default. Tone and any custom notes belong in the automation instructions.
 
 If the group wants the recurring update in the chat instead of email, do not
 create the `group-health-newsletter` email automation and do not use the
@@ -205,10 +206,11 @@ asks how someone can join the newsletter, post a join offer scoped to
 different set. Every join offer must lead with "react to this message to join,"
 plainly say what reacting shares, include `{{share_scope}}` exactly once, and
 include `{{join_url}}` exactly once as the customize link so a member can share
-more or less. Reacting grants the disclosed snapshot; the link lets a member
-pick a different set. Never silently share health data that the message did not
-disclose, never include any other URL, and never repeatedly re-offer to someone
-who declined.
+more or less. When this offer names the newsletter group, pass the group's
+chosen name as `displayName` on the `post_join_offer` call. Reacting grants the
+disclosed snapshot; the link lets a member pick a different set. Never silently
+share health data that the message did not disclose, never include any other
+URL, and never repeatedly re-offer to someone who declined.
 
 If a member asks to be removed from the newsletter in the group chat, call
 `murph.group` with `action="revoke_own_email_share"`. That revokes only the

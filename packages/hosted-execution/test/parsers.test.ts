@@ -563,6 +563,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "post_join_offer",
       joinOffer: {
+        displayName: "Sunday Sleep Crew",
         messageTemplate:
           "  React here to join. Shares {{share_scope}}. Page: {{join_url}}.  ",
         projectionKinds: ["group-email.v0"],
@@ -570,8 +571,22 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "post_join_offer",
       joinOffer: {
+        displayName: "Sunday Sleep Crew",
         messageTemplate: "React here to join. Shares {{share_scope}}. Page: {{join_url}}.",
         projectionKinds: ["group-email.v0"],
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "post_join_offer",
+      joinOffer: {
+        messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
+      },
+    })).toEqual({
+      action: "post_join_offer",
+      joinOffer: {
+        displayName: null,
+        messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
+        projectionKinds: null,
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
@@ -631,6 +646,24 @@ describe("parseHostedRuntimeGroupTool", () => {
         joinOffer: { intro: "Like this to join us." },
       })
     ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
+        joinOffer: {
+          displayName: "   ",
+          messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
+        },
+      })
+    ).toThrow(/displayName must not be blank/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_join_offer",
+        joinOffer: {
+          displayName: "a".repeat(121),
+          messageTemplate: "React here. Shares {{share_scope}}. Customize: {{join_url}}.",
+        },
+      })
+    ).toThrow(/displayName is too long/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "post_join_offer",

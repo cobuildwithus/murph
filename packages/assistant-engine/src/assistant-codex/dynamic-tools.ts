@@ -329,7 +329,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -350,7 +350,7 @@ export const MURPH_GROUP_TOOL = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
         description:
-          'Optional group display name the group chose, shown on the join page when creating a join link.',
+          'Optional group display name, the name the group chose, shown on the join page when creating a join link or posting a join offer.',
       },
       kind: {
         type: 'string',
@@ -795,6 +795,12 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('post_join_offer'),
+      displayName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
+        .optional(),
       messageTemplate: z
         .string()
         .trim()
@@ -2880,6 +2886,9 @@ function parseGroupArguments(
   }
   if (parsed.data.action === 'post_join_offer') {
     const joinOffer = {
+      ...(parsed.data.displayName !== undefined
+        ? { displayName: parsed.data.displayName }
+        : {}),
       messageTemplate: parsed.data.messageTemplate,
       ...(parsed.data.projectionKinds !== undefined
         ? { projectionKinds: parsed.data.projectionKinds }

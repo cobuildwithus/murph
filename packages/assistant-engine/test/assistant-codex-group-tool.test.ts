@@ -56,6 +56,8 @@ describe("murph.group dynamic tool", () => {
       .toEqual([...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS]);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionKinds.items.enum)
       .toEqual([...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS]);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
+      .toContain("the name the group chose");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("{{join_url}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
@@ -81,6 +83,7 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
+      displayName: "Sunday Sleep Crew",
       messageTemplate:
         "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       projectionKinds: ["sleep-times.v0"],
@@ -89,6 +92,7 @@ describe("murph.group dynamic tool", () => {
       request: {
         action: "post_join_offer",
         joinOffer: {
+          displayName: "Sunday Sleep Crew",
           messageTemplate:
             "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
           projectionKinds: ["sleep-times.v0"],
@@ -169,6 +173,27 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
+  it("keeps displayName optional on post_join_offer", () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      projectionKinds: ["sleep-times.v0"],
+    }));
+
+    expect(request).toEqual({
+      kind: "group",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+          projectionKinds: ["sleep-times.v0"],
+        },
+      },
+    });
+  });
+
   it("rejects unsupported group kinds and projection kinds", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "create_join_link",
@@ -185,6 +210,22 @@ describe("murph.group dynamic tool", () => {
       messageTemplate:
         "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       intro: "Like this to join.",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      displayName: "   ",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      projectionKinds: ["sleep-times.v0"],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      displayName: "a".repeat(121),
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      projectionKinds: ["sleep-times.v0"],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({

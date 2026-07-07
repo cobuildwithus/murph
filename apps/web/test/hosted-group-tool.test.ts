@@ -648,6 +648,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "post_join_offer",
         joinOffer: {
+          displayName: "Sunday Sleep Crew",
           messageTemplate:
             "React here and you're in. Reacting shares {{share_scope}} with this group; customize at {{join_url}}.",
           projectionKinds: [
@@ -674,6 +675,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       expect.objectContaining({
         actorMemberId: "member_owner",
         containerMemberId: "member_container",
+        displayName: "Sunday Sleep Crew",
         requestedVaultShareProjectionKinds: [
           "group-email.v0",
           "sleep-times.v0",

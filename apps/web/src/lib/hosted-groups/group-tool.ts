@@ -395,6 +395,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
+      displayName: input.joinOffer?.displayName ?? null,
       now,
       requestedVaultShareProjectionKinds: projectionKinds,
       tx,

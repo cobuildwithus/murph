@@ -805,6 +805,7 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 }
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
+  displayName?: string | null;
   // Model-authored natural group-chat message with server-filled
   // {{share_scope}} and {{join_url}} placeholders.
   messageTemplate?: string | null;
