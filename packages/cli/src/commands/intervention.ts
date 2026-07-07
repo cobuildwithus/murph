@@ -32,6 +32,12 @@ const experimentLookupSchema = z
   .trim()
   .min(1)
   .max(160)
+const interventionSessionStatusSchema = z.enum([
+  'completed',
+  'partial',
+  'missed',
+  'skipped',
+])
 
 export function registerInterventionCommands(
   cli: Cli.Cli,
@@ -175,6 +181,9 @@ export function registerInterventionCommands(
       regimenId: regimenIdSchema
         .optional()
         .describe('Replace the related regimen id.'),
+      sessionStatus: interventionSessionStatusSchema
+        .optional()
+        .describe('Replace the experiment session status.'),
       clearDuration: z.boolean().optional().describe('Clear the saved duration.'),
       clearRegimenId: z.boolean().optional().describe('Clear the saved regimen id and related links.'),
     },
@@ -184,6 +193,7 @@ export function registerInterventionCommands(
       appendTypedSet(set, 'interventionType', stringOption(options.type))
       appendTypedSet(set, 'durationMinutes', numberOption(options.duration))
       appendTypedSet(set, 'regimenId', stringOption(options.regimenId))
+      appendTypedSet(set, 'sessionStatus', stringOption(options.sessionStatus))
       appendTypedClear(clear, 'durationMinutes', options.clearDuration === true)
       appendTypedClear(clear, 'regimenId', options.clearRegimenId === true)
       return {

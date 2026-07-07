@@ -81,7 +81,7 @@ function getSummaryData(experiment: ExperimentSummaryTilesExperiment): SummaryDa
       key: "adherence",
       label: "Adherence",
       value: tallies && tallies.total > 0
-        ? `${tallies.completed} of ${tallies.total} done`
+        ? `${tallies.done} of ${tallies.total} done`
         : "—",
       detail: renderAdherenceDetail(tallies),
     },
@@ -137,11 +137,22 @@ function renderAdherenceDetail(tallies: ScheduleTallies | null): ReactNode {
     && tallies.unknown === 0
     && tallies.scheduled === 0
   ) {
+    if (tallies.assumed > 0) {
+      return tallies.completed === 0
+        ? `${tallies.done} done, all assumed`
+        : `${tallies.done} done, ${tallies.assumed} assumed`;
+    }
     return "On track";
   }
 
   return (
     <span className="flex flex-wrap gap-x-3 gap-y-1">
+      {tallies.assumed > 0 && (
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block size-1.5 rounded-full bg-chart-4/70" />
+          {tallies.assumed} assumed
+        </span>
+      )}
       {tallies.partial > 0 && (
         <span className="flex items-center gap-1.5">
           <span className="inline-block size-1.5 rounded-full bg-amber-500" />
@@ -177,7 +188,9 @@ function renderAdherenceDetail(tallies: ScheduleTallies | null): ReactNode {
 }
 
 interface ScheduleTallies {
+  assumed: number;
   completed: number;
+  done: number;
   partial: number;
   missed: number;
   failed: number;
@@ -194,6 +207,7 @@ function tallySchedule(schedule: ExperimentSchedule | undefined): ScheduleTallie
     .reduce(
       (acc, cell) => {
         if (cell.kind === "completed") acc.completed += 1;
+        if (cell.kind === "assumed") acc.assumed += 1;
         if (cell.kind === "partial") acc.partial += 1;
         if (cell.kind === "missed") acc.missed += 1;
         if (cell.kind === "failed") acc.failed += 1;
@@ -201,11 +215,13 @@ function tallySchedule(schedule: ExperimentSchedule | undefined): ScheduleTallie
         if (cell.kind === "scheduled") acc.scheduled += 1;
         return acc;
       },
-      { completed: 0, partial: 0, missed: 0, failed: 0, unknown: 0, scheduled: 0 },
+      { assumed: 0, completed: 0, partial: 0, missed: 0, failed: 0, unknown: 0, scheduled: 0 },
     );
 
+  const done = counts.completed + counts.assumed;
   return {
     ...counts,
-    total: counts.completed + counts.partial + counts.missed + counts.failed + counts.unknown + counts.scheduled,
+    done,
+    total: done + counts.partial + counts.missed + counts.failed + counts.unknown + counts.scheduled,
   };
 }

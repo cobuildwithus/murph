@@ -15,6 +15,7 @@ interface ExperimentScheduleProps {
 const CELL_VARIANT: Record<ScheduleCellKind, string> = {
   baseline: "border border-secondary/30 bg-secondary/30 text-foreground/60",
   completed: "border border-ring/40 bg-ring/15 text-foreground",
+  assumed: "border border-chart-4/45 bg-chart-4/15 text-foreground",
   partial: "border border-secondary/60 bg-secondary/20 text-foreground",
   missed: "border border-muted-foreground/35 bg-muted/25 text-muted-foreground",
   failed: "border border-secondary/60 bg-secondary/15 text-foreground",
@@ -25,6 +26,7 @@ const CELL_VARIANT: Record<ScheduleCellKind, string> = {
 const LEGEND_ENTRIES: { kind: ScheduleCellKind; label: string }[] = [
   { kind: "baseline", label: "Baseline" },
   { kind: "completed", label: "Completed" },
+  { kind: "assumed", label: "Assumed done" },
   { kind: "partial", label: "Partial" },
   { kind: "missed", label: "Not logged" },
   { kind: "failed", label: "Not met" },
@@ -77,14 +79,15 @@ export function ExperimentScheduleSidebar({ schedule }: ExperimentScheduleProps)
 function tallyTargetStats(schedule: ExperimentSchedule) {
   const cells = schedule.weeks.flatMap((week) => week.cells);
   const completed = cells.filter((c) => c.kind === "completed").length;
+  const assumed = cells.filter((c) => c.kind === "assumed").length;
   const partial = cells.filter((c) => c.kind === "partial").length;
   const missed = cells.filter((c) => c.kind === "missed").length;
   const failed = cells.filter((c) => c.kind === "failed").length;
   const unknown = cells.filter((c) => c.kind === "unknown").length;
   const hasToday = cells.some((c) => c.isToday);
-  const due = completed + partial + missed + failed + unknown;
-  const adherencePercent = due > 0 ? Math.round((completed / due) * 100) : 0;
-  return { completed, due, adherencePercent, hasToday };
+  const due = completed + assumed + partial + missed + failed + unknown;
+  const adherencePercent = due > 0 ? Math.round(((completed + assumed) / due) * 100) : 0;
+  return { completed: completed + assumed, due, adherencePercent, hasToday };
 }
 
 function WeekDateRange({ dateRange }: { dateRange: string }) {
@@ -126,6 +129,7 @@ function CompactCellView({ cell }: { cell: ScheduleCell }) {
 function renderCompactCellBody(cell: ScheduleCell): ReactNode {
   switch (cell.kind) {
     case "completed":
+    case "assumed":
       return <Check className="size-2.5" strokeWidth={3} />;
     case "partial":
       return <Minus aria-label="Partial" className="size-2.5" strokeWidth={3} />;
@@ -234,6 +238,7 @@ function ScheduleCellView({ cell }: { cell: ScheduleCell }) {
 function renderCellBody(cell: ScheduleCell): ReactNode {
   switch (cell.kind) {
     case "completed":
+    case "assumed":
       return (
         <span className="text-[11px] font-semibold">
           {cell.detail ?? <Check className="size-3.5" strokeWidth={2.5} />}

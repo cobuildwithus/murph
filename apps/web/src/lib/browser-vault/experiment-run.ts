@@ -614,6 +614,8 @@ function formatScheduleCellDetail(
   switch (kind) {
     case "completed":
       return "Done";
+    case "assumed":
+      return "Assumed done";
     case "partial":
       return "Partial";
     case "missed":
@@ -640,6 +642,7 @@ function summarizeScheduleWeek(cells: readonly ScheduleCell[]): string | undefin
 
   const parts = [
     formatCount(countScheduleCells(cells, "completed"), "done"),
+    formatCount(countScheduleCells(cells, "assumed"), "assumed"),
     formatCount(countScheduleCells(cells, "partial"), "partial"),
     formatCount(countScheduleCells(cells, "missed"), "not logged"),
     formatCount(countScheduleCells(cells, "failed"), "not met"),
@@ -719,7 +722,8 @@ function formatScheduleDose(results: BrowserVaultExperimentResultsView): string 
   const parts = [
     target !== null ? `${target} planned` : undefined,
     minimum !== null ? `${minimum} minimum useful` : undefined,
-    schedule ? formatCount(schedule.completedSessions, "done") : undefined,
+    schedule ? formatCount(Math.max(0, schedule.completedSessions - schedule.assumedSessions), "done") : undefined,
+    schedule ? formatCount(schedule.assumedSessions, "assumed") : undefined,
     schedule ? formatCount(schedule.partialSessions, "partial") : undefined,
     schedule ? formatCount(schedule.missedSessions, "not logged") : undefined,
     schedule ? formatCount(schedule.failedSessions, "not met") : undefined,
@@ -754,9 +758,7 @@ function buildRunSummary(
     return `${phaseLabel} in progress`;
   }
 
-  const adherencePart = adherence
-    ? ` with ${adherence.loggedSessions} logged target${adherence.loggedSessions === 1 ? "" : "s"}`
-    : "";
+  const adherencePart = adherence ? ` with ${formatRunSummaryAdherence(adherence)}` : "";
 
   return `${phaseLabel}${adherencePart}: ${primary.label} is ${formatDelta(primary.deltaAbs, primary.unit ?? undefined)} from baseline.`;
 }
@@ -1121,14 +1123,31 @@ function formatProgressPhase(
 function formatAdherenceDetail(
   adherence: NonNullable<BrowserVaultExperimentResultsView["progress"]>["adherence"],
 ): string {
+  const assumedSessions = adherence.assumedSessions ?? 0;
   const parts = [
-    `${adherence.loggedSessions} logged`,
+    assumedSessions > 0
+      ? `${adherence.loggedSessions} done (${assumedSessions} assumed)`
+      : `${adherence.loggedSessions} logged`,
+    formatCount(adherence.sensedSessions ?? 0, "sensed"),
+    formatCount(adherence.confirmedSessions ?? 0, "confirmed"),
+    assumedSessions > 0 ? undefined : formatCount(assumedSessions, "assumed"),
     formatCount(adherence.partialSessions, "partial"),
     formatCount(adherence.missedSessions, "not logged"),
     adherence.targetSessions !== null ? `${adherence.targetSessions} target` : undefined,
   ].filter((part): part is string => Boolean(part));
 
   return `Adherence is ${adherence.status.replaceAll("_", " ")} (${parts.join(" · ")}).`;
+}
+
+function formatRunSummaryAdherence(
+  adherence: NonNullable<BrowserVaultExperimentResultsView["progress"]>["adherence"],
+): string {
+  const assumedSessions = adherence.assumedSessions ?? 0;
+  if (assumedSessions > 0) {
+    return `${adherence.loggedSessions} done (${assumedSessions} assumed)`;
+  }
+
+  return `${adherence.loggedSessions} logged target${adherence.loggedSessions === 1 ? "" : "s"}`;
 }
 
 function formatExpectedSignalText(

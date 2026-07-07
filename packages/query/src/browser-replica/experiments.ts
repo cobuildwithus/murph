@@ -7,6 +7,7 @@ import {
 
 import {
   buildExperimentAdherenceCalendar,
+  countAdherenceConfidenceSessions,
   countCompletedAdherenceSessions,
   eventKindIsCandidateForEvidence,
   resolveActivityEvidenceLocalDate,
@@ -196,6 +197,7 @@ export interface BrowserVaultExperimentBiomarkerResult {
 
 export interface BrowserVaultExperimentScheduleResult {
   cells: BrowserVaultExperimentScheduleCell[];
+  assumedSessions: number;
   completedSessions: number;
   failedSessions: number;
   missedSessions: number;
@@ -208,6 +210,7 @@ export interface BrowserVaultExperimentScheduleResult {
 
 export type BrowserVaultExperimentScheduleCellKind =
   | "completed"
+  | "assumed"
   | "partial"
   | "missed"
   | "failed"
@@ -246,11 +249,14 @@ export interface BrowserVaultExperimentAdherenceResult {
 export interface BrowserVaultExperimentProgressResult {
   adherence: {
     completedSessions: number;
+    assumedSessions?: number;
+    confirmedSessions?: number;
     expectedSessionsByNow: number | null;
     loggedSessions: number;
     minimumUsefulSessions: number | null;
     missedSessions: number;
     partialSessions: number;
+    sensedSessions?: number;
     skippedSessions: number;
     status: "not_started" | "behind" | "on_track" | "met_minimum" | "met_target" | "unknown";
     targetSessions: number | null;
@@ -351,7 +357,7 @@ export function selectBrowserVaultExperimentResults(
   const biomarkers = buildBiomarkerResults(client, context, metricWindow);
   const adherence = buildAdherenceResult(context);
   const schedule = buildScheduleResult(adherence);
-  const progress = buildProgressResult(context, biomarkers, schedule);
+  const progress = buildProgressResult(context, biomarkers, schedule, adherence);
   const outcome = buildOutcomeResult(context, biomarkers, progress);
   const runContext = buildExperimentContextEntries(context);
 
@@ -1336,7 +1342,8 @@ function summarizeScheduleCells(
 ): BrowserVaultExperimentScheduleResult {
   return {
     cells: cells.slice(),
-    completedSessions: countCells(countedCells, "completed"),
+    assumedSessions: countCells(countedCells, "assumed"),
+    completedSessions: countCells(countedCells, "completed") + countCells(countedCells, "assumed"),
     failedSessions: countCells(countedCells, "failed"),
     missedSessions: countCells(countedCells, "missed"),
     unknownSessions: countCells(countedCells, "unknown"),
@@ -1456,6 +1463,7 @@ function buildProgressResult(
   context: BrowserVaultExperimentRunContext,
   biomarkers: readonly BrowserVaultExperimentBiomarkerResult[],
   schedule: BrowserVaultExperimentScheduleResult | null,
+  adherence: BrowserVaultExperimentAdherenceResult | null,
 ): BrowserVaultExperimentProgressResult {
   const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
   const hasAmbiguousTargets = context.adherenceTargets.length > 1 && !rollupTarget;
@@ -1471,10 +1479,13 @@ function buildProgressResult(
   const progressTarget = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? null
     : rollupTarget ?? context.adherenceTargets[0] ?? null;
+  const progressObservations = progressTarget
+    ? buildAdherenceObservations(context, [progressTarget])
+    : [];
   const progressCounts = progressTarget && !progressTarget.calendar
     ? countCompletedAdherenceSessions({
         asOfDate: context.asOfDate,
-        observations: buildAdherenceObservations(context, [progressTarget]),
+        observations: progressObservations,
         target: progressTarget,
         windows: context.run.windows,
       })
@@ -1506,6 +1517,23 @@ function buildProgressResult(
         cells: schedule.cells.filter((cell) => cell.targetId === rollupTarget.targetId),
       }
     : progressTarget?.calendar ? schedule : null;
+  const progressCells = progressTarget?.calendar && adherence
+    ? rollupTarget
+      ? adherence.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
+      : adherence.cells
+    : null;
+  const confidenceCounts = hasUnsupportedExplicitTargets || hasAmbiguousTargets
+    ? { sensedSessions: 0, confirmedSessions: 0, assumedSessions: 0 }
+    : progressTarget?.calendar
+    ? countAdherenceConfidenceSessions({
+        cells: progressCells ?? [],
+        observations: progressObservations,
+      })
+    : progressCounts ?? {
+        sensedSessions: 0,
+        confirmedSessions: 0,
+        assumedSessions: 0,
+      };
   const expectedSessionsByNow = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? null
     : computeExpectedSessionsByNow(
@@ -1521,11 +1549,14 @@ function buildProgressResult(
   return {
     adherence: {
       completedSessions,
+      ...(confidenceCounts.assumedSessions > 0 ? { assumedSessions: confidenceCounts.assumedSessions } : {}),
+      ...(confidenceCounts.confirmedSessions > 0 ? { confirmedSessions: confidenceCounts.confirmedSessions } : {}),
       expectedSessionsByNow,
       loggedSessions,
       minimumUsefulSessions,
       missedSessions,
       partialSessions,
+      ...(confidenceCounts.sensedSessions > 0 ? { sensedSessions: confidenceCounts.sensedSessions } : {}),
       skippedSessions,
       status: hasUnsupportedExplicitTargets || hasAmbiguousTargets
         ? "unknown"
@@ -1653,6 +1684,13 @@ function buildOutcomeResult(
     progress.adherence.loggedSessions < progress.adherence.minimumUsefulSessions
   ) {
     reasons.push("Logged session count stayed below the minimum useful target.");
+  }
+
+  if (
+    (progress.adherence.assumedSessions ?? 0) >
+      (progress.adherence.sensedSessions ?? 0) + (progress.adherence.confirmedSessions ?? 0)
+  ) {
+    reasons.push("Most sessions are assumed rather than confirmed.");
   }
 
   if (context.unsupportedExplicitAdherenceTargets) {

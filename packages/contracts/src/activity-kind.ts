@@ -11,6 +11,10 @@ export const activityKindAliasGroups = [
   ["sleep", "sleep-session", "sleep-summary", "sleep-cycle"],
 ] as const satisfies readonly (readonly string[])[];
 
+export const activityKindCategories = {
+  cardio: ["running", "cycling", "swimming", "rowing", "elliptical"],
+} as const;
+
 export function normalizeActivityKindToken(value: string | null | undefined): string | null {
   const normalized = value
     ?.trim()
@@ -30,12 +34,23 @@ export function activityTextMatchesKind(
     return false;
   }
 
+  const categoryMembers = activityKindCategoryMembers(requested);
+  if (categoryMembers) {
+    return categoryMembers.some((member) => activityTextMatchesKind(normalized, member));
+  }
+
   if (activityKindsEquivalent(normalized, requested)) {
     return true;
   }
 
   const requestedAliases = activityKindAliasSet(requested);
   return normalized.split("-").some((part) => requestedAliases.has(part));
+}
+
+function activityKindCategoryMembers(value: string): readonly string[] | null {
+  return Object.prototype.hasOwnProperty.call(activityKindCategories, value)
+    ? activityKindCategories[value as keyof typeof activityKindCategories]
+    : null;
 }
 
 function activityKindsEquivalent(left: string, right: string): boolean {

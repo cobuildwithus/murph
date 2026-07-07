@@ -146,7 +146,7 @@ test("treats explicitly skipped linked-event adherence as missed in v1", () => {
   };
 
   const result = buildExperimentAdherenceCalendar({
-    asOf: "2026-04-10T12:00:00.000Z",
+    asOf: "2026-04-11T12:00:00.000Z",
     observations: [{
       evidenceId: "evt_skipped",
       eventKind: "intervention_session",
@@ -160,6 +160,83 @@ test("treats explicitly skipped linked-event adherence as missed in v1", () => {
   const skippedCell = result.cells.find((cell) => cell.localDate === "2026-04-10");
   assert.equal(skippedCell?.status, "missed");
   assert.deepEqual(skippedCell?.evidenceIds, ["evt_skipped"]);
+});
+
+test("assumes missing non-sensable linked-event adherence after grace", () => {
+  const target: ExperimentAdherenceTarget = {
+    targetId: "sauna",
+    label: "Sauna",
+    phase: "intervention",
+    calendar: {
+      kind: "daily",
+      timeZone: "America/New_York",
+      targetCountPerDay: 1,
+    },
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "intervention_session",
+      missing: "assumed_after_grace",
+    },
+    grace: { hours: 24 },
+  };
+
+  const result = buildExperimentAdherenceCalendar({
+    asOf: "2026-04-11T12:00:00.000Z",
+    observations: [{
+      evidenceId: "evt_skipped",
+      eventKind: "intervention_session",
+      localDate: "2026-04-08",
+      status: "skipped",
+    }],
+    targets: [target],
+    windows,
+  });
+
+  assert.deepEqual(
+    result.cells.slice(0, 4).map((cell) => [cell.localDate, cell.status, cell.score, cell.reason]),
+    [
+      ["2026-04-08", "missed", 0, "Target evidence was marked missed."],
+      ["2026-04-09", "assumed", 1, "No log needed. Assumed done on schedule."],
+      ["2026-04-10", "scheduled", null, "The planned target is not due yet."],
+      ["2026-04-11", "scheduled", null, "The planned target is not due yet."],
+    ],
+  );
+  assert.equal(result.summary.status, "behind");
+  assert.equal(result.targets[0]?.assumedCount, 1);
+});
+
+test("grades stale activity assumed-after-grace targets as missed", () => {
+  const target: ExperimentAdherenceTarget = {
+    targetId: "running",
+    label: "Running",
+    phase: "intervention",
+    calendar: {
+      kind: "daily",
+      timeZone: "America/New_York",
+      targetCountPerDay: 1,
+    },
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "activity_session",
+      activityKind: "running",
+      missing: "assumed_after_grace",
+    },
+    grace: { hours: 0 },
+  };
+
+  const result = buildExperimentAdherenceCalendar({
+    asOf: "2026-04-11T12:00:00.000Z",
+    observations: [],
+    targets: [target],
+    windows,
+  });
+
+  const missedCell = result.cells.find((cell) => cell.localDate === "2026-04-10");
+  assert.equal(missedCell?.status, "missed");
+  assert.equal(missedCell?.score, 0);
+  assert.equal(missedCell?.reason, "No target evidence was logged after the grace window.");
+  assert.equal(result.targets[0]?.assumedCount, 0);
+  assert.equal(result.targets[0]?.missedCount, 3);
 });
 
 test("keeps missing metric-threshold evidence unknown when configured that way", () => {
@@ -243,6 +320,11 @@ test("synthesizes legacy schedules into adherence targets", () => {
     targetCompletions: 2,
     minimumUsefulCompletions: 1,
   });
+  assert.deepEqual(targets[0]?.evidence, {
+    kind: "linkedEventCount",
+    eventKind: "intervention_session",
+    missing: "assumed_after_grace",
+  });
 });
 
 test("synthesizes calendar-less count targets from legacy session counts", () => {
@@ -304,7 +386,8 @@ test("maps generic workout modalities to unscoped activity evidence", () => {
     eventKind: "activity_session",
   });
   assert.deepEqual(resolveAdherenceEvidence("cardio"), {
-    eventKind: "intervention_session",
+    eventKind: "activity_session",
+    activityKind: "cardio",
   });
   assert.deepEqual(resolveAdherenceEvidence("movement"), {
     eventKind: "intervention_session",
@@ -398,6 +481,97 @@ test("counts calendar-less activity targets by matching activity kind", () => {
   });
 
   assert.equal(counts.completedSessions, 4);
+});
+
+test("counts cardio category activity targets from member activity kinds only", () => {
+  const target: ExperimentAdherenceTarget = {
+    targetId: "cardio",
+    label: "Cardio",
+    phase: "intervention",
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "activity_session",
+      activityKind: "cardio",
+      missing: "missed_after_grace",
+    },
+  };
+
+  const counts = countCompletedAdherenceSessions({
+    asOfDate: "2026-04-12",
+    observations: [
+      { evidenceId: "run_1", eventKind: "activity_session", activityKind: "running", localDate: "2026-04-08" },
+      { evidenceId: "swim_1", eventKind: "activity_session", activityKind: "swimming", localDate: "2026-04-09" },
+      { evidenceId: "strength_1", eventKind: "activity_session", activityKind: "strength", localDate: "2026-04-10" },
+    ],
+    target,
+    windows,
+  });
+
+  assert.equal(counts.completedSessions, 2);
+});
+
+test("honors only known intervention activity-kind contradictions for scoped activity evidence", () => {
+  const target: ExperimentAdherenceTarget = {
+    targetId: "cardio",
+    label: "Cardio",
+    phase: "intervention",
+    calendar: {
+      kind: "daily",
+      timeZone: "America/New_York",
+    },
+    evidence: {
+      kind: "linkedEventCount",
+      eventKind: "activity_session",
+      activityKind: "cardio",
+      missing: "missed_after_grace",
+    },
+    grace: { hours: 0 },
+  };
+
+  const result = buildExperimentAdherenceCalendar({
+    asOf: "2026-04-11T12:00:00.000Z",
+    observations: [
+      {
+        activityKind: "strength",
+        evidenceId: "evt_strength_intervention",
+        eventKind: "intervention_session",
+        localDate: "2026-04-08",
+        status: "completed",
+      },
+      {
+        evidenceId: "evt_kindless_manual_intervention",
+        eventKind: "intervention_session",
+        localDate: "2026-04-09",
+        status: "completed",
+      },
+      {
+        activityKind: "running",
+        evidenceId: "evt_running_intervention",
+        eventKind: "intervention_session",
+        localDate: "2026-04-10",
+        status: "completed",
+      },
+      {
+        activityKind: "hiit",
+        evidenceId: "evt_hiit_intervention",
+        eventKind: "intervention_session",
+        localDate: "2026-04-11",
+        status: "completed",
+      },
+    ],
+    targets: [target],
+    windows,
+  });
+
+  assert.deepEqual(
+    result.cells.slice(0, 4).map((cell) => [cell.localDate, cell.status, cell.evidenceIds]),
+    [
+      ["2026-04-08", "missed", []],
+      ["2026-04-09", "satisfied", ["evt_kindless_manual_intervention"]],
+      ["2026-04-10", "satisfied", ["evt_running_intervention"]],
+      ["2026-04-11", "satisfied", ["evt_hiit_intervention"]],
+    ],
+  );
 });
 
 test("rejects adherence calendars that expand beyond the browser-safe cell limit", () => {

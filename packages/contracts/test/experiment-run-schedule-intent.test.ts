@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  experimentAdherenceTargetSchema,
   experimentAdherenceTargetsSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
@@ -187,6 +188,49 @@ describe("experiment adherence targets", () => {
     expect(experimentRunPlanSchema.parse({ adherenceTargets: [target] }).adherenceTargets).toEqual([
       target,
     ]);
+  });
+
+  it("limits assumed missing policy to intervention-session evidence", () => {
+    const interventionTarget = {
+      targetId: "sauna",
+      label: "Sauna",
+      phase: "intervention",
+      calendar: {
+        kind: "daily",
+        timeZone: "America/New_York",
+      },
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "intervention_session",
+        missing: "assumed_after_grace",
+      },
+    } as const;
+    const activityTarget = {
+      ...interventionTarget,
+      targetId: "running",
+      label: "Running",
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "activity_session",
+        activityKind: "running",
+        missing: "assumed_after_grace",
+      },
+    } as const;
+
+    expect(experimentAdherenceTargetSchema.parse(interventionTarget)).toEqual(interventionTarget);
+    const activityResult = experimentAdherenceTargetSchema.safeParse(activityTarget);
+    expect(activityResult.success).toBe(false);
+    if (activityResult.success) {
+      throw new Error("expected activity-session assumed target to fail validation");
+    }
+    expect(activityResult.error.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "assumed_after_grace requires intervention_session evidence.",
+          path: ["evidence", "missing"],
+        }),
+      ]),
+    );
   });
 
   it("requires calendars for metric adherence targets", () => {

@@ -6553,6 +6553,16 @@
                           "type": "string",
                           "pattern": "^reg_[0-9A-Za-z]+$"
                         },
+                        "sessionStatus": {
+                          "description": "Replace the experiment session status.",
+                          "type": "string",
+                          "enum": [
+                            "completed",
+                            "partial",
+                            "missed",
+                            "skipped"
+                          ]
+                        },
                         "clearDuration": {
                           "description": "Clear the saved duration.",
                           "type": "boolean"

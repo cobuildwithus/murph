@@ -253,6 +253,99 @@ describe('device activity triggered automations', () => {
     )
   })
 
+  it('matches cardio automations to cycling activity but not strength sessions', async () => {
+    const automation = createDeviceActivityAutomation({
+      activityKind: 'cardio',
+      after: '2026-06-07T11:00:00.000Z',
+      automationId: 'auto_cardio',
+      instructions: 'Ask how the cardio session felt.',
+    })
+    deviceActivityMocks.automations = [automation]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_cardio_strength',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Bike strength warmup',
+          workoutType: 'strength',
+        }),
+        createActivityEntity({
+          entityId: 'evt_cardio_cycling',
+          occurredAt: '2026-06-07T12:30:00.000Z',
+          title: 'Lunch ride',
+          workoutType: 'cycling',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:31:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:31:00.000Z',
+      scheduled: 1,
+    })
+
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]?.prompt).toContain('Kind: cardio')
+    expect(jobs[0]?.prompt).toContain('Lunch ride')
+    expect(jobs[0]?.prompt).not.toContain('Bike strength warmup')
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: '2026-06-07T12:30:00.000Z',
+        afterEntityId: 'evt_cardio_cycling',
+        afterOccurredAt: '2026-06-07T12:30:00.000Z',
+        expectedActivityKind: 'cardio',
+        expectedSource: undefined,
+        lookup: 'auto_cardio',
+        vaultRoot,
+      }),
+    )
+  })
+
+  it('uses activity titles as a fallback only when structured kind is absent', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'running',
+        after: '2026-06-07T11:00:00.000Z',
+        automationId: 'auto_run_title_fallback',
+        instructions: 'Ask how the run felt.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_title_only_run',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Morning run',
+          workoutType: null,
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:01:00.000Z',
+      scheduled: 1,
+    })
+
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]?.prompt).toContain('Morning run')
+    expect(jobs[0]?.prompt).toContain('Kind: running')
+  })
+
   it('keeps explicit whoop device activity automations scoped to whoop providers', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({

@@ -1335,7 +1335,7 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
     assert.deepEqual(requireRecord(adherenceTarget.evidence, 'adherenceTarget.evidence'), {
       kind: 'linkedEventCount',
       eventKind: 'intervention_session',
-      missing: 'missed_after_grace',
+      missing: 'assumed_after_grace',
     })
     assert.deepEqual(requireRecord(adherenceTarget.grace, 'adherenceTarget.grace'), {
       hours: 24,
@@ -2452,8 +2452,10 @@ test.sequential(
       assert.equal(requireData(progress).progress.dayInRun, 20)
       assert.deepEqual(requireData(progress).progress.adherence, {
         completedSessions: 2,
+        confirmedSessions: 2,
         evidence: { eventKind: 'intervention_session' },
         expectedSessionsByNow: 3,
+        loggedSessions: 2,
         minimumUsefulSessions: 3,
         sessionEventIds: [
           requireData(sessionBySlug).eventId,

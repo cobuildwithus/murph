@@ -52,6 +52,7 @@ type DeviceActivityEventKind = 'activity_session' | 'sleep_session'
 
 interface DeviceActivityCandidate {
   activityKind: string
+  activityKindSource: 'structured' | 'title' | 'generic'
   durationMinutes: number | null
   entityId: string
   occurredAt: string
@@ -222,9 +223,11 @@ function listDeviceActivityCandidates(vault: VaultReadModel, nowIso: string): De
     .flatMap((entity) => {
       const occurredAt = resolveActivityOccurredAt(entity)
       const triggeredAt = resolveDeviceActivityTriggeredAt(entity)
+      const activityKind = resolveDeviceActivityKind(entity)
       return occurredAt && triggeredAt
         ? [{
-            activityKind: resolveDeviceActivityKind(entity),
+            activityKind: activityKind.kind,
+            activityKindSource: activityKind.source,
             durationMinutes: readActivityDurationMinutes(entity),
             entityId: entity.entityId,
             occurredAt,
@@ -335,19 +338,24 @@ function isStaleDeviceActivity(entity: ActivityEntity, nowIso: string): boolean 
   return nowMs - endedAtMs > DEVICE_ACTIVITY_MAX_STALENESS_MS
 }
 
-function resolveDeviceActivityKind(entity: ActivityEntity & { kind: DeviceActivityEventKind }): string {
+function resolveDeviceActivityKind(
+  entity: ActivityEntity & { kind: DeviceActivityEventKind },
+): { kind: string; source: DeviceActivityCandidate['activityKindSource'] } {
   if (entity.kind === 'sleep_session') {
-    return 'sleep'
+    return { kind: 'sleep', source: 'structured' }
   }
 
   const structuredKind = resolveAdherenceObservationActivityKind({
     attributes: entity.attributes,
   })
   if (structuredKind) {
-    return structuredKind
+    return { kind: structuredKind, source: 'structured' }
   }
 
-  return normalizeActivityKindToken(readEntityTitle(entity)) ?? 'activity'
+  const titleKind = normalizeActivityKindToken(readEntityTitle(entity))
+  return titleKind
+    ? { kind: titleKind, source: 'title' }
+    : { kind: 'activity', source: 'generic' }
 }
 
 function deviceActivityKindMatches(
@@ -375,6 +383,10 @@ function deviceActivityKindMatches(
 
   if (requested === 'activity-session' || requested === 'workout' || requested === 'workouts') {
     return candidate.recordKind === 'activity_session'
+  }
+
+  if (candidate.activityKindSource === 'structured') {
+    return activityTextMatchesKind(candidate.activityKind, requested)
   }
 
   return activityTextMatchesKind(candidate.activityKind, requested)

@@ -452,6 +452,7 @@ function projectSafeEventAttributes(entity: CanonicalEntity): Record<string, unk
         "confounders",
         "experimentId",
         "experimentSlug",
+        "interventionType",
         "note",
         "protocolId",
         "sessionStatus",
