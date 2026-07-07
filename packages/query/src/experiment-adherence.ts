@@ -349,9 +349,7 @@ export function synthesizeLegacySessionAdherenceTargets(input: {
       kind: "linkedEventCount" as const,
       eventKind: evidence.eventKind,
       ...(evidence.activityKind ? { activityKind: evidence.activityKind } : {}),
-      missing: evidence.eventKind === "intervention_session"
-        ? "assumed_after_grace" as const
-        : "missed_after_grace" as const,
+      missing: "missed_after_grace" as const,
     },
     grace: { hours: 24 },
     ...(rollup ? { rollup } : {}),
@@ -360,7 +358,18 @@ export function synthesizeLegacySessionAdherenceTargets(input: {
   if (runPlan.schedule) {
     const calendar = calendarFromLegacySchedule(runPlan.schedule);
     if (calendar) {
-      return [{ ...base, calendar }];
+      return [{
+        ...base,
+        calendar,
+        evidence: {
+          kind: "linkedEventCount" as const,
+          eventKind: evidence.eventKind,
+          ...(evidence.activityKind ? { activityKind: evidence.activityKind } : {}),
+          missing: evidence.eventKind === "intervention_session"
+            ? "assumed_after_grace" as const
+            : "missed_after_grace" as const,
+        },
+      }];
     }
   }
 
@@ -464,11 +473,19 @@ export function countAdherenceConfidenceSessions(input: {
     if (cell.status !== "satisfied" && cell.status !== "partial") {
       continue;
     }
-    for (const evidenceId of cell.evidenceIds) {
-      const observation = observationsById.get(evidenceId);
-      if (observation) {
-        countAdherenceObservationConfidence(counts, observation);
-      }
+    const observations = cell.evidenceIds
+      .map((evidenceId) => observationsById.get(evidenceId))
+      .filter((observation): observation is ExperimentAdherenceObservation =>
+        observation !== undefined &&
+        observation.status !== "missed" &&
+        observation.status !== "skipped"
+      );
+    if (observations.some((observation) => isSensedAdherenceObservation(observation))) {
+      counts.sensedSessions += 1;
+    } else if (observations.some((observation) => normalizeObservationSource(observation.source) === "manual")) {
+      counts.confirmedSessions += 1;
+    } else if (observations.some((observation) => normalizeObservationSource(observation.source) === "derived")) {
+      counts.assumedSessions += 1;
     }
   }
 
@@ -858,11 +875,12 @@ function countAdherenceObservationConfidence(
   counts: AdherenceConfidenceSessionCounts,
   observation: ExperimentAdherenceObservation,
 ): void {
+  if (isSensedAdherenceObservation(observation)) {
+    counts.sensedSessions += 1;
+    return;
+  }
+
   switch (normalizeObservationSource(observation.source)) {
-    case "device":
-    case "import":
-      counts.sensedSessions += 1;
-      return;
     case "manual":
       counts.confirmedSessions += 1;
       return;
@@ -872,6 +890,13 @@ function countAdherenceObservationConfidence(
     default:
       return;
   }
+}
+
+function isSensedAdherenceObservation(
+  observation: ExperimentAdherenceObservation,
+): boolean {
+  const source = normalizeObservationSource(observation.source);
+  return source === "device" || source === "import";
 }
 
 function minLocalDate(left: string, right: string): string {

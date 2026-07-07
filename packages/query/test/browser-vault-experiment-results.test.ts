@@ -1035,6 +1035,19 @@ test("browser outcome demotes confidence when most sessions are assumed", () => 
             minimumUsefulSessions: 1,
           },
         }),
+        sessionEvent("2026-04-04", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_assumed_outcome",
+          experimentSlug: "browser-assumed-outcome",
+          id: "evt_browser_assumed_outcome_manual_1",
+        }),
+        sessionEvent("2026-04-04", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_assumed_outcome",
+          experimentSlug: "browser-assumed-outcome",
+          id: "evt_browser_assumed_outcome_manual_2",
+          occurredAt: "2026-04-04T15:00:00.000Z",
+        }),
       ],
       metricRows: restingHeartRateRows([
         ["2026-04-01", 63],
@@ -1049,7 +1062,9 @@ test("browser outcome demotes confidence when most sessions are assumed", () => 
 
   const result = selectBrowserVaultExperimentResults(client, "browser-assumed-outcome");
 
-  assert.equal(result?.progress?.adherence.assumedSessions, 3);
+  assert.equal(result?.progress?.adherence.completedSessions, 3);
+  assert.equal(result?.progress?.adherence.confirmedSessions, 1);
+  assert.equal(result?.progress?.adherence.assumedSessions, 2);
   assert.equal(result?.outcome?.confidence.level, "medium");
   assert.deepEqual(result?.outcome?.confidence.reasons, [
     "Most sessions are assumed rather than confirmed.",

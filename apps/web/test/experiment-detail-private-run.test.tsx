@@ -840,6 +840,228 @@ describe("experiment detail private-run composition", () => {
     expect(scheduleMarkup).not.toContain("1 missed");
   });
 
+  it("renders all-assumed schedule cells as done with assumed detail copy", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        generatedAt: "2026-04-10T12:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            id: "exp_sauna_all_assumed",
+            runPlan: {
+              baselineEnd: "2026-04-07",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-10",
+              interventionStart: "2026-04-08",
+              adherenceTargets: [{
+                targetId: "sauna",
+                label: "Sauna",
+                phase: "intervention",
+                calendar: {
+                  kind: "explicitDates",
+                  timeZone: "America/New_York",
+                  dates: [
+                    { localDate: "2026-04-08", localTime: "00:00" },
+                    { localDate: "2026-04-09", localTime: "00:00" },
+                    { localDate: "2026-04-10", localTime: "00:00" },
+                  ],
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "assumed_after_grace",
+                },
+                grace: { hours: 0 },
+                rollup: {
+                  targetCompletions: 3,
+                  minimumUsefulCompletions: 2,
+                },
+              }],
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "active",
+            title: "Private sauna assumed run",
+          }),
+          id: "exp_sauna_all_assumed",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "active",
+          summary: "Assumed sauna cells should still count as done.",
+          tags: ["sauna"],
+          title: "Private sauna assumed run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    const interventionKinds = privateRun?.schedule?.weeks
+      .flatMap((week) => week.cells)
+      .filter((cell) => cell.kind !== "baseline")
+      .map((cell) => cell.kind);
+    const markup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(interventionKinds).toEqual(["assumed", "assumed", "assumed"]);
+    expect(markup).toContain("3 of 3 done");
+    expect(markup).toContain("3 done, all assumed");
+  });
+
+  it("renders mixed confirmed and assumed schedule copy without calling all sessions logged", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        additionalEntities: [
+          createSessionEntity({
+            date: "2026-04-08",
+            experimentId: "exp_sauna_mixed_assumed",
+            experimentSlug: "finnish-sauna",
+            sessionStatus: "completed",
+            source: "manual",
+          }),
+        ],
+        generatedAt: "2026-04-10T12:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "decrease",
+              primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            },
+            id: "exp_sauna_mixed_assumed",
+            runPlan: {
+              baselineEnd: "2026-04-07",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-10",
+              interventionStart: "2026-04-08",
+              adherenceTargets: [{
+                targetId: "sauna",
+                label: "Sauna",
+                phase: "intervention",
+                calendar: {
+                  kind: "explicitDates",
+                  timeZone: "America/New_York",
+                  dates: [
+                    { localDate: "2026-04-08", localTime: "00:00" },
+                    { localDate: "2026-04-09", localTime: "00:00" },
+                    { localDate: "2026-04-10", localTime: "00:00" },
+                  ],
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "assumed_after_grace",
+                },
+                grace: { hours: 0 },
+                rollup: {
+                  targetCompletions: 3,
+                  minimumUsefulCompletions: 2,
+                },
+              }],
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-01",
+            status: "active",
+            title: "Private sauna mixed assumed run",
+          }),
+          id: "exp_sauna_mixed_assumed",
+          slug: "finnish-sauna",
+          startedOn: "2026-04-01",
+          status: "active",
+          summary: "Mixed assumed cells should expose the split.",
+          tags: ["sauna"],
+          title: "Private sauna mixed assumed run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+    const markup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(privateRun?.summaryDetail).toContain("3 done (2 assumed)");
+    expect(privateRun?.summaryDetail).not.toContain("3 logged");
+    expect(markup).toContain("3 of 3 done");
+    expect(markup).toContain("3 done, 2 assumed");
+  });
+
+  it("keeps device-observed schedule copy on logged wording", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
+
+    expect(protocol).not.toBeNull();
+
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        additionalEntities: [
+          createActivitySessionEntity({
+            activityType: "Running",
+            date: "2026-06-01",
+            id: "evt_device_schedule_run",
+            source: "device",
+            sportName: "Run",
+          }),
+        ],
+        generatedAt: "2026-06-05T12:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            analysisPlan: {
+              desiredDirection: "increase",
+              primaryBiomarkerKey: "biomarker:vo2-max",
+            },
+            id: "exp_device_schedule_run",
+            runPlan: {
+              baselineEnd: "2026-05-31",
+              baselineStart: "2026-05-25",
+              interventionEnd: "2026-06-03",
+              interventionStart: "2026-06-01",
+              minimumUsefulSessions: 2,
+              modality: "Run",
+              schedule: {
+                kind: "dailyLocal",
+                localTime: "08:00",
+                timeZone: "America/New_York",
+              },
+              targetSessions: 3,
+            },
+            slug: "norwegian-4x4",
+            startedOn: "2026-05-25",
+            status: "active",
+            title: "Private running device schedule",
+          }),
+          id: "exp_device_schedule_run",
+          slug: "norwegian-4x4",
+          startedOn: "2026-05-25",
+          status: "active",
+          summary: "Device-observed sessions keep logged wording.",
+          tags: ["running"],
+          title: "Private running device schedule",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    expect(privateRun?.summaryDetail).toContain("1 logged");
+    expect(privateRun?.summaryDetail).not.toContain("1 done (");
+  });
+
   it("does not synthesize a schedule grid for calendar-less count adherence", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("norwegian-4x4");
 
@@ -1405,6 +1627,7 @@ function createSessionEntity(input: {
   experimentSlug: string;
   note?: string;
   sessionStatus: string;
+  source?: string;
   symptoms?: string[];
 }): BrowserVaultEntity {
   return createEntity("event", `evt_${input.date}_${input.sessionStatus}`, {
@@ -1415,6 +1638,7 @@ function createSessionEntity(input: {
       experimentSlug: input.experimentSlug,
       note: input.note,
       sessionStatus: input.sessionStatus,
+      ...(input.source === undefined ? {} : { source: input.source }),
       symptoms: input.symptoms,
     },
     date: input.date,
@@ -1432,11 +1656,13 @@ function createActivitySessionEntity(input: {
   activityType: string;
   date: string;
   id: string;
+  source?: string;
   sportName?: string;
 }): BrowserVaultEntity {
   return createEntity("event", input.id, {
     attributes: {
       activityType: input.activityType,
+      ...(input.source === undefined ? {} : { source: input.source }),
       ...(input.sportName === undefined ? {} : { sportName: input.sportName }),
     },
     date: input.date,

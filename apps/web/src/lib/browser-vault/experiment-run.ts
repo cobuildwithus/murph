@@ -758,9 +758,7 @@ function buildRunSummary(
     return `${phaseLabel} in progress`;
   }
 
-  const adherencePart = adherence
-    ? ` with ${adherence.loggedSessions} logged target${adherence.loggedSessions === 1 ? "" : "s"}`
-    : "";
+  const adherencePart = adherence ? ` with ${formatRunSummaryAdherence(adherence)}` : "";
 
   return `${phaseLabel}${adherencePart}: ${primary.label} is ${formatDelta(primary.deltaAbs, primary.unit ?? undefined)} from baseline.`;
 }
@@ -1125,17 +1123,31 @@ function formatProgressPhase(
 function formatAdherenceDetail(
   adherence: NonNullable<BrowserVaultExperimentResultsView["progress"]>["adherence"],
 ): string {
+  const assumedSessions = adherence.assumedSessions ?? 0;
   const parts = [
-    `${adherence.loggedSessions} logged`,
+    assumedSessions > 0
+      ? `${adherence.loggedSessions} done (${assumedSessions} assumed)`
+      : `${adherence.loggedSessions} logged`,
     formatCount(adherence.sensedSessions ?? 0, "sensed"),
     formatCount(adherence.confirmedSessions ?? 0, "confirmed"),
-    formatCount(adherence.assumedSessions ?? 0, "assumed"),
+    assumedSessions > 0 ? undefined : formatCount(assumedSessions, "assumed"),
     formatCount(adherence.partialSessions, "partial"),
     formatCount(adherence.missedSessions, "not logged"),
     adherence.targetSessions !== null ? `${adherence.targetSessions} target` : undefined,
   ].filter((part): part is string => Boolean(part));
 
   return `Adherence is ${adherence.status.replaceAll("_", " ")} (${parts.join(" · ")}).`;
+}
+
+function formatRunSummaryAdherence(
+  adherence: NonNullable<BrowserVaultExperimentResultsView["progress"]>["adherence"],
+): string {
+  const assumedSessions = adherence.assumedSessions ?? 0;
+  if (assumedSessions > 0) {
+    return `${adherence.loggedSessions} done (${assumedSessions} assumed)`;
+  }
+
+  return `${adherence.loggedSessions} logged target${adherence.loggedSessions === 1 ? "" : "s"}`;
 }
 
 function formatExpectedSignalText(

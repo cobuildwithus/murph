@@ -308,7 +308,7 @@ test("synthesizes calendar-less count targets from legacy session counts", () =>
   assert.deepEqual(targets[0]?.evidence, {
     kind: "linkedEventCount",
     eventKind: "intervention_session",
-    missing: "assumed_after_grace",
+    missing: "missed_after_grace",
   });
   assert.deepEqual(targets[0]?.rollup, {
     targetCompletions: 28,
@@ -392,7 +392,7 @@ test("maps generic workout modalities to unscoped activity evidence", () => {
     assert.deepEqual(manualTargets[0]?.evidence, {
       kind: "linkedEventCount",
       eventKind: "intervention_session",
-      missing: "assumed_after_grace",
+      missing: "missed_after_grace",
     });
   }
 });

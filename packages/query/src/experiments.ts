@@ -1338,17 +1338,6 @@ function decideMissedLogDue(
     );
   }
 
-  if (hasAssumedAfterGraceSessionTarget(context)) {
-    return buildFollowupBase(
-      context,
-      date,
-      "missed-log",
-      "session_assumed",
-      "skip",
-      date,
-    );
-  }
-
   if (!isDailyInterventionSchedule(context.frontmatter)) {
     return buildFollowupBase(
       context,
@@ -1357,6 +1346,17 @@ function decideMissedLogDue(
       "unsupported_session_schedule",
       "skip",
       null,
+    );
+  }
+
+  if (hasAssumedAfterGraceCalendarSessionTarget(context)) {
+    return buildFollowupBase(
+      context,
+      date,
+      "missed-log",
+      "session_assumed",
+      "skip",
+      date,
     );
   }
 
@@ -1370,11 +1370,12 @@ function decideMissedLogDue(
   );
 }
 
-function hasAssumedAfterGraceSessionTarget(context: ExperimentFollowupContext): boolean {
+function hasAssumedAfterGraceCalendarSessionTarget(context: ExperimentFollowupContext): boolean {
   const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
   const targets = rollupTarget ? [rollupTarget] : context.adherenceTargets;
   return targets.some((target) =>
     target.evidence.kind === "linkedEventCount" &&
+    target.calendar !== undefined &&
     target.evidence.missing === "assumed_after_grace"
   );
 }

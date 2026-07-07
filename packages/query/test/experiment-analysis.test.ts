@@ -1135,7 +1135,8 @@ test("SAUNA assumed calendar sessions count as complete and explicit corrections
   assert.equal(progress.adherence.assumedSessions, 3);
   assert.equal(progress.adherence.status, "met_target");
   assert.equal(followup.action, "skip");
-  assert.equal(followup.reason, "session_assumed");
+  assert.equal(followup.reason, "unsupported_session_schedule");
+  assert.equal(followup.window.sessionDate, null);
 
   const correctedVault = createVaultReadModel({
     vaultRoot: "/virtual/experiment-analysis-sauna-assumed-corrected",
@@ -2661,6 +2662,20 @@ test("experiment outcome demotes confidence when most sessions are assumed", () 
           minimumUsefulSessions: 1,
         },
       }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE2A1",
+        experimentId,
+        experimentSlug: "assumed-majority-outcome",
+        occurredAt: "2026-04-08T12:00:00.000Z",
+        source: "manual",
+      }),
+      makeSession({
+        entityId: "evt_01JNV45RHN0TQ9ZXE0A7YSE2A2",
+        experimentId,
+        experimentSlug: "assumed-majority-outcome",
+        occurredAt: "2026-04-08T14:00:00.000Z",
+        source: "manual",
+      }),
       makeObservation({
         entityId: "evt_assumed_metric_base_1",
         dayKey: "2026-04-01",
@@ -2715,7 +2730,9 @@ test("experiment outcome demotes confidence when most sessions are assumed", () 
   const progress = summarizeExperimentProgress(vault, "assumed-majority-outcome", { asOf: "2026-04-12" });
   const outcome = analyzeExperimentOutcome(vault, "assumed-majority-outcome", { asOf: "2026-04-12" });
 
-  assert.equal(progress.adherence.assumedSessions, 3);
+  assert.equal(progress.adherence.completedSessions, 3);
+  assert.equal(progress.adherence.confirmedSessions, 1);
+  assert.equal(progress.adherence.assumedSessions, 2);
   assert.equal(outcome.confidence.level, "medium");
   assert.deepEqual(outcome.confidence.reasons, [
     "Most sessions are assumed rather than confirmed.",
@@ -3214,7 +3231,7 @@ test("experiment progress resolves linked events, skipped sessions, digest remin
   assert.equal(progress.protocolRef, null);
 });
 
-test("experiment follow-up due skips assumed-mode missed-log dates", () => {
+test("experiment follow-up due keeps calendar-less count targets on main missed-log behavior", () => {
   const experiment = makeExperiment("active", {
     runPlan: {
       baselineStart: "2026-04-01",
@@ -3242,13 +3259,58 @@ test("experiment follow-up due skips assumed-mode missed-log dates", () => {
     date: "2026-04-10",
   });
 
-  assert.equal(decision.action, "skip");
-  assert.equal(decision.reason, "session_assumed");
+  assert.equal(decision.action, "notify");
+  assert.equal(decision.reason, "planned_session_log_missing");
   assert.equal(decision.window.sessionDate, "2026-04-10");
   assert.equal(
     decision.dedupeKey,
     "experiment-followup:exp_01JNV4458HYPP53JDQCBP1QJFM:missed-log:2026-04-10",
   );
+});
+
+test("experiment follow-up due skips assumed calendar missed-log dates only after due gates pass", () => {
+  const experiment = makeExperiment("active", {
+    runPlan: {
+      baselineStart: "2026-04-01",
+      baselineEnd: "2026-04-07",
+      interventionStart: "2026-04-08",
+      interventionEnd: "2026-04-21",
+      modality: "sauna",
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "08:00",
+        timeZone: "America/New_York",
+      },
+      targetSessions: 14,
+      minimumUsefulSessions: 10,
+    },
+    assistantSupport: {
+      remindersEnabled: true,
+      missedLogFollowup: "default_on",
+      weeklyDigestEnabled: false,
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/experiment-followup-due-assumed-calendar",
+    metadata: { timezone: "America/New_York" },
+    entities: [experiment],
+  });
+
+  const earlyDecision = decideExperimentFollowupDue(vault, "sauna-rhr", {
+    kind: "missed-log",
+    date: "2026-04-07",
+  });
+  const dueDecision = decideExperimentFollowupDue(vault, "sauna-rhr", {
+    kind: "missed-log",
+    date: "2026-04-10",
+  });
+
+  assert.equal(earlyDecision.action, "skip");
+  assert.equal(earlyDecision.reason, "not_in_intervention_window");
+  assert.equal(earlyDecision.window.sessionDate, null);
+  assert.equal(dueDecision.action, "skip");
+  assert.equal(dueDecision.reason, "session_assumed");
+  assert.equal(dueDecision.window.sessionDate, "2026-04-10");
 });
 
 test("experiment follow-up due skips missed-log when the date already has any session log", () => {
@@ -3452,7 +3514,7 @@ test("experiment follow-up due skips missed-log when generic activity target has
   assert.equal(decision.reason, "session_already_logged");
 });
 
-test("experiment follow-up due skips missed-log for opt-out and assumed non-daily schedules", () => {
+test("experiment follow-up due skips missed-log for opt-out and unsupported non-daily schedules", () => {
   const optedOut = createVaultReadModel({
     vaultRoot: "/virtual/experiment-followup-opt-out",
     metadata: null,
@@ -3509,7 +3571,7 @@ test("experiment follow-up due skips missed-log for opt-out and assumed non-dail
       kind: "missed-log",
       date: "2026-04-10",
     }).reason,
-    "session_assumed",
+    "unsupported_session_schedule",
   );
 });
 
