@@ -189,11 +189,19 @@ function startHostedDirectEnsureWakeBestEffort(wake: {
         userId: wake.userId,
       })
       .then((ensureResult) => {
-        console.info("Hosted direct ensure wake completed.", {
-          kind: ensureResult.kind,
-          ...(ensureResult.kind === "runtime_processing_accepted"
-            ? { action: ensureResult.action }
-            : {}),
+        if ("kind" in ensureResult) {
+          console.info("Hosted direct ensure wake completed.", {
+            kind: ensureResult.kind,
+            ...(ensureResult.kind === "runtime_processing_accepted"
+              ? { action: ensureResult.action }
+              : {}),
+            source: wakeSource,
+          });
+          return;
+        }
+
+        console.info("Hosted direct ensure wake accepted.", {
+          accepted: ensureResult.accepted,
           source: wakeSource,
         });
       })
