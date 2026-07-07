@@ -5,6 +5,7 @@ import {
 import {
   isHostedEmailAuthenticatedSenderVerdictAccepted,
   resolveHostedEmailDirectSenderLookupAddress,
+  resolveHostedEmailInboundSenderAddress,
 } from "@murphai/runtime-state";
 
 import {
@@ -15,6 +16,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
+  lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
@@ -43,6 +45,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   const prisma = getPrisma();
   const aliasKey = body.aliasKey?.trim() ?? "";
+  const groupId = body.groupId?.trim() ?? "";
 
   if (aliasKey) {
     const candidateMemberId = await readHostedMemberIdByReplyAliasLookupKey({
@@ -57,6 +60,69 @@ export const POST = withJsonError(async (request: Request) => {
     if (!memberId) {
       return jsonOk({ userId: null });
     }
+
+    return jsonOk({
+      userId: memberId,
+    });
+  }
+
+  if (groupId) {
+    const senderAddress = resolveHostedEmailInboundSenderAddress({
+      envelopeFrom: body.envelopeFrom,
+      hasRepeatedHeaderFrom: body.hasRepeatedHeaderFrom,
+      headerFrom: body.headerFrom,
+    });
+    if (!senderAddress) {
+      return jsonOk({ userId: null });
+    }
+
+    const senderMember = await lookupHostedMemberByVerifiedEmailAddress({
+      address: senderAddress,
+      prisma,
+    });
+    const senderMemberId = senderMember?.core.id ?? null;
+    if (!senderMemberId) {
+      return jsonOk({ userId: null });
+    }
+
+    const group = await prisma.hostedGroup.findUnique({
+      where: { id: groupId },
+      select: {
+        members: { select: { memberId: true } },
+        runtimeMemberId: true,
+      },
+    });
+    if (
+      !group?.runtimeMemberId
+      || !group.members.some((member) => member.memberId === senderMemberId)
+    ) {
+      return jsonOk({ userId: null });
+    }
+    const runtimeMemberId = group.runtimeMemberId;
+
+    const grant = await prisma.hostedVaultShare.findFirst({
+      where: {
+        destinationMemberId: runtimeMemberId,
+        grantorMemberId: senderMemberId,
+        projectionKind: "group-email.v0",
+        status: "granted",
+      },
+      select: { grantorMemberId: true },
+    });
+    if (!grant) {
+      return jsonOk({ userId: null });
+    }
+    if (!await readActiveHostedMemberAccess({
+      memberId: senderMemberId,
+      prisma,
+    })) {
+      return jsonOk({ userId: null });
+    }
+
+    const memberId = await resolveHostedEmailRouteMemberUserId({
+      memberId: runtimeMemberId,
+      prisma,
+    });
 
     return jsonOk({
       userId: memberId,

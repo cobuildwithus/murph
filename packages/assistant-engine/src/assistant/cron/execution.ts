@@ -3,6 +3,9 @@ import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import {
   isHostedRuntimeProcessEnv,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
+import type {
+  HostedRuntimeNewsletterScheduledAuthority,
+} from '@murphai/hosted-execution/runtime-control'
 import {
   type AutomationQueryRecord,
 } from '@murphai/query'
@@ -107,6 +110,11 @@ const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR =
   'Assistant background maintenance stopped after provider work; occurrence consumed to avoid replay.'
 const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
   'Assistant cron yielded to fresh foreground input.'
+const ASSISTANT_CRON_NEWSLETTER_SEND_FAILED_ERROR =
+  'Group health newsletter email send failed for every recipient.'
+const GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG = 'group-health-newsletter'
+const GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS =
+  2 * 60 * 60 * 1000
 const ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR =
   'Device activity occurrence skipped because its parent listener is no longer authorized.'
 const ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR =
@@ -574,6 +582,11 @@ export async function executeClaimedAssistantCronJob(input: {
             deviceActivityAuthority.assistantTargetOverride,
           deliveryDispatchMode: input.deliveryDispatchMode,
           executionContext: input.executionContext,
+          scheduledAutomationAuthority: resolveAssistantCronScheduledNewsletterAuthority({
+            job: input.job,
+            occurrenceAt,
+            trigger: input.trigger,
+          }),
           serviceTier,
           signal: yieldCancellation.signal,
           turnEnvironment: input.turnEnvironment ?? null,
@@ -683,6 +696,18 @@ export async function executeClaimedAssistantCronJob(input: {
 
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary
+          const postTurnDeliveryFailure =
+            resolveAssistantCronPostTurnDeliveryFailure({
+              job: input.job,
+              result,
+              trigger: input.trigger,
+            })
+          if (postTurnDeliveryFailure) {
+            throw new VaultCliError(
+              'ASSISTANT_CRON_NEWSLETTER_SEND_FAILED',
+              postTurnDeliveryFailure,
+            )
+          }
           const foregroundYieldedAfterNotification =
             !maintenanceJob &&
             (foregroundPreemption.wasForegroundYielded() ||
@@ -985,6 +1010,63 @@ function resolveAssistantCronAutomationTargetOverride(
 ): AutomationQueryRecord['assistantTargetOverride'] | null {
   return job.kind === 'canonical' && job.source.kind === 'automation'
     ? job.source.assistantTargetOverride
+    : null
+}
+
+function resolveAssistantCronScheduledNewsletterAuthority(input: {
+  job: ResolvedAssistantCronJob
+  occurrenceAt: string
+  trigger: AssistantCronTrigger
+}): HostedRuntimeNewsletterScheduledAuthority | null {
+  if (
+    input.trigger !== 'scheduled' ||
+    input.job.kind !== 'canonical' ||
+    input.job.source.kind !== 'automation' ||
+    input.job.source.schedule.kind !== 'cron' ||
+    input.job.source.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+  ) {
+    return null
+  }
+
+  const createdAtMs = Date.parse(input.job.source.createdAt)
+  const occurrenceAtMs = Date.parse(input.occurrenceAt)
+  if (!Number.isFinite(createdAtMs) || !Number.isFinite(occurrenceAtMs)) {
+    return null
+  }
+
+  if (
+    occurrenceAtMs <
+      createdAtMs + GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS
+  ) {
+    return null
+  }
+
+  return {
+    automationId: input.job.source.automationId,
+    occurrenceAt: input.occurrenceAt,
+  }
+}
+
+function resolveAssistantCronPostTurnDeliveryFailure(input: {
+  job: ResolvedAssistantCronJob
+  result: Awaited<ReturnType<typeof sendAssistantNotificationLocal>>
+  trigger: AssistantCronTrigger
+}): string | null {
+  if (
+    input.trigger !== 'scheduled' ||
+    input.job.kind !== 'canonical' ||
+    input.job.source.kind !== 'automation' ||
+    input.job.source.schedule.kind !== 'cron' ||
+    input.job.source.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+  ) {
+    return null
+  }
+
+  const newsletterSendResult =
+    input.result.postTurnDeliveryExpectations?.newsletterSendResult ?? null
+  return newsletterSendResult?.status === 'unavailable' &&
+    newsletterSendResult.unavailableReason === 'send_failed'
+    ? ASSISTANT_CRON_NEWSLETTER_SEND_FAILED_ERROR
     : null
 }
 

@@ -661,6 +661,98 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     expect(tx.hostedGroup.update).not.toHaveBeenCalled();
   });
 
+  it("seeds email authorization as the default requested and owner-granted group projection", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: false,
+      grantedProjectionKinds: ["group-email.v0", "profile-name.v0"],
+      joinCode: null,
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["group-email.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      now,
+      tx,
+    })).resolves.toMatchObject({
+      group: {
+        members: [
+          {
+            grantedVaultShareProjectionKinds: ["group-email.v0", "profile-name.v0"],
+            memberId: "member_owner",
+          },
+        ],
+        requestedVaultShareProjectionKinds: ["group-email.v0"],
+      },
+      joinCode: "join_created",
+    });
+
+    expect(tx.hostedGroup.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        joinPolicyJson: {
+          requestedVaultShareProjectionKinds: ["group-email.v0"],
+          schema: "murph.hosted-group.join-policy.v1",
+        },
+      }),
+    }));
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(expect.objectContaining({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_owner",
+      now,
+      projectionKind: "profile-name.v0",
+    }));
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(expect.objectContaining({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_owner",
+      now,
+      projectionKind: "group-email.v0",
+    }));
+  });
+
+  it("merges the default email request into existing groups without granting email", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: true,
+      grantedProjectionKinds: ["profile-name.v0"],
+      joinCode: "join_existing",
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["sleep-times.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    const first = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      now,
+      tx,
+    });
+    const second = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      now,
+      tx,
+    });
+
+    expect(first.group.requestedVaultShareProjectionKinds).toEqual([
+      "group-email.v0",
+      "sleep-times.v0",
+    ]);
+    expect(second.group.requestedVaultShareProjectionKinds).toEqual([
+      "group-email.v0",
+      "sleep-times.v0",
+    ]);
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(expect.objectContaining({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_owner",
+      now,
+      projectionKind: "profile-name.v0",
+    }));
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(expect.objectContaining({
+      projectionKind: "group-email.v0",
+    }));
+  });
+
   it("creates or reads a join link through the owner-authorized path", async () => {
     const tx = buildGroupLinkTx({
       joinCode: null,
@@ -690,7 +782,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
             role: "owner",
           },
         ],
-        requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+        requestedVaultShareProjectionKinds: ["group-email.v0", "sleep-times.v0"],
         status: "active",
       },
       joinCode: "join_created",
@@ -715,8 +807,11 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
 });
 
 function buildGroupLinkTx(input: {
+  existingGroup?: boolean;
+  grantedProjectionKinds?: string[];
   joinCode?: string | null;
   ownerMemberId: string;
+  requestedProjectionKinds?: string[];
 }): PrismaClient & {
   hostedGroup: {
     create: ReturnType<typeof vi.fn>;
@@ -730,16 +825,28 @@ function buildGroupLinkTx(input: {
     upsert: ReturnType<typeof vi.fn>;
   };
 } {
+  let requestedProjectionKinds = input.requestedProjectionKinds ?? ["sleep-times.v0"];
   return createPrismaStub({
     $queryRaw: vi.fn(async () => []),
     hostedGroup: {
-      create: vi.fn(),
+      create: vi.fn(async (args: {
+        data?: {
+          joinPolicyJson?: {
+            requestedVaultShareProjectionKinds?: string[];
+          };
+        };
+      }) => {
+        requestedProjectionKinds =
+          args.data?.joinPolicyJson?.requestedVaultShareProjectionKinds
+          ?? requestedProjectionKinds;
+        return { id: "group_1" };
+      }),
       findUnique: vi.fn(async (args: {
         select?: { joinCode?: boolean; ownerMemberId?: boolean };
         where: { id?: string; runtimeMemberId?: string };
       }) => {
         if (args.where.runtimeMemberId) {
-          return { id: "group_1" };
+          return input.existingGroup === false ? null : { id: "group_1" };
         }
         if (args.where.id && args.select?.joinCode) {
           return {
@@ -753,7 +860,7 @@ function buildGroupLinkTx(input: {
             displayName: "Sunday sleep crew",
             id: "group_1",
             joinPolicyJson: {
-              requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+              requestedVaultShareProjectionKinds: requestedProjectionKinds,
               schema: "murph.hosted-group.join-policy.v1",
             },
             kind: "friends",
@@ -763,7 +870,18 @@ function buildGroupLinkTx(input: {
         }
         return null;
       }),
-      update: vi.fn(async () => ({ joinCode: "join_created" })),
+      update: vi.fn(async (args: {
+        data?: {
+          joinPolicyJson?: {
+            requestedVaultShareProjectionKinds?: string[];
+          };
+        };
+      }) => {
+        requestedProjectionKinds =
+          args.data?.joinPolicyJson?.requestedVaultShareProjectionKinds
+          ?? requestedProjectionKinds;
+        return { joinCode: "join_created" };
+      }),
     },
     hostedGroupJoinOffer: {
       updateMany: vi.fn(async () => ({ count: 0 })),
@@ -773,12 +891,12 @@ function buildGroupLinkTx(input: {
     },
     hostedVaultShare: {
       count: vi.fn(async () => 0),
-      findMany: vi.fn(async () => [
-        {
+      findMany: vi.fn(async () =>
+        (input.grantedProjectionKinds ?? ["profile-name.v0"]).map((projectionKind) => ({
           grantorMemberId: input.ownerMemberId,
-          projectionKind: "profile-name.v0",
-        },
-      ]),
+          projectionKind,
+        })),
+      ),
       findUnique: vi.fn(async () => null),
     },
     hostedThreadContainer: {

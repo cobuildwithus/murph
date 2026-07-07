@@ -50,6 +50,10 @@ export async function importHostedVaultShareDeliveryWake(input: {
 }): Promise<HostedMailboxItemImportOutcome> {
   const delivery = input.wake.delivery;
 
+  if (delivery.projectionKind === "group-email.v0") {
+    return { status: "imported" };
+  }
+
   // Defense in depth: every path segment below is parser-constrained upstream, but this
   // handler is the one that touches the filesystem, so it re-asserts identifier safety.
   if (!hasSafeVaultShareIdentifiers({

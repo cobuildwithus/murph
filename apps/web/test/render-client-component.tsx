@@ -16,6 +16,7 @@ type RenderClientComponentResult<TButton extends HTMLButtonElement | null> = {
   open: ReturnType<typeof vi.fn>;
   reload: ReturnType<typeof vi.fn>;
   replaceState: ReturnType<typeof vi.fn>;
+  rerender: (element: ReactElement) => Promise<void>;
   window: Window & typeof globalThis;
 };
 
@@ -93,6 +94,11 @@ export async function renderClientComponent(
     open,
     reload,
     replaceState,
+    rerender: async (nextElement: ReactElement) => {
+      await act(async () => {
+        root.render(nextElement);
+      });
+    },
     window,
   };
 }

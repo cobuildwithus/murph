@@ -47,7 +47,7 @@ export default async function SecurityPage() {
   return (
     <>
       <main className="isolate min-h-dvh bg-[#f5f0e8] antialiased">
-        <StickyNav authenticated={authenticated} githubStarCount={githubStarCount} />
+        <StickyNav authenticated={authenticated} darkTop githubStarCount={githubStarCount} />
         <HeroSection />
         <PromisesSection />
         <HostedOverviewSection />
