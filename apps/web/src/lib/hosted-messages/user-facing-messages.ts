@@ -213,7 +213,7 @@ Sound good?`,
     `Welcome. A family member picked up the bill, but what happens here stays between you and me. They can't see any of it.
 
 Ready to start?`,
-    `You're in. Family pays for your access, and that's all they can see. Your conversations and data stay private to you.
+    `You're in. Family pays for your access, but your conversations and data stay private to you. They can't see what you share with me.
 
 Want to get started?`,
     `All set. Your Murph access is covered by family, but they can't see anything you share with me. That's yours alone.
@@ -234,7 +234,7 @@ Ready?`,
     `You're in. One thing worth knowing: whoever pays for your access can't see what you share with me. That stays private to you.
 
 Sound good?`,
-    `Welcome in. Your access is paid for by family, but that's where their view ends. Everything you share with me is private to you.
+    `Welcome in. Your access is paid for by family, but they can't see what you share with me. Everything here is private to you.
 
 Ready to get going?`,
     `Invite accepted, you're in. A family member handles the bill, but your conversations with me are private. They can't see them.
