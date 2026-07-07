@@ -1,6 +1,6 @@
 import { cn } from "@/src/lib/utils";
 
-import { VoiceMemoPlayer } from "./voice-memo-player";
+import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 
 type Tint = "sage" | "gold" | "bronze";
 
@@ -486,10 +486,6 @@ function HabitArtifact() {
           caption="Murph sent a hype track. Press play."
         />
       </div>
-
-      <p className="mt-4 text-[0.75rem] leading-[1.5] text-[#736a58]">
-        Sticking. Reminders backed off from daily to weekly check-in.
-      </p>
     </div>
   );
 }

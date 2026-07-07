@@ -31,7 +31,7 @@ import {
   MurphHeadshotAvatar,
   type MurphHeadshotSrc,
 } from "./murph-headshot-avatar";
-import { VoiceMemoPlayer } from "./voice-memo-player";
+import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 
 type BloodworkMarker = {
   label: string;
@@ -350,8 +350,7 @@ const GROUP_MESSAGES = {
   mayaReply: "😂 not the sunrise walk pressure",
   murphRoastIntro: "made the group a little anthem for week one",
   sundayTimestamp: "Sunday 8:02 AM",
-  murphNewsletter:
-    "This week's wins just landed in everyone's inbox. Family included, no app needed.",
+  murphNewsletter: "This week's wins just landed in everyone's inbox.",
 } as const;
 
 // Placeholder track until the ElevenLabs challenge-roast song is dropped in
@@ -526,6 +525,14 @@ export function HeroClocksIn({
   };
 
   const nextId = () => ++idRef.current;
+
+  // In group mode Murph is attributed like any other sender (avatar + name),
+  // matching how iMessage renders every non-you participant.
+  const murphSender = {
+    id: "murph",
+    name: "Murph",
+    avatarSrc: murphHeadshotSrc,
+  };
 
   const activateFloater = (idx: number | null) => {
     if (idx === null) return;
@@ -1389,24 +1396,31 @@ export function HeroClocksIn({
                           }
                           const next = items[i + 1];
                           const prev = items[i - 1];
+                          const senderKeyOf = (item: StreamItem) =>
+                            item.kind === "text"
+                              ? item.from === "member"
+                                ? `member:${item.sender.id}`
+                                : item.from
+                              : null;
                           const isTail =
                             !next ||
-                            next.kind !== "text" ||
-                            next.from !== it.from ||
-                            (next.from === "member" &&
-                              it.from === "member" &&
-                              next.sender.id !== it.sender.id);
+                            senderKeyOf(next) !== senderKeyOf(it);
+                          // In the group chat every non-you sender is
+                          // attributed like iMessage does it, Murph included.
+                          const sender =
+                            it.from === "member"
+                              ? it.sender
+                              : it.from === "murph" && groupMode
+                                ? murphSender
+                                : undefined;
                           const showSenderLabel =
-                            it.from === "member" &&
-                            (!prev ||
-                              prev.kind !== "text" ||
-                              prev.from !== "member" ||
-                              prev.sender.id !== it.sender.id);
+                            Boolean(sender) &&
+                            (!prev || senderKeyOf(prev) !== senderKeyOf(it));
                           return (
                             <MessageBubble
                               key={it.id}
                               from={it.from}
-                              sender={it.from === "member" ? it.sender : undefined}
+                              sender={sender}
                               showSenderLabel={showSenderLabel}
                               text={it.text}
                               isTail={isTail}
@@ -1952,6 +1966,12 @@ function GroupHeaderAvatars({
   );
 }
 
+type MessageSender = {
+  id: string;
+  name: string;
+  avatarSrc: string;
+};
+
 function MessageBubble({
   from,
   isTail,
@@ -1961,7 +1981,7 @@ function MessageBubble({
 }: {
   from: TextItem["from"];
   isTail: boolean;
-  sender?: GroupMember;
+  sender?: MessageSender;
   showSenderLabel?: boolean;
   text: string;
 }) {
@@ -1988,7 +2008,7 @@ function MessageBubble({
         isUser ? "ml-auto max-w-[80%]" : "mr-auto max-w-[86%]",
       )}
     >
-      {isMember && sender ? (
+      {sender ? (
         <div className="flex items-end gap-1.5">
           <div
             aria-hidden="true"

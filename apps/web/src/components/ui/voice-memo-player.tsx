@@ -27,6 +27,7 @@ export function VoiceMemoPlayer({
   trackClassName?: string;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const probedDurationRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -34,10 +35,27 @@ export function VoiceMemoPlayer({
   useEffect(() => {
     const a = audioRef.current;
     if (!a) return;
-    const onTime = () => setCurrent(a.currentTime);
+    const onTime = () => {
+      setCurrent(a.currentTime);
+      // Some encodes only report a usable duration after playback starts.
+      if (Number.isFinite(a.duration) && a.duration > 0) {
+        setDuration((prev) => (prev > 0 ? prev : a.duration));
+      }
+    };
     const onDurationKnown = () => {
       if (Number.isFinite(a.duration) && a.duration > 0) {
         setDuration(a.duration);
+        if (probedDurationRef.current && a.currentTime > 1e6 && a.paused) {
+          a.currentTime = 0;
+        }
+        return;
+      }
+      // VBR mp3s report Infinity until the browser is forced to scan the
+      // file: seek far past the end once, and durationchange re-fires with
+      // the real value.
+      if (a.duration === Infinity && !probedDurationRef.current) {
+        probedDurationRef.current = true;
+        a.currentTime = 1e7;
       }
     };
     const onEnd = () => {
@@ -71,7 +89,9 @@ export function VoiceMemoPlayer({
   };
 
   const progress = duration > 0 ? Math.min(1, current / duration) : 0;
-  const displayTime = duration > 0 ? (playing ? current : duration) : 0;
+  // When the duration is still unknown, count up while playing instead of
+  // sitting frozen at 0:00.
+  const displayTime = duration > 0 ? (playing ? current : duration) : current;
 
   return (
     <div className="w-full">
