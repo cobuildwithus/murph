@@ -112,9 +112,11 @@ function buildCardSessions(
   const loggedSessions =
     adherence.loggedSessions ??
     adherence.completedSessions + (adherence.partialSessions ?? 0);
+  const assumedSessions = adherence.assumedSessions ?? 0;
 
   return {
     logged: Math.max(0, loggedSessions),
+    ...(assumedSessions > 0 ? { assumed: assumedSessions } : {}),
     target:
       adherence.targetSessions !== null && adherence.targetSessions >= 1
         ? adherence.targetSessions
@@ -201,13 +203,17 @@ function resolveDayCode(input: {
     return input.date > input.asOf ? DAY_CODES.scheduled : DAY_CODES.noEvidence;
   }
 
-  const satisfied = countStatuses(statuses, "satisfied") + countStatuses(statuses, "assumed");
+  const satisfied = countStatuses(statuses, "satisfied");
+  const assumed = countStatuses(statuses, "assumed");
   const partial = countStatuses(statuses, "partial");
   const missedOrFailed = countStatuses(statuses, "missed") + countStatuses(statuses, "failed");
   if (satisfied === statuses.length) {
     return DAY_CODES.completed;
   }
-  if (satisfied > 0 || partial > 0) {
+  if (assumed === statuses.length) {
+    return DAY_CODES.assumed;
+  }
+  if (satisfied > 0 || assumed > 0 || partial > 0) {
     return DAY_CODES.partial;
   }
   if (missedOrFailed > 0) {

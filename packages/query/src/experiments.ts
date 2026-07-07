@@ -21,6 +21,7 @@ import {
   countAdherenceConfidenceSessions,
   countCompletedAdherenceSessions,
   eventKindIsCandidateForEvidence,
+  experimentAdherenceTargetPlansDate,
   resolveActivityEvidenceLocalDate,
   resolveExperimentAdherenceRollupTarget,
   resolveAdherenceObservationActivityKind,
@@ -1338,6 +1339,17 @@ function decideMissedLogDue(
     );
   }
 
+  if (hasAssumedAfterGraceCalendarSessionTarget(context, date)) {
+    return buildFollowupBase(
+      context,
+      date,
+      "missed-log",
+      "session_assumed",
+      "skip",
+      date,
+    );
+  }
+
   if (!isDailyInterventionSchedule(context.frontmatter)) {
     return buildFollowupBase(
       context,
@@ -1346,17 +1358,6 @@ function decideMissedLogDue(
       "unsupported_session_schedule",
       "skip",
       null,
-    );
-  }
-
-  if (hasAssumedAfterGraceCalendarSessionTarget(context)) {
-    return buildFollowupBase(
-      context,
-      date,
-      "missed-log",
-      "session_assumed",
-      "skip",
-      date,
     );
   }
 
@@ -1370,13 +1371,21 @@ function decideMissedLogDue(
   );
 }
 
-function hasAssumedAfterGraceCalendarSessionTarget(context: ExperimentFollowupContext): boolean {
+function hasAssumedAfterGraceCalendarSessionTarget(
+  context: ExperimentFollowupContext,
+  date: string,
+): boolean {
   const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
   const targets = rollupTarget ? [rollupTarget] : context.adherenceTargets;
   return targets.some((target) =>
     target.evidence.kind === "linkedEventCount" &&
     target.calendar !== undefined &&
-    target.evidence.missing === "assumed_after_grace"
+    target.evidence.missing === "assumed_after_grace" &&
+    experimentAdherenceTargetPlansDate({
+      localDate: date,
+      target,
+      windows: buildWindowSummary(context.frontmatter),
+    })
   );
 }
 

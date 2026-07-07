@@ -292,6 +292,31 @@ export function expandExperimentAdherenceExpectations(
   }
 }
 
+export function experimentAdherenceTargetPlansDate(input: {
+  localDate: string;
+  target: ExperimentAdherenceTarget;
+  windows: ExperimentAdherenceWindows;
+}): boolean {
+  const { target } = input;
+  if (!target.calendar) {
+    return false;
+  }
+
+  const range = resolveTargetDateRange(target.phase, input.windows);
+  if (!range || input.localDate < range.start || input.localDate > range.end) {
+    return false;
+  }
+
+  switch (target.calendar.kind) {
+    case "daily":
+      return true;
+    case "weekdays":
+      return target.calendar.weekdays.includes(localDateWeekday(input.localDate));
+    case "explicitDates":
+      return target.calendar.dates.some((entry) => entry.localDate === input.localDate);
+  }
+}
+
 function countExperimentAdherenceExpectations(
   target: ExperimentAdherenceTarget,
   windows: ExperimentAdherenceWindows,

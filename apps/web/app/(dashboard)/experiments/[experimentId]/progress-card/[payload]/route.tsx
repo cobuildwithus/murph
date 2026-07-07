@@ -42,14 +42,16 @@ const SENTIMENT_TEXT: Record<string, string> = {
 
 /**
  * Single-hue intensity ramp for the session timeline — a quiet data strip, not
- * a sticker grid. Baseline days stay neutral; logged days fill green; missed and
- * unlogged days read as faint outlines so the eye lands on the markers instead.
+ * a sticker grid. Baseline days stay neutral; logged days fill green; assumed
+ * days use a softer dashed green; missed and unlogged days read as faint
+ * outlines so the eye lands on the markers instead.
  */
 const CELL_STYLE: Record<
   string,
   { fill: string; border: string; dashed?: boolean }
 > = {
   C: { fill: COLOR.primary, border: COLOR.primary },
+  A: { fill: "rgba(90,110,50,0.18)", border: "rgba(90,110,50,0.55)", dashed: true },
   P: { fill: "rgba(90,110,50,0.40)", border: "rgba(90,110,50,0.40)" },
   M: { fill: "transparent", border: "rgba(44,50,47,0.22)" },
   B: { fill: "rgba(120,110,86,0.16)", border: "rgba(120,110,86,0.16)" },
@@ -496,8 +498,14 @@ function statusLine(data: ExperimentProgressCardData): string {
 }
 
 function sessionsLine(data: ExperimentProgressCardData): string {
-  return data.sessions.target
-    ? `${data.sessions.logged} of ${data.sessions.target} logged`
+  const assumed = data.sessions.assumed ?? 0;
+  if (data.sessions.target) {
+    const base = `${data.sessions.logged} of ${data.sessions.target}`;
+    return assumed > 0 ? `${base} (${assumed} assumed)` : `${base} logged`;
+  }
+
+  return assumed > 0
+    ? `${data.sessions.logged} logged (${assumed} assumed)`
     : `${data.sessions.logged} logged`;
 }
 

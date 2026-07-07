@@ -1119,9 +1119,14 @@ test("SAUNA assumed calendar sessions count as complete and explicit corrections
 
   const progress = summarizeExperimentProgress(vault, "sauna-assumed-cadence", { asOf: "2026-04-12" });
   const calendar = collectExperimentAdherenceCalendar(vault, "sauna-assumed-cadence", { asOf: "2026-04-12" });
+  const { card } = buildExperimentProgressCard(vault, "sauna-assumed-cadence", { asOf: "2026-04-12" });
   const followup = decideExperimentFollowupDue(vault, "sauna-assumed-cadence", {
     kind: "missed-log",
     date: "2026-04-10",
+  });
+  const offPlanFollowup = decideExperimentFollowupDue(vault, "sauna-assumed-cadence", {
+    kind: "missed-log",
+    date: "2026-04-09",
   });
 
   assert.deepEqual(calendar?.cells.map((cell) => [cell.localDate, cell.status]), [
@@ -1134,9 +1139,15 @@ test("SAUNA assumed calendar sessions count as complete and explicit corrections
   assert.equal(progress.adherence.expectedSessionsByNow, 3);
   assert.equal(progress.adherence.assumedSessions, 3);
   assert.equal(progress.adherence.status, "met_target");
+  assert.equal(card.weeks[0].start, "2026-04-06");
+  assert.equal(card.weeks[0].cells, "ANANANN");
+  assert.deepEqual(card.sessions, { logged: 3, assumed: 3, target: 3 });
   assert.equal(followup.action, "skip");
-  assert.equal(followup.reason, "unsupported_session_schedule");
-  assert.equal(followup.window.sessionDate, null);
+  assert.equal(followup.reason, "session_assumed");
+  assert.equal(followup.window.sessionDate, "2026-04-10");
+  assert.equal(offPlanFollowup.action, "skip");
+  assert.equal(offPlanFollowup.reason, "unsupported_session_schedule");
+  assert.equal(offPlanFollowup.window.sessionDate, null);
 
   const correctedVault = createVaultReadModel({
     vaultRoot: "/virtual/experiment-analysis-sauna-assumed-corrected",
@@ -1207,6 +1218,9 @@ test("TRETINOIN and red-light nightly schedules mix manual confirmations with as
   const calendar = collectExperimentAdherenceCalendar(vault, "tretinoin-red-light-nightly", {
     asOf: "2026-04-12",
   });
+  const { card } = buildExperimentProgressCard(vault, "tretinoin-red-light-nightly", {
+    asOf: "2026-04-12",
+  });
 
   assert.deepEqual(calendar?.cells.map((cell) => [cell.localDate, cell.status]), [
     ["2026-04-08", "assumed"],
@@ -1217,6 +1231,9 @@ test("TRETINOIN and red-light nightly schedules mix manual confirmations with as
   assert.equal(progress.adherence.loggedSessions, 3);
   assert.equal(progress.adherence.assumedSessions, 2);
   assert.equal(progress.adherence.confirmedSessions, 1);
+  assert.equal(card.weeks[0].start, "2026-04-08");
+  assert.equal(card.weeks[0].cells, "ACAOOOO");
+  assert.deepEqual(card.sessions, { logged: 3, assumed: 2, target: 3 });
 });
 
 test("device running schedules keep missed-after-grace gaps and populate sensed sessions", () => {
@@ -1256,6 +1273,9 @@ test("device running schedules keep missed-after-grace gaps and populate sensed 
   const calendar = collectExperimentAdherenceCalendar(vault, "device-running-schedule", {
     asOf: "2026-04-12",
   });
+  const { card } = buildExperimentProgressCard(vault, "device-running-schedule", {
+    asOf: "2026-04-12",
+  });
 
   assert.deepEqual(calendar?.cells.map((cell) => [cell.localDate, cell.status]), [
     ["2026-04-08", "missed"],
@@ -1267,6 +1287,8 @@ test("device running schedules keep missed-after-grace gaps and populate sensed 
   assert.equal(progress.adherence.sensedSessions, 1);
   assert.equal(progress.adherence.assumedSessions, undefined);
   assert.equal(progress.adherence.status, "behind");
+  assert.equal(card.weeks[0].cells, "MCMOOOO");
+  assert.deepEqual(card.sessions, { logged: 1, target: 3 });
 });
 
 test("cardio category experiments count running and swimming but not strength sessions", () => {

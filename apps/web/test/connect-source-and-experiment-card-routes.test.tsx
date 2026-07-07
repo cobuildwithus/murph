@@ -199,9 +199,9 @@ test("experiment progress-card route returns a static-like PNG response for medi
       title: "Bedtime silent meditation",
       asOf: "2026-06-16",
       phase: { day: 19, totalDays: 21 },
-      sessions: { logged: 5, target: 12 },
+      sessions: { logged: 5, assumed: 2, target: 12 },
       weeks: [
-        { start: "2026-06-05", cells: "CMCMMCP" },
+        { start: "2026-06-05", cells: "CMAMMCP" },
         { start: "2026-06-12", cells: "MMCCSSS" },
       ],
       movers: [],
@@ -229,7 +229,10 @@ test("experiment progress-card route returns a static-like PNG response for medi
   assert.equal(init.width, 1200);
   assert.equal(init.height, 630);
   assert.equal(headersInitToRecord(init.headers)["Cache-Control"], "public, max-age=31536000, immutable");
-  assert.match(JSON.stringify(imageTree), /Bedtime silent meditation/u);
+  const serializedImageTree = JSON.stringify(renderReactTree(imageTree));
+  assert.match(serializedImageTree, /Bedtime silent meditation/u);
+  assert.match(serializedImageTree, /5 of 12 \(2 assumed\)/u);
+  assert.match(serializedImageTree, /rgba\(90,110,50,0\.18\)/u);
 });
 
 function getImageResponseCall(): [unknown, MockImageResponseInit] {
@@ -256,4 +259,30 @@ function headersInitToRecord(headers: HeadersInit | undefined): Record<string, s
     return Object.fromEntries(headers);
   }
   return headers;
+}
+
+function renderReactTree(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(renderReactTree);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const type = value.type;
+  const props = isRecord(value.props) ? value.props : {};
+  if (typeof type === "function") {
+    const render = type as (props: Record<string, unknown>) => unknown;
+    return renderReactTree(render(props));
+  }
+
+  return {
+    type: typeof type === "string" ? type : String(type),
+    props,
+    children: renderReactTree(props.children),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
