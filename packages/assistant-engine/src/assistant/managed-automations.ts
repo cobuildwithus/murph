@@ -397,7 +397,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '',
       'Both kinds:',
       '- Before sending, append one dated section to the ledger with the locked append surface, for example: `vault-cli knowledge append-section murph-product-notes YYYY-MM-DD --title "Murph product notes" --body <markdown>`. The appended section body must record only this run\'s kind and the chosen item ids; do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text.',
-      '- If `append-section` reports that the section already exists, another run already recorded today\'s note: read that section and either send the note it records if it still clears the current bar, or return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. Do not append again and do not switch kinds.',
+      '- If `append-section` reports that the section already exists, another run already recorded today\'s note: read that section and, if its recorded kind and item ids still clear the current bar, compose and send a note for those exact items; otherwise return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. Do not append again and do not switch kinds.',
       '- Keep this scheduled note text-only. Do not create, attach, or send images or response media.',
       '- Write a brief, warm note with the selected items and why each may matter for this user. 2-3 short bullets or short paragraphs are enough.',
       '- If the ledger page was missing before this run, open with one short sentence that Murph occasionally shares what is new or useful, then move directly into the items.',
