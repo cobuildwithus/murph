@@ -12,6 +12,10 @@ export const hostedWebPrismaPredeployDestructiveMigrationBaseline =
   "20260707170000_drop_stale_linq_recency_columns";
 
 const incompatiblePredeploySqlPatterns = [
+  {
+    label: "ADD COLUMN NOT NULL",
+    pattern: /\bADD\s+COLUMN\b[\s\S]{0,240}?\bNOT\s+NULL\b/iu,
+  },
   { label: "DROP COLUMN", pattern: /\bDROP\s+COLUMN\b/iu },
   { label: "DROP CONSTRAINT", pattern: /\bDROP\s+CONSTRAINT\b/iu },
   { label: "DROP INDEX", pattern: /\bDROP\s+INDEX\b/iu },
@@ -142,7 +146,7 @@ export async function assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
     .join(", ");
 
   throw new Error(
-    `Destructive or incompatible hosted web Prisma migration(s) cannot run in the predeploy Prisma path after ${hostedWebPrismaPredeployDestructiveMigrationBaseline}: ${summary}. Move contract SQL to apps/web/prisma/contract-migrations so it runs after the production deployment is promoted.`,
+    `Destructive or incompatible hosted web Prisma migration(s) cannot run in the predeploy Prisma path after ${hostedWebPrismaPredeployDestructiveMigrationBaseline}: ${summary}. Use an expand/backfill/switch/final-cleanup sequence; only final cleanup SQL belongs in apps/web/prisma/contract-migrations after production promotion.`,
   );
 }
 

@@ -142,6 +142,11 @@ describe("hosted web production migration guard", () => {
         "20260707170004_set_not_null",
         'ALTER TABLE "hosted_member_routing" ALTER COLUMN "contract_value" SET NOT NULL;',
       );
+      await writeMigrationSql(
+        migrationsDir,
+        "20260707170005_add_required_column",
+        'ALTER TABLE "hosted_member_routing" ADD COLUMN "required_value" TEXT NOT NULL;',
+      );
 
       const destructiveMigrations =
         await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
@@ -163,6 +168,10 @@ describe("hosted web production migration guard", () => {
           {
             migrationId: "20260707170004_set_not_null",
             reason: "ALTER COLUMN SET NOT NULL",
+          },
+          {
+            migrationId: "20260707170005_add_required_column",
+            reason: "ADD COLUMN NOT NULL",
           },
         ],
       );
@@ -448,12 +457,21 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /github\.event\.deployment_status\.state == 'success'/u);
     assert.match(workflow, /deployment_status\.creator\.login == 'vercel\[bot\]'/u);
     assert.match(workflow, /deployment\.creator\.login == 'vercel\[bot\]'/u);
+    assert.match(workflow, /cancel-in-progress: true/u);
     assert.match(workflow, /github\.event\.deployment\.sha/u);
     assert.match(workflow, /fetch-depth: 0/u);
     assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOYED_SHA\}" origin\/main/u);
+    assert.match(workflow, /https:\/\/api\.vercel\.com\/v4\/aliases\/\$\{alias_host\}/u);
+    assert.match(workflow, /deployment\?\.meta\?\.githubCommitSha/u);
+    assert.match(workflow, /HOSTED_WEB_VERCEL_TOKEN/u);
+    assert.match(workflow, /HOSTED_WEB_VERCEL_PROJECT_ID/u);
     assert.match(
       workflow,
       /steps\.production-branch\.outputs\.should_run == 'true'/u,
+    );
+    assert.match(
+      workflow,
+      /steps\.current-production\.outputs\.should_run == 'true'/u,
     );
     assert.doesNotMatch(workflow, /deployment\.ref == 'main'/u);
     assert.match(workflow, /HOSTED_WEB_DIRECT_DATABASE_URL/u);

@@ -571,15 +571,22 @@ blocks future destructive or incompatible Prisma migration SQL after
 for app runtime traffic. Because a successful predeploy migration cannot roll
 back automatically if a later deploy step fails, normal production Prisma
 migrations must stay backward compatible with the currently deployed app and
-avoid old-code-breaking changes such as drops, renames, `SET NOT NULL`, or
-column type changes.
+avoid old-code-breaking changes such as required columns, drops, renames,
+`SET NOT NULL`, or column type changes. Those changes need an
+expand/backfill/switch/final-cleanup sequence: add the new nullable shape first,
+backfill or dual-write as needed, switch application reads/writes in a later
+deploy, then clean up the old shape only after the replacement deployment is
+live.
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
 successful production deployment. That workflow only accepts Vercel-originated
 deployment statuses, checks out the exact deployed commit, verifies it is
-reachable from `origin/main`, requires
-`HOSTED_WEB_DIRECT_DATABASE_URL` as a GitHub Actions secret, and calls
+reachable from `origin/main`, verifies the configured Vercel production alias
+still points at that commit before exposing the database secret, requires
+`HOSTED_WEB_VERCEL_TOKEN`, `HOSTED_WEB_VERCEL_PROJECT_ID`,
+`HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
+GitHub Actions, and calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
