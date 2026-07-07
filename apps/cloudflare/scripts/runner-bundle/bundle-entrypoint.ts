@@ -28,8 +28,10 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 
 // Byte budgets over the esbuild metafile so import-graph creep in the boot
 // surface fails the assembly instead of silently regressing cold start.
-// Baselines measured from the real assembled bundle on 2026-07-06: total
-// 8,223,286B across 42 chunks, entry container-entrypoint.js 1,267,937B.
+// Latest measured from the real assembled bundle on 2026-07-07: total
+// 7,882,321B across 40 chunks, entry container-entrypoint.js 1,270,041B.
+// The entry ratchet baseline remains 1,267,937B because the latest entry did
+// not beat the prior baseline.
 //
 // The entry chunk gates cold-start parse, so it is ratcheted, not given
 // headroom: the guard holds it to the measured baseline plus a tight noise
@@ -63,6 +65,10 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/device-syncd/dist/providers/",
   "/importers/dist/",
   "node_modules/@junction-api/sdk/",
+  "/health-metrics/dist/murph-age.js",
+  "/health-metrics/dist/murph-age-source-routes.js",
+  "/query/dist/murph-age.js",
+  "/query/dist/browser-replica/murph-age.js",
 ] as const;
 
 export async function bundleRunnerContainerEntrypoint(
@@ -237,8 +243,8 @@ function assertRunnerEntrypointBundleBootInputsAllowed(
   if (forbiddenInputs.size > 0) {
     throw new Error(
       [
-        "runner entrypoint bundle includes provider connector inputs in the static boot closure.",
-        "Move these imports behind a per-turn dynamic import:",
+        "runner entrypoint bundle includes forbidden inputs in the static boot closure.",
+        "Move these imports behind a per-turn dynamic import or a narrow package subpath:",
         ...[...forbiddenInputs].sort().map((inputPath) => `  ${inputPath}`),
       ].join("\n"),
     );

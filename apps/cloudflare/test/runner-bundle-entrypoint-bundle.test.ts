@@ -229,7 +229,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         entryBytes: 10_000,
         totalBytes: 10_000,
       }),
-    ).toThrow(/provider connector inputs in the static boot closure[\s\S]*node_modules\/grammy\/out\/mod\.js/);
+    ).toThrow(/forbidden inputs in the static boot closure[\s\S]*node_modules\/grammy\/out\/mod\.js/);
   });
 
   it("rejects staged @murphai/inboxd connector inputs from the static boot closure", () => {
@@ -243,7 +243,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         totalBytes: 10_000,
       }),
     ).toThrow(
-      /provider connector inputs in the static boot closure[\s\S]*\.deploy\/runner-bundle\/node_modules\/@murphai\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
+      /forbidden inputs in the static boot closure[\s\S]*\.deploy\/runner-bundle\/node_modules\/@murphai\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
     );
   });
 
@@ -258,7 +258,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         totalBytes: 10_000,
       }),
     ).toThrow(
-      /provider connector inputs in the static boot closure[\s\S]*packages\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
+      /forbidden inputs in the static boot closure[\s\S]*packages\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
     );
   });
 
@@ -292,6 +292,26 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       "Junction SDK",
       ".deploy/runner-bundle/node_modules/@junction-api/sdk/index.js",
       /node_modules\/@junction-api\/sdk\/index\.js/,
+    ],
+    [
+      "staged Murph Age health-metrics calculator",
+      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age.js",
+      /node_modules\/@murphai\/health-metrics\/dist\/murph-age\.js/,
+    ],
+    [
+      "staged Murph Age health-metrics source routes",
+      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age-source-routes.js",
+      /node_modules\/@murphai\/health-metrics\/dist\/murph-age-source-routes\.js/,
+    ],
+    [
+      "workspace Murph Age query runtime",
+      "packages/query/dist/murph-age.js",
+      /packages\/query\/dist\/murph-age\.js/,
+    ],
+    [
+      "workspace Murph Age browser replica",
+      "packages/query/dist/browser-replica/murph-age.js",
+      /packages\/query\/dist\/browser-replica\/murph-age\.js/,
     ],
   ])("rejects %s inputs from the static boot closure", (_label, inputPath, expected) => {
     const metafile = staticBootClosureMetafile(inputPath);

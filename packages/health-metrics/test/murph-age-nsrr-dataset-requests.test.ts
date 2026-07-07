@@ -6,7 +6,7 @@ import {
   MURPH_AGE_NSRR_DATASET_REQUEST_SCHEMA_VERSION,
   listMurphAgeNsrrDatasetRequests,
   resolveMurphAgeSourceRoute,
-} from "../src/index.ts";
+} from "@murphai/health-metrics/murph-age-source-routes";
 
 test("lists NSRR dataset requests as model-unblocker checklist without authorizing row parsing", () => {
   const requests = listMurphAgeNsrrDatasetRequests();

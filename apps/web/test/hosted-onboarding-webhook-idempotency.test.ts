@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
   getPrisma: vi.fn(),
+  handleHostedGroupJoinOfferReaction: vi.fn(),
   incrementHostedLinqInboundDailyState: vi.fn(),
   incrementHostedLinqOutboundDailyState: vi.fn(),
   issueHostedInviteTx: vi.fn(),
@@ -156,6 +157,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-groups/join-offer-reaction", () => ({
+  handleHostedGroupJoinOfferReaction: mocks.handleHostedGroupJoinOfferReaction,
+}));
+
 import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
 import {
   createHostedLinqChatLookupKey,
@@ -187,6 +192,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
       id: "hld_claimed",
+    });
+    mocks.handleHostedGroupJoinOfferReaction.mockResolvedValue({
+      reason: "accepted",
+      status: "accepted",
     });
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
     mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
@@ -312,6 +321,161 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+  });
+
+  it("dispatches Linq reaction.added events to the hosted group join-offer handler", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        rawBody: buildLinqProviderWebhookBody({
+          data: {
+            chat_id: "chat_group_1",
+            from_handle: { handle: "+15551234567", service: "iMessage" },
+            line: { phone_number: "+15550000000" },
+            message_id: "msg_offer_123",
+            reaction_type: "like",
+          },
+          eventId: "evt_reaction_123",
+          eventType: "reaction.added",
+        }),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "accepted-linq-group-join-offer-reaction",
+    });
+
+    expect(prisma.hostedLinqProviderEvent.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventId: createHostedLinqProviderEventLookupKey("evt_reaction_123"),
+          eventType: "reaction.added",
+        }),
+        skipDuplicates: true,
+      }),
+    );
+    expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          eventId: "evt_reaction_123",
+          eventType: "reaction.added",
+          messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+          reactionFromHandle: "+15551234567",
+          reactionType: "like",
+        }),
+        prisma,
+      }),
+    );
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("reruns duplicate Linq reaction.added events so a failed join-offer confirmation can retry", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    prisma.hostedLinqProviderEvent.createMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    let membershipExists = false;
+    let membershipCreates = 0;
+    let confirmationAttempts = 0;
+    mocks.handleHostedGroupJoinOfferReaction.mockImplementation(async () => {
+      if (!membershipExists) {
+        membershipExists = true;
+        membershipCreates += 1;
+      }
+      confirmationAttempts += 1;
+      if (confirmationAttempts === 1) {
+        throw new Error("confirmation send failed");
+      }
+      return {
+        reason: "accepted",
+        status: "accepted",
+      };
+    });
+    const webhook = {
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          from_handle: { handle: "+15551234567", service: "iMessage" },
+          line: { phone_number: "+15550000000" },
+          message_id: "msg_offer_123",
+          reaction_type: "like",
+        },
+        eventId: "evt_reaction_123",
+        eventType: "reaction.added",
+      }),
+      signature: null,
+      timestamp: null,
+    };
+
+    await expect(handleHostedOnboardingLinqWebhook(webhook)).rejects.toThrow(
+      "confirmation send failed",
+    );
+    await expect(handleHostedOnboardingLinqWebhook(webhook)).resolves.toMatchObject({
+      duplicate: true,
+      ignored: false,
+      ok: true,
+      reason: "accepted-linq-group-join-offer-reaction",
+    });
+
+    expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledTimes(2);
+    expect(confirmationAttempts).toBe(2);
+    expect(membershipCreates).toBe(1);
+  });
+
+  it("reruns clean duplicate Linq reaction.added events without sending the join-offer confirmation twice", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    prisma.hostedLinqProviderEvent.createMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    let confirmationSends = 0;
+    let confirmationSent = false;
+    mocks.handleHostedGroupJoinOfferReaction.mockImplementation(async () => {
+      if (!confirmationSent) {
+        confirmationSent = true;
+        confirmationSends += 1;
+      }
+      return {
+        reason: "accepted",
+        status: "accepted",
+      };
+    });
+    const webhook = {
+      rawBody: buildLinqProviderWebhookBody({
+        data: {
+          chat_id: "chat_group_1",
+          from_handle: { handle: "+15551234567", service: "iMessage" },
+          line: { phone_number: "+15550000000" },
+          message_id: "msg_offer_123",
+          reaction_type: "like",
+        },
+        eventId: "evt_reaction_123",
+        eventType: "reaction.added",
+      }),
+      signature: null,
+      timestamp: null,
+    };
+
+    await expect(handleHostedOnboardingLinqWebhook(webhook)).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "accepted-linq-group-join-offer-reaction",
+    });
+    await expect(handleHostedOnboardingLinqWebhook(webhook)).resolves.toMatchObject({
+      duplicate: true,
+      ignored: false,
+      ok: true,
+      reason: "accepted-linq-group-join-offer-reaction",
+    });
+
+    expect(mocks.handleHostedGroupJoinOfferReaction).toHaveBeenCalledTimes(2);
+    expect(confirmationSends).toBe(1);
   });
 
   it("records failed Linq message receipts as alerts without product sends or wake handoff", async () => {

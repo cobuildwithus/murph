@@ -123,6 +123,14 @@ describe("hosted Linq webhook transport", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(sendHostedLinqChatMessage).mockResolvedValue({
+      chatId: "chat-1",
+      messageId: "provider-message-1",
+    });
+    vi.mocked(claimHostedLinqDeliveryProviderDispatchTx).mockResolvedValue({
+      claimed: true,
+      id: "hld_claimed",
+    });
   });
 
   it("sends the planner-chosen home phone with a chat+home-line stable effect id", async () => {
@@ -521,6 +529,75 @@ describe("hosted Linq webhook transport", () => {
         }),
       );
     });
+  });
+
+  it("reclaims group join-offer confirmations after a failed send", async () => {
+    vi.mocked(sendHostedLinqChatMessage)
+      .mockRejectedValueOnce(new Error("linq send failed"))
+      .mockResolvedValueOnce({
+        chatId: "chat-1",
+        messageId: "provider-message-2",
+      });
+    vi.mocked(claimHostedLinqDeliveryProviderDispatchTx).mockResolvedValue({
+      claimed: true,
+      id: "hld_claimed",
+    });
+    const effect = createGroupJoinOfferAcceptedEffect();
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
+        prisma: createDeliveryPrismaStub() as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toThrow("linq send failed");
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
+        prisma: createDeliveryPrismaStub() as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledTimes(2);
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    expect(sendHostedLinqChatMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        idempotencyKey: effect.effectId,
+        message: "joined",
+      }),
+    );
+  });
+
+  it("does not resend group join-offer confirmations after the delivery claim is consumed", async () => {
+    vi.mocked(claimHostedLinqDeliveryProviderDispatchTx)
+      .mockResolvedValueOnce({
+        claimed: true,
+        id: "hld_claimed",
+      })
+      .mockResolvedValueOnce({
+        claimed: false,
+        id: "hld_claimed",
+      });
+    const effect = createGroupJoinOfferAcceptedEffect();
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
+        prisma: createDeliveryPrismaStub() as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
+        prisma: createDeliveryPrismaStub() as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledTimes(2);
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
   });
 
   it("delivers legacy invite_signin side effects as invite signup replies", async () => {
@@ -1430,6 +1507,36 @@ function buildAuthorizedLinqRouteFixture(input: {
       hostedThreadContainerParticipant: {
         findFirst: vi.fn().mockResolvedValue(null),
       },
+    },
+  };
+}
+
+function createGroupJoinOfferAcceptedEffect() {
+  return createHostedWebhookLinqMessageSideEffect({
+    chatId: "chat-1",
+    memberId: "member-1",
+    message: "joined",
+    offerMessageLookupKey: "hbidx:linq-message:v1:offer",
+    occurredAt: "2026-03-26T12:00:00.000Z",
+    replyToMessageId: "message-1",
+    sourceEventId: "event-1",
+    template: "group_join_offer_accepted",
+  });
+}
+
+function createDeliveryPrismaStub() {
+  return {
+    hostedLinqDelivery: {
+      create: vi.fn().mockResolvedValue({ id: "hld_123" }),
+      findUnique: vi.fn().mockResolvedValue(null),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    hostedLinqLine: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({ phoneNumberLookupKey: null }),
+    },
+    hostedLinqProviderEvent: {
+      findMany: vi.fn().mockResolvedValue([]),
     },
   };
 }
