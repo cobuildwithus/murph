@@ -87,6 +87,7 @@ import {
 import {
   sendHostedProviderLinqMessage,
   sendHostedProviderLinqVoiceMemo,
+  sendHostedProviderLinqChatAction,
   setHostedProviderLinqMessageReaction,
 } from "../hosted-provider-effects.ts";
 import {
@@ -1295,116 +1296,185 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   });
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
   const blockedForegroundDeliveryKeys = new Set<string>();
+  const linqTypingStopDrain = createHostedLinqTypingStopDrain();
   const preparedDispatchByIntentId = new Map(
     (input.preparedDispatches ?? []).map((preparedDispatch) => [
       preparedDispatch.intentId,
       preparedDispatch,
     ]),
   );
-  for (let index = 0; index < input.assistantDeliveryEffects.length; index += 1) {
-    const assistantDeliveryEffect = input.assistantDeliveryEffects[index];
-    if (!assistantDeliveryEffect) {
-      continue;
-    }
-    if (await maybeYieldHostedPreparedAssistantDeliveryDrain({
-      effects: input.assistantDeliveryEffects.slice(index),
-      input,
-      preparedDispatchByIntentId,
-    })) {
-      break;
-    }
-    if (blockedForegroundDeliveryKeys.has(
-      readHostedAssistantDeliveryEffectBoundaryKey(assistantDeliveryEffect),
-    )) {
-      continue;
-    }
-    emitHostedExecutionStructuredLog({
-      component: "assistant-delivery",
-      details: buildHostedAssistantDeliveryDetails({
-        effectFingerprint: assistantDeliveryEffect.fingerprint,
-        effectId: assistantDeliveryEffect.effectId,
-        extra: {
-          deliveryPhase: assistantDeliveryEffect.deliveryPhase,
-          eventType: assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
-            ? "assistant.delivery.foreground_started"
-            : "assistant.delivery.background_started",
-        },
+  let pendingTypingStopEffectIndex = 0;
+  try {
+    for (let index = 0; index < input.assistantDeliveryEffects.length; index += 1) {
+      pendingTypingStopEffectIndex = index;
+      const assistantDeliveryEffect = input.assistantDeliveryEffects[index];
+      if (!assistantDeliveryEffect) {
+        continue;
+      }
+      if (await maybeYieldHostedPreparedAssistantDeliveryDrain({
+        effects: input.assistantDeliveryEffects.slice(index),
+        input,
+        preparedDispatchByIntentId,
+      })) {
+        recordHostedLinqTypingStopStillPendingEffects({
+          effects: input.assistantDeliveryEffects.slice(index),
+          linqDeliveryContexts,
+          preparedDispatchByIntentId,
+          state: linqTypingStopDrain,
+        });
+        break;
+      }
+      if (blockedForegroundDeliveryKeys.has(
+        readHostedAssistantDeliveryEffectBoundaryKey(assistantDeliveryEffect),
+      )) {
+        continue;
+      }
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: buildHostedAssistantDeliveryDetails({
+          effectFingerprint: assistantDeliveryEffect.fingerprint,
+          effectId: assistantDeliveryEffect.effectId,
+          extra: {
+            deliveryPhase: assistantDeliveryEffect.deliveryPhase,
+            eventType: assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
+              ? "assistant.delivery.foreground_started"
+              : "assistant.delivery.background_started",
+          },
+          userId: input.wake.userId,
+        }),
+        wake: input.wake,
+        message: assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
+          ? "Hosted assistant foreground delivery starting."
+          : "Hosted assistant background delivery starting.",
+        phase: "outbox",
         userId: input.wake.userId,
-      }),
-      wake: input.wake,
-      message: assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
-        ? "Hosted assistant foreground delivery starting."
-        : "Hosted assistant background delivery starting.",
-      phase: "outbox",
-      userId: input.wake.userId,
-    });
-    let outcome: HostedAssistantDeliveryOutcome;
-    try {
+      });
+      let outcome: HostedAssistantDeliveryOutcome;
       const preparedDispatch =
         preparedDispatchByIntentId.get(assistantDeliveryEffect.effectId) ?? null;
       const ownsPreparedDispatch =
         input.allowPreparedSending === true
         && preparedDispatch !== null;
-      outcome = await deliverHostedPreparedAssistantDelivery({
-        actionApprovalPort: input.actionApprovalPort ?? null,
-        wake: input.wake,
-        effectsPort: input.effectsPort,
-        allowPreparedSending: ownsPreparedDispatch,
-        assertLiveness: input.assertLiveness,
+      const effectLinqDeliveryContexts =
+        preparedDispatch?.linqDeliveryContext
+          ? [preparedDispatch.linqDeliveryContext, ...linqDeliveryContexts]
+          : linqDeliveryContexts;
+      let currentEffectTypingStopRecorded = false;
+      try {
+        outcome = await deliverHostedPreparedAssistantDelivery({
+          actionApprovalPort: input.actionApprovalPort ?? null,
+          wake: input.wake,
+          effectsPort: input.effectsPort,
+          allowPreparedSending: ownsPreparedDispatch,
+          assertLiveness: input.assertLiveness,
+          assistantDeliveryEffect,
+          signal: input.signal ?? null,
+          shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery ?? null,
+          linqEnv,
+          linqDeliveryContexts,
+          linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
+          preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
+          telegramEnv,
+          telegramVoiceMemoEnv,
+          whatsAppEnv,
+          providerFetch: input.providerFetch ?? null,
+          userId: input.wake.userId,
+          vaultRoot: input.vaultRoot,
+          onTerminalLinqTypingStopFailure: (terminalOutcome) => {
+            recordHostedLinqTypingStopOutcome({
+              assistantDeliveryEffect,
+              linqDeliveryContexts: effectLinqDeliveryContexts,
+              outcome: terminalOutcome,
+              state: linqTypingStopDrain,
+            });
+            currentEffectTypingStopRecorded = true;
+          },
+        });
+      } catch (error) {
+        pendingTypingStopEffectIndex = currentEffectTypingStopRecorded
+          ? index + 1
+          : index;
+        const remainingEffects = input.assistantDeliveryEffects.slice(index + 1);
+        await resetHostedPreparedAssistantDeliveryEffects({
+          effects: remainingEffects,
+          preparedDispatchByIntentId,
+          vaultRoot: input.vaultRoot,
+        });
+        if (isHostedBackgroundDeliveryYieldedError(error)) {
+          recordHostedLinqTypingStopStillPendingEffects({
+            effects: input.assistantDeliveryEffects.slice(pendingTypingStopEffectIndex),
+            linqDeliveryContexts,
+            preparedDispatchByIntentId,
+            state: linqTypingStopDrain,
+          });
+          input.onBackgroundDeliveryYield?.({
+            yieldedEffectCount: input.assistantDeliveryEffects.length - index,
+          });
+          break;
+        }
+        throw error;
+      }
+      outcomes.push(outcome);
+      recordHostedLinqTypingStopOutcome({
         assistantDeliveryEffect,
-        signal: input.signal ?? null,
-        shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery ?? null,
-        linqEnv,
-        linqDeliveryContexts,
-        linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
-        preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
-        telegramEnv,
-        telegramVoiceMemoEnv,
-        whatsAppEnv,
-        providerFetch: input.providerFetch ?? null,
-        userId: input.wake.userId,
-        vaultRoot: input.vaultRoot,
+        linqDeliveryContexts: effectLinqDeliveryContexts,
+        outcome,
+        state: linqTypingStopDrain,
       });
-    } catch (error) {
-      await resetHostedPreparedAssistantDeliveryEffects({
+      pendingTypingStopEffectIndex = index + 1;
+      if (await maybeYieldHostedPreparedAssistantDeliveryDrain({
         effects: input.assistantDeliveryEffects.slice(index + 1),
+        input,
         preparedDispatchByIntentId,
-        vaultRoot: input.vaultRoot,
-      });
-      if (isHostedBackgroundDeliveryYieldedError(error)) {
-        input.onBackgroundDeliveryYield?.({
-          yieldedEffectCount: input.assistantDeliveryEffects.length - index,
+      })) {
+        recordHostedLinqTypingStopStillPendingEffects({
+          effects: input.assistantDeliveryEffects.slice(index + 1),
+          linqDeliveryContexts,
+          preparedDispatchByIntentId,
+          state: linqTypingStopDrain,
         });
         break;
       }
-      throw error;
-    }
-    outcomes.push(outcome);
-    if (await maybeYieldHostedPreparedAssistantDeliveryDrain({
-      effects: input.assistantDeliveryEffects.slice(index + 1),
-      input,
-      preparedDispatchByIntentId,
-    })) {
-      break;
-    }
-    if (shouldBlockLaterHostedAssistantForegroundDeliveries({
-      effect: assistantDeliveryEffect,
-      outcome,
-    })) {
-      const boundaryKey = readHostedAssistantDeliveryEffectBoundaryKey(
-        assistantDeliveryEffect,
-      );
-      blockedForegroundDeliveryKeys.add(boundaryKey);
-      await resetHostedPreparedAssistantDeliveryEffects({
-        effects: input.assistantDeliveryEffects
+      if (shouldBlockLaterHostedAssistantForegroundDeliveries({
+        effect: assistantDeliveryEffect,
+        outcome,
+      })) {
+        const boundaryKey = readHostedAssistantDeliveryEffectBoundaryKey(
+          assistantDeliveryEffect,
+        );
+        const blockedEffects = input.assistantDeliveryEffects
           .slice(index + 1)
           .filter((effect) =>
             readHostedAssistantDeliveryEffectBoundaryKey(effect) === boundaryKey
-          ),
-        preparedDispatchByIntentId,
-        vaultRoot: input.vaultRoot,
-      });
+          );
+        blockedForegroundDeliveryKeys.add(boundaryKey);
+        recordHostedLinqTypingStopStillPendingEffects({
+          effects: blockedEffects,
+          linqDeliveryContexts,
+          preparedDispatchByIntentId,
+          state: linqTypingStopDrain,
+        });
+        await resetHostedPreparedAssistantDeliveryEffects({
+          effects: blockedEffects,
+          preparedDispatchByIntentId,
+          vaultRoot: input.vaultRoot,
+        });
+      }
     }
+  } catch (error) {
+    recordHostedLinqTypingStopStillPendingEffects({
+      effects: input.assistantDeliveryEffects.slice(pendingTypingStopEffectIndex),
+      linqDeliveryContexts,
+      preparedDispatchByIntentId,
+      state: linqTypingStopDrain,
+    });
+    throw error;
+  } finally {
+    flushHostedLinqTypingStopDrain({
+      env: linqEnv,
+      providerFetch: input.providerFetch ?? null,
+      state: linqTypingStopDrain,
+    });
   }
 
   return outcomes;
@@ -1517,6 +1587,165 @@ function isHostedAssistantReactionOnlyEffect(
     && effect.payload.replyToMessageId !== null;
 }
 
+type HostedLinqTypingStopDrainState = Map<
+  string,
+  {
+    sent: boolean;
+    stillPending: boolean;
+    terminalFailure: boolean;
+  }
+>;
+
+function createHostedLinqTypingStopDrain(): HostedLinqTypingStopDrainState {
+  return new Map();
+}
+
+function recordHostedLinqTypingStopOutcome(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  outcome: HostedAssistantDeliveryOutcome;
+  state: HostedLinqTypingStopDrainState;
+}): void {
+  const target = resolveHostedLinqTypingStopTargetForEffect({
+    assistantDeliveryEffect: input.assistantDeliveryEffect,
+    linqDeliveryContexts: input.linqDeliveryContexts,
+  });
+  if (!target) {
+    return;
+  }
+  if (
+    input.outcome.deliveryStatus !== "sent"
+    && !hostedAssistantDeliveryOutcomeShouldStopLinqTyping(input.outcome)
+  ) {
+    readHostedLinqTypingStopDrainEntry(input.state, target).stillPending = true;
+    return;
+  }
+
+  const entry = readHostedLinqTypingStopDrainEntry(input.state, target);
+  if (input.outcome.deliveryStatus === "sent") {
+    entry.sent = true;
+    return;
+  }
+
+  entry.terminalFailure = true;
+}
+
+function recordHostedLinqTypingStopStillPendingEffects(input: {
+  effects: readonly HostedAssistantDeliveryEffect[];
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  preparedDispatchByIntentId: ReadonlyMap<string, HostedAssistantDeliveryPreparedDispatch>;
+  state: HostedLinqTypingStopDrainState;
+}): void {
+  for (const effect of input.effects) {
+    const preparedDispatch =
+      input.preparedDispatchByIntentId.get(effect.effectId) ?? null;
+    const linqDeliveryContexts = preparedDispatch?.linqDeliveryContext
+      ? [preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
+      : input.linqDeliveryContexts;
+    const target = resolveHostedLinqTypingStopTargetForEffect({
+      assistantDeliveryEffect: effect,
+      linqDeliveryContexts,
+    });
+    if (!target) {
+      continue;
+    }
+    readHostedLinqTypingStopDrainEntry(input.state, target).stillPending = true;
+  }
+}
+
+function flushHostedLinqTypingStopDrain(input: {
+  env: NodeJS.ProcessEnv;
+  providerFetch: typeof fetch | null;
+  state: HostedLinqTypingStopDrainState;
+}): void {
+  for (const [target, entry] of input.state) {
+    if (
+      !entry.terminalFailure
+      || entry.sent
+      || entry.stillPending
+    ) {
+      continue;
+    }
+
+    // This skips the recent-inbound send guard intentionally: typing_stop carries
+    // no message content, targets only the bound outbox delivery context, and
+    // cannot exist for guard-blocked routes because typing start is guard-gated.
+    void sendHostedProviderLinqChatAction({
+      action: "typing_stop",
+      target,
+    }, {
+      env: input.env,
+      fetchImplementation: input.providerFetch,
+    }).catch(() => undefined);
+  }
+}
+
+function readHostedLinqTypingStopDrainEntry(
+  state: HostedLinqTypingStopDrainState,
+  target: string,
+): {
+  sent: boolean;
+  stillPending: boolean;
+  terminalFailure: boolean;
+} {
+  const existing = state.get(target);
+  if (existing) {
+    return existing;
+  }
+  const entry = {
+    sent: false,
+    stillPending: false,
+    terminalFailure: false,
+  };
+  state.set(target, entry);
+  return entry;
+}
+
+function resolveHostedLinqTypingStopTargetForEffect(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+}): string | null {
+  if (isHostedAssistantReactionOnlyEffect(input.assistantDeliveryEffect)) {
+    return null;
+  }
+  const channel = normalizeHostedAssistantDeliveryChannel(
+    input.assistantDeliveryEffect.payload.channel,
+  )?.toLowerCase();
+  if (channel !== "linq") {
+    return null;
+  }
+
+  return resolveHostedLinqTypingStopTarget({
+    assistantDeliveryEffect: input.assistantDeliveryEffect,
+    linqDeliveryContexts: input.linqDeliveryContexts,
+  });
+}
+
+function hostedAssistantDeliveryOutcomeShouldStopLinqTyping(
+  outcome: HostedAssistantDeliveryOutcome | null,
+): boolean {
+  return outcome?.deliveryStatus === "failed"
+    || outcome?.deliveryStatus === "failed_ambiguous"
+    || outcome?.deliveryStatus === "missing-result";
+}
+
+function resolveHostedLinqTypingStopTarget(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+}): string | null {
+  const payload = input.assistantDeliveryEffect.payload;
+  const payloadTarget = readHostedAssistantDeliveryPayloadTarget(payload);
+  const deliveryContext = payloadTarget.target
+    ? resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+      contexts: input.linqDeliveryContexts,
+      replyToMessageId: payload.replyToMessageId,
+      target: payloadTarget.target,
+      targetKind: payloadTarget.targetKind,
+    })
+    : null;
+  return deliveryContext?.target ?? payloadTarget.target;
+}
+
 export async function resetHostedPreparedAssistantDeliveryEffects(input: {
   effects: readonly HostedAssistantDeliveryEffect[];
   minimumNextAttemptAt?: Date | null;
@@ -1573,6 +1802,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   providerFetch: typeof fetch | null;
   userId: string;
   vaultRoot: string;
+  onTerminalLinqTypingStopFailure?: (
+    outcome: HostedAssistantDeliveryOutcome,
+  ) => void;
 }): Promise<HostedAssistantDeliveryOutcome> {
   const now = new Date();
   const mirrorState = await readAssistantOutboxIntentMirrorState({
@@ -1581,6 +1813,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
     vault: input.vaultRoot,
   });
+  const linqDeliveryContexts = input.preparedDispatch?.linqDeliveryContext
+    ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
+    : input.linqDeliveryContexts;
   let providerDispatchEntered = false;
   try {
     assertHostedDeliveryLiveness(input.signal);
@@ -1609,9 +1844,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     if (disabledAutoReplyOutcome) {
       return disabledAutoReplyOutcome;
     }
-    const linqDeliveryContexts = input.preparedDispatch?.linqDeliveryContext
-      ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
-      : input.linqDeliveryContexts;
     assertHostedBackgroundDeliveryNotYielded(input);
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
@@ -1832,7 +2064,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       vaultRoot: input.vaultRoot,
     });
     if (resetDispatchResult) {
-      return await buildHostedAssistantDeliveryDispatchResult({
+      return buildHostedAssistantDeliveryDispatchResult({
         assistantDeliveryEffect: input.assistantDeliveryEffect,
         dispatchResult: resetDispatchResult,
         userId: input.userId,
@@ -1841,7 +2073,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       });
     }
     assertHostedDeliveryLiveness(input.signal);
-    return await buildHostedAssistantDeliveryDispatchResult({
+    return buildHostedAssistantDeliveryDispatchResult({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       dispatchResult: dispatched,
       userId: input.userId,
@@ -1849,13 +2081,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       wake: input.wake,
     });
   } catch (error) {
-    if (input.preparedDispatch && shouldResetHostedPreparedDeliveryOnPreProviderAbort({
-      assistantDeliveryEffect: input.assistantDeliveryEffect,
-      error,
-      mirrorState,
-      providerDispatchEntered,
-      signal: input.signal,
-    })) {
+    const resetPreparedDelivery =
+      input.preparedDispatch !== null
+      && shouldResetHostedPreparedDeliveryOnPreProviderAbort({
+        assistantDeliveryEffect: input.assistantDeliveryEffect,
+        error,
+        mirrorState,
+        providerDispatchEntered,
+        signal: input.signal,
+      });
+    if (input.preparedDispatch && resetPreparedDelivery) {
       await resetAssistantOutboxPreparedDispatchById({
         deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
         deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
@@ -1867,6 +2102,18 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           : {}),
         vault: input.vaultRoot,
       });
+    } else if (readHostedAssistantDeliveryRetryableFlag(error) !== true) {
+      const deliveryError = normalizeAssistantDeliveryError(error);
+      input.onTerminalLinqTypingStopFailure?.(
+        buildHostedAssistantDeliveryOutcome({
+          deliveryErrorCode: deliveryError.code,
+          deliveryErrorDetails: normalizeHostedAssistantDeliveryErrorDetails(deliveryError),
+          deliveryErrorMessage: deliveryError.message,
+          deliveryStatus: "failed",
+          effect: input.assistantDeliveryEffect,
+          retryable: false,
+        }),
+      );
     }
     const enrichedError = attachHostedAssistantDeliveryDispatchDetails(error, {
       effectId: input.assistantDeliveryEffect.effectId,

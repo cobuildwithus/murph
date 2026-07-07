@@ -1757,6 +1757,8 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     createAssistantTurnId: () => 'turn-notification-skip',
   }))
   vi.doMock('../src/assistant/channel-typing.js', () => ({
+    assistantDeliveryOutcomeSupersedesTypingIndicator: (kind: string | null) =>
+      kind === 'sent' || kind === 'queued',
     startAssistantChannelTypingIndicator:
       mocks.startAssistantChannelTypingIndicator,
     stopAssistantChannelTypingIndicator:
@@ -1969,6 +1971,43 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
+test('sendAssistantNotificationLocal releases typing after accepted delivery', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Deliver this reminder.',
+      text: 'Remember to sleep.',
+    }),
+    session: providerSession,
+  })
+  const { mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-typing-delivered',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Deliver this scheduled reminder.',
+    vault: '/vaults/typing-delivered',
+  })
+
+  expect(result.deliveryOutcome).toEqual(expect.objectContaining({
+    kind: 'sent',
+  }))
+  expect(mocks.stopAssistantChannelTypingIndicator).toHaveBeenCalledWith(
+    expect.objectContaining({
+      stop: expect.any(Function),
+    }),
+    {
+      providerStop: false,
+    },
+  )
+})
+
 test('sendAssistantNotificationLocal defers queue-only notification commit until delivery is accepted', async () => {
   const providerSession = createAssistantSession()
   const providerResult = createProviderResult({
@@ -2081,6 +2120,68 @@ test('sendAssistantNotificationLocal abandons queued delivery when deferred comm
     status: 'abandoned',
     vault: '/vaults/deferred-queue-commit-failure',
   })
+  expect(mocks.stopAssistantChannelTypingIndicator).toHaveBeenCalledWith(
+    expect.objectContaining({
+      stop: expect.any(Function),
+    }),
+    {
+      providerStop: true,
+    },
+  )
+})
+
+test('sendAssistantNotificationLocal preserves queued typing continuity when first-contact marking throws after commit', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Queued scheduled reminder.',
+      text: 'Remember to sleep.',
+    }),
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-deferred-queue-first-contact-failure',
+    })
+  deliverMessage.mockResolvedValueOnce({
+    delivery: null,
+    deliveryError: null,
+    intent: {
+      intentId: 'intent-queued-first-contact-failure',
+    },
+    kind: 'queued',
+    session: providerSession,
+  })
+  const firstContactError = new Error('first-contact marker failed')
+  mocks.markAssistantFirstContactSeen.mockRejectedValueOnce(firstContactError)
+
+  await expect(
+    sendAssistantNotificationLocal({
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: null,
+      },
+      firstContactPolicy: {
+        markSeenOnDeliveryAccepted: true,
+      },
+      instructions: 'Queue this scheduled reminder.',
+      vault: '/vaults/deferred-queue-first-contact-failure',
+    }),
+  ).rejects.toBe(firstContactError)
+
+  expect(mocks.markAssistantFirstContactSeen).toHaveBeenCalledOnce()
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled()
+  expect(mocks.stopAssistantChannelTypingIndicator).toHaveBeenCalledWith(
+    expect.objectContaining({
+      stop: expect.any(Function),
+    }),
+    {
+      providerStop: false,
+    },
+  )
 })
 
 test('sendAssistantNotificationLocal runs beforeCommit before persisting skip decisions', async () => {
@@ -3045,6 +3146,8 @@ async function loadNotificationTurnHarness(input: {
     clearAssistantSessionCodexResumeState: vi.fn(
       async (clearInput: { session: AssistantSession }) => clearInput.session,
     ),
+    hasAssistantSeenFirstContact: vi.fn(async () => false),
+    markAssistantFirstContactSeen: vi.fn(async () => undefined),
     normalizeAssistantExecutionContext: vi.fn((value) => value),
     markAssistantOutboxIntentMirrorTerminalById: vi.fn(async () => null),
     resolveAssistantExecutionDefaultTarget: vi.fn((targetInput) =>
@@ -3069,6 +3172,10 @@ async function loadNotificationTurnHarness(input: {
     })),
     resolveAssistantTurnRoute: vi.fn(() => input.providerResult.route),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    startAssistantChannelTypingIndicator: vi.fn(() => ({
+      stop: vi.fn(async () => undefined),
+    })),
+    stopAssistantChannelTypingIndicator: vi.fn(async () => undefined),
     withAssistantTurnLock: vi.fn(async (lockInput: { run(): Promise<unknown> }) =>
       await lockInput.run()),
   }
@@ -3122,6 +3229,25 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/turns.js', () => ({
     createAssistantTurnId: () => input.turnId,
   }))
+  vi.doMock('../src/assistant/channel-typing.js', () => ({
+    assistantDeliveryOutcomeSupersedesTypingIndicator: (kind: string | null) =>
+      kind === 'sent' || kind === 'queued',
+    startAssistantChannelTypingIndicator:
+      mocks.startAssistantChannelTypingIndicator,
+    stopAssistantChannelTypingIndicator:
+      mocks.stopAssistantChannelTypingIndicator,
+  }))
+  vi.doMock('../src/assistant/first-contact.js', async () => {
+    const actual = await vi.importActual<
+      typeof import('../src/assistant/first-contact.ts')
+    >('../src/assistant/first-contact.js')
+
+    return {
+      ...actual,
+      hasAssistantSeenFirstContact: mocks.hasAssistantSeenFirstContact,
+      markAssistantFirstContactSeen: mocks.markAssistantFirstContactSeen,
+    }
+  })
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
   }))

@@ -67,6 +67,7 @@ import {
 } from './hosted-context-diagnostics.js'
 import { createAssistantHostedToolContext } from './hosted-tool-context.js'
 import {
+  assistantDeliveryOutcomeSupersedesTypingIndicator,
   startAssistantChannelTypingIndicator,
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
@@ -328,6 +329,7 @@ export async function sendAssistantNotificationLocal(
       const turnId = createAssistantTurnId()
       const turnCreatedAt = new Date().toISOString()
       const progressDelivery = null
+      let committedDeliveryOutcomeKind: AssistantDeliveryOutcome['kind'] | null = null
       const typingIndicator =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? null
@@ -537,6 +539,7 @@ export async function sendAssistantNotificationLocal(
             sharedPlan,
             turnId,
           })
+          committedDeliveryOutcomeKind = deliveryOutcome.kind
           await finalizeAssistantTurnFromDeliveryOutcome({
             outcome: deliveryOutcome,
             response: responseText,
@@ -653,6 +656,7 @@ export async function sendAssistantNotificationLocal(
             throw error
           }
         })()
+        committedDeliveryOutcomeKind = committedDeliveryOutcome.kind
         if (
           input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
           assistantNotificationDeliveryAcceptedFirstContact({
@@ -687,7 +691,11 @@ export async function sendAssistantNotificationLocal(
           session: committedDeliveryOutcome.session,
         })
       } finally {
-        await stopAssistantChannelTypingIndicator(typingIndicator)
+        await stopAssistantChannelTypingIndicator(typingIndicator, {
+          providerStop: !assistantDeliveryOutcomeSupersedesTypingIndicator(
+            committedDeliveryOutcomeKind,
+          ),
+        })
       }
     },
   })
