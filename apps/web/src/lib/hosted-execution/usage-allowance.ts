@@ -948,6 +948,40 @@ export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
   })).slice(0, 32)}`;
 }
 
+export function buildHostedAiUsageGateLegacyNoticeIdempotencyKeys(input: {
+  memberId: string;
+  periodStart: Date | string;
+}): string[] {
+  const legacyNoticeCodes = [
+    "edge_usage_limit_reached",
+    "family_usage_limit_reached",
+    "pulse_upgrade_edge",
+    "trial_usage_limit_reached",
+  ] satisfies HostedAiUsageLimitNoticeCode[];
+
+  return legacyNoticeCodes.map((noticeCode) =>
+    buildHostedAiUsageGateLegacyNoticeIdempotencyKey({
+      memberId: input.memberId,
+      noticeCode,
+      periodStart: input.periodStart,
+    }),
+  );
+}
+
+function buildHostedAiUsageGateLegacyNoticeIdempotencyKey(input: {
+  memberId: string;
+  noticeCode: HostedAiUsageLimitNoticeCode;
+  periodStart: Date | string;
+}): string {
+  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
+
+  return `ai-usage-gate:${sha256Hex(JSON.stringify({
+    memberId: input.memberId,
+    noticeCode: input.noticeCode,
+    periodStart: periodStart.toISOString(),
+  })).slice(0, 32)}`;
+}
+
 export async function markHostedAiUsageLimitNoticeSent(input: {
   memberId: string;
   periodStart: Date | string;

@@ -315,6 +315,31 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   }
 }
 
+export async function hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx(input: {
+  idempotencyKeys: readonly string[];
+  prisma: HostedLinqDeliveryClient;
+}): Promise<boolean> {
+  const idempotencyKeys = [
+    ...new Set(input.idempotencyKeys
+      .map((key) => createHostedLinqDeliveryIdempotencyLookupKey(key))
+      .filter((key): key is string => Boolean(key))),
+  ];
+  if (idempotencyKeys.length === 0) {
+    return false;
+  }
+
+  const deliveries = await input.prisma.hostedLinqDelivery.findMany({
+    where: {
+      idempotencyKey: {
+        in: idempotencyKeys,
+      },
+    },
+    select: hostedLinqDeliveryLifecycleSelect,
+  });
+
+  return deliveries.some(isHostedLinqDeliveryProviderCorrelated);
+}
+
 async function updateHostedLinqDeliveryAttemptIfPreProvider(input: {
   data: Prisma.HostedLinqDeliveryUpdateInput;
   delivery: {

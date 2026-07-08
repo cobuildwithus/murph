@@ -5,6 +5,7 @@ import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-
 import {
   applyHostedLinqDeliveryReceiptTx,
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
@@ -1344,6 +1345,46 @@ describe("hosted Linq observability stores", () => {
         lte: new Date("2026-03-26T12:15:00.000Z"),
       },
       status: "attempted",
+    });
+  });
+
+  it("detects provider-correlated deliveries for legacy idempotency keys", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        id: "hld_legacy_usage_notice",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        skippedAt: null,
+        source: "hosted_webhook_side_effect",
+        status: "accepted",
+      },
+    ]);
+
+    await expect(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+      idempotencyKeys: [
+        "ai-usage-gate:legacy_key",
+      ],
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(true);
+
+    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        acceptedAt: true,
+        source: true,
+      }),
+      where: {
+        idempotencyKey: {
+          in: [
+            createHostedLinqDeliveryIdempotencyLookupKey("ai-usage-gate:legacy_key"),
+          ],
+        },
+      },
     });
   });
 

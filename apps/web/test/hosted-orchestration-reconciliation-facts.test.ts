@@ -742,11 +742,51 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
       failedAt: new Date(FIXED_NOW),
-      failureCode: "Error",
+      failureCode: "HostedRuntimeTelegramUsageLimitNoticeRejectedError",
       failureReason: expect.stringContaining("HTTP 403"),
       idempotencyKey: expectedIdempotencyKey,
       prisma: expect.objectContaining({ kind: "prisma" }),
     });
+    expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
+  });
+
+  it("leaves ambiguous Telegram usage-limit delivery attempts non-reclaimable", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
+    mocks.fetch.mockRejectedValueOnce(new Error("network closed"));
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    consoleErrorSpy.mockRestore();
+
+    expect(response.status).toBe(500);
+    expect(mocks.markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });
 

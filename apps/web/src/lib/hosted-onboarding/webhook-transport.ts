@@ -4,6 +4,7 @@ import type {
 } from "@prisma/client";
 
 import {
+  buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
   markHostedAiUsageLimitNoticeSent,
   type HostedAiUsageGateNoticeCode,
@@ -12,6 +13,7 @@ import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   recordHostedLinqDeliveryAttemptTx,
@@ -1075,6 +1077,17 @@ async function claimHostedLinqNoticeForSideEffect(
         return true;
       }
       const target = readHostedLinqSideEffectDeliveryTarget(effect.payload);
+      const legacyDeliveryAlreadySent =
+        await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+          idempotencyKeys: buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
+            memberId: effect.payload.memberId,
+            periodStart: effect.payload.claimToken.periodStart,
+          }),
+          prisma,
+        });
+      if (legacyDeliveryAlreadySent) {
+        return false;
+      }
       const claim = await claimHostedLinqDeliveryProviderDispatchTx({
         idempotencyKey: effect.effectId,
         linqChatId: target.linqChatId,

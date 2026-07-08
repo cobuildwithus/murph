@@ -443,15 +443,15 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         replyToMessageId: wake.message.telegramMessage.messageId,
       });
     } catch (error) {
-      await markHostedLinqDeliverySendFailedTx({
-        failedAt: sentAt,
-        failureCode: error instanceof Error ? error.name : "UNKNOWN_ERROR",
-        failureReason: error instanceof Error
-          ? error.message
-          : "Hosted Telegram usage-limit notice delivery failed.",
-        idempotencyKey,
-        prisma: input.prisma,
-      });
+      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError) {
+        await markHostedLinqDeliverySendFailedTx({
+          failedAt: sentAt,
+          failureCode: error.name,
+          failureReason: error.message,
+          idempotencyKey,
+          prisma: input.prisma,
+        });
+      }
       throw error;
     }
     await markHostedLinqDeliveryAcceptedTx({
@@ -526,7 +526,7 @@ async function sendHostedRuntimeTelegramUsageLimitNotice(input: {
         },
       );
     } catch {
-      throw new Error(
+      throw new HostedRuntimeTelegramUsageLimitNoticeUnknownError(
         "Hosted Telegram usage-limit notice delivery could not be confirmed after calling the Bot API.",
       );
     }
@@ -535,8 +535,13 @@ async function sendHostedRuntimeTelegramUsageLimitNotice(input: {
     if (response.ok && isHostedRuntimeTelegramSuccessResponse(payload)) {
       return;
     }
+    if (response.ok) {
+      throw new HostedRuntimeTelegramUsageLimitNoticeUnknownError(
+        "Hosted Telegram usage-limit notice delivery returned success without a confirmed Bot API result.",
+      );
+    }
 
-    throw new Error(
+    throw new HostedRuntimeTelegramUsageLimitNoticeRejectedError(
       formatHostedRuntimeTelegramFailureMessage({
         errorContext: readHostedRuntimeTelegramErrorContext(payload),
         status: response.status,
@@ -545,6 +550,14 @@ async function sendHostedRuntimeTelegramUsageLimitNotice(input: {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+class HostedRuntimeTelegramUsageLimitNoticeRejectedError extends Error {
+  override name = "HostedRuntimeTelegramUsageLimitNoticeRejectedError";
+}
+
+class HostedRuntimeTelegramUsageLimitNoticeUnknownError extends Error {
+  override name = "HostedRuntimeTelegramUsageLimitNoticeUnknownError";
 }
 
 type HostedRuntimeTelegramUsageLimitNoticeDelivery = {
