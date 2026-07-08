@@ -67,8 +67,9 @@ Last verified: 2026-07-06
   migrations. The guarded predeploy migration entrypoint uses
   `DIRECT_DATABASE_URL` when present, requires it in Vercel production, rejects
   known pooled Postgres ports such as `6432` and `6543`, blocks destructive or
-  incompatible Prisma migration SQL outside the frozen historical
-  `20260707170000_drop_stale_linq_recency_columns` baseline, regenerates the
+  incompatible Prisma migration SQL outside the frozen hosted web migration
+  history set ending at `20260707170000_drop_stale_linq_recency_columns`,
+  regenerates the
   hosted web Prisma client after migrations, and runs the hosted Linq DB
   configured-line sync/readiness check so DB-backed Linq assignment cannot
   deploy with an empty assignable line pool or stale generated client.

@@ -192,6 +192,39 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("keeps known post-baseline destructive migration history exempt", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        hostedWebPrismaPredeployDestructiveMigrationBaseline,
+        'ALTER TABLE "hosted_member_routing" DROP COLUMN "legacy_value";',
+      );
+      await writeMigrationSql(
+        migrationsDir,
+        "20260707180000_hosted_vault_share_projection_scopes",
+        [
+          'ALTER TABLE "hosted_vault_share"',
+          '  ALTER COLUMN "projection_scope_key" SET NOT NULL;',
+          'DROP INDEX IF EXISTS "hosted_vault_share_active_grantor_projection_idx";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(destructiveMigrations, []);
+      await assert.doesNotReject(() =>
+        assertHostedWebPrismaPredeployMigrationsAreExpandOnly(migrationsDir),
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("blocks newly introduced backdated destructive Prisma migrations", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),

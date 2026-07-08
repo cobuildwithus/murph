@@ -94,6 +94,7 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
   "20260706130000_hosted_group_join_offer",
   "20260706130000_hosted_growth_daily_snapshot",
   "20260707170000_drop_stale_linq_recency_columns",
+  "20260707180000_hosted_vault_share_projection_scopes",
 ]);
 
 const incompatiblePredeploySqlPatterns = [
@@ -231,7 +232,7 @@ export async function assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
     .join(", ");
 
   throw new Error(
-    `Destructive or incompatible hosted web Prisma migration(s) cannot run in the predeploy Prisma path outside the frozen ${hostedWebPrismaPredeployDestructiveMigrationBaseline} baseline: ${summary}. Use an expand/backfill/switch/final-cleanup sequence; only final cleanup SQL belongs in apps/web/prisma/contract-migrations after production promotion.`,
+    `Destructive or incompatible hosted web Prisma migration(s) cannot run in the predeploy Prisma path outside the frozen hosted web migration history set ending at ${hostedWebPrismaPredeployDestructiveMigrationBaseline}: ${summary}. Use an expand/backfill/switch/final-cleanup sequence; only final cleanup SQL belongs in apps/web/prisma/contract-migrations after production promotion.`,
   );
 }
 
