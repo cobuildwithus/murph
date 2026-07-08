@@ -1,6 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import {
@@ -60,19 +61,27 @@ export function GroupJoinLegalConsentGate({
   }
 
   return (
-    <HostedLegalConsentCard
-      acceptedPendingLabel="Continuing..."
-      initialStatus={initialStatus}
-      mode="compact"
-      onAccepted={refreshRoute}
-      onRequirementChange={(required) => {
-        if (!required) {
-          refreshRoute();
-        }
-      }}
-      preferredScope="launch.legal"
-      source="group-join"
-    />
+    <div className="flex flex-col gap-4">
+      <HostedLegalConsentCard
+        acceptedPendingLabel="Continuing..."
+        initialStatus={initialStatus}
+        mode="compact"
+        onAccepted={refreshRoute}
+        onRequirementChange={(required) => {
+          if (!required) {
+            refreshRoute();
+          }
+        }}
+        preferredScope="launch.legal"
+        source="group-join"
+      />
+      <Link
+        href="/home"
+        className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+      >
+        Not now
+      </Link>
+    </div>
   );
 }
 
