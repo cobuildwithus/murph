@@ -62,6 +62,76 @@ const BASE_USAGE_RECORD = {
 type AllowanceExecuteRaw = (sql: TemplateStringsArray, ...params: unknown[]) => Promise<number>;
 type AllowanceExecuteRawMock = ReturnType<typeof vi.fn<AllowanceExecuteRaw>>;
 
+function buildMalformedOpenAiImageUsageRecords(input: {
+  occurredAt?: AssistantUsageRecord["occurredAt"];
+} = {}): AssistantUsageRecord[] {
+  const occurredAt = input.occurredAt ?? BASE_USAGE_RECORD.occurredAt;
+
+  return [
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: null,
+      inputTokens: null,
+      occurredAt,
+      outputTokens: null,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: null,
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: null,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 100,
+      inputTokens: 1_300,
+      occurredAt,
+      outputTokens: null,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 100,
+          image_tokens: 1_000,
+          text_tokens: 300,
+        },
+        total_tokens: 1_300,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 1_300,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: null,
+      inputTokens: null,
+      occurredAt,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        output_tokens: 400,
+        output_tokens_details: {
+          image_tokens: 400,
+          reasoning_tokens: 0,
+          text_tokens: 0,
+        },
+        total_tokens: 400,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 400,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+  ] satisfies AssistantUsageRecord[];
+}
+
 describe("hosted AI usage allowance pricing", () => {
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
@@ -878,68 +948,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
   });
 
   it("fails image accounting before claiming rows when provider usage pricing basis is missing", async () => {
-    const records = [
-      {
-        ...BASE_USAGE_RECORD,
-        cachedInputTokens: null,
-        inputTokens: null,
-        outputTokens: null,
-        provider: "openai-images",
-        providerName: "OpenAI Images",
-        rawUsageJson: {},
-        requestedModel: "gpt-image-2",
-        servedModel: null,
-        totalTokens: null,
-        usageExtractionSourcePath: "openai.images.generate",
-        usageExtractionVersion: "openai-images-v1",
-      },
-      {
-        ...BASE_USAGE_RECORD,
-        cachedInputTokens: 100,
-        inputTokens: 1_300,
-        outputTokens: null,
-        provider: "openai-images",
-        providerName: "OpenAI Images",
-        rawUsageJson: {
-          input_tokens: 1_300,
-          input_tokens_details: {
-            cached_tokens: 100,
-            image_tokens: 1_000,
-            text_tokens: 300,
-          },
-          total_tokens: 1_300,
-        },
-        requestedModel: "gpt-image-2",
-        servedModel: null,
-        totalTokens: 1_300,
-        usageExtractionSourcePath: "openai.images.generate",
-        usageExtractionVersion: "openai-images-v1",
-      },
-      {
-        ...BASE_USAGE_RECORD,
-        cachedInputTokens: null,
-        inputTokens: null,
-        outputTokens: 400,
-        provider: "openai-images",
-        providerName: "OpenAI Images",
-        rawUsageJson: {
-          output_tokens: 400,
-          output_tokens_details: {
-            image_tokens: 400,
-            reasoning_tokens: 0,
-            text_tokens: 0,
-          },
-          total_tokens: 400,
-        },
-        requestedModel: "gpt-image-2",
-        servedModel: null,
-        totalTokens: 400,
-        usageExtractionSourcePath: "openai.images.generate",
-        usageExtractionVersion: "openai-images-v1",
-      },
-    ] satisfies AssistantUsageRecord[];
-
-    for (const record of records) {
+    for (const record of buildMalformedOpenAiImageUsageRecords()) {
       const updateMany = vi.fn(async () => ({ count: 1 }));
       const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
       const tx = createAllowanceTx({
@@ -1014,6 +1023,34 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     }));
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
     expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
+  it("fails stale-trial image denial before claiming rows when provider usage pricing basis is missing", async () => {
+    for (const record of buildMalformedOpenAiImageUsageRecords({
+      occurredAt: "2026-04-08T12:00:01.000Z",
+    })) {
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+      const tx = createAllowanceTx({
+        billingPhase: "trial",
+        checkoutOffer: "pulse_trial_7d",
+        executeRaw,
+        hostedAiUsageUpdateMany: updateMany,
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+        trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+      });
+
+      await expect(accountHostedAiUsageForAllowanceTx({
+        memberId: "member_123",
+        now: new Date("2026-04-08T12:00:05.000Z"),
+        record,
+        tx: tx as never,
+      })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+
+      expect(updateMany).not.toHaveBeenCalled();
+      expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
+    }
   });
 
   it("uses Family-sponsored allowance instead of stale direct trial state", async () => {

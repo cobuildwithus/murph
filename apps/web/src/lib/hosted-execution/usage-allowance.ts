@@ -561,10 +561,6 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
 
-  if (tokenPricingBasis === "standard") {
-    return tokenPricingBasis;
-  }
-
   if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
     assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
     return tokenPricingBasis;
@@ -572,6 +568,10 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
 
   if (matchHostedAiUsageOpenAiImageRecord(record) !== null) {
     assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(tokenPricingBasis);
+    return tokenPricingBasis;
+  }
+
+  if (tokenPricingBasis === "standard") {
     return tokenPricingBasis;
   }
 
