@@ -614,7 +614,7 @@ function isCanonicalPendingOccurrenceForCurrentSchedule(input: {
   }
 
   if (input.source.schedule.kind === 'every') {
-    const anchorAt = input.state.lastSucceededAt ?? input.state.activatedAt
+    const anchorAt = resolveCanonicalAssistantCronConsumedAnchorAt(input.state)
     if (!anchorAt) {
       return true
     }
@@ -645,13 +645,36 @@ function resolveCanonicalAssistantCronScheduleAnchorAt(input: {
     return input.source.updatedAt
   }
 
-  return (
-    input.state.lastSucceededAt ??
-    (
-      input.state.consecutiveFailures === 0
-        ? input.state.lastFailedAt
-        : null
-    ) ??
-    input.state.activatedAt
-  )
+  return resolveCanonicalAssistantCronConsumedAnchorAt(input.state)
+}
+
+function resolveCanonicalAssistantCronConsumedAnchorAt(
+  state: AssistantCronCanonicalRuntimeState,
+): string | null {
+  const consumedFailedAt =
+    state.consecutiveFailures === 0 ? state.lastFailedAt : null
+  return latestAssistantCronTimestamp([
+    state.lastSucceededAt,
+    consumedFailedAt,
+  ]) ?? state.activatedAt
+}
+
+function latestAssistantCronTimestamp(
+  values: readonly (string | null | undefined)[],
+): string | null {
+  let latestValue: string | null = null
+  let latestMs = Number.NEGATIVE_INFINITY
+  for (const value of values) {
+    if (!value) {
+      continue
+    }
+    const valueMs = Date.parse(value)
+    if (!Number.isFinite(valueMs) || valueMs < latestMs) {
+      continue
+    }
+    latestValue = value
+    latestMs = valueMs
+  }
+
+  return latestValue
 }

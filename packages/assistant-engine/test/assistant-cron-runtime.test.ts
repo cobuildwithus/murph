@@ -4123,6 +4123,63 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.state.consecutiveFailures).toBe(1)
   })
 
+  it('advances consumed canonical delivery failures after an older success', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-terminal-delivery-after-success-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'terminal delivery after success',
+    )
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-04-08T10:00:05.000Z',
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-08T10:00:05.000Z',
+        lastSucceededAt: '2026-04-08T10:00:05.000Z',
+        lastError: null,
+        consecutiveFailures: 0,
+      },
+    }))
+    const error = Object.assign(
+      new Error('Hosted Linq egress authority assertion request failed.'),
+      {
+        code: 'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH',
+        details: {
+          assistantNotificationStage: 'delivery',
+        },
+        retryable: false,
+      },
+    )
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeRecord = runtimeStore.jobs.find((record) =>
+      record.jobId === canonicalJob.jobId
+    )
+    expect(runtimeRecord?.state.pendingOccurrenceAt).toBeNull()
+    expect(runtimeRecord?.state.retryAfterAt).toBeNull()
+    expect(runtimeRecord?.state.lastSucceededAt).toBe('2026-04-08T10:00:05.000Z')
+    expect(runtimeRecord?.state.lastFailedAt).toBe('2026-04-09T10:00:00.000Z')
+    expect(runtimeRecord?.state.consecutiveFailures).toBe(0)
+    const projected = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+    expect(projected.state.nextRunAt).toBe('2026-04-10T10:00:00.000Z')
+  })
+
   it('skips stale recurring canonical notification cron jobs and advances the schedule', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
@@ -6785,6 +6842,52 @@ describe('assistant cron runtime orchestration', () => {
     expect(abandoned.state.lastError).toBe('provider abandoned delivery')
     expect(abandoned.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
     expect(abandoned.state.consecutiveFailures).toBe(0)
+  })
+
+  it('advances reconciled terminal canonical deliveries after an older success', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-outbox-terminal-after-success-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'outbox terminal after success',
+    )
+    const intentId = 'outbox_terminal_after_success_delivery'
+    await updateCanonicalRuntimeState(vaultRoot, canonicalJob.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-04-09T10:00:00.000Z',
+      state: {
+        ...record.state,
+        lastRunAt: '2026-04-09T10:00:00.000Z',
+        lastSucceededAt: '2026-04-08T10:00:05.000Z',
+        pendingDeliveryIntentId: intentId,
+        pendingOccurrenceAt: '2026-04-09T10:00:00.000Z',
+      },
+    }))
+    await saveAssistantOutboxIntent(vaultRoot, buildTestLinqOutboxIntent({
+      createdAt: '2026-04-09T10:00:00.000Z',
+      intentId,
+    }))
+
+    await expect(
+      markAssistantOutboxIntentMirrorTerminalById({
+        error: new Error('provider failed delivery after prior success'),
+        failedAt: new Date('2026-04-09T10:01:00.000Z'),
+        intentId,
+        status: 'failed',
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      status: 'failed',
+    })
+
+    const failed = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+    expect(failed.state.pendingDeliveryIntentId).toBeUndefined()
+    expect(failed.state.lastSucceededAt).toBe('2026-04-08T10:00:05.000Z')
+    expect(failed.state.lastFailedAt).toBe('2026-04-09T10:01:00.000Z')
+    expect(failed.state.lastError).toBe('provider failed delivery after prior success')
+    expect(failed.state.nextRunAt).toBe('2026-04-10T10:00:00.000Z')
+    expect(failed.state.consecutiveFailures).toBe(0)
   })
 
   it('drops stale pending canonical occurrences when delivery fails after a schedule edit', async () => {
