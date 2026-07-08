@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -8,9 +9,12 @@ import { test } from "vitest";
 import type { IntegrationIngestRecord } from "@murphai/contracts";
 
 import {
+  appendJsonlRecord,
+  applyHostedCanonicalWriteReceipt,
   buildIntegrationEvidencePart,
   buildIntegrationIngestAppendPlan,
   buildIntegrationIngestRecord,
+  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   initializeVault,
   listIntegrationIngestsForEvent,
   MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES,
@@ -426,6 +430,90 @@ test("integration ingest append plans refuse new rows for archived months", asyn
       return true;
     },
   );
+});
+
+test("generic JSONL append paths refuse archived integration ingest shards", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-generic-append-archive");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-01.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_GenericArchivedAppend1",
+    eventId: "evt_GenericArchivedAppend1",
+    importedAt: "2025-01-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [archivedRecord]);
+
+  const newRecord = makeIntegrationIngestRecord({
+    id: "xfm_GenericArchivedAppend2",
+    eventId: "evt_GenericArchivedAppend2",
+    importedAt: "2025-01-13T09:00:00.000Z",
+  });
+  await assert.rejects(
+    appendJsonlRecord({ vaultRoot, relativePath: logicalPath, record: newRecord }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_SHARD_ARCHIVED");
+      return true;
+    },
+  );
+  await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+});
+
+test("hosted JSONL receipt replay refuses archived integration ingest shards", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-hosted-replay-archive");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2024/2024-12.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_HostedArchivedReplay1",
+    eventId: "evt_HostedArchivedReplay1",
+    importedAt: "2024-12-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [archivedRecord]);
+
+  const newRecord = makeIntegrationIngestRecord({
+    id: "xfm_HostedArchivedReplay2",
+    eventId: "evt_HostedArchivedReplay2",
+    importedAt: "2024-12-13T09:00:00.000Z",
+  });
+  const appendPayload = `${JSON.stringify(newRecord)}\n`;
+  const appendSha256 = createHash("sha256").update(appendPayload).digest("hex");
+  await assert.rejects(
+    applyHostedCanonicalWriteReceipt({
+      vaultRoot,
+      readPayload: async () => Buffer.from(appendPayload, "utf8"),
+      receipt: {
+        schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+        operationId: "op_hosted_integration_archive_replay",
+        operationType: "hosted_integration_archive_replay",
+        summary: "reject archived integration ingest replay",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+        occurredAt: "2026-03-01T00:00:00.000Z",
+        committedAt: "2026-03-01T00:00:00.000Z",
+        actions: [{
+          kind: "jsonl_append",
+          targetRelativePath: logicalPath,
+          appendSha256,
+          appendByteLength: Buffer.byteLength(appendPayload),
+          baseSha256: createHash("sha256").update("").digest("hex"),
+          baseByteLength: 0,
+          originalSize: 0,
+          contentRef: {
+            sha256: appendSha256,
+            byteSize: Buffer.byteLength(appendPayload),
+          },
+        }],
+      },
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_SHARD_ARCHIVED");
+      return true;
+    },
+  );
+  await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
 });
 
 test("validateVault validates archived integration ingest shards", async () => {

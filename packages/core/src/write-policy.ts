@@ -1,6 +1,7 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
+import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
 import {
   assertPathWithinVaultOnDisk,
@@ -67,6 +68,8 @@ interface PrepareVerifiedTargetOptions {
   createParentDirectory: boolean;
 }
 
+const INTEGRATION_INGEST_ARCHIVE_SUFFIXES = [".gz", ".zip"] as const;
+
 async function pathExists(absolutePath: string): Promise<boolean> {
   try {
     await fs.access(absolutePath);
@@ -77,6 +80,27 @@ async function pathExists(absolutePath: string): Promise<boolean> {
     }
 
     throw error;
+  }
+}
+
+function isIntegrationIngestJsonlAppendTarget(relativePath: string): boolean {
+  return relativePath.startsWith(`${VAULT_LAYOUT.integrationIngestLedgerDirectory}/`)
+    && relativePath.endsWith(".jsonl");
+}
+
+export async function assertJsonlAppendTargetCanAppend(target: ResolvedVaultPath): Promise<void> {
+  if (!isIntegrationIngestJsonlAppendTarget(target.relativePath)) {
+    return;
+  }
+  for (const suffix of INTEGRATION_INGEST_ARCHIVE_SUFFIXES) {
+    const archivedAbsolutePath = `${target.absolutePath}${suffix}`;
+    if (await pathExists(archivedAbsolutePath)) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_SHARD_ARCHIVED",
+        `Integration ingest shard "${target.relativePath}" is archived and cannot be appended.`,
+        { relativePath: target.relativePath },
+      );
+    }
   }
 }
 
@@ -317,6 +341,7 @@ export async function applyJsonlAppendTarget({
   existedBefore: boolean;
   originalSize: number;
 }> {
+  await assertJsonlAppendTargetCanAppend(target);
   const existedBefore = await pathExists(target.absolutePath);
   const originalSize = existedBefore ? (await fs.stat(target.absolutePath)).size : 0;
   const payload = await readPayload();

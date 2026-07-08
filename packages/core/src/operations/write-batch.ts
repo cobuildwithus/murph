@@ -28,6 +28,7 @@ import {
   applyImmutableWriteTarget,
   applyJsonlAppendTarget,
   applyTextWriteTarget,
+  assertJsonlAppendTargetCanAppend,
   assertWriteTargetPolicy,
   assertWriteTargetPolicyForVault,
   prepareVerifiedDeleteTarget,
@@ -640,6 +641,7 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
     kind: "jsonl_append",
   });
+  await assertJsonlAppendTargetCanAppend(target);
   const originalSize = input.originalSize ?? 0;
   if (input.baseByteLength !== originalSize) {
     throw new VaultError(
