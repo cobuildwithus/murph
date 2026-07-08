@@ -1,8 +1,9 @@
 "use client";
 
 import { usePrivy } from "@privy-io/react-auth";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
+import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -29,12 +30,19 @@ export function HostedEmailPrivyLinkHandOff(props: {
   onAborted: () => void;
   onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
 }) {
+  const { onAborted, onSynced } = props;
+  const { openAuthDialog } = useAuth();
   const { ready } = usePrivy();
+  const handleClientAuthRequired = useCallback(() => {
+    openAuthDialog();
+    onAborted();
+  }, [onAborted, openAuthDialog]);
   const controller = useHostedEmailSettingsController({
     authenticated: true,
     initialEmail: null,
-    onPrivyLinkAborted: props.onAborted,
-    onSynced: props.onSynced,
+    onClientAuthRequired: handleClientAuthRequired,
+    onPrivyLinkAborted: onAborted,
+    onSynced,
   });
   const startedRef = useRef(false);
   const { handleLinkEmail } = controller;
@@ -54,8 +62,6 @@ export function HostedEmailPrivyLinkHandOff(props: {
   // the linked payload), there is nothing further to show — close the flow.
   const completedWithoutSync =
     Boolean(controller.successMessage) && !controller.isSyncingEmailRoute;
-  const { onAborted } = props;
-
   useEffect(() => {
     if (completedWithoutSync) {
       onAborted();

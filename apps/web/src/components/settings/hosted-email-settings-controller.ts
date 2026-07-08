@@ -28,6 +28,8 @@ export interface HostedEmailSettingsInitialEmail {
 export function useHostedEmailSettingsController(input: {
   authenticated: boolean;
   initialEmail: HostedEmailSettingsInitialEmail | null;
+  /** Called when the server session exists but this browser has no Privy user yet. */
+  onClientAuthRequired?: () => void;
   /** Called when the member dismisses Privy's link modal without linking. */
   onPrivyLinkAborted?: () => void;
   onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
@@ -42,6 +44,7 @@ export function useHostedEmailSettingsController(input: {
   const [emailAddress, setEmailAddress] = useState(() => baseDisplayState.currentEmail?.address ?? "");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSyncingEmailRoute, setIsSyncingEmailRoute] = useState(false);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [verifiedEmailOverride, setVerifiedEmailOverride] = useState<HostedPrivyEmailAccount | null>(null);
@@ -87,6 +90,7 @@ export function useHostedEmailSettingsController(input: {
   const normalizedCurrentEmail = overrideDisplayState.normalizedCurrentEmail;
   const canManageEmail = input.authenticated;
   const canSendEmailUpdateCode = Boolean(effectiveCurrentEmail?.address);
+  const clientAuthenticated = privyUser !== null;
   // Privy's headless update-email flow refuses to send a code unless the
   // Privy user already has an email linked; otherwise we must link instead,
   // which Privy only supports through its own modal.
@@ -97,6 +101,7 @@ export function useHostedEmailSettingsController(input: {
 
   async function requestCodeForEmail(nextEmailAddress: string) {
     setErrorMessage(null);
+    setNoticeMessage(null);
     setSuccessMessage(null);
 
     if (!input.authenticated) {
@@ -106,6 +111,12 @@ export function useHostedEmailSettingsController(input: {
 
     if (!isValidEmailAddress(nextEmailAddress)) {
       setErrorMessage("Enter a valid email address before we send a code.");
+      return;
+    }
+
+    if (!clientAuthenticated) {
+      setNoticeMessage("Sign in on this device to manage email.");
+      input.onClientAuthRequired?.();
       return;
     }
 
@@ -137,20 +148,25 @@ export function useHostedEmailSettingsController(input: {
   }
 
   async function handleSendCode(rawEmailAddress?: string) {
+    const nextEmailAddress = normalizeEmailAddress(rawEmailAddress ?? emailAddress);
+
+    if (canSendEmailUpdateCode && !nextEmailAddress) {
+      setErrorMessage("Enter a valid email address before we send a code.");
+      return;
+    }
+
+    if (nextEmailAddress && nextEmailAddress !== emailAddress) {
+      setEmailAddress(nextEmailAddress);
+    }
+
     if (!canSendEmailUpdateCode || !canUpdatePrivyEmail) {
       handleLinkEmail();
       return;
     }
 
-    const nextEmailAddress = normalizeEmailAddress(rawEmailAddress ?? emailAddress);
-
     if (!nextEmailAddress) {
       setErrorMessage("Enter a valid email address before we send a code.");
       return;
-    }
-
-    if (nextEmailAddress !== emailAddress) {
-      setEmailAddress(nextEmailAddress);
     }
 
     await requestCodeForEmail(nextEmailAddress);
@@ -168,6 +184,7 @@ export function useHostedEmailSettingsController(input: {
 
   function handleUseAnotherEmail() {
     setErrorMessage(null);
+    setNoticeMessage(null);
     setSuccessMessage(null);
     setCode("");
     setPendingEmailAddress(null);
@@ -175,6 +192,7 @@ export function useHostedEmailSettingsController(input: {
 
   async function handleVerifyCode(rawCode?: string) {
     setErrorMessage(null);
+    setNoticeMessage(null);
     setSuccessMessage(null);
 
     const normalizedCode = (rawCode ?? code).trim();
@@ -231,12 +249,19 @@ export function useHostedEmailSettingsController(input: {
 
   function handleLinkEmail() {
     setErrorMessage(null);
+    setNoticeMessage(null);
     setSuccessMessage(null);
     setCode("");
     setPendingEmailAddress(null);
 
     if (!input.authenticated) {
       setErrorMessage("Sign in to your Murph account first, then link your email.");
+      return;
+    }
+
+    if (!clientAuthenticated) {
+      setNoticeMessage("Sign in on this device to manage email.");
+      input.onClientAuthRequired?.();
       return;
     }
 
@@ -276,6 +301,7 @@ export function useHostedEmailSettingsController(input: {
 
   async function handleSyncVerifiedEmail() {
     setErrorMessage(null);
+    setNoticeMessage(null);
     setSuccessMessage(null);
 
     if (!effectiveVerifiedEmail?.address) {
@@ -312,6 +338,7 @@ export function useHostedEmailSettingsController(input: {
   return {
     authenticated: input.authenticated,
     canManageEmail,
+    clientAuthenticated,
     code,
     effectiveCurrentEmail,
     effectiveVerifiedEmail,
@@ -323,6 +350,7 @@ export function useHostedEmailSettingsController(input: {
     isSubmittingCode,
     isSyncingEmailRoute,
     canSendEmailUpdateCode,
+    noticeMessage,
     pendingEmailAddress,
     successMessage,
     setCode,
