@@ -47,7 +47,7 @@ vault-cli assistant stop --vault <path> [--request-id <id>]
 vault-cli status --vault <path> [--session <id>] [--limit <n>] [--request-id <id>]
 vault-cli doctor --vault <path> [--repair] [--request-id <id>]
 vault-cli stop --vault <path> [--request-id <id>]
-vault-cli assistant session list --vault <path> [--request-id <id>]
+vault-cli assistant session list --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
 vault-cli memory show [memoryId] --vault <path>
 vault-cli memory upsert <text> --vault <path> --section <section>
@@ -109,7 +109,7 @@ vault-cli event list --vault <path> [--kind <kind>] [--from <date>] [--to <date>
 vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note "..."] [--source <source>] [--request-id <id>]
 vault-cli document edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli document show <id> --vault <path> [--request-id <id>]
-vault-cli document list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
+vault-cli document list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
 vault-cli document manifest <id> --vault <path> [--request-id <id>]
 vault-cli capture add --vault <path> [--media <path> ...] [--label <text>] [--body-site <text>] [--collection <text>] [--related-id <id> ...] [--note <text>] [--title <title>] [--occurred-at <ts>] [--source <source>] [--tag <tag> ...] [--request-id <id>]
 vault-cli capture import-json --vault <path> --input @file.json|- [--request-id <id>]

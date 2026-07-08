@@ -11,6 +11,7 @@ import {
   assistantOnboardingCompletionReasonValues,
   assistantOnboardingResultSchema,
   assistantOnboardingResumeContextResultSchema,
+  assistantSessionListResultSchema,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { InboxServices } from '@murphai/inbox-services'
@@ -31,7 +32,6 @@ const commandMocks = vi.hoisted(() => ({
   getAssistantSession: vi.fn(),
   getAssistantStatus: vi.fn(),
   listAssistantSelfDeliveryTargets: vi.fn(),
-  listRecentAssistantSessions: vi.fn(),
   listAssistantSessions: vi.fn(),
   readAssistantOnboardingState: vi.fn(),
   redactAssistantDisplayPath: vi.fn((value: string) => `redacted:${value}`),
@@ -113,7 +113,6 @@ vi.mock('@murphai/assistant-engine/assistant-state', () => ({
   readAssistantOnboardingState: commandMocks.readAssistantOnboardingState,
   redactAssistantDisplayPath: commandMocks.redactAssistantDisplayPath,
   getAssistantSession: commandMocks.getAssistantSession,
-  listRecentAssistantSessions: commandMocks.listRecentAssistantSessions,
   listAssistantSessions: commandMocks.listAssistantSessions,
   reopenAssistantOnboarding: commandMocks.reopenAssistantOnboarding,
   resolveAssistantOnboardingStatePath:
@@ -1088,7 +1087,6 @@ test('assistant status and session commands reject uninitialized vault roots bef
 
   assert.equal(commandMocks.getAssistantStatus.mock.calls.length, 0)
   assert.equal(commandMocks.getAssistantSession.mock.calls.length, 0)
-  assert.equal(commandMocks.listRecentAssistantSessions.mock.calls.length, 0)
   assert.equal(commandMocks.listAssistantSessions.mock.calls.length, 0)
 })
 
@@ -1317,7 +1315,7 @@ test('session commands return redacted state paths and session payloads', async 
   const assistant = readCommandGroup(commands, 'assistant')
   const session = readCommandGroup(assistant.commands, 'session')
 
-  commandMocks.listRecentAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
+  commandMocks.listAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
   commandMocks.getAssistantSession.mockResolvedValueOnce(TEST_SESSION)
   commandMocks.redactAssistantSessionForDisplay
     .mockReturnValueOnce({
@@ -1375,6 +1373,9 @@ test('session commands return redacted state paths and session payloads', async 
     stateRoot: 'redacted:/tmp/vault/.runtime/operations/assistant',
     vault: 'redacted:/tmp/vault',
   })
+  assert.deepEqual(commandMocks.listAssistantSessions.mock.calls, [
+    ['/tmp/vault'],
+  ])
   assert.deepEqual(showResult, {
     session: {
       ...TEST_SESSION,
@@ -1383,4 +1384,38 @@ test('session commands return redacted state paths and session payloads', async 
     stateRoot: 'redacted:/tmp/vault/.runtime/operations/assistant',
     vault: 'redacted:/tmp/vault',
   })
+})
+
+test('session list slices durable sessions by requested limit', async () => {
+  const commands = createAssistantCli()
+  const assistant = readCommandGroup(commands, 'assistant')
+  const session = readCommandGroup(assistant.commands, 'session')
+  const olderSession: AssistantSession = {
+    ...TEST_SESSION,
+    conversationId: 'older-session-command-coverage',
+    sessionId: 'older-session-command-coverage',
+    alias: 'chat:older',
+    updatedAt: '2026-03-27T00:00:00.000Z',
+  }
+
+  commandMocks.listAssistantSessions.mockResolvedValueOnce([
+    TEST_SESSION,
+    olderSession,
+  ])
+
+  const listResult = assistantSessionListResultSchema.parse(
+    await readCommand(session.commands, 'list').run({
+      options: {
+        vault: '/tmp/vault',
+        limit: 1,
+      },
+    }),
+  )
+
+  assert.equal(listResult.count, 1)
+  assert.equal(listResult.filters.limit, 1)
+  assert.equal(listResult.sessions[0]?.sessionId, TEST_SESSION.sessionId)
+  assert.deepEqual(commandMocks.listAssistantSessions.mock.calls, [
+    ['/tmp/vault'],
+  ])
 })

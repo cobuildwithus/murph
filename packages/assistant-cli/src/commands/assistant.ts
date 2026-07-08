@@ -45,7 +45,7 @@ import {
   readAssistantOnboardingState,
   reopenAssistantOnboarding,
   resolveAssistantOnboardingStatePath,
-  listRecentAssistantSessions,
+  listAssistantSessions,
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
 import {
@@ -1408,10 +1408,8 @@ export function registerAssistantCommands(
       async run(context) {
         await assertAssistantInitializedVaultRoot(context.options.vault)
         const limit = normalizeAssistantSessionListLimit(context.options.limit)
-        const sessions = await listRecentAssistantSessions(
-          context.options.vault,
-          { limit },
-        )
+        const sessions = (await listAssistantSessions(context.options.vault))
+          .slice(0, limit)
         return assistantSessionListResultSchema.parse({
           ...buildAssistantStateResultPaths(context.options.vault),
           filters: { limit },
