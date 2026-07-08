@@ -229,22 +229,6 @@ export async function runCallCircleScheduler(input: {
 
       if (
         match.status === "bridging"
-        && hasTimedOutProviderAttemptedCallCircleBridge({
-          match,
-          now,
-        })
-      ) {
-        const handedOff = await appendCallCircleBridgeHandoffs({
-          match,
-          now,
-          prisma,
-        });
-        if (handedOff) result.handoffs += 1;
-        continue;
-      }
-
-      if (
-        match.status === "bridging"
         && match.phoneCall
         && match.phoneCall.analyzedAt !== null
         && ["failed", "needs_user"].includes(match.phoneCall.status)
@@ -1256,22 +1240,6 @@ function hasTimedOutCallCircleBridgeAnalysis(input: {
     && input.phoneCall.endedAt
     && input.phoneCall.analyzedAt === null
     && input.now.getTime() - input.phoneCall.endedAt.getTime()
-      >= CALL_CIRCLE_BRIDGE_ANALYSIS_GRACE_MS,
-  );
-}
-
-function hasTimedOutProviderAttemptedCallCircleBridge(input: {
-  match: SchedulerMatch;
-  now: Date;
-}): boolean {
-  const phoneCall = input.match.phoneCall;
-  return Boolean(
-    phoneCall
-    && phoneCall.analyzedAt === null
-    && phoneCall.providerCallId === null
-    && phoneCall.providerStartAttemptedAt !== null
-    && phoneCall.status === "starting"
-    && input.now.getTime() - input.match.windowEndAt.getTime()
       >= CALL_CIRCLE_BRIDGE_ANALYSIS_GRACE_MS,
   );
 }

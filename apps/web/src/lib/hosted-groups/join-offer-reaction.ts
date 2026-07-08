@@ -13,16 +13,13 @@ import {
   canAppendCallCircleSetupNotification,
   enrollCallCircleParticipant,
 } from "../call-circle/participant-store";
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
   normalizeHostedLinqGroupJoinOfferReaction,
   type ParsedHostedLinqProviderEvent,
 } from "../hosted-onboarding/linq-provider-events";
-import {
-  createHostedLinqProviderEventLookupKey,
-} from "../hosted-onboarding/linq-observability-identifiers";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
@@ -46,15 +43,9 @@ export type HostedGroupJoinOfferReactionResult =
   | { status: "accepted"; reason: "accepted" }
   | { status: "ignored"; reason: HostedGroupJoinOfferReactionSkipReason };
 
-type HostedGroupJoinOfferReactionAcceptanceResult =
-  | {
-      callCircleSetupSignal: CallCircleNotificationSignal | null;
-      status: "accepted";
-    }
-  | {
-      callCircleSetupSignal: null;
-      status: "already_processed";
-    };
+type HostedGroupJoinOfferReactionAcceptanceResult = {
+  callCircleSetupSignal: CallCircleNotificationSignal | null;
+};
 
 export async function handleHostedGroupJoinOfferReaction(input: {
   event: ParsedHostedLinqProviderEvent;
@@ -129,13 +120,18 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     if (!reason) {
       throw error;
     }
-    if (reason === "no_offer_match") {
-      await recordPendingHostedGroupJoinOfferReaction({
-        event: input.event,
-        memberId: member.id,
-        messageLookupKeyReadCandidates,
+    if (
+      reason === "no_offer_match"
+      && await hasUnboundHostedGroupJoinOfferForReactionThread({
         prisma: input.prisma,
         threadIdentityLookupKeyReadCandidates,
+      })
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
+        httpStatus: 503,
+        message: "This group offer is still being bound to the provider message.",
+        retryable: true,
       });
     }
     return skipHostedGroupJoinOfferReaction({
@@ -150,90 +146,14 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   return { status: "accepted", reason: "accepted" };
 }
 
-export async function drainPendingHostedGroupJoinOfferReactionsForOffer(input: {
-  limit?: number;
-  messageLookupKey: string;
-  now?: Date;
-  prisma: PrismaClient;
-}): Promise<{ acceptedCount: number; scannedCount: number }> {
-  const pendingReactions = await input.prisma.hostedGroupJoinOfferPendingReaction.findMany({
-    orderBy: [
-      { providerCreatedAt: "asc" },
-      { createdAt: "asc" },
-    ],
-    take: input.limit ?? 50,
-    where: {
-      acceptedAt: null,
-      messageLookupKey: input.messageLookupKey,
-    },
-  });
-  const acceptedAt = input.now ?? new Date();
-  const signals: CallCircleNotificationSignal[] = [];
-  let acceptedCount = 0;
-
-  for (const reaction of pendingReactions) {
-    try {
-      const accepted = await acceptHostedGroupJoinOfferReactionForMember({
-        memberId: reaction.memberId,
-        messageLookupKeyReadCandidates: readJsonStringArray(
-          reaction.messageLookupKeyCandidatesJson,
-        ),
-        now: reaction.providerCreatedAt,
-        pendingReaction: {
-          acceptedAt,
-          eventId: reaction.eventId,
-        },
-        prisma: input.prisma,
-        threadIdentityLookupKeyReadCandidates: readJsonStringArray(
-          reaction.threadIdentityLookupKeyCandidatesJson,
-        ),
-      });
-      if (accepted.status !== "accepted") {
-        continue;
-      }
-      acceptedCount += 1;
-      if (accepted.callCircleSetupSignal) {
-        signals.push(accepted.callCircleSetupSignal);
-      }
-    } catch (error) {
-      if (!readHostedGroupJoinOfferReactionSkipReason(error)) {
-        throw error;
-      }
-    }
-  }
-
-  if (signals.length > 0) {
-    await signalCallCircleNotificationRuntimesBestEffort(signals);
-  }
-
-  return { acceptedCount, scannedCount: pendingReactions.length };
-}
-
 async function acceptHostedGroupJoinOfferReactionForMember(input: {
   memberId: string;
   messageLookupKeyReadCandidates: readonly string[];
   now: Date;
-  pendingReaction?: {
-    acceptedAt: Date;
-    eventId: string;
-  };
   prisma: PrismaClient;
   threadIdentityLookupKeyReadCandidates: readonly string[];
 }): Promise<HostedGroupJoinOfferReactionAcceptanceResult> {
   return await input.prisma.$transaction(async (tx) => {
-    if (input.pendingReaction) {
-      const claimed = await tx.hostedGroupJoinOfferPendingReaction.updateMany({
-        data: { acceptedAt: input.pendingReaction.acceptedAt },
-        where: {
-          acceptedAt: null,
-          eventId: input.pendingReaction.eventId,
-        },
-      });
-      if (claimed.count === 0) {
-        return { callCircleSetupSignal: null, status: "already_processed" };
-      }
-    }
-
     const offerAcceptance = await acceptHostedGroupJoinOfferTx({
       memberId: input.memberId,
       messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
@@ -254,32 +174,41 @@ async function acceptHostedGroupJoinOfferReactionForMember(input: {
         notification: callCircleSetupNotification,
       })
       : null;
-    return { callCircleSetupSignal, status: "accepted" };
+    return { callCircleSetupSignal };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
-async function recordPendingHostedGroupJoinOfferReaction(input: {
-  event: ParsedHostedLinqProviderEvent;
-  memberId: string;
-  messageLookupKeyReadCandidates: readonly string[];
+async function hasUnboundHostedGroupJoinOfferForReactionThread(input: {
   prisma: PrismaClient;
   threadIdentityLookupKeyReadCandidates: readonly string[];
-}): Promise<void> {
-  if (!input.event.messageLookupKey) {
-    return;
+}): Promise<boolean> {
+  const threadIdentityLookupKeyReadCandidates = normalizeLookupKeyCandidates(
+    input.threadIdentityLookupKeyReadCandidates,
+  );
+  if (threadIdentityLookupKeyReadCandidates.length === 0) {
+    return false;
   }
-  await input.prisma.hostedGroupJoinOfferPendingReaction.createMany({
-    data: {
-      eventId: createHostedLinqProviderEventLookupKey(input.event.eventId),
-      memberId: input.memberId,
-      messageLookupKey: input.event.messageLookupKey,
-      messageLookupKeyCandidatesJson: toJsonStringArray(input.messageLookupKeyReadCandidates),
-      providerCreatedAt: input.event.providerCreatedAt,
-      threadIdentityLookupKeyCandidatesJson:
-        toJsonStringArray(input.threadIdentityLookupKeyReadCandidates),
+  const route = await input.prisma.hostedThreadRoute.findFirst({
+    select: { containerMemberId: true },
+    where: {
+      channel: "linq",
+      threadIdentityLookupKey: { in: threadIdentityLookupKeyReadCandidates },
     },
-    skipDuplicates: true,
   });
+  if (!route) {
+    return false;
+  }
+  const offer = await input.prisma.hostedGroupJoinOffer.findFirst({
+    select: { id: true },
+    where: {
+      group: {
+        runtimeMemberId: route.containerMemberId,
+      },
+      messageLookupKey: null,
+      revokedAt: null,
+    },
+  });
+  return offer !== null;
 }
 
 async function applyHostedGroupOfferFeatureActivationsTx(input: {
@@ -375,17 +304,4 @@ function skipHostedGroupJoinOfferReaction(input: {
   reason: HostedGroupJoinOfferReactionSkipReason;
 }): HostedGroupJoinOfferReactionResult {
   return { status: "ignored", reason: input.reason };
-}
-
-function toJsonStringArray(values: readonly string[]): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(values)) as Prisma.InputJsonValue;
-}
-
-function readJsonStringArray(value: Prisma.JsonValue): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return normalizeLookupKeyCandidates(
-    value.map((entry) => typeof entry === "string" ? entry : null),
-  );
 }

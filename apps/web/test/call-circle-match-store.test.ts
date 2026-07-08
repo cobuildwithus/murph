@@ -29,6 +29,7 @@ import {
   canUseActiveCallCircleParticipant,
   canUseActiveCallCircleParticipantPair,
   enrollCallCircleParticipant,
+  HOSTED_CALL_CIRCLE_PARTICIPANTS_MAX,
   listCallCircleEligibleParticipants,
   pauseCallCircleParticipant,
   resumeCallCircleParticipant,
@@ -636,17 +637,14 @@ describe("Call Circle conditional mutations", () => {
       status: "paused",
       updatedAt: new Date("2026-07-06T14:30:00.000Z"),
     };
-    const create = vi.fn(async () => {
-      throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
-        clientVersion: "test",
-        code: "P2002",
-      });
-    });
-    const findUniqueOrThrow = vi.fn(async () => existing);
+    const create = vi.fn();
+    const findUnique = vi.fn(async () => existing);
+    const findUniqueOrThrow = vi.fn();
     const update = vi.fn();
     const prisma = {
       hostedCallCircleParticipant: {
         create,
+        findUnique,
         findUniqueOrThrow,
         update,
       },
@@ -660,7 +658,9 @@ describe("Call Circle conditional mutations", () => {
     })).resolves.toBe(existing);
 
     expect(update).not.toHaveBeenCalled();
-    expect(findUniqueOrThrow).toHaveBeenCalledWith({
+    expect(create).not.toHaveBeenCalled();
+    expect(findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(findUnique).toHaveBeenCalledWith({
       where: {
         groupId_memberId: {
           groupId: "hgrp_123",
@@ -668,6 +668,34 @@ describe("Call Circle conditional mutations", () => {
         },
       },
     });
+  });
+
+  it("rejects new enrollment once the group participant cap is reached", async () => {
+    const create = vi.fn();
+    const count = vi.fn(async () => HOSTED_CALL_CIRCLE_PARTICIPANTS_MAX);
+    const findUnique = vi.fn(async () => null);
+    const prisma = {
+      $queryRaw: vi.fn(async () => []),
+      hostedCallCircleParticipant: {
+        count,
+        create,
+        findUnique,
+      },
+    };
+
+    await expect(enrollCallCircleParticipant({
+      groupId: "hgrp_123",
+      memberId: "member_new",
+      now: new Date("2026-07-06T15:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_CALL_CIRCLE_PARTICIPANT_LIMIT_REACHED",
+    });
+
+    expect(count).toHaveBeenCalledWith({
+      where: { groupId: "hgrp_123" },
+    });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("writes preferences only to an existing participant without changing enrollment", async () => {

@@ -1,10 +1,13 @@
 import "server-only";
 
-import { Prisma } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   hostedCallCirclePreferencesSchema,
   type HostedCallCirclePreferences,
 } from "@murphai/hosted-execution/call-circle";
+import {
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   generateHostedCallCircleParticipantId,
@@ -12,6 +15,7 @@ import {
 import {
   readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import type {
   CallCircleParticipantRow,
@@ -32,6 +36,9 @@ export interface CallCircleEligibleParticipant {
   timeZone: string;
 }
 
+export const HOSTED_CALL_CIRCLE_PARTICIPANTS_MAX =
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
+
 export async function enrollCallCircleParticipant(input: {
   groupId: string;
   memberId: string;
@@ -39,6 +46,65 @@ export async function enrollCallCircleParticipant(input: {
   prisma?: CallCirclePrismaClient;
 }): Promise<CallCircleParticipantRow> {
   const prisma = input.prisma ?? getPrisma();
+  if (hasPrismaTransactionMethod(prisma)) {
+    return await prisma.$transaction(async (tx) => enrollCallCircleParticipantInLockedGroup({
+      groupId: input.groupId,
+      memberId: input.memberId,
+      now: input.now,
+      prisma: tx,
+    }));
+  }
+  return await enrollCallCircleParticipantInLockedGroup({
+    groupId: input.groupId,
+    memberId: input.memberId,
+    now: input.now,
+    prisma,
+  });
+}
+
+async function enrollCallCircleParticipantInLockedGroup(input: {
+  groupId: string;
+  memberId: string;
+  now: Date;
+  prisma: CallCirclePrismaClient;
+}): Promise<CallCircleParticipantRow> {
+  const prisma = input.prisma;
+  const existing = await prisma.hostedCallCircleParticipant.findUnique({
+    where: {
+      groupId_memberId: {
+        groupId: input.groupId,
+        memberId: input.memberId,
+      },
+    },
+  });
+  if (existing) {
+    return existing;
+  }
+  await lockHostedCallCircleParticipantGroup(prisma, input.groupId);
+  const existingAfterLock = await prisma.hostedCallCircleParticipant.findUnique({
+    where: {
+      groupId_memberId: {
+        groupId: input.groupId,
+        memberId: input.memberId,
+      },
+    },
+  });
+  if (existingAfterLock) {
+    return existingAfterLock;
+  }
+  const participantCount = await prisma.hostedCallCircleParticipant.count({
+    where: {
+      groupId: input.groupId,
+    },
+  });
+  if (participantCount >= HOSTED_CALL_CIRCLE_PARTICIPANTS_MAX) {
+    throw hostedOnboardingError({
+      code: "HOSTED_CALL_CIRCLE_PARTICIPANT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This group already has the maximum number of Call Circle participants.",
+      retryable: false,
+    });
+  }
   try {
     return await prisma.hostedCallCircleParticipant.create({
       data: {
@@ -329,4 +395,22 @@ function toPrismaJson(value: HostedCallCirclePreferences): Prisma.InputJsonValue
 function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError
     && error.code === "P2002";
+}
+
+function hasPrismaTransactionMethod(
+  prisma: CallCirclePrismaClient,
+): prisma is PrismaClient {
+  return "$transaction" in prisma;
+}
+
+async function lockHostedCallCircleParticipantGroup(
+  prisma: CallCirclePrismaClient,
+  groupId: string,
+): Promise<void> {
+  await prisma.$queryRaw(Prisma.sql`
+    SELECT 1
+    FROM "hosted_group"
+    WHERE "id" = ${groupId}
+    FOR UPDATE
+  `);
 }

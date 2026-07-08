@@ -47,7 +47,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 }));
 
 import {
-  drainPendingHostedGroupJoinOfferReactionsForOffer,
   handleHostedGroupJoinOfferReaction,
 } from "@/src/lib/hosted-groups/join-offer-reaction";
 import {
@@ -298,7 +297,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
   });
 
-  it("records a pending reaction when the visible offer row is not bound yet", async () => {
+  it("ignores a no-offer match when the thread has no unbound offer reservation", async () => {
     mocks.acceptHostedGroupJoinOfferTx.mockRejectedValueOnce(hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
       httpStatus: 404,
@@ -308,8 +307,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     const event = parseReactionEvent({
       reactionType: "like",
     });
-    const pendingReactions = createPendingReactionDelegate();
-    const prisma = createPrismaStub({ pendingReactions });
+    const prisma = createPrismaStub();
 
     await expect(handleHostedGroupJoinOfferReaction({
       event,
@@ -319,111 +317,53 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       status: "ignored",
     });
 
-    expect(pendingReactions.createMany).toHaveBeenCalledWith({
-      data: {
-        eventId: expect.stringMatching(/^hbid:linq\.provider-event:s1:[0-9a-f]{64}$/u),
-        memberId: "member_reactor",
-        messageLookupKey: event.messageLookupKey,
-        messageLookupKeyCandidatesJson: createHostedLinqMessageLookupKeyReadCandidates(
-          "msg_offer_123",
-        ),
-        providerCreatedAt: event.providerCreatedAt,
-        threadIdentityLookupKeyCandidatesJson:
-          createHostedExternalThreadIdentityLookupKeyReadCandidates({
-            channel: "linq",
-            threadId: "chat_group_1",
-          }),
-      },
-      skipDuplicates: true,
-    });
     expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
   });
 
-  it("drains a pending reaction after the provider-bound offer row exists", async () => {
+  it("throws retryably when the thread has an unbound offer reservation", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: false,
+    }));
     const event = parseReactionEvent({
       reactionType: "like",
     });
-    const messageLookupKey = createHostedLinqMessageLookupKey("msg_offer_123");
-    if (!messageLookupKey) {
-      throw new Error("Expected offer lookup key.");
-    }
-    const acceptedAt = new Date("2026-03-26T12:02:00.000Z");
-    const pendingReactions = createPendingReactionDelegate({
-      findMany: [{
-        acceptedAt: null,
-        createdAt: new Date("2026-03-26T12:01:30.000Z"),
-        eventId: "hbid:linq.provider-event:s1:"
-          + "0".repeat(64),
-        memberId: "member_reactor",
-        messageLookupKey,
-        messageLookupKeyCandidatesJson: createHostedLinqMessageLookupKeyReadCandidates(
-          "msg_offer_123",
-        ),
-        providerCreatedAt: event.providerCreatedAt,
-        threadIdentityLookupKeyCandidatesJson:
-          createHostedExternalThreadIdentityLookupKeyReadCandidates({
-            channel: "linq",
-            threadId: "chat_group_1",
-          }),
-      }],
+    const prisma = createPrismaStub({
+      routeContainerMemberId: "member_group_runtime",
+      unboundOffer: true,
     });
-    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce(buildAcceptedJoinOffer({
-      featureActivations: ["call-circle.enroll.v0"],
-    }));
-    const prisma = createPrismaStub({ pendingReactions });
 
-    await expect(drainPendingHostedGroupJoinOfferReactionsForOffer({
-      messageLookupKey,
-      now: acceptedAt,
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
       prisma,
-    })).resolves.toEqual({
-      acceptedCount: 1,
-      scannedCount: 1,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
+      retryable: true,
     });
 
-    expect(pendingReactions.findMany).toHaveBeenCalledWith({
-      orderBy: [
-        { providerCreatedAt: "asc" },
-        { createdAt: "asc" },
-      ],
-      take: 50,
+    expect(prisma.hostedThreadRoute.findFirst).toHaveBeenCalledWith({
+      select: { containerMemberId: true },
       where: {
-        acceptedAt: null,
-        messageLookupKey,
-      },
-    });
-    expect(pendingReactions.updateMany).toHaveBeenCalledWith({
-      data: { acceptedAt },
-      where: {
-        acceptedAt: null,
-        eventId: "hbid:linq.provider-event:s1:" + "0".repeat(64),
-      },
-    });
-    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        memberId: "member_reactor",
-        messageLookupKeyReadCandidates: createHostedLinqMessageLookupKeyReadCandidates(
-          "msg_offer_123",
-        ),
-        now: event.providerCreatedAt,
-        threadIdentityLookupKeyReadCandidates:
-          createHostedExternalThreadIdentityLookupKeyReadCandidates({
+        channel: "linq",
+        threadIdentityLookupKey: {
+          in: createHostedExternalThreadIdentityLookupKeyReadCandidates({
             channel: "linq",
             threadId: "chat_group_1",
           }),
-      }),
-    );
-    expect(mocks.enrollCallCircleParticipant).toHaveBeenCalledWith(
-      expect.objectContaining({
-        groupId: "group_1",
-        memberId: "member_reactor",
-        now: event.providerCreatedAt,
-      }),
-    );
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).toHaveBeenCalledWith([{
-      mailboxItemId: "mailbox_call_circle_setup",
-      memberId: "member_reactor",
-    }]);
+        },
+      },
+    });
+    expect(prisma.hostedGroupJoinOffer.findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        group: { runtimeMemberId: "member_group_runtime" },
+        messageLookupKey: null,
+        revokedAt: null,
+      },
+    });
+    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
   });
 });
 
@@ -523,51 +463,49 @@ function buildAcceptedJoinOffer(input: {
   };
 }
 
-type PendingReactionRow = {
-  acceptedAt: Date | null;
-  createdAt: Date;
-  eventId: string;
-  memberId: string;
-  messageLookupKey: string;
-  messageLookupKeyCandidatesJson: Prisma.JsonValue;
-  providerCreatedAt: Date;
-  threadIdentityLookupKeyCandidatesJson: Prisma.JsonValue;
-};
-
-type PendingReactionDelegate = {
-  createMany: ReturnType<typeof vi.fn>;
-  findMany: ReturnType<typeof vi.fn>;
-  updateMany: ReturnType<typeof vi.fn>;
-};
-
-function createPendingReactionDelegate(input: {
-  findMany?: PendingReactionRow[];
-} = {}): PendingReactionDelegate {
-  return {
-    createMany: vi.fn(async () => ({ count: 1 })),
-    findMany: vi.fn(async () => input.findMany ?? []),
-    updateMany: vi.fn(async () => ({ count: 1 })),
-  };
-}
-
 function createPrismaStub(input: {
-  pendingReactions?: PendingReactionDelegate;
-} = {}): PrismaClient {
+  routeContainerMemberId?: string | null;
+  unboundOffer?: boolean;
+} = {}): PrismaClient & {
+  hostedGroupJoinOffer: {
+    findFirst: ReturnType<typeof vi.fn>;
+  };
+  hostedThreadRoute: {
+    findFirst: ReturnType<typeof vi.fn>;
+  };
+} {
   const prisma = createPrismaClient({
     databaseUrl: "postgresql://test:test@127.0.0.1:1/test",
   });
-  const pendingReactions = input.pendingReactions ?? createPendingReactionDelegate();
-  const tx = {
-    hostedGroupJoinOfferPendingReaction: pendingReactions,
-  } as unknown as Prisma.TransactionClient;
-  Object.defineProperty(prisma, "hostedGroupJoinOfferPendingReaction", {
+  const hostedThreadRoute = {
+    findFirst: vi.fn(async () =>
+      input.routeContainerMemberId === undefined || input.routeContainerMemberId === null
+        ? null
+        : { containerMemberId: input.routeContainerMemberId }),
+  };
+  const hostedGroupJoinOffer = {
+    findFirst: vi.fn(async () => input.unboundOffer ? { id: "hgrpjo_reserved" } : null),
+  };
+  const tx = {} as Prisma.TransactionClient;
+  Object.defineProperty(prisma, "hostedThreadRoute", {
     configurable: true,
-    value: pendingReactions,
+    value: hostedThreadRoute,
+  });
+  Object.defineProperty(prisma, "hostedGroupJoinOffer", {
+    configurable: true,
+    value: hostedGroupJoinOffer,
   });
   Object.defineProperty(prisma, "$transaction", {
     configurable: true,
     value: vi.fn(async <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) =>
       run(tx)),
   });
-  return prisma;
+  return prisma as PrismaClient & {
+    hostedGroupJoinOffer: {
+      findFirst: ReturnType<typeof vi.fn>;
+    };
+    hostedThreadRoute: {
+      findFirst: ReturnType<typeof vi.fn>;
+    };
+  };
 }

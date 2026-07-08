@@ -142,7 +142,6 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   // Group membership rows stay in dedicated group tables; optional sharing
   // remains explicit through HostedVaultShare grants.
   "HostedGroup",
-  "HostedGroupJoinOfferPendingReaction",
   "HostedGroupMember",
   "HostedCallCircleMatch",
   "HostedCallCircleParticipant",
@@ -532,13 +531,6 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
-    const hostedGroupJoinOfferPendingReactionMigrationSql = readFileSync(
-      new URL(
-        "../prisma/migrations/20260708120000_hosted_group_join_offer_pending_reaction/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -624,7 +616,6 @@ describe("hosted Prisma baseline migration", () => {
       "20260706130000_hosted_growth_daily_snapshot",
       "20260707170000_drop_stale_linq_recency_columns",
       "20260707193000_hosted_phone_call_provider_start_attempt",
-      "20260708120000_hosted_group_join_offer_pending_reaction",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -676,32 +667,18 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedGroupJoinOfferMigrationSql).toContain(
       'CREATE TABLE "hosted_group_join_offer"',
     );
-    expect(hostedGroupJoinOfferMigrationSql).toContain('"message_lookup_key" TEXT NOT NULL');
+    expect(hostedGroupJoinOfferMigrationSql).toContain('"offer_fingerprint" TEXT NOT NULL');
+    expect(hostedGroupJoinOfferMigrationSql).toContain('"message_lookup_key" TEXT');
     expect(hostedGroupJoinOfferMigrationSql).toContain('"projection_kinds_json" JSONB NOT NULL');
     expect(hostedGroupJoinOfferMigrationSql).toContain('"revoked_at" TIMESTAMP(3)');
     expect(hostedGroupJoinOfferMigrationSql).toContain(
       'REFERENCES "hosted_group"("id")',
     );
+    expect(hostedGroupJoinOfferMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_group_join_offer_offer_fingerprint_key"',
+    );
     expect(hostedGroupJoinOfferMigrationSql).not.toContain(
       'ALTER TABLE "hosted_group"',
-    );
-    expect(hostedGroupJoinOfferPendingReactionMigrationSql).toContain(
-      'CREATE TABLE "hosted_group_join_offer_pending_reaction"',
-    );
-    expect(hostedGroupJoinOfferPendingReactionMigrationSql).toContain(
-      '"message_lookup_key" TEXT NOT NULL',
-    );
-    expect(hostedGroupJoinOfferPendingReactionMigrationSql).toContain(
-      '"message_lookup_key_candidates_json" JSONB NOT NULL',
-    );
-    expect(hostedGroupJoinOfferPendingReactionMigrationSql).toContain(
-      '"thread_identity_lookup_key_candidates_json" JSONB NOT NULL',
-    );
-    expect(hostedGroupJoinOfferPendingReactionMigrationSql).toContain(
-      'REFERENCES "hosted_member"("id")',
-    );
-    expect(hostedGroupJoinOfferPendingReactionMigrationSql).not.toMatch(
-      /"(?:raw_)?(?:handle|body|payload)[^"]*"/iu,
     );
     expect(hostedGrowthDailySnapshotMigrationSql).toContain(
       'CREATE TABLE "hosted_growth_daily_snapshot"',

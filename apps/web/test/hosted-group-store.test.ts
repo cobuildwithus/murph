@@ -40,12 +40,13 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 import {
   acceptHostedGroupJoinCodeTx,
   acceptHostedGroupJoinOfferTx,
+  bindHostedGroupJoinOfferTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
   createHostedGroupJoinOfferFingerprint,
   normalizeHostedGroupOfferScope,
-  recordHostedGroupJoinOfferTx,
+  reserveHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
   normalizeHostedVaultShareProjectionKinds,
@@ -120,6 +121,7 @@ function buildTx(input?: {
     create: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
   hostedThreadRoute: {
@@ -181,13 +183,15 @@ function buildTx(input?: {
         return null;
       }),
       findUnique: vi.fn(async (args: {
-        where: { messageLookupKey?: string };
+        where: { messageLookupKey?: string; offerFingerprint?: string };
       }) => {
         const messageLookupKey = input?.offerMessageLookupKey ?? "hbidx:linq-message:v1:offer";
         if (args.where.messageLookupKey === messageLookupKey) {
           return {
             groupId: "group_1",
+            id: "hgrpjo_1",
             messageLookupKey,
+            offerFingerprint: "0123456789abcdef0123456789abcdef",
             offerScopeJson: ["sleep-times.v0"],
             revokedAt: input?.revokedOfferAt ?? null,
             group: {
@@ -201,6 +205,7 @@ function buildTx(input?: {
         }
         return null;
       }),
+      update: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
     hostedGroupMember: {
@@ -454,23 +459,30 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
-  it("records join-offer bindings as message lookup keys and projection snapshots", async () => {
-    const tx = buildTx();
+  it("reserves and binds join-offer rows as the durable offer owner", async () => {
+    const tx = buildStatefulJoinOfferTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
 
-    await expect(recordHostedGroupJoinOfferTx({
+    const reserved = await reserveHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_123",
+      offerFingerprint: "0123456789abcdef0123456789abcdef",
       offerScope: {
         featureActivations: ["call-circle.enroll.v0"],
         vaultShareProjectionKinds: ["sleep-times.v0", "profile-name.v0"],
       },
       postedAt,
       tx,
+    });
+    await expect(bindHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      messageId: "msg_offer_123",
+      offerId: reserved.id,
+      tx,
     })).resolves.toMatchObject({
       groupId: "group_1",
       messageIdSuffix: expect.stringContaining("123"),
       messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+      offerFingerprint: "0123456789abcdef0123456789abcdef",
       offerScope: {
         featureActivations: ["call-circle.enroll.v0"],
         vaultShareProjectionKinds: ["sleep-times.v0"],
@@ -481,11 +493,17 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       data: {
         groupId: "group_1",
         id: expect.stringMatching(/^hgrpjo_/u),
-        messageIdSuffix: expect.stringContaining("123"),
-        messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+        offerFingerprint: "0123456789abcdef0123456789abcdef",
         postedAt,
         offerScopeJson: ["call-circle.enroll.v0", "sleep-times.v0"],
       },
+    });
+    expect(tx.hostedGroupJoinOffer.update).toHaveBeenCalledWith({
+      data: {
+        messageIdSuffix: expect.stringContaining("123"),
+        messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+      },
+      where: { id: reserved.id },
     });
   });
 
@@ -527,22 +545,34 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const tx = buildStatefulJoinOfferTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
 
-    const first = await recordHostedGroupJoinOfferTx({
+    const firstReserved = await reserveHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_123",
+      offerFingerprint: "0123456789abcdef0123456789abcdef",
       offerScope: {
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
       postedAt,
       tx,
     });
-    const second = await recordHostedGroupJoinOfferTx({
+    const first = await bindHostedGroupJoinOfferTx({
       groupId: "group_1",
       messageId: "msg_offer_123",
+      offerId: firstReserved.id,
+      tx,
+    });
+    const secondReserved = await reserveHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      offerFingerprint: "0123456789abcdef0123456789abcdef",
       offerScope: {
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
       postedAt: new Date("2026-07-01T00:05:00.000Z"),
+      tx,
+    });
+    const second = await bindHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      messageId: "msg_offer_123",
+      offerId: secondReserved.id,
       tx,
     });
 
@@ -555,11 +585,12 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
     });
-    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(2);
+    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(1);
     expect(tx.hostedGroupJoinOffer.findUnique).toHaveBeenCalledWith({
-      where: { messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_123") },
+      where: { offerFingerprint: "0123456789abcdef0123456789abcdef" },
       select: expect.objectContaining({
         messageLookupKey: true,
+        offerFingerprint: true,
         revokedAt: true,
       }),
     });
@@ -698,22 +729,34 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const secondPostedAt = new Date("2026-07-01T00:05:00.000Z");
     const now = new Date("2026-07-01T00:06:00.000Z");
 
-    const firstOffer = await recordHostedGroupJoinOfferTx({
+    const firstReserved = await reserveHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_a",
+      offerFingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       offerScope: {
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
       postedAt: firstPostedAt,
       tx,
     });
-    await recordHostedGroupJoinOfferTx({
+    const firstOffer = await bindHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_b",
+      messageId: "msg_offer_a",
+      offerId: firstReserved.id,
+      tx,
+    });
+    const secondReserved = await reserveHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      offerFingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       offerScope: {
         vaultShareProjectionKinds: ["activity-days.v0"],
       },
       postedAt: secondPostedAt,
+      tx,
+    });
+    await bindHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      messageId: "msg_offer_b",
+      offerId: secondReserved.id,
       tx,
     });
 
@@ -1053,7 +1096,8 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     groupId: string;
     id: string;
     messageIdSuffix: string | null;
-    messageLookupKey: string;
+    messageLookupKey: string | null;
+    offerFingerprint: string;
     offerScopeJson: Prisma.InputJsonValue;
     revokedAt: Date | null;
   }> = [];
@@ -1076,35 +1120,45 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
           groupId: string;
           id: string;
           messageIdSuffix?: string | null;
-          messageLookupKey: string;
+          messageLookupKey?: string | null;
+          offerFingerprint: string;
           offerScopeJson: Prisma.InputJsonValue;
         };
       }) => {
-        if (offers.some((entry) => entry.messageLookupKey === args.data.messageLookupKey)) {
+        if (offers.some((entry) => entry.offerFingerprint === args.data.offerFingerprint)) {
+          throw Object.assign(new Error("duplicate offer fingerprint"), { code: "P2002" });
+        }
+        if (
+          args.data.messageLookupKey
+          && offers.some((entry) => entry.messageLookupKey === args.data.messageLookupKey)
+        ) {
           throw Object.assign(new Error("duplicate message lookup key"), { code: "P2002" });
         }
         offers.push({
           groupId: args.data.groupId,
           id: args.data.id,
           messageIdSuffix: args.data.messageIdSuffix ?? null,
-          messageLookupKey: args.data.messageLookupKey,
+          messageLookupKey: args.data.messageLookupKey ?? null,
+          offerFingerprint: args.data.offerFingerprint,
           offerScopeJson: args.data.offerScopeJson,
           revokedAt: null,
         });
         return {};
       }),
       findUnique: vi.fn(async (args: {
-        where: { id?: string; messageLookupKey?: string };
+        where: { id?: string; messageLookupKey?: string; offerFingerprint?: string };
       }) => {
         const offer = offers.find((entry) =>
           entry.id === args.where.id
-          || entry.messageLookupKey === args.where.messageLookupKey);
+          || entry.messageLookupKey === args.where.messageLookupKey
+          || entry.offerFingerprint === args.where.offerFingerprint);
         return offer
           ? {
               groupId: offer.groupId,
               id: offer.id,
               messageIdSuffix: offer.messageIdSuffix,
               messageLookupKey: offer.messageLookupKey,
+              offerFingerprint: offer.offerFingerprint,
               offerScopeJson: offer.offerScopeJson,
               revokedAt: offer.revokedAt,
               group,
@@ -1125,8 +1179,10 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
             typeof lookup === "string"
               ? entry.messageLookupKey === lookup
               : lookup?.startsWith
-                ? entry.messageLookupKey.startsWith(lookup.startsWith)
-                : lookup?.in?.includes(entry.messageLookupKey)
+                ? (entry.messageLookupKey?.startsWith(lookup.startsWith) ?? false)
+                : entry.messageLookupKey
+                  ? (lookup?.in?.includes(entry.messageLookupKey) ?? false)
+                  : false
           ));
         if (!offer || ("revokedAt" in args.where && offer.revokedAt !== null)) {
           return null;
@@ -1136,6 +1192,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
           id: offer.id,
           messageIdSuffix: offer.messageIdSuffix,
           messageLookupKey: offer.messageLookupKey,
+          offerFingerprint: offer.offerFingerprint,
           offerScopeJson: offer.offerScopeJson,
           revokedAt: offer.revokedAt,
           group,
@@ -1148,6 +1205,13 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
         const offer = offers.find((entry) => entry.id === args.where.id);
         if (!offer) {
           throw new Error("offer not found");
+        }
+        if (
+          args.data.messageLookupKey
+          && offers.some((entry) =>
+            entry.id !== offer.id && entry.messageLookupKey === args.data.messageLookupKey)
+        ) {
+          throw Object.assign(new Error("duplicate message lookup key"), { code: "P2002" });
         }
         offer.messageIdSuffix = args.data.messageIdSuffix ?? offer.messageIdSuffix;
         offer.messageLookupKey = args.data.messageLookupKey ?? offer.messageLookupKey;

@@ -64,10 +64,11 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
+  bindHostedGroupJoinOfferTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   createHostedGroupJoinOfferFingerprint,
   readHostedGroupByRuntimeMemberId,
-  recordHostedGroupJoinOfferTx,
+  reserveHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
   type HostedGroupFeatureActivationKind,
 } from "./group-store";
@@ -75,9 +76,6 @@ import {
   normalizeHostedVaultShareProjectionKinds,
   projectHostedVaultShareProjectionDisplays,
 } from "./join-policy";
-import {
-  drainPendingHostedGroupJoinOfferReactionsForOffer,
-} from "./join-offer-reaction";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
@@ -505,6 +503,21 @@ async function postHostedRuntimeGroupOffer(input: {
     offerKind: input.action,
     offerScope,
   });
+  let offerReservation: Awaited<ReturnType<typeof reserveHostedGroupJoinOfferTx>>;
+  try {
+    offerReservation = await prisma.$transaction(async (tx) => {
+      return await reserveHostedGroupJoinOfferTx({
+        groupId: created.group.id,
+        offerFingerprint,
+        offerScope,
+        postedAt: now,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch {
+    return unavailable("offer_binding_failed");
+  }
+
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
     sent = await sendHostedLinqChatMessage({
@@ -519,22 +532,15 @@ async function postHostedRuntimeGroupOffer(input: {
     return unavailable("provider_message_unavailable");
   }
 
-  let offerBinding: Awaited<ReturnType<typeof recordHostedGroupJoinOfferTx>>;
   try {
-    offerBinding = await prisma.$transaction(async (tx) => {
-      return await recordHostedGroupJoinOfferTx({
+    await prisma.$transaction(async (tx) => {
+      return await bindHostedGroupJoinOfferTx({
         groupId: created.group.id,
         messageId: sent.messageId,
-        offerScope,
-        postedAt: now,
+        offerId: offerReservation.id,
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-    await drainPendingHostedGroupJoinOfferReactionsForOffer({
-      messageLookupKey: offerBinding.messageLookupKey,
-      now,
-      prisma,
-    });
   } catch {
     return unavailable("offer_binding_failed");
   }

@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
+  bindHostedGroupJoinOfferTx: vi.fn(),
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
   createHostedGroupJoinOfferFingerprint: vi.fn(),
-  drainPendingHostedGroupJoinOfferReactionsForOffer: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
-  recordHostedGroupJoinOfferTx: vi.fn(),
+  reserveHostedGroupJoinOfferTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
   revokeHostedGroupMemberEmailShareTx: vi.fn(),
@@ -85,17 +85,13 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
+  bindHostedGroupJoinOfferTx: mocks.bindHostedGroupJoinOfferTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx:
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
   createHostedGroupJoinOfferFingerprint: mocks.createHostedGroupJoinOfferFingerprint,
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
-  recordHostedGroupJoinOfferTx: mocks.recordHostedGroupJoinOfferTx,
+  reserveHostedGroupJoinOfferTx: mocks.reserveHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
-}));
-
-vi.mock("@/src/lib/hosted-groups/join-offer-reaction", () => ({
-  drainPendingHostedGroupJoinOfferReactionsForOffer:
-    mocks.drainPendingHostedGroupJoinOfferReactionsForOffer,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -177,20 +173,29 @@ describe("handleHostedRuntimeGroupTool", () => {
       joinCode: "abc123",
     });
     mocks.createHostedGroupJoinOfferFingerprint.mockReturnValue("offer_fingerprint_1");
-    mocks.recordHostedGroupJoinOfferTx.mockResolvedValue({
+    mocks.reserveHostedGroupJoinOfferTx.mockResolvedValue({
       groupId: GROUP_SUMMARY.id,
       id: "hgrpjo_1",
-      messageIdSuffix: "offer_msg",
-      messageLookupKey: "hbidx:linq-message:v1:offer",
+      messageIdSuffix: null,
+      messageLookupKey: null,
+      offerFingerprint: "offer_fingerprint_1",
       offerScope: {
         featureActivations: [],
         schema: "murph.hosted-group.offer-scope.v1",
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
     });
-    mocks.drainPendingHostedGroupJoinOfferReactionsForOffer.mockResolvedValue({
-      acceptedCount: 0,
-      scannedCount: 0,
+    mocks.bindHostedGroupJoinOfferTx.mockResolvedValue({
+      groupId: GROUP_SUMMARY.id,
+      id: "hgrpjo_1",
+      messageIdSuffix: "offer_msg",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      offerFingerprint: "offer_fingerprint_1",
+      offerScope: {
+        featureActivations: [],
+        schema: "murph.hosted-group.offer-scope.v1",
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
     });
   });
 
@@ -722,9 +727,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
     });
-    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+    expect(mocks.reserveHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      offerFingerprint: "offer_fingerprint_1",
       offerScope: {
         featureActivations: [],
         vaultShareProjectionKinds: ["sleep-times.v0"],
@@ -732,21 +737,20 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       postedAt: expect.any(Date),
       tx: fakeTx,
     });
-    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0])
-      .toBeLessThan(mocks.recordHostedGroupJoinOfferTx.mock.invocationCallOrder[0]);
-    expect(mocks.recordHostedGroupJoinOfferTx.mock.invocationCallOrder[0])
-      .toBeLessThan(
-        mocks.drainPendingHostedGroupJoinOfferReactionsForOffer.mock.invocationCallOrder[0],
-      );
-    expect(mocks.drainPendingHostedGroupJoinOfferReactionsForOffer).toHaveBeenCalledWith({
-      messageLookupKey: "hbidx:linq-message:v1:offer",
-      now: expect.any(Date),
-      prisma: expect.any(Object),
+    expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      messageId: "msg_offer_1",
+      offerId: "hgrpjo_1",
+      tx: fakeTx,
     });
+    expect(mocks.reserveHostedGroupJoinOfferTx.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]);
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.bindHostedGroupJoinOfferTx.mock.invocationCallOrder[0]);
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
-  it("leaves the visible provider offer in place so retry can bind the recovered message", async () => {
+  it("leaves the reserved provider offer in place so retry can bind the recovered message", async () => {
     mocks.sendHostedLinqChatMessage
       .mockResolvedValueOnce({
         chatId: "chat_group_1",
@@ -756,13 +760,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         chatId: "chat_group_1",
         messageId: "msg_offer_1",
       });
-    mocks.recordHostedGroupJoinOfferTx
+    mocks.bindHostedGroupJoinOfferTx
       .mockRejectedValueOnce(new Error("temporary db failure"))
       .mockResolvedValueOnce({
         groupId: GROUP_SUMMARY.id,
         id: "hgrpjo_1",
         messageIdSuffix: "offer_msg",
         messageLookupKey: "hbidx:linq-message:v1:offer",
+        offerFingerprint: "offer_fingerprint_1",
         offerScope: {
           featureActivations: [],
           schema: "murph.hosted-group.offer-scope.v1",
@@ -809,22 +814,15 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         "group-join-offer:offer_fingerprint_1",
         "group-join-offer:offer_fingerprint_1",
       ]);
-    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledTimes(2);
-    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenLastCalledWith({
+    expect(mocks.reserveHostedGroupJoinOfferTx).toHaveBeenCalledTimes(2);
+    expect(mocks.reserveHostedGroupJoinOfferTx.mock.calls.map(([input]) => input.offerFingerprint))
+      .toEqual(["offer_fingerprint_1", "offer_fingerprint_1"]);
+    expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledTimes(2);
+    expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenLastCalledWith({
       groupId: GROUP_SUMMARY.id,
       messageId: "msg_offer_1",
-      offerScope: {
-        featureActivations: [],
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-      postedAt: expect.any(Date),
+      offerId: "hgrpjo_1",
       tx: fakeTx,
-    });
-    expect(mocks.drainPendingHostedGroupJoinOfferReactionsForOffer).toHaveBeenCalledTimes(1);
-    expect(mocks.drainPendingHostedGroupJoinOfferReactionsForOffer).toHaveBeenCalledWith({
-      messageLookupKey: "hbidx:linq-message:v1:offer",
-      now: expect.any(Date),
-      prisma: expect.any(Object),
     });
   });
 
@@ -843,7 +841,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.reserveHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
   it("posts a model-authored Call Circle offer with the server-filled join URL", async () => {
@@ -893,14 +892,20 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         vaultShareProjectionKinds: [],
       },
     });
-    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+    expect(mocks.reserveHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      offerFingerprint: "offer_fingerprint_1",
       offerScope: {
         featureActivations: ["call-circle.enroll.v0"],
         vaultShareProjectionKinds: [],
       },
       postedAt: expect.any(Date),
+      tx: fakeTx,
+    });
+    expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      messageId: "msg_offer_1",
+      offerId: "hgrpjo_1",
       tx: fakeTx,
     });
   });
@@ -926,7 +931,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
 
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.reserveHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
   it("does not post a Call Circle offer when the join URL placeholder is missing", async () => {
@@ -953,7 +959,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.reserveHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
   it("does not bind an offer when the provider omits the sent message id", async () => {
@@ -991,7 +998,17 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         vaultShareProjectionKinds: [],
       },
     });
-    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.reserveHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      offerFingerprint: "offer_fingerprint_1",
+      offerScope: {
+        featureActivations: [],
+        vaultShareProjectionKinds: [],
+      },
+      postedAt: expect.any(Date),
+      tx: fakeTx,
+    });
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
   it("rejects an authority that does not match the bound runtime member", async () => {

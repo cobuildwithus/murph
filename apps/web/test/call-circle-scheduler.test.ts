@@ -1312,9 +1312,8 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
   });
 
-  it("hands off an attached provider-attempted bridge after the window grace elapses", async () => {
+  it("leaves an attached provider-attempted bridge for the phone-call owner after the grace elapses", async () => {
     const now = new Date("2026-07-06T15:45:00.000Z");
-    const tx = {};
     const prisma = createSchedulerPrisma({
       dueMatches: [schedulerMatch({
         finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
@@ -1330,29 +1329,18 @@ describe("runCallCircleScheduler", () => {
         windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
       })],
       groups: [],
-      tx,
     });
 
     await expect(runCallCircleScheduler({
       now,
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      handoffs: 1,
+      handoffs: 0,
     });
 
-    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
-      matchId: "hccm_123",
-      now,
-      outcome: "text_handoff",
-      phoneCallId: "hpc_starting",
-      prisma: tx,
-      status: "dropped",
-    });
-    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).toHaveBeenCalledWith([
-      { mailboxItemId: "mailbox_handoff", memberId: "member_a" },
-      { mailboxItemId: "mailbox_handoff", memberId: "member_b" },
-    ]);
+    expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
   });
 
   it("retries terminal Call Circle outcome notifications that were not appended yet", async () => {

@@ -104,6 +104,16 @@ export interface HostedGroupJoinOfferBindingTxResult {
   id: string;
   messageIdSuffix: string | null;
   messageLookupKey: string;
+  offerFingerprint: string;
+  offerScope: HostedGroupOfferScope;
+}
+
+export interface HostedGroupJoinOfferReservationTxResult {
+  groupId: string;
+  id: string;
+  messageIdSuffix: string | null;
+  messageLookupKey: string | null;
+  offerFingerprint: string;
   offerScope: HostedGroupOfferScope;
 }
 
@@ -442,20 +452,20 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   });
 }
 
-export async function recordHostedGroupJoinOfferTx(input: {
+export async function reserveHostedGroupJoinOfferTx(input: {
   groupId: string;
-  messageId: string | null;
+  offerFingerprint: string;
   offerScope: HostedGroupOfferScopeInput;
   postedAt: Date;
   tx: Prisma.TransactionClient;
-}): Promise<HostedGroupJoinOfferBindingTxResult> {
-  const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
-  if (!messageLookupKey) {
+}): Promise<HostedGroupJoinOfferReservationTxResult> {
+  const offerFingerprint = normalizeHostedGroupJoinOfferFingerprint(input.offerFingerprint);
+  if (!offerFingerprint) {
     throw hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_MESSAGE_ID_REQUIRED",
-      httpStatus: 502,
-      message: "Could not bind this group offer to a provider message.",
-      retryable: true,
+      code: "HOSTED_GROUP_JOIN_OFFER_FINGERPRINT_REQUIRED",
+      httpStatus: 400,
+      message: "Could not reserve this group offer.",
+      retryable: false,
     });
   }
   const offerScope = normalizeHostedGroupOfferScopeInput(input.offerScope);
@@ -472,16 +482,126 @@ export async function recordHostedGroupJoinOfferTx(input: {
       retryable: false,
     });
   }
+  const existing = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { offerFingerprint },
+    select: {
+      groupId: true,
+      id: true,
+      messageIdSuffix: true,
+      messageLookupKey: true,
+      offerFingerprint: true,
+      offerScopeJson: true,
+      revokedAt: true,
+    },
+  });
+  if (existing) {
+    if (existing.groupId === input.groupId && existing.revokedAt === null) {
+      return {
+        groupId: existing.groupId,
+        id: existing.id,
+        messageIdSuffix: existing.messageIdSuffix,
+        messageLookupKey: existing.messageLookupKey,
+        offerFingerprint: existing.offerFingerprint,
+        offerScope: normalizeHostedGroupOfferScope(existing.offerScopeJson),
+      };
+    }
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
+      httpStatus: 410,
+      message: "This group offer has been revoked.",
+      retryable: false,
+    });
+  }
   const id = generateHostedGroupJoinOfferId();
+  await input.tx.hostedGroupJoinOffer.create({
+    data: {
+      id,
+      groupId: input.groupId,
+      offerFingerprint,
+      offerScopeJson: toHostedGroupOfferScopeJson(offerScope),
+      postedAt: input.postedAt,
+    },
+  });
+
+  return {
+    groupId: input.groupId,
+    id,
+    messageIdSuffix: null,
+    messageLookupKey: null,
+    offerFingerprint,
+    offerScope,
+  };
+}
+
+export async function bindHostedGroupJoinOfferTx(input: {
+  groupId: string;
+  messageId: string | null;
+  offerId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinOfferBindingTxResult> {
+  const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
+  if (!messageLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_MESSAGE_ID_REQUIRED",
+      httpStatus: 502,
+      message: "Could not bind this group offer to a provider message.",
+      retryable: true,
+    });
+  }
+  await lockHostedGroupRow(input.tx, input.groupId);
+  const offer = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { id: input.offerId },
+    select: {
+      groupId: true,
+      id: true,
+      messageIdSuffix: true,
+      messageLookupKey: true,
+      offerFingerprint: true,
+      offerScopeJson: true,
+      revokedAt: true,
+    },
+  });
+  if (!offer || offer.groupId !== input.groupId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: false,
+    });
+  }
+  if (offer.revokedAt !== null) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
+      httpStatus: 410,
+      message: "This group offer has been revoked.",
+      retryable: false,
+    });
+  }
+  if (offer.messageLookupKey) {
+    if (offer.messageLookupKey === messageLookupKey) {
+      return {
+        groupId: offer.groupId,
+        id: offer.id,
+        messageIdSuffix: offer.messageIdSuffix,
+        messageLookupKey: offer.messageLookupKey,
+        offerFingerprint: offer.offerFingerprint,
+        offerScope: normalizeHostedGroupOfferScope(offer.offerScopeJson),
+      };
+    }
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_ALREADY_BOUND",
+      httpStatus: 409,
+      message: "This group offer is already bound to another provider message.",
+      retryable: false,
+    });
+  }
+
   try {
-    await input.tx.hostedGroupJoinOffer.create({
+    await input.tx.hostedGroupJoinOffer.update({
+      where: { id: input.offerId },
       data: {
-        id,
-        groupId: input.groupId,
         messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
         messageLookupKey,
-        offerScopeJson: toHostedGroupOfferScopeJson(offerScope),
-        postedAt: input.postedAt,
       },
     });
   } catch (error) {
@@ -495,16 +615,23 @@ export async function recordHostedGroupJoinOfferTx(input: {
         id: true,
         messageIdSuffix: true,
         messageLookupKey: true,
+        offerFingerprint: true,
         offerScopeJson: true,
         revokedAt: true,
       },
     });
-    if (existing && existing.groupId === input.groupId && existing.revokedAt === null) {
+    if (
+      existing
+      && existing.groupId === input.groupId
+      && existing.messageLookupKey
+      && existing.revokedAt === null
+    ) {
       return {
         groupId: existing.groupId,
         id: existing.id,
         messageIdSuffix: existing.messageIdSuffix,
         messageLookupKey: existing.messageLookupKey,
+        offerFingerprint: existing.offerFingerprint,
         offerScope: normalizeHostedGroupOfferScope(existing.offerScopeJson),
       };
     }
@@ -513,10 +640,11 @@ export async function recordHostedGroupJoinOfferTx(input: {
 
   return {
     groupId: input.groupId,
-    id,
+    id: input.offerId,
     messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
     messageLookupKey,
-    offerScope,
+    offerFingerprint: offer.offerFingerprint,
+    offerScope: normalizeHostedGroupOfferScope(offer.offerScopeJson),
   };
 }
 
@@ -534,6 +662,11 @@ export function createHostedGroupJoinOfferFingerprint(input: {
     offerScope,
     schema: "murph.hosted-group.join-offer-send.v1",
   })).slice(0, 32);
+}
+
+function normalizeHostedGroupJoinOfferFingerprint(value: string): string | null {
+  const normalized = value.trim();
+  return /^[a-f0-9]{32}$/u.test(normalized) ? normalized : null;
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -607,6 +740,14 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
       httpStatus: 410,
       message: "This group offer has been revoked.",
+      retryable: false,
+    });
+  }
+  if (!offer.messageLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
       retryable: false,
     });
   }

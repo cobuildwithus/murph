@@ -387,7 +387,6 @@ model HostedMember {
   hostedGroupsOwned              HostedGroup[]                   @relation("HostedGroupOwner")
   hostedGroupMemberships         HostedGroupMember[]             @relation("HostedGroupMember")
   hostedGroupRuntime             HostedGroup?                    @relation("HostedGroupRuntimeMember")
-  hostedGroupJoinOfferPendingReactions HostedGroupJoinOfferPendingReaction[] @relation("HostedGroupJoinOfferPendingReactionMember")
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
@@ -1149,7 +1148,8 @@ model HostedGroup {
 model HostedGroupJoinOffer {
   id                  String      @id
   groupId             String      @map("group_id")
-  messageLookupKey    String      @unique @map("message_lookup_key")
+  offerFingerprint    String      @unique @map("offer_fingerprint")
+  messageLookupKey    String?     @unique @map("message_lookup_key")
   messageIdSuffix     String?     @map("message_id_suffix")
   offerScopeJson      Json        @map("projection_kinds_json")
   postedAt            DateTime    @map("posted_at")
@@ -1158,23 +1158,6 @@ model HostedGroupJoinOffer {
 
   @@index([groupId, revokedAt, postedAt])
   @@map("hosted_group_join_offer")
-}
-
-model HostedGroupJoinOfferPendingReaction {
-  eventId                               String       @id @map("event_id")
-  memberId                              String       @map("member_id")
-  messageLookupKey                      String       @map("message_lookup_key")
-  messageLookupKeyCandidatesJson        Json         @map("message_lookup_key_candidates_json")
-  threadIdentityLookupKeyCandidatesJson Json         @map("thread_identity_lookup_key_candidates_json")
-  providerCreatedAt                     DateTime     @map("provider_created_at")
-  acceptedAt                            DateTime?    @map("accepted_at")
-  createdAt                             DateTime     @default(now()) @map("created_at")
-  member                                HostedMember @relation("HostedGroupJoinOfferPendingReactionMember", fields: [memberId], references: [id], onDelete: Cascade)
-
-  @@index([messageLookupKey, acceptedAt, providerCreatedAt], map: "hgrp_pending_reaction_message_idx")
-  @@index([acceptedAt, providerCreatedAt], map: "hgrp_pending_reaction_open_idx")
-  @@index([memberId, acceptedAt], map: "hgrp_pending_reaction_member_idx")
-  @@map("hosted_group_join_offer_pending_reaction")
 }
 
 model HostedGroupMember {

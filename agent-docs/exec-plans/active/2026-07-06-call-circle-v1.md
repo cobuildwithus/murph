@@ -675,6 +675,30 @@ Focused follow-up verification:
 
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-connector-call.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts`
 
+## ReviewGPT Follow-Up 22 2026-07-08
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- Once a Call Circle bridge phone call has `providerStartAttemptedAt`, the
+  phone-call subsystem owns recovery and terminalization. The scheduler no
+  longer marks provider-attempted `starting` calls as text handoffs after a
+  grace window; Retell webhook/result processing or the phone-call stale-start
+  sweep remains the terminal owner.
+- Follow-Up 21's pending-reaction table added a second owner beside the group
+  offer. Group offers now reserve a durable `HostedGroupJoinOffer` by stable
+  offer fingerprint before provider send, bind the provider message lookup key
+  after send, and make positive no-offer reactions retryable only when the
+  Linq thread has an active unbound reservation. The pending-reaction table and
+  migration were removed.
+- Call Circle enrollment now enforces the existing group-chat participant cap
+  at the enrollment owner under the group row lock, preventing unbounded weekly
+  proposal scans and fanout.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web prisma:generate`
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT
