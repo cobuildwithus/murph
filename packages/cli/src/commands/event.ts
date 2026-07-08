@@ -407,7 +407,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
           to: input.to,
           tag: Array.isArray(input.tag) ? input.tag : undefined,
           experiment: input.experiment,
-          limit: input.limit ?? 50,
+          limit: input.limit ?? 10,
         })
       },
     },

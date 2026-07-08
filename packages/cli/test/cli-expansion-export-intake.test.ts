@@ -450,7 +450,7 @@ test.sequential(
         from: '2026-03-10',
         to: '2026-03-12',
         experiment: null,
-        limit: 50,
+        limit: 10,
       })
       assert.deepEqual(
         requireData(listResult).items.map((item) => item.packId),

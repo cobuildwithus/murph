@@ -11,6 +11,7 @@ import type {
   AssistantOutboxIntent,
   AssistantSession,
   AssistantTurnReceipt,
+  AssistantTurnReceiptSummary,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 const test = baseTest.sequential
@@ -164,6 +165,26 @@ const BASE_RECEIPT: AssistantTurnReceipt = {
   completedAt: '2026-04-08T00:01:05.000Z',
   lastError: null,
   timeline: [],
+}
+
+const BASE_RECEIPT_SUMMARY: AssistantTurnReceiptSummary = {
+  schema: 'murph.assistant-turn-receipt-summary.v1',
+  turnId: BASE_RECEIPT.turnId,
+  sessionId: BASE_RECEIPT.sessionId,
+  provider: BASE_RECEIPT.provider,
+  providerModel: BASE_RECEIPT.providerModel,
+  promptPreview: BASE_RECEIPT.promptPreview,
+  responsePreview: BASE_RECEIPT.responsePreview,
+  status: BASE_RECEIPT.status,
+  deliveryRequested: BASE_RECEIPT.deliveryRequested,
+  deliveryDisposition: BASE_RECEIPT.deliveryDisposition,
+  deliveryIntentId: BASE_RECEIPT.deliveryIntentId,
+  startedAt: BASE_RECEIPT.startedAt,
+  updatedAt: BASE_RECEIPT.updatedAt,
+  completedAt: BASE_RECEIPT.completedAt,
+  lastError: BASE_RECEIPT.lastError,
+  timelineEventCount: BASE_RECEIPT.timeline.length,
+  latestTimelineEvent: null,
 }
 
 const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
@@ -427,7 +448,7 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
           notes: [],
         },
       },
-      recentTurns: [BASE_RECEIPT],
+      recentTurns: [BASE_RECEIPT_SUMMARY],
       warnings: [],
     },
   })

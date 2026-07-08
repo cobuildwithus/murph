@@ -1,4 +1,10 @@
-import { access, open, readdir, readFile, type FileHandle } from 'node:fs/promises'
+import {
+  access,
+  open,
+  readdir,
+  readFile,
+  type FileHandle,
+} from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -52,6 +58,7 @@ import type { ResolvedAssistantSession } from './types.js'
 export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
 export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
+const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
 
 const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({
   name: 'assistant.automation-state',
@@ -598,6 +605,17 @@ export async function readAssistantIndexStore(
 
   try {
     const parsed = assistantAliasStoreSchema.parse(JSON.parse(raw))
+    if (parsed.recentSessions === undefined) {
+      if (await hasDurableAssistantSessions(paths)) {
+        return rebuildAssistantIndexStore(paths)
+      }
+      const upgraded = assistantAliasStoreSchema.parse({
+        ...parsed,
+        recentSessions: {},
+      })
+      await writeJsonFileAtomic(paths.indexesPath, upgraded)
+      return upgraded
+    }
     return parsed
   } catch (error) {
     const quarantine = await quarantineAssistantStateFile({
@@ -648,63 +666,37 @@ export async function synchronizeAssistantIndexes(
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
-    // Foreground saves never rebuild the projection (that would scan every
-    // session file on the reply commit path). While the projection is absent
-    // it stays absent, so the idle maintenance read can tell "not built yet"
-    // from "partially built" and do the one-time rebuild off the hot path.
-    ...(store.recentSessions === undefined
-      ? {}
-      : {
-          recentSessions: pruneAssistantRecentSessions({
-            ...store.recentSessions,
-            [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
-          }),
-        }),
+    recentSessions: pruneAssistantRecentSessions({
+      ...(store.recentSessions ?? {}),
+      [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
+    }),
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
 }
 
-const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 32
-
-// Recurring-maintenance projection reader. Deliberately does NOT go through
-// readAssistantIndexStore: that reader's missing/corrupt fallbacks rebuild
-// the index by scanning every session file, which is only acceptable on
-// explicit repair/routing paths. Here a parseable legacy index gets an
-// empty projection persisted once (O(1)) so bounded foreground saves warm
-// it up, and a missing or corrupt index just yields no evidence this wake.
-export async function ensureAssistantRecentSessionsProjection(
+export async function readAssistantRecentSessionIds(
   paths: AssistantStatePaths,
-): Promise<Record<string, string>> {
-  let raw: string
-  try {
-    raw = await readFile(paths.indexesPath, 'utf8')
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return {}
-    }
-    throw error
+  options: {
+    limit: number
+  },
+): Promise<string[]> {
+  const limit = Math.max(0, Math.trunc(options.limit))
+  if (limit === 0) {
+    return []
   }
 
-  let store: AssistantAliasStore
-  try {
-    store = assistantAliasStoreSchema.parse(JSON.parse(raw))
-  } catch {
-    // Corrupt index: quarantine/rebuild belongs to the routing read path.
-    return {}
-  }
+  const store = await readAssistantIndexStore(paths, { fresh: true })
+  return sortRecentSessionIds(store.recentSessions ?? {}).slice(0, limit)
+}
 
-  if (store.recentSessions !== undefined) {
-    return store.recentSessions
-  }
-
-  const updated = assistantAliasStoreSchema.parse({
-    version: ASSISTANT_INDEX_STORE_VERSION,
-    aliases: store.aliases,
-    conversationKeys: store.conversationKeys,
-    recentSessions: {},
-  })
-  await writeJsonFileAtomic(paths.indexesPath, updated)
-  return {}
+function sortRecentSessionIds(
+  recentSessions: Record<string, string>,
+): string[] {
+  return Object.entries(recentSessions)
+    .sort(([, left], [, right]) =>
+      compareAssistantTimestampsAscending(right, left),
+    )
+    .map(([sessionId]) => sessionId)
 }
 
 function pruneAssistantRecentSessions(
@@ -833,7 +825,7 @@ async function rebuildAssistantIndexStore(
     if (session.binding.conversationKey) {
       conversationKeys[session.binding.conversationKey] = session.sessionId
     }
-    recentSessions[session.sessionId] = session.lastTurnAt ?? session.updatedAt
+    recentSessions[session.sessionId] = resolveAssistantIndexRebuildTimestamp(session)
   }
 
   const rebuilt = assistantAliasStoreSchema.parse({

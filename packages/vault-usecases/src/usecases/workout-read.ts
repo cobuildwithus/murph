@@ -20,7 +20,7 @@ import {
   relativePathStrings,
 } from './vault-usecase-helpers.js'
 
-const DEFAULT_LIST_LIMIT = 50
+const DEFAULT_LIST_LIMIT = 5
 const TRACKED_WORKOUT_EVENT_KINDS = ['activity_session', 'body_measurement'] as const
 
 type TrackedWorkoutEventKind = (typeof TRACKED_WORKOUT_EVENT_KINDS)[number]
