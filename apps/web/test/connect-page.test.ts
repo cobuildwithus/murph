@@ -749,6 +749,43 @@ test("ConnectPage shows account-scoped disconnects for multi-source Junction acc
   assert.equal(markup.match(/aria-label="Disconnect Junction account"/gu)?.length, 2);
 });
 
+test("ConnectPage scopes disconnects by every non-disconnected Junction upstream", async () => {
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_multi_source",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Garmin",
+            resourceCount: 2,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+          {
+            providerLabel: "Apple Health",
+            resourceCount: 4,
+            sourceProviderSlug: "apple_health_kit",
+            status: "unavailable",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Garmin connected/u);
+  assert.doesNotMatch(markup, /Apple Health connected/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Garmin"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Apple Health"/u);
+  assert.equal(markup.match(/aria-label="Disconnect Junction account"/gu)?.length, 1);
+});
+
 test("ConnectPage keeps account disconnects visible for parent-level Junction reauthorization", async () => {
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");

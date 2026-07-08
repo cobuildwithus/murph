@@ -560,11 +560,7 @@ function resolveConnectSourceDisconnect(
     return { connectionId, scope: null };
   }
 
-  const affectedUpstreamSourceCount = isReauthorizationRequiredConnectSourceState(source.state)
-    ? source.upstreamSources.length
-    : countLiveJunctionUpstreamSources(source.upstreamSources);
-
-  if (affectedUpstreamSourceCount <= 1) {
+  if (countDisconnectableJunctionUpstreamSources(source.upstreamSources) <= 1) {
     return { connectionId, scope: null };
   }
 
@@ -580,12 +576,24 @@ function countLiveJunctionUpstreamSources(
   return upstreamSources.filter(isLiveJunctionUpstreamSource).length;
 }
 
+function countDisconnectableJunctionUpstreamSources(
+  upstreamSources: ConnectSettingsSourceMatch["upstreamSources"],
+): number {
+  return upstreamSources.filter(isDisconnectableJunctionUpstreamSource).length;
+}
+
 function isLiveJunctionUpstreamSource(
   source: ConnectSettingsSourceMatch["upstreamSources"][number],
 ): boolean {
   return source.status === "connected"
     || source.status === "error"
     || source.requiresReconnect === true;
+}
+
+function isDisconnectableJunctionUpstreamSource(
+  source: ConnectSettingsSourceMatch["upstreamSources"][number],
+): boolean {
+  return source.status !== "disconnected" || source.requiresReconnect === true;
 }
 
 function upsertConnectSourceConnection(
