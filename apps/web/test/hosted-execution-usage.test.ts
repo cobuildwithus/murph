@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   recordHostedAiUsageRecords,
@@ -92,6 +92,8 @@ const BASE_USAGE_RECORD = {
 
 describe("recordHostedAiUsageRecords", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-29T12:00:06.000Z"));
     vi.clearAllMocks();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
     allowanceMocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
@@ -111,6 +113,10 @@ describe("recordHostedAiUsageRecords", () => {
       kind: "home",
       recipientPhone: "+15555550123",
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("sends the home-route usage-limit notice after accounting reports a crossing", async () => {
@@ -339,6 +345,37 @@ describe("recordHostedAiUsageRecords", () => {
     expect(routingMocks.readHostedMemberRoutingState).toHaveBeenCalledOnce();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledOnce();
     expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+  });
+
+  it("skips crossing notices for usage periods that have already ended", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-01T00:00:01.000Z"));
+    try {
+      const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
+      const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+      allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
+        buildUsageLimitNoticeCandidate({
+          periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        }),
+      );
+
+      await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+        accountAllowance: true,
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [BASE_USAGE_RECORD],
+      })).resolves.toEqual({
+        recordedIds: ["turn_123.attempt-1"],
+      });
+
+      expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+      expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+      expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+      expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("skips the crossing notice when no home Linq route is available", async () => {
@@ -953,13 +990,14 @@ function buildUsageLimitNoticeCandidate(overrides: Partial<{
   memberId: string;
   noticeCode: string;
   noticeMessage: string;
+  periodEnd: Date;
   periodStart: Date;
   sourceUsageId: string;
 }> = {}) {
   return {
     crossedAt: new Date("2026-03-29T12:00:05.000Z"),
     memberId: overrides.memberId ?? "member_123",
-    periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+    periodEnd: overrides.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
     periodStart: overrides.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
     sourceUsageId: overrides.sourceUsageId ?? "turn_123.attempt-1",
     userNotice: {

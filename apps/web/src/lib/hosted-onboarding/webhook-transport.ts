@@ -1031,6 +1031,7 @@ async function claimHostedLinqNoticeForSideEffect(
         linqChatId: target.linqChatId,
         phoneNumber: target.phoneNumber,
         prisma,
+        reclaimFreshPreProviderAttempt: true,
         source: "hosted_webhook_side_effect",
         sourceRef: effect.effectId,
         targetKind: target.targetKind,

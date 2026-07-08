@@ -186,6 +186,15 @@ async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
   candidate: HostedAiUsageLimitNoticeCandidate;
   prisma: HostedAiUsageClient;
 }): Promise<void> {
+  const sentAt = new Date();
+  if (
+    sentAt < input.candidate.periodStart
+    || sentAt >= input.candidate.periodEnd
+  ) {
+    logHostedAiUsageLimitNoticeAtCrossing("period_not_current", input.candidate);
+    return;
+  }
+
   try {
     const route = readHostedLinqHomeLineAuthority(
       await readHostedMemberRoutingState({
@@ -198,7 +207,6 @@ async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
       return;
     }
 
-    const sentAt = new Date();
     await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
       chatId: route.chatId,
       claimToken: {
@@ -218,7 +226,7 @@ async function sendHostedAiUsageLimitNoticeAtCrossing(input: {
 }
 
 function logHostedAiUsageLimitNoticeAtCrossing(
-  reason: "home_route_missing" | "send_failed",
+  reason: "home_route_missing" | "period_not_current" | "send_failed",
   candidate: HostedAiUsageLimitNoticeCandidate,
   error?: unknown,
 ): void {

@@ -1209,6 +1209,56 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
+  it("reclaims fresh pre-provider delivery rows when the caller opts in", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:30.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_fresh_attempt",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      status: "attempted",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      reclaimFreshPreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "ai-usage-gate:member_123:2026-03",
+      targetKind: "thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_fresh_attempt",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt,
+          failedAt: null,
+          skippedAt: null,
+          status: "attempted",
+        }),
+        where: expect.objectContaining({
+          id: "hld_fresh_attempt",
+          OR: expect.arrayContaining([
+            { status: "attempted" },
+          ]),
+        }),
+      }),
+    );
+  });
+
   it("reclaims stale pre-provider delivery rows for a later provider dispatch retry", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");

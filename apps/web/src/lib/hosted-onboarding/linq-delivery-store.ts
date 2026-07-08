@@ -219,6 +219,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   linqChatId?: string | null;
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
+  reclaimFreshPreProviderAttempt?: boolean;
   source: string;
   sourceRef?: string | null;
   targetKind?: string | null;
@@ -276,6 +277,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       data,
       delivery: existing,
       prisma: input.prisma,
+      reclaimFreshPreProviderAttempt: input.reclaimFreshPreProviderAttempt ?? false,
     });
   }
 
@@ -304,6 +306,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       data,
       delivery: concurrent,
       prisma: input.prisma,
+      reclaimFreshPreProviderAttempt: input.reclaimFreshPreProviderAttempt ?? false,
     });
   }
 }
@@ -1280,6 +1283,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     status: string;
   };
   prisma: HostedLinqDeliveryClient;
+  reclaimFreshPreProviderAttempt: boolean;
 }): Promise<{ claimed: boolean; id: string | null }> {
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
@@ -1308,6 +1312,9 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
           },
           status: "attempted",
         },
+        ...(input.reclaimFreshPreProviderAttempt
+          ? [{ status: "attempted" }]
+          : []),
       ],
     },
     data: input.data,

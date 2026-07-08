@@ -6811,6 +6811,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       linqChatId: "chat_123",
       phoneNumber: undefined,
       prisma,
+      reclaimFreshPreProviderAttempt: true,
       source: "hosted_webhook_side_effect",
       sourceRef: expectedIdempotencyKey,
       targetKind: "thread",
