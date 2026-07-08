@@ -7,6 +7,7 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
+  hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
@@ -1438,6 +1439,56 @@ describe("hosted Linq observability stores", () => {
         }),
       }),
     );
+  });
+
+  it("detects terminal Telegram usage notice failures", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        failedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failureCode: "HostedRuntimeTelegramUsageLimitNoticeRejectedError",
+        status: "failed",
+      },
+    ]);
+
+    await expect(hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx({
+      idempotencyKeys: ["ai-usage-gate:member_123:2026-03"],
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(true);
+
+    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
+      select: {
+        failedAt: true,
+        failureCode: true,
+        status: true,
+      },
+      where: {
+        idempotencyKey: {
+          in: [
+            createHostedLinqDeliveryIdempotencyLookupKey(
+              "ai-usage-gate:member_123:2026-03",
+            ),
+          ],
+        },
+        source: "hosted_runtime_ai_usage_limit_notice",
+      },
+    });
+  });
+
+  it("does not treat retry-after Telegram usage notice failures as terminal", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        failedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failureCode: "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
+        status: "failed",
+      },
+    ]);
+
+    await expect(hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx({
+      idempotencyKeys: ["ai-usage-gate:member_123:2026-03"],
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(false);
   });
 
   it("reclaims stale pre-provider Telegram usage notice rows when the caller opts in", async () => {

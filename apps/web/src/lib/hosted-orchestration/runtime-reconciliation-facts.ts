@@ -48,6 +48,7 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
+  hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
 } from "../hosted-onboarding/linq-delivery-store";
@@ -469,6 +470,14 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     if (currentDeliverySentNotice) {
       return { status: "already_notified" };
     }
+    const currentDeliveryTerminalFailure =
+      await hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx({
+        idempotencyKeys: [idempotencyKey],
+        prisma: input.prisma,
+      });
+    if (currentDeliveryTerminalFailure) {
+      return { status: "already_notified" };
+    }
     const legacyPeriodClaimOwnsNotice =
       await hasFreshHostedAiUsageLimitNoticeClaim({
         memberId: input.userId,
@@ -494,7 +503,15 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
           idempotencyKeys: [idempotencyKey],
           prisma: input.prisma,
         });
-      return claimedCurrentDeliverySentNotice
+      if (claimedCurrentDeliverySentNotice) {
+        return { status: "already_notified" };
+      }
+      const claimedCurrentDeliveryTerminalFailure =
+        await hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx({
+          idempotencyKeys: [idempotencyKey],
+          prisma: input.prisma,
+        });
+      return claimedCurrentDeliveryTerminalFailure
         ? { status: "already_notified" }
         : buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }

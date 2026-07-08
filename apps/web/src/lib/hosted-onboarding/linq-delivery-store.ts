@@ -343,6 +343,39 @@ export async function hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysT
   return deliveries.some(isHostedLinqDeliveryProviderCorrelated);
 }
 
+export async function hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx(input: {
+  idempotencyKeys: readonly string[];
+  prisma: HostedLinqDeliveryClient;
+}): Promise<boolean> {
+  const idempotencyKeys = [
+    ...new Set(input.idempotencyKeys
+      .map((key) => createHostedLinqDeliveryIdempotencyLookupKey(key))
+      .filter((key): key is string => Boolean(key))),
+  ];
+  if (idempotencyKeys.length === 0) {
+    return false;
+  }
+
+  const deliveries = await input.prisma.hostedLinqDelivery.findMany({
+    where: {
+      idempotencyKey: {
+        in: idempotencyKeys,
+      },
+      source: HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE,
+    },
+    select: {
+      failedAt: true,
+      failureCode: true,
+      status: true,
+    },
+  });
+
+  return deliveries.some((delivery) =>
+    (delivery.failedAt !== null || delivery.status === "failed")
+    && delivery.failureCode !== "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError"
+  );
+}
+
 export async function hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx(
   input: {
     attemptedAt?: Date;
