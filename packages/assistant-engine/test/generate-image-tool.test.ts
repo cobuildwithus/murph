@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
+import { initializeVault } from '@murphai/core'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -77,6 +78,7 @@ describe('executeGenerateImageTool reference images', () => {
     await withTempDir(async (root) => {
       const vaultRoot = path.join(root, 'vault')
       const codexHome = path.join(root, 'codex-home')
+      await initializeVault({ vaultRoot })
       const refPath = path.join(vaultRoot, 'raw', 'inbox', 'photo.png')
       await mkdir(path.dirname(refPath), { recursive: true })
       await writeFile(refPath, PNG_BYTES)

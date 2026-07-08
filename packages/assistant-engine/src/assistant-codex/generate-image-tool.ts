@@ -1,8 +1,10 @@
 import { Buffer } from 'node:buffer'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 
+import { addCapture } from '@murphai/core'
 import type {
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -44,6 +46,8 @@ export interface GenerateImageToolResult {
   responseMedia?: AssistantResponseMedia[]
   rpcSuccess: boolean
   rpcText: string
+  savedCaptureId?: string | null
+  savedImageRef?: string | null
   usageDraft?: AssistantProviderUsageDraft | null
 }
 
@@ -57,6 +61,13 @@ type GenerateImageUsageExtractionSourcePath =
 
 const LOCAL_GENERATED_IMAGES_DIR = 'generated_images'
 const MAX_GENERATED_IMAGE_BYTES = 10 * 1024 * 1024
+const GENERATED_IMAGE_CAPTURE_SOURCE = 'murph.generate_image'
+
+interface SavedGeneratedImageCapture {
+  captureId: string
+  imageRef: string
+  manifestPath: string | null
+}
 
 export async function executeGenerateImageTool(input: {
   abortSignal?: AbortSignal | null
@@ -176,6 +187,25 @@ export async function executeGenerateImageTool(input: {
     }
   }
 
+  let savedCapture: SavedGeneratedImageCapture | null = null
+  if (vaultRoot) {
+    try {
+      savedCapture = await saveGeneratedImageCapture({
+        args: input.args,
+        bytes: openAiResult.imageBytes,
+        promptHash,
+        referenceImages,
+        vaultRoot,
+      })
+    } catch {
+      return {
+        rpcSuccess: false,
+        rpcText: 'image generated but vault save failed',
+        usageDraft,
+      }
+    }
+  }
+
   try {
     if (input.hostedGeneratedImageUploader) {
       const media = await input.hostedGeneratedImageUploader.uploadGeneratedImage({
@@ -199,7 +229,11 @@ export async function executeGenerateImageTool(input: {
       return {
         responseMedia: [media],
         rpcSuccess: true,
-        rpcText: 'generated image attached to the final response',
+        rpcText: savedCapture
+          ? `generated image attached to the final response and saved to the vault as ${savedCapture.imageRef}`
+          : 'generated image attached to the final response',
+        savedCaptureId: savedCapture?.captureId ?? null,
+        savedImageRef: savedCapture?.imageRef ?? null,
         usageDraft,
       }
     }
@@ -211,7 +245,11 @@ export async function executeGenerateImageTool(input: {
     })
     return {
       rpcSuccess: true,
-      rpcText: `generated image saved at ${localPath.displayPath}`,
+      rpcText: savedCapture
+        ? `generated image saved at ${localPath.displayPath} and saved to the vault as ${savedCapture.imageRef}`
+        : `generated image saved at ${localPath.displayPath}`,
+      savedCaptureId: savedCapture?.captureId ?? null,
+      savedImageRef: savedCapture?.imageRef ?? null,
       usageDraft,
     }
   } catch {
@@ -222,6 +260,77 @@ export async function executeGenerateImageTool(input: {
         : 'image generated but local save failed',
       usageDraft,
     }
+  }
+}
+
+async function saveGeneratedImageCapture(input: {
+  args: GenerateImageToolArgs
+  bytes: Uint8Array
+  promptHash: string
+  referenceImages: readonly ResolvedGenerateImageReference[]
+  vaultRoot: string
+}): Promise<SavedGeneratedImageCapture> {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-generated-image-'))
+  try {
+    const filename = generatedImageFilename(input.args.outputFormat)
+    const sourcePath = path.join(tempRoot, filename)
+    await writeFile(sourcePath, Buffer.from(input.bytes))
+
+    const occurredAt = new Date().toISOString()
+    const result = await addCapture({
+      vaultRoot: input.vaultRoot,
+      draft: {
+        occurredAt,
+        source: 'derived',
+        tags: ['assistant-generated-image', 'generated-image'],
+        title: 'Generated image',
+        note: 'Assistant-generated image saved for later visual reuse.',
+      },
+      attachments: [
+        {
+          kind: 'photo',
+          role: 'media_1',
+          sourcePath,
+          targetName: filename,
+        },
+      ],
+      rawImport: {
+        importedAt: occurredAt,
+        importKind: 'capture',
+        source: GENERATED_IMAGE_CAPTURE_SOURCE,
+        provenance: {
+          family: 'capture',
+          generatedImage: {
+            model: OPENAI_IMAGE_GENERATION_MODEL,
+            outputFormat: input.args.outputFormat,
+            promptHash: input.promptHash,
+            quality: input.args.quality,
+            referenceImageCount: input.referenceImages.length,
+            ...(input.referenceImages.length > 0
+              ? { referenceImageSetHash: hashReferenceImageSet(input.referenceImages) }
+              : {}),
+            schema: 'murph.generated-image.v1',
+            size: input.args.size,
+          },
+          mediaCount: 1,
+        },
+      },
+    })
+
+    const imageRef = result.event.attachments?.find((attachment) =>
+      attachment.role === 'media_1'
+    )?.relativePath ?? null
+    if (!imageRef) {
+      throw new Error('Generated image capture did not produce a media ref.')
+    }
+
+    return {
+      captureId: result.eventId,
+      imageRef,
+      manifestPath: result.manifestPath,
+    }
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true })
   }
 }
 

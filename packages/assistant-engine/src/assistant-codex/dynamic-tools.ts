@@ -194,7 +194,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    'Generate one image with GPT Image 2, optionally using ordered vault image references. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. Hosted runs attach the generated image to the final response; local runs save it under CODEX_HOME/generated_images.',
+    'Generate one image with GPT Image 2, optionally using ordered vault image references. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs also attach the generated image to the final response; local runs also save it under CODEX_HOME/generated_images.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -371,7 +371,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL. A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -2184,6 +2184,9 @@ async function executeGroupTool(input: {
 
   let request: HostedRuntimeGroupToolRequest
   let usageDraft: AssistantProviderUsageDraft | null = null
+  let generatedAvatarCapture:
+    | { savedCaptureId: string | null; savedImageRef: string | null }
+    | null = null
   if (isPreparedGroupAvatarRequest(input.request)) {
     let preflight: Extract<HostedRuntimeGroupToolResponse, { action: 'preflight_set_chat_avatar' }>
     try {
@@ -2223,14 +2226,23 @@ async function executeGroupTool(input: {
     }
     request = prepared.request
     usageDraft = prepared.usageDraft ?? null
+    generatedAvatarCapture = prepared.savedImageRef
+      ? {
+          savedCaptureId: prepared.savedCaptureId ?? null,
+          savedImageRef: prepared.savedImageRef,
+        }
+      : null
   } else {
     request = input.request
   }
 
   try {
     const result = await groupTool.request(request)
+    const payload = generatedAvatarCapture
+      ? { ...result, generatedImage: generatedAvatarCapture }
+      : result
     return {
-      ...toolTextResult(true, safeToolPayloadText(result)),
+      ...toolTextResult(true, safeToolPayloadText(payload)),
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch {
@@ -2260,6 +2272,8 @@ async function prepareGroupAvatarRuntimeRequest(input: {
   | {
       request: Extract<HostedRuntimeGroupToolRequest, { action: 'set_chat_avatar' }>
       rpcSuccess: true
+      savedCaptureId?: string | null
+      savedImageRef?: string | null
       usageDraft?: AssistantProviderUsageDraft | null
     }
   | {
@@ -2299,6 +2313,8 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     return {
       request: { action: 'set_chat_avatar', groupChatIconUrl: media.url },
       rpcSuccess: true,
+      savedCaptureId: generated.savedCaptureId ?? null,
+      savedImageRef: generated.savedImageRef ?? null,
       usageDraft: generated.usageDraft ?? null,
     }
   }

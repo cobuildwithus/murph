@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { initializeVault } from '@murphai/core'
 
 import {
   executeGenerateImageTool,
@@ -117,6 +118,8 @@ describe('executeGenerateImageTool', () => {
   })
 
   it('uploads hosted images and returns normalized response media', async () => {
+    const vaultRoot = await createTempDir('assistant-image-tool-vault-')
+    await initializeVault({ vaultRoot })
     const uploader = {
       uploadGeneratedImage: vi.fn(async (input) => {
         expect(input.alt).toBe('A product photo')
@@ -161,6 +164,7 @@ describe('executeGenerateImageTool', () => {
       hostedGeneratedImageUploader: uploader,
       providerRequestOrdinal: 4,
       requireHostedGeneratedImageUploader: true,
+      vaultRoot,
     })
 
     expect(fetchImpl).toHaveBeenCalledOnce()
@@ -175,8 +179,14 @@ describe('executeGenerateImageTool', () => {
         },
       ],
       rpcSuccess: true,
-      rpcText: 'generated image attached to the final response',
     })
+    expect(result.rpcText).toMatch(
+      /^generated image attached to the final response and saved to the vault as raw\/captures\/.+\.webp$/u,
+    )
+    expect(result.savedCaptureId).toMatch(/^evt_[A-Za-z0-9_-]+$/u)
+    expect(result.savedImageRef).toMatch(/^raw\/captures\/.+\.webp$/u)
+    await expect(readFile(path.join(vaultRoot, result.savedImageRef!)))
+      .resolves.toEqual(Buffer.from(webpBytes))
     expect(result.usageDraft?.providerRequestOrdinal).toBe(4)
     expect(result.usageDraft?.providerRequestOutcome).toBe('succeeded')
     expect(result.usageDraft?.usage).toMatchObject({
@@ -660,6 +670,8 @@ describe('murph.generate_image dynamic tool execution', () => {
   })
 
   it('parses a Codex dynamic tool call and appends hosted media with image usage', async () => {
+    const vaultRoot = await createTempDir('assistant-image-tool-dynamic-vault-')
+    await initializeVault({ vaultRoot })
     const uploader = {
       uploadGeneratedImage: vi.fn(async (input) => ({
         alt: input.alt,
@@ -717,6 +729,7 @@ describe('murph.generate_image dynamic tool execution', () => {
       progressDelivery: null,
       request: request!,
       requireHostedGeneratedImageUploader: true,
+      vaultRoot,
     })
 
     expect(nextUsageOrdinal).toHaveBeenCalledOnce()
@@ -725,10 +738,18 @@ describe('murph.generate_image dynamic tool execution', () => {
       contentItems: [
         {
           type: 'inputText',
-          text: 'generated image attached to the final response',
+          text: expect.stringMatching(
+            /^generated image attached to the final response and saved to the vault as raw\/captures\/.+\.webp$/u,
+          ),
         },
       ],
     })
+    const savedImageRef = result.rpcResult.contentItems[0]?.type === 'inputText'
+      ? result.rpcResult.contentItems[0].text.match(/raw\/captures\/.+\.webp/u)?.[0]
+      : null
+    expect(savedImageRef).toBeTruthy()
+    await expect(readFile(path.join(vaultRoot, savedImageRef!)))
+      .resolves.toEqual(Buffer.from(webpBytes))
     expect(result.responseMediaPatch).toEqual({
       media: [
         {
