@@ -11889,7 +11889,7 @@
                   "maxLength": 128
                 },
                 "recordType": {
-                  "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, journal, protocol, provider, regimen, recipe, sample, workout_format.",
+                  "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, habitat, journal, protocol, provider, regimen, recipe, sample, workout_format.",
                   "type": "array",
                   "items": {
                     "type": "string",
@@ -11975,7 +11975,7 @@
                           "minLength": 1
                         },
                         "recordType": {
-                          "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, journal, protocol, provider, regimen, recipe, sample, workout_format.",
+                          "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, habitat, journal, protocol, provider, regimen, recipe, sample, workout_format.",
                           "type": "array",
                           "items": {
                             "type": "string",
