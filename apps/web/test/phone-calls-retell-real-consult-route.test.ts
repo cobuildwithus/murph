@@ -182,6 +182,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     memberId: "member_123",
     provider: "retell",
     providerCallId: "retell_call_123",
+    providerStartAttemptedAt: null,
     requestKey: "phone_call_request_1",
     resultJson: null,
     status: "calling",

@@ -259,7 +259,6 @@ function dueCallCircleMatchWhere(input: {
         },
       },
       {
-        phoneCallId: null,
         status: "bridging",
         windowEndAt: {
           gt: new Date(input.now.getTime() - CALL_CIRCLE_STRANDED_BRIDGE_LOOKBACK_MS),

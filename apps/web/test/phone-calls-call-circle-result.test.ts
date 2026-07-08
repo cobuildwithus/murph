@@ -318,6 +318,7 @@ function buildCallCirclePhoneCall(): HostedPhoneCall {
     memberId: "member_a",
     provider: "retell",
     providerCallId: "retell_call_123",
+    providerStartAttemptedAt: null,
     requestKey: "call-circle:hccm_123",
     resultJson: null,
     status: "ended",

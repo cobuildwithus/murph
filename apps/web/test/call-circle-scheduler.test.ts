@@ -1189,8 +1189,8 @@ describe("runCallCircleScheduler", () => {
       .toBeLessThan(mocks.expirePastCallCircleMatches.mock.invocationCallOrder[0]);
   });
 
-  it("hands off an attached unstarted bridge after the call window is missed", async () => {
-    const now = new Date("2026-07-06T15:45:00.000Z");
+  it("hands off an attached unstarted bridge after the normal due window is missed", async () => {
+    const now = new Date("2026-07-06T17:45:00.000Z");
     const tx = {};
     const prisma = createSchedulerPrisma({
       dueMatches: [schedulerMatch({
@@ -1225,6 +1225,19 @@ describe("runCallCircleScheduler", () => {
       status: "dropped",
     });
     expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedCallCircleMatch.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([{
+            status: "bridging",
+            windowEndAt: {
+              gt: new Date("2026-06-29T17:45:00.000Z"),
+            },
+          }]),
+        }),
+      }),
+    );
   });
 
   it("retries terminal Call Circle outcome notifications that were not appended yet", async () => {

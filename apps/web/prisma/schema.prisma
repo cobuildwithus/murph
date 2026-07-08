@@ -572,20 +572,21 @@ model HostedComputerHandoff {
 }
 
 model HostedPhoneCall {
-  id             String                @id
-  memberId       String                @map("member_id")
-  requestKey     String                @map("request_key")
-  provider       String                @default("retell")
-  providerCallId String?               @unique @map("provider_call_id")
-  status         HostedPhoneCallStatus @default(starting)
-  briefJson      Json                  @map("brief_json")
-  resultJson     Json?                 @map("result_json")
-  endedAt        DateTime?             @map("ended_at")
-  analyzedAt     DateTime?             @map("analyzed_at")
-  createdAt      DateTime              @default(now()) @map("created_at")
-  updatedAt      DateTime              @updatedAt @map("updated_at")
-  member         HostedMember          @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  callCircleMatches HostedCallCircleMatch[]
+  id                       String                @id
+  memberId                 String                @map("member_id")
+  requestKey               String                @map("request_key")
+  provider                 String                @default("retell")
+  providerCallId           String?               @unique @map("provider_call_id")
+  providerStartAttemptedAt DateTime?             @map("provider_start_attempted_at")
+  status                   HostedPhoneCallStatus @default(starting)
+  briefJson                Json                  @map("brief_json")
+  resultJson               Json?                 @map("result_json")
+  endedAt                  DateTime?             @map("ended_at")
+  analyzedAt               DateTime?             @map("analyzed_at")
+  createdAt                DateTime              @default(now()) @map("created_at")
+  updatedAt                DateTime              @updatedAt @map("updated_at")
+  member                   HostedMember          @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  callCircleMatches        HostedCallCircleMatch[]
 
   @@unique([memberId, requestKey])
   @@index([memberId, createdAt])

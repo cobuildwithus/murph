@@ -76,7 +76,6 @@ describe("createHostedPhoneCall", () => {
     })]);
     expectProviderStartAttemptUpdate(store.updateManyCalls[0], {
       callId: createdCallId,
-      updatedAt: created.updatedAt,
     });
     expect(store.updateManyCalls[1]).toEqual({
       data: {
@@ -269,7 +268,6 @@ describe("createHostedPhoneCall", () => {
     })]);
     expectProviderStartAttemptUpdate(store.updateManyCalls[0], {
       callId: "hpc_existing",
-      updatedAt: new Date(0),
     });
     expect(store.updateManyCalls[1]).toEqual({
       data: {
@@ -348,11 +346,12 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toHaveLength(1);
   });
 
-  it("fails stale duplicate reservations that already attempted provider start", async () => {
+  it("keeps stale duplicate reservations that already attempted provider start active", async () => {
     const existing = buildHostedPhoneCall({
       createdAt: new Date(0),
       id: "hpc_existing",
       providerCallId: null,
+      providerStartAttemptedAt: new Date("2026-01-01T00:00:00.000Z"),
       status: "starting",
       updatedAt: new Date("2026-01-01T00:00:00.000Z"),
     });
@@ -373,25 +372,10 @@ describe("createHostedPhoneCall", () => {
 
     expect(response).toEqual({
       phoneCallId: "hpc_existing",
-      status: "failed",
+      status: "starting",
     });
     expect(runtime.startCalls).toEqual([]);
-    expect(store.updateManyCalls).toEqual([{
-      data: {
-        resultJson: {
-          outcome: "not_completed",
-          summary: "Murph could not start the phone call.",
-        },
-        status: "failed",
-      },
-      where: {
-        analyzedAt: null,
-        id: "hpc_existing",
-        provider: "retell",
-        providerCallId: null,
-        status: "starting",
-      },
-    }]);
+    expect(store.updateManyCalls).toEqual([]);
   });
 
   it("fails stale duplicate unstarted reservations instead of replaying starting forever", async () => {
@@ -499,7 +483,7 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toHaveLength(1);
   });
 
-  it("marks the call failed when the provider start fails", async () => {
+  it("keeps provider-start failures active after the provider attempt is marked", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
     const runtime = createPhoneCallRuntime({
@@ -514,28 +498,20 @@ describe("createHostedPhoneCall", () => {
       requestKey: created.requestKey,
       runtime: runtime.runtime,
       transferNumberResolver: createTransferNumberResolver(null),
-    })).rejects.toThrow("provider unavailable");
+    })).resolves.toEqual({
+      phoneCallId: store.createCalls[0]!.data.id,
+      status: "starting",
+    });
 
     const createdCallId = store.createCalls[0]!.data.id;
     expectProviderStartAttemptUpdate(store.updateManyCalls[0], {
       callId: createdCallId,
-      updatedAt: created.updatedAt,
     });
-    expect(store.updateManyCalls[1]).toEqual({
-      data: {
-        resultJson: {
-          outcome: "not_completed",
-          summary: "Murph could not start the phone call.",
-        },
-        status: "failed",
-      },
-      where: {
-        analyzedAt: null,
-        id: createdCallId,
-        provider: "retell",
-        providerCallId: null,
-        status: "starting",
-      },
+    expect(store.updateManyCalls).toHaveLength(1);
+    expect(store.currentCall()).toMatchObject({
+      providerCallId: null,
+      resultJson: null,
+      status: "starting",
     });
   });
 
@@ -617,7 +593,6 @@ describe("createHostedPhoneCall", () => {
     })]);
     expectProviderStartAttemptUpdate(store.updateManyCalls[0], {
       callId: createdCallId,
-      updatedAt: created.updatedAt,
     });
     expect(store.updateManyCalls[1]).toEqual({
       data: {
@@ -678,24 +653,8 @@ describe("createHostedPhoneCall", () => {
     });
     expectProviderStartAttemptUpdate(store.updateManyCalls[0], {
       callId: createdCallId,
-      updatedAt: created.updatedAt,
     });
-    expect(store.updateManyCalls[1]).toEqual({
-      data: {
-        resultJson: {
-          outcome: "not_completed",
-          summary: "Murph could not start the phone call.",
-        },
-        status: "failed",
-      },
-      where: {
-        analyzedAt: null,
-        id: createdCallId,
-        provider: "retell",
-        providerCallId: null,
-        status: "starting",
-      },
-    });
+    expect(store.updateManyCalls).toHaveLength(1);
     expect(store.currentCall()).toMatchObject({
       providerCallId: "retell_started",
       resultJson: {
@@ -826,9 +785,10 @@ function createPhoneCallStore(input: {
         current = {
           ...current,
           providerCallId: args.data.providerCallId ?? current.providerCallId,
+          providerStartAttemptedAt:
+            args.data.providerStartAttemptedAt ?? current.providerStartAttemptedAt,
           resultJson: args.data.resultJson ?? current.resultJson,
           status: args.data.status ?? current.status,
-          updatedAt: args.data.updatedAt ?? current.updatedAt,
         };
         return { count: 1 };
       },
@@ -881,12 +841,11 @@ function expectProviderStartAttemptUpdate(
   update: PhoneCallUpdateManyInput | undefined,
   input: {
     callId: string;
-    updatedAt: Date;
   },
 ): void {
   expect(update).toEqual({
     data: {
-      updatedAt: expect.any(Date),
+      providerStartAttemptedAt: expect.any(Date),
     },
     where: {
       analyzedAt: null,
@@ -894,8 +853,8 @@ function expectProviderStartAttemptUpdate(
       id: input.callId,
       provider: "retell",
       providerCallId: null,
+      providerStartAttemptedAt: null,
       status: "starting",
-      updatedAt: input.updatedAt,
     },
   });
 }
@@ -911,8 +870,8 @@ function matchesUpdateManyWhere(
     && (where.analyzedAt === undefined || call.analyzedAt === where.analyzedAt)
     && (where.endedAt === undefined || call.endedAt === where.endedAt)
     && (
-      where.updatedAt === undefined
-      || call.updatedAt.getTime() === where.updatedAt.getTime()
+      where.providerStartAttemptedAt === undefined
+      || call.providerStartAttemptedAt === where.providerStartAttemptedAt
     );
 }
 
@@ -927,6 +886,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     memberId: "member_1",
     provider: "retell",
     providerCallId: null,
+    providerStartAttemptedAt: null,
     requestKey: "phone_call_request_1",
     resultJson: null,
     status: "starting",

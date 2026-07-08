@@ -53,9 +53,9 @@ interface HostedPhoneCallStore {
     updateMany(input: {
       data: {
         providerCallId?: string;
+        providerStartAttemptedAt?: Date;
         resultJson?: HostedPhoneCallResult;
         status?: HostedPhoneCall["status"];
-        updatedAt?: Date;
       };
       where: {
         analyzedAt?: null;
@@ -63,8 +63,8 @@ interface HostedPhoneCallStore {
         id: string;
         provider: "retell";
         providerCallId: null;
+        providerStartAttemptedAt?: null;
         status: "starting";
-        updatedAt?: Date;
       };
     }): Promise<{ count: number }>;
   };
@@ -146,13 +146,9 @@ export async function createHostedPhoneCall(input: {
         };
       }
       if (hasProviderStartAttemptMarker(existing)) {
-        const replayed = await failStaleUnstartedPhoneCallReservation({
-          call: existing,
-          prisma,
-        });
         return {
-          phoneCallId: replayed.id,
-          status: toStartResponseStatus(replayed.status),
+          phoneCallId: existing.id,
+          status: toStartResponseStatus(existing.status),
         };
       }
       return await startHostedPhoneCallReservation({
@@ -225,6 +221,11 @@ async function startHostedPhoneCallReservation(input: {
     ) {
       throw new Error("Hosted phone call start aborted.");
     }
+    const transferNumber = input.brief.allowTransferToUser
+      ? await input.resolveTransferNumber({
+          memberId: input.memberId,
+        })
+      : null;
     const providerStartAttempt = await markHostedPhoneCallProviderStartAttempt({
       call,
       prisma: input.prisma,
@@ -243,13 +244,16 @@ async function startHostedPhoneCallReservation(input: {
       openingLine: input.runtimeOptions?.openingLine ?? null,
       retellAgentId: input.runtimeOptions?.retellAgentId ?? null,
       retellAgentVersion: input.runtimeOptions?.retellAgentVersion ?? null,
-      transferNumber: input.brief.allowTransferToUser
-        ? await input.resolveTransferNumber({
-            memberId: input.memberId,
-          })
-        : null,
+      transferNumber,
     });
   } catch (error) {
+    if (hasProviderStartAttemptMarker(call)) {
+      return {
+        phoneCallId: call.id,
+        status: toStartResponseStatus(call.status),
+      };
+    }
+
     const updated = await input.prisma.hostedPhoneCall.updateMany({
       data: {
         resultJson: {
@@ -347,7 +351,7 @@ function isStaleUnstartedPhoneCallReservation(call: HostedPhoneCall): boolean {
 }
 
 function hasProviderStartAttemptMarker(call: HostedPhoneCall): boolean {
-  return call.updatedAt.getTime() > call.createdAt.getTime();
+  return call.providerStartAttemptedAt !== null;
 }
 
 async function markHostedPhoneCallProviderStartAttempt(input: {
@@ -359,15 +363,15 @@ async function markHostedPhoneCallProviderStartAttempt(input: {
 > {
   const markedAt = new Date();
   const updated = await input.prisma.hostedPhoneCall.updateMany({
-    data: { updatedAt: markedAt },
+    data: { providerStartAttemptedAt: markedAt },
     where: {
       analyzedAt: null,
       endedAt: null,
       id: input.call.id,
       provider: "retell",
       providerCallId: null,
+      providerStartAttemptedAt: null,
       status: "starting",
-      updatedAt: input.call.updatedAt,
     },
   });
   if (updated.count === 0) {
@@ -382,7 +386,7 @@ async function markHostedPhoneCallProviderStartAttempt(input: {
   return {
     call: {
       ...input.call,
-      updatedAt: markedAt,
+      providerStartAttemptedAt: markedAt,
     },
     marked: true,
   };
@@ -398,6 +402,7 @@ async function failStaleUnstartedPhoneCallReservation(input: {
   };
   if (
     !isStaleUnstartedPhoneCallReservation(input.call)
+    || hasProviderStartAttemptMarker(input.call)
   ) {
     return input.call;
   }

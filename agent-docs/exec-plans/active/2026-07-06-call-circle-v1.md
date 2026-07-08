@@ -395,6 +395,32 @@ Focused follow-up verification:
 - `pnpm --filter @murphai/assistant-engine test -- assistant-notification-turn-runtime.test.ts assistant-automation-runtime.test.ts assistant-return-contact-kind.test.ts`
 - `pnpm --filter @murphai/assistant-engine typecheck`
 
+## ReviewGPT Follow-Up 9 2026-07-07
+
+Accepted findings from the ninth PR ReviewGPT pass:
+
+- The generic `HostedPhoneCall` provider-egress idempotency boundary must be
+  a durable nullable fact, not an inference from `updatedAt`. The prior
+  Follow-Up 8 marker is superseded by `providerStartAttemptedAt`, set once
+  immediately before Retell egress after local preflight and transfer-number
+  resolution. Duplicate recovery can only start stale reservations where this
+  field is still null.
+- Provider-start errors after `providerStartAttemptedAt` is set are
+  ambiguous external attempts. Keep the row `starting` instead of locally
+  failing it, so a later Retell webhook with `murph_phone_call_id` can repair
+  the row.
+- The long stranded-bridge scheduler lookback must include attached
+  `bridging` matches as well as unattached ones; the existing recoverable
+  phone-call predicate remains the guard for attached rows.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/phone-calls-service.test.ts apps/web/test/call-circle-scheduler.test.ts`
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/phone-calls-service.test.ts`
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/phone-calls-service.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/phone-calls-retell-real-consult-route.test.ts apps/web/test/phone-calls-call-circle-result.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+- `pnpm --filter @murphai/assistant-engine typecheck`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT
