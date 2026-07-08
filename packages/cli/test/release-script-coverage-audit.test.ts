@@ -315,7 +315,12 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'pr-reviewgpt-loop.md'),
       'utf8',
     )
-    expect(prReviewGptLoop).toContain('does **not** run the local Codex')
+    expect(prReviewGptLoop).toContain('Required post-completion ReviewGPT loop')
+    expect(prReviewGptLoop).toContain('pnpm review:gpt pr-review')
+    expect(prReviewGptLoop).toContain('Eragon managed browser profile')
+    expect(prReviewGptLoop).toContain('zero accepted findings')
+    expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
+    expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('scripts/review-gpt-pr-head-preflight.sh')
     expect(prReviewGptLoop).toContain('REVIEW_COMPLETE')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)

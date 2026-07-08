@@ -12,13 +12,22 @@ import {
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupToolRequest,
+  type HostedRuntimeGroupToolResponse,
   type HostedRuntimeNewsletterParticipantSummary,
   type HostedRuntimeNewsletterScheduledAuthority,
   type HostedRuntimeNewsletterToolRequest,
   type HostedRuntimeNewsletterToolResponse,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
-import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from '@murphai/hosted-execution/vault-share'
+import {
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareProjectionScopeKey,
+  parseHostedVaultShareProjectionScope,
+  type HostedVaultShareSelectableProjectionScope,
+} from '@murphai/hosted-execution/vault-share'
 import type { OverviewWeeklyStat } from '@murphai/query'
 import {
   buildHostedComputerRunOperationPath,
@@ -43,6 +52,7 @@ import {
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 import type {
+  AssistantGeneratedImageContentType,
   AssistantHostedGeneratedImageUploader,
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
@@ -68,6 +78,10 @@ import {
   executeGenerateImageTool,
   type GenerateImageToolArgs,
 } from './generate-image-tool.js'
+import {
+  resolveGenerateImageReferences,
+  type ResolvedGenerateImageReference,
+} from './image-reference-resolver.js'
 import {
   type GenerateSongToolArgs,
   type GenerateVoiceMemoToolArgs,
@@ -325,11 +339,39 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
+const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [
+        ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+        HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+      ],
+    },
+    selector: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['activityKind'],
+      properties: {
+        activityKind: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS],
+        },
+      },
+      description:
+        'Required only for activity-minutes-days.v1; omit selector for fixed projection kinds.',
+    },
+  },
+} as const
+
 export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL. A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -338,9 +380,11 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: [
           'read_current',
+          'update_display_name',
           'create_join_link',
           'post_join_offer',
           'read_chat_participants',
+          'set_chat_avatar',
           'share_contact_card',
           'revoke_own_email_share',
         ],
@@ -350,39 +394,89 @@ export const MURPH_GROUP_TOOL = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
         description:
-          'Optional group display name shown on the join page when creating a join link.',
+          'Group display name. Required for action="update_display_name", which requests the iMessage group chat title update and stores the same hosted group label; optional for action="create_join_link" or action="post_join_offer" only when it is the name the group chose.',
+      },
+      avatarSource: {
+        type: 'string',
+        enum: ['generate', 'image_ref'],
+        description:
+          'Required for action="set_chat_avatar". Use "generate" to create a new square avatar from prompt, or "image_ref" to reuse one user-sent JPG, PNG, or WebP image ref.',
+      },
+      prompt: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 4000,
+        description:
+          'Required for action="set_chat_avatar" with avatarSource="generate". Prompt for one square group chat avatar image.',
+      },
+      imageRef: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 1024,
+        description:
+          'Required for action="set_chat_avatar" with avatarSource="image_ref". A user-sent JPG, PNG, or WebP ref under raw/inbox/** or raw/captures/**.',
+      },
+      size: {
+        type: 'string',
+        enum: ['1024x1024'],
+        default: '1024x1024',
+        description: 'For generated group avatars. Group avatars are square.',
+      },
+      quality: {
+        type: 'string',
+        enum: ['low', 'medium', 'high'],
+        default: 'medium',
+      },
+      outputFormat: {
+        type: 'string',
+        enum: ['webp', 'png', 'jpeg'],
+        default: 'webp',
+      },
+      alt: {
+        anyOf: [
+          { type: 'string', minLength: 1, maxLength: 500 },
+          { type: 'null' },
+        ],
+        default: null,
+        description: 'Optional alt text for the generated or reused avatar image.',
+      },
+      referenceImageRefs: {
+        type: 'array',
+        maxItems: 16,
+        default: [],
+        description:
+          'Optional ordered JPG, PNG, or WebP image refs to use as visual references when action="set_chat_avatar" and avatarSource="generate".',
+        items: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 1024,
+        },
       },
       kind: {
         type: 'string',
         enum: [...HOSTED_RUNTIME_GROUP_KINDS],
         description: 'Optional group kind when creating a join link.',
       },
-      requestedVaultShareProjectionKinds: {
+      requestedVaultShareProjectionScopes: {
         type: 'array',
-        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length,
-        items: {
-          type: 'string',
-          enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
-        },
+        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
+        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projections the join page may offer joining members. Joining never shares them automatically; each member approves their own selection.',
+          'Optional bounded health projection scopes the join page may offer joining members. Joining never shares them automatically; each member approves their own selection. Use activity-minutes-days.v1 with selector.activityKind for running, walking, swimming, sauna, or any other recognized activity alias.',
       },
-      projectionKinds: {
+      projectionScopes: {
         type: 'array',
-        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length,
-        items: {
-          type: 'string',
-          enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
-        },
+        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
+        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projections that liking the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that profile display name is shared too.',
+          'Optional bounded health projections that reacting to the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that profile display name is shared too.',
       },
       messageTemplate: {
         type: 'string',
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
         description:
-          'Required for action="post_join_offer". Write one short natural group-chat message, not a fixed script. Mention that liking or reacting to this message joins the group. Include {{join_url}} exactly once where the server should insert the exact join URL, and {{share_scope}} exactly once where the server should insert the exact shared-scope phrase. Do not include any other URL.',
+          'Required for action="post_join_offer". Write one short natural group-chat message, not a fixed script. Lead with reacting to this message to join. Include {{share_scope}} exactly once where the server inserts the exact shared-scope phrase. Include {{join_url}} exactly once as the customize link so members can share more or less. Do not include any other URL.',
       },
     },
     required: ['action'],
@@ -435,7 +529,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, this attaches the exact approved file to your normal reply. It does not reveal file bytes to the model, does not queue a separate delivery, and does not support arbitrary recipients.",
+    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, the file is queued to deliver with your normal reply but delivery is not yet confirmed. It does not reveal file bytes to the model and does not support arbitrary recipients.",
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -760,20 +854,89 @@ const GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = '{{join_url}}'
 const GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = '{{share_scope}}'
 
 function hasUsableGroupJoinOfferPlaceholders(messageTemplate: string): boolean {
-  return (
-    messageTemplate.includes(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-    && messageTemplate.indexOf(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-    && messageTemplate.includes(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-    && messageTemplate.indexOf(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
+  return hasPlaceholderExactlyOnce(
+    messageTemplate,
+    GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+  ) && hasPlaceholderExactlyOnce(
+    messageTemplate,
+    GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
   )
 }
+
+function hasPlaceholderExactlyOnce(messageTemplate: string, placeholder: string): boolean {
+  return (
+    messageTemplate.includes(placeholder)
+    && messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
+  )
+}
+
+const selectableVaultShareProjectionScopeByKey =
+  new Map<string, HostedVaultShareSelectableProjectionScope>(
+    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) => [
+      buildHostedVaultShareProjectionScopeKey(scope),
+      scope,
+    ]),
+  )
+
+const groupVaultShareProjectionScopeSchema = z.unknown().transform((value, context) => {
+  let parsedScope: ReturnType<typeof parseHostedVaultShareProjectionScope>
+  try {
+    parsedScope = parseHostedVaultShareProjectionScope(
+      value,
+      'murph.group vault share projection scope',
+    )
+  } catch (error) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error instanceof Error
+        ? error.message
+        : 'Vault share projection scope is not supported.',
+    })
+    return z.NEVER
+  }
+  const scope = selectableVaultShareProjectionScopeByKey.get(
+    buildHostedVaultShareProjectionScopeKey(parsedScope),
+  )
+  if (!scope) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Vault share projection scope is not selectable.',
+    })
+    return z.NEVER
+  }
+  return scope
+})
 
 const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_current'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('update_display_name'),
+      displayName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('set_chat_avatar'),
+      alt: z.string().trim().min(1).max(500).nullable().default(null),
+      avatarSource: z.enum(['generate', 'image_ref']),
+      imageRef: z.string().trim().min(1).max(1024).optional(),
+      outputFormat: z.enum(['webp', 'png', 'jpeg']).default('webp'),
+      prompt: z.string().trim().min(1).max(4000).optional(),
+      quality: z.enum(['low', 'medium', 'high']).default('medium'),
+      referenceImageRefs: z
+        .array(z.string().trim().min(1).max(1024))
+        .max(16)
+        .default([]),
+      size: z.literal('1024x1024').default('1024x1024'),
     })
     .strict(),
   z
@@ -789,6 +952,12 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('post_join_offer'),
+      displayName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
+        .optional(),
       messageTemplate: z
         .string()
         .trim()
@@ -796,11 +965,11 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         .max(HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH)
         .refine(hasUsableGroupJoinOfferPlaceholders, {
           message:
-            'post_join_offer messageTemplate must contain {{join_url}} exactly once and {{share_scope}} exactly once',
+            'post_join_offer messageTemplate must contain {{share_scope}} exactly once and {{join_url}} exactly once',
         }),
-      projectionKinds: z
-        .array(z.enum(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS))
-        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length)
+      projectionScopes: z
+        .array(groupVaultShareProjectionScopeSchema)
+        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
         .optional(),
     })
     .strict(),
@@ -819,9 +988,9 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
         .optional(),
       kind: z.enum(HOSTED_RUNTIME_GROUP_KINDS).optional(),
-      requestedVaultShareProjectionKinds: z
-        .array(z.enum(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS))
-        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length)
+      requestedVaultShareProjectionScopes: z
+        .array(groupVaultShareProjectionScopeSchema)
+        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
         .optional(),
     })
     .strict(),
@@ -1099,6 +1268,22 @@ interface ParsedDynamicToolCallRequest {
   tool: string | null
 }
 
+type MurphGroupToolRequest =
+  | HostedRuntimeGroupToolRequest
+  | {
+      action: 'set_chat_avatar'
+      avatar:
+        | {
+            source: 'generate'
+            args: GenerateImageToolArgs
+          }
+        | {
+            source: 'image_ref'
+            alt: string | null
+            imageRef: string
+          }
+    }
+
 export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
   | {
@@ -1200,7 +1385,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'group'
-      request: HostedRuntimeGroupToolRequest
+      request: MurphGroupToolRequest
     }
   | {
       kind: 'newsletter'
@@ -1671,7 +1856,10 @@ export async function executeMurphDynamicToolRequest(input: {
               ...toolTextResult(
                 true,
                 JSON.stringify({
+                  deliveryStatus: 'queued_with_reply',
                   filename: result.filename,
+                  note:
+                    'Approval succeeded. The file is queued to deliver with your normal reply; delivery is not confirmed yet.',
                   status: result.status,
                 }),
               ),
@@ -1735,8 +1923,15 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'group':
       return await executeGroupTool({
+        abortSignal: input.abortSignal ?? null,
+        env: input.env,
+        fetchImpl: input.fetchImpl,
         hostedToolContext: input.hostedToolContext ?? null,
+        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+        nextUsageOrdinal: input.nextUsageOrdinal,
         request: input.request.request,
+        vaultRoot: input.vaultRoot ?? null,
       })
     case 'newsletter':
       return await executeNewsletterTool({
@@ -1959,20 +2154,268 @@ async function executeFamilyPlanTool(input: {
   }
 }
 
+function groupAvatarUnavailableToolResult(
+  unavailableReason: string,
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(true, safeToolPayloadText({
+    action: 'set_chat_avatar',
+    result: {
+      status: 'unavailable',
+      unavailableReason,
+    },
+  }))
+}
+
 async function executeGroupTool(input: {
+  abortSignal: AbortSignal | null
+  env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
-  request: HostedRuntimeGroupToolRequest
+  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
+  materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
+  nextUsageOrdinal: () => number
+  request: MurphGroupToolRequest
+  vaultRoot: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const groupTool = input.hostedToolContext?.groupTool ?? null
   if (!groupTool) {
     return toolTextResult(false, 'group tools are unavailable for this turn')
   }
-  try {
-    const result = await groupTool.request(input.request)
-    return toolTextResult(true, safeToolPayloadText(result))
-  } catch {
-    return toolTextResult(false, 'group tool request failed')
+
+  let request: HostedRuntimeGroupToolRequest
+  let usageDraft: AssistantProviderUsageDraft | null = null
+  if (isPreparedGroupAvatarRequest(input.request)) {
+    let preflight: Extract<HostedRuntimeGroupToolResponse, { action: 'preflight_set_chat_avatar' }>
+    try {
+      const preflightResult = await groupTool.request({ action: 'preflight_set_chat_avatar' })
+      if (preflightResult.action !== 'preflight_set_chat_avatar') {
+        return groupAvatarUnavailableToolResult('group_avatar_preflight_unavailable')
+      }
+      preflight = preflightResult
+    } catch {
+      return groupAvatarUnavailableToolResult('group_avatar_preflight_unavailable')
+    }
+    if (preflight.result.status !== 'ok') {
+      return toolTextResult(true, safeToolPayloadText({
+        action: 'set_chat_avatar',
+        result: preflight.result,
+      }))
+    }
+
+    const prepared = await prepareGroupAvatarRuntimeRequest({
+      abortSignal: input.abortSignal,
+      env: input.env,
+      fetchImpl: input.fetchImpl,
+      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      nextUsageOrdinal: input.nextUsageOrdinal,
+      request: input.request,
+      vaultRoot: input.vaultRoot,
+    })
+    if (!prepared.rpcSuccess) {
+      return {
+        rpcResult: {
+          success: false,
+          contentItems: [{ type: 'inputText', text: prepared.rpcText }],
+        },
+        usageDraft: prepared.usageDraft ?? null,
+      }
+    }
+    request = prepared.request
+    usageDraft = prepared.usageDraft ?? null
+  } else {
+    request = input.request
   }
+
+  try {
+    const result = await groupTool.request(request)
+    return {
+      ...toolTextResult(true, safeToolPayloadText(result)),
+      ...(usageDraft ? { usageDraft } : {}),
+    }
+  } catch {
+    return {
+      ...toolTextResult(false, 'group tool request failed'),
+      ...(usageDraft ? { usageDraft } : {}),
+    }
+  }
+}
+
+function isPreparedGroupAvatarRequest(
+  request: MurphGroupToolRequest,
+): request is Extract<MurphGroupToolRequest, { action: 'set_chat_avatar'; avatar: unknown }> {
+  return request.action === 'set_chat_avatar' && 'avatar' in request
+}
+
+async function prepareGroupAvatarRuntimeRequest(input: {
+  abortSignal: AbortSignal | null
+  env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
+  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
+  materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
+  nextUsageOrdinal: () => number
+  request: Extract<MurphGroupToolRequest, { action: 'set_chat_avatar'; avatar: unknown }>
+  vaultRoot: string | null
+}): Promise<
+  | {
+      request: Extract<HostedRuntimeGroupToolRequest, { action: 'set_chat_avatar' }>
+      rpcSuccess: true
+      usageDraft?: AssistantProviderUsageDraft | null
+    }
+  | {
+      rpcSuccess: false
+      rpcText: string
+      usageDraft?: AssistantProviderUsageDraft | null
+    }
+> {
+  const avatar = input.request.avatar
+  if (avatar.source === 'generate') {
+    const generated = await executeGenerateImageTool({
+      abortSignal: input.abortSignal,
+      args: avatar.args,
+      env: input.env,
+      fetchImpl: input.fetchImpl,
+      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      providerRequestOrdinal: input.nextUsageOrdinal(),
+      requireHostedGeneratedImageUploader: true,
+      vaultRoot: input.vaultRoot,
+    })
+    if (!generated.rpcSuccess) {
+      return {
+        rpcSuccess: false,
+        rpcText: generated.rpcText,
+        usageDraft: generated.usageDraft ?? null,
+      }
+    }
+    const media = generated.responseMedia?.[0] ?? null
+    if (media?.kind !== 'image') {
+      return {
+        rpcSuccess: false,
+        rpcText: 'generated group avatar did not produce a hosted image URL',
+        usageDraft: generated.usageDraft ?? null,
+      }
+    }
+    return {
+      request: { action: 'set_chat_avatar', groupChatIconUrl: media.url },
+      rpcSuccess: true,
+      usageDraft: generated.usageDraft ?? null,
+    }
+  }
+
+  const uploaded = await uploadGroupAvatarImageReference({
+    alt: avatar.alt,
+    hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+    imageRef: avatar.imageRef,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    vaultRoot: input.vaultRoot,
+  })
+  if (!uploaded.rpcSuccess) {
+    return uploaded
+  }
+  return {
+    request: { action: 'set_chat_avatar', groupChatIconUrl: uploaded.url },
+    rpcSuccess: true,
+  }
+}
+
+async function uploadGroupAvatarImageReference(input: {
+  alt: string | null
+  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
+  imageRef: string
+  materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
+  vaultRoot: string | null
+}): Promise<
+  | { rpcSuccess: true; url: string }
+  | { rpcSuccess: false; rpcText: string }
+> {
+  if (!input.hostedGeneratedImageUploader) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'hosted image upload is not available for this turn',
+    }
+  }
+  if (!normalizeNullableString(input.vaultRoot)) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'image references are unavailable for this turn',
+    }
+  }
+
+  let references: ResolvedGenerateImageReference[]
+  try {
+    references = await resolveGenerateImageReferences({
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      refs: [input.imageRef],
+      vaultRoot: input.vaultRoot ?? '',
+    })
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+    return {
+      rpcSuccess: false,
+      rpcText: 'group avatar image reference could not be loaded',
+    }
+  }
+
+  const reference = references[0] ?? null
+  if (!reference) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'group avatar image reference could not be loaded',
+    }
+  }
+
+  try {
+    const media = await input.hostedGeneratedImageUploader.uploadGeneratedImage({
+      alt: input.alt ?? 'Group chat avatar',
+      bytes: reference.bytes,
+      contentType: groupAvatarReferenceContentType(reference.mediaType),
+      filename: groupAvatarReferenceFilename(reference.mediaType),
+      metadata: {
+        imageSha256: reference.sha256,
+        schema: 'murph.group-avatar.v1',
+        sourceRefSha256: reference.sourceRefSha256,
+      },
+      source: 'murph.group-avatar',
+    })
+    if (media.kind !== 'image') {
+      return {
+        rpcSuccess: false,
+        rpcText: 'group avatar upload did not produce a hosted image URL',
+      }
+    }
+    return { rpcSuccess: true, url: media.url }
+  } catch {
+    return {
+      rpcSuccess: false,
+      rpcText: 'group avatar image upload failed',
+    }
+  }
+}
+
+function groupAvatarReferenceContentType(
+  mediaType: ResolvedGenerateImageReference['mediaType'],
+): AssistantGeneratedImageContentType {
+  return mediaType
+}
+
+function groupAvatarReferenceFilename(
+  mediaType: ResolvedGenerateImageReference['mediaType'],
+): string {
+  switch (mediaType) {
+    case 'image/jpeg':
+      return 'group-avatar.jpg'
+    case 'image/png':
+      return 'group-avatar.png'
+    case 'image/webp':
+      return 'group-avatar.webp'
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 interface GroupNewsletterParticipantStats {
@@ -2834,7 +3277,7 @@ function parseGroupArguments(
   value: unknown,
 ):
   | {
-      request: HostedRuntimeGroupToolRequest
+      request: MurphGroupToolRequest
       ok: true
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
@@ -2857,10 +3300,10 @@ function parseGroupArguments(
         ? { displayName: parsed.data.displayName }
         : {}),
       ...(parsed.data.kind !== undefined ? { kind: parsed.data.kind } : {}),
-      ...(parsed.data.requestedVaultShareProjectionKinds !== undefined
+      ...(parsed.data.requestedVaultShareProjectionScopes !== undefined
         ? {
-            requestedVaultShareProjectionKinds:
-              parsed.data.requestedVaultShareProjectionKinds,
+            requestedVaultShareProjectionScopes:
+              parsed.data.requestedVaultShareProjectionScopes,
           }
         : {}),
     }
@@ -2872,11 +3315,93 @@ function parseGroupArguments(
           : { action: 'create_join_link' },
     }
   }
+  if (parsed.data.action === 'update_display_name') {
+    return {
+      ok: true,
+      request: {
+        action: 'update_display_name',
+        updateDisplayName: {
+          displayName: parsed.data.displayName,
+        },
+      },
+    }
+  }
+  if (parsed.data.action === 'set_chat_avatar') {
+    if (parsed.data.avatarSource === 'generate') {
+      if (!parsed.data.prompt) {
+        return {
+          ok: false,
+          validationDigest: buildDynamicToolValidationDigest({
+            error: new z.ZodError([
+              {
+                code: z.ZodIssueCode.custom,
+                message: 'set_chat_avatar with avatarSource="generate" requires prompt',
+                path: ['prompt'],
+              },
+            ]),
+            rawInput: value,
+            schemaName: 'murph.group.input',
+            schemaRootKeys: ['action'],
+            toolName: 'murph.group',
+          }),
+        }
+      }
+      return {
+        ok: true,
+        request: {
+          action: 'set_chat_avatar',
+          avatar: {
+            source: 'generate',
+            args: {
+              alt: parsed.data.alt,
+              outputFormat: parsed.data.outputFormat,
+              prompt: parsed.data.prompt,
+              quality: parsed.data.quality,
+              referenceImageRefs: parsed.data.referenceImageRefs,
+              size: parsed.data.size,
+            },
+          },
+        },
+      }
+    }
+    if (!parsed.data.imageRef) {
+      return {
+        ok: false,
+        validationDigest: buildDynamicToolValidationDigest({
+          error: new z.ZodError([
+            {
+              code: z.ZodIssueCode.custom,
+              message: 'set_chat_avatar with avatarSource="image_ref" requires imageRef',
+              path: ['imageRef'],
+            },
+          ]),
+          rawInput: value,
+          schemaName: 'murph.group.input',
+          schemaRootKeys: ['action'],
+          toolName: 'murph.group',
+        }),
+      }
+    }
+    return {
+      ok: true,
+      request: {
+        action: 'set_chat_avatar',
+        avatar: {
+          alt: parsed.data.alt,
+          imageRef: parsed.data.imageRef,
+          source: 'image_ref',
+        },
+      },
+    }
+  }
   if (parsed.data.action === 'post_join_offer') {
     const joinOffer = {
+      ...(parsed.data.displayName !== undefined
+        ? { displayName: parsed.data.displayName }
+        : {}),
       messageTemplate: parsed.data.messageTemplate,
-      ...(parsed.data.projectionKinds !== undefined
-        ? { projectionKinds: parsed.data.projectionKinds }
+      ...(parsed.data.projectionScopes !== undefined
+        ? { projectionScopes: parsed.data.projectionScopes }
         : {}),
     }
     return {

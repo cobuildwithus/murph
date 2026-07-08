@@ -1,15 +1,23 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
-import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
+import {
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+} from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinCodeTx: vi.fn(),
   assertHostedMemberNotSuspended: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   getPrisma: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort:
+    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -62,6 +70,9 @@ beforeEach(async () => {
       memberId: "member_group_runtime",
     }],
   });
+  mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
+    undefined,
+  );
   mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
 
@@ -97,20 +108,55 @@ test("signals destination cleanup wakes after a group permission revoke without 
     joinCode: "JOIN123",
     memberId: "member_grantor",
     now: expect.any(Date),
-    selectedVaultShareProjectionKinds: [],
+    selectedVaultShareProjectionScopes: [],
     tx: { tx: true },
   });
   expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+  expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+    .not.toHaveBeenCalled();
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
     expectedUserId: "member_group_runtime",
     mailboxItemId: "mailbox_item_revoke_1",
   });
 });
 
+test("enqueues a private missing-email nudge after accepting an email-sharing grant", async () => {
+  mocks.acceptHostedGroupJoinCodeTx.mockResolvedValueOnce({
+    alreadyMember: false,
+    grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
+    groupId: "group_1",
+    membershipId: "membership_created",
+    revokedVaultShareProjectionKinds: [],
+    vaultShareCleanupSignals: [],
+  });
+  const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
+    body: JSON.stringify({
+      selectedVaultShareProjectionKinds: ["group-email.v0"],
+    }),
+    headers: {
+      "content-type": "application/json",
+      origin: "https://join.example.test",
+    },
+    method: "POST",
+  });
+
+  const response = await route.POST(request, {
+    params: Promise.resolve({ joinCode: "JOIN123" }),
+  });
+
+  expect(response.status).toBe(200);
+  expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+    .toHaveBeenCalledWith({
+      groupId: "group_1",
+      memberId: "member_grantor",
+      prisma: expect.any(Object),
+    });
+});
+
 test("accepts the full closed set of selectable vault-share permissions", async () => {
   const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
     body: JSON.stringify({
-      selectedVaultShareProjectionKinds: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+      selectedVaultShareProjectionScopes: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
     }),
     headers: {
       "content-type": "application/json",
@@ -128,7 +174,7 @@ test("accepts the full closed set of selectable vault-share permissions", async 
     joinCode: "JOIN123",
     memberId: "member_grantor",
     now: expect.any(Date),
-    selectedVaultShareProjectionKinds: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    selectedVaultShareProjectionScopes: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
     tx: { tx: true },
   });
 });

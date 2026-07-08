@@ -1,21 +1,32 @@
 import { createHash } from "node:crypto";
 
 import {
+  activityTextMatchesKind,
+  isStrictIsoDate,
+} from "@murphai/contracts";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  getHostedVaultShareActivityMinutesProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
+  type HostedVaultShareActivityMinutesProjectionSpec,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareDailyMetricProjectionSpec,
   type HostedVaultShareProjectionKind,
+  type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
   type ProjectedWearableSleepSummary,
+  listCanonicalEntities,
   listMetricPoints,
   listMetricPointsBatch,
   readProfileDocumentRuntime,
+  resolveAdherenceObservationActivityKind,
   selectMetricSeries,
   summarizeWearableSleepRuntime,
+  type CanonicalEntity,
   type MetricSeriesPoint,
 } from "@murphai/query";
 
@@ -23,17 +34,18 @@ import type { HostedRuntimeVaultSharePort } from "./platform.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY_MAX_MINUTES = 24 * 60;
+const ACTIVITY_SESSION_DUPLICATE_MIN_OVERLAP_RATIO = 0.8;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEY_PATTERN = /^heart-rate-zone-(\d+)-minutes$/u;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEYS = Array.from(
   { length: 21 },
   (_, zone) => `heart-rate-zone-${zone}-minutes`,
 );
 
-export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = 3;
+export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = 7;
 
 export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = 7;
 
-export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = 3;
+export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = 7;
 
 export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = 7;
 
@@ -61,6 +73,14 @@ type HeartRateZoneMetricProjectionRow = MetricSourceRevisionPoint & Pick<
   MetricSeriesPoint,
   "context" | "date" | "grain" | "metricKey" | "statistic" | "value"
 >;
+
+export type ActivitySessionProjectionRow = MetricSourceRevisionPoint & {
+  activityKind: string | null;
+  date: string;
+  durationMinutes: number;
+  endedAt?: string | null;
+  startedAt?: string | null;
+};
 
 export interface HostedVaultShareProjectionOfferResult {
   outcome:
@@ -91,26 +111,28 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
     return { outcome: "no-port" };
   }
 
-  let projectionKinds: HostedVaultShareProjectionKind[];
+  let projectionScopes: HostedVaultShareProjectionScope[];
   try {
-    projectionKinds = uniqueHostedVaultShareProjectionKinds(
-      await port.listActiveProjectionKinds(),
+    projectionScopes = uniqueHostedVaultShareProjectionScopes(
+      await port.listActiveProjectionScopes(),
     );
   } catch {
     return { outcome: "error" };
   }
 
-  if (projectionKinds.length === 0) {
+  if (projectionScopes.length === 0) {
     return { outcome: "no-active-share" };
   }
 
   const outcomes: HostedVaultShareOfferOutcome[] = [];
+  const context: HostedVaultShareProjectionReadContext = {};
 
-  for (const projectionKind of projectionKinds) {
-    outcomes.push(await offerHostedVaultShareKindBestEffort({
+  for (const projectionScope of projectionScopes) {
+    outcomes.push(await offerHostedVaultShareScopeBestEffort({
+      context,
       port,
-      projectionKind,
-      readRecords: resolveProjectableRecordReader(projectionKind),
+      projectionScope,
+      readRecords: resolveProjectableRecordReader(projectionScope),
       vaultRoot: input.vaultRoot,
     }));
   }
@@ -120,21 +142,35 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
 
 type HostedVaultShareOfferOutcome = HostedVaultShareProjectionOfferResult["outcome"];
 
-async function offerHostedVaultShareKindBestEffort(input: {
+export interface HostedVaultShareProjectionReadContext {
+  activityRowsByVaultAndCutoff?: Map<string, Promise<ActivitySessionProjectionRow[]>>;
+}
+
+type ProjectableRecordReader = (input: {
+  context: HostedVaultShareProjectionReadContext;
+  vaultRoot: string;
+}) => Promise<HostedVaultShareDeliveryRecord[]>;
+
+async function offerHostedVaultShareScopeBestEffort(input: {
+  context: HostedVaultShareProjectionReadContext;
   port: HostedRuntimeVaultSharePort;
-  projectionKind: HostedVaultShareProjectionKind;
-  readRecords: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
+  projectionScope: HostedVaultShareProjectionScope;
+  readRecords: ProjectableRecordReader;
   vaultRoot: string;
 }): Promise<HostedVaultShareOfferOutcome> {
   try {
-    const records = await input.readRecords(input.vaultRoot);
+    const records = await input.readRecords({
+      context: input.context,
+      vaultRoot: input.vaultRoot,
+    });
 
     if (records.length === 0) {
       return "no-projectable-records";
     }
 
     const response = await input.port.deliver({
-      projectionKind: input.projectionKind,
+      projectionKind: input.projectionScope.projectionKind,
+      projectionScope: input.projectionScope,
       records,
     });
 
@@ -145,36 +181,46 @@ async function offerHostedVaultShareKindBestEffort(input: {
 }
 
 function resolveProjectableRecordReader(
-  projectionKind: HostedVaultShareProjectionKind,
-): (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]> {
+  projectionScope: HostedVaultShareProjectionScope,
+): ProjectableRecordReader {
+  const projectionKind = projectionScope.projectionKind;
   switch (projectionKind) {
     case "group-email.v0":
       return async () => [];
     case "heart-rate-zones-days.v0":
-      return readProjectableHeartRateZoneDays;
+      return ({ vaultRoot }) => readProjectableHeartRateZoneDays(vaultRoot);
     case "profile-name.v0":
-      return readProjectableProfileName;
+      return ({ vaultRoot }) => readProjectableProfileName(vaultRoot);
     case "sleep-times.v0":
-      return readProjectableSleepNights;
+      return ({ vaultRoot }) => readProjectableSleepNights(vaultRoot);
     case "workout-days.v0":
-      return readProjectableWorkoutDays;
+      return ({ vaultRoot }) => readProjectableWorkoutDays(vaultRoot);
     default: {
+      const activityMinutesSpec =
+        getHostedVaultShareActivityMinutesProjectionSpec(projectionScope);
+      if (activityMinutesSpec) {
+        return ({ context, vaultRoot }) =>
+          readProjectableActivityMinutesDays(vaultRoot, activityMinutesSpec, context);
+      }
       const spec = getHostedVaultShareDailyMetricProjectionSpec(projectionKind);
       if (spec) {
-        return (vaultRoot) => readProjectableDailyMetricDays(vaultRoot, spec);
+        return ({ vaultRoot }) => readProjectableDailyMetricDays(vaultRoot, spec);
       }
       return async () => [];
     }
   }
 }
 
-function uniqueHostedVaultShareProjectionKinds(
-  projectionKinds: readonly HostedVaultShareProjectionKind[],
-): HostedVaultShareProjectionKind[] {
-  const unique: HostedVaultShareProjectionKind[] = [];
-  for (const projectionKind of projectionKinds) {
-    if (!unique.includes(projectionKind)) {
-      unique.push(projectionKind);
+function uniqueHostedVaultShareProjectionScopes(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
+): HostedVaultShareProjectionScope[] {
+  const unique: HostedVaultShareProjectionScope[] = [];
+  const seen = new Set<string>();
+  for (const projectionScope of projectionScopes) {
+    const scopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+    if (!seen.has(scopeKey)) {
+      seen.add(scopeKey);
+      unique.push(projectionScope);
     }
   }
   return unique;
@@ -302,6 +348,19 @@ export async function readProjectableWorkoutDays(
     minuteRows: minuteSeries.rows,
     nowMs,
   });
+}
+
+export async function readProjectableActivityMinutesDays(
+  vaultRoot: string,
+  spec: HostedVaultShareActivityMinutesProjectionSpec,
+  context?: HostedVaultShareProjectionReadContext,
+): Promise<HostedVaultShareDeliveryRecord[]> {
+  const nowMs = Date.now();
+  const cutoffDate = new Date(
+    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
+  ).toISOString().slice(0, 10);
+  const rows = await readProjectableActivitySessionRows(vaultRoot, cutoffDate, context);
+  return selectProjectableActivityMinutesDays({ nowMs, rows, spec });
 }
 
 export async function readProjectableHeartRateZoneDays(
@@ -502,6 +561,69 @@ export function selectProjectableWorkoutDays(
   return records;
 }
 
+export function selectProjectableActivityMinutesDays(
+  input: {
+    nowMs: number;
+    rows: readonly ActivitySessionProjectionRow[];
+    spec: HostedVaultShareActivityMinutesProjectionSpec;
+  },
+): HostedVaultShareDeliveryRecord[] {
+  const cutoffMs =
+    input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const groups = new Map<string, {
+    date: string;
+    rows: ActivitySessionProjectionRow[];
+    sessionCount: number;
+    sessionMinutes: number;
+  }>();
+
+  const projectableRows = input.rows.filter((row) =>
+    isProjectableActivitySessionRow(row, input.spec.activityKind, cutoffMs)
+  );
+  for (const row of dedupeActivitySessionRows(projectableRows, input.spec.activityKind)) {
+    const group = groups.get(row.date) ?? {
+      date: row.date,
+      rows: [],
+      sessionCount: 0,
+      sessionMinutes: 0,
+    };
+    group.rows.push(row);
+    group.sessionCount += 1;
+    group.sessionMinutes += row.durationMinutes;
+    groups.set(row.date, group);
+  }
+
+  const records: HostedVaultShareDeliveryRecord[] = [];
+  for (const group of [...groups.values()].sort((left, right) => right.date.localeCompare(left.date))) {
+    if (
+      group.sessionCount <= 0
+      || group.sessionCount > 100
+      || group.sessionMinutes <= 0
+      || group.sessionMinutes > DAY_MAX_MINUTES
+    ) {
+      continue;
+    }
+
+    records.push({
+      data: {
+        activityKind: input.spec.activityKind,
+        date: group.date,
+        sessionCount: group.sessionCount,
+        sessionMinutes: group.sessionMinutes,
+      },
+      occurredAt: `${group.date}T00:00:00.000Z`,
+      recordKey: group.date,
+      ...sourceRevisionField(deriveCompositeMetricSeriesSourceRevision(group.rows)),
+    });
+
+    if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
+      break;
+    }
+  }
+
+  return records;
+}
+
 export function selectProjectableHeartRateZoneDays(
   points: readonly HeartRateZoneMetricProjectionRow[],
   nowMs: number,
@@ -593,6 +715,281 @@ export function selectProjectableHeartRateZoneDays(
   return records;
 }
 
+async function readProjectableActivitySessionRows(
+  vaultRoot: string,
+  cutoffDate: string,
+  context?: HostedVaultShareProjectionReadContext,
+): Promise<ActivitySessionProjectionRow[]> {
+  if (context) {
+    const cacheKey = `${vaultRoot}\u0000${cutoffDate}`;
+    context.activityRowsByVaultAndCutoff ??= new Map();
+    const cached = context.activityRowsByVaultAndCutoff.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const read = readProjectableActivitySessionRows(vaultRoot, cutoffDate);
+    context.activityRowsByVaultAndCutoff.set(cacheKey, read);
+    return read;
+  }
+
+  const entities = await listCanonicalEntities(vaultRoot, {
+    family: "event",
+    from: cutoffDate,
+    kinds: ["activity_session", "intervention_session"],
+    limit: null,
+  });
+  const rows: ActivitySessionProjectionRow[] = [];
+
+  for (const entity of entities) {
+    const row = toActivitySessionProjectionRow(entity);
+    if (row && row.date >= cutoffDate) {
+      rows.push(row);
+    }
+  }
+
+  return rows;
+}
+
+function toActivitySessionProjectionRow(
+  entity: CanonicalEntity,
+): ActivitySessionProjectionRow | null {
+  if (
+    entity.family !== "event"
+    || (entity.kind !== "activity_session" && entity.kind !== "intervention_session")
+  ) {
+    return null;
+  }
+
+  const durationMinutes = readFiniteNumber(entity.attributes.durationMinutes);
+  const date = entity.kind === "intervention_session"
+    ? readInterventionSessionDate(entity)
+    : readActivitySessionDate(entity);
+  if (
+    durationMinutes === null
+    || durationMinutes <= 0
+    || durationMinutes > DAY_MAX_MINUTES
+    || !date
+  ) {
+    return null;
+  }
+
+  const startedAt = readOptionalString(entity.attributes.startAt)
+    ?? entity.occurredAt
+    ?? null;
+  const endedAt = readOptionalString(entity.attributes.endAt);
+  const observedAt = readOptionalString(entity.attributes.recordedAt)
+    ?? entity.occurredAt
+    ?? undefined;
+
+  return {
+    activityKind: readActivitySessionKind(entity),
+    date,
+    durationMinutes,
+    endedAt,
+    observedAt,
+    pointIds: [`event:${entity.entityId}`],
+    recordIds: [entity.entityId],
+    sourceFamily: "event",
+    sourceKind: entity.kind,
+    startedAt,
+  };
+}
+
+function readActivitySessionDate(entity: CanonicalEntity): string | null {
+  for (const value of [
+    entity.date,
+    readOptionalString(entity.attributes.dayKey),
+    readOptionalString(entity.attributes.date),
+  ]) {
+    if (value && isStrictIsoDate(value)) {
+      return value;
+    }
+  }
+
+  for (const value of [
+    readOptionalString(entity.attributes.startAt),
+    entity.occurredAt,
+  ]) {
+    const date = readIsoTimestampDate(value);
+    if (date) {
+      return date;
+    }
+  }
+
+  return null;
+}
+
+function readInterventionSessionDate(entity: CanonicalEntity): string | null {
+  for (const value of [
+    readOptionalString(entity.attributes.scheduledLocalDate),
+    readOptionalString(entity.attributes.sessionLocalDate),
+    entity.date,
+    readOptionalString(entity.attributes.date),
+  ]) {
+    if (value && isStrictIsoDate(value)) {
+      return value;
+    }
+  }
+
+  return readIsoTimestampDate(entity.occurredAt);
+}
+
+function readActivitySessionKind(entity: CanonicalEntity): string | null {
+  return resolveAdherenceObservationActivityKind({
+    attributes: entity.attributes as Record<string, unknown>,
+  });
+}
+
+function isProjectableActivitySessionRow(
+  row: ActivitySessionProjectionRow,
+  activityKind: string,
+  cutoffMs: number,
+): boolean {
+  const dayMs = Date.parse(`${row.date}T00:00:00.000Z`);
+  return Number.isFinite(dayMs)
+    && dayMs >= cutoffMs
+    && activityTextMatchesKind(row.activityKind, activityKind)
+    && Number.isFinite(row.durationMinutes)
+    && row.durationMinutes > 0
+    && row.durationMinutes <= DAY_MAX_MINUTES;
+}
+
+function dedupeActivitySessionRows(
+  rows: readonly ActivitySessionProjectionRow[],
+  activityKind?: string,
+): ActivitySessionProjectionRow[] {
+  const deduped: ActivitySessionProjectionRow[] = [];
+  const exactDedupeIndexes = new Map<string, number>();
+
+  for (const row of rows) {
+    const key = activitySessionRowDedupeKey(row, activityKind);
+    const exactDuplicateIndex = exactDedupeIndexes.get(key);
+    if (exactDuplicateIndex !== undefined) {
+      deduped[exactDuplicateIndex] = choosePreferredActivitySessionRow(
+        deduped[exactDuplicateIndex],
+        row,
+      );
+      continue;
+    }
+
+    const duplicateIndex = deduped.findIndex((existing) =>
+      activitySessionRowsOverlap(existing, row, activityKind)
+    );
+    if (duplicateIndex >= 0) {
+      deduped[duplicateIndex] = choosePreferredActivitySessionRow(
+        deduped[duplicateIndex],
+        row,
+      );
+      exactDedupeIndexes.set(key, duplicateIndex);
+      continue;
+    }
+
+    exactDedupeIndexes.set(key, deduped.length);
+    deduped.push(row);
+  }
+
+  return deduped;
+}
+
+function activitySessionRowDedupeKey(
+  row: ActivitySessionProjectionRow,
+  activityKind?: string,
+): string {
+  const dedupeActivityKind = activityKind ?? row.activityKind;
+  if (row.startedAt || row.endedAt) {
+    return JSON.stringify({
+      activityKind: dedupeActivityKind,
+      date: row.date,
+      durationMinutes: row.durationMinutes,
+      endedAt: row.endedAt ?? null,
+      startedAt: row.startedAt ?? null,
+    });
+  }
+
+  return metricSeriesPointSourceOwnerKey(row)
+    ?? JSON.stringify({
+      activityKind: dedupeActivityKind,
+      date: row.date,
+      durationMinutes: row.durationMinutes,
+      pointIds: sortedStrings(row.pointIds ?? []),
+    });
+}
+
+function activitySessionRowsOverlap(
+  left: ActivitySessionProjectionRow,
+  right: ActivitySessionProjectionRow,
+  activityKind?: string,
+): boolean {
+  const leftActivityKind = activityKind ?? left.activityKind;
+  const rightActivityKind = activityKind ?? right.activityKind;
+  if (leftActivityKind !== rightActivityKind || left.date !== right.date) {
+    return false;
+  }
+
+  const leftWindow = activitySessionRowWindow(left);
+  const rightWindow = activitySessionRowWindow(right);
+  if (!leftWindow || !rightWindow) {
+    return false;
+  }
+
+  const overlapMs =
+    Math.min(leftWindow.endMs, rightWindow.endMs)
+    - Math.max(leftWindow.startMs, rightWindow.startMs);
+  if (overlapMs <= 0) {
+    return false;
+  }
+
+  return overlapMs
+    / Math.min(leftWindow.durationMs, rightWindow.durationMs)
+    >= ACTIVITY_SESSION_DUPLICATE_MIN_OVERLAP_RATIO;
+}
+
+function activitySessionRowWindow(
+  row: ActivitySessionProjectionRow,
+): { durationMs: number; endMs: number; startMs: number } | null {
+  const startMs = parseOptionalTimestampMs(row.startedAt);
+  if (startMs === null) {
+    return null;
+  }
+  const explicitEndMs = parseOptionalTimestampMs(row.endedAt);
+  const durationMs = row.durationMinutes * 60 * 1000;
+  const endMs = explicitEndMs ?? startMs + durationMs;
+  if (
+    !Number.isFinite(durationMs)
+    || durationMs <= 0
+    || !Number.isFinite(endMs)
+    || endMs <= startMs
+  ) {
+    return null;
+  }
+  return { durationMs: endMs - startMs, endMs, startMs };
+}
+
+function choosePreferredActivitySessionRow(
+  left: ActivitySessionProjectionRow,
+  right: ActivitySessionProjectionRow,
+): ActivitySessionProjectionRow {
+  const completenessDifference =
+    activitySessionRowCompletenessScore(right)
+    - activitySessionRowCompletenessScore(left);
+  if (completenessDifference > 0) {
+    return right;
+  }
+  if (completenessDifference < 0) {
+    return left;
+  }
+
+  const observedDifference =
+    (parseOptionalTimestampMs(right.observedAt) ?? 0)
+    - (parseOptionalTimestampMs(left.observedAt) ?? 0);
+  return observedDifference > 0 ? right : left;
+}
+
+function activitySessionRowCompletenessScore(row: ActivitySessionProjectionRow): number {
+  return (parseOptionalTimestampMs(row.startedAt) === null ? 0 : 1)
+    + (parseOptionalTimestampMs(row.endedAt) === null ? 0 : 1);
+}
+
 function sameMetricSeriesPointSourceOwner(
   left: MetricSourceOwnerPoint,
   right: MetricSourceOwnerPoint,
@@ -669,7 +1066,7 @@ function sanitizeProjectionUnit(unit: string | null): string | null {
     : null;
 }
 
-function sanitizeProjectionText(value: string | undefined, maxLength: number): string | undefined {
+function sanitizeProjectionText(value: string | null | undefined, maxLength: number): string | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
@@ -680,6 +1077,42 @@ function sanitizeProjectionText(value: string | undefined, maxLength: number): s
     && !/[\u0000-\u001f\u007f]/u.test(trimmed)
     ? trimmed
     : undefined;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseOptionalTimestampMs(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function readIsoTimestampDate(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp)
+    ? new Date(timestamp).toISOString().slice(0, 10)
+    : null;
 }
 
 function parseHeartRateZoneMetricKey(metricKey: string): number | null {

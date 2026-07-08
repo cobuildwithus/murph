@@ -1,8 +1,13 @@
 import {
-  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
-  type HostedVaultShareProjectionKind,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareProjectionScopeKey,
+  parseHostedVaultShareProjectionScope,
+  type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
+import {
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
+} from "@/src/lib/hosted-groups/group-newsletter";
 import { acceptHostedGroupJoinCodeTx } from "@/src/lib/hosted-groups/group-store";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -23,16 +28,11 @@ export const revalidate = 0;
 
 const BODY_LIMIT_BYTES = 4_096;
 
-type HostedVaultShareSelectableProjectionKind =
-  (typeof HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS)[number];
-
-function isHostedVaultShareSelectableProjectionKind(
-  value: unknown,
-): value is HostedVaultShareSelectableProjectionKind {
-  return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.includes(
-    value as HostedVaultShareSelectableProjectionKind,
-  );
-}
+const SELECTABLE_SCOPE_KEYS = new Set(
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) =>
+    buildHostedVaultShareProjectionScopeKey(scope)
+  ),
+);
 
 export const POST = withJsonError(async (
   request: Request,
@@ -44,8 +44,8 @@ export const POST = withJsonError(async (
 
   const joinCode = await resolveDecodedRouteParam(context.params, "joinCode");
   const body = await readOptionalJsonObject(request, { limitBytes: BODY_LIMIT_BYTES });
-  const selectedVaultShareProjectionKinds = parseSelectedVaultShareProjectionKinds(
-    body.selectedVaultShareProjectionKinds,
+  const selectedVaultShareProjectionScopes = parseSelectedVaultShareProjectionScopes(
+    body.selectedVaultShareProjectionScopes ?? body.selectedVaultShareProjectionKinds,
   );
 
   const prisma = getPrisma();
@@ -54,7 +54,7 @@ export const POST = withJsonError(async (
     joinCode,
     memberId: auth.member.id,
     now,
-    selectedVaultShareProjectionKinds,
+    selectedVaultShareProjectionScopes,
     tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const {
@@ -68,6 +68,14 @@ export const POST = withJsonError(async (
     } catch {
       // Durable join/grants already committed; the runtime will offer projections later.
     }
+  }
+
+  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
+    await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+      groupId: result.groupId,
+      memberId: auth.member.id,
+      prisma,
+    });
   }
 
   await signalVaultShareCleanupRuntimesBestEffort(vaultShareCleanupSignals);
@@ -91,7 +99,7 @@ async function signalVaultShareCleanupRuntimesBestEffort(
   }));
 }
 
-function parseSelectedVaultShareProjectionKinds(value: unknown): HostedVaultShareProjectionKind[] {
+function parseSelectedVaultShareProjectionScopes(value: unknown): HostedVaultShareProjectionScope[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
     throw hostedOnboardingError({
@@ -100,17 +108,31 @@ function parseSelectedVaultShareProjectionKinds(value: unknown): HostedVaultShar
       message: "Selected group permissions must be a list.",
     });
   }
-  const selected = new Set<HostedVaultShareSelectableProjectionKind>();
+  const selected = new Map<string, HostedVaultShareProjectionScope>();
   for (const entry of value) {
-    if (!isHostedVaultShareSelectableProjectionKind(entry)) {
+    let scope: HostedVaultShareProjectionScope;
+    try {
+      scope = parseHostedVaultShareProjectionScope(
+        entry,
+        "Selected group permission",
+      );
+    } catch {
       throw hostedOnboardingError({
         code: "HOSTED_GROUP_SELECTED_PERMISSION_UNSUPPORTED",
         httpStatus: 400,
         message: "One of the selected group permissions is not supported.",
       });
     }
-    selected.add(entry);
-    if (selected.size > HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length) {
+    const scopeKey = buildHostedVaultShareProjectionScopeKey(scope);
+    if (!SELECTABLE_SCOPE_KEYS.has(scopeKey)) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_SELECTED_PERMISSION_UNSUPPORTED",
+        httpStatus: 400,
+        message: "One of the selected group permissions is not supported.",
+      });
+    }
+    selected.set(scopeKey, scope);
+    if (selected.size > HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length) {
       throw hostedOnboardingError({
         code: "HOSTED_GROUP_SELECTED_PERMISSIONS_TOO_MANY",
         httpStatus: 400,
@@ -118,5 +140,7 @@ function parseSelectedVaultShareProjectionKinds(value: unknown): HostedVaultShar
       });
     }
   }
-  return [...selected];
+  return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.filter((scope) =>
+    selected.has(buildHostedVaultShareProjectionScopeKey(scope))
+  );
 }

@@ -1056,6 +1056,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
   linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
+  publicInternetFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
   userEnv?: Readonly<Record<string, string>>;
   wake?: HostedRuntimeEvent | null;
@@ -1092,6 +1093,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       linqDeliveryContexts,
       linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
       providerFetch: input.providerFetch ?? null,
+      publicInternetFetch: input.publicInternetFetch ?? null,
       signal: input.signal ?? null,
     }),
     sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
@@ -1195,6 +1197,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
+  publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal?: AbortSignal | null;
   userEnv?: Readonly<Record<string, string>>;
@@ -1306,6 +1309,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           telegramVoiceMemoEnv,
           whatsAppEnv,
           providerFetch: input.providerFetch ?? null,
+          publicInternetFetch: input.publicInternetFetch ?? null,
           userId: input.wake.userId,
           vaultRoot: input.vaultRoot,
           onTerminalLinqTypingStopFailure: (terminalOutcome) => {
@@ -1728,6 +1732,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
   whatsAppEnv: NodeJS.ProcessEnv;
   providerFetch: typeof fetch | null;
+  publicInternetFetch: typeof fetch | null;
   userId: string;
   vaultRoot: string;
   onTerminalLinqTypingStopFailure?: (
@@ -1883,6 +1888,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             providerDispatchEntered = true;
           },
           providerFetch: input.providerFetch,
+          publicInternetFetch: input.publicInternetFetch,
           signal: input.signal,
           vaultRoot: input.vaultRoot,
         }),
@@ -2205,6 +2211,7 @@ function createHostedAssistantLinqSendDependency(input: {
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
+  publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
   threadIsDirect?: boolean | null;
@@ -2267,6 +2274,9 @@ function createHostedAssistantLinqSendDependency(input: {
         targetKind: request.targetKind ?? null,
       }, {
         ...dependencies,
+        ...(input.publicInternetFetch
+          ? { publicFetchImplementation: input.publicInternetFetch }
+          : {}),
         ...(verifiedVaultFiles.size > 0
           ? {
               loadVaultFile: async (media) => {
@@ -2293,7 +2303,7 @@ function createHostedAssistantLinqSendDependency(input: {
           deliveryContext,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
-          failureReason: null,
+          failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
           fromPhoneNumber,
           idempotencyKey: request.idempotencyKey ?? null,
           intentId: input.intentId ?? null,
@@ -2762,6 +2772,16 @@ function readHostedAssistantLinqDeliveryFailureCode(error: unknown): string {
   return error instanceof Error && error.name !== "Error"
     ? error.name
     : "HOSTED_LINQ_PROVIDER_SEND_FAILED";
+}
+
+function readTrustedHostedAssistantLinqDeliveryFailureReason(
+  error: unknown,
+): string | null {
+  if (!(error instanceof VaultCliError)) {
+    return null;
+  }
+  const message = error.message.replace(/\s+/gu, " ").trim();
+  return message ? message.slice(0, 500) : null;
 }
 
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {

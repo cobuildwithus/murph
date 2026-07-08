@@ -510,13 +510,13 @@ describe("runner bundle container-entrypoint esbuild step", () => {
   it("resolves the production budgets as the ratcheted baselines plus tolerance", () => {
     const budgets = resolveRunnerEntrypointBundleBudgets();
 
-    // Entry = measured baseline (1,267,937B on 2026-07-06) + 48,000B noise
-    // band. Static closure = measured baseline (6,382,690B on 2026-07-07) +
-    // 96,000B noise band. Locking exact values makes any silent change to a
+    // Entry = measured baseline (1,319,436B on 2026-07-07) + 48,000B noise
+    // band. Static closure = measured CI baseline (6,487,522B on 2026-07-07)
+    // + 96,000B noise band. Locking exact values makes any silent change to a
     // ratchet a failing, reviewed diff.
     expect(budgets).toEqual({
-      entryBytes: 1_267_937 + 48_000,
-      staticClosureBytes: 6_382_690 + 96_000,
+      entryBytes: 1_319_436 + 48_000,
+      staticClosureBytes: 6_487_522 + 96_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling

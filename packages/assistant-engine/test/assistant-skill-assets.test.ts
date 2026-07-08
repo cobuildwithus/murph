@@ -1,6 +1,10 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import {
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+} from '@murphai/hosted-execution/vault-share'
 
 import {
   ASSISTANT_SKILLS,
@@ -161,7 +165,18 @@ describe('assistant skill assets', () => {
     if (!groupChatSkill) return
 
     const raw = await readSkillFile(groupChatSkill)
+    expect(raw).toContain('do not create it immediately with invented')
+    expect(raw).toContain('group wants to call it')
+    expect(raw).toContain('default reaction-share scope')
+    expect(raw).toContain('sleep timing')
+    expect(raw).toContain('workout summaries, resting heart rate, and HRV')
+    expect(raw).toContain('Let the group widen')
+    expect(raw).toContain('pass that same chosen name as `displayName`')
+    expect(raw).toContain('`murph.group action="post_join_offer"`')
+    expect(raw).toContain('`murph.group action="create_join_link"`')
+    expect(raw).toContain('If the group wants the recurring update in the chat instead of email')
     expect(raw).toContain('vault-cli automation save')
+    expect(raw).toContain("the group's chosen name as the positional `<title>`")
     expect(raw).toContain('Use exactly `--slug group-health-newsletter`')
     expect(raw).toContain('Any other slug will not be able to send')
     expect(raw).toContain('vault-cli automation set-status group-health-newsletter --status archived')
@@ -176,8 +191,41 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('group-email.v0')
     expect(raw).not.toContain('nudge them in the group')
     expect(raw).toContain('post a join offer scoped to')
-    expect(raw).toContain('`group-email.v0` so a like grants it')
+    expect(raw).toContain('`resting-heart-rate-days.v0`, and `hrv-days.v0`')
+    expect(raw).toContain('include `{{join_url}}` exactly once as the customize link')
+    expect(raw).toContain('pass the group\'s')
+    expect(raw).toContain('chosen name as `displayName` on the `post_join_offer` call')
+    expect(raw).toContain('Reacting grants the')
+    expect(raw).toContain('disclosed snapshot')
+    expect(raw).toContain('Never silently')
+    expect(raw).toContain('share health data that the message did not disclose')
+    expect(raw).not.toContain('link-free offer')
     expect(raw).toContain('never repeatedly re-offer')
+  })
+
+  it('keeps group challenge guidance aligned with selectable scoring projections', async () => {
+    const groupChallengeSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'group-challenge',
+    )
+    expect(groupChallengeSkill).toBeTruthy()
+    if (!groupChallengeSkill) return
+
+    const raw = await readSkillFile(groupChallengeSkill)
+    for (const projectionKind of HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS) {
+      if (projectionKind === 'group-email.v0') {
+        continue
+      }
+      expect(raw).toContain(projectionKind)
+    }
+    expect(raw).toContain(HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND)
+    expect(raw).toContain('"activityKind": "<alias>"')
+    expect(raw).toContain('narrowest matching scope')
+    expect(raw).toContain('unsupported instead of')
+    expect(raw).toContain('vault-cli group shared --kind steps-days.v0')
+    expect(raw).toContain(
+      'vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>',
+    )
+    expect(raw).toContain('Never pass selector scopes through `--kind`')
   })
 
   it('builds stable symbolic skill file references', () => {

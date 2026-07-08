@@ -556,19 +556,51 @@ Generate the client and apply migrations with Prisma:
 pnpm --dir apps/web prisma:generate
 pnpm --dir apps/web prisma:migrate:deploy
 pnpm --dir apps/web release:production:migrate
+pnpm --dir apps/web release:production:contract-migrate
 ```
 
 The checked-in Vercel build command runs
 `pnpm release:production:migrate && pnpm build`, so Vercel deploys still run
 the guarded production migration wrapper automatically before building. The
 generic `pnpm --dir apps/web build` script is intentionally non-mutating and
-only generates artifacts plus validation output. The migration wrapper uses
-`DIRECT_DATABASE_URL` when it is set, requires it in Vercel production, and
-rejects known pooled Postgres ports such as `6432` and `6543`; keep
+only generates artifacts plus validation output. The predeploy migration
+wrapper uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel
+production, rejects known pooled Postgres ports such as `6432` and `6543`, and
+blocks destructive or incompatible Prisma migration SQL outside the frozen
+historical migration set ending at
+`20260707170000_drop_stale_linq_recency_columns`; keep
 `DATABASE_URL` available for app runtime traffic. Because a successful
-migration cannot roll back automatically if a later deploy step fails,
-production migrations must stay backward compatible with the currently deployed
-app and use expand/contract sequencing for breaking changes.
+predeploy migration cannot roll back automatically if a later deploy step
+fails, normal production Prisma migrations must stay backward compatible with
+the currently deployed app and avoid old-code-breaking changes such as required
+columns, drops, renames, `SET NOT NULL`, or column type changes. Those changes
+need an expand/backfill/switch/final-cleanup sequence: add the new nullable
+shape first, backfill or dual-write as needed, switch application reads/writes
+in a later deploy, then clean up the old shape only after the replacement
+deployment is live and the prior production function window has drained.
+Destructive contract cleanup belongs under
+`apps/web/prisma/contract-migrations` and runs through the
+`Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
+successful production deployment. That workflow only accepts Vercel-originated
+deployment statuses, checks out the exact deployed commit, verifies it is
+reachable from `origin/main`, waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS`
+seconds for prior production function executions to drain, then verifies the
+configured Vercel production alias still points at that commit before exposing
+the database secret. It requires
+`HOSTED_WEB_VERCEL_TOKEN`, `HOSTED_WEB_VERCEL_PROJECT_ID`,
+`HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
+GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
+`300` and is capped at `600` unless the workflow timeout is raised. The workflow
+does not use GitHub Actions concurrency for this lane; the final alias check and
+the contract migration advisory lock make stale or duplicate runs skip safely
+without letting stale events replace valid pending runs. After those gates, it calls
+`pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
+Rollback floor: after contract cleanup drops an old schema shape, the oldest
+safe Vercel rollback target is the first deployed commit that no longer reads or
+writes that dropped shape. Rolling back below that floor requires restoring or
+re-expanding the database shape first, or deploying a forward fix. Cloudflare
+`container_rollout=immediate` is not applicable to this Vercel-only lane; the
+bounded Vercel drain wait plus final alias check owns the old-function window.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during

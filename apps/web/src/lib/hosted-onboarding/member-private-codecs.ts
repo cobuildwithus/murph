@@ -29,7 +29,9 @@ const HOSTED_MEMBER_ROUTING_PENDING_LINQ_RECIPIENT_PHONE_FIELD =
 const HOSTED_MEMBER_ROUTING_PENDING_LINQ_PARTICIPANT_CONTACT_FIELD =
   "hosted-member-routing.pending-linq-participant-contact";
 const HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD = "hosted-member-routing.telegram-user-id";
-const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_SCHEMA =
+const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_CURRENT_SCHEMA =
+  "murph.hosted-member-routing.telegram.v2";
+const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_LEGACY_SCHEMA =
   "murph.hosted-member-routing.telegram.v1";
 const HOSTED_MEMBER_BILLING_STRIPE_CUSTOMER_FIELD = "hosted-member-billing-ref.stripe-customer-id";
 const HOSTED_MEMBER_BILLING_STRIPE_SUBSCRIPTION_FIELD =
@@ -320,8 +322,8 @@ function buildHostedMemberRoutingTelegramPrivateValue(input: {
   }
 
   return JSON.stringify({
-    schema: HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_SCHEMA,
-    telegramThreadId: telegramThreadId ?? telegramUserId,
+    schema: HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_CURRENT_SCHEMA,
+    telegramThreadId,
     telegramUserId,
   });
 }
@@ -340,14 +342,26 @@ function parseHostedMemberRoutingTelegramPrivateValue(
 
   const envelope = parseHostedMemberRoutingTelegramPrivateEnvelope(normalized);
 
-  if (envelope.status === "supported") {
+  if (envelope.status === "current") {
     const telegramUserId = normalizeNullableString(envelope.telegramUserId);
     const normalizedThreadId = normalizeHostedTelegramDirectThreadTarget(
       envelope.telegramThreadId,
     );
 
     return {
-      telegramThreadId: normalizedThreadId ?? telegramUserId,
+      telegramThreadId: normalizedThreadId,
+      telegramUserId,
+    };
+  }
+
+  if (envelope.status === "legacy") {
+    const telegramUserId = normalizeNullableString(envelope.telegramUserId);
+
+    return {
+      telegramThreadId: normalizeHostedTelegramLegacyDirectThreadTarget(
+        envelope.telegramThreadId,
+        telegramUserId,
+      ),
       telegramUserId,
     };
   }
@@ -361,7 +375,8 @@ function parseHostedMemberRoutingTelegramPrivateValue(
 function parseHostedMemberRoutingTelegramPrivateEnvelope(
   value: string,
 ):
-  | { status: "supported"; telegramThreadId: string | null; telegramUserId: string | null }
+  | { status: "current"; telegramThreadId: string | null; telegramUserId: string | null }
+  | { status: "legacy"; telegramThreadId: string | null; telegramUserId: string | null }
   | { status: "unsupported" } {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -376,12 +391,21 @@ function parseHostedMemberRoutingTelegramPrivateEnvelope(
 
     const record = parsed as Record<string, unknown>;
 
-    if (record.schema !== HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_SCHEMA) {
+    if (record.schema === HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_LEGACY_SCHEMA) {
+      return {
+        status: "legacy",
+        telegramThreadId:
+          typeof record.telegramThreadId === "string" ? record.telegramThreadId : null,
+        telegramUserId: typeof record.telegramUserId === "string" ? record.telegramUserId : null,
+      };
+    }
+
+    if (record.schema !== HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_CURRENT_SCHEMA) {
       return { status: "unsupported" };
     }
 
     return {
-      status: "supported",
+      status: "current",
       telegramThreadId:
         typeof record.telegramThreadId === "string" ? record.telegramThreadId : null,
       telegramUserId: typeof record.telegramUserId === "string" ? record.telegramUserId : null,
@@ -410,6 +434,29 @@ export function normalizeHostedTelegramDirectThreadTarget(
     !parsed.businessConnectionId &&
     !parsed.directMessagesTopicId &&
     parsed.chatId.startsWith("-")
+  ) {
+    return null;
+  }
+
+  return serializeTelegramThreadTarget(parsed);
+}
+
+function normalizeHostedTelegramLegacyDirectThreadTarget(
+  value: string | null,
+  telegramUserId: string | null,
+): string | null {
+  const normalized = normalizeNullableString(value);
+
+  if (normalized === null || normalized === telegramUserId) {
+    return null;
+  }
+
+  const parsed = parseTelegramThreadTarget(normalized);
+
+  if (
+    !parsed
+    || parsed.messageThreadId != null
+    || (!parsed.businessConnectionId && !parsed.directMessagesTopicId)
   ) {
     return null;
   }

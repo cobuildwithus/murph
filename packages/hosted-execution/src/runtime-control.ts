@@ -24,7 +24,9 @@ import {
 
 import type {
   HostedVaultShareProjectionKind,
+  HostedVaultShareProjectionScope,
   HostedVaultShareSelectableProjectionKind,
+  HostedVaultShareSelectableProjectionScope,
 } from "./vault-share.ts";
 
 export const HOSTED_MAILBOX_LANES = [
@@ -759,9 +761,12 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
 
 export type HostedRuntimeGroupToolAction =
   | "read_current"
+  | "update_display_name"
   | "create_join_link"
   | "post_join_offer"
+  | "preflight_set_chat_avatar"
   | "read_chat_participants"
+  | "set_chat_avatar"
   | "share_contact_card"
   | "revoke_own_email_share";
 
@@ -777,10 +782,12 @@ export const HOSTED_RUNTIME_GROUP_KINDS = [
 export type HostedRuntimeGroupKind = (typeof HOSTED_RUNTIME_GROUP_KINDS)[number];
 
 export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
+export const HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH = 2000;
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
 
 export interface HostedRuntimeGroupMemberSummary {
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   handle: string | null;
   memberId: string;
   role: string;
@@ -793,24 +800,40 @@ export interface HostedRuntimeGroupSummary {
   memberCount: number;
   members: HostedRuntimeGroupMemberSummary[];
   requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   status: string;
 }
 
 export interface HostedRuntimeGroupCreateJoinLinkRequest {
   displayName?: string | null;
   kind?: HostedRuntimeGroupKind | null;
-  // Closed over the individually selectable kinds: the membership-implied
-  // profile-name.v0 share is never requestable through a join link.
+  // Compatibility for old fixed-kind callers. Selector-only projections must
+  // use requestedVaultShareProjectionScopes.
   requestedVaultShareProjectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
+  // Closed over the individually selectable scopes: the membership-implied
+  // profile-name.v0 share is never requestable through a join link.
+  requestedVaultShareProjectionScopes?: HostedVaultShareSelectableProjectionScope[] | null;
 }
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
+  displayName?: string | null;
   // Model-authored natural group-chat message with server-filled
-  // {{join_url}} and {{share_scope}} placeholders.
+  // {{share_scope}} and {{join_url}} placeholders.
   messageTemplate?: string | null;
-  // Closed over the individually selectable kinds; the server-filled share
-  // scope always includes the membership-implied profile-name.v0 share.
+  // Compatibility for old fixed-kind callers. Selector-only projections must
+  // use projectionScopes.
   projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
+  // Closed over the individually selectable scopes; the offer always includes
+  // the membership-implied profile-name.v0 share in its deterministic copy.
+  projectionScopes?: HostedVaultShareSelectableProjectionScope[] | null;
+}
+
+export interface HostedRuntimeGroupUpdateDisplayNameRequest {
+  displayName: string;
+}
+
+export interface HostedRuntimeGroupSetChatAvatarRequest {
+  groupChatIconUrl: string;
 }
 
 /**
@@ -837,13 +860,27 @@ export interface HostedRuntimeGroupChatParticipant {
 
 export type HostedRuntimeGroupToolRequest =
   | { action: "read_current" }
+  | {
+      action: "update_display_name";
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+      updateDisplayName: HostedRuntimeGroupUpdateDisplayNameRequest;
+    }
   | { action: "create_join_link"; joinLink?: HostedRuntimeGroupCreateJoinLinkRequest | null }
   | {
       action: "post_join_offer";
       joinOffer?: HostedRuntimeGroupPostJoinOfferRequest | null;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
+  | {
+      action: "preflight_set_chat_avatar";
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
   | { action: "read_chat_participants"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
+  | {
+      action: "set_chat_avatar";
+      groupChatIconUrl: string;
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
   | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
   | {
       action: "revoke_own_email_share";
@@ -865,6 +902,12 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
   | {
+      action: "update_display_name";
+      result:
+        | { status: "ok"; group: HostedRuntimeGroupSummary }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
       action: "post_join_offer";
       result:
         | { status: "sent"; group: HostedRuntimeGroupSummary; joinUrl: string }
@@ -875,6 +918,19 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "ok"; participants: HostedRuntimeGroupChatParticipant[] }
         | { status: "unavailable"; unavailableReason: string; participants: null };
+    }
+  | {
+      action: "set_chat_avatar";
+      result:
+        | { status: "requested" }
+        | { status: "ok" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "preflight_set_chat_avatar";
+      result:
+        | { status: "ok" }
+        | { status: "unavailable"; unavailableReason: string };
     }
   | {
       action: "share_contact_card";
