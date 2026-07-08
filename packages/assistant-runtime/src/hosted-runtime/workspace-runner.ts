@@ -953,6 +953,9 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
 
   const loop = (async () => {
     while (!waitController.signal.aborted) {
+      if (input.checkpointRequestBuilder.assistantInputBatchFull()) {
+        break;
+      }
       let notification: RuntimeWakeNotification;
       try {
         notification = await runtimeWakeSignal.wait(waitController.signal);
@@ -979,9 +982,6 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       const foregroundConversationImportItem =
         input.input.foregroundImportItem ?? input.input.importItem;
       try {
-        if (input.checkpointRequestBuilder.assistantInputBatchFull()) {
-          break;
-        }
         const handleForegroundImportResult = async (
           result: HostedMailboxImportCheckpointResult,
         ): Promise<boolean> => {

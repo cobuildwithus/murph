@@ -12224,7 +12224,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("late foreground input during system work is batched to the foreground page limit", async () => {
+  test("batch-full foreground rerun leaves later foreground wake pending", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-batch-limit-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -12343,7 +12343,7 @@ describe("hosted workspace runtime entrypoint", () => {
               };
               return {
                 afterCheckpoint: async () => {
-                  for (let seq = 1; seq <= 5; seq += 1) {
+                  for (let seq = 1; seq <= 2; seq += 1) {
                     mailboxItems.push(createMailboxItem({
                       id: `mailbox_item_entrypoint_foreground_batch_limit_conversation_${seq}`,
                       laneSeq: String(seq),
@@ -12370,6 +12370,15 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             }
 
+            if (assistantPhaseCalls === 2) {
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_foreground_batch_limit_conversation_3",
+                laneSeq: "3",
+                occurredAt: "2026-04-27T00:00:03.000Z",
+              }));
+              runtimeWakeSignal.notify();
+            }
+
             const assistantRedactedStatus: HostedRuntimeRedactedJson = {
               hostedAssistantProgressed: true,
             };
@@ -12385,22 +12394,24 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
       await waitUntil(() => {
-        assert.equal(assistantPhaseCalls, 2);
+        assert.equal(assistantPhaseCalls, 3);
       });
       const result = await resultPromise;
 
       assert.equal(assistantPhaseInputIds[1]?.length, 2);
       assert.deepEqual(assistantPhaseInputIds[1], importedInputIds.slice(0, 2));
       assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1", "thread_2"]);
-      const thirdImportIndex = events.indexOf(
-        "mailbox.importItem:mailbox_item_entrypoint_foreground_batch_limit_conversation_3",
+      assert.equal(assistantPhaseInputIds[2]?.length, 1);
+      assert.deepEqual(assistantPhaseInputIds[2], [importedInputIds[2]]);
+      assert.deepEqual(assistantPhaseLinqContextTargets[2], ["thread_3"]);
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:2")
+          < requireEventIndex(
+            events,
+            "mailbox.importItem:mailbox_item_entrypoint_foreground_batch_limit_conversation_3",
+          ),
+        "the batch-full rerun must not consume and drop the later wake",
       );
-      if (thirdImportIndex !== -1) {
-        assert.ok(
-          requireEventIndex(events, "assistant.phase:2") < thirdImportIndex,
-          "the first foreground rerun must run before importing beyond the capped batch",
-        );
-      }
       assert.ok(
         fetchRequests.some((request) =>
           request.requestId.includes(":runtime-wake:")
@@ -12412,7 +12423,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
       assert.equal(result.nextWakeAt, checkpointRequests[0]?.nextWakeAt ?? null);
     } finally {
       runtimeAbortController.abort();
