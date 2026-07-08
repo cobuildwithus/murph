@@ -294,7 +294,7 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "DocumentReference",
           relativePath: "DocumentReference/page-1.json",
-          count: 2,
+          count: 3,
         },
         {
           resourceType: "AllergyIntolerance",
@@ -401,6 +401,22 @@ describe("buildClinicalImportPlan", () => {
               },
             ],
           },
+          {
+            resourceType: "DocumentReference",
+            id: "document-metadata-only",
+            status: "current",
+            docStatus: "final",
+            date: "2026-07-02T08:32:00.000Z",
+            description: "Pathology report",
+            content: [
+              {
+                attachment: {
+                  contentType: "application/pdf",
+                  url: "https://example.invalid/pathology-report.pdf",
+                },
+              },
+            ],
+          },
         ],
         "AllergyIntolerance/page-1.json": [
           {
@@ -472,7 +488,7 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toHaveLength(12);
+    expect(plan.unsupported).toHaveLength(13);
     expect(plan.unsupported).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -506,6 +522,10 @@ describe("buildClinicalImportPlan", () => {
         expect.objectContaining({
           resourceId: "document-docstatus-entered-in-error",
           reason: "document reference docStatus is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "document-metadata-only",
+          reason: "document reference text is not available in raw FHIR page",
         }),
         expect.objectContaining({
           resourceId: "allergy-refuted",
@@ -561,7 +581,7 @@ describe("buildClinicalImportPlan", () => {
     ).rejects.toThrow("count mismatch");
   });
 
-  it("does not import global no-known allergies when confirmed positive allergy evidence is present", async () => {
+  it("does not import global no-known allergies when positive allergy evidence is present", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
@@ -597,12 +617,6 @@ describe("buildClinicalImportPlan", () => {
             clinicalStatus: {
               coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
             },
-            verificationStatus: {
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
-                code: "confirmed",
-              }],
-            },
             code: {
               text: "Penicillin",
               coding: [{ system: "http://snomed.info/sct", code: "91936005", display: "Penicillin allergy" }],
@@ -619,7 +633,7 @@ describe("buildClinicalImportPlan", () => {
       expect.arrayContaining([
         expect.objectContaining({
           resourceId: "allergy-negative-conflict",
-          reason: "no-known allergy conflicts with positive allergy evidence",
+          reason: "no-known allergy conflicts with allergy evidence",
         }),
         expect.objectContaining({
           resourceId: "allergy-positive-conflict",

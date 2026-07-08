@@ -37,7 +37,7 @@ export interface BuildClinicalImportPlanInput {
 }
 
 type FhirResourceContext<TResource extends Resource = Resource> = {
-  hasImportablePositiveAllergyEvidence: boolean;
+  hasAllergyConflictEvidence: boolean;
   manifest: ClinicalRawManifest;
   rawRef: string;
   resource: TResource;
@@ -111,14 +111,14 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
     resourcePages.push({ rawRef, resources });
   }
 
-  const hasImportablePositiveAllergyEvidence = resourcePages.some(({ resources }) =>
-    resources.some(isImportablePositiveAllergyEvidence)
+  const hasAllergyConflictEvidence = resourcePages.some(({ resources }) =>
+    resources.some(isAllergyConflictEvidence)
   );
 
   for (const { rawRef, resources } of resourcePages) {
     for (const resource of resources) {
       const context: FhirResourceContext = {
-        hasImportablePositiveAllergyEvidence,
+        hasAllergyConflictEvidence,
         manifest,
         rawRef,
         resource,
@@ -215,7 +215,7 @@ function resourceContext<TResource extends Resource>(
   resource: TResource,
 ): FhirResourceContext<TResource> {
   return {
-    hasImportablePositiveAllergyEvidence: context.hasImportablePositiveAllergyEvidence,
+    hasAllergyConflictEvidence: context.hasAllergyConflictEvidence,
     manifest: context.manifest,
     rawRef: context.rawRef,
     resource,
@@ -427,7 +427,7 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
 
   const note = readDocumentReferenceText(context.resource);
   if (!note) {
-    return emptyMappedResource();
+    return unsupportedOnly(context, "document reference text is not available in raw FHIR page");
   }
 
   const occurredAt = readClinicalOccurredAt(context.resource);
@@ -476,8 +476,8 @@ function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>)
     return unsupportedOnly(context, "allergy status is not importable");
   }
 
-  if (context.hasImportablePositiveAllergyEvidence) {
-    return unsupportedOnly(context, "no-known allergy conflicts with positive allergy evidence");
+  if (context.hasAllergyConflictEvidence) {
+    return unsupportedOnly(context, "no-known allergy conflicts with allergy evidence");
   }
 
   const occurredAt = readClinicalOccurredAt(context.resource);
@@ -686,8 +686,8 @@ function isNoKnownAllergy(resource: AllergyIntolerance): boolean {
   );
 }
 
-function isImportablePositiveAllergyEvidence(resource: Resource): boolean {
-  return isAllergyIntolerance(resource) && !isNoKnownAllergy(resource) && hasImportableAllergyStatus(resource);
+function isAllergyConflictEvidence(resource: Resource): boolean {
+  return isAllergyIntolerance(resource) && !isNoKnownAllergy(resource);
 }
 
 function hasImportableAllergyStatus(resource: AllergyIntolerance): boolean {
@@ -865,7 +865,7 @@ function readDocumentReferenceText(resource: DocumentReference): string | null {
     }
   }
 
-  return readString(resource.description) ?? null;
+  return null;
 }
 
 function textFromNarrative(value: Narrative | undefined): string | null {
