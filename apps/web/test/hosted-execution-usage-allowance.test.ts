@@ -98,6 +98,45 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it("prices future GPT model slugs with provisional standard and flex accounting", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-5.6-terra",
+      servedModel: "openai/gpt-5.6-terra-2026-07-08",
+    })).toMatchObject({
+      costUsdMicros: 1896n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-terra",
+        modelSource: "served",
+        requestedModel: "gpt-5.6-terra",
+        servedModel: "openai/gpt-5.6-terra-2026-07-08",
+        tokenPricingBasis: "standard",
+      },
+      pricingVersion: "murph-future-gpt-provisional-2026-07-08-standard",
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "hosted-openai",
+      requestedModel: "gpt-sol",
+      servedModel: "gpt-sol",
+      tokenPricingBasis: "openai-flex",
+    })).toMatchObject({
+      costUsdMicros: 948n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-sol",
+        tokenPricingAdjustment: {
+          denominator: "2",
+          numerator: "1",
+        },
+        tokenPricingBasis: "openai-flex",
+      },
+      pricingVersion: "murph-future-gpt-provisional-2026-07-08-openai-flex",
+    });
+  });
+
   it("applies OpenAI flex adjustment once to the rounded standard token cost", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,

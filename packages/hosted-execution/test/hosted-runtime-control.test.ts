@@ -216,6 +216,10 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.5")).toBe("gpt-5.5");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.5-2026-04-23")).toBe("gpt-5.5");
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.5-2026-04-23")).toBe("gpt-5.5");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-sol")).toBe("gpt-sol");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-terra")).toBe("gpt-terra");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-luma-2026-07-08")).toBe("gpt-5.6-luma");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.6-terra-2026-07-08")).toBe("gpt-5.6-terra");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.4-mini")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
   });
@@ -232,6 +236,16 @@ describe("hosted runtime control contracts", () => {
       serviceTier: "flex",
     })).toBe("openai-flex");
     expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-sol",
+      providerName: "hosted-openai",
+      serviceTier: "flex",
+    })).toBe("openai-flex");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "openai/gpt-5.6-terra-2026-07-08",
+      providerName: "openai",
+      serviceTier: "flex",
+    })).toBe("openai-flex");
+    expect(resolveHostedAiUsageTokenPricingBasis({
       model: "gpt-5.5",
       providerName: "openai-local-test",
       serviceTier: "flex",
@@ -242,7 +256,7 @@ describe("hosted runtime control contracts", () => {
       serviceTier: "flex",
     })).toBe("standard");
     expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-5.5",
+      model: "gpt-5.6-terra",
       providerName: "vercel-ai-gateway",
       serviceTier: "flex",
     })).toBe("standard");

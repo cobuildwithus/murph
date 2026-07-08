@@ -36,7 +36,6 @@ const HOSTED_DEPLOY_CONTEXTS = [
   "production",
 ] as const;
 const REQUIRED_HOSTED_ASSISTANT_PROVIDER = "openai";
-const PRODUCTION_HOSTED_ASSISTANT_MODEL = "gpt-5.5";
 const PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT = "low";
 const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 
@@ -274,15 +273,6 @@ export function listHostedDeployEnvironmentInvariantErrors(
 
   if (deployContext !== "production") {
     return errors;
-  }
-
-  if (
-    hostedAssistantModel
-    && hostedAssistantModel !== PRODUCTION_HOSTED_ASSISTANT_MODEL
-  ) {
-    errors.push(
-      `production hosted assistant deploys must set HOSTED_ASSISTANT_MODEL=${PRODUCTION_HOSTED_ASSISTANT_MODEL}.`,
-    );
   }
 
   if (

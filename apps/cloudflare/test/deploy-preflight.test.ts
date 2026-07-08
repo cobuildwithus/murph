@@ -11,6 +11,9 @@ import {
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
+const HOSTED_ASSISTANT_MODEL_PRICING_ERROR =
+  "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5, gpt-sol, gpt-terra, gpt-5.6-luma, gpt-5.6-terra for hosted AI usage allowance pricing.";
+
 function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefined> = {}): EnvSource {
   return {
     CF_BUNDLES_BUCKET: "bundles",
@@ -301,7 +304,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
+      HOSTED_ASSISTANT_MODEL_PRICING_ERROR,
     );
 
     expect(
@@ -312,7 +315,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
+      HOSTED_ASSISTANT_MODEL_PRICING_ERROR,
     );
   });
 
@@ -349,7 +352,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
+      HOSTED_ASSISTANT_MODEL_PRICING_ERROR,
     );
 
     expect(
@@ -360,7 +363,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
+      HOSTED_ASSISTANT_MODEL_PRICING_ERROR,
     );
 
     expect(
@@ -371,7 +374,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
+      HOSTED_ASSISTANT_MODEL_PRICING_ERROR,
     );
 
     expect(
@@ -382,7 +385,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toContain(
-      "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5 for hosted AI usage allowance pricing.",
+      HOSTED_ASSISTANT_MODEL_PRICING_ERROR,
     );
   });
 
@@ -390,13 +393,11 @@ describe("deploy preflight helpers", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(
         createRequiredWorkerDeployEnv({
-          HOSTED_ASSISTANT_MODEL: "gpt-unpriced-mini",
+          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
         }),
         { deployWorker: true },
       ),
-    ).toContain(
-      "production hosted assistant deploys must set HOSTED_ASSISTANT_MODEL=gpt-5.5.",
-    );
+    ).not.toContain(HOSTED_ASSISTANT_MODEL_PRICING_ERROR);
 
     expect(
       listHostedDeployEnvironmentInvariantErrors(
@@ -426,7 +427,7 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).toEqual(expect.not.arrayContaining([
-      "production hosted assistant deploys must set HOSTED_ASSISTANT_MODEL=gpt-5.5.",
+      HOSTED_ASSISTANT_MODEL_PRICING_ERROR,
       "production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=low.",
     ]));
   });
