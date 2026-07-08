@@ -43,8 +43,10 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+  bindHostedGroupJoinOfferMessageTx,
   normalizeHostedGroupOfferScope,
   recordHostedGroupJoinOfferTx,
+  reserveHostedGroupJoinOfferAttemptTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
   normalizeHostedVaultShareProjectionKinds,
@@ -485,6 +487,104 @@ describe("acceptHostedGroupJoinCodeTx", () => {
           schema: "murph.hosted-group.offer-scope.v1",
           vaultShareProjectionKinds: ["sleep-times.v0"],
         },
+      },
+    });
+  });
+
+  it("reserves a stable join-offer attempt before the provider message is sent", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+    const message = "Like this to join: https://www.withmurph.ai/groups/join/join_1";
+
+    const reserved = await reserveHostedGroupJoinOfferAttemptTx({
+      groupId: "group_1",
+      message,
+      offerKind: "post_join_offer",
+      offerScope: {
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+      postedAt,
+      tx,
+    });
+    const reread = await reserveHostedGroupJoinOfferAttemptTx({
+      groupId: "group_1",
+      message,
+      offerKind: "post_join_offer",
+      offerScope: {
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+      postedAt: new Date("2026-07-01T00:05:00.000Z"),
+      tx,
+    });
+
+    expect(reserved).toMatchObject({
+      groupId: "group_1",
+      id: expect.stringMatching(/^hgrpjo_[a-f0-9]{32}$/u),
+      messageIdSuffix: null,
+      messageLookupKey: expect.stringMatching(/^hosted-group-join-offer-attempt:hgrpjo_/u),
+      providerMessageBound: false,
+      offerScope: {
+        featureActivations: [],
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+    });
+    expect(reread.id).toBe(reserved.id);
+    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("binds a reserved join-offer attempt to the provider message lookup key", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+    const message = "Like this to join: https://www.withmurph.ai/groups/join/join_1";
+    const reserved = await reserveHostedGroupJoinOfferAttemptTx({
+      groupId: "group_1",
+      message,
+      offerKind: "post_join_offer",
+      offerScope: {
+        featureActivations: ["call-circle.enroll.v0"],
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+      postedAt,
+      tx,
+    });
+
+    const bound = await bindHostedGroupJoinOfferMessageTx({
+      attemptId: reserved.id,
+      messageId: "msg_offer_123",
+      tx,
+    });
+    const reread = await reserveHostedGroupJoinOfferAttemptTx({
+      groupId: "group_1",
+      message,
+      offerKind: "post_join_offer",
+      offerScope: {
+        featureActivations: ["call-circle.enroll.v0"],
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+      postedAt: new Date("2026-07-01T00:05:00.000Z"),
+      tx,
+    });
+
+    expect(bound).toMatchObject({
+      groupId: "group_1",
+      id: reserved.id,
+      messageIdSuffix: expect.stringContaining("123"),
+      messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_123"),
+      offerScope: {
+        featureActivations: ["call-circle.enroll.v0"],
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+    });
+    expect(reread).toMatchObject({
+      id: reserved.id,
+      messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_123"),
+      providerMessageBound: true,
+    });
+    expect(tx.hostedGroupJoinOffer.update).toHaveBeenCalledWith({
+      where: { id: reserved.id },
+      data: {
+        messageIdSuffix: expect.stringContaining("123"),
+        messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_123"),
       },
     });
   });
@@ -953,6 +1053,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     create: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
   hostedThreadRoute: {
@@ -974,6 +1075,8 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
   };
   const offers: Array<{
     groupId: string;
+    id: string;
+    messageIdSuffix: string | null;
     messageLookupKey: string;
     offerScopeJson: Prisma.InputJsonValue;
     revokedAt: Date | null;
@@ -995,12 +1098,16 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
       create: vi.fn(async (args: {
         data: {
           groupId: string;
+          id: string;
+          messageIdSuffix?: string | null;
           messageLookupKey: string;
           offerScopeJson: Prisma.InputJsonValue;
         };
       }) => {
         offers.push({
           groupId: args.data.groupId,
+          id: args.data.id,
+          messageIdSuffix: args.data.messageIdSuffix ?? null,
           messageLookupKey: args.data.messageLookupKey,
           offerScopeJson: args.data.offerScopeJson,
           revokedAt: null,
@@ -1008,13 +1115,16 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
         return {};
       }),
       findUnique: vi.fn(async (args: {
-        where: { messageLookupKey?: string };
+        where: { id?: string; messageLookupKey?: string };
       }) => {
         const offer = offers.find((entry) =>
-          entry.messageLookupKey === args.where.messageLookupKey);
+          entry.id === args.where.id
+          || entry.messageLookupKey === args.where.messageLookupKey);
         return offer
           ? {
               groupId: offer.groupId,
+              id: offer.id,
+              messageIdSuffix: offer.messageIdSuffix,
               messageLookupKey: offer.messageLookupKey,
               offerScopeJson: offer.offerScopeJson,
               revokedAt: offer.revokedAt,
@@ -1035,11 +1145,25 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
         }
         return {
           groupId: offer.groupId,
+          id: offer.id,
+          messageIdSuffix: offer.messageIdSuffix,
           messageLookupKey: offer.messageLookupKey,
           offerScopeJson: offer.offerScopeJson,
           revokedAt: offer.revokedAt,
           group,
         };
+      }),
+      update: vi.fn(async (args: {
+        data: { messageIdSuffix?: string | null; messageLookupKey?: string };
+        where: { id: string };
+      }) => {
+        const offer = offers.find((entry) => entry.id === args.where.id);
+        if (!offer) {
+          throw new Error("offer not found");
+        }
+        offer.messageIdSuffix = args.data.messageIdSuffix ?? offer.messageIdSuffix;
+        offer.messageLookupKey = args.data.messageLookupKey ?? offer.messageLookupKey;
+        return {};
       }),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },

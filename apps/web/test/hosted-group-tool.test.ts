@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
+  bindHostedGroupJoinOfferMessageTx: vi.fn(),
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
-  recordHostedGroupJoinOfferTx: vi.fn(),
+  reserveHostedGroupJoinOfferAttemptTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
   revokeHostedGroupMemberEmailShareTx: vi.fn(),
@@ -83,10 +84,11 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
+  bindHostedGroupJoinOfferMessageTx: mocks.bindHostedGroupJoinOfferMessageTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx:
     mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
-  recordHostedGroupJoinOfferTx: mocks.recordHostedGroupJoinOfferTx,
+  reserveHostedGroupJoinOfferAttemptTx: mocks.reserveHostedGroupJoinOfferAttemptTx,
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
 }));
 
@@ -168,8 +170,21 @@ describe("handleHostedRuntimeGroupTool", () => {
       group: GROUP_SUMMARY,
       joinCode: "abc123",
     });
-    mocks.recordHostedGroupJoinOfferTx.mockResolvedValue({
+    mocks.reserveHostedGroupJoinOfferAttemptTx.mockResolvedValue({
       groupId: GROUP_SUMMARY.id,
+      id: "hgrpjo_attempt_1",
+      messageIdSuffix: "offer_msg",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      offerScope: {
+        featureActivations: [],
+        schema: "murph.hosted-group.offer-scope.v1",
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+      providerMessageBound: false,
+    });
+    mocks.bindHostedGroupJoinOfferMessageTx.mockResolvedValue({
+      groupId: GROUP_SUMMARY.id,
+      id: "hgrpjo_attempt_1",
       messageIdSuffix: "offer_msg",
       messageLookupKey: "hbidx:linq-message:v1:offer",
       offerScope: {
@@ -683,7 +698,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_group_1",
-        idempotencyKey: expect.stringMatching(/^group-join-offer:hgrp_123:/u),
+        idempotencyKey: "group-join-offer:hgrpjo_attempt_1",
         message:
           "React here and you're in. Joining shares your Murph profile name and recent sleep timing with this group; manage it at https://www.withmurph.ai/groups/join/abc123.",
       }),
@@ -698,9 +713,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         message: expect.not.stringContaining("—"),
       }),
     );
-    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+    expect(mocks.reserveHostedGroupJoinOfferAttemptTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message:
+        "React here and you're in. Joining shares your Murph profile name and recent sleep timing with this group; manage it at https://www.withmurph.ai/groups/join/abc123.",
+      offerKind: "post_join_offer",
       offerScope: {
         featureActivations: [],
         vaultShareProjectionKinds: ["sleep-times.v0"],
@@ -708,7 +725,77 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       postedAt: expect.any(Date),
       tx: fakeTx,
     });
+    expect(mocks.reserveHostedGroupJoinOfferAttemptTx.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]);
+    expect(mocks.bindHostedGroupJoinOfferMessageTx).toHaveBeenCalledWith({
+      attemptId: "hgrpjo_attempt_1",
+      messageId: "msg_offer_1",
+      tx: fakeTx,
+    });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+  });
+
+  it("reuses the same offer attempt when provider send succeeds but binding must retry", async () => {
+    mocks.bindHostedGroupJoinOfferMessageTx
+      .mockRejectedValueOnce(new Error("temporary db failure"))
+      .mockResolvedValueOnce({
+        groupId: GROUP_SUMMARY.id,
+        id: "hgrpjo_attempt_1",
+        messageIdSuffix: "offer_msg",
+        messageLookupKey: "hbidx:linq-message:v1:offer",
+        offerScope: {
+          featureActivations: [],
+          schema: "murph.hosted-group.offer-scope.v1",
+          vaultShareProjectionKinds: ["sleep-times.v0"],
+        },
+      });
+
+    const request = {
+      action: "post_join_offer" as const,
+      joinOffer: {
+        messageTemplate:
+          "React here and you're in. Joining shares {{share_scope}} with this group; manage it at {{join_url}}.",
+        projectionKinds: ["sleep-times.v0" as const],
+      },
+      linqThread: LINQ_THREAD,
+    };
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "offer_binding_failed",
+      },
+    });
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request,
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "sent",
+      },
+    });
+
+    expect(mocks.reserveHostedGroupJoinOfferAttemptTx).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedLinqChatMessage.mock.calls.map(([input]) => input.idempotencyKey))
+      .toEqual([
+        "group-join-offer:hgrpjo_attempt_1",
+        "group-join-offer:hgrpjo_attempt_1",
+      ]);
+    expect(mocks.bindHostedGroupJoinOfferMessageTx).toHaveBeenCalledTimes(2);
+    expect(mocks.bindHostedGroupJoinOfferMessageTx).toHaveBeenLastCalledWith({
+      attemptId: "hgrpjo_attempt_1",
+      messageId: "msg_offer_1",
+      tx: fakeTx,
+    });
   });
 
   it("does not create or send a join offer without the required message template", async () => {
@@ -726,7 +813,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.reserveHostedGroupJoinOfferAttemptTx).not.toHaveBeenCalled();
+    expect(mocks.bindHostedGroupJoinOfferMessageTx).not.toHaveBeenCalled();
   });
 
   it("posts a model-authored Call Circle offer with the server-filled join URL", async () => {
@@ -763,18 +851,24 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_group_1",
-        idempotencyKey: expect.stringMatching(/^group-call-circle-offer:hgrp_123:/u),
+        idempotencyKey: "group-call-circle-offer:hgrpjo_attempt_1",
         message: sentMessage,
       }),
     );
-    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+    expect(mocks.reserveHostedGroupJoinOfferAttemptTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: sentMessage,
+      offerKind: "post_call_circle_offer",
       offerScope: {
         featureActivations: ["call-circle.enroll.v0"],
         vaultShareProjectionKinds: [],
       },
       postedAt: expect.any(Date),
+      tx: fakeTx,
+    });
+    expect(mocks.bindHostedGroupJoinOfferMessageTx).toHaveBeenCalledWith({
+      attemptId: "hgrpjo_attempt_1",
+      messageId: "msg_offer_1",
       tx: fakeTx,
     });
   });
@@ -800,7 +894,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
 
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.reserveHostedGroupJoinOfferAttemptTx).not.toHaveBeenCalled();
+    expect(mocks.bindHostedGroupJoinOfferMessageTx).not.toHaveBeenCalled();
   });
 
   it("does not post a Call Circle offer when the join URL placeholder is missing", async () => {
@@ -827,7 +922,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.reserveHostedGroupJoinOfferAttemptTx).not.toHaveBeenCalled();
   });
 
   it("does not bind an offer when the provider omits the sent message id", async () => {
@@ -855,7 +950,19 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       },
     });
 
-    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.reserveHostedGroupJoinOfferAttemptTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      message:
+        "Like this to join. It shares your Murph profile name with the group. Join page: https://www.withmurph.ai/groups/join/abc123.",
+      offerKind: "post_join_offer",
+      offerScope: {
+        featureActivations: [],
+        vaultShareProjectionKinds: [],
+      },
+      postedAt: expect.any(Date),
+      tx: fakeTx,
+    });
+    expect(mocks.bindHostedGroupJoinOfferMessageTx).not.toHaveBeenCalled();
   });
 
   it("rejects an authority that does not match the bound runtime member", async () => {

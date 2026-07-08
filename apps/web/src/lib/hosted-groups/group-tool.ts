@@ -65,8 +65,9 @@ import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  bindHostedGroupJoinOfferMessageTx,
   readHostedGroupByRuntimeMemberId,
-  recordHostedGroupJoinOfferTx,
+  reserveHostedGroupJoinOfferAttemptTx,
   revokeHostedGroupMemberEmailShareTx,
   type HostedGroupFeatureActivationKind,
 } from "./group-store";
@@ -490,36 +491,51 @@ async function postHostedRuntimeGroupOffer(input: {
   const message = typeof input.message === "string"
     ? input.message
     : input.message({ joinUrl });
+  const offerScope = {
+    featureActivations: input.featureActivations,
+    vaultShareProjectionKinds: input.projectionKinds,
+  };
 
-  let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
+  let offerAttempt: Awaited<ReturnType<typeof reserveHostedGroupJoinOfferAttemptTx>>;
   try {
-    sent = await sendHostedLinqChatMessage({
-      chatId: authorized.chatId,
-      idempotencyKey: `${input.idempotencyKeyPrefix}:${created.group.id}:${now.toISOString()}`,
+    offerAttempt = await prisma.$transaction(async (tx) => reserveHostedGroupJoinOfferAttemptTx({
+      groupId: created.group.id,
       message,
-    });
-  } catch {
-    return unavailable("send_failed");
-  }
-  if (!sent.messageId) {
-    return unavailable("provider_message_unavailable");
-  }
-
-  try {
-    await prisma.$transaction(async (tx) => {
-      await recordHostedGroupJoinOfferTx({
-        groupId: created.group.id,
-        messageId: sent.messageId,
-        offerScope: {
-          featureActivations: input.featureActivations,
-          vaultShareProjectionKinds: input.projectionKinds,
-        },
-        postedAt: now,
-        tx,
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      offerKind: input.action,
+      offerScope,
+      postedAt: now,
+      tx,
+    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch {
     return unavailable("offer_binding_failed");
+  }
+
+  if (!offerAttempt.providerMessageBound) {
+    let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
+    try {
+      sent = await sendHostedLinqChatMessage({
+        chatId: authorized.chatId,
+        idempotencyKey: `${input.idempotencyKeyPrefix}:${offerAttempt.id}`,
+        message,
+      });
+    } catch {
+      return unavailable("send_failed");
+    }
+    if (!sent.messageId) {
+      return unavailable("provider_message_unavailable");
+    }
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await bindHostedGroupJoinOfferMessageTx({
+          attemptId: offerAttempt.id,
+          messageId: sent.messageId,
+          tx,
+        });
+      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    } catch {
+      return unavailable("offer_binding_failed");
+    }
   }
 
   try {
