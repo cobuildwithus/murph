@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const CONFIG_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOSTED_WEB_PRISMA_MIGRATIONS_DIR = path.join(CONFIG_DIR, "prisma", "migrations");
 const KNOWN_POOLER_PORTS = new Set(["6432", "6543"]);
+const SYSTEM_SSL_FILE_PARAMETERS = ["sslcert", "sslkey", "sslrootcert"] as const;
 
 export const hostedWebPrismaPredeployDestructiveMigrationBaseline =
   "20260707170000_drop_stale_linq_recency_columns";
@@ -154,8 +155,13 @@ export function resolveHostedWebMigrationDatabaseUrl(
   const directDatabaseUrl = nonEmptyEnv(environment.DIRECT_DATABASE_URL);
 
   if (directDatabaseUrl !== undefined) {
-    assertDirectMigrationDatabaseUrl(directDatabaseUrl, "DIRECT_DATABASE_URL");
-    return { source: "DIRECT_DATABASE_URL", url: directDatabaseUrl };
+    const normalizedDirectDatabaseUrl =
+      normalizeHostedWebMigrationDatabaseUrl(directDatabaseUrl);
+    assertDirectMigrationDatabaseUrl(
+      normalizedDirectDatabaseUrl,
+      "DIRECT_DATABASE_URL",
+    );
+    return { source: "DIRECT_DATABASE_URL", url: normalizedDirectDatabaseUrl };
   }
 
   if (shouldRequireDirectDatabaseUrl(environment)) {
@@ -170,7 +176,32 @@ export function resolveHostedWebMigrationDatabaseUrl(
   }
 
   assertDirectMigrationDatabaseUrl(databaseUrl, "DATABASE_URL");
-  return { source: "DATABASE_URL", url: databaseUrl };
+  return {
+    source: "DATABASE_URL",
+    url: normalizeHostedWebMigrationDatabaseUrl(databaseUrl),
+  };
+}
+
+export function normalizeHostedWebMigrationDatabaseUrl(databaseUrl: string): string {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(databaseUrl);
+  } catch {
+    return databaseUrl;
+  }
+
+  if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
+    return databaseUrl;
+  }
+
+  for (const key of SYSTEM_SSL_FILE_PARAMETERS) {
+    if (parsed.searchParams.get(key) === "system") {
+      parsed.searchParams.delete(key);
+    }
+  }
+
+  return parsed.toString();
 }
 
 export function assertDirectMigrationDatabaseUrl(
@@ -206,14 +237,19 @@ export async function runHostedWebPrismaMigrateDeploy(
 
   const migrationDatabaseUrl = resolveHostedWebMigrationDatabaseUrl(environment);
   console.log(`Applying hosted web Prisma migrations with ${migrationDatabaseUrl.source}.`);
+  const childEnvironment: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...environment,
+    DATABASE_URL: migrationDatabaseUrl.url,
+  };
+  if (migrationDatabaseUrl.source === "DIRECT_DATABASE_URL") {
+    childEnvironment.DIRECT_DATABASE_URL = migrationDatabaseUrl.url;
+  }
+
   await runCommand(
     hostedWebPrismaMigrateDeployCommand.command,
     hostedWebPrismaMigrateDeployCommand.args,
-    {
-      ...process.env,
-      ...environment,
-      DATABASE_URL: migrationDatabaseUrl.url,
-    },
+    childEnvironment,
   );
 }
 
