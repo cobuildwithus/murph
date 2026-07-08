@@ -109,7 +109,7 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
-  it('requires pending vault-file approvals to include the returned handoff link', () => {
+  it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Vault file sends:')
@@ -126,7 +126,16 @@ describe('assistant execution prompt contract', () => {
       'When `murph.send_vault_file` returns `status: "approved"`',
     )
     expect(prompt).toContain(
-      'approval succeeded and the file is queued to deliver with your normal reply; delivery is not confirmed yet.',
+      'write a concise, natural reply using the returned filename when useful',
+    )
+    expect(prompt).toContain(
+      'such as "Here it is: report.pdf."',
+    )
+    expect(prompt).toContain(
+      'Do not quote or paraphrase `deliveryStatus`, approval metadata, queue mechanics, or "delivery is not confirmed" as stock user-facing copy.',
+    )
+    expect(prompt).toContain(
+      'Do not claim the file was delivered or sent successfully unless a later delivery result explicitly confirms `sent`.',
     )
   })
 
