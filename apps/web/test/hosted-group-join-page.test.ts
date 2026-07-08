@@ -108,6 +108,8 @@ test("renders launch legal consent before the join form for authenticated viewer
   });
   expect(markup).toContain('data-legal-consent-gate="true"');
   expect(markup).toContain('data-initial-launch-granted="false"');
+  expect(markup).toContain('aria-live="polite"');
+  expect(markup).toContain('aria-label="Group join action"');
   expect(markup).not.toContain("Accept group invite");
 });
 

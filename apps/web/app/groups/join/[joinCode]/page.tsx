@@ -126,24 +126,32 @@ function renderGroupJoin(input: {
         <ClarityRow label="Private" text="Your chats, health data, and vault. Always." />
       </div>
 
-      {input.authenticated && !input.launchConsentStatus?.launchGranted ? (
-        <GroupJoinLegalConsentGate initialStatus={input.launchConsentStatus} />
-      ) : input.authenticated ? (
-        <GroupJoinAcceptForm
-          activeVaultShareProjectionScopes={view.activeVaultShareProjectionScopes}
-          alreadyActiveMember={alreadyActiveMember}
-          groupName={groupName}
-          joinCode={input.joinCode}
-          permissions={view.requestedVaultShareProjections}
-        />
-      ) : (
-        <div className="flex flex-col gap-2">
-          <GroupJoinSignInButton />
-          <p className="text-center text-xs leading-5 text-muted-foreground">
-            Sign in or create a private Murph account, and we&apos;ll bring you back here.
-          </p>
-        </div>
-      )}
+      <div
+        id="group-join-action"
+        aria-label="Group join action"
+        aria-live="polite"
+        className="flex flex-col"
+        role="region"
+      >
+        {input.authenticated && !input.launchConsentStatus?.launchGranted ? (
+          <GroupJoinLegalConsentGate initialStatus={input.launchConsentStatus} />
+        ) : input.authenticated ? (
+          <GroupJoinAcceptForm
+            activeVaultShareProjectionScopes={view.activeVaultShareProjectionScopes}
+            alreadyActiveMember={alreadyActiveMember}
+            groupName={groupName}
+            joinCode={input.joinCode}
+            permissions={view.requestedVaultShareProjections}
+          />
+        ) : (
+          <div className="flex flex-col gap-2">
+            <GroupJoinSignInButton />
+            <p className="text-center text-xs leading-5 text-muted-foreground">
+              Sign in or create a private Murph account, and we&apos;ll bring you back here.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

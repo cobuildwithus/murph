@@ -279,8 +279,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.95')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.95')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.97')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.97')
     expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
       'incur@0.4.5: patches/incur@0.4.5.patch',
     )
@@ -291,6 +291,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('attach_artifacts=1')
     expect(reviewGptConfig).toContain('app_connector="current"')
     expect(reviewGptConfig).toContain('model="gpt-5.5-pro"')
+    expect(reviewGptConfig).toContain('thinking="current"')
     expect(reviewGptConfig).toContain('snapshot_attachment_name="repo.snapshot.zip"')
     expect(reviewGptConfig).toContain('repomix_attachment_format="zip"')
     const prDeepReviewPrompt = readFileSync(
@@ -320,7 +321,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('repo-local `pr-review` preset')
     expect(prReviewGptLoop).toContain('`pnpm review:gpt`')
     expect(prReviewGptLoop).toContain('managed ReviewGPT browser lanes')
-    expect(prReviewGptLoop).toContain('`Eragon.app` on CDP port `9448`')
+    expect(prReviewGptLoop).toContain('randomly among usable')
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
