@@ -15,6 +15,9 @@ import {
   type HostedWebContractMigrationDatabase,
 } from "../scripts/run-production-contract-migrations";
 import {
+  resolveVercelProductionAliasSha,
+} from "../scripts/resolve-vercel-production-alias-sha";
+import {
   hostedWebProductionLinqLineSyncCommand,
   hostedWebProductionMigrationCommand,
   hostedWebProductionPrismaGenerateCommand,
@@ -518,6 +521,89 @@ describe("hosted web production migration guard", () => {
     assert.ok(database.queries.includes("ROLLBACK"));
   });
 
+  test("resolves current Vercel production alias SHA from provider-shaped JSON", async () => {
+    const environment = {
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TEAM_ID: "team-id",
+      HOSTED_WEB_VERCEL_TOKEN: "token",
+    };
+    const aliasUrl =
+      "https://api.vercel.com/v4/aliases/www.withmurph.ai?projectId=project-id&teamId=team-id";
+    const cases = [
+      {
+        aliasResponse: { deploymentId: "dpl_direct" },
+        deploymentUrl:
+          "https://api.vercel.com/v13/deployments/dpl_direct?withGitRepoInfo=true&teamId=team-id",
+      },
+      {
+        aliasResponse: { deployment: { id: "dpl_nested" } },
+        deploymentUrl:
+          "https://api.vercel.com/v13/deployments/dpl_nested?withGitRepoInfo=true&teamId=team-id",
+      },
+      {
+        aliasResponse: { deployment: { url: "murph-abc.vercel.app" } },
+        deploymentUrl:
+          "https://api.vercel.com/v13/deployments/murph-abc.vercel.app?withGitRepoInfo=true&teamId=team-id",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const requests: Array<{
+        authorization: string | undefined;
+        url: string;
+      }> = [];
+      const resolvedSha = await resolveVercelProductionAliasSha(
+        environment,
+        async (url, init) => {
+          requests.push({
+            authorization: init?.headers?.Authorization,
+            url,
+          });
+
+          if (url.includes("/v4/aliases/")) {
+            return jsonFetchResponse(testCase.aliasResponse);
+          }
+
+          if (url.includes("/v13/deployments/")) {
+            return jsonFetchResponse({
+              gitSource: { sha: "sha-from-git-source" },
+              meta: { githubCommitSha: "spoofed-meta-sha" },
+            });
+          }
+
+          throw new Error(`Unexpected Vercel URL: ${url}`);
+        },
+      );
+
+      assert.equal(resolvedSha, "sha-from-git-source");
+      assert.deepEqual(requests, [
+        {
+          authorization: "Bearer token",
+          url: aliasUrl,
+        },
+        {
+          authorization: "Bearer token",
+          url: testCase.deploymentUrl,
+        },
+      ]);
+    }
+
+    await assert.rejects(
+      () =>
+        resolveVercelProductionAliasSha(environment, async (url) => {
+          if (url.includes("/v4/aliases/")) {
+            return jsonFetchResponse({ deploymentId: "dpl_123" });
+          }
+
+          return jsonFetchResponse({
+            meta: { githubCommitSha: "spoofed-meta-sha" },
+          });
+        }),
+      /gitSource\.sha/u,
+    );
+  });
+
   test("keeps package build non-mutating and keeps Vercel deploy migrations automatic", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(appRoot, "package.json"), "utf8"),
@@ -592,12 +678,16 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /github\.event\.deployment\.sha/u);
     assert.match(workflow, /fetch-depth: 0/u);
     assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOYED_SHA\}" origin\/main/u);
-    assert.match(workflow, /https:\/\/api\.vercel\.com\/v4\/aliases\/\$\{alias_host\}/u);
-    assert.match(workflow, /deployment\?\.meta\?\.githubCommitSha/u);
+    assert.match(
+      workflow,
+      /resolve-vercel-production-alias-sha\.ts/u,
+    );
+    assert.doesNotMatch(workflow, /alias_host=/u);
+    assert.doesNotMatch(workflow, /alias_url=/u);
+    assert.doesNotMatch(workflow, /data\?\.meta\?\.githubCommitSha/u);
+    assert.doesNotMatch(workflow, /meta\.githubCommitSha/u);
     assert.match(workflow, /HOSTED_WEB_VERCEL_TOKEN/u);
     assert.match(workflow, /HOSTED_WEB_VERCEL_PROJECT_ID/u);
-    assert.match(workflow, /HOSTED_WEB_DIRECT_DATABASE_URL/u);
-    assert.match(workflow, /DIRECT_DATABASE_URL="\$\{HOSTED_WEB_DIRECT_DATABASE_URL\}"/u);
     assert.match(workflow, /HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS/u);
     assert.match(
       workflow,
@@ -611,18 +701,77 @@ describe("hosted web production migration guard", () => {
       workflow,
       /steps\.production-branch\.outputs\.should_run == 'true'/u,
     );
-    assert.doesNotMatch(workflow, /steps\.current-production/u);
+    assert.match(workflow, /steps\.current-production\.outputs\.should_apply == 'true'/u);
     assert.doesNotMatch(workflow, /deployment\.ref == 'main'/u);
     assert.match(workflow, /release:production:contract-migrate/u);
+
+    const productionProofStep = extractWorkflowStep(
+      workflow,
+      "Verify current Vercel production deployment",
+    );
+    const contractMigrationStep = extractWorkflowStep(
+      workflow,
+      "Apply contract migrations",
+    );
+    assert.match(productionProofStep, /id: current-production/u);
+    assert.match(productionProofStep, /HOSTED_WEB_VERCEL_TOKEN/u);
+    assert.match(productionProofStep, /resolve-vercel-production-alias-sha\.ts/u);
+    assert.match(productionProofStep, /echo "should_apply=true" >> "\$\{GITHUB_OUTPUT\}"/u);
+    assert.match(productionProofStep, /echo "should_apply=false" >> "\$\{GITHUB_OUTPUT\}"/u);
+    assert.doesNotMatch(productionProofStep, /HOSTED_WEB_DIRECT_DATABASE_URL/u);
+    assert.doesNotMatch(productionProofStep, /DIRECT_DATABASE_URL/u);
+    assert.match(
+      contractMigrationStep,
+      /steps\.current-production\.outputs\.should_apply == 'true'/u,
+    );
+    assert.match(contractMigrationStep, /HOSTED_WEB_VERCEL_TOKEN/u);
+    assert.match(contractMigrationStep, /resolve-vercel-production-alias-sha\.ts/u);
+    assert.match(contractMigrationStep, /-u DIRECT_DATABASE_URL/u);
+    assert.match(
+      contractMigrationStep,
+      /-u MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS/u,
+    );
+    assert.match(
+      contractMigrationStep,
+      /-u MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS/u,
+    );
+    assert.match(
+      contractMigrationStep,
+      /DIRECT_DATABASE_URL: \$\{\{ secrets\.HOSTED_WEB_DIRECT_DATABASE_URL \}\}/u,
+    );
+    assert.match(
+      contractMigrationStep,
+      /MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"/u,
+    );
+    assert.match(
+      contractMigrationStep,
+      /MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"/u,
+    );
+    assert.match(contractMigrationStep, /release:production:contract-migrate/u);
     assert.ok(
-      workflow.indexOf('sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"')
-        < workflow.indexOf('alias_response="$('),
+      productionProofStep.indexOf('sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"')
+        < productionProofStep.indexOf('current_sha="$('),
       "contract migrations must wait for production drain before the final alias check",
     );
     assert.ok(
-      workflow.indexOf('alias_response="$(')
+      contractMigrationStep.indexOf("-u DIRECT_DATABASE_URL")
+        < contractMigrationStep.indexOf("resolve-vercel-production-alias-sha.ts"),
+      "contract migration step must strip the database env before running the resolver",
+    );
+    assert.ok(
+      contractMigrationStep.indexOf('current_sha="$(')
+        < contractMigrationStep.indexOf('if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then'),
+      "contract migration step must compare the fresh production alias SHA before SQL",
+    );
+    assert.ok(
+      contractMigrationStep.indexOf('if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then')
+        < contractMigrationStep.indexOf("release:production:contract-migrate"),
+      "contract migrations must re-check the current production deployment SHA immediately before SQL",
+    );
+    assert.ok(
+      workflow.indexOf('echo "should_apply=true" >> "${GITHUB_OUTPUT}"')
         < workflow.indexOf("release:production:contract-migrate"),
-      "contract migrations must re-check the current production alias before SQL",
+      "contract migrations must expose the database secret only after the alias proof output is set",
     );
 
     const nodeVersion = workflow.match(/node-version:\s*([^\s#]+)/u)?.[1] ?? "";
@@ -706,6 +855,29 @@ async function writeMigrationSql(
   const migrationDir = path.join(migrationsDir, migrationId);
   await mkdir(migrationDir, { recursive: true });
   await writeFile(path.join(migrationDir, "migration.sql"), sql);
+}
+
+function extractWorkflowStep(workflow: string, stepName: string): string {
+  const marker = `      - name: ${stepName}`;
+  const start = workflow.indexOf(marker);
+  assert.notEqual(start, -1, `workflow step was not found: ${stepName}`);
+
+  const nextStep = workflow.indexOf("\n      - name: ", start + marker.length);
+  return nextStep === -1 ? workflow.slice(start) : workflow.slice(start, nextStep);
+}
+
+function jsonFetchResponse(data: unknown): {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+} {
+  return {
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify(data);
+    },
+  };
 }
 
 class FakeContractMigrationDatabase implements HostedWebContractMigrationDatabase {
