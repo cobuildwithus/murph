@@ -870,7 +870,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .min(1)
         .optional()
         .describe("Optional lexical filter across title, instructions, route, and metadata."),
-      limit: z.number().int().positive().max(200).default(50),
+      limit: z.number().int().positive().max(200).default(10),
     }),
     output: automationListResultSchema,
     async run(context) {

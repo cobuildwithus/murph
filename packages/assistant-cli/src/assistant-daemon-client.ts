@@ -9,7 +9,6 @@ import {
   assistantCronTargetSnapshotSchema,
   assistantOutboxIntentSchema,
   assistantRunResultSchema,
-  assistantSessionListResultSchema,
   assistantSessionShowResultSchema,
   assistantStatusResultSchema,
   type AssistantAskResult,
@@ -620,7 +619,7 @@ function parseAssistantSessionListPayload(payload: unknown): AssistantSession[] 
   if (!Array.isArray(payload)) {
     throw new Error('Assistant daemon returned an invalid session list payload.')
   }
-  return assistantSessionListResultSchema.shape.sessions.parse(payload)
+  return assistantSessionShowResultSchema.shape.session.array().parse(payload)
 }
 
 function parseAssistantSessionOutputPayload(payload: unknown): AssistantSession {

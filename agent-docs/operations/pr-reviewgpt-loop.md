@@ -1,11 +1,13 @@
 # PR ReviewGPT Loop
 
-Last verified: 2026-07-07
+Last verified: 2026-07-08
 
 Required post-completion ReviewGPT loop for non-trivial PR-lane work. It runs
-the repo-local `pr-review` preset through `pnpm review:gpt`, using the Eragon
-managed browser profile by default. It does **not** run the local Codex
-`deep-review` pass.
+the repo-local `pr-review` preset through `pnpm review:gpt`, using one of the
+managed ReviewGPT browser lanes. The repo config chooses randomly among
+Eragon, Phlebas, and Mountain by default so PR-review load is spread across
+signed-in browser profiles. It does **not** run the local Codex `deep-review`
+pass.
 
 For PR-lane patch implementation, this loop is the audit gate: the worktree /
 PR-lane skip in `agent-docs/operations/completion-workflow.md` lets the parent
@@ -50,8 +52,9 @@ current-task user opt-out.
    scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>
    ```
 
-2. Run ReviewGPT with the PR preset and Eragon browser profile. Pass the PR ref
-   through `REVIEW_GPT_PR_URL` so `scripts/package-audit-context-full.sh` adds
+2. Run ReviewGPT with the PR preset and the default randomized managed browser
+   lane. Pass the PR ref through `REVIEW_GPT_PR_URL` so
+   `scripts/package-audit-context-full.sh` adds
    `review-gpt-pr-context/pr.diff` and `changed-files.txt` to the guarded
    source snapshot. Capture the response in an uncommitted `audit-packages/`
    artifact and require the preset's `REVIEW_COMPLETE` marker before treating
@@ -67,10 +70,16 @@ current-task user opt-out.
        --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Use the PR body as the intent contract."
    ```
 
-   The repo wrapper defaults this command to the Eragon managed browser profile
-   (`Eragon.app`, CDP port `9448`, profile `Default`) and `app_connector=current`
-   so review context comes from the guarded ZIP and repomix attachments, not a
-   ChatGPT connector.
+   The repo wrapper chooses one ReviewGPT browser lane per run:
+   `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`, or
+   `Mountain.app` on `9450`, always with profile `Default` and
+   `app_connector=current` so review context comes from the guarded ZIP and
+   repomix attachments, not a ChatGPT connector.
+
+   To pin a specific lane while recovering or debugging one profile, set
+   `REVIEW_GPT_BROWSER_LANE=eragon|phlebas|mountain` on that command.
+   `aragon` is accepted as an alias for `eragon`. Leave it unset for normal
+   PR-review rounds.
 
 3. Confirm the captured output is an actual completed review before triaging
    it. If the run dies, times out, leaves an empty/preliminary file, lacks
@@ -83,8 +92,9 @@ current-task user opt-out.
    minutes; a round that comes back in roughly a minute or two almost always
    means ReviewGPT answered on a different or downgraded model instead of
    actually reviewing the diff. Do not triage or trust that output — discard the
-   round, confirm the Eragon profile is on the intended model, and rerun against
-   the same pushed head.
+   round, confirm the selected profile is signed in and on the intended model,
+   and rerun against the same pushed head. If only one lane is healthy, pin it
+   with `REVIEW_GPT_BROWSER_LANE` and note the temporary override in handoff.
 
 4. Triage every finding locally before fixing:
    - **Accepted bug/edge case**: confirm the issue through a
@@ -164,9 +174,9 @@ the touched surface, push it, and use the ordinary review-loop rules.
 - For current-checkout work, never use this loop to satisfy local required
   completion audits; see `agent-docs/operations/completion-workflow.md`.
 - Do not use local Codex `deep-review`, Codex subagents, pasted text, connector
-  context, dirty-worktree context, ad hoc archives, or a non-Eragon browser
-  profile for this PR gate unless the current user task explicitly changes the
-  route.
+  context, dirty-worktree context, ad hoc archives, or an unmanaged/non-ReviewGPT
+  browser profile for this PR gate unless the current user task explicitly
+  changes the route.
 - Response files under `audit-packages/` are local working artifacts and stay
   uncommitted.
 - The `pr-review` prompt lives at

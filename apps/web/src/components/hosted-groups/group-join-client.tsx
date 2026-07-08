@@ -8,11 +8,13 @@ import {
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
+import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
 import { Button } from "@/src/components/ui/button";
+import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { cn } from "@/src/lib/utils";
 
 export interface GroupJoinPermissionDisplay {
@@ -43,6 +45,34 @@ export function GroupJoinSignInButton() {
         description="Create or open your private Murph account, then we'll bring you back here."
       />
     </>
+  );
+}
+
+export function GroupJoinLegalConsentGate({
+  initialStatus,
+}: {
+  initialStatus: HostedConsentStatus | null;
+}) {
+  const router = useRouter();
+
+  function refreshRoute() {
+    router.refresh();
+  }
+
+  return (
+    <HostedLegalConsentCard
+      acceptedPendingLabel="Continuing..."
+      initialStatus={initialStatus}
+      mode="compact"
+      onAccepted={refreshRoute}
+      onRequirementChange={(required) => {
+        if (!required) {
+          refreshRoute();
+        }
+      }}
+      preferredScope="launch.legal"
+      source="group-join"
+    />
   );
 }
 
@@ -123,7 +153,7 @@ export function GroupJoinAcceptForm(props: {
               Optional sharing
             </span>
             <p className="text-[13px] leading-5 text-muted-foreground">
-              You can join either way, and change this anytime from this link.
+              Join either way. Change anytime.
             </p>
           </div>
           <div className="flex flex-col gap-2.5">
@@ -182,7 +212,7 @@ export function GroupJoinAcceptForm(props: {
               : "Joining..."
             : props.alreadyActiveMember
               ? "Save changes"
-              : `Join ${props.groupName}`}
+              : "Join group"}
         </Button>
         {errorMessage ? (
           <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">

@@ -1047,7 +1047,7 @@ test('sendLinqMessage posts Linq chat message payloads to the configured API bas
   })
 })
 
-test('sendLinqMessage includes reply_to when a parent Linq message id is provided', async () => {
+test('sendLinqMessage sends normal Linq chat messages when a parent message id is provided', async () => {
   const requests: Array<Record<string, unknown>> = []
 
   await sendLinqMessage(
@@ -1088,9 +1088,6 @@ test('sendLinqMessage includes reply_to when a parent Linq message id is provide
             value: 'Queued the Linq reply.',
           },
         ],
-        reply_to: {
-          message_id: 'msg_parent_123',
-        },
       },
     },
   ])

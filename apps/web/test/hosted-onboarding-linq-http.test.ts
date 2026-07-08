@@ -138,7 +138,7 @@ describe("sendHostedLinqChatMessage", () => {
     });
   });
 
-  it("sends Linq idempotency keys on existing-chat replies", async () => {
+  it("sends existing-chat messages without provider-native reply anchors", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
       void _init;
@@ -155,6 +155,7 @@ describe("sendHostedLinqChatMessage", () => {
       chatId: "chat_123",
       idempotencyKey: "linq-message:evt_123",
       message: "hello",
+      replyToMessageId: "msg_parent_123",
     });
 
     const firstCall = fetchMock.mock.calls[0];

@@ -1947,6 +1947,10 @@ test('assistant session list schema emits the normalized session output shape', 
   const schema = JSON.parse(
     await runSourceCliRaw(['assistant', 'session', 'list', '--schema', '--format', 'json']),
   ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
     output: {
       properties: Record<string, unknown>
       required?: string[]
@@ -1955,7 +1959,10 @@ test('assistant session list schema emits the normalized session output shape', 
 
   assert.equal('stateRoot' in schema.output.properties, true)
   assert.equal('sessions' in schema.output.properties, true)
-  assert.deepEqual(schema.output.required, ['vault', 'stateRoot', 'sessions'])
+  assert.equal('limit' in schema.options.properties, true)
+  assert.equal('filters' in schema.output.properties, true)
+  assert.equal('count' in schema.output.properties, true)
+  assert.deepEqual(schema.output.required, ['vault', 'stateRoot', 'filters', 'sessions', 'count'])
 
   const sessions = schema.output.properties.sessions as {
     items?: {
@@ -1968,7 +1975,10 @@ test('assistant session list schema emits the normalized session output shape', 
   assert.notEqual(sessionVariant, undefined)
   assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), false)
   assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), false)
-  assert.equal('target' in (sessionVariant?.properties ?? {}), true)
+  assert.equal('target' in (sessionVariant?.properties ?? {}), false)
+  assert.equal('providerOptions' in (sessionVariant?.properties ?? {}), false)
+  assert.equal('model' in (sessionVariant?.properties ?? {}), true)
+  assert.equal('resumeThreadId' in (sessionVariant?.properties ?? {}), true)
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('assistant session show schema emits the normalized session output shape', async () => {
@@ -2177,7 +2187,7 @@ test('health list help preserves command-family option shapes', async () => {
   assert.match(documentHelp, /^\s+--from\b/mu)
   assert.match(documentHelp, /^\s+--to\b/mu)
   assert.doesNotMatch(documentHelp, /^\s+--status\b/mu)
-  assert.doesNotMatch(documentHelp, /^\s+--limit\b/mu)
+  assert.match(documentHelp, /^\s+--limit\b/mu)
 }, INCUR_HELP_TIMEOUT_MS)
 
 test('owned date-range list help reuses consistent date and limit descriptions', async () => {

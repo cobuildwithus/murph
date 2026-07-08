@@ -4,6 +4,7 @@ import {
 } from '../assistant-daemon-client.js'
 import {
   getAssistantSessionLocal,
+  listAssistantSessions as listAssistantSessionsFromStore,
   listAssistantSessionsLocal,
 } from '@murphai/assistant-engine/assistant-store'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
@@ -13,7 +14,14 @@ export type { AssistantSession } from '@murphai/operator-config/assistant-cli-co
 
 export async function listAssistantSessions(
   vault: string,
+  options?: {
+    limit?: number
+  },
 ): Promise<AssistantSession[]> {
+  if (typeof options?.limit === 'number') {
+    return listAssistantSessionsFromStore(vault, options)
+  }
+
   const remote = await maybeListAssistantSessionsViaDaemon({ vault })
   if (remote !== null) {
     return remote

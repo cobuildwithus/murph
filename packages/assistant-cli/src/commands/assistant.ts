@@ -22,6 +22,8 @@ import {
   assistantStopResultSchema,
   assistantStatusResultSchema,
   type AssistantOnboardingResumeContextResult,
+  type AssistantSession,
+  type AssistantSessionSummary,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { deliverAssistantMessage } from '@murphai/assistant-engine/outbound-channel'
 import type { ConversationRef } from '@murphai/assistant-engine/assistant-runtime'
@@ -35,7 +37,6 @@ import { runAssistantDoctor } from '../assistant/doctor.js'
 import { getAssistantStatus } from '../assistant/status.js'
 import {
   redactAssistantSessionForDisplay,
-  redactAssistantSessionsForDisplay,
 } from '@murphai/assistant-engine/assistant-runtime'
 import {
   completeAssistantOnboarding,
@@ -476,6 +477,42 @@ function buildAssistantOnboardingResult(vault: string, onboarding: unknown) {
   })
 }
 
+const assistantSessionListDefaultLimit = 5
+
+function normalizeAssistantSessionListLimit(limit: number | undefined): number {
+  if (typeof limit !== 'number' || !Number.isInteger(limit)) {
+    return assistantSessionListDefaultLimit
+  }
+
+  return Math.min(Math.max(limit, 1), 50)
+}
+
+function toAssistantSessionSummary(session: AssistantSession): AssistantSessionSummary {
+  const redacted = redactAssistantSessionForDisplay(session)
+  return {
+    schema: redacted.schema,
+    conversationId: redacted.conversationId,
+    sessionId: redacted.sessionId,
+    alias: redacted.alias,
+    binding: redacted.binding,
+    createdAt: redacted.createdAt,
+    updatedAt: redacted.updatedAt,
+    lastTurnAt: redacted.lastTurnAt,
+    turnCount: redacted.turnCount,
+    provider: redacted.provider,
+    model: redacted.providerOptions.model,
+    modelProvider: redacted.providerOptions.modelProvider ?? null,
+    reasoningEffort: redacted.providerOptions.reasoningEffort,
+    sandbox: redacted.providerOptions.sandbox,
+    approvalPolicy: redacted.providerOptions.approvalPolicy,
+    profile: redacted.providerOptions.profile,
+    oss: redacted.providerOptions.oss,
+    executionDriver: redacted.providerOptions.executionDriver,
+    resumeKind: redacted.providerOptions.resumeKind,
+    resumeThreadId: redacted.resumeState?.threadId ?? null,
+  }
+}
+
 type AssistantOnboardingResumeContextSurface =
   AssistantOnboardingResumeContextResult[
     | 'goals'
@@ -503,7 +540,7 @@ type AssistantOnboardingDeviceAccountServices = {
 type AssistantVaultServices = VaultServices &
   AssistantOnboardingDeviceAccountServices
 
-const assistantOnboardingResumeContextDefaultLimit = 10
+const assistantOnboardingResumeContextDefaultLimit = 3
 
 function normalizeAssistantOnboardingResumeContextLimit(limit: number): number {
   return Math.min(Math.max(limit, 1), 50)
@@ -1219,7 +1256,7 @@ export function registerAssistantCommands(
           .max(50)
           .default(assistantOnboardingResumeContextDefaultLimit)
           .describe(
-            'Maximum records to return per setup surface. Defaults to 10.',
+            'Maximum records to return per setup surface. Defaults to 3.',
           ),
       }),
       output: assistantOnboardingResumeContextResultSchema,
@@ -1358,14 +1395,27 @@ export function registerAssistantCommands(
     session.command('list', {
       args: emptyArgsSchema,
       description: 'List known assistant sessions for one vault.',
-      options: withBaseOptions(),
+      options: withBaseOptions({
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(50)
+          .default(assistantSessionListDefaultLimit)
+          .describe('Maximum number of recent assistant sessions to return. Defaults to 5.'),
+      }),
       output: assistantSessionListResultSchema,
       async run(context) {
         await assertAssistantInitializedVaultRoot(context.options.vault)
-        const sessions = await listAssistantSessions(context.options.vault)
+        const limit = normalizeAssistantSessionListLimit(context.options.limit)
+        const sessions = await listAssistantSessions(context.options.vault, {
+          limit,
+        })
         return assistantSessionListResultSchema.parse({
           ...buildAssistantStateResultPaths(context.options.vault),
-          sessions: redactAssistantSessionsForDisplay(sessions),
+          filters: { limit },
+          sessions: sessions.map(toAssistantSessionSummary),
+          count: sessions.length,
         })
       },
     })

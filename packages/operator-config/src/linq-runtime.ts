@@ -1571,7 +1571,6 @@ function buildLinqMessageBody(input: {
   replyToMessageId?: string | null
 }): MessageSendParams {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
-  const replyToMessageId = normalizeNullableString(input.replyToMessageId)
   const media = normalizeLinqMediaList(input.media ?? [])
   const renderedText = renderMarkdownMessageText(
     normalizeRequiredString(input.message, 'message'),
@@ -1596,13 +1595,6 @@ function buildLinqMessageBody(input: {
       ...(idempotencyKey
         ? {
             idempotency_key: idempotencyKey,
-          }
-        : {}),
-      ...(replyToMessageId
-        ? {
-            reply_to: {
-              message_id: replyToMessageId,
-            },
           }
         : {}),
     },

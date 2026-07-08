@@ -2,25 +2,84 @@
 
 review_gpt_config_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 review_gpt_repo_root="$(CDPATH= cd -- "$review_gpt_config_dir/.." && pwd -P)"
-review_gpt_eragon_app="$review_gpt_repo_root/output-packages/review-gpt-profiles/eragon/Eragon.app"
 
-if [[ ! -d "$review_gpt_eragon_app" ]] && command -v mdfind >/dev/null 2>&1; then
-  review_gpt_eragon_app="$(
-    mdfind "kMDItemDisplayName == 'Eragon.app' || kMDItemFSName == 'Eragon.app'" | head -n 1
+review_gpt_invalid_browser_lane() {
+  echo "Error: unsupported ReviewGPT browser lane '$1'. Use random, eragon, phlebas, or mountain." >&2
+}
+
+review_gpt_browser_lane_display_name() {
+  case "$1" in
+    eragon) printf '%s\n' "Eragon" ;;
+    phlebas) printf '%s\n' "Phlebas" ;;
+    mountain) printf '%s\n' "Mountain" ;;
+    *)
+      review_gpt_invalid_browser_lane "$1"
+      return 1
+      ;;
+  esac
+}
+
+review_gpt_browser_lane_port() {
+  case "$1" in
+    eragon) printf '%s\n' "9448" ;;
+    phlebas) printf '%s\n' "9442" ;;
+    mountain) printf '%s\n' "9450" ;;
+    *)
+      review_gpt_invalid_browser_lane "$1"
+      return 1
+      ;;
+  esac
+}
+
+review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-random}}}"
+review_gpt_requested_browser_lane="$(printf '%s' "$review_gpt_requested_browser_lane" | tr '[:upper:]' '[:lower:]')"
+
+case "$review_gpt_requested_browser_lane" in
+  "" | auto | random)
+    review_gpt_browser_lanes=(eragon phlebas mountain)
+    review_gpt_selected_browser_lane="${review_gpt_browser_lanes[$((RANDOM % ${#review_gpt_browser_lanes[@]}))]}"
+    ;;
+  aragon | eragon)
+    review_gpt_selected_browser_lane="eragon"
+    ;;
+  phlebas | mountain)
+    review_gpt_selected_browser_lane="$review_gpt_requested_browser_lane"
+    ;;
+  *)
+    review_gpt_invalid_browser_lane "$review_gpt_requested_browser_lane"
+    return 1 2>/dev/null || exit 1
+    ;;
+esac
+
+review_gpt_selected_browser_display="$(review_gpt_browser_lane_display_name "$review_gpt_selected_browser_lane")" || {
+  return 1 2>/dev/null || exit 1
+}
+review_gpt_selected_browser_port="$(review_gpt_browser_lane_port "$review_gpt_selected_browser_lane")" || {
+  return 1 2>/dev/null || exit 1
+}
+review_gpt_selected_browser_app="$review_gpt_repo_root/output-packages/review-gpt-profiles/$review_gpt_selected_browser_lane/$review_gpt_selected_browser_display.app"
+
+if [[ ! -d "$review_gpt_selected_browser_app" ]] && command -v mdfind >/dev/null 2>&1; then
+  review_gpt_found_browser_app="$(
+    mdfind "kMDItemDisplayName == '$review_gpt_selected_browser_display.app' || kMDItemFSName == '$review_gpt_selected_browser_display.app'" | head -n 1
   )"
+  if [[ -n "$review_gpt_found_browser_app" ]]; then
+    review_gpt_selected_browser_app="$review_gpt_found_browser_app"
+  fi
 fi
 
-review_gpt_eragon_binary="$review_gpt_eragon_app/Contents/MacOS/Brave Browser"
-if [[ -x "$review_gpt_eragon_binary" ]]; then
-  browser_binary_path="${browser_binary_path:-$review_gpt_eragon_binary}"
+review_gpt_selected_browser_binary="$review_gpt_selected_browser_app/Contents/MacOS/Brave Browser"
+if [[ -x "$review_gpt_selected_browser_binary" ]]; then
+  browser_binary_path="${browser_binary_path:-$review_gpt_selected_browser_binary}"
 else
   browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
 fi
-managed_browser_user_data_dir="${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/Eragon}"
+managed_browser_user_data_dir="${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/$review_gpt_selected_browser_display}"
 managed_browser_profile="${managed_browser_profile:-Default}"
-managed_browser_port="${managed_browser_port:-9448}"
+managed_browser_port="${managed_browser_port:-$review_gpt_selected_browser_port}"
+export REVIEW_GPT_SELECTED_BROWSER_LANE="$review_gpt_selected_browser_lane"
 
-name_prefix="murph-chatgpt-audit"
+name_prefix="murph-$review_gpt_selected_browser_lane-chatgpt-audit"
 repo_context_url=""
 attach_artifacts=1
 include_tests=0
@@ -29,9 +88,9 @@ preset_dir="scripts/chatgpt-review-presets"
 # PR review runs pass REVIEW_GPT_PR_URL so this package wrapper can add
 # review-gpt-pr-context/pr.diff and changed-files.txt to repo.snapshot.zip.
 package_script="scripts/package-audit-context-full.sh"
-# `current` skips connector selection. The PR loop requires the Eragon composer
-# to have no selected app connector before auto-send because review context must
-# come from the guarded ZIP and repomix attachments.
+# `current` skips connector selection. The PR loop requires the selected
+# composer to have no app connector selected before auto-send because review
+# context must come from the guarded ZIP and repomix attachments.
 app_connector="current"
 model="gpt-5.5-pro"
 snapshot_attachment_name="repo.snapshot.zip"
