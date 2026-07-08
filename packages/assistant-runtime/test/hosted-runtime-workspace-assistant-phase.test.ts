@@ -5622,6 +5622,153 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("stages terminal delivery failure input before yielding prepared background outbox delivery", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-terminal-failure-yield-",
+    ));
+    try {
+      const now = "2026-04-27T00:00:00.000Z";
+      const intentCreatedAt = "2026-04-26T23:59:50.000Z";
+      await seedDirectLinqAssistantInputRoute({
+        enabledAt: intentCreatedAt,
+        vaultRoot,
+      });
+      const actualAssistantAutomation =
+        await vi.importActual<typeof import("@murphai/assistant-engine/assistant-automation")>(
+          "@murphai/assistant-engine/assistant-automation",
+        );
+      const baseEffect = createDeliveryEffect();
+      const firstDeliveryEffect = {
+        ...baseEffect,
+        deliveryPhase: "background_retry" as const,
+        effectId: "intent_terminal_failure_late_yield_first",
+        fingerprint: "fingerprint_terminal_failure_late_yield_first",
+        payload: {
+          ...baseEffect.payload,
+          channel: "linq" as const,
+          idempotencyKey:
+            "assistant-outbox:intent_terminal_failure_late_yield_first",
+          media: [{
+            approvalGeneration: "b".repeat(64),
+            approvalId: "approval_terminal_failure_late_yield",
+            contentType: "application/pdf",
+            filename: "lab-results.pdf",
+            kind: "vault_file" as const,
+            ref: "documents/lab-results.pdf",
+            sha256: "a".repeat(64),
+            sizeBytes: 1234,
+          }],
+        },
+      };
+      const secondDeliveryEffect = {
+        ...createDeliveryEffect(),
+        deliveryPhase: "background_retry" as const,
+        effectId: "intent_terminal_failure_late_yield_second",
+        fingerprint: "fingerprint_terminal_failure_late_yield_second",
+        payload: {
+          ...createDeliveryEffect().payload,
+          channel: "linq" as const,
+          idempotencyKey:
+            "assistant-outbox:intent_terminal_failure_late_yield_second",
+        },
+      };
+      const preparedDispatches = [
+        ...createPreparedDispatchesForDeliveryEffect(firstDeliveryEffect),
+        ...createPreparedDispatchesForDeliveryEffect(secondDeliveryEffect),
+      ];
+      const terminalFailure = {
+        ...createFailedDeliveryOutcome({
+          deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+          effectId: firstDeliveryEffect.effectId,
+        }),
+        deliveryStatus: "failed" as const,
+        effectFingerprint: firstDeliveryEffect.fingerprint,
+        retryable: false,
+      };
+      let shouldYield = false;
+      mocks.readAssistantOutboxIntent.mockImplementation(async (
+        _vaultRoot: string,
+        intentId: string,
+      ) => intentId === firstDeliveryEffect.effectId
+        ? createTerminalFailureOutboxIntent({
+          bindingDeliveryTarget: "linq_chat_direct",
+          channel: "linq",
+          createdAt: intentCreatedAt,
+          effectId: firstDeliveryEffect.effectId,
+          explicitTarget: null,
+        })
+        : null);
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        firstDeliveryEffect,
+        secondDeliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+        preparedDispatches,
+      });
+      mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(
+        "2026-04-27T00:00:30.000Z",
+      );
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async (input) => {
+        expect(input.shouldYieldBackgroundDelivery?.()).toBe(false);
+        const outcomes = [terminalFailure];
+        shouldYield = true;
+        expect(input.shouldYieldBackgroundDelivery?.()).toBe(true);
+        input.onBackgroundDeliveryYield?.({ yieldedEffectCount: 1 });
+        return outcomes;
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        shouldYieldBackgroundMaintenance: () => shouldYield,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+      expect(mocks.resetHostedPreparedAssistantDeliveryEffects).not.toHaveBeenCalled();
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: now,
+        nextWakeReason: "assistant",
+        redactedStatus: expect.objectContaining({
+          hostedAssistantNextWakeAt: now,
+          hostedOutboxDeliveryYielded: 1,
+          hostedOutboxTerminalFailureInputsStaged: 1,
+          nextWakeAt: now,
+        }),
+      }));
+      const pendingInputIds = await readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      });
+      expect(pendingInputIds).toHaveLength(1);
+      const event = await actualAssistantAutomation.readAssistantInputEvent({
+        inputId: pendingInputIds[0]!,
+        vault: vaultRoot,
+      });
+      expect(event?.sourceRef.kind).toBe("hosted-mailbox");
+      if (event?.sourceRef.kind !== "hosted-mailbox") {
+        throw new Error("Expected hosted-mailbox terminal failure input.");
+      }
+      expect(event.sourceRef.eventId).toBe(
+        `outbox-delivery-failed:${firstDeliveryEffect.effectId}`,
+      );
+      expect(event?.replyTarget).toEqual({
+        channel: "linq",
+        messageId: null,
+        threadId: "linq_chat_direct",
+      });
+      expect(event?.occurredAt).toBe(intentCreatedAt);
+      expect(event?.content.text).toContain(
+        "outgoing message failed to send and was NOT delivered",
+      );
+      expect(event?.content.text).toContain('vault file "lab-results.pdf"');
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("does not carry device-sync next-wake reasons from the assistant automation lane", async () => {
     const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({

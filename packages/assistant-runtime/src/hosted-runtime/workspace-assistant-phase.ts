@@ -3915,8 +3915,15 @@ async function drainHostedPostCheckpointDelivery(input: {
       outcomes,
       vaultRoot: input.input.restored.vaultRoot,
     });
+    const stagedTerminalFailureInputCount =
+      await stageHostedTerminalOutboxFailureInputs({
+        deliveryEffects: input.assistantDeliveryEffects,
+        outcomes,
+        vaultRoot: input.input.restored.vaultRoot,
+      });
     return await yieldHostedBackgroundPostCheckpointDrain(input, {
       resetPreparedDelivery: false,
+      stagedTerminalFailureInputCount,
       yieldedDeliveryCount: backgroundDeliveryDrainYieldedCount,
     });
   }
@@ -4029,6 +4036,7 @@ async function yieldHostedBackgroundPostCheckpointDrain(
   input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
   options?: {
     resetPreparedDelivery?: boolean;
+    stagedTerminalFailureInputCount?: number;
     yieldedDeliveryCount?: number;
   },
 ): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
@@ -4061,6 +4069,12 @@ async function yieldHostedBackgroundPostCheckpointDrain(
       ...(input.redactedStatus ?? {}),
       hostedOutboxDeliveryYielded:
         options?.yieldedDeliveryCount ?? input.assistantDeliveryEffects.length,
+      ...(typeof options?.stagedTerminalFailureInputCount === "number"
+        ? {
+            hostedOutboxTerminalFailureInputsStaged:
+              options.stagedTerminalFailureInputCount,
+          }
+        : {}),
       hostedAssistantNextWakeAt: nextWake.at,
       nextWakeAt: nextWake.at,
     },
