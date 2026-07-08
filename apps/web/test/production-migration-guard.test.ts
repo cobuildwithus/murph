@@ -523,6 +523,7 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /github\.event\.deployment_status\.state == 'success'/u);
     assert.match(workflow, /deployment_status\.creator\.login == 'vercel\[bot\]'/u);
     assert.match(workflow, /deployment\.creator\.login == 'vercel\[bot\]'/u);
+    assert.match(workflow, /environment: production/u);
     assert.match(workflow, /timeout-minutes: 20/u);
     assert.doesNotMatch(workflow, /concurrency:/u);
     assert.doesNotMatch(workflow, /cancel-in-progress/u);

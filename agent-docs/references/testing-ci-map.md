@@ -89,7 +89,12 @@ Last verified: 2026-07-06
   replace valid pending runs, and requires GitHub Actions values for
   `HOSTED_WEB_VERCEL_TOKEN`,
   `HOSTED_WEB_VERCEL_PROJECT_ID`, `HOSTED_WEB_PRODUCTION_BASE_URL`, and
-  `HOSTED_WEB_DIRECT_DATABASE_URL`.
+  `HOSTED_WEB_DIRECT_DATABASE_URL`. After contract cleanup applies, the rollback
+  floor is the first deployed Vercel commit that no longer reads or writes the
+  dropped schema shape; rollback below that floor requires DB restore/re-expand
+  or a forward deploy. Cloudflare `container_rollout=immediate` is not
+  applicable to this Vercel-only lane; the bounded drain wait and final alias
+  check own the old-function window.
 
 ## Current Gaps
 

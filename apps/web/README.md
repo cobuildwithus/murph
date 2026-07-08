@@ -594,6 +594,12 @@ does not use GitHub Actions concurrency for this lane; the final alias check and
 the contract migration advisory lock make stale or duplicate runs skip safely
 without letting stale events replace valid pending runs. After those gates, it calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
+Rollback floor: after contract cleanup drops an old schema shape, the oldest
+safe Vercel rollback target is the first deployed commit that no longer reads or
+writes that dropped shape. Rolling back below that floor requires restoring or
+re-expanding the database shape first, or deploying a forward fix. Cloudflare
+`container_rollout=immediate` is not applicable to this Vercel-only lane; the
+bounded Vercel drain wait plus final alias check owns the old-function window.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated
 hosted web plus Worker cutover with hosted computer-use traffic paused during
