@@ -1234,7 +1234,6 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     };
   }
 
-  const limitIncreased = current.limitUsdMicros < resolved.limitUsdMicros;
   const metadata = buildHostedAiUsageAllowancePeriodMetadata({
     blockedAt: current.blockedAt,
     limitNoticeSentAt: current.limitNoticeSentAt,
@@ -1242,6 +1241,10 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     now: input.now,
     spentUsdMicros: current.spentUsdMicros,
   });
+  const limitNoticeSentAt =
+    current.limitUsdMicros < resolved.limitUsdMicros && current.limitNoticeSentAt
+      ? current.limitNoticeSentAt
+      : metadata.limitNoticeSentAt;
   const upgraded = await input.tx.hostedAiUsagePeriod.update({
     where: {
       memberId_periodStart: {
@@ -1253,7 +1256,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       billingPlanCode: resolved.billingPlanCode,
       blockedAt: metadata.blockedAt,
       limitUsdMicros: resolved.limitUsdMicros,
-      limitNoticeSentAt: limitIncreased ? null : metadata.limitNoticeSentAt,
+      limitNoticeSentAt,
       periodEnd: resolved.periodEnd,
       updatedAt: input.now,
     },

@@ -481,6 +481,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       attemptedAt: sentAt,
       idempotencyKey,
       prisma: input.prisma,
+      reclaimStalePreProviderAttempt: true,
       source: "hosted_runtime_ai_usage_limit_notice",
       sourceRef: wake.eventId,
       targetKind: "telegram_thread",

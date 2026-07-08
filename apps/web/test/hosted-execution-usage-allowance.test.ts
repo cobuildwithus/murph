@@ -1442,7 +1442,8 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("raises the current period limit on upgrade without lowering spend", async () => {
+  it("raises the current period limit on upgrade without lowering spend or reopening the period notice", async () => {
+    const priorNoticeSentAt = new Date("2026-03-28T12:00:00.000Z");
     const update = vi.fn(async (args?: unknown) => {
       void args;
       return {
@@ -1455,6 +1456,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
     const prisma = createGatePrisma({
       billingPlanCode: "launch_edge_monthly",
+      limitNoticeSentAt: priorNoticeSentAt,
       limitUsdMicros: 10_000_000n,
       periodEnd: new Date("2026-04-01T00:00:00.000Z"),
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
@@ -1475,7 +1477,7 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
-        limitNoticeSentAt: null,
+        limitNoticeSentAt: priorNoticeSentAt,
         limitUsdMicros: 25_000_000n,
       }),
     }));
@@ -2295,6 +2297,7 @@ function createGatePrisma(input: {
     spentUsdMicros: bigint;
   } | null;
   limitUsdMicros?: bigint;
+  limitNoticeSentAt?: Date | null;
   periodEnd?: Date;
   periodStart?: Date;
   pulseTrialPolicyVersion?: string | null;
@@ -2347,7 +2350,7 @@ function createGatePrisma(input: {
     lastUsageAt: input.spentUsdMicros > 0n
       ? new Date(periodStart.getTime() + 60_000)
       : null,
-    limitNoticeSentAt: null,
+    limitNoticeSentAt: input.limitNoticeSentAt ?? null,
     limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
     periodEnd,
     periodStart,

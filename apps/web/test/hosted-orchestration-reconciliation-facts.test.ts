@@ -718,6 +718,7 @@ describe("hosted orchestration reconciliation facts", () => {
       attemptedAt: new Date(FIXED_NOW),
       idempotencyKey: expectedIdempotencyKey,
       prisma: expect.objectContaining({ kind: "prisma" }),
+      reclaimStalePreProviderAttempt: true,
       source: "hosted_runtime_ai_usage_limit_notice",
       sourceRef: "telegram_event_runtime_denied",
       targetKind: "telegram_thread",
@@ -798,7 +799,7 @@ describe("hosted orchestration reconciliation facts", () => {
       retryAt: "2026-05-20T12:15:00.000Z",
     });
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
-      .toHaveBeenCalledWith(expect.not.objectContaining({
+      .toHaveBeenCalledWith(expect.objectContaining({
         reclaimStalePreProviderAttempt: true,
       }));
     expect(mocks.fetch).not.toHaveBeenCalled();
