@@ -1356,6 +1356,7 @@ describe("hosted Linq observability stores", () => {
       acceptedAt: null,
       attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       deliveredAt: null,
+      failureCode: "HostedRuntimeTelegramUsageLimitNoticeRejectedError",
       failedAt: new Date("2026-03-26T12:00:01.000Z"),
       id: "hld_failed_telegram_notice",
       lastReceiptAt: null,
@@ -1386,6 +1387,57 @@ describe("hosted Linq observability stores", () => {
     }));
     expect(updateWhere?.OR).not.toContainEqual({ failedAt: { not: null } });
     expect(updateWhere?.OR).not.toContainEqual({ status: { in: ["failed", "skipped"] } });
+  });
+
+  it("reclaims retry-after failed Telegram usage notice rows", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failureCode: "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
+      failedAt: new Date("2026-03-26T12:00:01.000Z"),
+      id: "hld_retry_after_telegram_notice",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      status: "failed",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      prisma: fixture.prisma as never,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "telegram_event_runtime_denied",
+      targetKind: "telegram_thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_retry_after_telegram_notice",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt,
+          failedAt: null,
+          skippedAt: null,
+          status: "attempted",
+        }),
+        where: expect.objectContaining({
+          id: "hld_retry_after_telegram_notice",
+          OR: expect.arrayContaining([
+            { failedAt: { not: null } },
+            { status: { in: ["failed", "skipped"] } },
+          ]),
+        }),
+      }),
+    );
   });
 
   it("reclaims stale pre-provider Telegram usage notice rows when the caller opts in", async () => {

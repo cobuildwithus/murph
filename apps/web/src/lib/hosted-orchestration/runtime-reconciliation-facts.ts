@@ -507,6 +507,13 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       });
     } catch (error) {
       if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRetryAfterError) {
+        await markHostedLinqDeliverySendFailedTx({
+          failedAt: sentAt,
+          failureCode: error.name,
+          failureReason: error.message,
+          idempotencyKey,
+          prisma: input.prisma,
+        });
         return {
           retryAt: new Date(
             sentAt.getTime() + error.retryAfterSeconds * 1000,

@@ -1335,6 +1335,7 @@ const hostedLinqDeliveryLifecycleSelect = {
   acceptedAt: true,
   attemptedAt: true,
   deliveredAt: true,
+  failureCode: true,
   failedAt: true,
   id: true,
   lastReceiptAt: true,
@@ -1352,6 +1353,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     acceptedAt: Date | null;
     attemptedAt: Date;
     deliveredAt: Date | null;
+    failureCode: string | null;
     failedAt: Date | null;
     id: string;
     lastReceiptAt: Date | null;
@@ -1379,7 +1381,8 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     input.reclaimStalePreProviderAttempt
     ?? input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
   const canReclaimTerminalPreProviderAttempt =
-    input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
+    input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
+    || input.delivery.failureCode === "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError";
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       acceptedAt: null,
