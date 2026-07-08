@@ -3,6 +3,7 @@
 import { useLinkAccount, usePrivy, useUser } from "@privy-io/react-auth";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import {
   ContactSupportAction,
@@ -253,7 +254,8 @@ export function HostedTelegramCardSettings(props: {
           value={telegramValue}
           action={
             <div className="flex gap-2">
-              <Button
+              <AuthButton
+                authSatisfied={canUsePrivyTelegramLink}
                 type="button"
                 onClick={() => void handleLinkTelegram()}
                 disabled={isBusy || !privyReady}
@@ -262,7 +264,7 @@ export function HostedTelegramCardSettings(props: {
                 className="text-muted-foreground hover:text-foreground"
               >
                 {isLinkingTelegram ? "Changing..." : "Change"}
-              </Button>
+              </AuthButton>
               {botLink ? (
                 <Button
                   render={<a href={botLink} target="_blank" rel="noreferrer" />}
@@ -282,14 +284,15 @@ export function HostedTelegramCardSettings(props: {
           value="Not connected"
           variant="empty"
           action={
-            <Button
+            <AuthButton
+              authSatisfied={canUsePrivyTelegramLink}
               type="button"
               size="sm"
               onClick={() => void handleLinkTelegram()}
               disabled={isBusy || !privyReady}
             >
               {isLinkingTelegram ? "Connecting..." : "Link Telegram"}
-            </Button>
+            </AuthButton>
           }
         />
       )}
