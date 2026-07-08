@@ -17,6 +17,9 @@ import {
   signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime,
 } from "../hosted-orchestration/signal-runtime";
+import {
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
+} from "./group-newsletter";
 import { acceptHostedGroupJoinOfferTx } from "./group-store";
 
 type HostedGroupJoinOfferReactionSkipReason =
@@ -109,6 +112,14 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     }
     return skipHostedGroupJoinOfferReaction({
       reason,
+    });
+  }
+
+  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
+    await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+      groupId: result.groupId,
+      memberId: member.id,
+      prisma: input.prisma,
     });
   }
 

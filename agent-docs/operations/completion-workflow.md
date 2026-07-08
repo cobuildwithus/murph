@@ -68,6 +68,15 @@ For every finding from a required audit pass:
 
 1. Read the real code path, adjacent files, and relevant tests before accepting the finding. When a finding depends on external behavior, check the dependency's docs, source, or types instead of guessing.
 2. Classify the finding as accepted/actionable, rejected, or out of scope. Reject speculative risks, unrealistic edge cases, broad rewrites, and fixes that add more complexity than the bug justifies.
+   For deploy-skew or legacy-compatibility findings, require evidence that the
+   incompatible state can actually exist outside the current branch before
+   accepting a compatibility fix: an already-deployed producer or consumer, a
+   rollback window with old code still able to observe new state, existing
+   production rows in the legacy shape, or external clients already sending that
+   shape. If there is no shipped feature, no affected persisted data, and no real
+   rollback/skew window, reject the finding or document the deployment note
+   instead of adding repair paths, shims, migrations, queues, or reconciliation
+   code.
 3. For accepted/actionable findings, fix the smallest correct surface at the right ownership boundary. If repeated findings cluster around one mechanism, pause tactical patching and simplify the mechanism, split or abandon the PR, or explicitly reject the collapse finding.
 4. After any review-driven code, test, config, or docs change, rerun the focused verification that proves the changed surface.
 5. Rerun the affected audit pass when the fix materially changes that pass's risk surface:

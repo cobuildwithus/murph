@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { PrismaClient } from "@prisma/client";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
@@ -14,7 +15,10 @@ import {
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
-import type { HostedVaultShareProjectionScope } from "@murphai/hosted-execution/vault-share";
+import type {
+  HostedVaultShareProjectionKind,
+  HostedVaultShareProjectionScope,
+} from "@murphai/hosted-execution/vault-share";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
@@ -62,6 +66,9 @@ import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-r
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
+import {
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
+} from "./group-newsletter";
 import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   readHostedGroupByRuntimeMemberId,
@@ -434,6 +441,11 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     // Durable grant already committed; the owner's runtime offers the
     // projection on a later wake if this best-effort signal fails.
   }
+  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
+    group: created.group,
+    ownerMemberId: created.ownerMemberId,
+    prisma,
+  });
 
   return {
     action: "create_join_link",
@@ -548,6 +560,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     // The group and offer binding are durable; owner runtime maintenance can
     // catch up on its next organic wake.
   }
+  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
+    group: created.group,
+    ownerMemberId: created.ownerMemberId,
+    prisma,
+  });
 
   return {
     action: "post_join_offer",
@@ -649,6 +666,31 @@ function buildHostedGroupJoinOfferMessage(input: {
       renderHostedGroupJoinOfferScopeSentence(input.projectionScopes),
     )
     .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, input.joinUrl);
+}
+
+async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
+  group: {
+    id: string;
+    members: readonly {
+      grantedVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
+      memberId: string;
+    }[];
+  };
+  ownerMemberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  if (!input.group.members.some((member) =>
+    member.memberId === input.ownerMemberId
+    && member.grantedVaultShareProjectionKinds.includes("group-email.v0")
+  )) {
+    return;
+  }
+
+  await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+    groupId: input.group.id,
+    memberId: input.ownerMemberId,
+    prisma: input.prisma,
+  });
 }
 
 function normalizeHostedGroupJoinOfferMessageTemplate(

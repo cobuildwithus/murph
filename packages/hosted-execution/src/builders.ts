@@ -524,6 +524,7 @@ export function buildHostedExecutionDeviceSyncWake(input: {
 }
 
 export function buildHostedExecutionGroupNewsletterEmailNeededWake(input: {
+  directRoute?: HostedExecutionGroupNewsletterEmailNeededWake["directRoute"];
   eventId: string;
   groupDisplayName: string | null;
   groupId: string;
@@ -537,6 +538,7 @@ export function buildHostedExecutionGroupNewsletterEmailNeededWake(input: {
       memberId: input.memberId,
       occurredAt: input.occurredAt,
     }),
+    ...(input.directRoute === undefined ? {} : { directRoute: input.directRoute }),
     groupDisplayName: input.groupDisplayName,
     groupId: input.groupId,
   };

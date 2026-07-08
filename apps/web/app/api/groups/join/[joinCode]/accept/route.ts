@@ -5,6 +5,9 @@ import {
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
+import {
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
+} from "@/src/lib/hosted-groups/group-newsletter";
 import { acceptHostedGroupJoinCodeTx } from "@/src/lib/hosted-groups/group-store";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -65,6 +68,14 @@ export const POST = withJsonError(async (
     } catch {
       // Durable join/grants already committed; the runtime will offer projections later.
     }
+  }
+
+  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
+    await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+      groupId: result.groupId,
+      memberId: auth.member.id,
+      prisma,
+    });
   }
 
   await signalVaultShareCleanupRuntimesBestEffort(vaultShareCleanupSignals);

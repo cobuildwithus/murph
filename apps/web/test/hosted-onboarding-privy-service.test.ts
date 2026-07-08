@@ -1162,7 +1162,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMember.create).toHaveBeenCalledTimes(1);
   });
 
-  it("creates a hosted member and a web invite for a new Telegram-only signup without synthetic phone identity data", async () => {
+  it("creates a hosted member and a web invite for a new Telegram-only signup without treating identity as messaging setup", async () => {
     const identityUpsert = vi.fn(async ({
       create,
       update,
@@ -1228,7 +1228,7 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "public-telegram-invite",
       joinUrl: "https://join.example.test/join/public-telegram-invite",
       memberId: "member_telegram_only",
-      messagingSetupRequired: false,
+      messagingSetupRequired: true,
       stage: "checkout",
     });
 
@@ -1246,7 +1246,7 @@ describe("completeHostedPrivyVerification", () => {
     }));
   });
 
-  it("allows an invite-bound Telegram-only verification when the invite does not require a phone identity", async () => {
+  it("allows invite-bound Telegram-only verification while still requiring a direct messaging route", async () => {
     const inviteMember = makeMember({
       maskedPhoneNumberHint: null,
       phoneLookupKey: null,
@@ -1305,7 +1305,7 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
       memberId: inviteMember.id,
-      messagingSetupRequired: false,
+      messagingSetupRequired: true,
       stage: "checkout",
     });
 

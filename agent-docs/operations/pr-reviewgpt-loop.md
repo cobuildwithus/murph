@@ -114,6 +114,16 @@ current-task user opt-out.
    reconciliation loop, policy manager, or abstraction without production-path
    proof that the simpler owner-boundary fix is insufficient.
 
+   For deploy-skew or legacy-compatibility findings, first prove that the
+   incompatible state can actually exist outside the current PR branch before
+   adding compatibility machinery. Check whether the feature or producer has
+   already shipped, whether old consumers/producers can still run during the
+   proposed rollout or rollback window, and whether production data or external
+   clients already contain the legacy shape. If the answer is no, reject the
+   finding as speculative or handle it with a deployment note; do not add repair
+   paths, migrations, shims, queues, or reconciliation code for rows or deployed
+   versions that do not exist.
+
 5. Fix only accepted findings after the reproduction/proof above is in place,
    run the verification required by
    `agent-docs/operations/verification-and-runtime.md` for the touched owners,
