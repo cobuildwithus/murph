@@ -828,7 +828,7 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "Observation",
           relativePath: "Observation/page-1.json",
-          count: 4,
+          count: 5,
         },
       ],
       pages: {
@@ -916,6 +916,35 @@ describe("buildClinicalImportPlan", () => {
           },
           {
             resourceType: "Observation",
+            id: "component-partial-normal-panel",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:02:30.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Metabolic panel" },
+            component: [
+              {
+                code: { text: "Albumin" },
+                interpretation: [{
+                  coding: [{
+                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                    code: "N",
+                  }],
+                }],
+                valueString: "Normal",
+              },
+              {
+                code: { text: "Potassium" },
+                valueQuantity: { value: 4.2, unit: "mmol/L" },
+              },
+            ],
+          },
+          {
+            resourceType: "Observation",
             id: "parent-component-conflict-panel",
             status: "final",
             effectiveDateTime: "2026-07-01T12:03:00.000Z",
@@ -951,7 +980,7 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toHaveLength(2);
+    expect(plan.candidates).toHaveLength(3);
     const abnormalPanel = plan.candidates.find(
       (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
         candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "component-abnormal-panel",
@@ -980,6 +1009,28 @@ describe("buildClinicalImportPlan", () => {
         flag: "normal",
         slug: "albumin",
         textValue: "Normal",
+      },
+    ]);
+
+    const partialNormalPanel = plan.candidates.find(
+      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
+        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "component-partial-normal-panel",
+    );
+    expect(partialNormalPanel?.payload.resultStatus).toBe("unknown");
+    expect(partialNormalPanel?.payload.results).toEqual([
+      {
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        flag: "normal",
+        slug: "albumin",
+        textValue: "Normal",
+      },
+      {
+        analyte: "Potassium",
+        biomarkerSlug: "potassium",
+        slug: "potassium",
+        unit: "mmol/L",
+        value: 4.2,
       },
     ]);
 

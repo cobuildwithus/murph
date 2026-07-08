@@ -1070,17 +1070,19 @@ function combineResultFlags(
 }
 
 function resultStatusFromBloodTestResults(results: readonly BloodTestResultRecord[]): ResultStatus {
-  const flags = results
-    .map((result) => result.flag)
-    .filter((flag): flag is BloodTestResultFlag => flag !== undefined && flag !== "unknown");
-  if (flags.length === 0) {
-    return "unknown";
-  }
-  if (flags.every((flag) => flag === "normal")) {
-    return "normal";
+  let allResultsAreKnownNormal = results.length > 0;
+  for (const result of results) {
+    const flag = result.flag;
+    if (flag === "normal") {
+      continue;
+    }
+    allResultsAreKnownNormal = false;
+    if (flag !== undefined && flag !== "unknown") {
+      return "abnormal";
+    }
   }
 
-  return "abnormal";
+  return allResultsAreKnownNormal ? "normal" : "unknown";
 }
 
 function readClinicalOccurredAt(
