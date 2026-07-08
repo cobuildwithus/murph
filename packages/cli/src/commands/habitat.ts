@@ -4,7 +4,9 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   computeHabitatCoverage,
   getHabitatAspectDefinition,
+  getHabitatIndicatorDefinition,
   HABITAT_CATALOG,
+  HABITAT_DECLINED_VALUE,
   HABITAT_DOMAIN_IDS,
   type HabitatIndicatorValue,
 } from '@murphai/contracts'
@@ -85,20 +87,54 @@ const habitatCatalogResultSchema = z.object({
   aspects: z.array(z.record(z.string(), z.unknown())),
 })
 
-function parseIndicatorValue(raw: string): HabitatIndicatorValue {
+function parseIndicatorValue(
+  aspectId: string,
+  indicatorId: string,
+  raw: string,
+): HabitatIndicatorValue {
   if (raw === 'null') {
     return null
   }
-  if (raw === 'true' || raw === 'false') {
-    return raw === 'true'
+  if (raw === HABITAT_DECLINED_VALUE) {
+    return HABITAT_DECLINED_VALUE
   }
-  if (raw.trim() !== '' && !Number.isNaN(Number(raw))) {
-    return Number(raw)
+
+  const definition = getHabitatIndicatorDefinition(aspectId, indicatorId)
+  if (!definition) {
+    throw new VaultCliError(
+      'contract_invalid',
+      `Indicator "${indicatorId}" is not part of habitat aspect "${aspectId}". Run \`habitat catalog ${aspectId}\` for valid indicator ids.`,
+    )
   }
-  return raw
+
+  switch (definition.valueType.kind) {
+    case 'number': {
+      const value = Number(raw)
+      if (raw.trim() === '' || Number.isNaN(value)) {
+        throw new VaultCliError(
+          'contract_invalid',
+          `Indicator "${indicatorId}" expects a number, got "${raw}".`,
+        )
+      }
+      return value
+    }
+    case 'boolean': {
+      if (raw !== 'true' && raw !== 'false') {
+        throw new VaultCliError(
+          'contract_invalid',
+          `Indicator "${indicatorId}" expects true or false, got "${raw}".`,
+        )
+      }
+      return raw === 'true'
+    }
+    case 'enum':
+    case 'text':
+      return raw
+  }
 }
 
 function parseIndicatorAssignments(
+  aspectId: string,
   assignments: readonly string[] | undefined,
 ): Record<string, HabitatIndicatorValue> | undefined {
   if (!assignments || assignments.length === 0) {
@@ -114,7 +150,10 @@ function parseIndicatorAssignments(
         `Indicator "${assignment}" must use the form indicator_id=value.`,
       )
     }
-    indicators[assignment.slice(0, separator).trim()] = parseIndicatorValue(
+    const indicatorId = assignment.slice(0, separator).trim()
+    indicators[indicatorId] = parseIndicatorValue(
+      aspectId,
+      indicatorId,
       assignment.slice(separator + 1).trim(),
     )
   }
@@ -170,15 +209,11 @@ export function registerHabitatCommands(cli: Cli.Cli) {
       const result = await upsertHabitatAspect({
         vaultRoot: options.vault,
         aspect: args.aspect,
-        indicators: parseIndicatorAssignments(options.indicator),
+        indicators: parseIndicatorAssignments(args.aspect, options.indicator),
         recordedAt: options.recordedAt ?? new Date().toISOString().slice(0, 10),
         note: options.note,
         body: options.body,
         status: options.status,
-      })
-      const record = await readHabitatAspect({
-        vaultRoot: options.vault,
-        habitatId: result.habitatId,
       })
 
       return {
@@ -187,7 +222,7 @@ export function registerHabitatCommands(cli: Cli.Cli) {
         aspect: result.aspect,
         path: result.relativePath,
         created: result.created,
-        indicators: record.indicators,
+        indicators: result.indicators,
       }
     },
   })

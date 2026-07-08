@@ -23,8 +23,8 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
 
 import { metadata as experimentsMetadata } from "../app/(dashboard)/experiments/page";
 import { ExperimentsPageClient } from "../app/(dashboard)/experiments/experiments-page-client";
-import { metadata as contextMetadata } from "../app/(dashboard)/context/page";
-import ContextPageClient from "../app/(dashboard)/context/context-page-client";
+import { metadata as environmentMetadata } from "../app/(dashboard)/environment/page";
+import EnvironmentPage from "../app/(dashboard)/environment/page";
 import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
 import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
 import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
@@ -64,17 +64,17 @@ test("dashboard routes define page-specific metadata with the shared preview ima
     experimentsMetadata.description,
     "Browse evidence-backed health experiments and compare what changes against your own baseline.",
   );
-  assert.equal(contextMetadata.title, "Context — Murph");
+  assert.equal(environmentMetadata.title, "Environment — Murph");
   assert.equal(
-    contextMetadata.description,
-    "The durable facts, preferences, and health context Murph uses for personal recommendations.",
+    environmentMetadata.description,
+    "The living-context facts Murph knows about your home, bedroom, light, and workspace.",
   );
 
   for (const routeMetadata of [
     overviewMetadata,
     historyMetadata,
     experimentsMetadata,
-    contextMetadata,
+    environmentMetadata,
   ]) {
     assert.deepEqual(routeMetadata.openGraph?.images, [
       {
@@ -180,26 +180,16 @@ test("HistoryPage renders recent timeline entries", () => {
   assert.doesNotMatch(markup, /history\/sample\/sample_1\.md/);
 });
 
-test("ContextPage renders structured context", () => {
-  const markup = renderToStaticMarkup(createElement(ContextPageClient));
+test("EnvironmentPage renders the habitat catalog mock", () => {
+  const markup = renderToStaticMarkup(createElement(EnvironmentPage));
 
-  assert.match(markup, /What Murph knows/);
-  assert.match(markup, /Equipment &amp; access/);
-  assert.match(markup, /Creatine monohydrate/);
-  assert.match(markup, /Improve resting heart rate/);
-  assert.doesNotMatch(markup, /Saved memory/);
-});
-
-test("ContextPage mock mode renders local equipment and access records", () => {
-  const markup = renderToStaticMarkup(createElement(ContextPageClient, { mockMode: true }));
-
-  assert.match(markup, /Local mock data/);
-  assert.match(markup, /Dry sauna access/);
-  assert.match(markup, /Red light panel/);
-  assert.match(markup, /Home gym setup/);
-  assert.match(markup, /Jump rope/);
-  assert.match(markup, /Mobility and massage tools/);
-  assert.match(markup, /Commercial gym access/);
+  assert.match(markup, /Environment/);
+  assert.match(markup, /Mock preview/);
+  assert.match(markup, /Bedroom &amp; sleep/);
+  assert.match(markup, /Night temperature/);
+  assert.match(markup, /Desk ergonomics/);
+  assert.match(markup, /skipped/);
+  assert.match(markup, /unknown/);
 });
 
 test("ExperimentsPage renders the public library with private browser-vault overlays", () => {

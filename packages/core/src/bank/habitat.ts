@@ -61,6 +61,7 @@ export interface UpsertHabitatAspectResult {
   aspect: string;
   relativePath: string;
   created: boolean;
+  indicators: Record<string, HabitatIndicatorValue>;
 }
 
 function validateHabitatFrontmatter(
@@ -221,6 +222,7 @@ async function upsertHabitatAspectLocked(
     aspect: record.aspect,
     relativePath: record.relativePath,
     created: target.created,
+    indicators: record.indicators,
   };
 }
 

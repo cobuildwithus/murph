@@ -452,32 +452,35 @@ async function buildAssistantSnapshotCoverage(input: {
   safetyComplete: boolean
   supplementCount: number
 }> {
-  const eventCoverage = await collectAssistantSnapshotEventLedgerCoverage(input)
-  const goalRead = await listAssistantSnapshotFrontmatterRecords(
-    input,
-    VAULT_LAYOUT.goalsDirectory,
-    goalFrontmatterSchema,
-  )
-  const conditionRead = await listAssistantSnapshotFrontmatterRecords(
-    input,
-    VAULT_LAYOUT.conditionsDirectory,
-    conditionFrontmatterSchema,
-  )
-  const allergyRead = await listAssistantSnapshotFrontmatterRecords(
-    input,
-    VAULT_LAYOUT.allergiesDirectory,
-    allergyFrontmatterSchema,
-  )
-  const regimenRead = await listAssistantSnapshotFrontmatterRecords(
-    input,
-    VAULT_LAYOUT.regimensDirectory,
-    regimenFrontmatterSchema,
-  )
-  const habitatRead = await listAssistantSnapshotFrontmatterRecords(
-    input,
-    VAULT_LAYOUT.habitatDirectory,
-    habitatFrontmatterSchema,
-  )
+  const [eventCoverage, goalRead, conditionRead, allergyRead, regimenRead, habitatRead] =
+    await Promise.all([
+      collectAssistantSnapshotEventLedgerCoverage(input),
+      listAssistantSnapshotFrontmatterRecords(
+        input,
+        VAULT_LAYOUT.goalsDirectory,
+        goalFrontmatterSchema,
+      ),
+      listAssistantSnapshotFrontmatterRecords(
+        input,
+        VAULT_LAYOUT.conditionsDirectory,
+        conditionFrontmatterSchema,
+      ),
+      listAssistantSnapshotFrontmatterRecords(
+        input,
+        VAULT_LAYOUT.allergiesDirectory,
+        allergyFrontmatterSchema,
+      ),
+      listAssistantSnapshotFrontmatterRecords(
+        input,
+        VAULT_LAYOUT.regimensDirectory,
+        regimenFrontmatterSchema,
+      ),
+      listAssistantSnapshotFrontmatterRecords(
+        input,
+        VAULT_LAYOUT.habitatDirectory,
+        habitatFrontmatterSchema,
+      ),
+    ])
   const goals = goalRead.records
   const conditions = conditionRead.records
   const allergies = allergyRead.records
@@ -1228,6 +1231,7 @@ function renderHabitatLine(records: readonly HabitatFrontmatter[]): string | nul
       indicators: record.indicators,
       indicatorRecordedAt: record.indicatorRecordedAt,
     })),
+    { now: new Date().toISOString().slice(0, 10) },
   )
   const aspects = coverage.domains.flatMap((domain) => domain.aspects)
   const coveredAspectIds = aspects
