@@ -6632,6 +6632,108 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("stages terminal delivery failure input when a mixed reply answered a failure note and a user message", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-terminal-failure-mixed-one-hop-",
+    ));
+    try {
+      const now = "2026-05-08T16:00:08.000Z";
+      const intentCreatedAt = "2026-05-08T16:00:00.000Z";
+      const actualAssistantAutomation =
+        await vi.importActual<typeof import("@murphai/assistant-engine/assistant-automation")>(
+          "@murphai/assistant-engine/assistant-automation",
+        );
+      const deliveryEffect = {
+        ...createDeliveryEffect(),
+        effectId: "intent_terminal_failure_mixed_recovery_reply",
+        fingerprint: "fingerprint_terminal_failure_mixed_recovery_reply",
+        payload: {
+          ...createDeliveryEffect().payload,
+          channel: "linq" as const,
+          idempotencyKey:
+            "assistant-outbox:intent_terminal_failure_mixed_recovery_reply",
+        },
+      };
+      mocks.readAssistantOutboxIntent.mockResolvedValue(
+        createTerminalFailureOutboxIntent({
+          actorId: "actor_linq_direct",
+          answeredMailboxItemIds: [
+            "outbox-delivery-failed:intent_original_terminal_failure",
+            "hosted-mailbox-item-user-b",
+          ],
+          bindingDeliveryTarget: "linq_chat_direct",
+          channel: "linq",
+          createdAt: intentCreatedAt,
+          effectId: deliveryEffect.effectId,
+          explicitTarget: null,
+          identityId: "identity_linq_direct",
+          replyToMessageId: "linq_message_direct",
+          threadId: "thread_linq_direct",
+          threadIsDirect: true,
+        }),
+      );
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([
+        {
+          ...createFailedDeliveryOutcome({
+            deliveryChannel: "linq",
+            deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+            effectId: deliveryEffect.effectId,
+          }),
+          deliveryStatus: "failed" as const,
+          effectFingerprint: deliveryEffect.fingerprint,
+          retryable: false,
+        },
+      ]);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = result.afterCheckpoint
+        ? await result.afterCheckpoint()
+        : result;
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 1,
+          hostedOutboxTerminalizedSending: 1,
+        }),
+      }));
+      const pendingInputIds = await readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      });
+      expect(pendingInputIds).toHaveLength(1);
+      const event = await actualAssistantAutomation.readAssistantInputEvent({
+        inputId: pendingInputIds[0]!,
+        vault: vaultRoot,
+      });
+      expect(event?.sourceRef.kind).toBe("hosted-mailbox");
+      if (event?.sourceRef.kind !== "hosted-mailbox") {
+        throw new Error("Expected hosted-mailbox terminal failure input.");
+      }
+      expect(event.sourceRef.eventId).toBe(
+        "outbox-delivery-failed:intent_terminal_failure_mixed_recovery_reply",
+      );
+      expect(event?.replyTarget).toEqual({
+        channel: "linq",
+        messageId: null,
+        threadId: "linq_chat_direct",
+      });
+      expect(event?.conversation?.threadId).toBe("thread_linq_direct");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("does not stage pending assistant input when a terminal failure was itself replying to a failure note", async () => {
     const vaultRoot = await mkdtemp(path.join(
       tmpdir(),

@@ -4247,13 +4247,15 @@ function buildHostedTerminalOutboxFailureRouteFromIntent(
     return null;
   }
 
+  const answeredMailboxItemIds = intent?.answeredMailboxItemIds ?? [];
   if (
-    intent?.answeredMailboxItemIds.some((mailboxItemId) =>
+    answeredMailboxItemIds.length > 0
+    && answeredMailboxItemIds.every((mailboxItemId) =>
       mailboxItemId.startsWith(`${OUTBOX_DELIVERY_FAILED_INPUT_PREFIX}:`)
-    ) === true
+    )
   ) {
-    // Failure notes use outbox-delivery-failed:<intentId>; answering one must
-    // not create another failure-note obligation.
+    // Failure-note-only replies are terminal evidence. Mixed replies may still
+    // owe a real user a failure signal, so they continue staging.
     return null;
   }
 
