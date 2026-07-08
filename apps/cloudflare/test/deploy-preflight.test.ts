@@ -12,7 +12,7 @@ import {
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 const HOSTED_ASSISTANT_MODEL_PRICING_ERROR =
-  "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5, gpt-sol, gpt-terra, gpt-5.6-luma, gpt-5.6-terra for hosted AI usage allowance pricing.";
+  "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna for hosted AI usage allowance pricing.";
 const HOSTED_ASSISTANT_FUTURE_MODEL_ROLLOUT_ERROR =
   "production hosted assistant future-model deploys must set HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is HOSTED_ASSISTANT_MODEL=gpt-5.5.";
 

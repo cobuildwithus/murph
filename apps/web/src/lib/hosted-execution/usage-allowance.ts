@@ -328,13 +328,13 @@ const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-05-05-openai-flex";
 const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_VERSION =
-  "murph-future-gpt-provisional-2026-07-08-standard";
+  "openai-gpt-5.6-preview-pricing-2026-07-08-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_OPENAI_FLEX_PRICING_VERSION =
-  "murph-future-gpt-provisional-2026-07-08-openai-flex";
+  "openai-gpt-5.6-preview-pricing-2026-07-08-openai-flex";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
 const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_SOURCE =
-  "murph-provisional-future-gpt-pricing-2026-07-08";
+  "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna";
 const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
@@ -381,12 +381,23 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE = {
   outputUsdMicrosPerMillionTokens: 30_000_000n,
 } as const;
 
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE = {
+  cachedInputUsdMicrosPerMillionTokens: 250_000n,
+  inputUsdMicrosPerMillionTokens: 2_500_000n,
+  outputUsdMicrosPerMillionTokens: 15_000_000n,
+} as const;
+
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE = {
+  cachedInputUsdMicrosPerMillionTokens: 100_000n,
+  inputUsdMicrosPerMillionTokens: 1_000_000n,
+  outputUsdMicrosPerMillionTokens: 6_000_000n,
+} as const;
+
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
   "gpt-5.5": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE,
-  "gpt-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE,
-  "gpt-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE,
-  "gpt-5.6-luma": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE,
-  "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE,
+  "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE,
+  "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
+  "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
 } as const satisfies Record<
   HostedAiUsageAllowancePricedModel,
   {
@@ -432,10 +443,9 @@ const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES = {
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
   "gpt-5.5": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_TOKEN_PRICING_BASES,
-  "gpt-sol": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
-  "gpt-terra": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
-  "gpt-5.6-luma": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
+  "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
+  "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
 } as const satisfies HostedAiUsageAllowanceTokenPricingBasesByModel;
 
 export function priceHostedAiUsageForAllowance(

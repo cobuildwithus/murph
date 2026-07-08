@@ -34,10 +34,9 @@ const runnerPythonPathFinallyCleanupBlock = `} finally {
 
 const hostedRunnerFlexModelSlugs = [
   "gpt-5.5",
-  "gpt-sol",
-  "gpt-terra",
-  "gpt-5.6-luma",
+  "gpt-5.6-sol",
   "gpt-5.6-terra",
+  "gpt-5.6-luna",
 ] as const;
 
 function createDeployEnvironment() {
@@ -539,7 +538,7 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).toContain(".use_responses_lite = false");
     expect(finalDockerfile).toContain('"id":"flex"');
     expect(finalDockerfile).toContain(
-      'jq -s -e \'length == 1 and (.[0] as $catalog | all(["gpt-5.5","gpt-sol","gpt-terra","gpt-5.6-luma","gpt-5.6-terra"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))) and ($catalog | any(.models[]?; .slug == "gpt-5.4-nano" and .supports_search_tool == false and .supports_parallel_tool_calls == false and .use_responses_lite == false)))\'',
+      'jq -s -e \'length == 1 and (.[0] as $catalog | all(["gpt-5.5","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))) and ($catalog | any(.models[]?; .slug == "gpt-5.4-nano" and .supports_search_tool == false and .supports_parallel_tool_calls == false and .use_responses_lite == false)))\'',
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
@@ -629,10 +628,9 @@ describe("hosted runner container image contract", () => {
     expect(readCodexModelSlugs(patchedCatalog)).toEqual([
       "gpt-5.5",
       "gpt-5.4-mini",
-      "gpt-sol",
-      "gpt-terra",
-      "gpt-5.6-luma",
+      "gpt-5.6-sol",
       "gpt-5.6-terra",
+      "gpt-5.6-luna",
       "gpt-5.4-nano",
     ]);
     for (const slug of hostedRunnerFlexModelSlugs) {
@@ -640,9 +638,17 @@ describe("hosted runner container image contract", () => {
     }
     expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-mini")).toEqual(["auto"]);
     expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-nano")).toEqual([]);
+    expect(readCodexModel(patchedCatalog, "gpt-5.6-sol")).toMatchObject({
+      description: "Future OpenAI model prepared for hosted runtime rollout.",
+      display_name: "GPT-5.6 Sol",
+    });
     expect(readCodexModel(patchedCatalog, "gpt-5.6-terra")).toMatchObject({
       description: "Future OpenAI model prepared for hosted runtime rollout.",
       display_name: "GPT-5.6 Terra",
+    });
+    expect(readCodexModel(patchedCatalog, "gpt-5.6-luna")).toMatchObject({
+      description: "Future OpenAI model prepared for hosted runtime rollout.",
+      display_name: "GPT-5.6 Luna",
     });
     expect(readCodexModel(patchedCatalog, "gpt-5.4-nano")).toMatchObject({
       supports_parallel_tool_calls: false,

@@ -58,10 +58,9 @@ export type HostedRuntimeControlMailboxKind =
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
   "gpt-5.5",
-  "gpt-sol",
-  "gpt-terra",
-  "gpt-5.6-luma",
+  "gpt-5.6-sol",
   "gpt-5.6-terra",
+  "gpt-5.6-luna",
 ] as const;
 
 export type HostedAiUsageAllowancePricedModel =

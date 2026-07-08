@@ -98,44 +98,54 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("prices future GPT model slugs with provisional standard and flex accounting", () => {
+  it("prices GPT-5.6 model slugs with official preview standard and flex accounting", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       requestedModel: "gpt-5.6-terra",
       servedModel: "openai/gpt-5.6-terra-2026-07-08",
     })).toMatchObject({
-      costUsdMicros: 1896n,
+      costUsdMicros: 948n,
       counted: true,
       pricingSnapshot: {
         model: "gpt-5.6-terra",
         modelSource: "served",
-        pricingSource: "murph-provisional-future-gpt-pricing-2026-07-08",
+        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "250000",
+          input: "2500000",
+          output: "15000000",
+        },
         requestedModel: "gpt-5.6-terra",
         servedModel: "openai/gpt-5.6-terra-2026-07-08",
         tokenPricingBasis: "standard",
       },
-      pricingVersion: "murph-future-gpt-provisional-2026-07-08-standard",
+      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-standard",
     });
 
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       providerName: "hosted-openai",
-      requestedModel: "gpt-sol",
-      servedModel: "gpt-sol",
+      requestedModel: "gpt-5.6-luna",
+      servedModel: "gpt-5.6-luna",
       tokenPricingBasis: "openai-flex",
     })).toMatchObject({
-      costUsdMicros: 948n,
+      costUsdMicros: 190n,
       counted: true,
       pricingSnapshot: {
-        model: "gpt-sol",
-        pricingSource: "murph-provisional-future-gpt-pricing-2026-07-08",
+        model: "gpt-5.6-luna",
+        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "100000",
+          input: "1000000",
+          output: "6000000",
+        },
         tokenPricingAdjustment: {
           denominator: "2",
           numerator: "1",
         },
         tokenPricingBasis: "openai-flex",
       },
-      pricingVersion: "murph-future-gpt-provisional-2026-07-08-openai-flex",
+      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-openai-flex",
     });
   });
 
