@@ -85,8 +85,9 @@ Last verified: 2026-07-06
   waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior
   production function executions to drain, rechecks that the configured Vercel
   production alias still points at that SHA before exposing the database secret,
-  does not cancel in-progress runs when stale deployment-status events arrive,
-  and requires GitHub Actions values for `HOSTED_WEB_VERCEL_TOKEN`,
+  does not use GitHub Actions concurrency for this lane so stale events cannot
+  replace valid pending runs, and requires GitHub Actions values for
+  `HOSTED_WEB_VERCEL_TOKEN`,
   `HOSTED_WEB_VERCEL_PROJECT_ID`, `HOSTED_WEB_PRODUCTION_BASE_URL`, and
   `HOSTED_WEB_DIRECT_DATABASE_URL`.
 

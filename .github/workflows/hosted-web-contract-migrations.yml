@@ -12,9 +12,6 @@ jobs:
     if: ${{ github.event.deployment_status.state == 'success' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    concurrency:
-      group: hosted-web-contract-migrations-production
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:

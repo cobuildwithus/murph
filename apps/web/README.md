@@ -590,9 +590,9 @@ the database secret. It requires
 `HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
 GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
 `300` and is capped at `600` unless the workflow timeout is raised. The workflow
-does not cancel in-progress runs when stale deployment-status events arrive;
-the final alias check and the contract migration advisory lock make stale or
-duplicate runs skip safely. After those gates, it calls
+does not use GitHub Actions concurrency for this lane; the final alias check and
+the contract migration advisory lock make stale or duplicate runs skip safely
+without letting stale events replace valid pending runs. After those gates, it calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
 The `2026062100_hosted_computer_single_member_profile` migration is an explicit
 greenfield computer-use hard cut: deploy it only as part of a coordinated

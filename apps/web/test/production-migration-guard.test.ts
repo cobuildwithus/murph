@@ -524,8 +524,9 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /deployment_status\.creator\.login == 'vercel\[bot\]'/u);
     assert.match(workflow, /deployment\.creator\.login == 'vercel\[bot\]'/u);
     assert.match(workflow, /timeout-minutes: 20/u);
-    assert.match(workflow, /cancel-in-progress: false/u);
-    assert.doesNotMatch(workflow, /cancel-in-progress: true/u);
+    assert.doesNotMatch(workflow, /concurrency:/u);
+    assert.doesNotMatch(workflow, /cancel-in-progress/u);
+    assert.doesNotMatch(workflow, /hosted-web-contract-migrations-production/u);
     assert.match(workflow, /github\.event\.deployment\.sha/u);
     assert.match(workflow, /fetch-depth: 0/u);
     assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOYED_SHA\}" origin\/main/u);
