@@ -1089,6 +1089,19 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "read_chat_participants",
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "update_display_name",
+      linqThread: LINQ_THREAD,
+      updateDisplayName: {
+        displayName: "  Weekly   Health Crew  ",
+      },
+    })).toEqual({
+      action: "update_display_name",
+      linqThread: LINQ_THREAD,
+      updateDisplayName: {
+        displayName: "Weekly Health Crew",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "share_contact_card",
       linqThread: LINQ_THREAD,
     })).toEqual({
@@ -1134,6 +1147,13 @@ describe("parseHostedRuntimeGroupTool", () => {
       parseHostedRuntimeGroupToolRequest({
         action: "share_contact_card",
         chatId: "chat_group_1",
+      })
+    ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "update_display_name",
+        chatId: "chat_group_1",
+        updateDisplayName: { displayName: "Weekly Health Crew" },
       })
     ).toThrow(/not allowed/u);
     expect(() =>

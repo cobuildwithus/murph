@@ -713,11 +713,19 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "update_display_name") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "updateDisplayName"]),
+      new Set(["action", "updateDisplayName", "linqThread"]),
       "Hosted runtime group tool update_display_name request",
     );
     return {
       action,
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool update_display_name request linqThread",
+            ),
+          }),
       updateDisplayName: parseHostedRuntimeGroupUpdateDisplayNameRequest(
         record.updateDisplayName,
       ),

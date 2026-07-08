@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   signalHostedMailboxAppendRuntime: vi.fn(),
   updateHostedGroupDisplayNameByRuntimeMemberIdTx: vi.fn(),
   updateHostedLinqChatAvatar: vi.fn(),
+  updateHostedLinqChatDisplayName: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
@@ -65,6 +66,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   sendHostedLinqAttachmentMessage: mocks.sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
   updateHostedLinqChatAvatar: mocks.updateHostedLinqChatAvatar,
+  updateHostedLinqChatDisplayName: mocks.updateHostedLinqChatDisplayName,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", () => ({
@@ -157,6 +159,15 @@ const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
 });
+const GROUP_RUNTIME_LINQ_THREAD = {
+  authority: {
+    accountLookupKey: "hplk_group_runtime",
+    channel: "linq" as const,
+    containerMemberId: "member_group_runtime",
+    threadId: "chat_group_runtime",
+  },
+  chatId: "chat_group_runtime",
+};
 const NEWSLETTER_DEFAULT_SCOPES = [
   { projectionKind: "group-email.v0" },
   { projectionKind: "sleep-times.v0" },
@@ -180,6 +191,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
     mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx
       .mockResolvedValue(RENAMED_GROUP_SUMMARY);
+    mocks.updateHostedLinqChatDisplayName.mockResolvedValue(undefined);
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
     mocks.hostedThreadContainerFindUnique.mockResolvedValue({
       member: { suspendedAt: null },
@@ -210,7 +222,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
       share_contact_card: "owner_active",
-      update_display_name: "participant_aware",
+      update_display_name: "owner_active",
     });
   });
 
@@ -269,8 +281,9 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
         updateDisplayName: {
-          displayName: "Weekly Health Crew",
+          displayName: "  Weekly   Health Crew  ",
         },
       },
     })).resolves.toEqual({
@@ -281,24 +294,40 @@ describe("handleHostedRuntimeGroupTool", () => {
       },
     });
 
-    expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledWith(
-      "member_group_runtime",
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
+      expect.objectContaining({ authority: GROUP_RUNTIME_LINQ_THREAD.authority }),
     );
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: "member_owner",
+    }));
+    expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
+      chatId: "chat_group_runtime",
+      displayName: "Weekly Health Crew",
+    });
     expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx)
       .toHaveBeenCalledWith(expect.objectContaining({
         displayName: "Weekly Health Crew",
         runtimeMemberId: "member_group_runtime",
         tx: fakeTx,
       }));
+    expect(
+      mocks.updateHostedLinqChatDisplayName.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mock.invocationCallOrder[0],
+    );
   });
 
   it("does not update the group display name when runtime access is inactive", async () => {
-    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue({
+      member: { suspendedAt: new Date("2026-07-06T12:00:00Z") },
+      ownerMemberId: "member_owner",
+    });
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: {
         action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
         updateDisplayName: { displayName: "Blocked name" },
       },
     })).resolves.toEqual({
@@ -310,16 +339,18 @@ describe("handleHostedRuntimeGroupTool", () => {
       },
     });
 
+    expect(mocks.updateHostedLinqChatDisplayName).not.toHaveBeenCalled();
     expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
   });
 
   it("reports group_not_found when the active runtime has no hosted group to rename", async () => {
-    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValue(null);
+    mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(null);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: {
         action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
         updateDisplayName: { displayName: "Unattached group" },
       },
     })).resolves.toEqual({
@@ -330,6 +361,31 @@ describe("handleHostedRuntimeGroupTool", () => {
         unavailableReason: "group_not_found",
       },
     });
+
+    expect(mocks.updateHostedLinqChatDisplayName).not.toHaveBeenCalled();
+    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
+  });
+
+  it("does not update the hosted group display name when the provider rejects the chat rename", async () => {
+    mocks.updateHostedLinqChatDisplayName.mockRejectedValue(new Error("linq down"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
+        updateDisplayName: { displayName: "Provider blocked name" },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+
+    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
   });
 
   it("creates a join link bound to the runtime member's thread container owner", async () => {
@@ -748,6 +804,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       messageId: "msg_offer_1",
     });
     mocks.updateHostedLinqChatAvatar.mockResolvedValue(undefined);
+    mocks.updateHostedLinqChatDisplayName.mockResolvedValue(undefined);
   });
 
   it("fails closed when the runtime supplied no linq thread context", async () => {
