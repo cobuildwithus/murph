@@ -1,6 +1,6 @@
 {
   "id": "assistant-session-list",
-  "command": "vault-cli assistant session list --vault <path> [--request-id <id>]",
+  "command": "vault-cli assistant session list --vault <path> [--limit <n>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"
