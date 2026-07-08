@@ -1378,6 +1378,8 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   const canReclaimStalePreProviderAttempt =
     input.reclaimStalePreProviderAttempt
     ?? input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
+  const canReclaimTerminalPreProviderAttempt =
+    input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       acceptedAt: null,
@@ -1386,9 +1388,13 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       lastReceiptAt: null,
       messageLookupKey: null,
       OR: [
-        { failedAt: { not: null } },
-        { skippedAt: { not: null } },
-        { status: { in: ["failed", "skipped"] } },
+        ...(canReclaimTerminalPreProviderAttempt
+          ? [
+              { failedAt: { not: null } },
+              { skippedAt: { not: null } },
+              { status: { in: ["failed", "skipped"] } },
+            ]
+          : []),
         ...(canReclaimStalePreProviderAttempt
           ? [
               {

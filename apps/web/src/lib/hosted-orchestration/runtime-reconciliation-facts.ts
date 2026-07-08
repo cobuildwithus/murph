@@ -506,6 +506,14 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         replyToMessageId: wake.message.telegramMessage.messageId,
       });
     } catch (error) {
+      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRetryAfterError) {
+        return {
+          retryAt: new Date(
+            sentAt.getTime() + error.retryAfterSeconds * 1000,
+          ).toISOString(),
+          status: "in_flight",
+        };
+      }
       if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError) {
         await markHostedLinqDeliverySendFailedTx({
           failedAt: sentAt,
@@ -514,6 +522,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
           idempotencyKey,
           prisma: input.prisma,
         });
+        return { status: "already_notified" };
       }
       throw error;
     }
@@ -626,6 +635,12 @@ async function sendHostedRuntimeTelegramUsageLimitNotice(input: {
     }
 
     const errorContext = readHostedRuntimeTelegramErrorContext(payload);
+    const retryAfterSeconds = readHostedRuntimeTelegramRetryAfterSeconds(payload);
+    if (response.status === 429 && retryAfterSeconds !== null) {
+      throw new HostedRuntimeTelegramUsageLimitNoticeRetryAfterError(
+        retryAfterSeconds,
+      );
+    }
     if (
       response.status >= 400
       && response.status < 500
@@ -653,6 +668,14 @@ class HostedRuntimeTelegramUsageLimitNoticeRejectedError extends Error {
 
 class HostedRuntimeTelegramUsageLimitNoticeUnknownError extends Error {
   override name = "HostedRuntimeTelegramUsageLimitNoticeUnknownError";
+}
+
+class HostedRuntimeTelegramUsageLimitNoticeRetryAfterError extends Error {
+  override name = "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError";
+
+  constructor(readonly retryAfterSeconds: number) {
+    super("Hosted Telegram usage-limit notice delivery was rate-limited by the Bot API.");
+  }
 }
 
 type HostedRuntimeTelegramUsageLimitNoticeDelivery = {
@@ -737,6 +760,24 @@ function readHostedRuntimeTelegramErrorContext(value: unknown): {
     description,
     errorCode,
   };
+}
+
+function readHostedRuntimeTelegramRetryAfterSeconds(value: unknown): number | null {
+  if (
+    !value
+    || typeof value !== "object"
+    || !("parameters" in value)
+    || !value.parameters
+    || typeof value.parameters !== "object"
+    || !("retry_after" in value.parameters)
+    || typeof value.parameters.retry_after !== "number"
+    || !Number.isSafeInteger(value.parameters.retry_after)
+    || value.parameters.retry_after <= 0
+  ) {
+    return null;
+  }
+
+  return value.parameters.retry_after;
 }
 
 function formatHostedRuntimeTelegramFailureMessage(input: {

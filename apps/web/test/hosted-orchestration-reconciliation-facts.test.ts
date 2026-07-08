@@ -1054,14 +1054,17 @@ describe("hosted orchestration reconciliation facts", () => {
       ),
     );
 
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const response = await reconciliationRoute.GET(
       requestForFacts(),
       routeContext(),
     );
-    consoleErrorSpy.mockRestore();
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: null,
+    });
     const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: MEMBER_ID,
       periodStart: deniedDecision.periodStart,
@@ -1073,6 +1076,66 @@ describe("hosted orchestration reconciliation facts", () => {
       idempotencyKey: expectedIdempotencyKey,
       prisma: expect.objectContaining({ kind: "prisma" }),
     });
+    expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
+  });
+
+  it("treats Telegram usage-limit 429 retry_after responses as in-flight", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
+    mocks.fetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          description: "Too Many Requests: retry after 42",
+          error_code: 429,
+          ok: false,
+          parameters: {
+            retry_after: 42,
+          },
+        }),
+        {
+          headers: { "content-type": "application/json" },
+          status: 429,
+        },
+      ),
+    );
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: "2026-05-20T12:00:42.000Z",
+    });
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+    expect(mocks.markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });
 
