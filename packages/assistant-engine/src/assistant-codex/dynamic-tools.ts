@@ -1266,6 +1266,7 @@ interface ParsedDynamicToolCallRequest {
   arguments: unknown
   namespace: string | null
   tool: string | null
+  toolCallId: string | null
 }
 
 type MurphGroupToolRequest =
@@ -1293,6 +1294,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'generate-image'
       args: GenerateImageToolArgs
+      toolCallId?: string
     }
   | {
       kind: 'generate-voice-memo'
@@ -1386,6 +1388,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'group'
       request: MurphGroupToolRequest
+      toolCallId?: string
     }
   | {
       kind: 'newsletter'
@@ -1489,6 +1492,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'generate-image',
         args: parsed.args,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_GENERATE_VOICE_MEMO_TOOL.name: {
@@ -1569,6 +1573,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'group',
         request: parsed.request,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_NEWSLETTER_TOOL.name: {
@@ -1734,12 +1739,20 @@ function currentHostedMailboxItemId(
 }
 
 function buildGeneratedImageCaptureIdempotencyKey(input: {
-  dynamicToolCallId: string | null
+  toolCallId: string | null
   scope: 'generate-image' | 'group-avatar'
 }): string | null {
-  const dynamicToolCallId = normalizeNullableString(input.dynamicToolCallId)
-  return dynamicToolCallId
-    ? `murph.dynamic-tool.${input.scope}:${dynamicToolCallId}`
+  const toolCallId = normalizeNullableString(input.toolCallId)
+  return toolCallId
+    ? `murph.dynamic-tool.${input.scope}:${toolCallId}`
+    : null
+}
+
+function readGeneratedImageToolCallId(
+  request: MurphDynamicToolRequest,
+): string | null {
+  return ('toolCallId' in request)
+    ? normalizeNullableString(request.toolCallId)
     : null
 }
 
@@ -1747,7 +1760,6 @@ export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
-  dynamicToolCallId?: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext?: AssistantHostedToolContext | null
@@ -1937,12 +1949,12 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
-        dynamicToolCallId: input.dynamicToolCallId ?? null,
         hostedToolContext: input.hostedToolContext ?? null,
         hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
         nextUsageOrdinal: input.nextUsageOrdinal,
         request: input.request.request,
+        toolCallId: readGeneratedImageToolCallId(input.request),
         vaultRoot: input.vaultRoot ?? null,
       })
     case 'newsletter':
@@ -1980,7 +1992,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
-          dynamicToolCallId: input.dynamicToolCallId ?? null,
+          toolCallId: readGeneratedImageToolCallId(input.request),
           scope: 'generate-image',
         }),
         codexHome: input.codexHome ?? null,
@@ -2184,7 +2196,6 @@ function groupAvatarUnavailableToolResult(
 
 async function executeGroupTool(input: {
   abortSignal: AbortSignal | null
-  dynamicToolCallId: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
@@ -2192,6 +2203,7 @@ async function executeGroupTool(input: {
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
   request: MurphGroupToolRequest
+  toolCallId: string | null
   vaultRoot: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const groupTool = input.hostedToolContext?.groupTool ?? null
@@ -2224,7 +2236,7 @@ async function executeGroupTool(input: {
 
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
-      dynamicToolCallId: input.dynamicToolCallId,
+      toolCallId: input.toolCallId,
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
@@ -2279,7 +2291,7 @@ function isPreparedGroupAvatarRequest(
 
 async function prepareGroupAvatarRuntimeRequest(input: {
   abortSignal: AbortSignal | null
-  dynamicToolCallId: string | null
+  toolCallId: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
@@ -2307,7 +2319,7 @@ async function prepareGroupAvatarRuntimeRequest(input: {
       abortSignal: input.abortSignal,
       args: avatar.args,
       captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
-        dynamicToolCallId: input.dynamicToolCallId,
+        toolCallId: input.toolCallId,
         scope: 'group-avatar',
       }),
       env: input.env,
@@ -3135,6 +3147,7 @@ function parseDynamicToolCallRequest(
       arguments: null,
       namespace: null,
       tool: null,
+      toolCallId: null,
     }
   }
 
@@ -3142,6 +3155,13 @@ function parseDynamicToolCallRequest(
     arguments: params.arguments,
     namespace: normalizeNullableStringValue(params.namespace),
     tool: normalizeNullableStringValue(params.tool),
+    toolCallId:
+      normalizeNullableStringValue(params.callId) ??
+      normalizeNullableStringValue(params.call_id) ??
+      normalizeNullableStringValue(params.toolCallId) ??
+      normalizeNullableStringValue(params.tool_call_id) ??
+      normalizeNullableStringValue(params.itemId) ??
+      normalizeNullableStringValue(params.item_id),
   }
 }
 

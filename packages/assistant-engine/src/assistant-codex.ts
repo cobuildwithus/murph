@@ -546,20 +546,6 @@ export interface CodexAppServerResponseSegment {
   response: string
 }
 
-function buildCodexDynamicToolCallId(input: {
-  requestId: CodexRpcId
-  threadId: string | null
-  turnId: string | null
-}): string | null {
-  const turnId = normalizeNullableString(input.turnId)
-  if (!turnId) {
-    return null
-  }
-
-  const threadId = normalizeNullableString(input.threadId) ?? 'unknown-thread'
-  return `codex-app-server:${threadId}:${turnId}:${input.requestId}`
-}
-
 export type CodexAppServerSteerInput = {
   threadId: string
   turnId: string
@@ -3130,11 +3116,6 @@ async function runCodexAppServerTurnOnProcess(
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
         : dynamicToolAbortController.signal,
       codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
-      dynamicToolCallId: buildCodexDynamicToolCallId({
-        requestId,
-        threadId: codexThreadId,
-        turnId,
-      }),
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,

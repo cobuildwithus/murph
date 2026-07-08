@@ -281,6 +281,113 @@ describe('executeGenerateImageTool', () => {
     expect(second.usageDraft).toBeNull()
   })
 
+  it('keys dynamic generated-image retries by stable tool call id, not RPC request id', async () => {
+    const vaultRoot = await createTempDir('assistant-image-tool-call-id-vault-')
+    await initializeVault({ vaultRoot })
+    const uploadGeneratedImage = vi.fn()
+      .mockRejectedValueOnce(new Error('upload failed'))
+      .mockImplementationOnce(async (input) => ({
+        alt: input.alt,
+        kind: 'image' as const,
+        source: input.source,
+        url: 'https://imagedelivery.net/account/retry-call/public',
+      }))
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+        usage: {
+          input_tokens: 3,
+          output_tokens: 5,
+          total_tokens: 8,
+        },
+      }))
+    const toolParams = {
+      callId: 'call_stable_generated_image',
+      namespace: 'murph',
+      tool: 'generate_image',
+      arguments: {
+        alt: 'A retryable dynamic product photo',
+        outputFormat: 'webp',
+        prompt: 'Render the retryable dynamic object.',
+        quality: 'high',
+        size: '1536x1024',
+      },
+    }
+    const firstRequest = readMurphDynamicToolRequest({
+      id: 100,
+      method: 'item/tool/call',
+      params: toolParams,
+    })
+    const secondRequest = readMurphDynamicToolRequest({
+      id: 101,
+      method: 'item/tool/call',
+      params: toolParams,
+    })
+
+    expect(firstRequest).toMatchObject({
+      kind: 'generate-image',
+      toolCallId: 'call_stable_generated_image',
+    })
+    if (
+      !firstRequest ||
+      !secondRequest ||
+      firstRequest.kind !== 'generate-image' ||
+      secondRequest.kind !== 'generate-image'
+    ) {
+      throw new Error('expected generate-image requests')
+    }
+
+    let usageOrdinal = 4
+    const first = await executeMurphDynamicToolRequest({
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      hostedGeneratedImageUploader: { uploadGeneratedImage },
+      nextUsageOrdinal: () => usageOrdinal++,
+      progressDelivery: null,
+      request: firstRequest,
+      requireHostedGeneratedImageUploader: true,
+      vaultRoot,
+    })
+    expect(first.rpcResult).toMatchObject({
+      success: false,
+      contentItems: [
+        {
+          type: 'inputText',
+          text: 'image generated but upload failed',
+        },
+      ],
+    })
+    expect(fetchImpl).toHaveBeenCalledOnce()
+
+    const second = await executeMurphDynamicToolRequest({
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      hostedGeneratedImageUploader: { uploadGeneratedImage },
+      nextUsageOrdinal: () => usageOrdinal++,
+      progressDelivery: null,
+      request: secondRequest,
+      requireHostedGeneratedImageUploader: true,
+      vaultRoot,
+    })
+
+    expect(fetchImpl).toHaveBeenCalledOnce()
+    expect(uploadGeneratedImage).toHaveBeenCalledTimes(2)
+    expect(second.rpcResult.success).toBe(true)
+    expect(second.responseMediaPatch?.media).toEqual([
+      {
+        alt: 'A retryable dynamic product photo',
+        kind: 'image',
+        source: 'gpt-image-2',
+        url: 'https://imagedelivery.net/account/retry-call/public',
+      },
+    ])
+    expect(second.usageDraft).toBeNull()
+  })
+
   it('emits a succeeded usage draft when a successful image response omits usage', async () => {
     const uploader = {
       uploadGeneratedImage: vi.fn(async (input) => ({

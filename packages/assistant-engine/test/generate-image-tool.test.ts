@@ -192,6 +192,61 @@ describe('executeGenerateImageTool reference images', () => {
       })
     })
   })
+
+  it('reuses a saved generated capture before reloading transient references', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      const codexHome = path.join(root, 'codex-home')
+      const referencePath = path.join(vaultRoot, 'raw/inbox/reference.png')
+      await initializeVault({ vaultRoot })
+      await mkdir(path.dirname(referencePath), { recursive: true })
+      await writeFile(referencePath, PNG_BYTES)
+
+      let fetchCalls = 0
+      const fetchImpl: typeof fetch = async () => {
+        fetchCalls += 1
+        return openAiPngResponse()
+      }
+      const args = {
+        alt: null,
+        outputFormat: 'png' as const,
+        prompt: 'Use image 1 as the reference subject.',
+        quality: 'medium' as const,
+        referenceImageRefs: ['raw/inbox/reference.png'],
+        size: '1024x1024' as const,
+      }
+
+      const first = await executeGenerateImageTool({
+        args,
+        captureIdempotencyKey: 'turn-1:tool-with-transient-ref',
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl,
+        providerRequestOrdinal: 1,
+        vaultRoot,
+      })
+
+      expect(first.rpcSuccess).toBe(true)
+      expect(fetchCalls).toBe(1)
+
+      await rm(referencePath)
+
+      const second = await executeGenerateImageTool({
+        args,
+        captureIdempotencyKey: 'turn-1:tool-with-transient-ref',
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl,
+        providerRequestOrdinal: 2,
+        vaultRoot,
+      })
+
+      expect(second.rpcSuccess).toBe(true)
+      expect(second.savedImageRef).toBe(first.savedImageRef)
+      expect(second.usageDraft).toBeNull()
+      expect(fetchCalls).toBe(1)
+    })
+  })
 })
 
 function openAiPngResponse(bytes: Uint8Array = PNG_BYTES): Response {

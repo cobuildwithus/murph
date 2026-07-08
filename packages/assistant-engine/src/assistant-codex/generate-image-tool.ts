@@ -9,7 +9,8 @@ import {
   addCapture,
   deterministicContractId,
   ID_PREFIXES,
-  walkVaultFiles,
+  loadEventLedgerShardsById,
+  selectLatestMatchedEvent,
 } from '@murphai/core'
 import type {
   AssistantResponseMedia,
@@ -121,25 +122,6 @@ export async function executeGenerateImageTool(input: {
     }
   }
 
-  let referenceImages: ResolvedGenerateImageReference[] = []
-  try {
-    referenceImages = referenceImageRefs.length > 0
-      ? await resolveGenerateImageReferences({
-          materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-          refs: referenceImageRefs,
-          vaultRoot: vaultRoot ?? '',
-        })
-      : []
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw error
-    }
-    return {
-      rpcSuccess: false,
-      rpcText: 'image references could not be loaded',
-    }
-  }
-
   const promptHash = hashGeneratedImagePrompt(input.args.prompt)
   const captureIdentity = vaultRoot
     ? buildGeneratedImageCaptureIdentity({
@@ -147,15 +129,6 @@ export async function executeGenerateImageTool(input: {
         outputFormat: input.args.outputFormat,
       })
     : null
-  const operation: GenerateImageOperation = referenceImages.length > 0
-    ? 'image_generation_with_references'
-    : 'image_generation'
-  const usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath =
-    referenceImages.length > 0 ? 'openai.images.edit' : 'openai.images.generate'
-
-  let generatedImageBytes: Uint8Array
-  let savedCapture: SavedGeneratedImageCapture | null = null
-  let usageDraft: AssistantProviderUsageDraft | null = null
   const existingCapture = captureIdentity && vaultRoot
     ? await findExistingGeneratedImageCapture({
         captureIdentity,
@@ -163,11 +136,39 @@ export async function executeGenerateImageTool(input: {
         vaultRoot,
       })
     : null
+  let generatedImageBytes: Uint8Array
+  let referenceImages: ResolvedGenerateImageReference[] = []
+  let savedCapture: SavedGeneratedImageCapture | null = null
+  let usageDraft: AssistantProviderUsageDraft | null = null
 
   if (existingCapture) {
     generatedImageBytes = existingCapture.bytes
     savedCapture = existingCapture.capture
   } else {
+    try {
+      referenceImages = referenceImageRefs.length > 0
+        ? await resolveGenerateImageReferences({
+            materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+            refs: referenceImageRefs,
+            vaultRoot: vaultRoot ?? '',
+          })
+        : []
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error
+      }
+      return {
+        rpcSuccess: false,
+        rpcText: 'image references could not be loaded',
+      }
+    }
+
+    const operation: GenerateImageOperation = referenceImages.length > 0
+      ? 'image_generation_with_references'
+      : 'image_generation'
+    const usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath =
+      referenceImages.length > 0 ? 'openai.images.edit' : 'openai.images.generate'
+
     let openAiResult: Awaited<ReturnType<typeof generateOpenAiImage>>
     try {
       openAiResult = await generateOpenAiImage({
@@ -508,12 +509,13 @@ async function findExistingGeneratedImageCapture(input: {
   outputFormat: OpenAiImageOutputFormat
   vaultRoot: string
 }): Promise<{ bytes: Uint8Array; capture: SavedGeneratedImageCapture } | null> {
-  const expectedSuffix = `/${input.captureIdentity.captureId}/media-1-${input.captureIdentity.filename}`
-  const extension = `.${generatedImageFileExtension(input.outputFormat)}`
-  const candidates = await walkVaultFiles(input.vaultRoot, RAW_CAPTURES_DIRECTORY, {
-    extension,
+  const matched = selectLatestMatchedEvent(
+    await loadEventLedgerShardsById(input.vaultRoot, input.captureIdentity.captureId),
+  )
+  const imageRef = readGeneratedImageCaptureAttachmentRef({
+    captureIdentity: input.captureIdentity,
+    record: matched?.record ?? null,
   })
-  const imageRef = candidates.find((candidate) => candidate.endsWith(expectedSuffix))
   if (!imageRef) {
     return null
   }
@@ -531,6 +533,48 @@ async function findExistingGeneratedImageCapture(input: {
       manifestPath: null,
     },
   }
+}
+
+function readGeneratedImageCaptureAttachmentRef(input: {
+  captureIdentity: GeneratedImageCaptureIdentity
+  record: unknown
+}): string | null {
+  const record = asUnknownRecord(input.record)
+  if (record?.kind !== 'note') {
+    return null
+  }
+
+  const attachments = Array.isArray(record.attachments) ? record.attachments : []
+  const expectedSuffix =
+    `/${input.captureIdentity.captureId}/media-1-${input.captureIdentity.filename}`
+
+  for (const attachmentValue of attachments) {
+    const attachment = asUnknownRecord(attachmentValue)
+    if (attachment?.role !== 'media_1') {
+      continue
+    }
+
+    const relativePath = normalizeUnknownNullableString(attachment.relativePath)
+    if (
+      relativePath &&
+      relativePath.startsWith(`${RAW_CAPTURES_DIRECTORY}/`) &&
+      relativePath.endsWith(expectedSuffix)
+    ) {
+      return relativePath
+    }
+  }
+
+  return null
+}
+
+function asUnknownRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object'
+    ? value as Record<string, unknown>
+    : null
+}
+
+function normalizeUnknownNullableString(value: unknown): string | null {
+  return typeof value === 'string' ? normalizeNullableString(value) : null
 }
 
 function generatedImageFilename(

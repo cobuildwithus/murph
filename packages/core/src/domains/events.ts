@@ -47,12 +47,16 @@ export type {
 export {
   deleteEvent,
   findEventByExternalRef,
+  loadEventLedgerShardsById,
+  selectLatestMatchedEvent,
   upsertEvent,
 } from "./events/ledger.ts";
 export type {
   DeleteEventInput,
   DeleteEventResult,
   FindEventByExternalRefInput,
+  LoadedEventLedgerShard,
+  MatchedEventRecord,
   UpsertEventDraftInput,
   UpsertEventInput,
   UpsertEventPayloadInput,
