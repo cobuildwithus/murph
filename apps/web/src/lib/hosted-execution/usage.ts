@@ -129,35 +129,37 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
-      const storedRecord = await tx.hostedAiUsage.upsert({
-        where: {
-          id: record.usageId,
-        },
-        create: buildHostedAiUsageCreateData(record, memberId),
-        update: {},
-        select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
-      });
-
-      assertStoredHostedAiUsageMatchesRecord({
-        memberId,
-        record,
-        storedRecord,
-      });
-      await markHostedAiUsageStripeExportSkippedTx({
-        id: storedRecord.id,
-        tx,
-      });
-    });
-
-    const limitNoticeCandidate = input.accountAllowance === true
-      ? await runHostedAiUsageRecordTransaction(prisma, async (tx) =>
-        accountHostedAiUsageForAllowanceTx({
+    let limitNoticeCandidate: HostedAiUsageLimitNoticeCandidate | null;
+    try {
+      limitNoticeCandidate = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+        await persistHostedAiUsageRecordTx({
           memberId,
           record,
           tx,
-        }))
-      : null;
+        });
+
+        if (input.accountAllowance === true) {
+          return accountHostedAiUsageForAllowanceTx({
+            memberId,
+            record,
+            tx,
+          });
+        }
+
+        return null;
+      });
+    } catch (error) {
+      if (isHostedAiUsageRecordPreservingAllowanceError(error)) {
+        await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+          await persistHostedAiUsageRecordTx({
+            memberId,
+            record,
+            tx,
+          });
+        });
+      }
+      throw error;
+    }
 
     if (limitNoticeCandidate) {
       limitNoticeCandidates.push(limitNoticeCandidate);
@@ -281,6 +283,38 @@ function logHostedAiUsageLimitNoticeAtCrossing(
   }
 
   console.warn("Hosted AI usage-limit notice at crossing failed.", details);
+}
+
+async function persistHostedAiUsageRecordTx(input: {
+  memberId: string;
+  record: AssistantUsageRecord;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const storedRecord = await input.tx.hostedAiUsage.upsert({
+    where: {
+      id: input.record.usageId,
+    },
+    create: buildHostedAiUsageCreateData(input.record, input.memberId),
+    update: {},
+    select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
+  });
+
+  assertStoredHostedAiUsageMatchesRecord({
+    memberId: input.memberId,
+    record: input.record,
+    storedRecord,
+  });
+  await markHostedAiUsageStripeExportSkippedTx({
+    id: storedRecord.id,
+    tx: input.tx,
+  });
+}
+
+function isHostedAiUsageRecordPreservingAllowanceError(
+  error: unknown,
+): boolean {
+  return error instanceof TypeError
+    && error.message.startsWith("OpenAI image hosted AI usage ");
 }
 
 async function runHostedAiUsageRecordTransaction<T>(

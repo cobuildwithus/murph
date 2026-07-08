@@ -132,6 +132,116 @@ function buildMalformedOpenAiImageUsageRecords(input: {
   ] satisfies AssistantUsageRecord[];
 }
 
+function buildInconsistentOpenAiImageUsageRecords(): AssistantUsageRecord[] {
+  return [
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 101,
+        output_tokens: 400,
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 0,
+          text_tokens: 300,
+        },
+        output_tokens: 400,
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 150,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 150,
+          image_tokens: 0,
+          text_tokens: 100,
+        },
+        output_tokens: 400,
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        output_tokens: 400,
+        output_tokens_details: {
+          image_tokens: 399,
+          reasoning_tokens: 0,
+          text_tokens: 0,
+        },
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        output_tokens: 400,
+        total_tokens: 999,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 999,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+  ] satisfies AssistantUsageRecord[];
+}
+
 describe("hosted AI usage allowance pricing", () => {
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
@@ -346,6 +456,13 @@ describe("hosted AI usage allowance pricing", () => {
     for (const record of records) {
       expect(() => priceHostedAiUsageForAllowance(record))
         .toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+    }
+  });
+
+  it("rejects OpenAI image usage when provider usage buckets are inconsistent", () => {
+    for (const record of buildInconsistentOpenAiImageUsageRecords()) {
+      expect(() => priceHostedAiUsageForAllowance(record))
+        .toThrow("OpenAI image hosted AI usage has inconsistent provider usage tokens");
     }
   });
 
@@ -961,6 +1078,26 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         record,
         tx: tx as never,
       })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+
+      expect(updateMany).not.toHaveBeenCalled();
+      expect(executeRaw).not.toHaveBeenCalled();
+    }
+  });
+
+  it("fails image accounting before claiming rows when provider usage buckets are inconsistent", async () => {
+    for (const record of buildInconsistentOpenAiImageUsageRecords()) {
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+      const tx = createAllowanceTx({
+        executeRaw,
+        hostedAiUsageUpdateMany: updateMany,
+      });
+
+      await expect(accountHostedAiUsageForAllowanceTx({
+        memberId: "member_123",
+        record,
+        tx: tx as never,
+      })).rejects.toThrow("OpenAI image hosted AI usage has inconsistent provider usage tokens");
 
       expect(updateMany).not.toHaveBeenCalled();
       expect(executeRaw).not.toHaveBeenCalled();

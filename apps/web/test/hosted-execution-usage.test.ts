@@ -257,6 +257,23 @@ describe("recordHostedAiUsageRecords", () => {
     expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
+  it("rolls back valid usage rows when allowance accounting fails generically", async () => {
+    const prisma = makeRollbackAwareUsagePrismaClient();
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockRejectedValue(
+      new Error("database unavailable"),
+    );
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).rejects.toThrow("database unavailable");
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prisma.readHostedAiUsageRows()).toEqual([]);
+  });
+
   it("keeps malformed image usage rows when allowance accounting rolls back", async () => {
     const prisma = makeRollbackAwareUsagePrismaClient();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockRejectedValue(
