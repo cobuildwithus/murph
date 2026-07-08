@@ -576,6 +576,251 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
+  it("preserves lab analytes that do not derive a slug", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "non-slug-analyte",
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          category: [{
+            coding: [{
+              system: "http://terminology.hl7.org/CodeSystem/observation-category",
+              code: "laboratory",
+            }],
+          }],
+          code: { text: "血糖" },
+          valueQuantity: { value: 91, unit: "mg/dL" },
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.unsupported).toEqual([]);
+    expect(plan.candidates).toHaveLength(1);
+    const candidate = plan.candidates.find(
+      (item): item is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
+        item.kind === "diagnostic-test",
+    );
+    expect(candidate?.payload.testName).toBe("血糖");
+    expect(candidate?.payload.results).toEqual([
+      {
+        analyte: "血糖",
+        unit: "mg/dL",
+        value: 91,
+      },
+    ]);
+  });
+
+  it("keeps candidate-bound FHIR labels resource-local", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 2,
+        },
+        {
+          resourceType: "DiagnosticReport",
+          relativePath: "DiagnosticReport/page-1.json",
+          count: 2,
+        },
+        {
+          resourceType: "DocumentReference",
+          relativePath: "DocumentReference/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            resourceType: "Observation",
+            id: "oversize-lab-label",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "x".repeat(161) },
+            component: [{
+              code: { text: "Glucose" },
+              valueQuantity: { value: 91, unit: "mg/dL" },
+            }],
+          },
+          {
+            resourceType: "Observation",
+            id: "valid-lab-neighbor",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:01:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Albumin" },
+            valueString: "Normal",
+          },
+        ],
+        "DiagnosticReport/page-1.json": [
+          {
+            resourceType: "DiagnosticReport",
+            id: "oversize-report-label",
+            status: "final",
+            issued: "2026-07-01T12:02:00.000Z",
+            code: { text: "x".repeat(161) },
+            conclusion: "Clear summary.",
+          },
+          {
+            resourceType: "DiagnosticReport",
+            id: "max-report-label",
+            status: "final",
+            issued: "2026-07-01T12:03:00.000Z",
+            code: { text: "r".repeat(160) },
+            conclusion: "Summary within bounds.",
+          },
+        ],
+        "DocumentReference/page-1.json": {
+          resourceType: "DocumentReference",
+          id: "oversize-document-title",
+          status: "current",
+          docStatus: "final",
+          date: "2026-07-02T08:30:00.000Z",
+          description: "x".repeat(161),
+          content: [
+            {
+              attachment: {
+                contentType: "text/plain",
+                data: Buffer.from("Follow up in two weeks.").toString("base64"),
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toHaveLength(2);
+    expect(plan.candidates.map((candidate) => candidate.resource.resourceId).sort()).toEqual([
+      "max-report-label",
+      "valid-lab-neighbor",
+    ]);
+    expect(plan.unsupported).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: "oversize-lab-label",
+          reason: "clinical candidate exceeds supported import bounds",
+        }),
+        expect.objectContaining({
+          resourceId: "oversize-report-label",
+          reason: "clinical candidate exceeds supported import bounds",
+        }),
+        expect.objectContaining({
+          resourceId: "oversize-document-title",
+          reason: "clinical candidate exceeds supported import bounds",
+        }),
+      ]),
+    );
+  });
+
+  it("fails closed on conflicting trusted clinical result interpretations", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+        },
+        {
+          resourceType: "DiagnosticReport",
+          relativePath: "DiagnosticReport/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "conflicting-lab-interpretation",
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          category: [{
+            coding: [{
+              system: "http://terminology.hl7.org/CodeSystem/observation-category",
+              code: "laboratory",
+            }],
+          }],
+          code: { text: "Glucose" },
+          interpretation: [
+            {
+              coding: [
+                {
+                  system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                  code: "N",
+                },
+                {
+                  system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                  code: "H",
+                },
+              ],
+            },
+          ],
+          valueQuantity: { value: 91, unit: "mg/dL" },
+        },
+        "DiagnosticReport/page-1.json": {
+          resourceType: "DiagnosticReport",
+          id: "conflicting-report-interpretation",
+          status: "final",
+          issued: "2026-07-01T12:02:00.000Z",
+          code: { text: "Pathology report" },
+          conclusion: "Clear summary.",
+          conclusionCode: [
+            {
+              coding: [
+                {
+                  system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                  code: "A",
+                },
+                {
+                  system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                  code: "N",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: "conflicting-lab-interpretation",
+          reason: "clinical result interpretation is ambiguous",
+        }),
+        expect.objectContaining({
+          resourceId: "conflicting-report-interpretation",
+          reason: "clinical result interpretation is ambiguous",
+        }),
+      ]),
+    );
+  });
+
   it("leaves unsafe clinical resources unsupported instead of importing live candidates", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [

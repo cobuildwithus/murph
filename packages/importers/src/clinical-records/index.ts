@@ -23,6 +23,7 @@ import {
   CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES,
   CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
   clinicalFacetSlug,
+  clinicalImportCandidateSchema,
   clinicalImportPlanSchema,
   clinicalRawManifestSchema,
   clinicalRawPathSchema,
@@ -98,6 +99,8 @@ const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, str
   ["temperature", new Map([["cel", "Cel"]])],
 ]);
 type QuantityComparator = NonNullable<BloodTestResultRecord["comparator"]>;
+type ResultStatus = "normal" | "abnormal" | "unknown";
+type ParsedResultStatus = ResultStatus | "ambiguous";
 const IMPORTABLE_OBSERVATION_STATUSES = new Set(["amended", "corrected", "final"]);
 const IMPORTABLE_DIAGNOSTIC_REPORT_STATUSES = new Set(["amended", "appended", "corrected", "final"]);
 const IMPORTABLE_DOCUMENT_REFERENCE_STATUSES = new Set(["current"]);
@@ -343,6 +346,35 @@ function unsupportedOnly(context: FhirResourceContext, reason: string): MappedFh
   return { candidates: [], unsupported: [unsupportedResource(context, reason)] };
 }
 
+function candidateOnly(
+  context: FhirResourceContext,
+  candidate: ClinicalImportCandidate,
+  unsupportedReason: string,
+): MappedFhirResource {
+  const parsedCandidate = clinicalImportCandidateSchema.safeParse(candidate);
+  if (!parsedCandidate.success) {
+    return unsupportedOnly(context, unsupportedReason);
+  }
+
+  return { candidates: [parsedCandidate.data], unsupported: [] };
+}
+
+function appendValidatedCandidate(input: {
+  candidate: ClinicalImportCandidate;
+  candidates: ClinicalImportCandidate[];
+  context: FhirResourceContext;
+  unsupported: ClinicalImportUnsupportedResource[];
+  unsupportedReason: string;
+}): void {
+  const parsedCandidate = clinicalImportCandidateSchema.safeParse(input.candidate);
+  if (!parsedCandidate.success) {
+    input.unsupported.push(unsupportedResource(input.context, input.unsupportedReason));
+    return;
+  }
+
+  input.candidates.push(parsedCandidate.data);
+}
+
 function mapObservation(context: FhirResourceContext<Observation>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
@@ -393,15 +425,21 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     }
     emittedVitalFacets.add(vital.facet);
 
-    candidates.push(buildVitalsCandidate(context, {
-      occurredAt,
-      resourceId,
-      title: vital.title,
-      facet: vital.facet,
-      metric: vital.metric,
-      unit,
-      value: value.value,
-    }));
+    appendValidatedCandidate({
+      candidates,
+      context,
+      unsupported,
+      unsupportedReason: "clinical candidate exceeds supported import bounds",
+      candidate: buildVitalsCandidate(context, {
+        occurredAt,
+        resourceId,
+        title: vital.title,
+        facet: vital.facet,
+        metric: vital.metric,
+        unit,
+        value: value.value,
+      }),
+    });
   }
 
   if (candidates.length > 0 || unsupported.length > 0) {
@@ -429,20 +467,19 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
       return unsupportedOnly(context, "vital quantity unit is not importable");
     }
 
-    return {
-      candidates: [
-        buildVitalsCandidate(context, {
-          occurredAt,
-          resourceId,
-          title: vital.title,
-          facet: vital.facet,
-          metric: vital.metric,
-          unit,
-          value: quantity.value,
-        }),
-      ],
-      unsupported: [],
-    };
+    return candidateOnly(
+      context,
+      buildVitalsCandidate(context, {
+        occurredAt,
+        resourceId,
+        title: vital.title,
+        facet: vital.facet,
+        metric: vital.metric,
+        unit,
+        value: quantity.value,
+      }),
+      "clinical candidate exceeds supported import bounds",
+    );
   }
 
   if (!isLaboratoryObservation(context.resource)) {
@@ -474,30 +511,34 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   }
 
   const testName = textForCodeableConcept(context.resource.code) ?? "FHIR laboratory observation";
-  return {
-    candidates: [
-      {
-        kind: "diagnostic-test",
-        rawRef: context.rawRef,
-        resource: sourceRef(context, resourceId, "lab-observation"),
-        payload: {
-          occurredAt,
-          source: "import",
-          title: `FHIR lab: ${truncate(testName, 148)}`,
-          testName: truncate(testName, 160),
-          resultStatus: resultStatusFromInterpretation(context.resource.interpretation),
-          testCategory: "laboratory",
-          collectedAt: occurredAt,
-          reportedAt: readIsoDateTime(context.resource.issued),
-          results,
-          rawRefs: [context.rawRef],
-          evidence: [evidenceForResource(context, resourceId)],
-          externalRef: externalRefForResource(context, "Observation", resourceId, "lab-observation"),
-        },
+  const resultStatus = resultStatusFromInterpretation(context.resource.interpretation);
+  if (resultStatus === "ambiguous") {
+    return unsupportedOnly(context, "clinical result interpretation is ambiguous");
+  }
+
+  return candidateOnly(
+    context,
+    {
+      kind: "diagnostic-test",
+      rawRef: context.rawRef,
+      resource: sourceRef(context, resourceId, "lab-observation"),
+      payload: {
+        occurredAt,
+        source: "import",
+        title: testName,
+        testName,
+        resultStatus,
+        testCategory: "laboratory",
+        collectedAt: occurredAt,
+        reportedAt: readIsoDateTime(context.resource.issued),
+        results,
+        rawRefs: [context.rawRef],
+        evidence: [evidenceForResource(context, resourceId)],
+        externalRef: externalRefForResource(context, "Observation", resourceId, "lab-observation"),
       },
-    ],
-    unsupported: [],
-  };
+    },
+    "clinical candidate exceeds supported import bounds",
+  );
 }
 
 function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): MappedFhirResource {
@@ -523,35 +564,38 @@ function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): Ma
     if (summary.length > DIAGNOSTIC_SUMMARY_MAX_LENGTH) {
       return unsupportedOnly(context, "diagnostic report summary exceeds candidate bounds");
     }
+    const resultStatus = resultStatusFromInterpretation(context.resource.conclusionCode);
+    if (resultStatus === "ambiguous") {
+      return unsupportedOnly(context, "clinical result interpretation is ambiguous");
+    }
 
-    return {
-      candidates: [
-        {
-          kind: "diagnostic-test",
-          rawRef: context.rawRef,
-          resource: sourceRef(context, resourceId, "diagnostic-report-summary"),
-          payload: {
-            occurredAt,
-            source: "import",
-            title: `FHIR report: ${truncate(testName, 148)}`,
-            testName: truncate(testName, 160),
-            resultStatus: resultStatusFromInterpretation(context.resource.conclusionCode),
-            summary,
-            testCategory: "diagnostic-report",
-            reportedAt: readIsoDateTime(context.resource.issued),
-            rawRefs: [context.rawRef],
-            evidence: [evidenceForResource(context, resourceId)],
-            externalRef: externalRefForResource(
-              context,
-              "DiagnosticReport",
-              resourceId,
-              "diagnostic-report-summary",
-            ),
-          },
+    return candidateOnly(
+      context,
+      {
+        kind: "diagnostic-test",
+        rawRef: context.rawRef,
+        resource: sourceRef(context, resourceId, "diagnostic-report-summary"),
+        payload: {
+          occurredAt,
+          source: "import",
+          title: testName,
+          testName,
+          resultStatus,
+          summary,
+          testCategory: "diagnostic-report",
+          reportedAt: readIsoDateTime(context.resource.issued),
+          rawRefs: [context.rawRef],
+          evidence: [evidenceForResource(context, resourceId)],
+          externalRef: externalRefForResource(
+            context,
+            "DiagnosticReport",
+            resourceId,
+            "diagnostic-report-summary",
+          ),
         },
-      ],
-      unsupported: [],
-    };
+      },
+      "clinical candidate exceeds supported import bounds",
+    );
   }
 
   return unsupportedOnly(context, "diagnostic report summary is not available in raw FHIR page");
@@ -588,27 +632,26 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
     ?? textForCodeableConcept(context.resource.type)
     ?? "FHIR document reference";
 
-  return {
-    candidates: [
-      {
-        kind: "clinical-note",
-        rawRef: context.rawRef,
-        resource: sourceRef(context, resourceId, "document-note"),
-        payload: {
-          occurredAt,
-          source: "import",
-          title: truncate(title, 160),
-          note,
-          noteType: "fhir_document_reference",
-          authoredAt: readIsoDateTime(context.resource.date),
-          rawRefs: [context.rawRef],
-          evidence: [evidenceForResource(context, resourceId)],
-          externalRef: externalRefForResource(context, "DocumentReference", resourceId, "document-note"),
-        },
+  return candidateOnly(
+    context,
+    {
+      kind: "clinical-note",
+      rawRef: context.rawRef,
+      resource: sourceRef(context, resourceId, "document-note"),
+      payload: {
+        occurredAt,
+        source: "import",
+        title,
+        note,
+        noteType: "fhir_document_reference",
+        authoredAt: readIsoDateTime(context.resource.date),
+        rawRefs: [context.rawRef],
+        evidence: [evidenceForResource(context, resourceId)],
+        externalRef: externalRefForResource(context, "DocumentReference", resourceId, "document-note"),
       },
-    ],
-    unsupported: [],
-  };
+    },
+    "clinical candidate exceeds supported import bounds",
+  );
 }
 
 function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>): MappedFhirResource {
@@ -638,35 +681,34 @@ function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>)
     return unsupportedOnly(context, "clinical timestamp is missing");
   }
 
-  return {
-    candidates: [
-      {
-        kind: "assertion",
-        rawRef: context.rawRef,
-        resource: sourceRef(context, resourceId, "no-known-allergies"),
-        payload: {
-          occurredAt,
-          source: "import",
-          title: "No known allergies",
-          assertion: "no_known_allergies",
-          domain: "allergy",
-          polarity: "absent",
-          subject: "allergies",
-          assertedOn: occurredAt.slice(0, 10),
-          sourceLabel: "FHIR AllergyIntolerance",
-          rawRefs: [context.rawRef],
-          evidence: [evidenceForResource(context, resourceId)],
-          externalRef: externalRefForResource(
-            context,
-            "AllergyIntolerance",
-            resourceId,
-            "no-known-allergies",
-          ),
-        },
+  return candidateOnly(
+    context,
+    {
+      kind: "assertion",
+      rawRef: context.rawRef,
+      resource: sourceRef(context, resourceId, "no-known-allergies"),
+      payload: {
+        occurredAt,
+        source: "import",
+        title: "No known allergies",
+        assertion: "no_known_allergies",
+        domain: "allergy",
+        polarity: "absent",
+        subject: "allergies",
+        assertedOn: occurredAt.slice(0, 10),
+        sourceLabel: "FHIR AllergyIntolerance",
+        rawRefs: [context.rawRef],
+        evidence: [evidenceForResource(context, resourceId)],
+        externalRef: externalRefForResource(
+          context,
+          "AllergyIntolerance",
+          resourceId,
+          "no-known-allergies",
+        ),
       },
-    ],
-    unsupported: [],
-  };
+    },
+    "clinical candidate exceeds supported import bounds",
+  );
 }
 
 function buildVitalsCandidate(
@@ -721,12 +763,12 @@ function buildBloodTestResult(resource: Observation | ObservationComponent): Blo
   }
 
   const quantity = readQuantityValue(resource.valueQuantity);
+  const slugFields = clinicalSlugFields(analyte);
   if (quantity) {
     return {
       analyte,
-      biomarkerSlug: clinicalFacetSlug(analyte),
+      ...slugFields,
       comparator: quantity.comparator,
-      slug: clinicalFacetSlug(analyte),
       unit: quantity.unit,
       value: quantity.value,
     };
@@ -740,13 +782,21 @@ function buildBloodTestResult(resource: Observation | ObservationComponent): Blo
 
     return {
       analyte,
-      biomarkerSlug: clinicalFacetSlug(analyte),
-      slug: clinicalFacetSlug(analyte),
+      ...slugFields,
       textValue,
     };
   }
 
   return null;
+}
+
+function clinicalSlugFields(value: string): Pick<BloodTestResultRecord, "biomarkerSlug" | "slug"> {
+  const slug = clinicalFacetSlug(value);
+  if (!slug) {
+    return {};
+  }
+
+  return { biomarkerSlug: slug, slug };
 }
 
 function sourceRef(context: FhirResourceContext, resourceId: string, facet: string) {
@@ -907,7 +957,10 @@ function codeableConceptHasCodeWithUnexpectedSystem(
   });
 }
 
-function resultStatusFromInterpretation(value: CodeableConcept[] | undefined): "normal" | "abnormal" | "unknown" {
+function resultStatusFromInterpretation(value: CodeableConcept[] | undefined): ParsedResultStatus {
+  let hasAbnormal = false;
+  let hasNormal = false;
+
   for (const interpretation of readFhirArray(value)) {
     for (const coding of codingsForCodeableConcept(interpretation)) {
       if (coding.system !== FHIR_SYSTEM_OBSERVATION_INTERPRETATION) {
@@ -915,12 +968,22 @@ function resultStatusFromInterpretation(value: CodeableConcept[] | undefined): "
       }
       const code = coding.code?.toLowerCase();
       if (code && RESULT_STATUS_ABNORMAL_CODES.has(code)) {
-        return "abnormal";
+        hasAbnormal = true;
       }
       if (code && RESULT_STATUS_NORMAL_CODES.has(code)) {
-        return "normal";
+        hasNormal = true;
       }
     }
+  }
+
+  if (hasAbnormal && hasNormal) {
+    return "ambiguous";
+  }
+  if (hasAbnormal) {
+    return "abnormal";
+  }
+  if (hasNormal) {
+    return "normal";
   }
 
   return "unknown";
@@ -1133,12 +1196,4 @@ function readString(value: unknown): string | undefined {
 
 function readNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value;
-  }
-
-  return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 }
