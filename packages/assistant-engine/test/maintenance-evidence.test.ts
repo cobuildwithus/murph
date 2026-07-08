@@ -1,4 +1,4 @@
-import { rm, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { afterEach, expect, test } from 'vitest'
 
 import {
@@ -135,7 +135,7 @@ test('builds bounded committed conversation evidence across recent sessions', as
   expect(evidence).not.toContain('internal status entry')
 })
 
-test('repairs legacy recent-session projections before building maintenance evidence', async () => {
+test('does not auto-repair legacy recent-session projections during maintenance evidence', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-maintenance-evidence-legacy-repair-',
   )
@@ -175,10 +175,12 @@ test('repairs legacy recent-session projections before building maintenance evid
     vault: vaultRoot,
   })
 
-  expect(evidence).toContain(
-    '- [2026-06-29T22:00:00.000Z] user: Legacy projection repair should still surface this message.',
-  )
-  expect(evidence).not.toContain('No committed user or assistant conversation messages')
+  expect(evidence).toContain('No committed user or assistant conversation messages')
+  expect(evidence).not.toContain('Legacy projection repair should still surface this message.')
+  const repaired = JSON.parse(await readFile(paths.indexesPath, 'utf8')) as {
+    recentSessions?: Record<string, string>
+  }
+  expect(repaired.recentSessions).toBeUndefined()
 })
 
 test('bounds transcript evidence reads to the tail byte cap', async () => {
