@@ -1196,7 +1196,7 @@ function normalizeHostedGroupOfferScopeInput(
 export function normalizeHostedGroupOfferScope(value: unknown): HostedGroupOfferScope {
   if (Array.isArray(value)) {
     return {
-      featureActivations: [],
+      featureActivations: normalizeHostedGroupFeatureActivationKinds(value),
       schema: HOSTED_GROUP_OFFER_SCOPE_SCHEMA,
       vaultShareProjectionKinds: normalizeHostedVaultShareProjectionKinds(value),
     };
@@ -1238,7 +1238,10 @@ function isHostedGroupFeatureActivationKind(
 }
 
 function toHostedGroupOfferScopeJson(scope: HostedGroupOfferScope): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(scope)) as Prisma.InputJsonValue;
+  return JSON.parse(JSON.stringify([
+    ...scope.featureActivations,
+    ...scope.vaultShareProjectionKinds,
+  ])) as Prisma.InputJsonValue;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

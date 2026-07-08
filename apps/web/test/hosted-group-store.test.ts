@@ -69,9 +69,12 @@ afterEach(() => {
   restoreKeyring = null;
 });
 
-it("normalizes legacy and scoped group-offer JSON", () => {
-  expect(normalizeHostedGroupOfferScope(["sleep-times.v0"])).toEqual({
-    featureActivations: [],
+it("normalizes legacy-compatible and scoped group-offer JSON", () => {
+  expect(normalizeHostedGroupOfferScope([
+    "call-circle.enroll.v0",
+    "sleep-times.v0",
+  ])).toEqual({
+    featureActivations: ["call-circle.enroll.v0"],
     schema: "murph.hosted-group.offer-scope.v1",
     vaultShareProjectionKinds: ["sleep-times.v0"],
   });
@@ -482,11 +485,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         messageIdSuffix: expect.stringContaining("123"),
         messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
         postedAt,
-        offerScopeJson: {
-          featureActivations: ["call-circle.enroll.v0"],
-          schema: "murph.hosted-group.offer-scope.v1",
-          vaultShareProjectionKinds: ["sleep-times.v0"],
-        },
+        offerScopeJson: ["call-circle.enroll.v0", "sleep-times.v0"],
       },
     });
   });

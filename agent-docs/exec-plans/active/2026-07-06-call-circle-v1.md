@@ -570,11 +570,17 @@ Accepted finding from the Phlebas confirmation rerun:
   provider message lookup key after send. Retries reuse only an unbound
   matching attempt; once an offer is bound, a later identical offer creates
   a fresh attempt instead of silently suppressing the new post.
+- Mixed web deploys must keep existing group-offer vault-share consent
+  compatible with old reaction handlers. Offer scope writes now keep the
+  existing `projection_kinds_json` column as an array of consent tokens, so
+  old readers still grant vault-share projections while new readers can also
+  recognize feature activation tokens.
 
 Focused follow-up verification:
 
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-store.test.ts`
 - `pnpm --filter @murphai/hosted-web typecheck`
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts`
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/phone-calls-call-circle-result.test.ts`
 
 ## Local Deep-Review Follow-Up 5 2026-07-07
