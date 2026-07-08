@@ -582,11 +582,14 @@ Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
 successful production deployment. That workflow only accepts Vercel-originated
-deployment statuses, checks out the exact deployed commit, verifies it is
-reachable from `origin/main`, waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS`
-seconds for prior production function executions to drain, then verifies the
-configured Vercel production alias still points at that commit before exposing
-the database secret. It requires
+completed production deployment statuses, checks out the exact deployed commit,
+verifies it is reachable from `origin/main`, waits
+`HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior production
+function executions to drain, then verifies the configured Vercel production
+alias still points at that commit before exposing the database secret. It can
+also be manually dispatched with `deployed_sha` set to the current Vercel
+production commit; the same drain and alias proof still apply before SQL runs.
+It requires
 `HOSTED_WEB_VERCEL_TOKEN`, `HOSTED_WEB_VERCEL_PROJECT_ID`,
 `HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
 GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
@@ -595,6 +598,9 @@ does not use GitHub Actions concurrency for this lane; the final alias check and
 the contract migration advisory lock make stale or duplicate runs skip safely
 without letting stale events replace valid pending runs. After those gates, it calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
+The shared production migration URL resolver strips Prisma-style
+`sslcert=system`, `sslkey=system`, and `sslrootcert=system` markers before
+handing Postgres URLs to raw `pg` clients, while preserving real SSL file paths.
 Rollback floor: after contract cleanup drops an old schema shape, the oldest
 safe Vercel rollback target is the first deployed commit that no longer reads or
 writes that dropped shape. Rolling back below that floor requires restoring or

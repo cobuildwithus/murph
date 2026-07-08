@@ -944,6 +944,12 @@ describe("hosted runtime control contracts", () => {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
       },
       provider: {
+        codexAppServerInitializeMs: 7,
+        codexAppServerPreProviderMs: 17,
+        codexAppServerSpawnReadyMs: 1,
+        codexAppServerThreadResumeMs: 9,
+        codexAppServerThreadStartMs: 0,
+        codexAppServerWarmReuseMs: 0,
         turnLockWaitMs: 1,
         sessionResolveMs: 2,
         promptBuildMs: 3,
@@ -981,6 +987,7 @@ describe("hosted runtime control contracts", () => {
       { sessionResolveMs: "not-a-number" }, // string leaf
       { sessionResolveMs: { secret: 1 } }, // object leaf
       { sessionResolveMs: [1, 2, 3] }, // array leaf
+      { codexAppServerWarmReuseMs: "0" }, // numeric leaf must stay numeric
       { networkToken: 1 }, // unknown sub key
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({
@@ -1179,6 +1186,31 @@ describe("hosted runtime control contracts", () => {
     expect(idempotent).toEqual({
       changed: false,
       value: merged.value,
+    });
+
+    const providerMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {},
+      incoming: {
+        schemaVersion: 1,
+        provider: {
+          codexAppServerInitializeMs: 7,
+          codexAppServerPreProviderMs: 17,
+          codexAppServerSpawnReadyMs: 1,
+          codexAppServerThreadResumeMs: 9,
+          codexAppServerWarmReuseMs: 0,
+          turnLockWaitMs: 2,
+        },
+      },
+      phases: ["provider"],
+    });
+
+    expect(providerMerged.value.provider).toEqual({
+      codexAppServerInitializeMs: 7,
+      codexAppServerPreProviderMs: 17,
+      codexAppServerSpawnReadyMs: 1,
+      codexAppServerThreadResumeMs: 9,
+      codexAppServerWarmReuseMs: 0,
+      turnLockWaitMs: 2,
     });
   });
 

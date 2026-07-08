@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   generateOpenAiImage,
   OPENAI_IMAGE_GENERATION_MODEL,
+  OPENAI_IMAGE_GENERATION_TIMEOUT_MS,
 } from '../src/assistant-codex/openai-image-generation.js'
 
 const RESPONSE_IMAGE_BYTES = new Uint8Array([0x01, 0x02, 0x03])
@@ -37,6 +38,10 @@ function openAiImageResponse(): Response {
 }
 
 describe('generateOpenAiImage', () => {
+  it('keeps the image request timeout above two minutes', () => {
+    expect(OPENAI_IMAGE_GENERATION_TIMEOUT_MS).toBe(240_000)
+  })
+
   it('uses the generations endpoint with JSON when no references are present', async () => {
     let capturedUrl: string | null = null
     let capturedInit: RequestInit | undefined

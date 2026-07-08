@@ -116,6 +116,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "agent-docs/operations/agent-workflow-routing.md" \
   "agent-docs/operations/verification-and-runtime.md" \
   "agent-docs/operations/completion-workflow.md" \
+  "agent-docs/operations/pr-reviewgpt-loop.md" \
   "agent-docs/exec-plans/active/COORDINATION_LEDGER.md" \
   "package.json" \
   "pnpm-workspace.yaml" \
