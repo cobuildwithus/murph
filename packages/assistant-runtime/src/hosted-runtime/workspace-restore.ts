@@ -10,7 +10,6 @@ import {
   type HostedCanonicalWriteReceipt,
 } from "@murphai/core";
 import {
-  compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import type {
@@ -964,8 +963,14 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
     artifactStore: input.platform.artifactStore,
     status: input.status,
   });
-  const receipts: HostedCanonicalWriteReceipt[] = [];
+  const appliedReceiptRefs = new Set<string>();
   for (const entry of entries) {
+    const receiptRefKey = `${entry.sha256}:${entry.byteSize}`;
+    if (appliedReceiptRefs.has(receiptRefKey)) {
+      continue;
+    }
+    appliedReceiptRefs.add(receiptRefKey);
+
     const bytes = await input.platform.artifactStore.get(entry.sha256);
     if (!bytes) {
       throw new Error("Hosted canonical write receipt artifact is unavailable.");
@@ -977,25 +982,16 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
       Buffer.from(bytes).toString("utf8"),
     );
     if (parsed) {
-      receipts.push(parsed);
+      await applyHostedCanonicalWriteReceipt({
+        readPayload: async (ref) =>
+          await readHostedCanonicalWritePayloadForRestore({
+            platform: input.platform,
+            ref,
+          }),
+        receipt: parsed,
+        vaultRoot: input.vaultRoot,
+      });
     }
-  }
-
-  receipts.sort((left, right) =>
-    compareHostedIsoTimestampsAscending(left.committedAt, right.committedAt)
-    || left.operationId.localeCompare(right.operationId)
-  );
-
-  for (const receipt of receipts) {
-    await applyHostedCanonicalWriteReceipt({
-      readPayload: async (ref) =>
-        await readHostedCanonicalWritePayloadForRestore({
-          platform: input.platform,
-          ref,
-        }),
-      receipt,
-      vaultRoot: input.vaultRoot,
-    });
   }
 }
 

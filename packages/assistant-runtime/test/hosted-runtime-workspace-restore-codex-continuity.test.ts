@@ -1156,12 +1156,22 @@ describe("hosted workspace restore Codex continuity", () => {
         id: "xfm_RestoreArchivedIngestReceipt2",
         importedAt: "2025-10-13T09:00:00.000Z",
       });
+      const secondAppendedRecord = makeIntegrationIngestRecord({
+        eventId: "evt_RestoreArchivedIngestReceipt3",
+        id: "xfm_RestoreArchivedIngestReceipt3",
+        importedAt: "2025-10-14T09:00:00.000Z",
+      });
       const basePayload = `${JSON.stringify(archivedRecord)}\n`;
       const baseBytes = Buffer.from(basePayload, "utf8");
       const appendPayload = `${JSON.stringify(appendedRecord)}\n`;
       const appendBytes = Buffer.from(appendPayload, "utf8");
       const appendSha256 = sha256HostedBundleHex(appendBytes);
-      const receiptArtifact = createJsonArtifact({
+      const secondBasePayload = `${basePayload}${appendPayload}`;
+      const secondBaseBytes = Buffer.from(secondBasePayload, "utf8");
+      const secondAppendPayload = `${JSON.stringify(secondAppendedRecord)}\n`;
+      const secondAppendBytes = Buffer.from(secondAppendPayload, "utf8");
+      const secondAppendSha256 = sha256HostedBundleHex(secondAppendBytes);
+      const firstReceiptArtifact = createJsonArtifact({
         actions: [
           {
             allowArchivedIntegrationIngestAmendment: true,
@@ -1181,19 +1191,47 @@ describe("hosted workspace restore Codex continuity", () => {
         committedAt: "2026-05-05T00:00:00.000Z",
         createdAt: "2026-05-05T00:00:00.000Z",
         occurredAt: "2026-05-05T00:00:00.000Z",
-        operationId: "op_synthetic_archived_ingest_restore",
+        operationId: "op_z_synthetic_archived_ingest_restore_first",
         operationType: "hosted_archived_ingest_restore_test",
         schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-        summary: "Restore archived integration ingest amendment.",
+        summary: "Restore first archived integration ingest amendment.",
+        updatedAt: "2026-05-05T00:00:00.000Z",
+      });
+      const secondReceiptArtifact = createJsonArtifact({
+        actions: [
+          {
+            allowArchivedIntegrationIngestAmendment: true,
+            appendByteLength: secondAppendBytes.byteLength,
+            appendSha256: secondAppendSha256,
+            baseByteLength: secondBaseBytes.byteLength,
+            baseSha256: sha256HostedBundleHex(secondBaseBytes),
+            contentRef: {
+              byteSize: secondAppendBytes.byteLength,
+              sha256: secondAppendSha256,
+            },
+            kind: "jsonl_append",
+            originalSize: secondBaseBytes.byteLength,
+            targetRelativePath: logicalPath,
+          },
+        ],
+        committedAt: "2026-05-05T00:00:00.000Z",
+        createdAt: "2026-05-05T00:00:00.000Z",
+        occurredAt: "2026-05-05T00:00:00.000Z",
+        operationId: "op_a_synthetic_archived_ingest_restore_second",
+        operationType: "hosted_archived_ingest_restore_test",
+        schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+        summary: "Restore second archived integration ingest amendment.",
         updatedAt: "2026-05-05T00:00:00.000Z",
       });
       const receiptLogArtifact = createJsonArtifact({
-        entries: [receiptArtifact.ref, receiptArtifact.ref],
+        entries: [firstReceiptArtifact.ref, secondReceiptArtifact.ref, secondReceiptArtifact.ref],
         schema: "murph.hosted-canonical-write-receipt-log.v1",
       });
       const artifactBytesByHash = new Map<string, Uint8Array>([
         [appendSha256, appendBytes],
-        [receiptArtifact.ref.sha256, receiptArtifact.bytes],
+        [secondAppendSha256, secondAppendBytes],
+        [firstReceiptArtifact.ref.sha256, firstReceiptArtifact.bytes],
+        [secondReceiptArtifact.ref.sha256, secondReceiptArtifact.bytes],
         [receiptLogArtifact.ref.sha256, receiptLogArtifact.bytes],
       ]);
       let restoreCallCount = 0;
@@ -1230,7 +1268,7 @@ describe("hosted workspace restore Codex continuity", () => {
         workspace: createWorkspaceState({
           redactedStatus: {
             hostedCanonicalWriteReceiptLogByteSize: receiptLogArtifact.ref.byteSize,
-            hostedCanonicalWriteReceiptLogEntryCount: 2,
+            hostedCanonicalWriteReceiptLogEntryCount: 3,
             hostedCanonicalWriteReceiptLogSha256: receiptLogArtifact.ref.sha256,
           },
           snapshotRef,
@@ -1244,7 +1282,7 @@ describe("hosted workspace restore Codex continuity", () => {
       await readFile(path.join(restoredVaultRoot, `${logicalPath}.gz`));
       assert.deepEqual(
         (await readIntegrationIngestEntries(restoredVaultRoot)).map((entry) => entry.record.id),
-        [archivedRecord.id, appendedRecord.id],
+        [archivedRecord.id, appendedRecord.id, secondAppendedRecord.id],
       );
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
