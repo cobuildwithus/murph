@@ -355,9 +355,14 @@ function parseHostedMemberRoutingTelegramPrivateValue(
   }
 
   if (envelope.status === "legacy") {
+    const telegramUserId = normalizeNullableString(envelope.telegramUserId);
+
     return {
-      telegramThreadId: null,
-      telegramUserId: normalizeNullableString(envelope.telegramUserId),
+      telegramThreadId: normalizeHostedTelegramLegacyDirectThreadTarget(
+        envelope.telegramThreadId,
+        telegramUserId,
+      ),
+      telegramUserId,
     };
   }
 
@@ -371,7 +376,7 @@ function parseHostedMemberRoutingTelegramPrivateEnvelope(
   value: string,
 ):
   | { status: "current"; telegramThreadId: string | null; telegramUserId: string | null }
-  | { status: "legacy"; telegramUserId: string | null }
+  | { status: "legacy"; telegramThreadId: string | null; telegramUserId: string | null }
   | { status: "unsupported" } {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -389,6 +394,8 @@ function parseHostedMemberRoutingTelegramPrivateEnvelope(
     if (record.schema === HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_LEGACY_SCHEMA) {
       return {
         status: "legacy",
+        telegramThreadId:
+          typeof record.telegramThreadId === "string" ? record.telegramThreadId : null,
         telegramUserId: typeof record.telegramUserId === "string" ? record.telegramUserId : null,
       };
     }
@@ -427,6 +434,29 @@ export function normalizeHostedTelegramDirectThreadTarget(
     !parsed.businessConnectionId &&
     !parsed.directMessagesTopicId &&
     parsed.chatId.startsWith("-")
+  ) {
+    return null;
+  }
+
+  return serializeTelegramThreadTarget(parsed);
+}
+
+function normalizeHostedTelegramLegacyDirectThreadTarget(
+  value: string | null,
+  telegramUserId: string | null,
+): string | null {
+  const normalized = normalizeNullableString(value);
+
+  if (normalized === null || normalized === telegramUserId) {
+    return null;
+  }
+
+  const parsed = parseTelegramThreadTarget(normalized);
+
+  if (
+    !parsed
+    || parsed.messageThreadId != null
+    || (!parsed.businessConnectionId && !parsed.directMessagesTopicId)
   ) {
     return null;
   }

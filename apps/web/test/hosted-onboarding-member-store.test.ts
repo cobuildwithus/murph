@@ -887,13 +887,59 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("preserves legacy Telegram user lookup while dropping legacy thread targets", async () => {
+  it("preserves legacy Telegram user lookup and valid direct thread targets", async () => {
     const telegramUserIdEncrypted = await encryptHostedWebNullableString({
       field: "hosted-member-routing.telegram-user-id",
       memberId: "member_123",
       value: JSON.stringify({
         schema: LEGACY_TELEGRAM_PRIVATE_STATE_SCHEMA,
         telegramThreadId: "456:business:biz-42:dm-topic:9",
+        telegramUserId: "456",
+      }),
+    });
+    const prisma = {
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatIdEncrypted: null,
+          linqRecipientPhoneEncrypted: null,
+          memberId: "member_123",
+          pendingLinqChatIdEncrypted: null,
+          pendingLinqRecipientPhoneEncrypted: null,
+          telegramUserIdEncrypted,
+          telegramUserLookupKey: "tg_user_456",
+        }),
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberRoutingState({
+        memberId: "member_123",
+        prisma,
+      }),
+    ).resolves.toEqual({
+      hasPendingLinqRouteState: false,
+      linqChatId: null,
+      linqChatLookupKey: null,
+      linqRecipientPhone: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: "456:business:biz-42:dm-topic:9",
+      telegramUserId: "456",
+      telegramUserLookupKey: "tg_user_456",
+    });
+  });
+
+  it("preserves legacy Telegram user lookup while dropping legacy identity-only thread targets", async () => {
+    const telegramUserIdEncrypted = await encryptHostedWebNullableString({
+      field: "hosted-member-routing.telegram-user-id",
+      memberId: "member_123",
+      value: JSON.stringify({
+        schema: LEGACY_TELEGRAM_PRIVATE_STATE_SCHEMA,
+        telegramThreadId: "456",
         telegramUserId: "456",
       }),
     });
