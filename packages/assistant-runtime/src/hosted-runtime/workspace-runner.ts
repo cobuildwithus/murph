@@ -1241,10 +1241,44 @@ function hasHostedMailboxImportForegroundConversationWork(
   );
 }
 
-function hasHostedMailboxImportAssistantInputWork(
-  result: HostedMailboxImportCheckpointResult | null | undefined,
-): boolean {
-  return (result?.importResult.assistantInputIds?.length ?? 0) > 0;
+function accumulateHostedAssistantInputMailboxImport(input: {
+  current: HostedMailboxImportCheckpointResult | null;
+  result: HostedMailboxImportCheckpointResult;
+}): HostedMailboxImportCheckpointResult | null {
+  const assistantInputIds = input.result.importResult.assistantInputIds ?? [];
+  if (assistantInputIds.length === 0) {
+    return input.current;
+  }
+
+  if (input.current === null) {
+    return input.result;
+  }
+
+  const mergedAssistantInputIds = [
+    ...(input.current.importResult.assistantInputIds ?? []),
+  ];
+  const seenAssistantInputIds = new Set(mergedAssistantInputIds);
+  let changed = false;
+  for (const assistantInputId of assistantInputIds) {
+    if (seenAssistantInputIds.has(assistantInputId)) {
+      continue;
+    }
+    seenAssistantInputIds.add(assistantInputId);
+    mergedAssistantInputIds.push(assistantInputId);
+    changed = true;
+  }
+
+  if (!changed) {
+    return input.current;
+  }
+
+  return {
+    ...input.result,
+    importResult: {
+      ...input.result.importResult,
+      assistantInputIds: mergedAssistantInputIds,
+    },
+  };
 }
 
 async function notifyHostedActiveTurnInputForMailboxImport(input: {
@@ -1799,9 +1833,10 @@ function createHostedWorkspaceCheckpointRequestSession(
     recordCheckpointResult(result) {
       latestMailboxImportSequence += 1;
       latestMailboxImport = result;
-      if (hasHostedMailboxImportAssistantInputWork(result)) {
-        latestAssistantInputMailboxImport = result;
-      }
+      latestAssistantInputMailboxImport = accumulateHostedAssistantInputMailboxImport({
+        current: latestAssistantInputMailboxImport,
+        result,
+      });
       mailboxRetryAt = selectHostedRuntimeWakeCandidate([
         createHostedRuntimeWakeCandidate(mailboxRetryAt, "mailbox"),
         createHostedRuntimeWakeCandidate(

@@ -11991,6 +11991,8 @@ describe("hosted workspace runtime entrypoint", () => {
         laneSeq: "1",
       }),
     ];
+    const importedInputIds: string[] = [];
+    const assistantPhaseInputIds: string[][] = [];
     let assistantPhaseCalls = 0;
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -12026,8 +12028,10 @@ describe("hosted workspace runtime entrypoint", () => {
 
             const inputId = await stagePendingLinqAssistantInputForMailboxItem({
               item: item.item,
+              threadId: item.item.id.endsWith("_2") ? "thread_2" : "thread_1",
               vaultRoot,
             });
+            importedInputIds.push(inputId);
             return {
               assistantInputId: inputId,
               status: "imported",
@@ -12046,8 +12050,11 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(phaseInput) {
             assistantPhaseCalls += 1;
+            assistantPhaseInputIds.push([
+              ...(phaseInput.initialMailboxImport.importResult.assistantInputIds ?? []),
+            ]);
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
               const systemRedactedStatus: HostedRuntimeRedactedJson = {
@@ -12056,14 +12063,26 @@ describe("hosted workspace runtime entrypoint", () => {
               return {
                 afterCheckpoint: async () => {
                   mailboxItems.push(createMailboxItem({
-                    id: "mailbox_item_entrypoint_foreground_preempt_conversation",
+                    id: "mailbox_item_entrypoint_foreground_preempt_conversation_1",
                     laneSeq: "1",
                     occurredAt: "2026-04-27T00:00:01.000Z",
                   }));
                   runtimeWakeSignal.notify();
                   await waitUntil(() => {
                     assert.ok(events.includes(
-                      "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation",
+                      "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation_1",
+                    ));
+                  });
+
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_foreground_preempt_conversation_2",
+                    laneSeq: "2",
+                    occurredAt: "2026-04-27T00:00:02.000Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                  await waitUntil(() => {
+                    assert.ok(events.includes(
+                      "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation_2",
                     ));
                   });
 
@@ -12122,8 +12141,13 @@ describe("hosted workspace runtime entrypoint", () => {
       const result = await resultPromise;
 
       assert.ok(events.includes(
-        "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation",
+        "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation_1",
       ));
+      assert.ok(events.includes(
+        "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation_2",
+      ));
+      assert.equal(importedInputIds.length, 2);
+      assert.deepEqual(assistantPhaseInputIds[1], importedInputIds);
       assert.ok(
         requireEventIndex(events, "assistant.phase:2")
           < requireEventIndex(events, "snapshot:idle_shutdown"),
@@ -19059,9 +19083,11 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
 
 async function stageAssistantInputEventForMailboxItem(input: {
   item: HostedMailboxItem;
+  threadId?: string;
   vaultRoot: string;
 }): Promise<string> {
   const text = "entrypoint hosted mailbox input";
+  const threadId = input.threadId ?? "thread_1";
   const staged = await upsertAssistantInputEvent({
     event: {
       content: {
@@ -19079,7 +19105,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
         actorId: "actor_1",
         actorIsSelf: false,
         source: "linq",
-        threadId: "thread_1",
+        threadId,
         threadIsDirect: true,
       },
       occurredAt: input.item.occurredAt,
@@ -19087,7 +19113,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
       replyTarget: {
         channel: "linq",
         messageId: `msg_${input.item.id}`,
-        threadId: "thread_1",
+        threadId,
       },
       sourceRef: {
         dedupeKey: input.item.dedupeKey,
@@ -19110,6 +19136,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
 
 async function stagePendingLinqAssistantInputForMailboxItem(input: {
   item: HostedMailboxItem;
+  threadId?: string;
   vaultRoot: string;
 }): Promise<string> {
   const inputId = await stageAssistantInputEventForMailboxItem(input);
