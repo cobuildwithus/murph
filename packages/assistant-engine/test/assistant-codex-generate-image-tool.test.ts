@@ -178,6 +178,17 @@ describe('executeGenerateImageTool', () => {
       rpcText: 'generated image attached to the final response',
     })
     expect(result.usageDraft?.providerRequestOrdinal).toBe(4)
+    expect(result.usageDraft?.providerRequestOutcome).toBe('partial')
+    expect(result.usageDraft?.usage).toMatchObject({
+      inputTokens: null,
+      outputTokens: null,
+      rawUsageJson: {
+        input_tokens: 3,
+        output_tokens: 5,
+        total_tokens: 8,
+      },
+      totalTokens: null,
+    })
   })
 
   it('returns a structured failure when the provider fetch rejects', async () => {
@@ -296,6 +307,7 @@ describe('executeGenerateImageTool', () => {
     expect(result.rpcSuccess).toBe(false)
     expect(result.rpcText).toBe('image generation returned invalid image data')
     expect(result.usageDraft?.providerRequestOrdinal).toBe(6)
+    expect(result.usageDraft?.providerRequestOutcome).toBe('partial')
   })
 
   it('hashes raw usage JSON on generated image usage drafts', async () => {
@@ -332,6 +344,12 @@ describe('executeGenerateImageTool', () => {
       total_tokens: 8,
     })
     expect(result.usageDraft?.usage.rawUsageJsonHash).toMatch(/^sha256:[0-9a-f]{64}$/u)
+    expect(result.usageDraft?.providerRequestOutcome).toBe('partial')
+    expect(result.usageDraft?.usage).toMatchObject({
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+    })
   })
 
   it('fails before OpenAI when hosted upload is required but unavailable', async () => {
@@ -672,12 +690,17 @@ describe('murph.generate_image dynamic tool execution', () => {
     expect(result.usageDraft).toMatchObject({
       provider: 'openai-images',
       providerRequestOrdinal: 3,
-      providerRequestOutcome: 'succeeded',
+      providerRequestOutcome: 'partial',
       usage: {
         providerName: 'OpenAI Images',
         providerRequestId: 'req_dynamic_image',
+        rawUsageJson: {
+          input_tokens: 12,
+          output_tokens: 34,
+          total_tokens: 46,
+        },
         requestedModel: 'gpt-image-2',
-        totalTokens: 46,
+        totalTokens: null,
       },
     })
   })

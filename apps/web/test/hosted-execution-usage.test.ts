@@ -291,6 +291,7 @@ describe("recordHostedAiUsageRecords", () => {
         outputTokens: null,
         provider: "openai-images",
         providerName: "OpenAI Images",
+        providerRequestOutcome: "partial",
         rawUsageJson: {
           input_tokens: 1_300,
           input_tokens_details: {
@@ -317,6 +318,43 @@ describe("recordHostedAiUsageRecords", () => {
         provider: "openai-images",
       }),
     ]);
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+  });
+
+  it("rolls back succeeded malformed image usage rows when allowance accounting fails", async () => {
+    const prisma = makeRollbackAwareUsagePrismaClient();
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockRejectedValue(
+      new TypeError("OpenAI image hosted AI usage requires provider usage tokens"),
+    );
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [{
+        ...BASE_USAGE_RECORD,
+        cachedInputTokens: null,
+        inputTokens: 1_300,
+        outputTokens: 400,
+        provider: "openai-images",
+        providerName: "OpenAI Images",
+        providerRequestOutcome: "succeeded",
+        rawUsageJson: {
+          input_tokens: 1_300,
+          output_tokens: 400,
+          total_tokens: 1_700,
+        },
+        requestedModel: "gpt-image-2",
+        servedModel: null,
+        totalTokens: 1_700,
+        usageExtractionSourcePath: "openai.images.generate",
+        usageExtractionVersion: "openai-images-v1",
+      }],
+    })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prisma.readHostedAiUsageRows()).toEqual([]);
     expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });

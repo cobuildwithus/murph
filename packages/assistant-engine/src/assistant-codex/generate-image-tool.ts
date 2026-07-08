@@ -237,18 +237,25 @@ function buildGeneratedImageUsageDraft(input: {
   referenceImageTotalBytes: number
   usage: OpenAiImageGenerationUsage | null
   usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath
-}): AssistantProviderUsageDraft {
+}): AssistantProviderUsageDraft | null {
+  if (!input.rawUsageJson || !input.usage) {
+    return null
+  }
+
+  const hasPricingBasis = hasPriceableGeneratedImageUsageBasis(input.usage)
   return {
     provider: 'openai-images',
     providerRequestOrdinal: input.providerRequestOrdinal,
-    providerRequestOutcome: 'succeeded',
+    providerRequestOutcome: hasPricingBasis ? 'succeeded' : 'partial',
     usage: {
       apiKeyEnv: 'OPENAI_API_KEY',
       baseUrl: OPENAI_IMAGES_BASE_URL,
       cacheWriteTokens: null,
-      cachedInputTokens: input.usage?.input_tokens_details?.cached_tokens ?? null,
-      inputTokens: input.usage?.input_tokens ?? null,
-      outputTokens: input.usage?.output_tokens ?? null,
+      cachedInputTokens: hasPricingBasis
+        ? input.usage.input_tokens_details?.cached_tokens ?? null
+        : null,
+      inputTokens: hasPricingBasis ? input.usage.input_tokens ?? null : null,
+      outputTokens: hasPricingBasis ? input.usage.output_tokens ?? null : null,
       providerMetadataJson: {
         imageOutputFormat: input.args.outputFormat,
         imageQuality: input.args.quality,
@@ -262,17 +269,63 @@ function buildGeneratedImageUsageDraft(input: {
       providerName: 'OpenAI Images',
       providerRequestId: input.providerRequestId,
       rawUsageJson: input.rawUsageJson,
-      rawUsageJsonHash: input.rawUsageJson
-        ? hashAssistantProviderStableJson(input.rawUsageJson)
+      rawUsageJsonHash: hashAssistantProviderStableJson(input.rawUsageJson),
+      reasoningTokens: hasPricingBasis
+        ? input.usage.output_tokens_details?.reasoning_tokens ?? null
         : null,
-      reasoningTokens: input.usage?.output_tokens_details?.reasoning_tokens ?? null,
       requestedModel: OPENAI_IMAGE_GENERATION_MODEL,
       servedModel: null,
-      totalTokens: input.usage?.total_tokens ?? null,
+      totalTokens: hasPricingBasis ? input.usage.total_tokens ?? null : null,
       usageExtractionSourcePath: input.usageExtractionSourcePath,
       usageExtractionVersion: OPENAI_IMAGE_GENERATION_USAGE_EXTRACTION_VERSION,
     },
   }
+}
+
+function hasPriceableGeneratedImageUsageBasis(
+  usage: OpenAiImageGenerationUsage,
+): boolean {
+  const inputTokens = usage.input_tokens ?? null
+  const outputTokens = usage.output_tokens ?? null
+  if (inputTokens === null || outputTokens === null) return false
+  if (
+    usage.total_tokens !== undefined &&
+    usage.total_tokens !== inputTokens + outputTokens
+  ) {
+    return false
+  }
+
+  const textInputTokens = usage.input_tokens_details?.text_tokens ?? null
+  const imageInputTokens = usage.input_tokens_details?.image_tokens ?? null
+  if (textInputTokens === null && imageInputTokens === null) return false
+
+  const detailedInputTokens = (textInputTokens ?? 0) + (imageInputTokens ?? 0)
+  if (detailedInputTokens !== inputTokens) return false
+
+  const cachedInputTokens = usage.input_tokens_details?.cached_tokens ?? 0
+  if (cachedInputTokens > detailedInputTokens) return false
+  if (
+    cachedInputTokens > 0 &&
+    (textInputTokens ?? 0) > 0 &&
+    (imageInputTokens ?? 0) > 0
+  ) {
+    return false
+  }
+
+  const outputDetails = usage.output_tokens_details
+  const hasOutputDetails =
+    outputDetails?.image_tokens !== undefined ||
+    outputDetails?.reasoning_tokens !== undefined ||
+    outputDetails?.text_tokens !== undefined
+  if (hasOutputDetails) {
+    const detailedOutputTokens =
+      (outputDetails?.image_tokens ?? 0) +
+      (outputDetails?.reasoning_tokens ?? 0) +
+      (outputDetails?.text_tokens ?? 0)
+    if (detailedOutputTokens !== outputTokens) return false
+  }
+
+  return detailedInputTokens > 0 && outputTokens > 0
 }
 
 async function writeLocalGeneratedImage(input: {

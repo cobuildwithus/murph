@@ -149,7 +149,7 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
         return null;
       });
     } catch (error) {
-      if (isHostedAiUsageRecordPreservingAllowanceError(error)) {
+      if (shouldPreserveHostedAiUsageRecordAfterAllowanceError(record, error)) {
         await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
           await persistHostedAiUsageRecordTx({
             memberId,
@@ -308,6 +308,21 @@ async function persistHostedAiUsageRecordTx(input: {
     id: storedRecord.id,
     tx: input.tx,
   });
+}
+
+function shouldPreserveHostedAiUsageRecordAfterAllowanceError(
+  record: AssistantUsageRecord,
+  error: unknown,
+): boolean {
+  return (
+    record.provider === "openai-images"
+    && record.providerRequestOutcome !== "succeeded"
+    && (
+      record.usageExtractionSourcePath === "openai.images.generate"
+      || record.usageExtractionSourcePath === "openai.images.edit"
+    )
+    && isHostedAiUsageRecordPreservingAllowanceError(error)
+  );
 }
 
 function isHostedAiUsageRecordPreservingAllowanceError(
