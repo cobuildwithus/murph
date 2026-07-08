@@ -624,19 +624,10 @@ describe("hosted Linq webhook transport", () => {
       targetKind: "thread",
       template: "ai_usage_quota",
     });
-    expect(claimHostedAiUsageLimitNoticeForRollout).toHaveBeenCalledWith({
-      claimedAt: new Date("2026-03-26T12:00:01.000Z"),
-      memberId: "member-1",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma: {},
-    });
-    const [rolloutClaimOrder] = vi.mocked(claimHostedAiUsageLimitNoticeForRollout)
-      .mock.invocationCallOrder;
     const [deliveryClaimOrder] = vi.mocked(claimHostedLinqDeliveryProviderDispatchTx)
       .mock.invocationCallOrder;
-    expect(rolloutClaimOrder).toBeDefined();
     expect(deliveryClaimOrder).toBeDefined();
-    expect(deliveryClaimOrder ?? 0).toBeLessThan(rolloutClaimOrder ?? 0);
+    expect(claimHostedAiUsageLimitNoticeForRollout).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).toHaveBeenCalledWith({
       memberId: "member-1",
       periodStart: "2026-03-01T00:00:00.000Z",
@@ -771,12 +762,12 @@ describe("hosted Linq webhook transport", () => {
       prisma: {},
     });
     expect(claimHostedAiUsageLimitNoticeForRollout).not.toHaveBeenCalled();
-    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalled();
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });
 
-  it("skips AI usage quota replies when the rollout period claim loses a race", async () => {
+  it("sends AI usage quota replies without a rollout period claim", async () => {
     vi.mocked(claimHostedAiUsageLimitNoticeForRollout).mockResolvedValueOnce(false);
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -801,19 +792,14 @@ describe("hosted Linq webhook transport", () => {
         sideEffects: [effect],
       }),
     ).resolves.toEqual({
-      sentCount: 0,
-      skipped: [
-        {
-          effectId: effect.effectId,
-          reason: "notice_in_flight",
-          template: "ai_usage_quota",
-        },
-      ],
+      sentCount: 1,
+      skipped: [],
     });
 
+    expect(claimHostedAiUsageLimitNoticeForRollout).not.toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalled();
-    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalled();
+    expect(markHostedAiUsageLimitNoticeSent).toHaveBeenCalled();
   });
 
   it("keeps claimed AI usage quota replies period-scoped across source events and notice codes", () => {

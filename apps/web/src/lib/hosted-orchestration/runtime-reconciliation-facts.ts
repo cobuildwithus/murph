@@ -36,7 +36,6 @@ import {
 import {
   buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
-  claimHostedAiUsageLimitNoticeForRollout,
   hasFreshHostedAiUsageLimitNoticeClaim,
   HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
   markHostedAiUsageLimitNoticeSent,
@@ -472,16 +471,6 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     if (legacyPeriodClaimOwnsNotice) {
       return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
-    const rolloutClaimedNotice =
-      await claimHostedAiUsageLimitNoticeForRollout({
-        claimedAt: sentAt,
-        memberId: input.userId,
-        periodStart: decision.periodStart,
-        prisma: input.prisma,
-    });
-    if (!rolloutClaimedNotice) {
-      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
-    }
     const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: sentAt,
       idempotencyKey,
@@ -509,10 +498,15 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         replyToMessageId: wake.message.telegramMessage.messageId,
       });
     } catch (error) {
-      if (
-        error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError
-        || error instanceof HostedRuntimeTelegramUsageLimitNoticeUnknownError
-      ) {
+      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeUnknownError) {
+        await markHostedLinqDeliveryAcceptedTx({
+          acceptedAt: sentAt,
+          idempotencyKey,
+          prisma: input.prisma,
+        });
+        return { status: "already_notified" };
+      }
+      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError) {
         await markHostedLinqDeliverySendFailedTx({
           failedAt: sentAt,
           failureCode: error.name,

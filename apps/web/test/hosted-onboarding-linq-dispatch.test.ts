@@ -6825,12 +6825,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       targetKind: "thread",
       template: "ai_usage_quota",
     });
-    expect(mocks.claimHostedAiUsageLimitNoticeForRollout).toHaveBeenCalledWith({
-      claimedAt: expect.any(Date),
-      memberId: "member_123",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma,
-    });
+    expect(mocks.claimHostedAiUsageLimitNoticeForRollout).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).toHaveBeenCalledWith({
       memberId: "member_123",
       periodStart: "2026-03-01T00:00:00.000Z",
@@ -7260,7 +7255,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
-  it("retries Linq AI usage quota replies when only a fresh period rollout claim exists", async () => {
+  it("returns a retryable Linq AI usage quota result when only a fresh legacy period claim exists", async () => {
     mocks.hasFreshHostedAiUsageLimitNoticeClaim.mockResolvedValue(true);
     mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
       allowed: false,
@@ -7348,12 +7343,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       retryable: true,
     });
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        linqChatId: "chat_123",
-        template: "ai_usage_quota",
-      }),
-    );
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();

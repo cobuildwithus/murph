@@ -6,7 +6,6 @@ import type {
 import {
   buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
-  claimHostedAiUsageLimitNoticeForRollout,
   hasFreshHostedAiUsageLimitNoticeClaim,
   markHostedAiUsageLimitNoticeSent,
   type HostedAiUsageGateNoticeCode,
@@ -1101,6 +1100,25 @@ async function claimHostedLinqNoticeForSideEffect(
       if (legacyDeliverySentNotice) {
         return { status: "already_claimed" };
       }
+      const legacyDeliveryInFlight =
+        await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
+          attemptedAt,
+          idempotencyKeys: legacyIdempotencyKeys,
+          prisma,
+        });
+      if (legacyDeliveryInFlight) {
+        return { status: "in_flight" };
+      }
+      const legacyPeriodClaimOwnsNotice =
+        await hasFreshHostedAiUsageLimitNoticeClaim({
+          memberId: effect.payload.memberId,
+          now: attemptedAt,
+          periodStart: effect.payload.claimToken.periodStart,
+          prisma,
+        });
+      if (legacyPeriodClaimOwnsNotice) {
+        return { status: "in_flight" };
+      }
       const claim = await claimHostedLinqDeliveryProviderDispatchTx({
         idempotencyKey: effect.effectId,
         linqChatId: target.linqChatId,
@@ -1121,35 +1139,6 @@ async function claimHostedLinqNoticeForSideEffect(
         return currentDeliverySentNotice
           ? { status: "already_claimed" }
           : { status: "in_flight" };
-      }
-      const legacyDeliveryInFlight =
-        await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
-          attemptedAt,
-          idempotencyKeys: legacyIdempotencyKeys,
-          prisma,
-        });
-      if (legacyDeliveryInFlight) {
-        return { status: "in_flight" };
-      }
-      const legacyPeriodClaimOwnsNotice =
-        await hasFreshHostedAiUsageLimitNoticeClaim({
-          memberId: effect.payload.memberId,
-          now: attemptedAt,
-          periodStart: effect.payload.claimToken.periodStart,
-          prisma,
-        });
-      if (legacyPeriodClaimOwnsNotice) {
-        return { status: "in_flight" };
-      }
-      const rolloutClaimedNotice =
-        await claimHostedAiUsageLimitNoticeForRollout({
-          claimedAt: attemptedAt,
-          memberId: effect.payload.memberId,
-          periodStart: effect.payload.claimToken.periodStart,
-          prisma,
-        });
-      if (!rolloutClaimedNotice) {
-        return { status: "in_flight" };
       }
       return { status: "claimed" };
     }
