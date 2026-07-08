@@ -321,7 +321,7 @@ function buildHostedMemberRoutingTelegramPrivateValue(input: {
 
   return JSON.stringify({
     schema: HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_SCHEMA,
-    telegramThreadId: telegramThreadId ?? telegramUserId,
+    telegramThreadId,
     telegramUserId,
   });
 }
@@ -347,7 +347,7 @@ function parseHostedMemberRoutingTelegramPrivateValue(
     );
 
     return {
-      telegramThreadId: normalizedThreadId ?? telegramUserId,
+      telegramThreadId: normalizedThreadId,
       telegramUserId,
     };
   }

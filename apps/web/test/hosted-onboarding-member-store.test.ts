@@ -839,6 +839,53 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it("does not project a Telegram identity-only binding as a direct thread target", async () => {
+    const telegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: "456",
+    });
+    const prisma = {
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatIdEncrypted: null,
+          linqRecipientPhoneEncrypted: null,
+          memberId: "member_123",
+          pendingLinqChatIdEncrypted: null,
+          pendingLinqRecipientPhoneEncrypted: null,
+          telegramUserIdEncrypted: telegramPrivateColumns.telegramUserIdEncrypted,
+          telegramUserLookupKey: "tg_user_456",
+        }),
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberRoutingState({
+        memberId: "member_123",
+        prisma,
+      }),
+    ).resolves.toEqual({
+      hasPendingLinqRouteState: false,
+      linqChatId: null,
+      linqChatLookupKey: null,
+      linqRecipientPhone: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: "456",
+      telegramUserLookupKey: "tg_user_456",
+    });
+  });
+
   it("fails closed when the persisted Telegram private payload uses an unknown schema", async () => {
     const telegramUserIdEncrypted = await encryptHostedWebNullableString({
       field: "hosted-member-routing.telegram-user-id",
@@ -1891,6 +1938,20 @@ describe("hosted-member-store", () => {
         telegramUserIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         telegramUserLookupKey: expect.stringMatching(/^hbidx:telegram-user:v1:/u),
       },
+    });
+    const upsertCall = upsert.mock.calls[0]?.[0] as {
+      create: {
+        telegramUserIdEncrypted: string;
+      };
+    };
+    await expect(
+      readHostedMemberRoutingTelegramPrivateState({
+        memberId: "member_123",
+        telegramUserIdEncrypted: upsertCall.create.telegramUserIdEncrypted,
+      }),
+    ).resolves.toEqual({
+      telegramThreadId: null,
+      telegramUserId: "456",
     });
   });
 
@@ -2998,7 +3059,7 @@ describe("hosted-member-store", () => {
         linqChatId: null,
         pendingLinqChatId: null,
         pendingLinqParticipantContact: null,
-        telegramThreadId: "456",
+        telegramThreadId: null,
         telegramUserId: "456",
       },
     });
