@@ -84,7 +84,7 @@ export type ActivitySessionProjectionRow = MetricSourceRevisionPoint & {
   activityKind: string | null;
   date: string;
   distanceMeters?: number | null;
-  durationMinutes: number;
+  durationMinutes?: number | null;
   endedAt?: string | null;
   startedAt?: string | null;
 };
@@ -624,8 +624,13 @@ export function selectProjectableActivityMinutesDays(
 
   const projectableRows = input.rows.filter((row) =>
     isProjectableActivitySessionRow(row, input.spec.activityKind, cutoffMs)
+    && isProjectableActivitySessionDurationRow(row)
   );
   for (const row of dedupeActivitySessionRows(projectableRows, input.spec.activityKind)) {
+    const durationMinutes = row.durationMinutes ?? null;
+    if (durationMinutes === null) {
+      continue;
+    }
     const group = groups.get(row.date) ?? {
       date: row.date,
       rows: [],
@@ -634,7 +639,7 @@ export function selectProjectableActivityMinutesDays(
     };
     group.rows.push(row);
     group.sessionCount += 1;
-    group.sessionMinutes += row.durationMinutes;
+    group.sessionMinutes += durationMinutes;
     groups.set(row.date, group);
   }
 
@@ -927,16 +932,17 @@ function toActivitySessionProjectionRow(
     return null;
   }
 
-  const durationMinutes = readFiniteNumber(entity.attributes.durationMinutes);
+  const rawDurationMinutes = readFiniteNumber(entity.attributes.durationMinutes);
+  const durationMinutes =
+    rawDurationMinutes !== null
+    && rawDurationMinutes > 0
+    && rawDurationMinutes <= DAY_MAX_MINUTES
+      ? rawDurationMinutes
+      : null;
   const date = entity.kind === "intervention_session"
     ? readInterventionSessionDate(entity)
     : readActivitySessionDate(entity);
-  if (
-    durationMinutes === null
-    || durationMinutes <= 0
-    || durationMinutes > DAY_MAX_MINUTES
-    || !date
-  ) {
+  if (!date) {
     return null;
   }
 
@@ -953,7 +959,7 @@ function toActivitySessionProjectionRow(
     activityKind: readActivitySessionKind(entity),
     date,
     ...(distanceMeters === null ? {} : { distanceMeters }),
-    durationMinutes,
+    ...(durationMinutes === null ? {} : { durationMinutes }),
     endedAt,
     observedAt,
     pointIds: [`event:${entity.entityId}`],
@@ -1043,7 +1049,13 @@ function isProjectableActivitySessionRow(
   const dayMs = Date.parse(`${row.date}T00:00:00.000Z`);
   return Number.isFinite(dayMs)
     && dayMs >= cutoffMs
-    && activityTextMatchesKind(row.activityKind, activityKind)
+    && activityTextMatchesKind(row.activityKind, activityKind);
+}
+
+function isProjectableActivitySessionDurationRow(
+  row: ActivitySessionProjectionRow,
+): boolean {
+  return typeof row.durationMinutes === "number"
     && Number.isFinite(row.durationMinutes)
     && row.durationMinutes > 0
     && row.durationMinutes <= DAY_MAX_MINUTES;
@@ -1155,6 +1167,9 @@ function activitySessionRowWindow(
 ): { durationMs: number; endMs: number; startMs: number } | null {
   const startMs = parseOptionalTimestampMs(row.startedAt);
   if (startMs === null) {
+    return null;
+  }
+  if (typeof row.durationMinutes !== "number") {
     return null;
   }
   const explicitEndMs = parseOptionalTimestampMs(row.endedAt);

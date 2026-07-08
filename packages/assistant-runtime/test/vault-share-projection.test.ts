@@ -164,7 +164,7 @@ function activitySessionRow(input: {
   activityKind: string | null;
   date: string;
   distanceMeters?: number | null;
-  durationMinutes: number;
+  durationMinutes?: number | null;
   endedAt?: string | null;
   recordIds?: string[];
   startedAt?: string | null;
@@ -174,7 +174,7 @@ function activitySessionRow(input: {
     activityKind: input.activityKind,
     date: input.date,
     ...(input.distanceMeters === undefined ? {} : { distanceMeters: input.distanceMeters }),
-    durationMinutes: input.durationMinutes,
+    ...(input.durationMinutes === undefined ? {} : { durationMinutes: input.durationMinutes }),
     endedAt: input.endedAt ?? null,
     observedAt: `${input.date}T12:00:00.000Z`,
     pointIds: [`point_${recordIds.join("_")}`],
@@ -610,6 +610,22 @@ describe("selectProjectableActivityMinutesDays", () => {
     ).toEqual(selected);
   });
 
+  it("does not count durationless sessions as activity-minute records", () => {
+    const selected = selectProjectableActivityMinutesDays({
+      nowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          recordIds: ["evt_run_no_duration"],
+        }),
+      ],
+      spec: runningSpec,
+    });
+
+    expect(selected).toEqual([]);
+  });
+
   it("drops exact duplicate activity sessions before scoring a day", () => {
     const selected = selectProjectableActivityMinutesDays({
       nowMs,
@@ -1032,7 +1048,7 @@ describe("selectProjectableActivitySessionCountDays", () => {
     ).toEqual(selected);
   });
 
-  it("counts canonical intervention sessions with matching activity kinds", async () => {
+  it("counts canonical intervention sessions without requiring duration", async () => {
     const saunaSessionCountSpec = requireActivitySessionCountSpec(
       buildHostedVaultShareActivitySessionCountProjectionScope({
         activityKind: "sauna",
@@ -1045,7 +1061,6 @@ describe("selectProjectableActivitySessionCountDays", () => {
       occurredAt: "2026-07-03T18:00:00.000Z",
       sessionLocalDate: ACTIVITY_DAY.date,
       interventionType: "sauna",
-      durationMinutes: 20,
     }]);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
 

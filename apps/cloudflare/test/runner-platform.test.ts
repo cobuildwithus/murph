@@ -30,10 +30,22 @@ import {
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  HOSTED_VAULT_SHARE_PROJECTION_KINDS,
+} from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
 }));
+
+function buildExpectedVaultShareActiveKindsPath(): string {
+  const params = new URLSearchParams();
+  for (const projectionKind of HOSTED_VAULT_SHARE_PROJECTION_KINDS) {
+    params.append("supportedProjectionKind", projectionKind);
+  }
+
+  return `${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}?${params.toString()}`;
+}
 
 vi.mock("@murphai/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
@@ -3757,7 +3769,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",
-      `http://web-control.worker${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}`,
+      `http://web-control.worker${buildExpectedVaultShareActiveKindsPath()}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",
     ]);
     for (const request of requests) {
