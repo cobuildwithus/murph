@@ -14,6 +14,7 @@ import {
   findCaptureByLookup,
   initializeVault,
   readJsonlRecords,
+  upsertEvent,
 } from '@murphai/core'
 
 const cleanupPaths: string[] = []
@@ -364,8 +365,9 @@ describe('workout primitive core mutations', () => {
     })
 
     expect(result.created).toBe(true)
-    expect(result.lookupPath).toMatch(
-      /^derived\/captures\/lookups\/[0-9a-f]{2}\/[0-9a-f]{64}\.json$/u,
+    expect(result.lookupPath).toBe('derived/captures/generated-image-lookups.json')
+    expect(result.event.tags).toEqual(
+      expect.arrayContaining(['capture', 'capture-lookup-backed']),
     )
 
     const live = await findCaptureByLookup({
@@ -378,6 +380,38 @@ describe('workout primitive core mutations', () => {
       ledgerFile: result.ledgerFile,
       attachmentRef: result.event.attachments?.[0]?.relativePath,
     })
+
+    await expect(
+      addCapture({
+        vaultRoot,
+        draft: {
+          id: result.eventId,
+          occurredAt: '2026-05-08T08:30:00.000Z',
+          source: 'manual',
+          title: 'Lookup-backed capture moved',
+          note: 'Moving this capture would stale the lookup ledger shard.',
+        },
+        attachments: [{
+          role: 'media_2',
+          sourcePath,
+        }],
+      }),
+    ).rejects.toMatchObject({ code: 'CAPTURE_LOOKUP_IMMUTABLE' })
+
+    await expect(
+      upsertEvent({
+        vaultRoot,
+        draft: {
+          id: result.eventId,
+          kind: 'note',
+          occurredAt: '2026-05-08T08:30:00.000Z',
+          source: 'manual',
+          title: 'Lookup-backed capture moved',
+          note: 'Moving this capture would stale the lookup ledger shard.',
+          tags: ['capture'],
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'CAPTURE_LOOKUP_IMMUTABLE' })
 
     await deleteEvent({
       vaultRoot,
