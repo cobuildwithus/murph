@@ -6,9 +6,6 @@ import path from 'node:path'
 import type {
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import {
-  classifyAssistantOpenAiImageUsageBasis,
-} from '@murphai/hosted-execution/assistant-usage'
 
 import type {
   AssistantHostedGeneratedImageUploader,
@@ -150,11 +147,16 @@ export async function executeGenerateImageTool(input: {
     }
   }
 
+  const hasValidGeneratedImageBytes = isValidGeneratedImageBytes({
+    bytes: openAiResult.imageBytes,
+    outputFormat: input.args.outputFormat,
+  })
   const usageDraft = buildGeneratedImageUsageDraft({
     args: input.args,
     operation,
     providerRequestId: openAiResult.providerRequestId,
     providerRequestOrdinal: input.providerRequestOrdinal,
+    providerRequestOutcome: hasValidGeneratedImageBytes ? 'succeeded' : 'partial',
     rawUsageJson: openAiResult.rawUsageJson,
     referenceImageCount: referenceImages.length,
     referenceImageSha256s: referenceImages.map((reference) => reference.sha256),
@@ -166,12 +168,7 @@ export async function executeGenerateImageTool(input: {
     usageExtractionSourcePath,
   })
 
-  if (
-    !isValidGeneratedImageBytes({
-      bytes: openAiResult.imageBytes,
-      outputFormat: input.args.outputFormat,
-    })
-  ) {
+  if (!hasValidGeneratedImageBytes) {
     return {
       rpcSuccess: false,
       rpcText: 'image generation returned invalid image data',
@@ -233,6 +230,7 @@ function buildGeneratedImageUsageDraft(input: {
   operation: GenerateImageOperation
   providerRequestId: string | null
   providerRequestOrdinal: number
+  providerRequestOutcome: AssistantProviderUsageDraft['providerRequestOutcome']
   rawUsageJson: Record<string, unknown> | null
   referenceImageCount: number
   referenceImageSha256s: readonly string[]
@@ -241,27 +239,17 @@ function buildGeneratedImageUsageDraft(input: {
   usage: OpenAiImageGenerationUsage | null
   usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath
 }): AssistantProviderUsageDraft {
-  const usageBasis = input.usage
-    ? classifyAssistantOpenAiImageUsageBasis({
-        cachedInputTokens: input.usage.input_tokens_details?.cached_tokens ?? null,
-        inputTokens: input.usage.input_tokens ?? null,
-        outputTokens: input.usage.output_tokens ?? null,
-        rawUsageJson: input.rawUsageJson,
-        totalTokens: input.usage.total_tokens ?? null,
-      })
-    : null
-  const priceableUsage = usageBasis?.priceable === true ? input.usage : null
   return {
     provider: 'openai-images',
     providerRequestOrdinal: input.providerRequestOrdinal,
-    providerRequestOutcome: priceableUsage ? 'succeeded' : 'partial',
+    providerRequestOutcome: input.providerRequestOutcome,
     usage: {
       apiKeyEnv: 'OPENAI_API_KEY',
       baseUrl: OPENAI_IMAGES_BASE_URL,
       cacheWriteTokens: null,
-      cachedInputTokens: priceableUsage?.input_tokens_details?.cached_tokens ?? null,
-      inputTokens: priceableUsage?.input_tokens ?? null,
-      outputTokens: priceableUsage?.output_tokens ?? null,
+      cachedInputTokens: input.usage?.input_tokens_details?.cached_tokens ?? null,
+      inputTokens: input.usage?.input_tokens ?? null,
+      outputTokens: input.usage?.output_tokens ?? null,
       providerMetadataJson: {
         imageOutputFormat: input.args.outputFormat,
         imageQuality: input.args.quality,
@@ -278,10 +266,10 @@ function buildGeneratedImageUsageDraft(input: {
       rawUsageJsonHash: input.rawUsageJson
         ? hashAssistantProviderStableJson(input.rawUsageJson)
         : null,
-      reasoningTokens: priceableUsage?.output_tokens_details?.reasoning_tokens ?? null,
+      reasoningTokens: input.usage?.output_tokens_details?.reasoning_tokens ?? null,
       requestedModel: OPENAI_IMAGE_GENERATION_MODEL,
       servedModel: null,
-      totalTokens: priceableUsage?.total_tokens ?? null,
+      totalTokens: input.usage?.total_tokens ?? null,
       usageExtractionSourcePath: input.usageExtractionSourcePath,
       usageExtractionVersion: OPENAI_IMAGE_GENERATION_USAGE_EXTRACTION_VERSION,
     },

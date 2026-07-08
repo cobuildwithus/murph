@@ -178,20 +178,20 @@ describe('executeGenerateImageTool', () => {
       rpcText: 'generated image attached to the final response',
     })
     expect(result.usageDraft?.providerRequestOrdinal).toBe(4)
-    expect(result.usageDraft?.providerRequestOutcome).toBe('partial')
+    expect(result.usageDraft?.providerRequestOutcome).toBe('succeeded')
     expect(result.usageDraft?.usage).toMatchObject({
-      inputTokens: null,
-      outputTokens: null,
+      inputTokens: 3,
+      outputTokens: 5,
       rawUsageJson: {
         input_tokens: 3,
         output_tokens: 5,
         total_tokens: 8,
       },
-      totalTokens: null,
+      totalTokens: 8,
     })
   })
 
-  it('emits a partial usage draft when a successful image response omits usage', async () => {
+  it('emits a succeeded usage draft when a successful image response omits usage', async () => {
     const uploader = {
       uploadGeneratedImage: vi.fn(async (input) => ({
         alt: input.alt,
@@ -230,7 +230,7 @@ describe('executeGenerateImageTool', () => {
     expect(result.usageDraft).toMatchObject({
       provider: 'openai-images',
       providerRequestOrdinal: 5,
-      providerRequestOutcome: 'partial',
+      providerRequestOutcome: 'succeeded',
       usage: {
         inputTokens: null,
         outputTokens: null,
@@ -397,11 +397,11 @@ describe('executeGenerateImageTool', () => {
       total_tokens: 8,
     })
     expect(result.usageDraft?.usage.rawUsageJsonHash).toMatch(/^sha256:[0-9a-f]{64}$/u)
-    expect(result.usageDraft?.providerRequestOutcome).toBe('partial')
+    expect(result.usageDraft?.providerRequestOutcome).toBe('succeeded')
     expect(result.usageDraft?.usage).toMatchObject({
-      inputTokens: null,
-      outputTokens: null,
-      totalTokens: null,
+      inputTokens: 3,
+      outputTokens: 5,
+      totalTokens: 8,
     })
   })
 
@@ -743,8 +743,10 @@ describe('murph.generate_image dynamic tool execution', () => {
     expect(result.usageDraft).toMatchObject({
       provider: 'openai-images',
       providerRequestOrdinal: 3,
-      providerRequestOutcome: 'partial',
+      providerRequestOutcome: 'succeeded',
       usage: {
+        inputTokens: 12,
+        outputTokens: 34,
         providerName: 'OpenAI Images',
         providerRequestId: 'req_dynamic_image',
         rawUsageJson: {
@@ -753,7 +755,7 @@ describe('murph.generate_image dynamic tool execution', () => {
           total_tokens: 46,
         },
         requestedModel: 'gpt-image-2',
-        totalTokens: null,
+        totalTokens: 46,
       },
     })
   })
