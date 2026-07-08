@@ -6,7 +6,6 @@ import type {
 import {
   buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
-  hasFreshHostedAiUsageLimitNoticeClaim,
   markHostedAiUsageLimitNoticeSent,
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";
@@ -1134,16 +1133,6 @@ async function claimHostedLinqNoticeForSideEffect(
         });
       if (currentDeliverySentNotice) {
         return { status: "already_claimed" };
-      }
-      const legacyPeriodClaimOwnsNotice =
-        await hasFreshHostedAiUsageLimitNoticeClaim({
-          memberId: effect.payload.memberId,
-          now: attemptedAt,
-          periodStart: effect.payload.claimToken.periodStart,
-          prisma,
-        });
-      if (legacyPeriodClaimOwnsNotice) {
-        return { status: "in_flight" };
       }
       const claim = await claimHostedLinqDeliveryProviderDispatchTx({
         idempotencyKey: effect.effectId,

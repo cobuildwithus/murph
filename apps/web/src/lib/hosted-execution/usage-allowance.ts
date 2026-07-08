@@ -1021,35 +1021,6 @@ export async function markHostedAiUsageLimitNoticeSent(input: {
   return marked.count === 1;
 }
 
-export async function hasFreshHostedAiUsageLimitNoticeClaim(input: {
-  memberId: string;
-  now?: Date | string;
-  periodStart: Date | string;
-  prisma?: HostedAiUsageAllowanceClient;
-}): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
-  const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
-  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
-  const staleBefore = new Date(
-    now.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-  );
-
-  const period = await prisma.hostedAiUsagePeriod.findUnique({
-    where: {
-      memberId_periodStart: {
-        memberId: input.memberId,
-        periodStart,
-      },
-    },
-    select: {
-      limitNoticeSentAt: true,
-    },
-  });
-  const claimedAt = period?.limitNoticeSentAt ?? null;
-
-  return claimedAt !== null && claimedAt > staleBefore;
-}
-
 function resolveHostedAiUsageInactiveGateDecision(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;

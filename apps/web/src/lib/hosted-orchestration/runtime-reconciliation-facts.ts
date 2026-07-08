@@ -36,7 +36,6 @@ import {
 import {
   buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
-  hasFreshHostedAiUsageLimitNoticeClaim,
   HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
   markHostedAiUsageLimitNoticeSent,
 } from "../hosted-execution/usage-allowance";
@@ -477,16 +476,6 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       });
     if (currentDeliveryTerminalFailure) {
       return { status: "already_notified" };
-    }
-    const legacyPeriodClaimOwnsNotice =
-      await hasFreshHostedAiUsageLimitNoticeClaim({
-        memberId: input.userId,
-        now: sentAt,
-        periodStart: decision.periodStart,
-        prisma: input.prisma,
-    });
-    if (legacyPeriodClaimOwnsNotice) {
-      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
     const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: sentAt,

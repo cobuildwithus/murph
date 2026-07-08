@@ -60,7 +60,6 @@ function buildTrialConversionPendingMessage(input: {
 const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
-    hasFreshHostedAiUsageLimitNoticeClaim: vi.fn(),
     hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx: vi.fn(),
     hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx: vi.fn(),
     markHostedAiUsageLimitNoticeSent: vi.fn(),
@@ -279,7 +278,6 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   return {
     ...actual,
     checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
-    hasFreshHostedAiUsageLimitNoticeClaim: mocks.hasFreshHostedAiUsageLimitNoticeClaim,
     markHostedAiUsageLimitNoticeSent: mocks.markHostedAiUsageLimitNoticeSent,
   };
 });
@@ -566,7 +564,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       .mockResolvedValue(false);
     mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx
       .mockResolvedValue(false);
-    mocks.hasFreshHostedAiUsageLimitNoticeClaim.mockResolvedValue(false);
     mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValue({
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
@@ -7257,8 +7254,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
   });
 
-  it("returns a retryable Linq AI usage quota result when only a fresh legacy period claim exists", async () => {
-    mocks.hasFreshHostedAiUsageLimitNoticeClaim.mockResolvedValue(true);
+  it("returns a retryable Linq AI usage quota result when the delivery row remains in flight", async () => {
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
+      claimed: false,
+      id: "hld_current_in_flight",
+    });
     mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
       allowed: false,
       billingPlanCode: "launch_monthly",
@@ -7321,7 +7321,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
     });
     const rawBody = buildHostedLinqWebhookBody({
-      eventId: "evt_ai_usage_limit_period_claim_in_flight",
+      eventId: "evt_ai_usage_limit_delivery_in_flight",
     });
 
     await expect(handleHostedOnboardingLinqWebhook({
@@ -7345,7 +7345,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       retryable: true,
     });
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledTimes(2);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();

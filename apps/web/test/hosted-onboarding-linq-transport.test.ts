@@ -81,14 +81,12 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   >("@/src/lib/hosted-execution/usage-allowance");
   return {
     ...actual,
-    hasFreshHostedAiUsageLimitNoticeClaim: vi.fn().mockResolvedValue(false),
     markHostedAiUsageLimitNoticeSent: vi.fn().mockResolvedValue(true),
   };
 });
 
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
-  hasFreshHostedAiUsageLimitNoticeClaim,
   markHostedAiUsageLimitNoticeSent,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import {
@@ -150,7 +148,6 @@ describe("hosted Linq webhook transport", () => {
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
-    vi.mocked(hasFreshHostedAiUsageLimitNoticeClaim).mockResolvedValue(false);
     vi.mocked(markHostedAiUsageLimitNoticeSent).mockResolvedValue(true);
   });
 
@@ -809,14 +806,12 @@ describe("hosted Linq webhook transport", () => {
       ],
     });
 
-    expect(hasFreshHostedAiUsageLimitNoticeClaim).not.toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });
 
-  it("skips AI usage quota replies while an old period notice claim is fresh", async () => {
-    vi.mocked(hasFreshHostedAiUsageLimitNoticeClaim).mockResolvedValueOnce(true);
+  it("sends AI usage quota replies through the delivery row after legacy delivery checks miss", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
@@ -840,25 +835,13 @@ describe("hosted Linq webhook transport", () => {
         sideEffects: [effect],
       }),
     ).resolves.toEqual({
-      sentCount: 0,
-      skipped: [
-        {
-          effectId: effect.effectId,
-          reason: "notice_in_flight",
-          template: "ai_usage_quota",
-        },
-      ],
+      sentCount: 1,
+      skipped: [],
     });
 
-    expect(hasFreshHostedAiUsageLimitNoticeClaim).toHaveBeenCalledWith({
-      memberId: "member-1",
-      now: new Date("2026-03-26T12:00:01.000Z"),
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma: {},
-    });
-    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
-    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalled();
+    expect(markHostedAiUsageLimitNoticeSent).toHaveBeenCalled();
   });
 
   it("sends AI usage quota replies from the delivery row", async () => {
