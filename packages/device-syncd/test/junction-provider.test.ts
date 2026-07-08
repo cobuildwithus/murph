@@ -2830,7 +2830,7 @@ test("Junction provider source keys are stable provider-level opaque ids", () =>
   assert.doesNotMatch(garminKey ?? "", /acct|junction|garmin/u);
 });
 
-test("Junction provider revokes connected remote provider slugs", async () => {
+test("Junction provider revokes remote provider slugs unless Junction already reports them disconnected", async () => {
   const requests: Array<{ method: string; url: string }> = [];
   const provider = createJunctionProvider(async (input, init) => {
     const request = {
@@ -2844,6 +2844,7 @@ test("Junction provider revokes connected remote provider slugs", async () => {
         data: [
           { slug: "garmin", status: "connected" },
           { slug: "Garmin", status: "active" },
+          { slug: "apple_health_kit", status: "error" },
           { slug: "fitbit", status: "revoked" },
           { provider: "Oura", status: "unknown" },
         ],
@@ -2868,6 +2869,14 @@ test("Junction provider revokes connected remote provider slugs", async () => {
     {
       method: "DELETE",
       url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/garmin",
+    },
+    {
+      method: "DELETE",
+      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/apple_health_kit",
+    },
+    {
+      method: "DELETE",
+      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/oura",
     },
   ]);
 });
