@@ -73,8 +73,17 @@ unmistakable. For example, the `prompt` value:
 > Upbeat roots-reggae, ~20s, warm male lead vocal. Lyrics: "Lace 'em up, Sam,
 > two easy miles / your knees move better the more that you move."
 
-Keep lyrics short: a 20-second track holds a couplet or two, not a full
-verse-chorus. For reminder songs specifically, name the action to do now, say
+Fit the lyrics to the duration, because the model will not: Eleven Music sings
+every quoted word inside the seconds you asked for, so an overlong lyric comes
+back rushed and garbled rather than trimmed. A relaxed vocal carries roughly a
+word and a half per second, and the intro and outro spend a few of those
+seconds before anyone sings — so a 15-second track holds about 18 words, a
+20-second track about 25 (a couplet or two), and a 30-second track about 40.
+Count the words in your lyrics
+before calling the tool; if you are over budget, cut lines first, and raise
+`durationSeconds` only when every remaining word earns its place.
+
+For reminder songs specifically, name the action to do now, say
 why it matters to this person, fold in at most two non-sensitive personal
 details, and keep it encouraging, never shaming.
 
@@ -87,8 +96,9 @@ instruments, tempo, key, mood — still belongs in the prompt.
 ## Duration
 
 `durationSeconds` is 3-300. Reminder songs are 15-30s. Shorter tracks are
-tighter and land faster; match the lyric and structure to the length you ask
-for.
+tighter and land faster. Pick the duration and the lyric together: the track
+is exactly as long as you ask for, so words beyond the budget in the Lyrics
+section get rushed, not dropped.
 
 ## House style and preferences
 
