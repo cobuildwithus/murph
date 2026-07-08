@@ -159,13 +159,21 @@ describe("buildClinicalImportPlan", () => {
       "vitals",
     ]);
     expect(plan.candidates.some((candidate) => candidate.kind === "assertion")).toBe(false);
-    expect(plan.unsupported).toEqual([
-      expect.objectContaining({
-        resourceType: "Condition",
-        resourceId: "condition-positive-1",
-        reason: "condition registry import not implemented",
-      }),
-    ]);
+    expect(plan.unsupported).toHaveLength(2);
+    expect(plan.unsupported).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceType: "Observation",
+          resourceId: "height-1",
+          reason: "observation code is not importable",
+        }),
+        expect.objectContaining({
+          resourceType: "Condition",
+          resourceId: "condition-positive-1",
+          reason: "condition registry import not implemented",
+        }),
+      ]),
+    );
 
     const systolic = plan.candidates.find(
       (candidate): candidate is ClinicalImportCandidateOfKind<"vitals"> =>
@@ -284,7 +292,19 @@ describe("buildClinicalImportPlan", () => {
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.unsupported).toEqual([]);
+    expect(plan.unsupported).toHaveLength(2);
+    expect(plan.unsupported).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: "lab-local-category",
+          reason: "observation code is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "lab-canonical-short-code",
+          reason: "observation code is not importable",
+        }),
+      ]),
+    );
     expect(plan.candidates).toHaveLength(2);
     expect(plan.candidates.some((candidate) => candidate.resource.resourceId === "lab-local-category")).toBe(false);
     expect(plan.candidates.some((candidate) => candidate.resource.resourceId === "lab-canonical-short-code"))
@@ -391,12 +411,12 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "Observation",
           relativePath: "Observation/page-1.json",
-          count: 7,
+          count: 8,
         },
         {
           resourceType: "DiagnosticReport",
           relativePath: "DiagnosticReport/page-1.json",
-          count: 1,
+          count: 2,
         },
         {
           resourceType: "DocumentReference",
@@ -487,15 +507,38 @@ describe("buildClinicalImportPlan", () => {
               },
             ],
           },
+          {
+            resourceType: "Observation",
+            id: "lab-date-only",
+            status: "final",
+            effectiveDateTime: "2026-07-01",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Glucose" },
+            valueQuantity: { value: 91, unit: "mg/dL" },
+          },
         ],
-        "DiagnosticReport/page-1.json": {
-          resourceType: "DiagnosticReport",
-          id: "report-cancelled",
-          status: "cancelled",
-          issued: "2026-07-01T12:00:00.000Z",
-          code: { text: "Metabolic panel" },
-          conclusion: "Cancelled result.",
-        },
+        "DiagnosticReport/page-1.json": [
+          {
+            resourceType: "DiagnosticReport",
+            id: "report-cancelled",
+            status: "cancelled",
+            issued: "2026-07-01T12:00:00.000Z",
+            code: { text: "Metabolic panel" },
+            conclusion: "Cancelled result.",
+          },
+          {
+            resourceType: "DiagnosticReport",
+            id: "report-no-summary",
+            status: "final",
+            issued: "2026-07-01T12:01:00.000Z",
+            code: { text: "Metabolic panel" },
+          },
+        ],
         "DocumentReference/page-1.json": [
           {
             resourceType: "DocumentReference",
@@ -652,7 +695,7 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toHaveLength(17);
+    expect(plan.unsupported).toHaveLength(19);
     expect(plan.unsupported).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -684,8 +727,16 @@ describe("buildClinicalImportPlan", () => {
           reason: "vital quantity unit is not importable",
         }),
         expect.objectContaining({
+          resourceId: "lab-date-only",
+          reason: "clinical timestamp is missing",
+        }),
+        expect.objectContaining({
           resourceId: "report-cancelled",
           reason: "diagnostic report status is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "report-no-summary",
+          reason: "diagnostic report summary is not available in raw FHIR page",
         }),
         expect.objectContaining({
           resourceId: "document-entered-in-error",

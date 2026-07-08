@@ -34,7 +34,7 @@ import {
   type ClinicalRawManifest,
   type ClinicalRawManifestResourceFile,
 } from "@murphai/clinical-records";
-import { isStrictIsoDate, isStrictIsoDateTime, type BloodTestResultRecord } from "@murphai/contracts";
+import { isStrictIsoDateTime, type BloodTestResultRecord } from "@murphai/contracts";
 
 export interface BuildClinicalImportPlanInput {
   vaultRoot: string;
@@ -335,10 +335,6 @@ function resourceContext<TResource extends Resource>(
   };
 }
 
-function emptyMappedResource(): MappedFhirResource {
-  return { candidates: [], unsupported: [] };
-}
-
 function unsupportedOnly(context: FhirResourceContext, reason: string): MappedFhirResource {
   return { candidates: [], unsupported: [unsupportedResource(context, reason)] };
 }
@@ -346,7 +342,7 @@ function unsupportedOnly(context: FhirResourceContext, reason: string): MappedFh
 function mapObservation(context: FhirResourceContext<Observation>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return emptyMappedResource();
+    return unsupportedOnly(context, "FHIR resource id is missing");
   }
 
   if (!hasImportableStatus(context.resource.status, IMPORTABLE_OBSERVATION_STATUSES)) {
@@ -366,6 +362,10 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     }
 
     const value = readQuantityValue(component.valueQuantity);
+    if (vital && !value) {
+      unsupported.push(unsupportedResource(context, "vital quantity is not importable"));
+      continue;
+    }
     if (!vital || !value) {
       continue;
     }
@@ -405,6 +405,9 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   }
 
   const quantity = readQuantityValue(context.resource.valueQuantity);
+  if (vital && !quantity) {
+    return unsupportedOnly(context, "vital quantity is not importable");
+  }
   if (vital && quantity) {
     if (!occurredAt) {
       return unsupportedOnly(context, "clinical timestamp is missing");
@@ -434,7 +437,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   }
 
   if (!isLaboratoryObservation(context.resource)) {
-    return emptyMappedResource();
+    return unsupportedOnly(context, "observation code is not importable");
   }
 
   const results = components
@@ -446,7 +449,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   }
 
   if (results.length === 0) {
-    return emptyMappedResource();
+    return unsupportedOnly(context, "laboratory observation result is not importable");
   }
 
   if (!occurredAt) {
@@ -483,7 +486,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
 function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return emptyMappedResource();
+    return unsupportedOnly(context, "FHIR resource id is missing");
   }
 
   if (!hasImportableStatus(context.resource.status, IMPORTABLE_DIAGNOSTIC_REPORT_STATUSES)) {
@@ -530,13 +533,13 @@ function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): Ma
     };
   }
 
-  return emptyMappedResource();
+  return unsupportedOnly(context, "diagnostic report summary is not available in raw FHIR page");
 }
 
 function mapDocumentReference(context: FhirResourceContext<DocumentReference>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return emptyMappedResource();
+    return unsupportedOnly(context, "FHIR resource id is missing");
   }
 
   if (!hasImportableStatus(context.resource.status, IMPORTABLE_DOCUMENT_REFERENCE_STATUSES)) {
@@ -587,7 +590,7 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
 function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return emptyMappedResource();
+    return unsupportedOnly(context, "FHIR resource id is missing");
   }
 
   if (codeableConceptHasCodeWithUnexpectedSystem(context.resource.code, FHIR_SYSTEM_SNOMED_CT, NO_KNOWN_ALLERGY_CODES)) {
@@ -918,9 +921,6 @@ function readIsoDateTime(value: unknown): string | undefined {
   }
   if (isStrictIsoDateTime(text)) {
     return text;
-  }
-  if (isStrictIsoDate(text)) {
-    return `${text}T00:00:00.000Z`;
   }
 
   return undefined;
