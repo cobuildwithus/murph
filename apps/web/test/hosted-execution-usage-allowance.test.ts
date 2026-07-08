@@ -120,6 +120,115 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it("prices OpenAI image generation with GPT Image 2 text, image, and output tokens", () => {
+    const generatedImage = {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 100,
+      inputTokens: 1_300,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 100,
+          image_tokens: 1_000,
+          text_tokens: 300,
+        },
+        output_tokens: 400,
+        output_tokens_details: {
+          image_tokens: 400,
+          reasoning_tokens: 0,
+          text_tokens: 0,
+        },
+        total_tokens: 1_700,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 1_700,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    } satisfies AssistantUsageRecord;
+
+    expect(priceHostedAiUsageForAllowance(generatedImage)).toMatchObject({
+      costUsdMicros: 21_125n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-image-2",
+        modelSource: "requested",
+        pricingSource: "https://developers.openai.com/api/docs/pricing",
+        standardCostUsdMicros: "21125",
+        tokenPricingBasis: "standard",
+        tokens: {
+          openAiImage: {
+            billableImageInput: "1000",
+            billableTextInput: "200",
+            cachedInput: "100",
+            cachedInputAllocation: "text_then_image_then_unclassified",
+            cachedTextInput: "100",
+            imageInput: "1000",
+            output: "400",
+            textInput: "300",
+          },
+        },
+      },
+      pricingVersion: "openai-image-api-pricing-2026-07-08-standard",
+    });
+  });
+
+  it("prices OpenAI image generation from aggregate token fields when details are missing", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 20,
+      inputTokens: 120,
+      outputTokens: 40,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: null,
+      requestedModel: "openai/gpt-image-2",
+      servedModel: null,
+      totalTokens: 160,
+      usageExtractionSourcePath: "openai.images.edit",
+      usageExtractionVersion: "openai-images-v1",
+    })).toMatchObject({
+      costUsdMicros: 2_040n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-image-2",
+        tokens: {
+          openAiImage: {
+            billableUnclassifiedInput: "100",
+            cachedUnclassifiedInput: "20",
+            unclassifiedInput: "120",
+          },
+        },
+      },
+    });
+  });
+
+  it("rejects OpenAI image usage with OpenAI flex token pricing", () => {
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      tokenPricingBasis: "openai-flex",
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    })).toThrow("OpenAI image hosted AI usage must use standard token pricing basis");
+  });
+
+  it("does not treat GPT Image 2 as a generic token-priced chat model", () => {
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      provider: "codex-cli",
+      providerName: "openai",
+      requestedModel: "gpt-image-2",
+      servedModel: "gpt-image-2",
+    })).toThrow("pricing is missing");
+  });
+
   it("accepts production OpenAI provider evidence for OpenAI flex token pricing", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,

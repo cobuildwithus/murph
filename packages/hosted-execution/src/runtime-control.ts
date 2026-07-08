@@ -70,6 +70,15 @@ export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
 export type HostedAiUsageOpenAiFlexTokenPricingModel =
   (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];
 
+// Image models stay separate from HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS
+// because that list validates HOSTED_ASSISTANT_MODEL in deploy preflight.
+export const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS = [
+  "gpt-image-2",
+] as const;
+
+export type HostedAiUsageAllowanceOpenAiImagePricedModel =
+  (typeof HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS)[number];
+
 export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS = [
   "eleven_flash_v2",
   "eleven_flash_v2_5",
@@ -200,6 +209,43 @@ export function isHostedAiUsageOpenAiFlexTokenPricingModelId(
     : false;
 }
 
+export function isHostedAiUsageAllowanceOpenAiImagePricedModelId(
+  value: string,
+): value is HostedAiUsageAllowanceOpenAiImagePricedModel {
+  return HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS.includes(
+    value as HostedAiUsageAllowanceOpenAiImagePricedModel,
+  );
+}
+
+export function normalizeHostedAiUsageAllowanceOpenAiImageModelId(
+  value: string | null | undefined,
+): HostedAiUsageAllowanceOpenAiImagePricedModel | null {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const exact = normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(
+    normalized,
+  );
+  if (exact) {
+    return exact;
+  }
+
+  const providerScoped = normalized.split("/").at(-1) ?? normalized;
+  const providerScopedExact =
+    normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(providerScoped);
+  if (providerScopedExact) {
+    return providerScopedExact;
+  }
+
+  const datedSnapshotBase = providerScoped.replace(/-\d{4}-\d{2}-\d{2}$/u, "");
+
+  return normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(
+    datedSnapshotBase,
+  );
+}
+
 export function isHostedAiUsageOpenAiTokenPricingProviderName(
   value: unknown,
 ): boolean {
@@ -322,6 +368,12 @@ function normalizeHostedAiUsageAllowancePricedModelCandidate(
   value: string,
 ): HostedAiUsageAllowancePricedModel | null {
   return isHostedAiUsageAllowancePricedModelId(value) ? value : null;
+}
+
+function normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(
+  value: string,
+): HostedAiUsageAllowanceOpenAiImagePricedModel | null {
+  return isHostedAiUsageAllowanceOpenAiImagePricedModelId(value) ? value : null;
 }
 
 function buildHostedAiUsageAllowDecisionSigningPayload(
