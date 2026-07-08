@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  readHostedMemberRoutingPrivateState: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -12,6 +13,11 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-private-codecs", () => ({
+  readHostedMemberRoutingPrivateState:
+    mocks.readHostedMemberRoutingPrivateState,
 }));
 
 import {
@@ -28,6 +34,15 @@ describe("hosted Linq egress authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member-1");
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValue({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
   });
 
   it("allows explicit signup welcome first contact for the bound runtime user", async () => {
@@ -43,7 +58,7 @@ describe("hosted Linq egress authority", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "+15550100001",
       targetKind: "participant",
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ targetOverride: null });
 
     expect(prisma.hostedMemberIdentity.findUnique).toHaveBeenCalledWith({
       select: { phoneLookupKey: true },
@@ -124,14 +139,14 @@ describe("hosted Linq egress authority", () => {
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-home",
       targetKind: "thread",
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ targetOverride: null });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-pending",
       targetKind: "thread",
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ targetOverride: null });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
@@ -158,7 +173,7 @@ describe("hosted Linq egress authority", () => {
       },
       target: "chat-authorized",
       targetKind: "thread",
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ targetOverride: null });
 
     expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
@@ -223,18 +238,92 @@ describe("hosted Linq egress authority", () => {
       },
       target: "chat-home",
       targetKind: "thread",
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ targetOverride: null });
 
     expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
       select: {
+        linqChatIdEncrypted: true,
         linqChatLookupKey: true,
+        linqRecipientPhoneEncrypted: true,
         linqRecipientPhoneLookupKey: true,
+        memberId: true,
+        pendingLinqChatIdEncrypted: true,
         pendingLinqChatLookupKey: true,
+        pendingLinqParticipantContactEncrypted: true,
+        pendingLinqRecipientPhoneEncrypted: true,
         pendingLinqRecipientPhoneLookupKey: true,
+        telegramUserIdEncrypted: true,
       },
       where: { memberId: "member-1" },
     });
+  });
+
+  it("returns a current home-route override for stale bare Linq home targets", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+    mocks.readHostedMemberRoutingPrivateState.mockResolvedValueOnce({
+      linqChatId: "chat-current-home",
+      linqRecipientPhone: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-stale-home",
+      targetKind: "explicit",
+    })).resolves.toEqual({
+      targetOverride: {
+        target: "chat-current-home",
+        targetKind: "thread",
+      },
+    });
+
+    expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps stale reply targets strict instead of returning a home-route override", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      replyToMessageId: "linq-message-reply",
+      target: "chat-stale-home",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
+  });
+
+  it("keeps stale explicit direct-recipient targets strict", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      directRecipientPhoneNumber: "+15550100001",
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-stale-home",
+      targetKind: "explicit",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
   });
 
   it("keeps direct route-authority target matching strict", () => {
@@ -324,10 +413,17 @@ function createPrismaStub(input: {
     },
     hostedMemberRouting: {
       findUnique: vi.fn().mockResolvedValue({
+        linqChatIdEncrypted: input.homeChatId ? "encrypted-home-chat" : null,
         linqChatLookupKey: createRequiredLinqChatLookupKey(input.homeChatId),
+        linqRecipientPhoneEncrypted: input.homeLinePhone ? "encrypted-home-line" : null,
         linqRecipientPhoneLookupKey: createRequiredPhoneLookupKey(input.homeLinePhone),
+        memberId: "member-1",
+        pendingLinqChatIdEncrypted: input.pendingChatId ? "encrypted-pending-chat" : null,
         pendingLinqChatLookupKey: createRequiredLinqChatLookupKey(input.pendingChatId),
+        pendingLinqParticipantContactEncrypted: null,
+        pendingLinqRecipientPhoneEncrypted: null,
         pendingLinqRecipientPhoneLookupKey: null,
+        telegramUserIdEncrypted: null,
       }),
     },
     hostedThreadRoute: {

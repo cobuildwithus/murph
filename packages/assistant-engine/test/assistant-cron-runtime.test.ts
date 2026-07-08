@@ -4014,6 +4014,66 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('consumes non-retryable delivery failures for scheduled canonical reminders', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-terminal-delivery-failure-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'terminal delivery reminder',
+    )
+    const error = Object.assign(
+      new Error('Hosted Linq egress authority assertion request failed.'),
+      {
+        code: 'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH',
+        details: {
+          assistantNotificationStage: 'delivery',
+        },
+        retryable: false,
+      },
+    )
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeRecord = runtimeStore.jobs.find((record) =>
+      record.jobId === canonicalJob.jobId
+    )
+    expect(runtimeRecord?.state.pendingOccurrenceAt).toBeNull()
+    expect(runtimeRecord?.state.retryAfterAt).toBeNull()
+    expect(runtimeRecord?.state.lastFailedAt).toBe('2026-04-08T10:00:00.000Z')
+    expect(runtimeRecord?.state.lastError).toBe(
+      'Hosted Linq egress authority assertion request failed.',
+    )
+    expect(runtimeRecord?.state.consecutiveFailures).toBe(0)
+    await expect(
+      listAssistantCronRuns({
+        job: canonicalJob.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: canonicalJob.jobId,
+      runs: [
+        expect.objectContaining({
+          error: 'Hosted Linq egress authority assertion request failed.',
+          status: 'failed',
+        }),
+      ],
+    })
+  })
+
   it('skips stale recurring canonical notification cron jobs and advances the schedule', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))

@@ -6125,6 +6125,94 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("uses Linq egress target overrides for provider dispatch", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_stale",
+      channel: "linq",
+      idempotencyKey: "assistant-outbox:intent_123",
+      message: "Current home route reminder.",
+      transportIdempotent: false,
+    });
+    const assertRecentInbound = vi.fn(async () => ({
+      targetOverride: {
+        target: "linq_chat_current",
+        targetKind: "thread" as const,
+      },
+    }));
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        answeredMailboxItemIds: [],
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "Current home route reminder.",
+        replyToMessageId: null,
+        target: "linq_chat_stale",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          idempotencyKey: "assistant-outbox:intent_123",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "linq_chat_stale",
+        targetKind: "thread",
+      }),
+      {
+        signal: null,
+      },
+    );
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "linq_chat_current",
+        targetKind: "thread",
+      }),
+      expect.any(Object),
+    );
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerTarget: "linq_chat_current",
+        providerThreadId: "linq_chat_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("keeps Linq sends successful when delivery outcome recording fails", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
@@ -6692,6 +6780,7 @@ describe("hosted runtime callbacks", () => {
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
+      replyToMessageId: "linq_message_other",
       routeAuthority: null,
       target: "linq_chat_other",
       targetKind: "thread",
@@ -7183,6 +7272,7 @@ describe("hosted runtime callbacks", () => {
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
+      replyToMessageId: "linq_message_current",
       routeAuthority,
       target: "linq_chat_current",
       targetKind: "thread",
@@ -7406,6 +7496,7 @@ describe("hosted runtime callbacks", () => {
       fromPhoneNumber: "+15559990000",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
+      replyToMessageId: "linq_message_a",
       routeAuthority: matchingRouteAuthority,
       target: "linq_chat_a",
       targetKind: "thread",
@@ -7508,6 +7599,7 @@ describe("hosted runtime callbacks", () => {
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
+      replyToMessageId: "linq_message_current",
       routeAuthority: null,
       target: "linq_chat_other",
       targetKind: "thread",
@@ -7602,6 +7694,7 @@ describe("hosted runtime callbacks", () => {
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
+      replyToMessageId: "linq_message_current",
       routeAuthority: null,
       target: "linq_chat_current",
       targetKind: "thread",
@@ -8547,6 +8640,7 @@ describe("hosted runtime callbacks", () => {
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
+      replyToMessageId: "linq_message_current",
       routeAuthority: null,
       target: "linq_chat_current",
       targetKind: "thread",

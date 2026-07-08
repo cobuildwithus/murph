@@ -205,9 +205,19 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
+  replyToMessageId?: string | null;
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
+export interface HostedRuntimeLinqTargetOverride {
+  target: string;
+  targetKind: "thread";
+}
+
+export interface HostedRuntimeLinqRecentInboundEngagementResult {
+  targetOverride?: HostedRuntimeLinqTargetOverride | null;
 }
 
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {
@@ -275,7 +285,7 @@ type HostedRuntimeEffectsPortBase = {
   assertLinqRecentInboundEngagement?(
     request: HostedRuntimeLinqRecentInboundEngagementRequest,
     context?: { signal?: AbortSignal | null },
-  ): Promise<void>;
+  ): Promise<HostedRuntimeLinqRecentInboundEngagementResult | void>;
   recordLinqDeliveryOutcome?(
     request: HostedRuntimeLinqDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },
