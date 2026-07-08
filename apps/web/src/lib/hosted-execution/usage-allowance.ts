@@ -1021,6 +1021,58 @@ export async function markHostedAiUsageLimitNoticeSent(input: {
   return marked.count === 1;
 }
 
+// During web rollout, older containers only observe this period column as the
+// notice owner. New code treats this as a short-lived claim until provider
+// delivery confirms it with the same marker plus a delivery row.
+export async function claimHostedAiUsageLimitNoticeForRollout(input: {
+  claimedAt?: Date | string;
+  memberId: string;
+  periodStart: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const claimedAt = normalizeHostedAiUsageAllowanceDate(input.claimedAt ?? new Date());
+  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
+  const staleBefore = new Date(
+    claimedAt.getTime() - HOSTED_AI_USAGE_LEGACY_NOTICE_CLAIM_STALE_MS,
+  );
+
+  const claimed = await prisma.hostedAiUsagePeriod.updateMany({
+    where: {
+      AND: [
+        {
+          periodStart: {
+            lte: claimedAt,
+          },
+        },
+        {
+          periodEnd: {
+            gt: claimedAt,
+          },
+        },
+      ],
+      blockedAt: {
+        not: null,
+      },
+      memberId: input.memberId,
+      OR: [
+        { limitNoticeSentAt: null },
+        {
+          limitNoticeSentAt: {
+            lte: staleBefore,
+          },
+        },
+      ],
+      periodStart,
+    },
+    data: {
+      limitNoticeSentAt: claimedAt,
+    },
+  });
+
+  return claimed.count === 1;
+}
+
 export async function hasFreshHostedAiUsageLimitNoticeClaim(input: {
   memberId: string;
   now?: Date | string;

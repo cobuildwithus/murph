@@ -603,7 +603,7 @@ describe("hosted Linq usage reset e2e", () => {
       replyToMessageId: "msg_after_notice_claimed",
       signal: undefined,
     });
-    expect(usage.prisma.hostedAiUsagePeriod.updateMany).toHaveBeenCalledTimes(1);
+    expect(usage.prisma.hostedAiUsagePeriod.updateMany).toHaveBeenCalledTimes(2);
     expect(usage.getPeriod("2026-04-01T00:00:00.000Z")).toMatchObject({
       limitNoticeSentAt: new Date("2026-04-30T12:00:00.000Z"),
       spentUsdMicros: monthlyLimit,

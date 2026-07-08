@@ -36,6 +36,7 @@ import {
 import {
   buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
+  claimHostedAiUsageLimitNoticeForRollout,
   hasFreshHostedAiUsageLimitNoticeClaim,
   markHostedAiUsageLimitNoticeSent,
 } from "../hosted-execution/usage-allowance";
@@ -448,10 +449,21 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     if (legacyPeriodClaimOwnsNotice) {
       return;
     }
+    const rolloutClaimedNotice =
+      await claimHostedAiUsageLimitNoticeForRollout({
+        claimedAt: sentAt,
+        memberId: input.userId,
+        periodStart: decision.periodStart,
+        prisma: input.prisma,
+      });
+    if (!rolloutClaimedNotice) {
+      return;
+    }
     const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: sentAt,
       idempotencyKey,
       prisma: input.prisma,
+      reclaimStalePreProviderAttempt: true,
       source: "hosted_runtime_ai_usage_limit_notice",
       sourceRef: wake.eventId,
       targetKind: "telegram_thread",

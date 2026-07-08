@@ -1306,7 +1306,7 @@ describe("hosted Linq observability stores", () => {
     expect(updateWhere?.OR).not.toContainEqual({ status: "attempted" });
   });
 
-  it("does not reclaim stale pre-provider Telegram usage notice rows", async () => {
+  it("does not reclaim stale pre-provider Telegram usage notice rows without opt-in", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
@@ -1347,6 +1347,61 @@ describe("hosted Linq observability stores", () => {
       },
       status: "attempted",
     });
+  });
+
+  it("reclaims stale pre-provider Telegram usage notice rows when the caller opts in", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_stale_telegram_attempt",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      status: "attempted",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "telegram_event_runtime_denied",
+      targetKind: "telegram_thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_stale_telegram_attempt",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt,
+          failedAt: null,
+          skippedAt: null,
+          status: "attempted",
+        }),
+        where: expect.objectContaining({
+          id: "hld_stale_telegram_attempt",
+          OR: expect.arrayContaining([
+            {
+              attemptedAt: {
+                lte: new Date("2026-03-26T12:15:00.000Z"),
+              },
+              status: "attempted",
+            },
+          ]),
+        }),
+      }),
+    );
   });
 
   it("detects provider-correlated deliveries for legacy idempotency keys", async () => {

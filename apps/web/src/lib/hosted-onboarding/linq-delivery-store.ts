@@ -222,6 +222,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
   reclaimFreshPreProviderAttempt?: boolean;
+  reclaimStalePreProviderAttempt?: boolean;
   source: string;
   sourceRef?: string | null;
   targetKind?: string | null;
@@ -281,6 +282,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       prisma: input.prisma,
       reclaimFreshPreProviderAttempt: input.reclaimFreshPreProviderAttempt ?? false,
       reclaimFreshPreProviderAttemptSource: input.source,
+      reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
     });
   }
 
@@ -311,6 +313,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       prisma: input.prisma,
       reclaimFreshPreProviderAttempt: input.reclaimFreshPreProviderAttempt ?? false,
       reclaimFreshPreProviderAttemptSource: input.source,
+      reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
     });
   }
 }
@@ -1360,6 +1363,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   prisma: HostedLinqDeliveryClient;
   reclaimFreshPreProviderAttempt: boolean;
   reclaimFreshPreProviderAttemptSource: string;
+  reclaimStalePreProviderAttempt?: boolean;
 }): Promise<{ claimed: boolean; id: string | null }> {
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
@@ -1372,7 +1376,8 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     input.attemptedAt.getTime() - HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS,
   );
   const canReclaimStalePreProviderAttempt =
-    input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
+    input.reclaimStalePreProviderAttempt
+    ?? input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       acceptedAt: null,

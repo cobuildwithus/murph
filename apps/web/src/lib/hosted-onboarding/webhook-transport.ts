@@ -6,6 +6,7 @@ import type {
 import {
   buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
+  claimHostedAiUsageLimitNoticeForRollout,
   hasFreshHostedAiUsageLimitNoticeClaim,
   markHostedAiUsageLimitNoticeSent,
   type HostedAiUsageGateNoticeCode,
@@ -1099,6 +1100,16 @@ async function claimHostedLinqNoticeForSideEffect(
           prisma,
         });
       if (legacyPeriodClaimOwnsNotice) {
+        return false;
+      }
+      const rolloutClaimedNotice =
+        await claimHostedAiUsageLimitNoticeForRollout({
+          claimedAt: attemptedAt,
+          memberId: effect.payload.memberId,
+          periodStart: effect.payload.claimToken.periodStart,
+          prisma,
+        });
+      if (!rolloutClaimedNotice) {
         return false;
       }
       const claim = await claimHostedLinqDeliveryProviderDispatchTx({

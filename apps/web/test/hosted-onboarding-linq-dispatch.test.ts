@@ -60,6 +60,7 @@ function buildTrialConversionPendingMessage(input: {
 const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
+    claimHostedAiUsageLimitNoticeForRollout: vi.fn(),
     hasFreshHostedAiUsageLimitNoticeClaim: vi.fn(),
     hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx: vi.fn(),
     markHostedAiUsageLimitNoticeSent: vi.fn(),
@@ -274,6 +275,8 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   return {
     ...actual,
     checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
+    claimHostedAiUsageLimitNoticeForRollout:
+      mocks.claimHostedAiUsageLimitNoticeForRollout,
     hasFreshHostedAiUsageLimitNoticeClaim: mocks.hasFreshHostedAiUsageLimitNoticeClaim,
     markHostedAiUsageLimitNoticeSent: mocks.markHostedAiUsageLimitNoticeSent,
   };
@@ -559,6 +562,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     mocks.hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx
       .mockResolvedValue(false);
+    mocks.claimHostedAiUsageLimitNoticeForRollout.mockResolvedValue(true);
     mocks.hasFreshHostedAiUsageLimitNoticeClaim.mockResolvedValue(false);
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
@@ -6817,6 +6821,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       sourceRef: expectedIdempotencyKey,
       targetKind: "thread",
       template: "ai_usage_quota",
+    });
+    expect(mocks.claimHostedAiUsageLimitNoticeForRollout).toHaveBeenCalledWith({
+      claimedAt: expect.any(Date),
+      memberId: "member_123",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      prisma,
     });
     expect(mocks.markHostedAiUsageLimitNoticeSent).toHaveBeenCalledWith({
       memberId: "member_123",

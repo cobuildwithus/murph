@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   accountHostedAiUsageForAllowanceTx,
   checkHostedAiUsageGate,
+  claimHostedAiUsageLimitNoticeForRollout,
   hasFreshHostedAiUsageLimitNoticeClaim,
   markHostedAiUsageLimitNoticeSent,
   priceHostedAiUsageForAllowance,
@@ -2145,6 +2146,57 @@ describe("markHostedAiUsageLimitNoticeSent", () => {
           not: null,
         },
         memberId: "member_123",
+        periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      },
+    });
+  });
+});
+
+describe("claimHostedAiUsageLimitNoticeForRollout", () => {
+  it("claims a blocked usage-period notice only when the prior marker is stale", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const prisma = {
+      hostedAiUsagePeriod: {
+        updateMany,
+      },
+    };
+
+    await expect(claimHostedAiUsageLimitNoticeForRollout({
+      claimedAt: "2026-03-29T12:00:00.000Z",
+      memberId: "member_123",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        limitNoticeSentAt: new Date("2026-03-29T12:00:00.000Z"),
+      },
+      where: {
+        AND: [
+          {
+            periodStart: {
+              lte: new Date("2026-03-29T12:00:00.000Z"),
+            },
+          },
+          {
+            periodEnd: {
+              gt: new Date("2026-03-29T12:00:00.000Z"),
+            },
+          },
+        ],
+        blockedAt: {
+          not: null,
+        },
+        memberId: "member_123",
+        OR: [
+          { limitNoticeSentAt: null },
+          {
+            limitNoticeSentAt: {
+              lte: new Date("2026-03-29T11:45:00.000Z"),
+            },
+          },
+        ],
         periodStart: new Date("2026-03-01T00:00:00.000Z"),
       },
     });
