@@ -989,6 +989,44 @@ export async function claimHostedAiUsageLimitNotice(input: {
   return claimed.count === 1;
 }
 
+export async function markHostedAiUsageLimitNoticeSent(input: {
+  memberId: string;
+  periodStart: Date | string;
+  prisma?: HostedAiUsageAllowanceClient;
+  sentAt?: Date | string;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
+  const sentAt = normalizeHostedAiUsageAllowanceDate(input.sentAt ?? new Date());
+
+  const marked = await prisma.hostedAiUsagePeriod.updateMany({
+    where: {
+      AND: [
+        {
+          periodStart: {
+            lte: sentAt,
+          },
+        },
+        {
+          periodEnd: {
+            gt: sentAt,
+          },
+        },
+      ],
+      blockedAt: {
+        not: null,
+      },
+      memberId: input.memberId,
+      periodStart,
+    },
+    data: {
+      limitNoticeSentAt: sentAt,
+    },
+  });
+
+  return marked.count === 1;
+}
+
 export async function releaseHostedAiUsageLimitNotice(input: {
   memberId: string;
   periodStart: Date | string;

@@ -113,7 +113,7 @@ describe("recordHostedAiUsageRecords", () => {
     });
   });
 
-  it("sends the claimed home-route usage-limit notice after accounting reports a crossing", async () => {
+  it("sends the home-route usage-limit notice after accounting reports a crossing", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const hostedAiUsageFindUnique = vi.fn(async () => null);
     const prisma = makeUsagePrismaClient(
@@ -146,12 +146,7 @@ describe("recordHostedAiUsageRecords", () => {
       }),
     });
     expect(hostedAiUsageFindUnique).not.toHaveBeenCalled();
-    expect(allowanceMocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
-      memberId: "member_123",
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      prisma,
-      sentAt: expect.any(Date),
-    });
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(routingMocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma,
@@ -285,7 +280,7 @@ describe("recordHostedAiUsageRecords", () => {
     });
 
     expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledTimes(2);
-    expect(allowanceMocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledOnce();
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledOnce();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -323,7 +318,7 @@ describe("recordHostedAiUsageRecords", () => {
     );
   });
 
-  it("skips crossing notices when the once-per-period claim is already taken", async () => {
+  it("still sends the crossing notice when a stale period marker already exists", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
@@ -340,13 +335,13 @@ describe("recordHostedAiUsageRecords", () => {
       recordedIds: ["turn_123.attempt-1"],
     });
 
-    expect(allowanceMocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledOnce();
-    expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
-    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(routingMocks.readHostedMemberRoutingState).toHaveBeenCalledOnce();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledOnce();
     expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
-  it("releases the crossing claim when no home Linq route is available", async () => {
+  it("skips the crossing notice when no home Linq route is available", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
     const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -367,17 +362,12 @@ describe("recordHostedAiUsageRecords", () => {
     });
     consoleWarnSpy.mockRestore();
 
-    const sentAt = allowanceMocks.claimHostedAiUsageLimitNotice.mock.calls[0]?.[0]?.sentAt;
-    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).toHaveBeenCalledWith({
-      memberId: "member_123",
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      prisma,
-      sentAt,
-    });
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
-  it("swallows crossing notice send failures after releasing the claim", async () => {
+  it("swallows crossing notice send failures without writing a period marker", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
     const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -397,13 +387,8 @@ describe("recordHostedAiUsageRecords", () => {
     });
     consoleWarnSpy.mockRestore();
 
-    const sentAt = allowanceMocks.claimHostedAiUsageLimitNotice.mock.calls[0]?.[0]?.sentAt;
-    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).toHaveBeenCalledWith({
-      memberId: "member_123",
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      prisma,
-      sentAt,
-    });
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
   it("does not account allowance when accounting is disabled", async () => {

@@ -5,6 +5,7 @@ import type {
 
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
+  markHostedAiUsageLimitNoticeSent,
   releaseHostedAiUsageLimitNotice,
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";
@@ -333,6 +334,7 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       throw error;
     }
 
+    await markHostedAiUsageLimitNoticeSentForSideEffectBestEffort(effect, input.prisma);
     if (isHostedInviteLinqMessagePayload(effect.payload)) {
       await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
       await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
@@ -1019,8 +1021,23 @@ async function claimHostedLinqNoticeForSideEffect(
     }
     case "invite_signin":
       return true;
-    case "ai_usage_quota":
-      return true;
+    case "ai_usage_quota": {
+      if (!effect.payload.claimToken) {
+        return true;
+      }
+      const target = readHostedLinqSideEffectDeliveryTarget(effect.payload);
+      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+        idempotencyKey: effect.effectId,
+        linqChatId: target.linqChatId,
+        phoneNumber: target.phoneNumber,
+        prisma,
+        source: "hosted_webhook_side_effect",
+        sourceRef: effect.effectId,
+        targetKind: target.targetKind,
+        template: effect.payload.template,
+      });
+      return claim.claimed;
+    }
     case "daily_quota":
       return claimHostedLinqQuotaReplyNotice({
         memberId: effect.payload.memberId,
@@ -1074,6 +1091,29 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
   } catch (error) {
     console.error(
       "Hosted Linq side-effect notice claim release failed.",
+      buildHostedLinqSideEffectLogDetails(effect, error, 0),
+    );
+  }
+}
+
+async function markHostedAiUsageLimitNoticeSentForSideEffectBestEffort(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<void> {
+  if (effect.payload.template !== "ai_usage_quota" || !effect.payload.claimToken) {
+    return;
+  }
+
+  try {
+    await markHostedAiUsageLimitNoticeSent({
+      memberId: effect.payload.memberId,
+      periodStart: effect.payload.claimToken.periodStart,
+      prisma,
+      sentAt: effect.payload.claimToken.sentAt,
+    });
+  } catch (error) {
+    console.warn(
+      "Hosted Linq AI usage-limit notice sent marker failed.",
       buildHostedLinqSideEffectLogDetails(effect, error, 0),
     );
   }

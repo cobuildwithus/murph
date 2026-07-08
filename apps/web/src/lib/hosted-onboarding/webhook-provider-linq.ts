@@ -56,7 +56,6 @@ import {
 } from "../hosted-mailbox/store";
 import {
   checkHostedAiUsageGate,
-  claimHostedAiUsageLimitNotice,
 } from "../hosted-execution/usage-allowance";
 import {
   bindHostedMemberHomeLinqChatAndTrackInbound,
@@ -1398,28 +1397,9 @@ async function planHostedLinqInboundAdmissionDenied(input: {
       sentAt: Date;
     } | null = null;
     if (deniedUsageGate.reason === "ai_usage_limit_exceeded") {
-      const usageLimitNoticeClaimSentAt = new Date();
-      const claimedUsageLimitNotice = await claimHostedAiUsageLimitNotice({
-        memberId: input.memberId,
-        periodStart: deniedUsageGate.periodStart,
-        prisma: input.prisma,
-        sentAt: usageLimitNoticeClaimSentAt,
-      });
-
-      if (!claimedUsageLimitNotice) {
-        return logHostedLinqWebhookPlannerDecisionAndReturn(
-          buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
-          buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-            ...input.logDetails,
-            reason: "ai-usage-gate-denied",
-            routeStage: input.routeStages.aiUsageDenied,
-          }),
-        );
-      }
-
       usageLimitNoticeClaim = {
         periodStart: deniedUsageGate.periodStart,
-        sentAt: usageLimitNoticeClaimSentAt,
+        sentAt: new Date(),
       };
     }
 

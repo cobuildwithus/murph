@@ -1308,8 +1308,6 @@ describe("Linq explicit external-thread routing", () => {
         message: "Usage limit reached.",
       },
     });
-    vi.mocked(usageAllowance.claimHostedAiUsageLimitNotice).mockResolvedValueOnce(true);
-
     const plan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({}),
       prisma: prisma as never,
@@ -1333,12 +1331,13 @@ describe("Linq explicit external-thread routing", () => {
       },
       template: "ai_usage_quota",
     });
-    expect(usageAllowance.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
-      memberId: "member_thread_container_123",
-      periodStart,
-      prisma,
-      sentAt: expect.any(Date),
+    expect(plan.desiredSideEffects[0]?.payload).toMatchObject({
+      claimToken: {
+        periodStart: periodStart.toISOString(),
+        sentAt: expect.any(String),
+      },
     });
+    expect(usageAllowance.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 

@@ -557,7 +557,6 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake({
       routeAuthority,
     }));
-    mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -574,12 +573,7 @@ describe("hosted orchestration reconciliation facts", () => {
       prisma: expect.objectContaining({ kind: "prisma" }),
       userId: MEMBER_ID,
     });
-    expect(mocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      sentAt: new Date(FIXED_NOW),
-    });
+    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith({
       chatId: "chat_runtime_denied",
       claimToken: {
@@ -881,7 +875,6 @@ describe("hosted orchestration reconciliation facts", () => {
       }),
     );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake());
-    mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),

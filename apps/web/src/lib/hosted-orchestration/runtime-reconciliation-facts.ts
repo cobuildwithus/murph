@@ -450,16 +450,6 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
   }
 
   const sentAt = input.now;
-  const claimed = await claimHostedAiUsageLimitNotice({
-    memberId: input.userId,
-    periodStart: decision.periodStart,
-    prisma: input.prisma,
-    sentAt,
-  });
-  if (!claimed) {
-    return;
-  }
-
   await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
     chatId: wake.message.linqMessage.chatId,
     claimToken: {

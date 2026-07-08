@@ -74,12 +74,14 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   return {
     ...actual,
     claimHostedAiUsageLimitNotice: vi.fn().mockResolvedValue(true),
+    markHostedAiUsageLimitNoticeSent: vi.fn().mockResolvedValue(true),
     releaseHostedAiUsageLimitNotice: vi.fn().mockResolvedValue(undefined),
   };
 });
 
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
+  markHostedAiUsageLimitNoticeSent,
   releaseHostedAiUsageLimitNotice,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import {
@@ -130,6 +132,7 @@ describe("hosted Linq webhook transport", () => {
       claimed: true,
       id: "hld_claimed",
     });
+    vi.mocked(markHostedAiUsageLimitNoticeSent).mockResolvedValue(true);
   });
 
   it("sends the planner-chosen home phone with a chat+home-line stable effect id", async () => {
@@ -555,7 +558,7 @@ describe("hosted Linq webhook transport", () => {
     expect(claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
   });
 
-  it("does not mark the daily quota notice when sending an AI usage quota reply", async () => {
+  it("claims and marks AI usage quota replies through the delivery row", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
@@ -598,8 +601,57 @@ describe("hosted Linq webhook transport", () => {
         replyToMessageId: "message-1",
       }),
     );
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+      linqChatId: "chat-1",
+      phoneNumber: undefined,
+      prisma: {},
+      source: "hosted_webhook_side_effect",
+      sourceRef: expectedIdempotencyKey,
+      targetKind: "thread",
+      template: "ai_usage_quota",
+    });
+    expect(markHostedAiUsageLimitNoticeSent).toHaveBeenCalledWith({
+      memberId: "member-1",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      prisma: {},
+      sentAt: "2026-03-26T12:00:01.000Z",
+    });
     expect(maybeShareHostedLinqContactCardAfterOutboundForRuntime).not.toHaveBeenCalled();
     expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
+  });
+
+  it("skips already-claimed AI usage quota replies before provider dispatch", async () => {
+    vi.mocked(claimHostedLinqDeliveryProviderDispatchTx).mockResolvedValueOnce({
+      claimed: false,
+      id: "hld_existing",
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage",
+      template: "ai_usage_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
+        prisma: {} as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
+    expect(releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
   it("keeps claimed AI usage quota replies period-scoped across source events", () => {
@@ -772,6 +824,7 @@ describe("hosted Linq webhook transport", () => {
       prisma: {},
       sentAt: "2026-03-26T12:00:01.000Z",
     });
+    expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
     expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
   });
 
@@ -800,6 +853,8 @@ describe("hosted Linq webhook transport", () => {
     ).rejects.toThrow("send failed");
 
     expect(releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
   });
 

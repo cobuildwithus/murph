@@ -552,12 +552,12 @@ describe("hosted Linq usage reset e2e", () => {
     expectHostedLinqReadReceiptSent();
   });
 
-  it("suppresses the usage-limit reply when the exhausted period notice was already claimed", async () => {
+  it("delivers the usage-limit reply when the exhausted period only has a stale sent marker", async () => {
     const monthlyLimit = getHostedAiUsageMonthlyAllowanceUsdMicros("launch_monthly");
-    const alreadyClaimedAt = new Date("2026-04-29T16:30:00.000Z");
+    const staleClaimedAt = new Date("2026-04-29T16:30:00.000Z");
     const usage = createUsageResetPrismaFixture({
       initialPeriod: {
-        limitNoticeSentAt: alreadyClaimedAt,
+        limitNoticeSentAt: staleClaimedAt,
         limitUsdMicros: monthlyLimit,
         periodEnd: new Date("2026-05-01T00:00:00.000Z"),
         periodStart: new Date("2026-04-01T00:00:00.000Z"),
@@ -587,12 +587,27 @@ describe("hosted Linq usage reset e2e", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "ai-usage-gate-denied",
+      reason: "sent-ai-usage-quota-reply",
     });
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    const expectedUsageLimitIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: MEMBER_ID,
+      noticeCode: "pulse_upgrade_edge",
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
+      chatId: CHAT_ID,
+      idempotencyKey: expectedUsageLimitIdempotencyKey,
+      message: buildPulseUpgradeEdgeMessage({
+        memberId: MEMBER_ID,
+        periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      }),
+      replyToMessageId: "msg_after_notice_claimed",
+      signal: undefined,
+    });
     expect(usage.prisma.hostedAiUsagePeriod.updateMany).toHaveBeenCalledTimes(1);
     expect(usage.getPeriod("2026-04-01T00:00:00.000Z")).toMatchObject({
-      limitNoticeSentAt: alreadyClaimedAt,
+      limitNoticeSentAt: new Date("2026-04-30T12:00:00.000Z"),
       spentUsdMicros: monthlyLimit,
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
@@ -741,10 +756,13 @@ function createUsageResetPrismaFixture(input: {
       }),
       updateMany: vi.fn(async (periodInput: {
         data: {
-          limitNoticeSentAt?: Date;
+          limitNoticeSentAt?: Date | null;
         };
         where: {
-          limitNoticeSentAt?: null;
+          blockedAt?: {
+            not: null;
+          };
+          limitNoticeSentAt?: Date | null;
           memberId: string;
           periodStart: Date;
         };
@@ -752,13 +770,29 @@ function createUsageResetPrismaFixture(input: {
         const period = periods.get(periodKey(periodInput.where.periodStart));
         if (
           !period ||
-          period.memberId !== periodInput.where.memberId ||
-          period.limitNoticeSentAt !== null
+          period.memberId !== periodInput.where.memberId
         ) {
           return { count: 0 };
         }
+        if (periodInput.where.blockedAt?.not === null && period.blockedAt === null) {
+          return { count: 0 };
+        }
+        if ("limitNoticeSentAt" in periodInput.where) {
+          const expected = periodInput.where.limitNoticeSentAt;
+          if (expected === null && period.limitNoticeSentAt !== null) {
+            return { count: 0 };
+          }
+          if (
+            expected instanceof Date
+            && period.limitNoticeSentAt?.getTime() !== expected.getTime()
+          ) {
+            return { count: 0 };
+          }
+        }
 
-        period.limitNoticeSentAt = periodInput.data.limitNoticeSentAt ?? null;
+        if ("limitNoticeSentAt" in periodInput.data) {
+          period.limitNoticeSentAt = periodInput.data.limitNoticeSentAt ?? null;
+        }
         periods.set(periodKey(period.periodStart), period);
         return { count: 1 };
       }),
