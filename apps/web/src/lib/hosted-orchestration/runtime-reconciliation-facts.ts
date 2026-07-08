@@ -453,25 +453,6 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     if (legacyDeliverySentNotice) {
       return { status: "already_notified" };
     }
-    const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
-      attemptedAt: sentAt,
-      idempotencyKey,
-      prisma: input.prisma,
-      source: "hosted_runtime_ai_usage_limit_notice",
-      sourceRef: wake.eventId,
-      targetKind: "telegram_thread",
-      template: "ai_usage_quota",
-    });
-    if (!claimed.claimed) {
-      const currentDeliverySentNotice =
-        await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
-          idempotencyKeys: [idempotencyKey],
-          prisma: input.prisma,
-        });
-      return currentDeliverySentNotice
-        ? { status: "already_notified" }
-        : buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
-    }
     const legacyDeliveryInFlight =
       await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
         attemptedAt: sentAt,
@@ -500,6 +481,25 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     });
     if (!rolloutClaimedNotice) {
       return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+    }
+    const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: sentAt,
+      idempotencyKey,
+      prisma: input.prisma,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: wake.eventId,
+      targetKind: "telegram_thread",
+      template: "ai_usage_quota",
+    });
+    if (!claimed.claimed) {
+      const currentDeliverySentNotice =
+        await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+          idempotencyKeys: [idempotencyKey],
+          prisma: input.prisma,
+        });
+      return currentDeliverySentNotice
+        ? { status: "already_notified" }
+        : buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
 
     try {
