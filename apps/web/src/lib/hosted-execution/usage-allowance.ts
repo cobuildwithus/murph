@@ -1850,7 +1850,7 @@ function matchHostedAiUsageOpenAiImageRecord(
   }
 
   const tokenBuckets = buildHostedAiUsageAllowanceOpenAiImageTokenBuckets(record);
-  if (!hasHostedAiUsageAllowanceOpenAiImageProviderUsageTokens(tokenBuckets)) {
+  if (!hasHostedAiUsageAllowanceOpenAiImageProviderUsagePricingBasis(tokenBuckets)) {
     throw new TypeError(
       "OpenAI image hosted AI usage requires provider usage tokens.",
     );
@@ -2017,13 +2017,14 @@ function buildHostedAiUsageAllowanceOpenAiImageTokenBuckets(
   };
 }
 
-function hasHostedAiUsageAllowanceOpenAiImageProviderUsageTokens(
+function hasHostedAiUsageAllowanceOpenAiImageProviderUsagePricingBasis(
   tokenBuckets: HostedAiUsageAllowanceOpenAiImageTokenBuckets,
 ): boolean {
-  return tokenBuckets.textInputTokens > 0n
+  const hasInputPricingBasis = tokenBuckets.textInputTokens > 0n
     || tokenBuckets.imageInputTokens > 0n
-    || tokenBuckets.unclassifiedInputTokens > 0n
-    || tokenBuckets.outputTokens > 0n;
+    || tokenBuckets.unclassifiedInputTokens > 0n;
+
+  return hasInputPricingBasis && tokenBuckets.outputTokens > 0n;
 }
 
 function readHostedAiUsageOpenAiImageOutputTokens(

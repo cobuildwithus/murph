@@ -225,6 +225,60 @@ describe("hosted AI usage allowance pricing", () => {
     }
   });
 
+  it("rejects OpenAI image usage when price-critical usage buckets are partial", () => {
+    const records = [
+      {
+        ...BASE_USAGE_RECORD,
+        cachedInputTokens: 100,
+        inputTokens: 1_300,
+        outputTokens: null,
+        provider: "openai-images",
+        providerName: "OpenAI Images",
+        rawUsageJson: {
+          input_tokens: 1_300,
+          input_tokens_details: {
+            cached_tokens: 100,
+            image_tokens: 1_000,
+            text_tokens: 300,
+          },
+          total_tokens: 1_300,
+        },
+        requestedModel: "gpt-image-2",
+        servedModel: null,
+        totalTokens: 1_300,
+        usageExtractionSourcePath: "openai.images.generate",
+        usageExtractionVersion: "openai-images-v1",
+      },
+      {
+        ...BASE_USAGE_RECORD,
+        cachedInputTokens: null,
+        inputTokens: null,
+        outputTokens: 400,
+        provider: "openai-images",
+        providerName: "OpenAI Images",
+        rawUsageJson: {
+          output_tokens: 400,
+          output_tokens_details: {
+            image_tokens: 400,
+            reasoning_tokens: 0,
+            text_tokens: 0,
+          },
+          total_tokens: 400,
+        },
+        requestedModel: "gpt-image-2",
+        servedModel: null,
+        totalTokens: 400,
+        usageExtractionSourcePath: "openai.images.generate",
+        usageExtractionVersion: "openai-images-v1",
+      },
+    ] satisfies AssistantUsageRecord[];
+
+    for (const record of records) {
+      expect(() => priceHostedAiUsageForAllowance(record))
+        .toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+    }
+  });
+
   it("rejects OpenAI image usage with OpenAI flex token pricing", () => {
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
@@ -823,17 +877,9 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
-  it("fails image accounting before claiming rows when provider usage tokens are missing", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
-    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
-    const tx = createAllowanceTx({
-      executeRaw,
-      hostedAiUsageUpdateMany: updateMany,
-    });
-
-    await expect(accountHostedAiUsageForAllowanceTx({
-      memberId: "member_123",
-      record: {
+  it("fails image accounting before claiming rows when provider usage pricing basis is missing", async () => {
+    const records = [
+      {
         ...BASE_USAGE_RECORD,
         cachedInputTokens: null,
         inputTokens: null,
@@ -847,11 +893,69 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         usageExtractionSourcePath: "openai.images.generate",
         usageExtractionVersion: "openai-images-v1",
       },
-      tx: tx as never,
-    })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+      {
+        ...BASE_USAGE_RECORD,
+        cachedInputTokens: 100,
+        inputTokens: 1_300,
+        outputTokens: null,
+        provider: "openai-images",
+        providerName: "OpenAI Images",
+        rawUsageJson: {
+          input_tokens: 1_300,
+          input_tokens_details: {
+            cached_tokens: 100,
+            image_tokens: 1_000,
+            text_tokens: 300,
+          },
+          total_tokens: 1_300,
+        },
+        requestedModel: "gpt-image-2",
+        servedModel: null,
+        totalTokens: 1_300,
+        usageExtractionSourcePath: "openai.images.generate",
+        usageExtractionVersion: "openai-images-v1",
+      },
+      {
+        ...BASE_USAGE_RECORD,
+        cachedInputTokens: null,
+        inputTokens: null,
+        outputTokens: 400,
+        provider: "openai-images",
+        providerName: "OpenAI Images",
+        rawUsageJson: {
+          output_tokens: 400,
+          output_tokens_details: {
+            image_tokens: 400,
+            reasoning_tokens: 0,
+            text_tokens: 0,
+          },
+          total_tokens: 400,
+        },
+        requestedModel: "gpt-image-2",
+        servedModel: null,
+        totalTokens: 400,
+        usageExtractionSourcePath: "openai.images.generate",
+        usageExtractionVersion: "openai-images-v1",
+      },
+    ] satisfies AssistantUsageRecord[];
 
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(executeRaw).not.toHaveBeenCalled();
+    for (const record of records) {
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+      const tx = createAllowanceTx({
+        executeRaw,
+        hostedAiUsageUpdateMany: updateMany,
+      });
+
+      await expect(accountHostedAiUsageForAllowanceTx({
+        memberId: "member_123",
+        record,
+        tx: tx as never,
+      })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+
+      expect(updateMany).not.toHaveBeenCalled();
+      expect(executeRaw).not.toHaveBeenCalled();
+    }
   });
 
   it("does not update period metadata again when allowanceAccountedAt was already set", async () => {
