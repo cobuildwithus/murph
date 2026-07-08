@@ -298,7 +298,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
   });
 
-  it("ignores a no-offer match when the thread has no unbound offer reservation", async () => {
+  it("ignores a no-offer match without consulting unbound thread reservations", async () => {
     mocks.acceptHostedGroupJoinOfferTx.mockRejectedValueOnce(hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
       httpStatus: 404,
@@ -319,109 +319,11 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedGroupJoinOffer.updateMany).not.toHaveBeenCalled();
+    expect(prisma.hostedGroupJoinOffer.findFirst).not.toHaveBeenCalled();
   });
 
-  it("revokes stale unbound reservations before ignoring a no-offer match", async () => {
-    mocks.acceptHostedGroupJoinOfferTx.mockRejectedValueOnce(hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
-      httpStatus: 404,
-      message: "This group offer is no longer active.",
-      retryable: false,
-    }));
-    const event = parseReactionEvent({
-      reactionType: "like",
-    });
-    const prisma = createPrismaStub({
-      routeContainerMemberId: "member_group_runtime",
-      unboundOffer: false,
-    });
-
-    await expect(handleHostedGroupJoinOfferReaction({
-      event,
-      prisma,
-    })).resolves.toEqual({
-      reason: "no_offer_match",
-      status: "ignored",
-    });
-
-    const bindingGraceCutoff = new Date(event.providerCreatedAt.getTime() - 5 * 60 * 1000);
-    expect(prisma.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
-      data: { revokedAt: event.providerCreatedAt },
-      where: {
-        group: { runtimeMemberId: "member_group_runtime" },
-        messageLookupKey: null,
-        postedAt: { lt: bindingGraceCutoff },
-        revokedAt: null,
-      },
-    });
-    expect(prisma.hostedGroupJoinOffer.findFirst).toHaveBeenCalledWith({
-      select: { id: true },
-      where: {
-        group: { runtimeMemberId: "member_group_runtime" },
-        messageLookupKey: null,
-        postedAt: { gte: bindingGraceCutoff },
-        revokedAt: null,
-      },
-    });
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
-  });
-
-  it("throws retryably when the thread has an unbound offer reservation", async () => {
-    mocks.acceptHostedGroupJoinOfferTx.mockRejectedValueOnce(hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
-      httpStatus: 404,
-      message: "This group offer is no longer active.",
-      retryable: false,
-    }));
-    const event = parseReactionEvent({
-      reactionType: "like",
-    });
-    const prisma = createPrismaStub({
-      routeContainerMemberId: "member_group_runtime",
-      unboundOffer: true,
-    });
-
-    await expect(handleHostedGroupJoinOfferReaction({
-      event,
-      prisma,
-    })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
-      retryable: true,
-    });
-
-    const bindingGraceCutoff = new Date(event.providerCreatedAt.getTime() - 5 * 60 * 1000);
-    expect(prisma.hostedThreadRoute.findFirst).toHaveBeenCalledWith({
-      select: { containerMemberId: true },
-      where: {
-        channel: "linq",
-        threadIdentityLookupKey: {
-          in: createHostedExternalThreadIdentityLookupKeyReadCandidates({
-            channel: "linq",
-            threadId: "chat_group_1",
-          }),
-        },
-      },
-    });
-    expect(prisma.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
-      data: { revokedAt: event.providerCreatedAt },
-      where: {
-        group: { runtimeMemberId: "member_group_runtime" },
-        messageLookupKey: null,
-        postedAt: { lt: bindingGraceCutoff },
-        revokedAt: null,
-      },
-    });
-    expect(prisma.hostedGroupJoinOffer.findFirst).toHaveBeenCalledWith({
-      select: { id: true },
-      where: {
-        group: { runtimeMemberId: "member_group_runtime" },
-        messageLookupKey: null,
-        postedAt: { gte: bindingGraceCutoff },
-        revokedAt: null,
-      },
-    });
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
-  });
 });
 
 function parseReactionEvent(input: {

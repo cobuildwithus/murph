@@ -8,6 +8,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import {
+  deleteHostedLinqMessage,
   sendHostedLinqChatMessage,
   sendHostedLinqReadReceipt,
   shareHostedLinqContactCard,
@@ -228,6 +229,70 @@ describe("sendHostedLinqReadReceipt", () => {
         signal: expect.any(AbortSignal),
       }),
     );
+  });
+});
+
+describe("deleteHostedLinqMessage", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("deletes provider-visible Linq messages by message id", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteHostedLinqMessage({
+      messageId: "msg_offer_123",
+    })).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("messages/msg_offer_123", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({
+        body: undefined,
+        method: "DELETE",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it("treats missing provider-visible Linq messages as already deleted", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteHostedLinqMessage({
+      messageId: "msg_missing",
+    })).resolves.toBeUndefined();
+  });
+
+  it("marks transient Linq delete failures as retryable", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({}, 503);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteHostedLinqMessage({
+      messageId: "msg_offer_123",
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq message delete failed with HTTP 503.",
+      retryable: true,
+    });
   });
 });
 

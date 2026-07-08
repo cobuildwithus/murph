@@ -364,6 +364,26 @@ Focused follow-up verification:
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/phone-calls-call-circle-result.test.ts apps/web/test/phone-calls-service.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/phone-calls-retell-real-consult-route.test.ts apps/web/test/call-circle-cron-route.test.ts apps/web/test/hosted-retention-cleanup.test.ts apps/web/test/hosted-retention-cron-route.test.ts apps/web/test/production-migration-guard.test.ts apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts apps/web/test/hosted-onboarding-webhook-idempotency.test.ts`
 - `pnpm --filter @murphai/hosted-web typecheck`
 
+## ReviewGPT Follow-Up 26 2026-07-08
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- Provider-attempted Call Circle bridge starts with no stored provider call id
+  are not Call Circle scheduler facts to terminalize. Follow-Up 26 removes
+  the scheduler-owned start-timeout failure branch added in Follow-Up 24; the
+  existing phone-call/Retell recovery owners remain responsible for later
+  provider facts.
+- Thread-scoped unbound offer state is not a consent authority. Reactions now
+  accept only exact provider-message-bound offer rows. When provider send
+  succeeds but DB binding fails, the tool best-effort deletes the specific
+  provider-visible offer and revokes the unbound reservation only after that
+  cleanup succeeds; if cleanup cannot be confirmed, the unbound reservation
+  remains for an idempotent resend/bind retry.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-scheduler.test.ts apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts`
+
 ## ReviewGPT Follow-Up 24 2026-07-08
 
 Accepted findings from the Phlebas PR-head rerun:

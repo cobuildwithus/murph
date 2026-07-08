@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
   createHostedGroupJoinOfferFingerprint: vi.fn(),
+  deleteHostedLinqMessage: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
@@ -56,6 +57,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+  deleteHostedLinqMessage: mocks.deleteHostedLinqMessage,
   getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
     Boolean(
@@ -199,6 +201,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
     });
+    mocks.deleteHostedLinqMessage.mockResolvedValue(undefined);
     mocks.revokeUnboundHostedGroupJoinOfferTx.mockResolvedValue(true);
   });
 
@@ -753,7 +756,45 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
-  it("leaves the reserved provider offer in place so retry can bind the recovered message", async () => {
+  it("deletes and revokes a sent provider offer when binding fails", async () => {
+    mocks.sendHostedLinqChatMessage.mockResolvedValue({
+      chatId: "chat_group_1",
+      messageId: "msg_offer_1",
+    });
+    mocks.bindHostedGroupJoinOfferTx.mockRejectedValueOnce(new Error("temporary db failure"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "React here and you're in. Joining shares {{share_scope}} with this group; manage it at {{join_url}}.",
+          projectionKinds: ["sleep-times.v0" as const],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "offer_binding_failed",
+      },
+    });
+
+    expect(mocks.deleteHostedLinqMessage).toHaveBeenCalledWith({
+      messageId: "msg_offer_1",
+    });
+    expect(mocks.revokeUnboundHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      now: expect.any(Date),
+      offerId: "hgrpjo_1",
+      tx: fakeTx,
+    });
+  });
+
+  it("leaves the reserved provider offer in place when cleanup fails so retry can bind the recovered message", async () => {
     mocks.sendHostedLinqChatMessage
       .mockResolvedValueOnce({
         chatId: "chat_group_1",
@@ -777,6 +818,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
           vaultShareProjectionKinds: ["sleep-times.v0"],
         },
       });
+    mocks.deleteHostedLinqMessage.mockRejectedValueOnce(new Error("delete failed"));
 
     const request = {
       action: "post_join_offer" as const,
@@ -798,6 +840,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         status: "unavailable",
         unavailableReason: "offer_binding_failed",
       },
+    });
+    expect(mocks.deleteHostedLinqMessage).toHaveBeenCalledWith({
+      messageId: "msg_offer_1",
     });
     expect(mocks.revokeUnboundHostedGroupJoinOfferTx).not.toHaveBeenCalled();
     await expect(handleHostedRuntimeGroupTool({

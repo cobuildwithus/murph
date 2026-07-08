@@ -27,6 +27,7 @@ import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
+  deleteHostedLinqMessage,
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
   isHostedLinqAttachmentSendPrepareFailure,
@@ -555,6 +556,13 @@ async function postHostedRuntimeGroupOffer(input: {
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch {
+    await retireSentUnboundHostedGroupJoinOfferBestEffort({
+      groupId: created.group.id,
+      messageId: sent.messageId,
+      now,
+      offerId: offerReservation.id,
+      prisma,
+    });
     return unavailable("offer_binding_failed");
   }
 
@@ -588,8 +596,23 @@ async function revokeReservedHostedGroupJoinOfferBestEffort(input: {
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch {
     // The post already failed; no user-visible offer acceptance should depend
-    // on this best-effort cleanup, and stale reservations expire on reaction.
+    // on this best-effort cleanup.
   }
+}
+
+async function retireSentUnboundHostedGroupJoinOfferBestEffort(input: {
+  groupId: string;
+  messageId: string;
+  now: Date;
+  offerId: string;
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<void> {
+  try {
+    await deleteHostedLinqMessage({ messageId: input.messageId });
+  } catch {
+    return;
+  }
+  await revokeReservedHostedGroupJoinOfferBestEffort(input);
 }
 
 function buildHostedGroupJoinOfferMessage(input: {

@@ -13,7 +13,7 @@ import {
   acceptCallCircleOfferEnrollment,
   canAppendCallCircleSetupNotification,
 } from "../call-circle/participant-store";
-import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
@@ -46,8 +46,6 @@ export type HostedGroupJoinOfferReactionResult =
 type HostedGroupJoinOfferReactionAcceptanceResult = {
   callCircleSetupSignal: CallCircleNotificationSignal | null;
 };
-
-const HOSTED_GROUP_JOIN_OFFER_BINDING_GRACE_MS = 5 * 60 * 1000;
 
 export async function handleHostedGroupJoinOfferReaction(input: {
   event: ParsedHostedLinqProviderEvent;
@@ -122,21 +120,6 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     if (!reason) {
       throw error;
     }
-    if (
-      reason === "no_offer_match"
-      && await hasUnboundHostedGroupJoinOfferForReactionThread({
-        now: input.event.providerCreatedAt,
-        prisma: input.prisma,
-        threadIdentityLookupKeyReadCandidates,
-      })
-    ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
-        httpStatus: 503,
-        message: "This group offer is still being bound to the provider message.",
-        retryable: true,
-      });
-    }
     return skipHostedGroupJoinOfferReaction({
       reason,
     });
@@ -180,55 +163,6 @@ async function acceptHostedGroupJoinOfferReactionForMember(input: {
       : null;
     return { callCircleSetupSignal };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-}
-
-async function hasUnboundHostedGroupJoinOfferForReactionThread(input: {
-  now: Date;
-  prisma: PrismaClient;
-  threadIdentityLookupKeyReadCandidates: readonly string[];
-}): Promise<boolean> {
-  const threadIdentityLookupKeyReadCandidates = normalizeLookupKeyCandidates(
-    input.threadIdentityLookupKeyReadCandidates,
-  );
-  if (threadIdentityLookupKeyReadCandidates.length === 0) {
-    return false;
-  }
-  const route = await input.prisma.hostedThreadRoute.findFirst({
-    select: { containerMemberId: true },
-    where: {
-      channel: "linq",
-      threadIdentityLookupKey: { in: threadIdentityLookupKeyReadCandidates },
-    },
-  });
-  if (!route) {
-    return false;
-  }
-  const activeCutoff = new Date(
-    input.now.getTime() - HOSTED_GROUP_JOIN_OFFER_BINDING_GRACE_MS,
-  );
-  await input.prisma.hostedGroupJoinOffer.updateMany({
-    data: { revokedAt: input.now },
-    where: {
-      group: {
-        runtimeMemberId: route.containerMemberId,
-      },
-      messageLookupKey: null,
-      postedAt: { lt: activeCutoff },
-      revokedAt: null,
-    },
-  });
-  const offer = await input.prisma.hostedGroupJoinOffer.findFirst({
-    select: { id: true },
-    where: {
-      group: {
-        runtimeMemberId: route.containerMemberId,
-      },
-      messageLookupKey: null,
-      postedAt: { gte: activeCutoff },
-      revokedAt: null,
-    },
-  });
-  return offer !== null;
 }
 
 async function applyHostedGroupOfferFeatureActivationsTx(input: {
