@@ -191,6 +191,59 @@ describe('executeGenerateImageTool', () => {
     })
   })
 
+  it('emits a partial usage draft when a successful image response omits usage', async () => {
+    const uploader = {
+      uploadGeneratedImage: vi.fn(async (input) => ({
+        alt: input.alt,
+        kind: 'image' as const,
+        source: input.source,
+        url: 'https://imagedelivery.net/account/image/public',
+      })),
+    }
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+      }, {
+        headers: {
+          'x-request-id': 'req_image_no_usage',
+        },
+      }))
+
+    const result = await executeGenerateImageTool({
+      args: {
+        alt: 'A product photo',
+        outputFormat: 'webp',
+        prompt: 'Render the object.',
+        quality: 'high',
+        size: '1536x1024',
+      },
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      hostedGeneratedImageUploader: uploader,
+      providerRequestOrdinal: 5,
+      requireHostedGeneratedImageUploader: true,
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.usageDraft).toMatchObject({
+      provider: 'openai-images',
+      providerRequestOrdinal: 5,
+      providerRequestOutcome: 'partial',
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        providerName: 'OpenAI Images',
+        providerRequestId: 'req_image_no_usage',
+        rawUsageJson: null,
+        rawUsageJsonHash: null,
+        requestedModel: 'gpt-image-2',
+        totalTokens: null,
+      },
+    })
+  })
+
   it('returns a structured failure when the provider fetch rejects', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('fetch failed')

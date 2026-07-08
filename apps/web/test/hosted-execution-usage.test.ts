@@ -322,6 +322,47 @@ describe("recordHostedAiUsageRecords", () => {
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
+  it("keeps partial image usage rows when provider usage is missing", async () => {
+    const prisma = makeRollbackAwareUsagePrismaClient();
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockRejectedValue(
+      new TypeError("OpenAI image hosted AI usage requires provider usage tokens"),
+    );
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [{
+        ...BASE_USAGE_RECORD,
+        cachedInputTokens: null,
+        inputTokens: null,
+        outputTokens: null,
+        provider: "openai-images",
+        providerName: "OpenAI Images",
+        providerRequestOutcome: "partial",
+        rawUsageJson: null,
+        rawUsageJsonHash: null,
+        requestedModel: "gpt-image-2",
+        servedModel: null,
+        totalTokens: null,
+        usageExtractionSourcePath: "openai.images.generate",
+        usageExtractionVersion: "openai-images-v1",
+      }],
+    })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.readHostedAiUsageRows()).toEqual([
+      expect.objectContaining({
+        allowanceAccountedAt: null,
+        id: "turn_123.attempt-1",
+        provider: "openai-images",
+        rawUsageJson: null,
+      }),
+    ]);
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+  });
+
   it("rolls back succeeded malformed image usage rows when allowance accounting fails", async () => {
     const prisma = makeRollbackAwareUsagePrismaClient();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockRejectedValue(
@@ -1109,6 +1150,8 @@ function makeRollbackAwareUsagePrismaClient() {
           allowanceCostUsdMicros: null,
           allowanceCounted: null,
           ...args.create,
+          rawUsageJson: args.create.rawUsageJson ?? null,
+          turnProfileJson: args.create.turnProfileJson ?? null,
         };
         workingRows.set(args.where.id, row);
         return row;

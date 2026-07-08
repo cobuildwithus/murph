@@ -237,25 +237,22 @@ function buildGeneratedImageUsageDraft(input: {
   referenceImageTotalBytes: number
   usage: OpenAiImageGenerationUsage | null
   usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath
-}): AssistantProviderUsageDraft | null {
-  if (!input.rawUsageJson || !input.usage) {
-    return null
-  }
-
-  const hasPricingBasis = hasPriceableGeneratedImageUsageBasis(input.usage)
+}): AssistantProviderUsageDraft {
+  const priceableUsage =
+    input.usage && hasPriceableGeneratedImageUsageBasis(input.usage)
+      ? input.usage
+      : null
   return {
     provider: 'openai-images',
     providerRequestOrdinal: input.providerRequestOrdinal,
-    providerRequestOutcome: hasPricingBasis ? 'succeeded' : 'partial',
+    providerRequestOutcome: priceableUsage ? 'succeeded' : 'partial',
     usage: {
       apiKeyEnv: 'OPENAI_API_KEY',
       baseUrl: OPENAI_IMAGES_BASE_URL,
       cacheWriteTokens: null,
-      cachedInputTokens: hasPricingBasis
-        ? input.usage.input_tokens_details?.cached_tokens ?? null
-        : null,
-      inputTokens: hasPricingBasis ? input.usage.input_tokens ?? null : null,
-      outputTokens: hasPricingBasis ? input.usage.output_tokens ?? null : null,
+      cachedInputTokens: priceableUsage?.input_tokens_details?.cached_tokens ?? null,
+      inputTokens: priceableUsage?.input_tokens ?? null,
+      outputTokens: priceableUsage?.output_tokens ?? null,
       providerMetadataJson: {
         imageOutputFormat: input.args.outputFormat,
         imageQuality: input.args.quality,
@@ -269,13 +266,13 @@ function buildGeneratedImageUsageDraft(input: {
       providerName: 'OpenAI Images',
       providerRequestId: input.providerRequestId,
       rawUsageJson: input.rawUsageJson,
-      rawUsageJsonHash: hashAssistantProviderStableJson(input.rawUsageJson),
-      reasoningTokens: hasPricingBasis
-        ? input.usage.output_tokens_details?.reasoning_tokens ?? null
+      rawUsageJsonHash: input.rawUsageJson
+        ? hashAssistantProviderStableJson(input.rawUsageJson)
         : null,
+      reasoningTokens: priceableUsage?.output_tokens_details?.reasoning_tokens ?? null,
       requestedModel: OPENAI_IMAGE_GENERATION_MODEL,
       servedModel: null,
-      totalTokens: hasPricingBasis ? input.usage.total_tokens ?? null : null,
+      totalTokens: priceableUsage?.total_tokens ?? null,
       usageExtractionSourcePath: input.usageExtractionSourcePath,
       usageExtractionVersion: OPENAI_IMAGE_GENERATION_USAGE_EXTRACTION_VERSION,
     },
