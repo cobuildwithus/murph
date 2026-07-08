@@ -33,6 +33,7 @@ vi.mock("@/src/lib/prisma", () => ({
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+	buildHostedVaultShareActivityMinutesProjectionScope,
 	buildHostedVaultShareActivityDistanceProjectionScope,
 	buildHostedVaultShareActivitySessionCountProjectionScope,
 	buildHostedVaultShareProjectionScopeKey,
@@ -40,6 +41,9 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 
 const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
+const RUNNING_MINUTES_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
+	activityKind: "running",
+});
 const RUNNING_DISTANCE_SCOPE = buildHostedVaultShareActivityDistanceProjectionScope({
 	activityKind: "running",
 });
@@ -112,6 +116,7 @@ describe("vault-share active-kinds route", () => {
 	it("filters new selector scopes from old runners that do not declare support", async () => {
 		mocks.readDeliverableHostedVaultShareProjectionScopes.mockResolvedValue([
 			ACTIVITY_SCOPE,
+			RUNNING_MINUTES_SCOPE,
 			RUNNING_DISTANCE_SCOPE,
 			RUNNING_SESSION_COUNT_SCOPE,
 		]);
@@ -120,8 +125,17 @@ describe("vault-share active-kinds route", () => {
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({
-			projectionKinds: ["activity-days.v0"],
-			projectionScopes: [ACTIVITY_SCOPE],
+			projectionKinds: [
+				"activity-days.v0",
+				"activity-minutes-days.v1",
+			],
+			projectionScopes: [
+				ACTIVITY_SCOPE,
+				RUNNING_MINUTES_SCOPE,
+			].sort((left, right) =>
+				buildHostedVaultShareProjectionScopeKey(left)
+					.localeCompare(buildHostedVaultShareProjectionScopeKey(right))
+			),
 		});
 	});
 

@@ -182,6 +182,15 @@ newly granted `activity-distance-days.v1` and
 that callback rather than making active-scope parsing fail or suppressing
 existing vault-share offers.
 
+This omitted-capability fallback is temporary compatibility owned by `apps/web`.
+It may be removed after the selector-scope runner bundle has been deployed with
+`container_rollout=immediate`, production logs show current runners send exact
+`supportedProjectionScope` values on the group-tool and active-scope callbacks,
+and the rollback window to a runner bundle without exact scope support has
+closed. Until removal, the fallback scope set must stay frozen to the
+pre-distance/count protocol and must not derive support for future projection
+kinds from the live registry.
+
 That callback negotiation does not protect the destination mailbox importer.
 Vault-share delivery wakes are appended by web directly into the destination
 member mailbox, and the destination runner does not declare projection-scope

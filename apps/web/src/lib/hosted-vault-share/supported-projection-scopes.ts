@@ -1,23 +1,51 @@
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
-  HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   parseHostedVaultShareProjectionScopeKey,
+  type HostedVaultShareFixedProjectionKind,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
 const SUPPORTED_PROJECTION_SCOPE_PARAM = "supportedProjectionScope";
 const LEGACY_SUPPORTED_PROJECTION_KIND_PARAM = "supportedProjectionKind";
 
+// Temporary omitted-capability fallback for runner bundles that predate exact
+// supportedProjectionScope negotiation. Keep this frozen so future registry
+// additions are not granted to runners that did not declare exact support.
+const LEGACY_OMITTED_CAPABILITY_FIXED_PROJECTION_KINDS = [
+  "group-email.v0",
+  "profile-name.v0",
+  "sleep-times.v0",
+  "workout-days.v0",
+  "heart-rate-zones-days.v0",
+  "activity-days.v0",
+  "steps-days.v0",
+  "max-heart-rate-days.v0",
+  "distance-days.v0",
+  "active-calories-days.v0",
+  "elevation-gain-days.v0",
+  "floors-climbed-days.v0",
+  "day-strain-days.v0",
+  "workout-strain-days.v0",
+  "activity-score-days.v0",
+  "vo2-max-days.v0",
+  "resting-heart-rate-days.v0",
+  "hrv-days.v0",
+] as const satisfies readonly HostedVaultShareFixedProjectionKind[];
+
 const DEFAULT_SUPPORTED_PROJECTION_SCOPE_KEYS =
-  new Set(HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES
-    .filter((scope) =>
-      (HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS as readonly string[])
-        .includes(scope.projectionKind)
-      || scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND
-    )
-    .map((scope) => buildHostedVaultShareProjectionScopeKey(scope)));
+  new Set([
+    ...LEGACY_OMITTED_CAPABILITY_FIXED_PROJECTION_KINDS
+      .map((projectionKind) => buildHostedVaultShareProjectionScopeKey({
+        projectionKind,
+      })),
+    ...HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES
+      .filter((scope) =>
+        scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND
+      )
+      .map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),
+  ]);
 
 export function readHostedVaultShareSupportedProjectionScopeKeysFromRequest(
   request: Request,
