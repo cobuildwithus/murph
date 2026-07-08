@@ -570,6 +570,7 @@ function wearableDatasetFromProjectedBundle(bundle: ProjectedWearableSummaryBund
 
   return {
     activitySessionAggregates,
+    metricSuppressionEvidence: [],
     metricCandidates,
     provenanceDiagnostics: [],
     rawMetricCandidates: metricCandidates,
