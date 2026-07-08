@@ -7,11 +7,14 @@ import {
   memoryDocumentRelativePath,
   parseMemoryDocument,
   renderMemoryDocument,
+  resolveMemoryDisplayName,
+  type MemoryDisplayNameResolution,
   type MemoryDocumentSnapshot,
   type MemoryRecord,
 } from "@murphai/contracts";
 
 export type {
+  MemoryDisplayNameResolution,
   MemoryDocumentSnapshot,
   MemoryRecord,
 } from "@murphai/contracts";
@@ -57,6 +60,12 @@ export async function getMemoryRecord(
 ): Promise<MemoryRecord | null> {
   const snapshot = await readMemoryDocument(vaultRoot);
   return snapshot.records.find((record) => record.id === recordId) ?? null;
+}
+
+export async function readMemoryDisplayNameRuntime(
+  vaultRoot: string,
+): Promise<MemoryDisplayNameResolution | null> {
+  return resolveMemoryDisplayName(await readMemoryDocument(vaultRoot));
 }
 
 export async function buildMemoryReadPromptBlock(

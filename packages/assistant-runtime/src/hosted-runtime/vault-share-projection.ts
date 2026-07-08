@@ -1,8 +1,14 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import {
   activityTextMatchesKind,
+  hasMemoryDisplayNameEvidence,
   isStrictIsoDate,
+  memoryDisplayNameSchema,
+  parseFrontmatterDocument,
+  resolveMemoryDisplayName,
 } from "@murphai/contracts";
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -22,7 +28,7 @@ import {
   listCanonicalEntities,
   listMetricPoints,
   listMetricPointsBatch,
-  readProfileDocumentRuntime,
+  readMemoryDocument,
   resolveAdherenceObservationActivityKind,
   selectMetricSeries,
   summarizeWearableSleepRuntime,
@@ -81,6 +87,16 @@ export type ActivitySessionProjectionRow = MetricSourceRevisionPoint & {
   endedAt?: string | null;
   startedAt?: string | null;
 };
+
+type ProjectableProfileNameResolution = {
+  displayName: string;
+  occurredAt: string;
+  sourceRevision: string;
+};
+
+type ProjectableMemoryProfileNameRead =
+  | { resolution: ProjectableProfileNameResolution; status: "resolved" }
+  | { status: "absent" | "no-evidence" | "unresolved" };
 
 export interface HostedVaultShareProjectionOfferResult {
   outcome:
@@ -226,6 +242,15 @@ function uniqueHostedVaultShareProjectionScopes(
   return unique;
 }
 
+function isMissingFileError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "ENOENT"
+  );
+}
+
 /**
  * Kind outcomes collapse to one summary for the existing single-outcome logging seam:
  * any error is worth the warn log, otherwise any delivery counts as delivered.
@@ -242,37 +267,120 @@ function combineHostedVaultShareOfferOutcomes(
 }
 
 /**
- * The profile display name projects only from the typed canonical profile document —
- * never parsed out of freeform memory text. occurredAt reuses the document's own
- * updatedAt so retries stay byte-identical and the only plaintext mailbox metadata is
- * when the name was set.
+ * The group-visible display name projects from canonical memory. The resolver prefers
+ * the typed memory record and only uses narrow legacy Identity memories as a backfill.
+ * occurredAt reuses the source memory record's updatedAt so retries stay byte-identical.
  */
 export async function readProjectableProfileName(
   vaultRoot: string,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
-  const snapshot = await readProfileDocumentRuntime(vaultRoot);
-  const displayName = snapshot.frontmatter.displayName;
-
-  if (
-    !displayName
-    || displayName.length > HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH
-    || !Number.isFinite(Date.parse(snapshot.frontmatter.updatedAt))
-  ) {
+  const memoryRead = await readProjectableMemoryProfileName(vaultRoot);
+  const resolved =
+    memoryRead.status === "resolved"
+      ? memoryRead.resolution
+      : memoryRead.status === "absent" || memoryRead.status === "no-evidence"
+        ? await readProjectableLegacyProfileName(vaultRoot)
+        : null;
+  if (resolved === null) {
     return [];
   }
 
   return [
     {
-      data: { displayName },
-      occurredAt: new Date(Date.parse(snapshot.frontmatter.updatedAt)).toISOString(),
+      data: { displayName: resolved.displayName },
+      occurredAt: resolved.occurredAt,
       recordKey: HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
+      sourceRevision: resolved.sourceRevision,
+    },
+  ];
+}
+
+async function readProjectableMemoryProfileName(
+  vaultRoot: string,
+): Promise<ProjectableMemoryProfileNameRead> {
+  const snapshot = await readMemoryDocument(vaultRoot).catch(() => null);
+  if (snapshot === null) {
+    return { status: "unresolved" };
+  }
+  if (!snapshot.exists) {
+    return { status: "absent" };
+  }
+  if (!hasMemoryDisplayNameEvidence(snapshot)) {
+    return { status: "no-evidence" };
+  }
+
+  const resolved = resolveMemoryDisplayName(snapshot);
+  if (
+    resolved === null
+    || resolved.displayName.length > HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH
+    || !Number.isFinite(Date.parse(resolved.record.updatedAt))
+  ) {
+    return { status: "unresolved" };
+  }
+
+  return {
+    resolution: {
+      displayName: resolved.displayName,
+      occurredAt: new Date(Date.parse(resolved.record.updatedAt)).toISOString(),
       sourceRevision: hashOpaqueSourceRevision({
-        profileUpdatedAt: snapshot.frontmatter.updatedAt,
+        memoryDisplayNameRecordId: resolved.record.id,
+        memoryDisplayNameSource: resolved.source,
+        memoryDisplayNameUpdatedAt: resolved.record.updatedAt,
         projectionKind: "profile-name.v0",
         recordKey: HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
       }),
     },
-  ];
+    status: "resolved",
+  };
+}
+
+async function readProjectableLegacyProfileName(
+  vaultRoot: string,
+): Promise<ProjectableProfileNameResolution | null> {
+  let markdown: string;
+  try {
+    markdown = await readFile(path.join(vaultRoot, "bank/profile.md"), "utf8");
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return null;
+    }
+    throw error;
+  }
+
+  const frontmatter = parseFrontmatterDocument(markdown).attributes;
+  if (
+    frontmatter === null
+    || typeof frontmatter !== "object"
+    || Array.isArray(frontmatter)
+  ) {
+    return null;
+  }
+
+  const displayName = memoryDisplayNameSchema.safeParse(
+    (frontmatter as { displayName?: unknown }).displayName,
+  );
+  const updatedAt = (frontmatter as { updatedAt?: unknown }).updatedAt;
+  const updatedAtMs = typeof updatedAt === "string" ? Date.parse(updatedAt) : NaN;
+  if (
+    !displayName.success
+    || displayName.data.length > HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH
+    || !Number.isFinite(updatedAtMs)
+  ) {
+    return null;
+  }
+
+  const occurredAt = new Date(updatedAtMs).toISOString();
+  return {
+    displayName: displayName.data,
+    occurredAt,
+    sourceRevision: hashOpaqueSourceRevision({
+      legacyProfileDisplayName: displayName.data,
+      legacyProfilePath: "bank/profile.md",
+      legacyProfileUpdatedAt: occurredAt,
+      projectionKind: "profile-name.v0",
+      recordKey: HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
+    }),
+  };
 }
 
 export async function readProjectableSleepNights(

@@ -1295,7 +1295,10 @@ describe('assistant skill assets', () => {
       'fall back to Identity or Context memory only for facts with no structured home',
     )
     expect(raw).toContain(
-      'preferred name, demographics, lifestyle context, interests, pregnancy or nursing status',
+      '`vault-cli memory set-name` for the preferred name',
+    )
+    expect(raw).toContain(
+      'such as demographics, lifestyle context, interests, pregnancy or nursing status',
     )
     expect(raw).toContain(
       "Save dated facts with the current prompt's local date rather than inferring a birthday or onset",
