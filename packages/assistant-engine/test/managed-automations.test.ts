@@ -459,6 +459,16 @@ describe('applyMurphManagedAutomations', () => {
       title: 'Weekly health digest',
     })
     expect(digestRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.digest)
+    expect(digestRecord?.tags).toContain('murph-managed:weekly-health-digest')
+    expect(digestRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(digestRecord?.instructions).toContain('still remember ten seconds after reading')
+    expect(digestRecord?.instructions).toContain('New data alone is not substance')
+    expect(digestRecord?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
+    expect(digestRecord?.instructions).toContain('what was probably noise')
+    expect(digestRecord?.instructions).toContain('Never restate single-day metric values')
+    expect(digestRecord?.instructions).toContain(
+      '{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}',
+    )
 
     const insightRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
@@ -587,6 +597,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.instructions).toContain('do not create one lane per tag')
     expect(researchScoutRecord?.instructions).toContain('vault-cli research scout-batch-payload-schema --format json')
     expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout-batch` once')
+    expect(researchScoutRecord?.instructions).toContain('If none exists, suppress the scheduled message without calling `vault-cli research scout-batch`')
     expect(researchScoutRecord?.instructions).not.toContain('Use `vault-cli research scout` once')
     expect(researchScoutRecord?.instructions).toContain('`topics`, `biomarkers`, `behaviors`, `supplements`, `conditionsOrConcerns`, `goals`, and `activeExperiments`')
     expect(researchScoutRecord?.instructions).toContain('do not use a generic `tags` field')
@@ -603,6 +614,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.instructions).toContain('Recent conversation and automation/regimen changes are veto context')
     expect(researchScoutRecord?.instructions).toContain('stale vault tags')
     expect(researchScoutRecord?.instructions).toContain('incremental value beyond known basics')
+    expect(researchScoutRecord?.instructions).toContain('still remember the point ten seconds after reading')
+    expect(researchScoutRecord?.instructions).toContain('Hard provenance gate: if the note could have been written without this run\'s retrieved sources')
+    expect(researchScoutRecord?.instructions).toContain('Skipping is the expected outcome')
     expect(researchScoutRecord?.instructions).toContain('Do not reuse the provider candidate\'s `actionOrQuestion` as advice')
     expect(researchScoutRecord?.instructions).toContain('Automatically skip generic health news, obvious habit advice')
     expect(researchScoutRecord?.instructions).toContain('`do more support work`, `be consistent`, `sleep better`, `eat protein`, `manage stress`')
