@@ -32,6 +32,7 @@ import {
   appendTranscriptEntries,
   inspectAssistantSessionStorage,
   loadAndPersistResolvedSession,
+  readAssistantRecentSessionIds,
   readAssistantIndexStore,
   readAssistantSession,
   readAssistantTranscriptEntries,
@@ -324,8 +325,20 @@ function hasAssistantSessionProviderOverrideInput(
 
 export async function listAssistantSessions(
   vault: string,
+  options?: {
+    limit?: number
+  },
 ): Promise<AssistantSession[]> {
-  return listAssistantSessionsLocal(vault)
+  if (typeof options?.limit !== 'number') {
+    return listAssistantSessionsLocal(vault)
+  }
+
+  const limit = Math.max(0, Math.trunc(options.limit))
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const sessionIds = await readAssistantRecentSessionIds(paths, { limit })
+    return (await readAssistantSessionsSorted(paths, sessionIds)).slice(0, limit)
+  })
 }
 
 // Maps a Codex thread back to the Murph assistant session that owns it (via

@@ -1,6 +1,7 @@
 import {
   access,
   open,
+  opendir,
   readdir,
   readFile,
   type FileHandle,
@@ -58,6 +59,8 @@ import type { ResolvedAssistantSession } from './types.js'
 export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
 export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
+const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
+const ASSISTANT_RECENT_SESSIONS_LEGACY_SCAN_LIMIT = 50
 
 const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({
   name: 'assistant.automation-state',
@@ -654,8 +657,107 @@ export async function synchronizeAssistantIndexes(
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
+    ...(store.recentSessions !== undefined
+      ? {
+          recentSessions: pruneAssistantRecentSessions({
+            ...store.recentSessions,
+            [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
+          }),
+        }
+      : {}),
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
+}
+
+export async function readAssistantRecentSessionIds(
+  paths: AssistantStatePaths,
+  options: {
+    limit: number
+  },
+): Promise<string[]> {
+  const limit = Math.max(0, Math.trunc(options.limit))
+  if (limit === 0) {
+    return []
+  }
+
+  let raw: string
+  try {
+    raw = await readFile(paths.indexesPath, 'utf8')
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return readAssistantRecentSessionIdsFromDirectoryFallback(paths, limit)
+    }
+    throw error
+  }
+
+  try {
+    const store = assistantAliasStoreSchema.parse(JSON.parse(raw))
+    if (store.recentSessions) {
+      return sortRecentSessionIds(store.recentSessions).slice(0, limit)
+    }
+  } catch {
+    return readAssistantRecentSessionIdsFromDirectoryFallback(paths, limit)
+  }
+
+  return readAssistantRecentSessionIdsFromDirectoryFallback(paths, limit)
+}
+
+function sortRecentSessionIds(
+  recentSessions: Record<string, string>,
+): string[] {
+  return Object.entries(recentSessions)
+    .sort(([, left], [, right]) =>
+      compareAssistantTimestampsAscending(right, left),
+    )
+    .map(([sessionId]) => sessionId)
+}
+
+function pruneAssistantRecentSessions(
+  recentSessions: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(recentSessions)
+      .sort(([, left], [, right]) =>
+        compareAssistantTimestampsAscending(right, left),
+      )
+      .slice(0, ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT),
+  )
+}
+
+async function readAssistantRecentSessionIdsFromDirectoryFallback(
+  paths: AssistantStatePaths,
+  limit: number,
+): Promise<string[]> {
+  const scanLimit = Math.min(
+    Math.max(limit, ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT),
+    ASSISTANT_RECENT_SESSIONS_LEGACY_SCAN_LIMIT,
+  )
+  let directory: Awaited<ReturnType<typeof opendir>>
+  try {
+    directory = await opendir(paths.sessionsDirectory)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return []
+    }
+    throw error
+  }
+
+  const sessionIds: string[] = []
+  try {
+    for (let checked = 0; checked < scanLimit; checked += 1) {
+      const entry = await directory.read()
+      if (!entry) {
+        break
+      }
+      if (entry.isFile() && entry.name.endsWith('.json')) {
+        sessionIds.push(entry.name.replace(/\.json$/u, ''))
+      }
+    }
+  } finally {
+    await directory.close()
+  }
+
+  return sessionIds
 }
 
 export async function writeAutomationState(
@@ -730,6 +832,7 @@ function createInitialAssistantIndexStore(): AssistantAliasStore {
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases: {},
     conversationKeys: {},
+    recentSessions: {},
   })
 }
 
@@ -763,6 +866,7 @@ async function rebuildAssistantIndexStore(
 
   const aliases: Record<string, string> = {}
   const conversationKeys: Record<string, string> = {}
+  const recentSessions: Record<string, string> = {}
   for (const session of sortSessionsForIndexRebuild(sessions)) {
     if (session.alias) {
       aliases[session.alias] = session.sessionId
@@ -770,12 +874,14 @@ async function rebuildAssistantIndexStore(
     if (session.binding.conversationKey) {
       conversationKeys[session.binding.conversationKey] = session.sessionId
     }
+    recentSessions[session.sessionId] = resolveAssistantIndexRebuildTimestamp(session)
   }
 
   const rebuilt = assistantAliasStoreSchema.parse({
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
+    recentSessions: pruneAssistantRecentSessions(recentSessions),
   })
   await writeJsonFileAtomic(paths.indexesPath, rebuilt)
   await appendAssistantRuntimeEventAtPaths(paths, {

@@ -298,6 +298,7 @@ export const assistantAliasStoreSchema = z
     version: z.literal(1),
     aliases: z.record(z.string(), assistantSessionIdSchema),
     conversationKeys: z.record(z.string(), assistantSessionIdSchema),
+    recentSessions: z.record(assistantSessionIdSchema, isoTimestampSchema).optional(),
   })
   .strict()
 

@@ -1408,8 +1408,9 @@ export function registerAssistantCommands(
       async run(context) {
         await assertAssistantInitializedVaultRoot(context.options.vault)
         const limit = normalizeAssistantSessionListLimit(context.options.limit)
-        const sessions = (await listAssistantSessions(context.options.vault))
-          .slice(0, limit)
+        const sessions = await listAssistantSessions(context.options.vault, {
+          limit,
+        })
         return assistantSessionListResultSchema.parse({
           ...buildAssistantStateResultPaths(context.options.vault),
           filters: { limit },

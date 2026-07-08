@@ -1374,7 +1374,7 @@ test('session commands return redacted state paths and session payloads', async 
     vault: 'redacted:/tmp/vault',
   })
   assert.deepEqual(commandMocks.listAssistantSessions.mock.calls, [
-    ['/tmp/vault'],
+    ['/tmp/vault', { limit: 5 }],
   ])
   assert.deepEqual(showResult, {
     session: {
@@ -1386,18 +1386,12 @@ test('session commands return redacted state paths and session payloads', async 
   })
 })
 
-test('session list slices source-of-truth sessions to the bounded page', async () => {
+test('session list requests a bounded source-of-truth page', async () => {
   const commands = createAssistantCli()
   const assistant = readCommandGroup(commands, 'assistant')
   const session = readCommandGroup(assistant.commands, 'session')
 
-  commandMocks.listAssistantSessions.mockResolvedValueOnce([
-    TEST_SESSION,
-    {
-      ...TEST_SESSION,
-      sessionId: 'session-outside-limit',
-    },
-  ])
+  commandMocks.listAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
 
   const listResult = assistantSessionListResultSchema.parse(
     await readCommand(session.commands, 'list').run({
@@ -1412,6 +1406,6 @@ test('session list slices source-of-truth sessions to the bounded page', async (
   assert.equal(listResult.filters.limit, 1)
   assert.equal(listResult.sessions[0]?.sessionId, TEST_SESSION.sessionId)
   assert.deepEqual(commandMocks.listAssistantSessions.mock.calls, [
-    ['/tmp/vault'],
+    ['/tmp/vault', { limit: 1 }],
   ])
 })

@@ -247,7 +247,7 @@ test('bounds session reads to the newest sessions by durable activity', async ()
     }),
   )
 
-  const limited = (await listAssistantSessions(vaultRoot)).slice(0, 1)
+  const limited = await listAssistantSessions(vaultRoot, { limit: 1 })
   expect(limited.map((session) => session.sessionId)).toEqual([
     'session-newer-activity',
   ])
@@ -264,7 +264,7 @@ test('bounds session reads to the newest sessions by durable activity', async ()
     JSON.stringify({ version: 1, aliases: {}, conversationKeys: {} }),
     'utf8',
   )
-  const legacyIndexed = await listAssistantSessions(vaultRoot)
+  const legacyIndexed = await listAssistantSessions(vaultRoot, { limit: 10 })
   expect(legacyIndexed.map((session) => session.sessionId).sort()).toEqual([
     'session-newer-activity',
     'session-older-activity',
@@ -277,7 +277,7 @@ test('bounds session reads to the newest sessions by durable activity', async ()
       sessionId: 'session-post-deploy',
     }),
   )
-  const warmed = await listAssistantSessions(vaultRoot)
+  const warmed = await listAssistantSessions(vaultRoot, { limit: 10 })
   expect(warmed.map((session) => session.sessionId)).toEqual([
     'session-post-deploy',
     'session-newer-activity',

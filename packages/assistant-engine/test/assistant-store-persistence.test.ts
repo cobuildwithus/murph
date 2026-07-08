@@ -15,6 +15,7 @@ import {
 import { listAssistantRuntimeEventsAtPath } from '../src/assistant/runtime-events.ts'
 import {
   appendAssistantTranscriptEntriesWithRefs,
+  listAssistantSessions,
   listAssistantSessionsLocal,
   updateAssistantAutomationState,
 } from '../src/assistant/store.ts'
@@ -427,6 +428,7 @@ describe('assistant store persistence seams', () => {
       version: 1,
       aliases: {},
       conversationKeys: {},
+      recentSessions: {},
     })
 
     const previous = createSession({
@@ -455,6 +457,9 @@ describe('assistant store persistence seams', () => {
       conversationKeys: {
         'telegram:user-1:thread-2': 'session-index-shared',
       },
+      recentSessions: {
+        'session-index-shared': '2026-04-08T00:06:00.000Z',
+      },
     })
     expect(JSON.parse(await readFile(paths.indexesPath, 'utf8'))).toEqual({
       version: 1,
@@ -463,6 +468,9 @@ describe('assistant store persistence seams', () => {
       },
       conversationKeys: {
         'telegram:user-1:thread-2': 'session-index-shared',
+      },
+      recentSessions: {
+        'session-index-shared': '2026-04-08T00:06:00.000Z',
       },
     })
   })
@@ -547,6 +555,9 @@ describe('assistant store persistence seams', () => {
       conversationKeys: {
         'telegram:user-1:thread-good': 'session-good',
       },
+      recentSessions: {
+        'session-good': '2026-04-08T00:05:00.000Z',
+      },
     })
 
     const quarantines = await listAssistantQuarantineEntriesAtPaths(paths)
@@ -611,6 +622,10 @@ describe('assistant store persistence seams', () => {
       conversationKeys: {
         'linq:user-1:thread-shared': 'session-newer',
       },
+      recentSessions: {
+        'session-newer': expect.any(String),
+        'session-older': expect.any(String),
+      },
     })
 
     const runtimeEvents = await listAssistantRuntimeEventsAtPath(paths.runtimeEventsPath)
@@ -662,7 +677,50 @@ describe('assistant store persistence seams', () => {
       conversationKeys: {
         'linq:user-1:thread-shared': 'session-newer',
       },
+      recentSessions: {
+        'session-newer': expect.any(String),
+        'session-older': expect.any(String),
+      },
     })
+  })
+
+  it('applies recent-session limits before reading durable session files', async () => {
+    const context = await createTempVaultContext('assistant-store-persistence-recent-bounded-')
+    tempRoots.push(context.parentRoot)
+    const paths = resolveAssistantStatePaths(context.vaultRoot)
+    await ensureAssistantState(paths)
+
+    const newest = createSession({
+      alias: 'newest-alias',
+      conversationKey: 'local:newest',
+      sessionId: 'session-newest',
+      updatedAt: '2026-04-08T00:03:00.000Z',
+    })
+    const olderSessionId = 'session-older-corrupt'
+    await writeAssistantSession(paths, newest)
+    await writeFile(
+      resolveAssistantSessionPath(paths, olderSessionId),
+      '{bad-json',
+      'utf8',
+    )
+    await writeFile(paths.indexesPath, JSON.stringify({
+      version: 1,
+      aliases: {},
+      conversationKeys: {},
+      recentSessions: {
+        'session-newest': '2026-04-08T00:03:00.000Z',
+        [olderSessionId]: '2026-04-08T00:01:00.000Z',
+      },
+    }), 'utf8')
+
+    await expect(listAssistantSessions(context.vaultRoot, {
+      limit: 1,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        sessionId: 'session-newest',
+      }),
+    ])
+    await expect(listAssistantQuarantineEntriesAtPaths(paths)).resolves.toEqual([])
   })
 
   it('treats corrupted session files as missing and ignores corrupted legacy sidecars for Codex sessions', async () => {
