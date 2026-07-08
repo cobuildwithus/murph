@@ -597,6 +597,22 @@ Focused follow-up verification:
 
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-response-service.test.ts`
 
+## ReviewGPT Follow-Up 18 2026-07-08
+
+Accepted finding from the Phlebas PR-head rerun:
+
+- A send-succeeded/bind-failed group offer could leave a provider-visible
+  like-to-consent message without a durable `HostedGroupJoinOffer` provider
+  lookup key. A user reaction in that window would be acknowledged as
+  `no_offer_match` and not replayed. Bind failure cleanup now revokes the
+  unbound private attempt and deletes the just-sent Linq message; retries
+  create a fresh attempt and provider idempotency key instead of reusing the
+  possibly-reacted anchor.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT

@@ -30,6 +30,7 @@ import {
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
   isHostedLinqAttachmentSendPrepareFailure,
+  deleteHostedLinqMessage,
   sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage,
 } from "../hosted-onboarding/linq-client";
@@ -68,6 +69,7 @@ import {
   bindHostedGroupJoinOfferMessageTx,
   readHostedGroupByRuntimeMemberId,
   reserveHostedGroupJoinOfferAttemptTx,
+  revokeHostedGroupJoinOfferAttemptTx,
   revokeHostedGroupMemberEmailShareTx,
   type HostedGroupFeatureActivationKind,
 } from "./group-store";
@@ -534,6 +536,11 @@ async function postHostedRuntimeGroupOffer(input: {
         });
       }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
     } catch {
+      await cleanupHostedGroupJoinOfferAttemptAfterBindFailure({
+        attemptId: offerAttempt.id,
+        messageId: sent.messageId,
+        prisma,
+      });
       return unavailable("offer_binding_failed");
     }
   }
@@ -549,6 +556,42 @@ async function postHostedRuntimeGroupOffer(input: {
     action: input.action,
     result: { group: created.group, joinUrl, status: "sent" },
   };
+}
+
+async function cleanupHostedGroupJoinOfferAttemptAfterBindFailure(input: {
+  attemptId: string;
+  messageId: string;
+  prisma: Pick<ReturnType<typeof getPrisma>, "$transaction">;
+}): Promise<void> {
+  try {
+    await input.prisma.$transaction(async (tx) => {
+      await revokeHostedGroupJoinOfferAttemptTx({
+        attemptId: input.attemptId,
+        now: new Date(),
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch (error) {
+    console.warn("Hosted group join-offer attempt cleanup failed.", {
+      ...sanitizeHostedOnboardingStructuredLogDetails({
+        attemptIdSuffix: toHostedOnboardingLogIdSuffix(input.attemptId),
+        errorName: deriveHostedOnboardingTimingErrorName(error),
+        messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+      }),
+    });
+  }
+
+  try {
+    await deleteHostedLinqMessage({ messageId: input.messageId });
+  } catch (error) {
+    console.warn("Hosted group join-offer provider-message cleanup failed.", {
+      ...sanitizeHostedOnboardingStructuredLogDetails({
+        attemptIdSuffix: toHostedOnboardingLogIdSuffix(input.attemptId),
+        errorName: deriveHostedOnboardingTimingErrorName(error),
+        messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+      }),
+    });
+  }
 }
 
 function buildHostedGroupJoinOfferMessage(input: {

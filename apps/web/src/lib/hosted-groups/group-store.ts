@@ -591,6 +591,20 @@ export async function bindHostedGroupJoinOfferMessageTx(input: {
     });
   }
 
+  const offerLookup = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { id: input.attemptId },
+    select: { groupId: true },
+  });
+  if (!offerLookup) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: true,
+    });
+  }
+
+  await lockHostedGroupRow(input.tx, offerLookup.groupId);
   const offer = await input.tx.hostedGroupJoinOffer.findUnique({
     where: { id: input.attemptId },
     select: {
@@ -610,7 +624,6 @@ export async function bindHostedGroupJoinOfferMessageTx(input: {
       retryable: true,
     });
   }
-  await lockHostedGroupRow(input.tx, offer.groupId);
   if (offer.revokedAt) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
@@ -680,6 +693,48 @@ export async function bindHostedGroupJoinOfferMessageTx(input: {
     messageLookupKey,
     offerScope,
   };
+}
+
+export async function revokeHostedGroupJoinOfferAttemptTx(input: {
+  attemptId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const offerLookup = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { id: input.attemptId },
+    select: { groupId: true },
+  });
+  if (!offerLookup) {
+    return false;
+  }
+
+  await lockHostedGroupRow(input.tx, offerLookup.groupId);
+  const offer = await input.tx.hostedGroupJoinOffer.findUnique({
+    where: { id: input.attemptId },
+    select: {
+      messageLookupKey: true,
+      revokedAt: true,
+    },
+  });
+  if (
+    !offer
+    || offer.revokedAt
+    || !isHostedGroupJoinOfferAttemptLookupKey(offer.messageLookupKey)
+  ) {
+    return false;
+  }
+
+  const updated = await input.tx.hostedGroupJoinOffer.updateMany({
+    where: {
+      id: input.attemptId,
+      messageLookupKey: offer.messageLookupKey,
+      revokedAt: null,
+    },
+    data: {
+      revokedAt: input.now,
+    },
+  });
+  return updated.count > 0;
 }
 
 async function readHostedGroupJoinOfferAttemptByIdTx(

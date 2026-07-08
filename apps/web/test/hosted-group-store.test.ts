@@ -47,6 +47,7 @@ import {
   normalizeHostedGroupOfferScope,
   recordHostedGroupJoinOfferTx,
   reserveHostedGroupJoinOfferAttemptTx,
+  revokeHostedGroupJoinOfferAttemptTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
   normalizeHostedVaultShareProjectionKinds,
@@ -601,6 +602,62 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       data: {
         messageIdSuffix: expect.stringContaining("123"),
         messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_123"),
+      },
+    });
+  });
+
+  it("revokes an unbound join-offer attempt so retries create a fresh anchor", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+    const message = "Like this to join: https://www.withmurph.ai/groups/join/join_1";
+
+    const reserved = await reserveHostedGroupJoinOfferAttemptTx({
+      groupId: "group_1",
+      message,
+      offerKind: "post_join_offer",
+      offerScope: {
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+      postedAt,
+      tx,
+    });
+    await expect(revokeHostedGroupJoinOfferAttemptTx({
+      attemptId: reserved.id,
+      now: new Date("2026-07-01T00:02:00.000Z"),
+      tx,
+    })).resolves.toBe(true);
+    await expect(bindHostedGroupJoinOfferMessageTx({
+      attemptId: reserved.id,
+      messageId: "msg_offer_123",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
+      httpStatus: 410,
+    });
+
+    const retry = await reserveHostedGroupJoinOfferAttemptTx({
+      groupId: "group_1",
+      message,
+      offerKind: "post_join_offer",
+      offerScope: {
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+      postedAt: new Date("2026-07-01T00:03:00.000Z"),
+      tx,
+    });
+
+    expect(retry.id).not.toBe(reserved.id);
+    expect(retry.messageLookupKey).toMatch(
+      /^hosted-group-join-offer-attempt:[a-f0-9]{32}:hgrpjo_/u,
+    );
+    expect(tx.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: reserved.id,
+        messageLookupKey: reserved.messageLookupKey,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date("2026-07-01T00:02:00.000Z"),
       },
     });
   });
@@ -1190,7 +1247,32 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
         offer.messageLookupKey = args.data.messageLookupKey ?? offer.messageLookupKey;
         return {};
       }),
-      updateMany: vi.fn(async () => ({ count: 0 })),
+      updateMany: vi.fn(async (args: {
+        data?: { revokedAt?: Date | null };
+        where?: {
+          groupId?: string;
+          id?: string;
+          messageLookupKey?: string;
+          revokedAt?: null;
+        };
+      }) => {
+        let count = 0;
+        for (const offer of offers) {
+          const matches = (args.where?.groupId === undefined || offer.groupId === args.where.groupId)
+            && (args.where?.id === undefined || offer.id === args.where.id)
+            && (
+              args.where?.messageLookupKey === undefined
+              || offer.messageLookupKey === args.where.messageLookupKey
+            )
+            && (!("revokedAt" in (args.where ?? {})) || offer.revokedAt === args.where?.revokedAt);
+          if (!matches) {
+            continue;
+          }
+          offer.revokedAt = args.data?.revokedAt ?? offer.revokedAt;
+          count += 1;
+        }
+        return { count };
+      }),
     },
     hostedGroupMember: {
       create: vi.fn(async () => ({ id: "membership_created" })),
