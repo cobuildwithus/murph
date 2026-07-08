@@ -264,13 +264,7 @@ async function startHostedPhoneCallReservation(input: {
         },
         status: "failed",
       },
-      where: {
-        analyzedAt: null,
-        id: call.id,
-        provider: "retell",
-        providerCallId: null,
-        status: "starting",
-      },
+      where: hostedPhoneCallUnstartedAndUnattemptedWhere(call.id),
     });
 
     if (updated.count === 0) {
@@ -336,6 +330,7 @@ function toStartResponseStatus(status: HostedPhoneCall["status"]): HostedPhoneCa
 function hasPhoneCallAdvancedBeyondStart(call: HostedPhoneCall): boolean {
   return call.status !== "starting"
     || call.providerCallId !== null
+    || call.providerStartAttemptedAt !== null
     || call.endedAt !== null
     || call.analyzedAt !== null;
 }
@@ -366,15 +361,7 @@ async function markHostedPhoneCallProviderStartAttempt(input: {
   const markedAt = new Date();
   const updated = await input.prisma.hostedPhoneCall.updateMany({
     data: { providerStartAttemptedAt: markedAt },
-    where: {
-      analyzedAt: null,
-      endedAt: null,
-      id: input.call.id,
-      provider: "retell",
-      providerCallId: null,
-      providerStartAttemptedAt: null,
-      status: "starting",
-    },
+    where: hostedPhoneCallUnstartedAndUnattemptedWhere(input.call.id),
   });
   if (updated.count === 0) {
     return {
@@ -414,13 +401,7 @@ async function failStaleUnstartedPhoneCallReservation(input: {
       resultJson,
       status: "failed",
     },
-    where: {
-      analyzedAt: null,
-      id: input.call.id,
-      provider: "retell",
-      providerCallId: null,
-      status: "starting",
-    },
+    where: hostedPhoneCallUnstartedAndUnattemptedWhere(input.call.id),
   });
   if (updated.count === 0) {
     return input.prisma.hostedPhoneCall.findUniqueOrThrow({
@@ -434,6 +415,23 @@ async function failStaleUnstartedPhoneCallReservation(input: {
     status: "failed",
   };
 }
+
+function hostedPhoneCallUnstartedAndUnattemptedWhere(
+  callId: string,
+): PhoneCallUnstartedAndUnattemptedWhere {
+  return {
+    analyzedAt: null,
+    endedAt: null,
+    id: callId,
+    provider: "retell",
+    providerCallId: null,
+    providerStartAttemptedAt: null,
+    status: "starting",
+  };
+}
+
+type PhoneCallUnstartedAndUnattemptedWhere =
+  Parameters<HostedPhoneCallStore["hostedPhoneCall"]["updateMany"]>[0]["where"];
 
 function isRequestKeyUniqueConstraintError(error: unknown): boolean {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {

@@ -578,13 +578,13 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "post_call_circle_offer",
       callCircleOffer: {
         message:
-          "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+          "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability. Join page: {{join_url}}",
       },
     })).toEqual({
       action: "post_call_circle_offer",
       callCircleOffer: {
         message:
-          "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+          "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability. Join page: {{join_url}}",
       },
     });
     expect(parseHostedRuntimeGroupToolRequest({
@@ -667,13 +667,28 @@ describe("parseHostedRuntimeGroupTool", () => {
         action: "post_call_circle_offer",
         callCircleOffer: { message: "Like this for a fun Call Circle update." },
       })
+    ).toThrow(/must contain \{\{join_url\}\} exactly once/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_call_circle_offer",
+        callCircleOffer: {
+          message:
+            "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+        },
+      })
+    ).toThrow(/must contain \{\{join_url\}\} exactly once/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "post_call_circle_offer",
+        callCircleOffer: { message: "Like this for a fun Call Circle update. Join page: {{join_url}}" },
+      })
     ).toThrow(/must say liking or reacting opts/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "post_call_circle_offer",
         callCircleOffer: {
           message:
-            "Like this to opt into Call Circle for this group. Murph will ask you privately for availability.",
+            "Like this to opt into Call Circle for this group. Murph will ask you privately for availability. Join page: {{join_url}}",
         },
       })
     ).toThrow(/shares their Murph profile name/u);
@@ -682,7 +697,7 @@ describe("parseHostedRuntimeGroupTool", () => {
         action: "post_call_circle_offer",
         callCircleOffer: {
           message:
-            "Like this to opt into Call Circle for this group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+            "Like this to opt into Call Circle for this group and share your Murph profile name with the group. Murph will ask you privately for availability. Join page: {{join_url}}",
         },
       })
     ).toThrow(/may add them to the group/u);
@@ -691,7 +706,7 @@ describe("parseHostedRuntimeGroupTool", () => {
         action: "post_call_circle_offer",
         callCircleOffer: {
           message:
-            "Like this if you do not want to join Call Circle for this group and do not want Murph to privately ask about your availability.",
+            "Like this if you do not want to join Call Circle for this group and do not want Murph to privately ask about your availability. Join page: {{join_url}}",
         },
       })
     ).toThrow(/must say liking or reacting opts/u);

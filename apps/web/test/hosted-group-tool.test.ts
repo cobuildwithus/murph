@@ -729,10 +729,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("posts a model-authored Call Circle offer and records only the feature activation", async () => {
+  it("posts a model-authored Call Circle offer with the server-filled join URL", async () => {
     vi.stubEnv("HOSTED_CALL_CIRCLE_OFFERS_ENABLED", "1");
     const message =
-      "Like this if you want Murph to include you in Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. I will ask you privately for availability.";
+      "Like this if you want Murph to include you in Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. I will ask you privately for availability. Join here: {{join_url}}";
+    const sentMessage =
+      "Like this if you want Murph to include you in Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. I will ask you privately for availability. Join here: https://www.withmurph.ai/groups/join/abc123";
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -762,7 +764,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       expect.objectContaining({
         chatId: "chat_group_1",
         idempotencyKey: expect.stringMatching(/^group-call-circle-offer:hgrp_123:/u),
-        message,
+        message: sentMessage,
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
@@ -779,7 +781,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
   it("keeps Call Circle offer posting disabled until the rollout gate is enabled", async () => {
     const message =
-      "Like this if you want Murph to include you in Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. I will ask you privately for availability.";
+      "Like this if you want Murph to include you in Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. I will ask you privately for availability. Join here: {{join_url}}";
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -797,6 +799,33 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       },
     });
 
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("does not post a Call Circle offer when the join URL placeholder is missing", async () => {
+    vi.stubEnv("HOSTED_CALL_CIRCLE_OFFERS_ENABLED", "1");
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_call_circle_offer",
+        callCircleOffer: {
+          message:
+            "Like this if you want Murph to include you in Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. I will ask you privately for availability.",
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "post_call_circle_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "call_circle_offer_message_template_unavailable",
+      },
+    });
+
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });

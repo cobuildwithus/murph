@@ -494,6 +494,29 @@ Focused follow-up verification:
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/phone-calls-service.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/phone-calls-retell-real-consult-route.test.ts apps/web/test/phone-calls-call-circle-result.test.ts apps/web/test/call-circle-cron-route.test.ts apps/web/test/hosted-retention-cleanup.test.ts apps/web/test/hosted-retention-cron-route.test.ts apps/web/test/production-migration-guard.test.ts`
 - `pnpm --filter @murphai/hosted-web typecheck`
 
+## ReviewGPT Follow-Up 13 2026-07-08
+
+Accepted findings from the thirteenth PR ReviewGPT pass:
+
+- Hosted phone-call failure writes must not take ownership back after another
+  actor records `providerStartAttemptedAt`. The start marker and all
+  pre-provider failure writes now share the same durable
+  unstarted/unattempted predicate, and zero-row failure writes refetch
+  provider-attempted rows as advanced/owned instead of failing them locally.
+- Call Circle group offers must include the generated join path in the
+  actually sent chat message. The model still authors the offer text, but the
+  message must include `{{join_url}}` exactly once; web fills the generated
+  join URL before sending and records the same server-owned offer binding.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/phone-calls-service.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/hosted-group-tool.test.ts`
+- `pnpm exec vitest run --config vitest.config.ts --no-coverage test/parsers.test.ts test/call-circle.test.ts` from `packages/hosted-execution`
+- `pnpm exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-group-tool.test.ts test/assistant-call-circle.test.ts` from `packages/assistant-engine`
+- `pnpm --filter @murphai/hosted-web typecheck`
+- `pnpm --filter @murphai/hosted-execution typecheck`
+- `pnpm --filter @murphai/assistant-engine typecheck`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT

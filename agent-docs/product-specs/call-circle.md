@@ -47,13 +47,15 @@ cannot provide.
 - Any active group member can ask the group's Murph to set up Call Circle in
   the group chat. Setup is per group.
 - Enrollment happens through the existing group offer/reaction primitive.
-  The group's Murph posts a server-owned, model-authored Call Circle offer in
-  the group chat; liking that offer opts the liker into Call Circle for that
-  group, may add them to the group if needed, shares their profile name with
-  the group, and lets Murph ask privately for availability. Attribution
-  resolves the liker to a `memberId` through the existing reaction/participant
-  lookup, not raw handle string comparison. Chat participants without their
-  own Murph cannot enroll; the offer points them at the existing join path.
+  The group's Murph posts a server-owned, model-authored Call Circle offer
+  template in the group chat; web fills the generated join URL into that
+  visible offer before sending. Liking that offer opts the liker into Call
+  Circle for that group, may add them to the group if needed, shares their
+  profile name with the group, and lets Murph ask privately for availability.
+  Attribution resolves the liker to a `memberId` through the existing
+  reaction/participant lookup, not raw handle string comparison. Chat
+  participants without their own Murph cannot enroll directly; the offer
+  points them at the existing join path.
   Posting Call Circle offers is rollout-gated by
   `HOSTED_CALL_CIRCLE_OFFERS_ENABLED` so new offer-scope rows are not created
   until all reaction handlers run the v1 scope reader.
@@ -192,8 +194,9 @@ can still read the additive schema.
    transitions are single conditional updates.
 2. One group-tool action: post a server-owned Call Circle offer into the
    group chat using the existing group offer/reaction primitive. The model
-   authors the visible offer copy inside tool guardrails; the server owns
-   the offer row and reaction acceptance.
+   authors the visible offer template inside tool guardrails; the server
+   fills the generated join URL, owns the offer row, and owns reaction
+   acceptance.
 3. One member-side runtime action: submit a structured Call Circle response
    (preferences, confirm yes/no, counter-proposal, pause), validated
    against a pending ask or active participation for that member. This is

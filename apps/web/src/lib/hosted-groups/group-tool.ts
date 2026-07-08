@@ -2,7 +2,11 @@ import "server-only";
 
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_URL_PLACEHOLDER,
+  hasHostedRuntimeGroupJoinUrlPlaceholderOnce,
+  isHostedRuntimeGroupCallCircleOfferConsentMessage,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupPostCallCircleOfferRequest,
@@ -75,7 +79,6 @@ export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
 const HOSTED_CALL_CIRCLE_OFFERS_ENABLED_ENV = "HOSTED_CALL_CIRCLE_OFFERS_ENABLED";
 
-const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
 const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
 
 export type HostedRuntimeGroupToolAccessClassification =
@@ -401,15 +404,18 @@ async function handleHostedRuntimeGroupPostCallCircleOffer(input: {
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "post_call_circle_offer",
+    result: { group: null, status: "unavailable", unavailableReason },
+  });
   if (!isHostedCallCircleOffersEnabled()) {
-    return {
-      action: "post_call_circle_offer",
-      result: {
-        group: null,
-        status: "unavailable",
-        unavailableReason: "call_circle_offers_disabled",
-      },
-    };
+    return unavailable("call_circle_offers_disabled");
+  }
+  const messageTemplate = normalizeHostedGroupCallCircleOfferMessageTemplate(
+    input.callCircleOffer.message,
+  );
+  if (!messageTemplate) {
+    return unavailable("call_circle_offer_message_template_unavailable");
   }
   return postHostedRuntimeGroupOffer({
     action: "post_call_circle_offer",
@@ -417,7 +423,10 @@ async function handleHostedRuntimeGroupPostCallCircleOffer(input: {
     idempotencyKeyPrefix: "group-call-circle-offer",
     linqThread: input.linqThread,
     memberId: input.memberId,
-    message: input.callCircleOffer.message,
+    message: ({ joinUrl }) => buildHostedGroupCallCircleOfferMessage({
+      joinUrl,
+      messageTemplate,
+    }),
     projectionKinds: [],
   });
 }
@@ -536,7 +545,15 @@ function buildHostedGroupJoinOfferMessage(input: {
       HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
       renderHostedGroupJoinOfferShareScope(input.projectionKinds),
     )
-    .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, input.joinUrl);
+    .replace(HOSTED_RUNTIME_GROUP_JOIN_URL_PLACEHOLDER, input.joinUrl);
+}
+
+function buildHostedGroupCallCircleOfferMessage(input: {
+  joinUrl: string;
+  messageTemplate: string;
+}): string {
+  return input.messageTemplate
+    .replace(HOSTED_RUNTIME_GROUP_JOIN_URL_PLACEHOLDER, input.joinUrl);
 }
 
 function normalizeHostedGroupJoinOfferMessageTemplate(
@@ -555,13 +572,30 @@ function normalizeHostedGroupJoinOfferMessageTemplate(
 
 function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): boolean {
   return (
-    messageTemplate.includes(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-    && messageTemplate.indexOf(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
+    hasHostedRuntimeGroupJoinUrlPlaceholderOnce(messageTemplate)
     && messageTemplate.includes(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
     && messageTemplate.indexOf(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
       === messageTemplate.lastIndexOf(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
   );
+}
+
+function normalizeHostedGroupCallCircleOfferMessageTemplate(
+  messageTemplate: string,
+): string | null {
+  const normalized = messageTemplate.trim().replace(/\s+/gu, " ");
+  if (
+    normalized.length === 0
+    || normalized.length > HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH
+  ) {
+    return null;
+  }
+  if (
+    !hasHostedRuntimeGroupJoinUrlPlaceholderOnce(normalized)
+    || !isHostedRuntimeGroupCallCircleOfferConsentMessage(normalized)
+  ) {
+    return null;
+  }
+  return normalized;
 }
 
 function renderHostedGroupJoinOfferShareScope(

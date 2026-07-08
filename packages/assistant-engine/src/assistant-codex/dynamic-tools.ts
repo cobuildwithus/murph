@@ -10,6 +10,7 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  hasHostedRuntimeGroupJoinUrlPlaceholderOnce,
   isHostedRuntimeGroupCallCircleOfferConsentMessage,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeFamilyPlanToolRequest,
@@ -336,7 +337,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, each member\'s granted share kinds, and Call Circle status) with action="read_current", mint the shareable group join link with action="create_join_link", post a server-owned like-to-join offer into the current group chat with action="post_join_offer", or post a server-owned Call Circle offer into the current group chat with action="post_call_circle_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. For action="post_call_circle_offer", write the group-facing invite in message yourself: it must naturally say that liking that message opts the liker into Call Circle for this group, may add them to the group if needed, shares their Murph profile name with the group, and lets Murph ask them privately for availability. Do not use a fixed script, do not include phone numbers, do not enroll anyone directly, and do not imply any specific person requested the call. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, each member\'s granted share kinds, and Call Circle status) with action="read_current", mint the shareable group join link with action="create_join_link", post a server-owned like-to-join offer into the current group chat with action="post_join_offer", or post a server-owned Call Circle offer into the current group chat with action="post_call_circle_offer". A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. For action="post_call_circle_offer", write the group-facing invite in message yourself with {{join_url}} exactly once where the server should insert the join URL: it must naturally say that liking that message opts the liker into Call Circle for this group, may add them to the group if needed, shares their Murph profile name with the group, and lets Murph ask them privately for availability. Do not use a fixed script, do not include phone numbers, do not enroll anyone directly, do not include any other URL, and do not imply any specific person requested the call. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -397,7 +398,7 @@ export const MURPH_GROUP_TOOL = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH,
         description:
-          'Required for post_call_circle_offer. Model-authored invite to send into the current group chat. It must say liking this message opts the liker into Call Circle for this group, may add them to the group, shares their Murph profile name with the group, and lets Murph ask privately for availability.',
+          'Required for post_call_circle_offer. Model-authored invite template to send into the current group chat with {{join_url}} exactly once where the server should insert the join URL. It must say liking this message opts the liker into Call Circle for this group, may add them to the group, shares their Murph profile name with the group, and lets Murph ask privately for availability. Do not include any other URL.',
       },
     },
     required: ['action'],
@@ -830,6 +831,10 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         .trim()
         .min(1)
         .max(HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH)
+        .refine(hasHostedRuntimeGroupJoinUrlPlaceholderOnce, {
+          message:
+            'post_call_circle_offer message must contain {{join_url}} exactly once',
+        })
         .refine(
           isHostedRuntimeGroupCallCircleOfferConsentMessage,
           "Call Circle offer message must say liking or reacting opts the member into Call Circle for this group, may add them to the group, shares their Murph profile name with the group, and lets Murph ask privately for availability.",

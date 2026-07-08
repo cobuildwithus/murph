@@ -89,6 +89,7 @@ import {
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH,
+  hasHostedRuntimeGroupJoinUrlPlaceholderOnce,
   isHostedRuntimeGroupCallCircleOfferConsentMessage,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX,
@@ -872,6 +873,11 @@ function parseHostedRuntimeGroupPostCallCircleOfferRequest(
   }
   if (message.length > HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH) {
     throw new TypeError("Hosted runtime group tool post_call_circle_offer message is too long.");
+  }
+  if (!hasHostedRuntimeGroupJoinUrlPlaceholderOnce(message)) {
+    throw new TypeError(
+      "Hosted runtime group tool post_call_circle_offer message must contain {{join_url}} exactly once.",
+    );
   }
   if (!isHostedRuntimeGroupCallCircleOfferConsentMessage(message)) {
     throw new TypeError(

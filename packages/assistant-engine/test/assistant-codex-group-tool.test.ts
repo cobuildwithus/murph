@@ -61,6 +61,8 @@ describe("murph.group dynamic tool", () => {
       .toContain("{{join_url}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("{{share_scope}}");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.message.description)
+      .toContain("{{join_url}}");
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
@@ -98,14 +100,14 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_call_circle_offer",
       message:
-        "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+        "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability. Join page: {{join_url}}",
     }))).toEqual({
       kind: "group",
       request: {
         action: "post_call_circle_offer",
         callCircleOffer: {
           message:
-            "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+            "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability. Join page: {{join_url}}",
         },
       },
     });
@@ -143,19 +145,25 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_call_circle_offer",
       message:
-        "Like this to opt into Call Circle for this group. Murph will ask you privately for availability.",
+        "Like this to opt into Call Circle for this group. If needed, Murph may add you to the group and share your Murph profile name with the group. Murph will ask you privately for availability.",
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_call_circle_offer",
       message:
-        "Like this to opt into Call Circle for this group and share your Murph profile name with the group. Murph will ask you privately for availability.",
+        "Like this to opt into Call Circle for this group. Murph will ask you privately for availability. Join page: {{join_url}}",
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_call_circle_offer",
       message:
-        "Like this if you do not want to join Call Circle for this group and do not want Murph to privately ask about your availability.",
+        "Like this to opt into Call Circle for this group and share your Murph profile name with the group. Murph will ask you privately for availability. Join page: {{join_url}}",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_call_circle_offer",
+      message:
+        "Like this if you do not want to join Call Circle for this group and do not want Murph to privately ask about your availability. Join page: {{join_url}}",
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({

@@ -815,6 +815,7 @@ export interface HostedRuntimeGroupPostJoinOfferRequest {
   projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
 }
 
+export const HOSTED_RUNTIME_GROUP_JOIN_URL_PLACEHOLDER = "{{join_url}}";
 export const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_MESSAGE_MAX_LENGTH = 1_000;
 
 const HOSTED_RUNTIME_GROUP_CALL_CIRCLE_OFFER_REACTION_PATTERN =
@@ -865,6 +866,14 @@ export function isHostedRuntimeGroupCallCircleOfferConsentMessage(
     });
 }
 
+export function hasHostedRuntimeGroupJoinUrlPlaceholderOnce(
+  message: string,
+): boolean {
+  return message.includes(HOSTED_RUNTIME_GROUP_JOIN_URL_PLACEHOLDER)
+    && message.indexOf(HOSTED_RUNTIME_GROUP_JOIN_URL_PLACEHOLDER)
+      === message.lastIndexOf(HOSTED_RUNTIME_GROUP_JOIN_URL_PLACEHOLDER);
+}
+
 function hasNearbyCallCircleConsentPhrase(input: {
   first: RegExp;
   second: RegExp;
@@ -891,6 +900,8 @@ function hasOrderedNearbyCallCircleConsentPhrase(input: {
 }
 
 export interface HostedRuntimeGroupPostCallCircleOfferRequest {
+  // Model-authored natural group-chat message with server-filled
+  // {{join_url}} placeholder.
   message: string;
 }
 

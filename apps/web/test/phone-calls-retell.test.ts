@@ -667,6 +667,7 @@ describe("Retell phone-call result handling", () => {
       call: buildHostedPhoneCall({
         id: "hpc_123",
         providerCallId: null,
+        providerStartAttemptedAt: new Date("2026-06-25T11:59:00.000Z"),
         status: "starting",
       }),
     });

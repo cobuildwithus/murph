@@ -123,9 +123,11 @@ describe("createHostedPhoneCall", () => {
       },
       where: {
         analyzedAt: null,
+        endedAt: null,
         id: createdCallId,
         provider: "retell",
         providerCallId: null,
+        providerStartAttemptedAt: null,
         status: "starting",
       },
     }]);
@@ -414,9 +416,11 @@ describe("createHostedPhoneCall", () => {
       },
       where: {
         analyzedAt: null,
+        endedAt: null,
         id: "hpc_existing",
         provider: "retell",
         providerCallId: null,
+        providerStartAttemptedAt: null,
         status: "starting",
       },
     }]);
@@ -426,6 +430,65 @@ describe("createHostedPhoneCall", () => {
         summary: "Murph could not start the phone call.",
       },
       status: "failed",
+    });
+  });
+
+  it("does not fail a stale duplicate after another start marks provider ownership", async () => {
+    const markedAt = new Date("2026-06-25T12:00:00.000Z");
+    const existing = buildHostedPhoneCall({
+      id: "hpc_existing",
+      providerCallId: null,
+      status: "starting",
+      updatedAt: new Date(0),
+    });
+    let store!: ReturnType<typeof createPhoneCallStore>;
+    store = createPhoneCallStore({
+      beforeUpdateMany: () => {
+        store.advanceCurrentCall({
+          providerStartAttemptedAt: markedAt,
+        });
+      },
+      createError: createUniqueRequestKeyError(["requestKey"]),
+      existing,
+    });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    const response = await createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: existing.memberId,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      runtime: runtime.runtime,
+    });
+
+    expect(response).toEqual({
+      phoneCallId: "hpc_existing",
+      status: "starting",
+    });
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        endedAt: null,
+        id: "hpc_existing",
+        provider: "retell",
+        providerCallId: null,
+        providerStartAttemptedAt: null,
+        status: "starting",
+      },
+    }]);
+    expect(store.currentCall()).toMatchObject({
+      providerCallId: null,
+      providerStartAttemptedAt: markedAt,
+      resultJson: null,
+      status: "starting",
     });
   });
 
@@ -550,9 +613,11 @@ describe("createHostedPhoneCall", () => {
       },
       where: {
         analyzedAt: null,
+        endedAt: null,
         id: createdCallId,
         provider: "retell",
         providerCallId: null,
+        providerStartAttemptedAt: null,
         status: "starting",
       },
     }]);
@@ -560,6 +625,63 @@ describe("createHostedPhoneCall", () => {
       providerCallId: null,
       providerStartAttemptedAt: null,
       status: "failed",
+    });
+  });
+
+  it("does not fail local start errors after another actor marks provider ownership", async () => {
+    const markedAt = new Date("2026-06-25T12:00:00.000Z");
+    const created = buildHostedPhoneCall();
+    let store!: ReturnType<typeof createPhoneCallStore>;
+    store = createPhoneCallStore({
+      beforeUpdateMany: () => {
+        store.advanceCurrentCall({
+          providerStartAttemptedAt: markedAt,
+        });
+      },
+      created,
+    });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_unused",
+      validateError: new Error("Retell local config invalid"),
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver("+12125550000"),
+    })).resolves.toEqual({
+      phoneCallId: store.createCalls[0]!.data.id,
+      status: "starting",
+    });
+
+    const createdCallId = store.createCalls[0]!.data.id;
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        endedAt: null,
+        id: createdCallId,
+        provider: "retell",
+        providerCallId: null,
+        providerStartAttemptedAt: null,
+        status: "starting",
+      },
+    }]);
+    expect(store.currentCall()).toMatchObject({
+      providerCallId: null,
+      providerStartAttemptedAt: markedAt,
+      resultJson: null,
+      status: "starting",
     });
   });
 
@@ -592,9 +714,11 @@ describe("createHostedPhoneCall", () => {
       },
       where: {
         analyzedAt: null,
+        endedAt: null,
         id: createdCallId,
         provider: "retell",
         providerCallId: null,
+        providerStartAttemptedAt: null,
         status: "starting",
       },
     }]);
@@ -788,6 +912,7 @@ function createHostedPhoneCall(input: CreateHostedPhoneCallInput) {
 }
 
 function createPhoneCallStore(input: {
+  beforeUpdateMany?: (args: PhoneCallUpdateManyInput) => Promise<void> | void;
   createError?: unknown;
   created?: HostedPhoneCall;
   existing?: HostedPhoneCall;
@@ -826,6 +951,7 @@ function createPhoneCallStore(input: {
       },
       updateMany: async (args) => {
         updateManyCalls.push(args);
+        await input.beforeUpdateMany?.(args);
         if (!matchesUpdateManyWhere(current, args.where)) {
           return { count: 0 };
         }
