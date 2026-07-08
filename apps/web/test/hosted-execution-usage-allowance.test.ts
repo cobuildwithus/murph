@@ -109,6 +109,7 @@ describe("hosted AI usage allowance pricing", () => {
       pricingSnapshot: {
         model: "gpt-5.6-terra",
         modelSource: "served",
+        pricingSource: "murph-provisional-future-gpt-pricing-2026-07-08",
         requestedModel: "gpt-5.6-terra",
         servedModel: "openai/gpt-5.6-terra-2026-07-08",
         tokenPricingBasis: "standard",
@@ -127,6 +128,7 @@ describe("hosted AI usage allowance pricing", () => {
       counted: true,
       pricingSnapshot: {
         model: "gpt-sol",
+        pricingSource: "murph-provisional-future-gpt-pricing-2026-07-08",
         tokenPricingAdjustment: {
           denominator: "2",
           numerator: "1",

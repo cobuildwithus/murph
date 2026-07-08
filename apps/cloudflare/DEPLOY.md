@@ -109,7 +109,7 @@ Core execution tuning:
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
-- `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy; omit it or set `gradual` for normal deploys, and use `immediate` only for emergency hotfixes that may interrupt active runner containers.
+- `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy; omit it or set `gradual` for normal deploys, and use `immediate` only for emergency hotfixes or production hosted assistant future-model flips that may interrupt active runner containers.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram,whatsapp`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production `wrangler.jsonc` sets `1200000`) and controls runner container activity expiry for native shell cleanup. Dirty foreground runtime state is checkpointed by the runtime-owned idle/scheduled-wake `idle_shutdown` path before the invocation returns. RunnerContainer activity expiry only yields to active foreground work or tears down an idle warm shell; it never records pending checkpoint intent.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
@@ -150,6 +150,15 @@ Hosted assistant config:
 When changing hosted assistant model pricing or allowance enforcement, deploy the
 Cloudflare Worker/runner model config before or atomically with the hosted web
 allowance logic so runtime usage callbacks keep using an allowance-priced model.
+For prepared future-model flips, use a two-step production rollout: first deploy
+the web allowance logic plus Worker/runner catalog patch while
+`HOSTED_ASSISTANT_MODEL` remains `gpt-5.5`, then flip
+`HOSTED_ASSISTANT_MODEL` to the future slug only after the managed-container
+smoke has proven the deployed runner-bundle fingerprint. The model-flip deploy
+must set `container_rollout=immediate` /
+`HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate` because a gradual rollout can
+leave warm old-bundle containers without the patched Codex model catalog for the
+future slug. The rollback floor is `HOSTED_ASSISTANT_MODEL=gpt-5.5`.
 
 Opt-in runtime integrations:
 

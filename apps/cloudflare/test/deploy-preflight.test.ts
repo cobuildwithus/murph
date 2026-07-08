@@ -13,6 +13,8 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 
 const HOSTED_ASSISTANT_MODEL_PRICING_ERROR =
   "HOSTED_ASSISTANT_MODEL must be one of gpt-5.5, gpt-sol, gpt-terra, gpt-5.6-luma, gpt-5.6-terra for hosted AI usage allowance pricing.";
+const HOSTED_ASSISTANT_FUTURE_MODEL_ROLLOUT_ERROR =
+  "production hosted assistant future-model deploys must set HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is HOSTED_ASSISTANT_MODEL=gpt-5.5.";
 
 function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefined> = {}): EnvSource {
   return {
@@ -398,6 +400,25 @@ describe("deploy preflight helpers", () => {
         { deployWorker: true },
       ),
     ).not.toContain(HOSTED_ASSISTANT_MODEL_PRICING_ERROR);
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+        }),
+        { deployWorker: true },
+      ),
+    ).toContain(HOSTED_ASSISTANT_FUTURE_MODEL_ROLLOUT_ERROR);
+
+    expect(
+      listHostedDeployEnvironmentInvariantErrors(
+        createRequiredWorkerDeployEnv({
+          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
+          HOSTED_EXECUTION_CONTAINER_ROLLOUT: "immediate",
+        }),
+        { deployWorker: true },
+      ),
+    ).not.toContain(HOSTED_ASSISTANT_FUTURE_MODEL_ROLLOUT_ERROR);
 
     expect(
       listHostedDeployEnvironmentInvariantErrors(

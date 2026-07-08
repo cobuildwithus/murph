@@ -133,6 +133,7 @@ type HostedAiUsageAllowanceSourceKind =
 interface HostedAiUsageAllowanceTokenPricingBasisConfig {
   multiplierDenominator: bigint;
   multiplierNumerator: bigint;
+  pricingSource: string;
   pricingVersion: string;
   requiredProviderKind: "openai" | null;
 }
@@ -332,6 +333,8 @@ const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_OPENAI_FLEX_PRICING_VERSION =
   "murph-future-gpt-provisional-2026-07-08-openai-flex";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
+const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_SOURCE =
+  "murph-provisional-future-gpt-pricing-2026-07-08";
 const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
@@ -397,12 +400,14 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_TOKEN_PRICING_BASES = {
   "openai-flex": {
     multiplierDenominator: 2n,
     multiplierNumerator: 1n,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
     pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_FLEX_PRICING_VERSION,
     requiredProviderKind: "openai",
   },
   standard: {
     multiplierDenominator: 1n,
     multiplierNumerator: 1n,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
     pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION,
     requiredProviderKind: null,
   },
@@ -412,12 +417,14 @@ const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES = {
   "openai-flex": {
     multiplierDenominator: 2n,
     multiplierNumerator: 1n,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_SOURCE,
     pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_OPENAI_FLEX_PRICING_VERSION,
     requiredProviderKind: "openai",
   },
   standard: {
     multiplierDenominator: 1n,
     multiplierNumerator: 1n,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_SOURCE,
     pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_VERSION,
     requiredProviderKind: null,
   },
@@ -486,7 +493,7 @@ export function priceHostedAiUsageForAllowance(
       pricingSnapshot: {
         credentialSource,
         ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
-        pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
+        pricingSource: tokenPricing?.pricingSource ?? HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
         schema: "murph.hosted-ai-usage-allowance-pricing.v1",
         tokenPricingBasis,
         tokens: tokenSnapshot,
@@ -533,7 +540,7 @@ export function priceHostedAiUsageForAllowance(
     pricingSnapshot: {
       credentialSource,
       ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
-      pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
+      pricingSource: resolvedTokenPricing.pricingSource,
       ratesUsdMicrosPerMillionTokens: {
         cachedInput: prices.cachedInputUsdMicrosPerMillionTokens.toString(),
         input: prices.inputUsdMicrosPerMillionTokens.toString(),

@@ -36,7 +36,9 @@ const HOSTED_DEPLOY_CONTEXTS = [
   "production",
 ] as const;
 const REQUIRED_HOSTED_ASSISTANT_PROVIDER = "openai";
+const PRODUCTION_HOSTED_ASSISTANT_ROLLBACK_MODEL = "gpt-5.5";
 const PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT = "low";
+const FUTURE_HOSTED_ASSISTANT_MODEL_CONTAINER_ROLLOUT = "immediate";
 const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 
 const REQUIRED_DEPLOY_ENV_NAMES = [
@@ -222,6 +224,12 @@ export function listHostedDeployEnvironmentInvariantErrors(
   const hostedAssistantReasoningEffort = normalizeOptionalString(
     source.HOSTED_ASSISTANT_REASONING_EFFORT,
   );
+  const hostedExecutionContainerRollout = normalizeOptionalString(
+    source.HOSTED_EXECUTION_CONTAINER_ROLLOUT,
+  ) ?? "gradual";
+  const hostedAssistantModelIsPriced = hostedAssistantModel
+    ? isHostedAiUsageAllowancePricedModelId(hostedAssistantModel)
+    : false;
   if (hostedAssistantProvider !== REQUIRED_HOSTED_ASSISTANT_PROVIDER) {
     errors.push(
       `HOSTED_ASSISTANT_PROVIDER must be ${REQUIRED_HOSTED_ASSISTANT_PROVIDER} for hosted runner execution.`,
@@ -232,7 +240,7 @@ export function listHostedDeployEnvironmentInvariantErrors(
     errors.push(
       `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS.join(", ")} for hosted AI usage allowance pricing.`,
     );
-  } else if (!isHostedAiUsageAllowancePricedModelId(hostedAssistantModel)) {
+  } else if (!hostedAssistantModelIsPriced) {
     errors.push(
       `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS.join(", ")} for hosted AI usage allowance pricing.`,
     );
@@ -281,6 +289,18 @@ export function listHostedDeployEnvironmentInvariantErrors(
   ) {
     errors.push(
       `production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=${PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT}.`,
+    );
+  }
+
+  if (
+    hostedAssistantModelIsPriced
+    && hostedAssistantModel
+    && hostedAssistantModel !== PRODUCTION_HOSTED_ASSISTANT_ROLLBACK_MODEL
+    && hostedExecutionContainerRollout
+      !== FUTURE_HOSTED_ASSISTANT_MODEL_CONTAINER_ROLLOUT
+  ) {
+    errors.push(
+      `production hosted assistant future-model deploys must set HOSTED_EXECUTION_CONTAINER_ROLLOUT=${FUTURE_HOSTED_ASSISTANT_MODEL_CONTAINER_ROLLOUT}; rollback floor is HOSTED_ASSISTANT_MODEL=${PRODUCTION_HOSTED_ASSISTANT_ROLLBACK_MODEL}.`,
     );
   }
 
