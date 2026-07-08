@@ -229,6 +229,7 @@ export type LinqFetch = (
     body?: string | Blob
     headers?: Record<string, string>
     method: string
+    redirect?: RequestRedirect
     signal?: AbortSignal
   },
 ) => Promise<LinqFetchResponse>
@@ -459,6 +460,7 @@ async function uploadLinqAttachmentBytes(
       }),
       headers,
       method: 'PUT',
+      redirect: 'error',
       signal: timeout.signal,
     })
   } catch (error) {

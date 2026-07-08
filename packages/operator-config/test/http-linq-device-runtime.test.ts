@@ -685,6 +685,7 @@ test('linq runtime uploads attachment bytes with public fetch for the presigned 
   const publicFetch = vi.fn(async (url: string, init) => {
     assert.equal(url, 'https://uploads.example.test/upload/report')
     assert.equal(init.method, 'PUT')
+    assert.equal(init.redirect, 'error')
     assert.deepEqual(init.headers, {
       'content-type': 'application/pdf',
       'x-upload-token': 'upload-token',
@@ -706,6 +707,65 @@ test('linq runtime uploads attachment bytes with public fetch for the presigned 
       },
     ),
   ).resolves.toEqual({ attachmentId: 'attachment_pdf_1' })
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(1)
+})
+
+test('linq runtime fails closed when a presigned attachment PUT redirects', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const bytes = new Uint8Array([1, 2, 3, 4])
+  const providerFetch = vi.fn(async (url: string, init) => {
+    assert.equal(init.method, 'POST')
+    assert.ok(url.endsWith('/attachments'))
+    return createJsonResponse({
+      attachment_id: 'attachment_pdf_1',
+      download_url: 'https://cdn.example.test/report.pdf',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+        'x-upload-token': 'upload-token',
+      },
+      upload_url: 'https://uploads.example.test/upload/report',
+    })
+  })
+  const publicFetch = vi.fn(async (url: string, init) => {
+    assert.equal(url, 'https://uploads.example.test/upload/report')
+    assert.equal(init.method, 'PUT')
+    assert.equal(init.redirect, 'error')
+    throw new TypeError('fetch failed: redirected')
+  })
+
+  await assert.rejects(
+    () =>
+      uploadLinqAttachment(
+        {
+          bytes,
+          contentType: 'application/pdf',
+          filename: 'report.pdf',
+        },
+        {
+          env,
+          fetchImplementation: providerFetch,
+          publicFetchImplementation: publicFetch,
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'create_attachment_upload' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'transport' &&
+      error.context?.method === 'PUT' &&
+      error.context?.path === '[presigned-upload]' &&
+      error.context?.requestOrigin === 'https://uploads.example.test' &&
+      error.context?.retryable === false &&
+      error.context?.timedOut === false,
+  )
 
   expect(providerFetch).toHaveBeenCalledTimes(1)
   expect(publicFetch).toHaveBeenCalledTimes(1)

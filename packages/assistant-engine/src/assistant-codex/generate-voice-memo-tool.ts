@@ -395,6 +395,7 @@ function createStringFetchAdapter(fetchImpl: typeof fetch) {
       body?: string | Blob
       headers?: Record<string, string>
       method: string
+      redirect?: RequestRedirect
       signal?: AbortSignal
     },
   ) => fetchImpl(input, init)
