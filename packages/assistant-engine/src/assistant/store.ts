@@ -352,23 +352,19 @@ export async function listAssistantSessionsLocal(
   })
 }
 
-// Bounded variant for recurring maintenance work: reads the bounded
-// recent-session projection from the assistant index store (maintained on
-// every session save, rebuilt from durable session records when missing) and
+// Bounded variant for recurring maintenance and compact CLI list work: reads
+// the bounded recent-session projection maintained on every session save, then
 // parses only the newest `limit` sessions by durable last-activity timestamp.
 export async function listRecentAssistantSessions(
   vault: string,
   options: {
     limit: number
-    repairMissingProjection?: boolean
   },
 ): Promise<AssistantSession[]> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
 
-    const recentSessions = await ensureAssistantRecentSessionsProjection(paths, {
-      repairMissingProjection: options.repairMissingProjection,
-    })
+    const recentSessions = await ensureAssistantRecentSessionsProjection(paths)
     return readAssistantSessionsSorted(
       paths,
       Object.entries(recentSessions)

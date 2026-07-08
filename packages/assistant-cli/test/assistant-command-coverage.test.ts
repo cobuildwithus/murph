@@ -1377,7 +1377,7 @@ test('session commands return redacted state paths and session payloads', async 
     vault: 'redacted:/tmp/vault',
   })
   assert.deepEqual(commandMocks.listRecentAssistantSessions.mock.calls, [
-    ['/tmp/vault', { limit: 5, repairMissingProjection: true }],
+    ['/tmp/vault', { limit: 5 }],
   ])
   assert.deepEqual(showResult, {
     session: {
@@ -1389,7 +1389,7 @@ test('session commands return redacted state paths and session payloads', async 
   })
 })
 
-test('session list requests a bounded repaired recent-session page', async () => {
+test('session list requests a bounded recent-session page', async () => {
   const commands = createAssistantCli()
   const assistant = readCommandGroup(commands, 'assistant')
   const session = readCommandGroup(assistant.commands, 'session')
@@ -1409,6 +1409,6 @@ test('session list requests a bounded repaired recent-session page', async () =>
   assert.equal(listResult.filters.limit, 1)
   assert.equal(listResult.sessions[0]?.sessionId, TEST_SESSION.sessionId)
   assert.deepEqual(commandMocks.listRecentAssistantSessions.mock.calls, [
-    ['/tmp/vault', { limit: 1, repairMissingProjection: true }],
+    ['/tmp/vault', { limit: 1 }],
   ])
 })

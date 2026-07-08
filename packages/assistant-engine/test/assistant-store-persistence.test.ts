@@ -644,8 +644,8 @@ describe('assistant store persistence seams', () => {
     )
   })
 
-  it('repairs legacy recent-session projections for bounded user-facing reads', async () => {
-    const context = await createTempVaultContext('assistant-store-persistence-recent-repair-')
+  it('keeps legacy recent-session reads bounded and warms the projection on save', async () => {
+    const context = await createTempVaultContext('assistant-store-persistence-recent-legacy-')
     tempRoots.push(context.parentRoot)
     const paths = resolveAssistantStatePaths(context.vaultRoot)
     await ensureAssistantState(paths)
@@ -664,6 +664,11 @@ describe('assistant store persistence seams', () => {
     })
     await writeAssistantSession(paths, older)
     await writeAssistantSession(paths, newer)
+    await writeFile(
+      resolveAssistantSessionPath(paths, 'session-legacy-corrupt'),
+      '{bad-json',
+      'utf8',
+    )
     await writeFile(paths.indexesPath, JSON.stringify({
       version: 1,
       aliases: {},
@@ -678,10 +683,12 @@ describe('assistant store persistence seams', () => {
       aliases: {},
       conversationKeys: {},
     })
+    await expect(listAssistantQuarantineEntriesAtPaths(paths)).resolves.toEqual([])
+
+    await synchronizeAssistantIndexes(paths, newer, null)
 
     await expect(listRecentAssistantSessions(context.vaultRoot, {
       limit: 1,
-      repairMissingProjection: true,
     })).resolves.toEqual([
       expect.objectContaining({
         sessionId: 'session-newer',
@@ -693,7 +700,6 @@ describe('assistant store persistence seams', () => {
     }
     expect(rebuilt.recentSessions).toEqual({
       'session-newer': '2026-04-08T00:02:00.000Z',
-      'session-older': '2026-04-08T00:01:00.000Z',
     })
   })
 
@@ -728,7 +734,6 @@ describe('assistant store persistence seams', () => {
 
     await expect(listRecentAssistantSessions(context.vaultRoot, {
       limit: 1,
-      repairMissingProjection: true,
     })).resolves.toEqual([
       expect.objectContaining({
         sessionId: 'session-newest',

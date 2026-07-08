@@ -1412,7 +1412,6 @@ export function registerAssistantCommands(
           context.options.vault,
           {
             limit,
-            repairMissingProjection: true,
           },
         )
         return assistantSessionListResultSchema.parse({

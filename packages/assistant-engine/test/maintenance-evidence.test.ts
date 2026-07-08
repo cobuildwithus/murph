@@ -214,7 +214,7 @@ test('bounds session reads to the newest sessions by durable activity', async ()
 
   // Legacy index without the projection: the recurring path never rebuilds
   // from session files (that would scan all sessions under the runtime write
-  // lock). It initializes an empty projection and warms up from normal
+  // lock). It returns an in-memory empty projection and warms up from normal
   // bounded saves instead.
   const paths = resolveAssistantStatePaths(vaultRoot)
   await writeFile(

@@ -648,44 +648,28 @@ export async function synchronizeAssistantIndexes(
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
-    // Foreground saves never rebuild the projection (that would scan every
-    // session file on the reply commit path). While the projection is absent
-    // it stays absent, so the idle maintenance read can tell "not built yet"
-    // from "partially built" and do the one-time rebuild off the hot path.
-    ...(store.recentSessions === undefined
-      ? {}
-      : {
-          recentSessions: pruneAssistantRecentSessions({
-            ...store.recentSessions,
-            [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
-          }),
-        }),
+    // Foreground saves own the bounded recent-session projection in O(1).
+    // Legacy indexes without the field start from the current save instead of
+    // rebuilding from every durable session on the reply commit path.
+    recentSessions: pruneAssistantRecentSessions({
+      ...(store.recentSessions ?? {}),
+      [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
+    }),
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
 }
 
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
 
-// Recurring-maintenance projection reader. Deliberately does NOT go through
-// readAssistantIndexStore by default: that reader's missing/corrupt fallbacks
+// Bounded projection reader. Deliberately does NOT go through
+// readAssistantIndexStore: that reader's missing/corrupt fallbacks
 // rebuild the index by scanning every session file, which is only acceptable on
-// explicit repair/routing paths. A parseable legacy index returns an in-memory
-// empty projection so bounded maintenance stays cheap while a later repair
-// owner can still distinguish "projection missing" from "projection built empty".
+// explicit routing/repair paths. A parseable legacy index returns an in-memory
+// empty projection so user-visible list and recurring maintenance reads stay
+// cheap until normal assistant saves warm the bounded projection.
 export async function ensureAssistantRecentSessionsProjection(
   paths: AssistantStatePaths,
-  options?: {
-    repairMissingProjection?: boolean
-  },
 ): Promise<Record<string, string>> {
-  if (options?.repairMissingProjection === true) {
-    const store = await readAssistantIndexStore(paths, { fresh: true })
-    if (store.recentSessions !== undefined) {
-      return store.recentSessions
-    }
-    return (await rebuildAssistantIndexStore(paths)).recentSessions ?? {}
-  }
-
   let raw: string
   try {
     raw = await readFile(paths.indexesPath, 'utf8')
