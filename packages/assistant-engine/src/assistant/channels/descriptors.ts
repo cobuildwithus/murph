@@ -561,6 +561,12 @@ async function sendLinqVoiceMemoDelivery(input: {
 
   const providerMessageIds: string[] = []
   const text = messageTextOrNull(input.message)
+  const homeRouteFallbackAllowed = shouldAllowLinqHomeRouteFallback({
+    bindingDelivery: input.bindingDelivery,
+    candidate: input.candidate,
+    explicitTarget: input.explicitTarget,
+    threadIsDirect: input.threadIsDirect,
+  })
   if (!text && input.candidate.kind === 'participant') {
     throw new VaultCliError(
       'ASSISTANT_LINQ_VOICE_MEMO_CHAT_REQUIRED',
@@ -587,12 +593,7 @@ async function sendLinqVoiceMemoDelivery(input: {
               input.deliverySource?.kind === 'linq'
                 ? input.deliverySource.fromPhoneNumber
                 : null,
-            homeRouteFallbackAllowed: shouldAllowLinqHomeRouteFallback({
-              bindingDelivery: input.bindingDelivery,
-              candidate: input.candidate,
-              explicitTarget: input.explicitTarget,
-              threadIsDirect: input.threadIsDirect,
-            }),
+            homeRouteFallbackAllowed,
             idempotencyKey: input.idempotencyKey ?? null,
             target: input.candidate.target,
             targetKind: input.candidate.kind,
@@ -661,6 +662,7 @@ async function sendLinqVoiceMemoDelivery(input: {
       ? await input.dependencies.sendLinqVoiceMemo({
           answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
           attachmentId,
+          homeRouteFallbackAllowed,
           replyToMessageId: input.replyToMessageId ?? null,
           target: voiceMemoTarget,
           targetKind: voiceMemoTargetKind,
