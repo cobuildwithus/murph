@@ -135,6 +135,52 @@ test('builds bounded committed conversation evidence across recent sessions', as
   expect(evidence).not.toContain('internal status entry')
 })
 
+test('repairs legacy recent-session projections before building maintenance evidence', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-maintenance-evidence-legacy-repair-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  await saveAssistantSession(
+    vaultRoot,
+    createEvidenceTestSession({
+      lastTurnAt: '2026-06-29T22:00:00.000Z',
+      sessionId: 'session-legacy-newer',
+    }),
+  )
+  await saveAssistantSession(
+    vaultRoot,
+    createEvidenceTestSession({
+      lastTurnAt: '2026-06-29T21:00:00.000Z',
+      sessionId: 'session-legacy-older',
+    }),
+  )
+  await appendAssistantTranscriptEntries(vaultRoot, 'session-legacy-newer', [
+    {
+      createdAt: '2026-06-29T22:00:00.000Z',
+      kind: 'user',
+      text: 'Legacy projection repair should still surface this message.',
+    },
+  ])
+
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await writeFile(
+    paths.indexesPath,
+    JSON.stringify({ version: 1, aliases: {}, conversationKeys: {} }),
+    'utf8',
+  )
+
+  const evidence = await buildAssistantMaintenanceConversationEvidence({
+    now: new Date('2026-06-30T03:00:00.000Z'),
+    vault: vaultRoot,
+  })
+
+  expect(evidence).toContain(
+    '- [2026-06-29T22:00:00.000Z] user: Legacy projection repair should still surface this message.',
+  )
+  expect(evidence).not.toContain('No committed user or assistant conversation messages')
+})
+
 test('bounds transcript evidence reads to the tail byte cap', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-maintenance-evidence-tail-',

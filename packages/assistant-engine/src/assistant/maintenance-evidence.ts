@@ -6,6 +6,7 @@ import { compareAssistantTimestampsAscending } from './shared.js'
 import {
   listAssistantTranscriptTailEntries,
   listRecentAssistantSessions,
+  repairAssistantSessionIndexes,
 } from './store.js'
 
 export const ASSISTANT_MAINTENANCE_EVIDENCE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
@@ -73,6 +74,21 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
 }): Promise<AssistantMaintenanceEvidenceMessage[]> {
   const sessions = await listRecentAssistantSessions(input.vault, {
     limit: ASSISTANT_MAINTENANCE_EVIDENCE_MAX_SESSIONS,
+    requireProjection: true,
+  }).catch(async (error: unknown) => {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'ASSISTANT_SESSION_INDEX_REPAIR_REQUIRED'
+    ) {
+      await repairAssistantSessionIndexes(input.vault)
+      return listRecentAssistantSessions(input.vault, {
+        limit: ASSISTANT_MAINTENANCE_EVIDENCE_MAX_SESSIONS,
+        requireProjection: true,
+      })
+    }
+    throw error
   })
   const messages: AssistantMaintenanceEvidenceMessage[] = []
 
