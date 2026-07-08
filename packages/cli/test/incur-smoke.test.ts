@@ -1843,8 +1843,7 @@ test('automation save and edit schemas expose typed automation fields and a sepa
     }
   }
 
-  assert.equal('includeBody' in listSchema.options.properties, true)
-  assert.equal(listSchema.options.required?.includes('includeBody') ?? false, true)
+  assert.equal('includeBody' in listSchema.options.properties, false)
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('automation show schema accepts an id-or-slug lookup', async () => {

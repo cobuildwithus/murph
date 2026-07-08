@@ -115,10 +115,6 @@ export const automationListItemSchema = automationRecordSchema
     instructions: true,
     markdown: true,
   })
-  .extend({
-    instructions: z.string().min(1).optional(),
-    markdown: z.string().min(1).optional(),
-  })
   .strict();
 
 export const automationListResultSchema = z.object({
@@ -127,7 +123,6 @@ export const automationListResultSchema = z.object({
     status: z.array(z.enum(automationStatusValues)).nullable(),
     text: z.string().nullable(),
     limit: z.number().int().positive().max(200),
-    includeBody: z.boolean(),
   }),
   count: z.number().int().nonnegative(),
   items: z.array(automationListItemSchema),
@@ -160,12 +155,7 @@ export function createAutomationScaffoldPayload(): z.infer<
 
 function automationListItem(
   record: z.infer<typeof automationRecordSchema>,
-  includeBody: boolean,
 ): z.infer<typeof automationListItemSchema> {
-  if (includeBody) {
-    return record;
-  }
-
   const { instructions, markdown, ...item } = record;
   void instructions;
   void markdown;
@@ -881,10 +871,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .optional()
         .describe("Optional lexical filter across title, instructions, route, and metadata."),
       limit: z.number().int().positive().max(200).default(50),
-      includeBody: z
-        .boolean()
-        .default(false)
-        .describe("Include full automation instructions and markdown in each list item."),
     }),
     output: automationListResultSchema,
     async run(context) {
@@ -900,10 +886,9 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           status: context.options.status ?? null,
           text: context.options.text ?? null,
           limit: context.options.limit,
-          includeBody: context.options.includeBody,
         },
         count: items.length,
-        items: items.map((item) => automationListItem(item, context.options.includeBody)),
+        items: items.map((item) => automationListItem(item)),
       };
     },
   });
