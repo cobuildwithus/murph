@@ -12003,7 +12003,7 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId: "attempt_synthetic_runtime_foreground_preempt_system",
             budget: {
-              maxMailboxItems: 1,
+              maxMailboxItems: 2,
             },
             idleCheckpointDelayMs,
             leaseGeneration: "9",
@@ -12030,11 +12030,11 @@ describe("hosted workspace runtime entrypoint", () => {
 
             const inputId = await stagePendingLinqAssistantInputForMailboxItem({
               item: item.item,
-              threadId: item.item.id.endsWith("_2") ? "thread_2" : "thread_1",
+              threadId: `thread_${item.item.laneSeq}`,
               vaultRoot,
             });
             importedInputIds.push(inputId);
-            const target = item.item.id.endsWith("_2") ? "thread_2" : "thread_1";
+            const target = `thread_${item.item.laneSeq}`;
             return {
               assistantInputId: inputId,
               linqDeliveryContext: {
@@ -12078,14 +12078,20 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase(phaseInput) {
             assistantPhaseCalls += 1;
             assistantPhaseInputIds.push([
-              ...(phaseInput.initialMailboxImport.importResult.assistantInputIds ?? []),
+              ...(phaseInput.initialAssistantInputBatch?.assistantInputIds
+                ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
+                ?? []),
             ]);
             assistantPhaseLinqContextTargets.push([
-              ...(phaseInput.initialMailboxImport.importResult.linqDeliveryContexts ?? [])
+              ...(phaseInput.initialAssistantInputBatch?.linqDeliveryContexts
+                ?? phaseInput.initialMailboxImport.importResult.linqDeliveryContexts
+                ?? [])
                 .map((context) => context.target ?? ""),
             ]);
             assistantPhaseLinqContextInboundItemIds.push([
-              ...(phaseInput.initialMailboxImport.importResult.linqDeliveryContexts ?? [])
+              ...(phaseInput.initialAssistantInputBatch?.linqDeliveryContexts
+                ?? phaseInput.initialMailboxImport.importResult.linqDeliveryContexts
+                ?? [])
                 .map((context) => context.currentInbound?.mailboxItemId ?? ""),
             ]);
             events.push(`assistant.phase:${assistantPhaseCalls}`);
@@ -12208,10 +12214,206 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       const checkpointWakeAt = checkpointRequests[0]?.nextWakeAt ?? null;
-      assert.notEqual(checkpointWakeAt, null);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
-      assert.equal(result.status, "budget_exhausted");
+      assert.equal(checkpointWakeAt, systemFollowUpWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, checkpointWakeAt);
+    } finally {
+      runtimeAbortController.abort();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("late foreground input during system work is batched to the foreground page limit", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-batch-limit-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_foreground_batch_limit_system",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    const importedInputIds: string[] = [];
+    const assistantPhaseInputIds: string[][] = [];
+    const assistantPhaseLinqContextTargets: string[][] = [];
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_foreground_batch_limit",
+            budget: {
+              maxMailboxItems: 1,
+            },
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-foreground-batch-limit.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            const target = `thread_${item.item.laneSeq}`;
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              threadId: target,
+              vaultRoot,
+            });
+            importedInputIds.push(inputId);
+            return {
+              assistantInputId: inputId,
+              linqDeliveryContext: {
+                currentInbound: {
+                  dedupeKey: item.item.dedupeKey,
+                  eventId: item.item.dedupeKey,
+                  mailboxItemId: item.item.id,
+                  occurredAt: item.item.occurredAt,
+                  replyToMessageId: `msg_${item.item.id}`,
+                  target,
+                },
+                directRecipientPhoneNumber: "+15550000001",
+                fromPhoneNumber: null,
+                replyToMessageId: `msg_${item.item.id}`,
+                routeAuthority: {
+                  accountLookupKey: `hbidx:${target}`,
+                  channel: "linq" as const,
+                  containerMemberId: `member_${target}`,
+                  threadId: target,
+                },
+                service: "iMessage",
+                target,
+                threadIsDirect: true,
+              },
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(phaseInput) {
+            assistantPhaseCalls += 1;
+            assistantPhaseInputIds.push([
+              ...(phaseInput.initialAssistantInputBatch?.assistantInputIds
+                ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
+                ?? []),
+            ]);
+            assistantPhaseLinqContextTargets.push([
+              ...(phaseInput.initialAssistantInputBatch?.linqDeliveryContexts
+                ?? phaseInput.initialMailboxImport.importResult.linqDeliveryContexts
+                ?? [])
+                .map((context) => context.target ?? ""),
+            ]);
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              const systemRedactedStatus: HostedRuntimeRedactedJson = {
+                hostedSystemMailboxRecorded: 1,
+              };
+              return {
+                afterCheckpoint: async () => {
+                  for (let seq = 1; seq <= 5; seq += 1) {
+                    mailboxItems.push(createMailboxItem({
+                      id: `mailbox_item_entrypoint_foreground_batch_limit_conversation_${seq}`,
+                      laneSeq: String(seq),
+                      occurredAt: `2026-04-27T00:00:0${seq}.000Z`,
+                    }));
+                  }
+                  runtimeWakeSignal.notify();
+                  await waitUntil(() => {
+                    assert.equal(importedInputIds.length, 2);
+                  });
+                  return {
+                    checkpointReason: "system_mailbox_receipt" as const,
+                    nextWakeAt: "2099-04-27T00:10:00.000Z",
+                    nextWakeReason: "device-sync.reconcile",
+                    redactedStatus: systemRedactedStatus,
+                  };
+                },
+                afterCheckpointKeepsForegroundImportLoop: true,
+                checkpointReason: "system_mailbox_receipt" as const,
+                nextWakeAt: "2099-04-27T00:10:00.000Z",
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+                redactedStatus: systemRedactedStatus,
+              };
+            }
+
+            const assistantRedactedStatus: HostedRuntimeRedactedJson = {
+              hostedAssistantProgressed: true,
+            };
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: assistantRedactedStatus,
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+      await waitUntil(() => {
+        assert.equal(assistantPhaseCalls, 2);
+      });
+      const result = await resultPromise;
+
+      assert.equal(assistantPhaseInputIds[1]?.length, 2);
+      assert.deepEqual(assistantPhaseInputIds[1], importedInputIds.slice(0, 2));
+      assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1", "thread_2"]);
+      const thirdImportIndex = events.indexOf(
+        "mailbox.importItem:mailbox_item_entrypoint_foreground_batch_limit_conversation_3",
+      );
+      if (thirdImportIndex !== -1) {
+        assert.ok(
+          requireEventIndex(events, "assistant.phase:2") < thirdImportIndex,
+          "the first foreground rerun must run before importing beyond the capped batch",
+        );
+      }
+      assert.ok(
+        fetchRequests.some((request) =>
+          request.requestId.includes(":runtime-wake:")
+          && request.requestId.includes(":conversation")
+          && request.lanes.some((lane) =>
+            lane.lane === "conversation" && lane.importedSeq === "0"
+          )
+        ),
+      );
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "mailbox");
+      assert.equal(result.nextWakeAt, checkpointRequests[0]?.nextWakeAt ?? null);
     } finally {
       runtimeAbortController.abort();
       await removeTempRoot(vaultRoot);

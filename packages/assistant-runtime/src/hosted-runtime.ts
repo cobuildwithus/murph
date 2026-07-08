@@ -121,6 +121,7 @@ import {
   type HostedWorkspaceDurableCheckpointEffectResult,
   type HostedWorkspaceRunnerDeferredUsageCapture,
   type HostedWorkspaceRunnerHandledDeviceSyncWake,
+  type HostedWorkspaceRunnerAssistantInputBatch,
   type HostedWorkspaceRunnerMailboxImportContext,
   type HostedWorkspaceRunnerInput,
   type HostedWorkspaceRunnerResult,
@@ -653,10 +654,10 @@ function hostedMailboxImportHasForegroundConversationWork(
   );
 }
 
-function hostedMailboxImportHasAssistantInputWork(
-  result: HostedMailboxImportCheckpointResult | null | undefined,
+function hostedAssistantInputBatchHasWork(
+  batch: HostedWorkspaceRunnerAssistantInputBatch | null | undefined,
 ): boolean {
-  return (result?.importResult.assistantInputIds?.length ?? 0) > 0;
+  return (batch?.assistantInputIds.length ?? 0) > 0;
 }
 
 export class HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError extends Error {
@@ -1368,6 +1369,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     let runtimePassOrdinal = 0;
     const runWorkspaceForegroundPass = async (passInput: {
+      initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
       initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
       requestId: string;
@@ -1378,7 +1380,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const passStartedAtEpochMs = Date.now();
       const passForeground = hostedMailboxImportHasForegroundConversationWork(
         passInput.initialMailboxImport ?? null,
-      );
+      ) || hostedAssistantInputBatchHasWork(passInput.initialAssistantInputBatch ?? null);
       emitPhaseLog({
         details: {
           initialMailboxImportProvided: passInput.initialMailboxImport !== undefined,
@@ -1395,6 +1397,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       try {
         let currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
+          initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
           initialMailboxImport: passInput.initialMailboxImport,
           vaultRoot: restored.vaultRoot,
         });
@@ -1409,6 +1412,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             await raceHostedRuntimeCancellation(
               runHostedWorkspaceUntilIdleOrBudget({
                 ...baseRunnerInput,
+                initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
                 initialMailboxImport: passInput.initialMailboxImport,
                 initialMailboxImportContext: passInput.initialMailboxImportContext ?? null,
                 requestId: passInput.requestId,
@@ -1419,6 +1423,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 },
                 runAssistantPhase: async (phaseInput) => {
                   currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
+                    initialAssistantInputBatch: phaseInput.initialAssistantInputBatch ?? null,
                     initialMailboxImport: phaseInput.initialMailboxImport,
                     vaultRoot: restored.vaultRoot,
                   });
@@ -1966,26 +1971,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= passResult.runtimeStateDirty;
       };
       const runForegroundPass = async (wakeInput: {
+        initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
         initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
         initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
         latencySeed?: HostedRuntimeWakeLatencySeed | null;
         preserveDueAssistantWakeOnNoProgress?: boolean;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
       }): Promise<HostedWorkspaceRunnerResult> => {
-        const resolveForegroundRerunMailboxImport = (
+        const resolveForegroundRerunAssistantInputBatch = (
           passResult: HostedWorkspaceRunnerResult,
-        ): HostedMailboxImportCheckpointResult | null => {
-          const assistantInputImport = passResult.latestAssistantInputMailboxImport;
-          if (
-            assistantInputImport
-            && assistantInputImport !== passResult.initialMailboxImport
-            && hostedMailboxImportHasAssistantInputWork(assistantInputImport)
-          ) {
-            return assistantInputImport;
-          }
-
-          return null;
-        };
+        ): HostedWorkspaceRunnerAssistantInputBatch | null =>
+          hostedAssistantInputBatchHasWork(passResult.latestAssistantInputBatch)
+            ? passResult.latestAssistantInputBatch
+            : null;
         const runSingleForegroundPass = async (
           singleWakeInput: typeof wakeInput,
         ): Promise<HostedWorkspaceRunnerResult> => {
@@ -1996,6 +1994,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             checkpointPendingBeforePass,
           );
           result = await runWorkspaceForegroundPass({
+            initialAssistantInputBatch: singleWakeInput.initialAssistantInputBatch ?? null,
             initialMailboxImport: singleWakeInput.initialMailboxImport ?? null,
             initialMailboxImportContext: singleWakeInput.initialMailboxImportContext
               ?? createHostedRuntimeWakeInitialImportContext(singleWakeInput.latencySeed ?? null),
@@ -2013,21 +2012,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
         let passResult = await runSingleForegroundPass(wakeInput);
         // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
-        let rerunMailboxImport = resolveForegroundRerunMailboxImport(passResult);
+        let rerunAssistantInputBatch = resolveForegroundRerunAssistantInputBatch(passResult);
         while (
-          rerunMailboxImport
+          rerunAssistantInputBatch
           && (
             passResult.assistantPhaseResult?.checkpointReason !== "assistant_runtime_commit"
             || passResult.assistantPhaseResult?.deviceSyncMaintenanceRan === true
           )
         ) {
           passResult = await runSingleForegroundPass({
-            initialMailboxImport: rerunMailboxImport,
+            initialAssistantInputBatch: rerunAssistantInputBatch,
+            initialMailboxImport: passResult.latestMailboxImport,
             initialMailboxImportContext: null,
             latencySeed: wakeInput.latencySeed ?? null,
             requestIdKind: "checkpoint-interrupt",
           });
-          rerunMailboxImport = resolveForegroundRerunMailboxImport(passResult);
+          rerunAssistantInputBatch = resolveForegroundRerunAssistantInputBatch(passResult);
         }
         return passResult;
       };
@@ -3812,10 +3812,14 @@ function resolveHostedWorkspaceRunMailboxFetchLimit(importLimit: number): number
 }
 
 async function resolveHostedForegroundCurrentDeliveryRoute(input: {
+  initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
   initialMailboxImport: HostedWorkspaceRunnerInput["initialMailboxImport"] | undefined;
   vaultRoot: string;
 }): Promise<AssistantCurrentDeliveryRoute | null> {
-  const assistantInputIds = input.initialMailboxImport?.importResult.assistantInputIds ?? [];
+  const assistantInputIds =
+    input.initialAssistantInputBatch?.assistantInputIds
+    ?? input.initialMailboxImport?.importResult.assistantInputIds
+    ?? [];
   const routes: AssistantCurrentDeliveryRoute[] = [];
   for (const inputId of assistantInputIds) {
     if (!inputId) {
