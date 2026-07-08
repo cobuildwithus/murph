@@ -1,4 +1,11 @@
-import { access, open, readdir, readFile, type FileHandle } from 'node:fs/promises'
+import {
+  access,
+  open,
+  opendir,
+  readdir,
+  readFile,
+  type FileHandle,
+} from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -644,17 +651,26 @@ export async function synchronizeAssistantIndexes(
     conversationKeys[session.binding.conversationKey] = session.sessionId
   }
 
+  const canUpdateRecentSessions =
+    store.recentSessions !== undefined ||
+    await assistantSessionDirectoryOnlyContains(paths, session.sessionId)
+
   const updated = assistantAliasStoreSchema.parse({
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
     // Foreground saves own the bounded recent-session projection in O(1).
-    // Legacy indexes without the field start from the current save instead of
-    // rebuilding from every durable session on the reply commit path.
-    recentSessions: pruneAssistantRecentSessions({
-      ...(store.recentSessions ?? {}),
-      [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
-    }),
+    // Legacy indexes without the field are updated only when the session
+    // directory is known to contain no older records; otherwise explicit
+    // repair owns the one-time full rebuild.
+    ...(canUpdateRecentSessions
+      ? {
+          recentSessions: pruneAssistantRecentSessions({
+            ...(store.recentSessions ?? {}),
+            [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
+          }),
+        }
+      : {}),
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
 }
@@ -681,6 +697,12 @@ export async function readAssistantRecentSessionsProjection(
     raw = await readFile(paths.indexesPath, 'utf8')
   } catch (error) {
     if (isMissingFileError(error)) {
+      if (!(await assistantSessionDirectoryHasSessionFile(paths))) {
+        return {
+          recentSessions: {},
+          state: 'ready',
+        }
+      }
       return {
         recentSessions: {},
         state: 'missing',
@@ -707,6 +729,17 @@ export async function readAssistantRecentSessionsProjection(
     }
   }
 
+  if (
+    Object.keys(store.aliases).length === 0 &&
+    Object.keys(store.conversationKeys).length === 0 &&
+    !(await assistantSessionDirectoryHasSessionFile(paths))
+  ) {
+    return {
+      recentSessions: {},
+      state: 'ready',
+    }
+  }
+
   return {
     recentSessions: {},
     state: 'missing',
@@ -729,6 +762,70 @@ function pruneAssistantRecentSessions(
       )
       .slice(0, ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT),
   )
+}
+
+async function assistantSessionDirectoryHasSessionFile(
+  paths: AssistantStatePaths,
+): Promise<boolean> {
+  let directory: Awaited<ReturnType<typeof opendir>>
+  try {
+    directory = await opendir(paths.sessionsDirectory)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false
+    }
+    throw error
+  }
+
+  try {
+    for (let checked = 0; checked < 16; checked += 1) {
+      const entry = await directory.read()
+      if (!entry) {
+        return false
+      }
+      if (entry.isFile() && entry.name.endsWith('.json')) {
+        return true
+      }
+    }
+    return true
+  } finally {
+    await directory.close()
+  }
+}
+
+async function assistantSessionDirectoryOnlyContains(
+  paths: AssistantStatePaths,
+  sessionId: string,
+): Promise<boolean> {
+  let directory: Awaited<ReturnType<typeof opendir>>
+  try {
+    directory = await opendir(paths.sessionsDirectory)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return true
+    }
+    throw error
+  }
+
+  let matched = false
+  try {
+    for (let checked = 0; checked < 2; checked += 1) {
+      const entry = await directory.read()
+      if (!entry) {
+        return matched
+      }
+      if (!entry.isFile() || !entry.name.endsWith('.json')) {
+        return false
+      }
+      if (entry.name.replace(/\.json$/u, '') !== sessionId) {
+        return false
+      }
+      matched = true
+    }
+    return false
+  } finally {
+    await directory.close()
+  }
 }
 
 export async function writeAutomationState(

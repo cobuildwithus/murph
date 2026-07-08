@@ -342,6 +342,37 @@ test.sequential(
 )
 
 test.sequential(
+  'assistant session list returns an empty compact page for a fresh vault',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cli-empty-'))
+    const homeRoot = path.join(parent, 'home')
+    const vaultRoot = path.join(parent, 'vault')
+    cleanupPaths.push(parent)
+    await mkdir(homeRoot, { recursive: true })
+    await initializeVault({ vaultRoot })
+
+    const listed = requireData(
+      await runIsolatedCli<{
+        count: number
+        filters: {
+          limit: number
+        }
+        sessions: unknown[]
+      }>(['assistant', 'session', 'list', '--vault', vaultRoot], {
+        env: {
+          HOME: homeRoot,
+        },
+      }),
+    )
+
+    assert.equal(listed.count, 0)
+    assert.equal(listed.filters.limit, 5)
+    assert.deepEqual(listed.sessions, [])
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
   'assistant session list and show redact HOME-based vault and runtime paths',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cli-home-'))

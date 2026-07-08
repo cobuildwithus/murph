@@ -14,6 +14,7 @@ import {
   appendAssistantTranscriptEntries,
   listAssistantTranscriptTailEntries,
   listRecentAssistantSessions,
+  repairAssistantSessionIndexes,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -214,8 +215,8 @@ test('bounds session reads to the newest sessions by durable activity', async ()
 
   // Legacy index without the projection: the recurring path never rebuilds
   // from session files (that would scan all sessions under the runtime write
-  // lock). It returns an in-memory empty projection and warms up from normal
-  // bounded saves instead.
+  // lock). It returns an in-memory empty projection until explicit repair
+  // builds the bounded recent-session projection.
   const paths = resolveAssistantStatePaths(vaultRoot)
   await writeFile(
     paths.indexesPath,
@@ -224,6 +225,13 @@ test('bounds session reads to the newest sessions by durable activity', async ()
   )
   const initialized = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
   expect(initialized).toEqual([])
+
+  await repairAssistantSessionIndexes(vaultRoot)
+  const repaired = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
+  expect(repaired.map((session) => session.sessionId).sort()).toEqual([
+    'session-newer-activity',
+    'session-older-activity',
+  ])
 
   await saveAssistantSession(
     vaultRoot,
@@ -235,6 +243,8 @@ test('bounds session reads to the newest sessions by durable activity', async ()
   const warmed = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
   expect(warmed.map((session) => session.sessionId)).toEqual([
     'session-post-deploy',
+    'session-newer-activity',
+    'session-older-activity',
   ])
 
   // Missing or corrupt index files must not trigger the repair-path rebuild

@@ -645,7 +645,19 @@ describe('assistant store persistence seams', () => {
     )
   })
 
-  it('keeps legacy recent-session reads bounded and warms the projection on save', async () => {
+  it('treats fresh empty recent-session projections as ready empty', async () => {
+    const context = await createTempVaultContext('assistant-store-persistence-recent-empty-')
+    tempRoots.push(context.parentRoot)
+    const paths = resolveAssistantStatePaths(context.vaultRoot)
+    await ensureAssistantState(paths)
+
+    await expect(listRecentAssistantSessions(context.vaultRoot, {
+      limit: 1,
+      requireProjection: true,
+    })).resolves.toEqual([])
+  })
+
+  it('keeps legacy recent-session reads bounded and repairable', async () => {
     const context = await createTempVaultContext('assistant-store-persistence-recent-legacy-')
     tempRoots.push(context.parentRoot)
     const paths = resolveAssistantStatePaths(context.vaultRoot)
@@ -724,18 +736,14 @@ describe('assistant store persistence seams', () => {
     await expect(listRecentAssistantSessions(context.vaultRoot, {
       limit: 1,
       requireProjection: true,
-    })).resolves.toEqual([
-      expect.objectContaining({
-        sessionId: 'session-newer',
-      }),
-    ])
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_INDEX_REPAIR_REQUIRED',
+    })
 
     const rebuilt = JSON.parse(await readFile(paths.indexesPath, 'utf8')) as {
       recentSessions?: Record<string, string>
     }
-    expect(rebuilt.recentSessions).toEqual({
-      'session-newer': '2026-04-08T00:02:00.000Z',
-    })
+    expect(rebuilt.recentSessions).toBeUndefined()
   })
 
   it('applies recent-session limits before reading durable session files', async () => {
