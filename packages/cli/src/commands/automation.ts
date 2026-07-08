@@ -110,6 +110,13 @@ export const automationRecordSchema = z
   })
   .strict();
 
+export const automationListItemSchema = automationRecordSchema
+  .omit({
+    instructions: true,
+    markdown: true,
+  })
+  .strict();
+
 export const automationListResultSchema = z.object({
   vault: pathSchema,
   filters: z.object({
@@ -118,7 +125,7 @@ export const automationListResultSchema = z.object({
     limit: z.number().int().positive().max(200),
   }),
   count: z.number().int().nonnegative(),
-  items: z.array(automationRecordSchema),
+  items: z.array(automationListItemSchema),
 });
 
 export const automationShowResultSchema = z.object({
@@ -144,6 +151,15 @@ export function createAutomationScaffoldPayload(): z.infer<
   typeof automationScaffoldResultSchema
 >["payload"] {
   return automationScaffoldPayloadSchema.parse(scaffoldAutomationPayload());
+}
+
+function automationListItem(
+  record: z.infer<typeof automationRecordSchema>,
+): z.infer<typeof automationListItemSchema> {
+  const { instructions, markdown, ...item } = record;
+  void instructions;
+  void markdown;
+  return item;
 }
 
 function invalidAutomationOption(message: string): never {
@@ -872,7 +888,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           limit: context.options.limit,
         },
         count: items.length,
-        items,
+        items: items.map((item) => automationListItem(item)),
       };
     },
   });
