@@ -28,7 +28,7 @@ export const commonListLimitOptionSchema = z
   .int()
   .positive()
   .max(200)
-  .default(50)
+  .default(10)
   .describe('Maximum number of results to return.')
 
 export const commonDateRangeOptionDescriptions = {

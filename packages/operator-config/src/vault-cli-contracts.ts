@@ -703,7 +703,7 @@ export const listFilterSchema = z.object({
     .array(z.string().min(1))
     .optional()
     .describe('Optional tag filter. Repeat for multiple tags.'),
-  limit: z.number().int().positive().max(200).default(50),
+  limit: z.number().int().positive().max(200).default(10),
 })
 
 export const listItemSchema = listEntitySchema

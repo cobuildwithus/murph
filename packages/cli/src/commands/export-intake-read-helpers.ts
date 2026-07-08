@@ -428,7 +428,7 @@ export async function listStoredExportPacks(
     })
     .map((item) => item.summary)
 
-  return filtered.slice(0, options.limit ?? 50)
+  return filtered.slice(0, options.limit ?? 10)
 }
 
 export async function materializeStoredExportPack(input: {

@@ -585,6 +585,31 @@ const assistantSessionOutputSchema = assistantPersistedSessionSchema
   })
   .strict()
 
+export const assistantSessionSummarySchema = z
+  .object({
+    schema: z.literal('murph.assistant-conversation.v2'),
+    conversationId: assistantSessionIdSchema,
+    sessionId: assistantSessionIdSchema,
+    alias: z.string().min(1).nullable(),
+    binding: assistantSessionBindingSchema,
+    createdAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    lastTurnAt: isoTimestampSchema.nullable(),
+    turnCount: z.number().int().nonnegative(),
+    provider: z.enum(assistantChatProviderValues),
+    model: z.string().min(1).nullable(),
+    modelProvider: z.string().min(1).nullable(),
+    reasoningEffort: z.string().min(1).nullable(),
+    sandbox: z.enum(assistantSandboxValues).nullable(),
+    approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
+    profile: z.string().min(1).nullable(),
+    oss: z.boolean(),
+    executionDriver: z.enum(assistantExecutionDriverValues),
+    resumeKind: z.enum(assistantResumeKindValues).nullable(),
+    resumeThreadId: z.string().min(1).nullable(),
+  })
+  .strict()
+
 function normalizeAssistantSessionRecord(
   value: z.infer<typeof assistantPersistedSessionRecordSchema>,
 ): AssistantSession {
@@ -1329,7 +1354,11 @@ export const assistantDeliverResultSchema = z.object({
 export const assistantSessionListResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
-  sessions: z.array(assistantSessionOutputSchema),
+  filters: z.object({
+    limit: z.number().int().positive().max(50),
+  }),
+  sessions: z.array(assistantSessionSummarySchema),
+  count: z.number().int().nonnegative(),
 })
 
 export const assistantSessionShowResultSchema = z.object({
@@ -1632,6 +1661,9 @@ export type AssistantDeliverResult = z.infer<
 >
 export type AssistantSessionListResult = z.infer<
   typeof assistantSessionListResultSchema
+>
+export type AssistantSessionSummary = z.infer<
+  typeof assistantSessionSummarySchema
 >
 export type AssistantSessionShowResult = z.infer<
   typeof assistantSessionShowResultSchema

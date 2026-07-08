@@ -286,10 +286,15 @@ test.sequential(
 
     const listed = requireData(
       await runIsolatedCli<{
+        count: number
+        filters: {
+          limit: number
+        }
         stateRoot: string
         sessions: Array<{
           sessionId: string
           alias: string | null
+          target?: unknown
         }>
       }>(['assistant', 'session', 'list', '--vault', vaultRoot], {
         env: {
@@ -297,10 +302,13 @@ test.sequential(
         },
       }),
     )
+    assert.equal(listed.count, 1)
+    assert.equal(listed.filters.limit, 5)
     assert.equal(listed.sessions.length, 1)
     assert.equal(listed.sessions[0]?.sessionId, created.session.sessionId)
     assert.equal(listed.sessions[0]?.alias, 'telegram:bob')
     assert.equal(listed.stateRoot, statePaths.assistantStateRoot)
+    assert.equal('target' in (listed.sessions[0] ?? {}), false)
     assert.equal(
       Object.prototype.hasOwnProperty.call(listed.sessions[0] ?? {}, 'lastAssistantMessage'),
       false,

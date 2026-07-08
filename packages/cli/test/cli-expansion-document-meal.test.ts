@@ -273,8 +273,9 @@ test(
 
     assert.equal('from' in documentListSchema.options.properties, true)
     assert.equal('to' in documentListSchema.options.properties, true)
+    assert.equal('limit' in documentListSchema.options.properties, true)
     assert.equal('kind' in documentListSchema.options.properties, false)
-    assert.deepEqual(documentListSchema.options.required ?? [], [])
+    assert.deepEqual(documentListSchema.options.required ?? [], ['limit'])
 
     assert.equal('input' in documentEditSchema.options.properties, false)
     assert.equal('set' in documentEditSchema.options.properties, false)
@@ -410,7 +411,7 @@ test.sequential(
       assert.equal(requireData(listedDocuments).filters.kind, 'document')
       assert.equal(requireData(listedDocuments).filters.from, '2026-03-12')
       assert.equal(requireData(listedDocuments).filters.to, '2026-03-12')
-      assert.equal(requireData(listedDocuments).filters.limit, 50)
+      assert.equal(requireData(listedDocuments).filters.limit, 10)
       assert.equal(requireData(listedDocuments).count, 1)
       assert.deepEqual(
         requireData(listedDocuments).items.map((item) => item.id),
@@ -799,7 +800,7 @@ test.sequential(
       assert.equal(requireData(listedMeals).filters.kind, 'meal')
       assert.equal(requireData(listedMeals).filters.from, '2026-03-12')
       assert.equal(requireData(listedMeals).filters.to, '2026-03-12')
-      assert.equal(requireData(listedMeals).filters.limit, 50)
+      assert.equal(requireData(listedMeals).filters.limit, 10)
       assert.equal(requireData(listedMeals).count, 1)
       assert.deepEqual(
         requireData(listedMeals).items.map((item) => item.id),

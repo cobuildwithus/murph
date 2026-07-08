@@ -221,7 +221,7 @@ export function registerProtocolCommands(
     description: "List private regimen records.",
     options: withBaseOptions({
       status: z.string().min(1).optional().describe("Optional regimen status to filter by."),
-      limit: z.number().int().positive().max(200).default(50),
+      limit: z.number().int().positive().max(200).default(10),
     }),
     output: healthListResultSchema,
     run({ options }) {
@@ -609,7 +609,7 @@ export function registerProtocolCommands(
         .min(1)
         .optional()
         .describe("Optional public Health Commons protocol key, slug, or route id to filter by."),
-      limit: z.number().int().positive().max(200).default(50),
+      limit: z.number().int().positive().max(200).default(10),
     }),
     output: privateProtocolListResultSchema,
     async run({ options }) {

@@ -154,7 +154,7 @@ export function registerExportCommands(cli: Cli.Cli, services: VaultServices) {
       experiment: slugSchema
         .optional()
         .describe('Optional experiment slug filter against the stored pack scope.'),
-      limit: z.number().int().positive().max(200).default(50),
+      limit: z.number().int().positive().max(200).default(10),
     }),
     output: exportPackListResultSchema,
     async run({ options }) {
