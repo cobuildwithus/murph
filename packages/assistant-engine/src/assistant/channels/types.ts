@@ -140,6 +140,7 @@ export interface AssistantChannelDependencies {
     answeredMailboxItemIds?: readonly string[] | null
     directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
+    homeRouteFallbackAllowed?: boolean | null
     idempotencyKey?: string | null
     media?: readonly AssistantResponseMedia[] | null
     message: string
@@ -160,6 +161,7 @@ export interface AssistantChannelDependencies {
   sendLinqVoiceMemo?: (input: {
     answeredMailboxItemIds?: readonly string[] | null
     attachmentId: string
+    homeRouteFallbackAllowed?: boolean | null
     replyToMessageId?: string | null
     signal?: AbortSignal
     target: string
@@ -251,6 +253,7 @@ export interface AssistantChannelAdapter {
       message: string
       replyToMessageId?: string | null
       subject?: string | null
+      threadIsDirect?: boolean | null
     },
     dependencies: AssistantChannelDependencies,
   ) => Promise<ReturnType<typeof assistantChannelDeliverySchema.parse>>
@@ -292,15 +295,18 @@ export interface AssistantChannelAdapterSpec {
   sendMessage: (input: {
     actorId: string | null
     answeredMailboxItemIds?: readonly string[] | null
+    bindingDelivery: AssistantBindingDelivery | null
     candidate: AssistantDeliveryCandidate
     deliverySource?: AssistantDeliverySource | null
     dependencies: AssistantChannelDependencies
+    explicitTarget: string | null
     idempotencyKey?: string | null
     identityId: string | null
     media: readonly AssistantResponseMedia[]
     message: string
     replyToMessageId?: string | null
     subject?: string | null
+    threadIsDirect: boolean | null
   }) => Promise<
     | {
         providerMessageId?: string | null

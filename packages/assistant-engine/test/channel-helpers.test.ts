@@ -347,18 +347,24 @@ describe('channel helper seams', () => {
     expect(sendMessage).toHaveBeenCalledWith({
       actorId: null,
       answeredMailboxItemIds: [],
+      bindingDelivery: {
+        kind: 'participant',
+        target: 'participant-7',
+      },
       candidate: {
         kind: 'participant',
         target: 'participant-7',
       },
       deliverySource: null,
       dependencies: {},
+      explicitTarget: null,
       idempotencyKey: 'idem-7',
       identityId: 'identity-7',
       media: [],
       message: 'hello there',
       replyToMessageId: 'reply-7',
       subject: null,
+      threadIsDirect: null,
     })
     expect(delivery).toMatchObject({
       channel: 'telegram',
@@ -670,6 +676,7 @@ describe('channel helper seams', () => {
         identityId: null,
         message: 'linq hello',
         replyToMessageId: '   ',
+        threadIsDirect: true,
       },
       {
         sendLinq,
@@ -679,6 +686,7 @@ describe('channel helper seams', () => {
       answeredMailboxItemIds: [],
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
+      homeRouteFallbackAllowed: true,
       idempotencyKey: 'idem-linq',
       message: 'linq hello',
       replyToMessageId: null,
@@ -966,6 +974,7 @@ describe('channel helper seams', () => {
       answeredMailboxItemIds: [],
       directRecipientPhoneNumber: '+15550000001',
       fromPhoneNumber: '+15550000002',
+      homeRouteFallbackAllowed: false,
       idempotencyKey: 'idem-text-first',
       message: 'Listen to this',
       replyToMessageId: 'reply-text',

@@ -1923,6 +1923,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
             effectsPort: input.effectsPort,
             fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+            homeRouteFallbackAllowed: false,
             idempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
             intentId: input.assistantDeliveryEffect.effectId,
             linqEgressLatencyTrace: input.linqEgressLatencyTrace,
@@ -2242,6 +2243,7 @@ function createHostedAssistantLinqSendDependency(input: {
       directRecipientPhoneNumber,
       effectsPort: input.effectsPort ?? null,
       fromPhoneNumber,
+      homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
       idempotencyKey: request.idempotencyKey ?? null,
       intentId: input.intentId ?? null,
       linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
@@ -2500,6 +2502,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
       effectsPort: input.effectsPort ?? null,
       fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+      homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
       idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
       intentId: input.intentId ?? null,
       linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
@@ -2798,6 +2801,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   directRecipientPhoneNumber: string | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
   fromPhoneNumber: string | null;
+  homeRouteFallbackAllowed: boolean;
   idempotencyKey: string | null;
   intentId: string | null;
   linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
@@ -2821,6 +2825,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     ...(currentInbound ? { currentInbound } : {}),
     directRecipientPhoneNumber: input.directRecipientPhoneNumber,
     fromPhoneNumber: input.fromPhoneNumber,
+    homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
     idempotencyKey: input.idempotencyKey,
     intentId: input.intentId,
     replyToMessageId: input.replyToMessageId,

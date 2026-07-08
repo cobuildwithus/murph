@@ -174,6 +174,7 @@ export function parseHostedRuntimeAssistantResponseMedia(
 export interface HostedRuntimeLinqSendRequest {
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
+  homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   media?: readonly AssistantResponseMedia[] | null;
   message: string;
@@ -203,6 +204,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
+  homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
   replyToMessageId?: string | null;

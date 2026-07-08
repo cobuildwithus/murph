@@ -641,5 +641,13 @@ function resolveCanonicalAssistantCronScheduleAnchorAt(input: {
     return input.source.updatedAt
   }
 
-  return input.state.lastSucceededAt ?? input.state.activatedAt
+  return (
+    input.state.lastSucceededAt ??
+    (
+      input.state.consecutiveFailures === 0
+        ? input.state.lastFailedAt
+        : null
+    ) ??
+    input.state.activatedAt
+  )
 }

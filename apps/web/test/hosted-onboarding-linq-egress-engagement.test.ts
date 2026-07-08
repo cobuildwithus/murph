@@ -222,7 +222,7 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
   });
 
-  it("falls back to the durable home route when same-user route authority is stale", async () => {
+  it("rejects stale same-user route authority before durable home-route fallback", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-home",
     });
@@ -238,25 +238,13 @@ describe("hosted Linq egress authority", () => {
       },
       target: "chat-home",
       targetKind: "thread",
-    })).resolves.toEqual({ targetOverride: null });
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
 
     expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
-      select: {
-        linqChatIdEncrypted: true,
-        linqChatLookupKey: true,
-        linqRecipientPhoneEncrypted: true,
-        linqRecipientPhoneLookupKey: true,
-        memberId: true,
-        pendingLinqChatIdEncrypted: true,
-        pendingLinqChatLookupKey: true,
-        pendingLinqParticipantContactEncrypted: true,
-        pendingLinqRecipientPhoneEncrypted: true,
-        pendingLinqRecipientPhoneLookupKey: true,
-        telegramUserIdEncrypted: true,
-      },
-      where: { memberId: "member-1" },
-    });
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
   });
 
   it("returns a current home-route override for stale bare Linq home targets", async () => {
@@ -274,6 +262,7 @@ describe("hosted Linq egress authority", () => {
     });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      homeRouteFallbackAllowed: true,
       memberId: "member-1",
       prisma: asRuntimeEngagementPrisma(prisma),
       target: "chat-stale-home",
@@ -286,6 +275,24 @@ describe("hosted Linq egress authority", () => {
     });
 
     expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps stale bare Linq targets strict without home-route proof", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-current-home",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-stale-non-home",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(mocks.readHostedMemberRoutingPrivateState).not.toHaveBeenCalled();
   });
 
   it("keeps stale reply targets strict instead of returning a home-route override", async () => {

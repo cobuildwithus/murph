@@ -6158,7 +6158,8 @@ describe('assistant cron runtime orchestration', () => {
     expect(failed.state.lastError).toBe(
       'Linq request POST /chats/[chat]/messages failed with HTTP 400.',
     )
-    expect(failed.state.nextRunAt).toBe('2026-05-04T16:00:50.000Z')
+    expect(failed.state.nextRunAt).toBe('2026-05-05T16:00:00.000Z')
+    expect(failed.state.consecutiveFailures).toBe(0)
   })
 
   it('passes an explicit participant delivery target for a source-backed mixed Linq route', async () => {
@@ -6582,7 +6583,8 @@ describe('assistant cron runtime orchestration', () => {
     expect(repaired.state.lastError).toBe(
       'Assistant cron pending delivery outbox intent is no longer available.',
     )
-    expect(repaired.state.nextRunAt).toBe('2026-04-09T10:00:30.000Z')
+    expect(repaired.state.nextRunAt).toBe('2026-04-10T10:00:00.000Z')
+    expect(repaired.state.consecutiveFailures).toBe(0)
   })
 
   it('reconciles pending cron deliveries from terminal outbox transitions', async () => {
@@ -6661,7 +6663,8 @@ describe('assistant cron runtime orchestration', () => {
     expect(abandoned.state.pendingDeliveryIntentId).toBeUndefined()
     expect(abandoned.state.lastFailedAt).toBe('2026-04-08T10:01:00.000Z')
     expect(abandoned.state.lastError).toBe('provider abandoned delivery')
-    expect(abandoned.state.nextRunAt).toBe('2026-04-08T10:01:30.000Z')
+    expect(abandoned.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
+    expect(abandoned.state.consecutiveFailures).toBe(0)
   })
 
   it('drops stale pending canonical occurrences when delivery fails after a schedule edit', async () => {
@@ -6731,7 +6734,7 @@ describe('assistant cron runtime orchestration', () => {
     const runtimeRecord = runtimeStore.jobs.find((record) =>
       record.jobId === editedJob.jobId
     )
-    expect(runtimeRecord?.state.pendingOccurrenceAt).toBe('2026-04-08T12:00:00.000Z')
+    expect(runtimeRecord?.state.pendingOccurrenceAt).toBeNull()
     expect(runtimeRecord?.state.retryAfterAt).toBeNull()
   })
 })

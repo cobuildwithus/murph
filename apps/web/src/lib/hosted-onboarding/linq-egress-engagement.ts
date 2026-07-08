@@ -72,6 +72,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
+  homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   memberId: string;
   prisma: HostedLinqEngagementClient;
@@ -93,6 +94,9 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       message: "Linq egress authority does not match the runtime user.",
       retryable: false,
     });
+  }
+  if (input.routeAuthority && !routeAuthority) {
+    throwHostedLinqRouteAuthorityMismatch();
   }
 
   if (normalizeNullable(input.targetKind) === "participant") {
@@ -134,12 +138,14 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     recipientPhone: input.directRecipientPhoneNumber,
     replyToMessageId: input.replyToMessageId,
     targetKind: input.targetKind,
+    homeRouteFallbackAllowed: input.homeRouteFallbackAllowed === true,
   });
 }
 
 async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   chatId?: string | null;
   currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
+  homeRouteFallbackAllowed: boolean;
   memberId: string;
   prisma: HostedLinqEngagementClient;
   recipientPhone?: string | null;
@@ -217,13 +223,15 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
 function canResolveHostedLinqHomeRouteOverride(input: {
   chatId?: string | null;
   currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
+  homeRouteFallbackAllowed?: boolean | null;
   recipientPhone?: string | null;
   replyToMessageId?: string | null;
   targetKind?: string | null;
 }): boolean {
   const targetKind = normalizeNullable(input.targetKind);
   return (
-    normalizeNullable(input.chatId) !== null
+    input.homeRouteFallbackAllowed === true
+    && normalizeNullable(input.chatId) !== null
     && input.currentInbound === null
     && normalizeNullable(input.recipientPhone) === null
     && normalizeNullable(input.replyToMessageId) === null

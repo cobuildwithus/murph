@@ -34,6 +34,7 @@ export const POST = withJsonError(async (request: Request) => {
     currentInbound: parseHostedLinqLegacyCurrentInboundProof(body.currentInbound),
     directRecipientPhoneNumber: readOptionalBodyString(body.directRecipientPhoneNumber),
     fromPhoneNumber: readOptionalBodyString(body.fromPhoneNumber),
+    homeRouteFallbackAllowed: body.homeRouteFallbackAllowed === true,
     idempotencyKey: readOptionalBodyString(body.idempotencyKey),
     memberId: userId,
     prisma: getPrisma(),

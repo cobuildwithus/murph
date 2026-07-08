@@ -319,7 +319,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('pnpm review:gpt pr-review')
     expect(prReviewGptLoop).toContain('repo-local `pr-review` preset')
     expect(prReviewGptLoop).toContain('`pnpm review:gpt`')
-    expect(prReviewGptLoop).toContain('Eragon managed browser profile')
+    expect(prReviewGptLoop).toContain('managed ReviewGPT browser lanes')
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')

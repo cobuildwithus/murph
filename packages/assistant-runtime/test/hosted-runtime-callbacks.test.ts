@@ -6151,6 +6151,7 @@ describe("hosted runtime callbacks", () => {
         answeredMailboxItemIds: [],
         directRecipientPhoneNumber: null,
         fromPhoneNumber: null,
+        homeRouteFallbackAllowed: true,
         idempotencyKey: "assistant-outbox:intent_123",
         message: "Current home route reminder.",
         replyToMessageId: null,
@@ -6188,6 +6189,7 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
+        homeRouteFallbackAllowed: true,
         target: "linq_chat_stale",
         targetKind: "thread",
       }),
@@ -6778,6 +6780,7 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
+      homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
       replyToMessageId: "linq_message_other",
@@ -7270,6 +7273,7 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: null,
+      homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
       replyToMessageId: "linq_message_current",
@@ -7494,6 +7498,7 @@ describe("hosted runtime callbacks", () => {
       },
       directRecipientPhoneNumber: "+15550000001",
       fromPhoneNumber: "+15559990000",
+      homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
       replyToMessageId: "linq_message_a",
@@ -7597,6 +7602,7 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
+      homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
       replyToMessageId: "linq_message_current",
@@ -7692,6 +7698,7 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550001",
       fromPhoneNumber: null,
+      homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
       replyToMessageId: "linq_message_current",
@@ -8638,6 +8645,7 @@ describe("hosted runtime callbacks", () => {
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: null,
       fromPhoneNumber: null,
+      homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
       replyToMessageId: "linq_message_current",
