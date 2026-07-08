@@ -23,6 +23,7 @@ import {
 import { generateRecordId } from "../../ids.ts";
 import { readJsonlRecords } from "../../jsonl.ts";
 import { readJsonFile } from "../../fs.ts";
+import { withCanonicalWriteLock } from "../../operations/canonical-write-lock.ts";
 import { runCanonicalWrite, type WriteBatch } from "../../operations/write-batch.ts";
 import { normalizeRelativeVaultPath } from "../../path-safety.ts";
 import type { DateInput } from "../../types.ts";
@@ -942,102 +943,104 @@ export async function addCapture(
 export async function addCaptureWithLookup(
   input: AddCaptureWithLookupInput,
 ): Promise<AddCaptureWithLookupResult> {
-  if (normalizeDraftEventId(input.draft.id)) {
-    throw new VaultError("INVALID_INPUT", "Capture lookup writes generate their own event id.");
-  }
+  return withCanonicalWriteLock(input.vaultRoot, async () => {
+    if (normalizeDraftEventId(input.draft.id)) {
+      throw new VaultError("INVALID_INPUT", "Capture lookup writes generate their own event id.");
+    }
 
-  const existing = await findCaptureByLookup({
-    lookupKey: input.lookupKey,
-    vaultRoot: input.vaultRoot,
-  });
-  if (existing.status === "live") {
-    throw new VaultError("CAPTURE_LOOKUP_EXISTS", "Capture lookup already points at a live capture.", {
-      eventId: existing.eventId,
-      relativePath: existing.lookupPath,
+    const existing = await findCaptureByLookup({
+      lookupKey: input.lookupKey,
+      vaultRoot: input.vaultRoot,
     });
-  }
-  if (existing.status === "deleted") {
-    throw new VaultError("CAPTURE_LOOKUP_DELETED", "Capture lookup points at a deleted capture.", {
-      eventId: existing.eventId,
-      relativePath: existing.lookupPath,
-    });
-  }
-
-  const { lookupKeyHash, lookupPath } = captureLookupPathForKey(input.lookupKey);
-  const result = await writeAttachmentBackedEvent<"capture", "note">({
-    vaultRoot: input.vaultRoot,
-    draft: input.draft,
-    attachments: input.attachments,
-    rawImport: input.rawImport,
-    specializedKind: "capture",
-    writeLabel: "capture",
-    operationType: "capture_write",
-    commandName: "core.addCaptureWithLookup",
-    ownerKind: "capture",
-    defaultImportKind: "capture",
-    rawImportFamily: "capture",
-    toLatestDraft: toCaptureDraft,
-    mergeDrafts: mergeCaptureDrafts,
-    applyAttachmentProjections: applyCaptureAttachmentProjections,
-    normalizeDraft: normalizeLookupBackedCaptureDraft,
-    requireAttachments: {
-      code: "CAPTURE_MEDIA_MISSING",
-      message: "Capture writes require at least one media attachment.",
-    },
-    stageAdditionalResult: async ({ batch, eventRecord, ledgerFile, manifestPath }) => {
-      const attachmentRef = eventRecord.attachments?.find((attachment) =>
-        attachment.role === input.lookupAttachmentRole
-      )?.relativePath ?? null;
-      if (!attachmentRef) {
-        throw new VaultError(
-          "CAPTURE_LOOKUP_ATTACHMENT_MISSING",
-          "Capture lookup attachment role was not written.",
-        );
-      }
-
-      const index = await readStoredCaptureLookupIndex({
-        vaultRoot: input.vaultRoot,
+    if (existing.status === "live") {
+      throw new VaultError("CAPTURE_LOOKUP_EXISTS", "Capture lookup already points at a live capture.", {
+        eventId: existing.eventId,
+        relativePath: existing.lookupPath,
       });
-      if (Object.prototype.hasOwnProperty.call(index.entries, lookupKeyHash)) {
-        throw new VaultError("CAPTURE_LOOKUP_EXISTS", "Capture lookup already exists.", {
-          relativePath: lookupPath,
+    }
+    if (existing.status === "deleted") {
+      throw new VaultError("CAPTURE_LOOKUP_DELETED", "Capture lookup points at a deleted capture.", {
+        eventId: existing.eventId,
+        relativePath: existing.lookupPath,
+      });
+    }
+
+    const { lookupKeyHash, lookupPath } = captureLookupPathForKey(input.lookupKey);
+    const result = await writeAttachmentBackedEvent<"capture", "note">({
+      vaultRoot: input.vaultRoot,
+      draft: input.draft,
+      attachments: input.attachments,
+      rawImport: input.rawImport,
+      specializedKind: "capture",
+      writeLabel: "capture",
+      operationType: "capture_write",
+      commandName: "core.addCaptureWithLookup",
+      ownerKind: "capture",
+      defaultImportKind: "capture",
+      rawImportFamily: "capture",
+      toLatestDraft: toCaptureDraft,
+      mergeDrafts: mergeCaptureDrafts,
+      applyAttachmentProjections: applyCaptureAttachmentProjections,
+      normalizeDraft: normalizeLookupBackedCaptureDraft,
+      requireAttachments: {
+        code: "CAPTURE_MEDIA_MISSING",
+        message: "Capture writes require at least one media attachment.",
+      },
+      stageAdditionalResult: async ({ batch, eventRecord, ledgerFile, manifestPath }) => {
+        const attachmentRef = eventRecord.attachments?.find((attachment) =>
+          attachment.role === input.lookupAttachmentRole
+        )?.relativePath ?? null;
+        if (!attachmentRef) {
+          throw new VaultError(
+            "CAPTURE_LOOKUP_ATTACHMENT_MISSING",
+            "Capture lookup attachment role was not written.",
+          );
+        }
+
+        const index = await readStoredCaptureLookupIndex({
+          vaultRoot: input.vaultRoot,
         });
-      }
+        if (Object.prototype.hasOwnProperty.call(index.entries, lookupKeyHash)) {
+          throw new VaultError("CAPTURE_LOOKUP_EXISTS", "Capture lookup already exists.", {
+            relativePath: lookupPath,
+          });
+        }
 
-      const lookup: StoredCaptureLookup = {
-        attachmentRef,
-        eventId: eventRecord.id,
-        ledgerFile,
-        manifestPath,
-      };
-      const nextIndex: StoredCaptureLookupIndex = {
-        entries: {
-          ...index.entries,
-          [lookupKeyHash]: lookup,
-        },
-        schema: CAPTURE_LOOKUP_SCHEMA,
-      };
-      await batch.stageTextWrite(lookupPath, `${JSON.stringify(nextIndex, null, 2)}\n`);
+        const lookup: StoredCaptureLookup = {
+          attachmentRef,
+          eventId: eventRecord.id,
+          ledgerFile,
+          manifestPath,
+        };
+        const nextIndex: StoredCaptureLookupIndex = {
+          entries: {
+            ...index.entries,
+            [lookupKeyHash]: lookup,
+          },
+          schema: CAPTURE_LOOKUP_SCHEMA,
+        };
+        await batch.stageTextWrite(lookupPath, `${JSON.stringify(nextIndex, null, 2)}\n`);
 
-      return {
-        auditFiles: [lookupPath],
-      };
-    },
-    buildRecord: (draft, fallbackTimeZone, lifecycle) =>
-      buildTypedEventRecord(
-        {
-          kind: "note",
-          ...draft,
-        },
-        fallbackTimeZone,
-        lifecycle,
-      ) as EventRecordByKind<"note">,
+        return {
+          auditFiles: [lookupPath],
+        };
+      },
+      buildRecord: (draft, fallbackTimeZone, lifecycle) =>
+        buildTypedEventRecord(
+          {
+            kind: "note",
+            ...draft,
+          },
+          fallbackTimeZone,
+          lifecycle,
+        ) as EventRecordByKind<"note">,
+    });
+
+    return {
+      ...result,
+      lookupPath,
+    };
   });
-
-  return {
-    ...result,
-    lookupPath,
-  };
 }
 
 export async function addMeasurement(

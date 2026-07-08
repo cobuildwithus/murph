@@ -429,6 +429,55 @@ describe('workout primitive core mutations', () => {
     })
   })
 
+  it('preserves concurrent capture lookup index entries', async () => {
+    const vaultRoot = await createTempVault('murph-core-capture-lookup-concurrent-')
+    const writes = await Promise.all(
+      Array.from({ length: 6 }, async (_, index) => {
+        const sourcePath = await createSourceFile(
+          vaultRoot,
+          `lookup-concurrent-${index}.jpg`,
+          `lookup-concurrent-${index}`,
+        )
+
+        return addCaptureWithLookup({
+          vaultRoot,
+          lookupAttachmentRole: 'media_1',
+          lookupKey: `test.capture.lookup.concurrent:${index}`,
+          draft: {
+            occurredAt: '2026-04-08T09:30:00.000Z',
+            source: 'manual',
+            title: `Concurrent lookup-backed capture ${index}`,
+            note: 'Concurrent generated-image retry identity.',
+          },
+          attachments: [{
+            role: 'media_1',
+            sourcePath,
+          }],
+        })
+      }),
+    )
+
+    const lookupIndex = JSON.parse(
+      await readFile(path.join(vaultRoot, 'derived/captures/generated-image-lookups.json'), 'utf8'),
+    ) as { entries: Record<string, unknown> }
+    expect(Object.keys(lookupIndex.entries)).toHaveLength(writes.length)
+
+    await Promise.all(
+      writes.map(async (result, index) => {
+        await expect(
+          findCaptureByLookup({
+            vaultRoot,
+            lookupKey: `test.capture.lookup.concurrent:${index}`,
+          }),
+        ).resolves.toMatchObject({
+          status: 'live',
+          eventId: result.eventId,
+          ledgerFile: result.ledgerFile,
+        })
+      }),
+    )
+  })
+
   it('adds canonical measurements through the open core seam and preserves qualifiers', async () => {
     const vaultRoot = await createTempVault('murph-core-canonical-measurement-')
     const sourcePath = await createSourceFile(vaultRoot, 'grip-strength.jpg', 'grip-strength-photo')
