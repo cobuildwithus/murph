@@ -787,6 +787,9 @@ describe("hosted deploy automation helpers", () => {
       validateDeployEnvStepIndex,
       workflow.indexOf("\n      - name:", validateDeployEnvStepIndex + 1),
     );
+    expect(validateDeployEnvStep).toContain(
+      "HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}",
+    );
     for (const name of HOSTED_WORKER_REQUIRED_SECRET_NAMES) {
       expect(validateDeployEnvStep).toContain(`${name}: \${{ secrets.${name} }}`);
     }
