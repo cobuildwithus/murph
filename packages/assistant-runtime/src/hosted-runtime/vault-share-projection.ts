@@ -931,6 +931,14 @@ function toActivitySessionProjectionRow(
   ) {
     return null;
   }
+  if (
+    entity.kind === "intervention_session"
+    && isNonProjectableInterventionSessionStatus(
+      entity.attributes.sessionStatus ?? entity.attributes.status,
+    )
+  ) {
+    return null;
+  }
 
   const rawDurationMinutes = readFiniteNumber(entity.attributes.durationMinutes);
   const durationMinutes =
@@ -968,6 +976,11 @@ function toActivitySessionProjectionRow(
     sourceKind: entity.kind,
     startedAt,
   };
+}
+
+function isNonProjectableInterventionSessionStatus(value: unknown): boolean {
+  const status = readOptionalString(value)?.toLowerCase();
+  return status === "missed" || status === "skipped";
 }
 
 function readActivitySessionDate(entity: CanonicalEntity): string | null {

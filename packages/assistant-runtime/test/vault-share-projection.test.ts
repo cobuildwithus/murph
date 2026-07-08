@@ -1118,6 +1118,45 @@ describe("selectProjectableActivitySessionCountDays", () => {
       await rm(vaultRoot, { recursive: true, force: true });
     }
   });
+
+  it("does not count missed or skipped intervention sessions", async () => {
+    const saunaSessionCountSpec = requireActivitySessionCountSpec(
+      buildHostedVaultShareActivitySessionCountProjectionScope({
+        activityKind: "sauna",
+      }),
+    );
+    const vaultRoot = await createActivitySessionVault([
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_sauna_missed",
+        kind: "intervention_session",
+        occurredAt: "2026-07-03T18:00:00.000Z",
+        sessionLocalDate: ACTIVITY_DAY.date,
+        interventionType: "sauna",
+        sessionStatus: "missed",
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_sauna_skipped",
+        kind: "intervention_session",
+        occurredAt: "2026-07-03T19:00:00.000Z",
+        sessionLocalDate: ACTIVITY_DAY.date,
+        interventionType: "sauna",
+        sessionStatus: "skipped",
+      },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await expect(readProjectableActivitySessionCountDays(
+        vaultRoot,
+        saunaSessionCountSpec,
+      )).resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("selectProjectableHeartRateZoneDays", () => {
