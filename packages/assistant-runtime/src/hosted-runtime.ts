@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
   type HostedRuntimeLatencyPhaseBreakdown,
+  type HostedRuntimeRedactedJson,
   type HostedRuntimeOrchestrationLatencyDiagnostics,
   type HostedRuntimeLatencyTraceMilestone,
   type HostedRuntimeLatencyTraceStagedMilestones,
@@ -131,6 +132,9 @@ import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "./hosted-runtime/workspace-restore.ts";
+import {
+  omitHostedCanonicalWriteReceiptLogStatusFields,
+} from "./hosted-runtime/canonical-write-receipt-log.ts";
 import {
   refreshHostedBrowserVaultReplicaFromRuntime,
   type HostedBrowserVaultReplicaRefreshResult,
@@ -1948,6 +1952,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           ...committedWorkspace,
           nextWakeAt: passWake.nextWakeAt,
           nextWakeReason: passWake.nextWakeReason,
+          redactedStatus: overlayHostedRuntimePendingRedactedStatus({
+            committedStatus: committedWorkspace.redactedStatus ?? null,
+            pendingStatus: redactedStatus,
+          }),
         };
       };
       const absorbForegroundPassResult = (
@@ -3356,6 +3364,16 @@ function mergeHostedWorkspaceInvocationRedactedStatus(
   return merged;
 }
 
+function overlayHostedRuntimePendingRedactedStatus(input: {
+  committedStatus: HostedRuntimeRedactedJson | null;
+  pendingStatus: HostedWorkspaceInvocationRedactedStatus;
+}): HostedRuntimeRedactedJson {
+  return {
+    ...(input.committedStatus ?? {}),
+    ...input.pendingStatus,
+  };
+}
+
 function readHostedWorkspaceInvocationRedactedNumber(
   value: HostedWorkspaceInvocationRedactedStatus,
   key: string,
@@ -3723,7 +3741,9 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     nextWakeAt: input.nextWakeAt,
     nextWakeReason: input.nextWakeReason,
     reason: "idle_shutdown" as const,
-    redactedStatus: input.redactedStatus ?? null,
+    redactedStatus: omitHostedCanonicalWriteReceiptLogStatusFields(
+      input.redactedStatus,
+    ),
     ...(input.runtimeWakePendingAtCheckpoint === undefined
       ? {}
       : { runtimeWakePendingAtCheckpoint: input.runtimeWakePendingAtCheckpoint }),

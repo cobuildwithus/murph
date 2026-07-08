@@ -70,6 +70,19 @@ export function hostedCanonicalWriteReceiptLogStatusFields(
   };
 }
 
+export function omitHostedCanonicalWriteReceiptLogStatusFields(
+  status: HostedRuntimeRedactedJson | null | undefined,
+): HostedRuntimeRedactedJson | null {
+  if (!status) {
+    return null;
+  }
+  const next = { ...status };
+  delete next[LOG_COUNT_STATUS_KEY];
+  delete next[LOG_SHA_STATUS_KEY];
+  delete next[LOG_SIZE_STATUS_KEY];
+  return Object.keys(next).length > 0 ? next : null;
+}
+
 export async function readHostedCanonicalWriteReceiptLogEntries(input: {
   artifactStore: HostedRuntimeArtifactStore;
   status: HostedRuntimeRedactedJson | null | undefined;

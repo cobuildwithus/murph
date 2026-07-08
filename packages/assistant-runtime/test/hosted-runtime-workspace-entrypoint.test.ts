@@ -15573,18 +15573,12 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
       const checkpointRedactedStatus = checkpointRequests[0]?.redactedStatus ?? {};
-      assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogEntryCount, 1);
-      const receiptLogSha256 = checkpointRedactedStatus.hostedCanonicalWriteReceiptLogSha256;
-      const receiptLogByteSize = checkpointRedactedStatus.hostedCanonicalWriteReceiptLogByteSize;
-      assert.ok(typeof receiptLogSha256 === "string");
-      assert.ok(typeof receiptLogByteSize === "number");
-      assert.deepEqual(
-        artifactPutCalls.find((call) => call.sha256 === receiptLogSha256),
-        {
-          byteLength: receiptLogByteSize,
-          sha256: receiptLogSha256,
-        },
-      );
+      assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogEntryCount, undefined);
+      assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogSha256, undefined);
+      assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogByteSize, undefined);
+      const receiptLogs = listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash);
+      assert.equal(receiptLogs.length, 1);
+      assert.equal(receiptLogs[0]?.entries.length, 1);
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "2026-04-27.md"), "utf8"),
         "exact hosted note\n",
@@ -15596,6 +15590,122 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       await assert.rejects(readdir(receiptRoot));
     } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("carries hosted canonical receipt logs across pre-checkpoint foreground passes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const artifactPutCalls: Array<{ byteLength: number; sha256: string }> = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let assistantPhaseCalls = 0;
+    let wakeTimer: ReturnType<typeof setTimeout> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const platform = createPlatform({
+        artifactBytesByHash,
+        artifactPutCalls,
+        events,
+        mailboxPort: createMailboxPort({
+          events,
+          items: mailboxItems,
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({ version: "0" }),
+        }),
+      });
+
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          idleCheckpointDelayMs: 200,
+        },
+      }), {
+        async createCheckpointSnapshot(snapshotInput) {
+          events.push(`snapshot:${snapshotInput.reason}`);
+          assert.equal(snapshotInput.reason, "idle_shutdown");
+          const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
+          const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
+          artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
+          return {
+            snapshotRef: createBundleRef({
+              hash: hotHash,
+              key: "users/bundles/member-synthetic/canonical-pre-checkpoint-hot.bundle.json",
+              size: hotSnapshot.bundle.byteLength,
+            }),
+          };
+        },
+        async importItem(item) {
+          events.push(`mailbox.importItem:${item.item.id}`);
+          return { status: "imported" };
+        },
+        platform,
+        async runAssistantPhase(input) {
+          assistantPhaseCalls += 1;
+          const noteName = assistantPhaseCalls === 1 ? "first" : "second";
+          await runCanonicalWrite({
+            vaultRoot: input.restored.vaultRoot,
+            operationType: "hosted_canonical_write_test",
+            summary: `Persist ${noteName} hosted canonical write receipt.`,
+            occurredAt: TEST_NOW,
+            mutate: async ({ batch }) => {
+              await batch.stageTextWrite(
+                `journal/pre-checkpoint-${noteName}.md`,
+                `${noteName} hosted note\n`,
+              );
+            },
+          });
+          if (assistantPhaseCalls === 1) {
+            wakeTimer = setTimeout(() => {
+              mailboxItems.push(createMailboxItem({
+                id: "mailbox_item_entrypoint_canonical_pre_checkpoint_002",
+                laneSeq: "1",
+              }));
+              runtimeWakeSignal.notify();
+            }, 10);
+          }
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        runtimeWakeSignal,
+        vaultRoot,
+      });
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_entrypoint_canonical_pre_checkpoint_002",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      const checkpointRedactedStatus = checkpointRequests[0]?.redactedStatus ?? {};
+      assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogEntryCount, undefined);
+      assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogSha256, undefined);
+      assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogByteSize, undefined);
+      assert.equal(artifactPutCalls.length, 6);
+      const receiptLogs = listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash);
+      assert.equal(receiptLogs.length, 2);
+      assert.equal(receiptLogs.at(-1)?.entries.length, 2);
+      assert.equal(
+        await readFile(path.join(vaultRoot, "journal", "pre-checkpoint-first.md"), "utf8"),
+        "first hosted note\n",
+      );
+      assert.equal(
+        await readFile(path.join(vaultRoot, "journal", "pre-checkpoint-second.md"), "utf8"),
+        "second hosted note\n",
+      );
+    } finally {
+      if (wakeTimer) {
+        clearTimeout(wakeTimer);
+      }
       await removeTempRoot(vaultRoot);
     }
   });
@@ -20348,6 +20458,39 @@ function readArtifactEventLabel(
 
 function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function listHostedCanonicalWriteReceiptLogArtifacts(
+  artifacts: ReadonlyMap<string, Uint8Array>,
+): Array<{ entries: unknown[]; sha256: string }> {
+  const logs: Array<{ entries: unknown[]; sha256: string }> = [];
+  for (const [sha256, bytes] of artifacts) {
+    const parsed = parseJsonArtifact(bytes);
+    if (
+      !isPlainJsonObject(parsed)
+      || parsed.schema !== "murph.hosted-canonical-write-receipt-log.v1"
+      || !Array.isArray(parsed.entries)
+    ) {
+      continue;
+    }
+    logs.push({
+      entries: parsed.entries,
+      sha256,
+    });
+  }
+  return logs;
+}
+
+function parseJsonArtifact(bytes: Uint8Array): unknown {
+  try {
+    return JSON.parse(Buffer.from(bytes).toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function requireEventIndex(events: readonly string[], event: string): number {
