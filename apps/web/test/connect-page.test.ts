@@ -746,7 +746,7 @@ test("ConnectPage shows account-scoped disconnects for multi-source Junction acc
   assert.equal(markup.match(/data-connection-state="connected"/gu)?.length, 2);
   assert.doesNotMatch(markup, /aria-label="Disconnect Apple Health"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Whoop"/u);
-  assert.equal(markup.match(/aria-label="Disconnect Junction account"/gu)?.length, 2);
+  assert.equal(markup.match(/aria-label="Disconnect account"/gu)?.length, 2);
 });
 
 test("ConnectPage scopes disconnects by every non-disconnected Junction upstream", async () => {
@@ -783,7 +783,7 @@ test("ConnectPage scopes disconnects by every non-disconnected Junction upstream
   assert.doesNotMatch(markup, /Apple Health connected/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Garmin"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Apple Health"/u);
-  assert.equal(markup.match(/aria-label="Disconnect Junction account"/gu)?.length, 1);
+  assert.equal(markup.match(/aria-label="Disconnect account"/gu)?.length, 1);
 });
 
 test("ConnectPage keeps account disconnects visible for parent-level Junction reauthorization", async () => {
@@ -829,7 +829,7 @@ test("ConnectPage keeps account disconnects visible for parent-level Junction re
   assert.doesNotMatch(markup, /aria-label="Reconnect Apple Health"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Apple Health"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Garmin"/u);
-  assert.equal(markup.match(/aria-label="Disconnect Junction account"/gu)?.length, 2);
+  assert.equal(markup.match(/aria-label="Disconnect account"/gu)?.length, 2);
 });
 
 test("ConnectPage does not apply parent Junction reauthorization to disconnected upstream projections", async () => {
@@ -877,7 +877,7 @@ test("ConnectPage does not apply parent Junction reauthorization to disconnected
   assert.doesNotMatch(markup, /Apple Health needs reconnect/u);
   assert.doesNotMatch(markup, /aria-label="Reconnect Apple Health"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Apple Health"/u);
-  assert.doesNotMatch(markup, /aria-label="Disconnect Junction account"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect account"/u);
 });
 
 test("ConnectPage shows mobile-managed guidance for Apple Health reconnect states without web target", async () => {
@@ -1438,7 +1438,7 @@ test("ConnectPage keeps account disconnects visible when all Junction children n
   assert.match(markup, /aria-label="Reconnect Whoop"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Garmin"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect Whoop"/u);
-  assert.equal(markup.match(/aria-label="Disconnect Junction account"/gu)?.length, 2);
+  assert.equal(markup.match(/aria-label="Disconnect account"/gu)?.length, 2);
 });
 
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
@@ -2323,7 +2323,7 @@ test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconne
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid uses account-scoped Junction disconnect copy", async () => {
+test("ConnectSourcesGrid uses account-scoped disconnect copy without naming Junction", async () => {
   const fetch = vi.fn(async (
     _input: RequestInfo | URL,
     _init?: RequestInit,
@@ -2354,18 +2354,19 @@ test("ConnectSourcesGrid uses account-scoped Junction disconnect copy", async ()
     ],
   }));
 
-  const disconnectButton = rendered.container.querySelector("button[aria-label='Disconnect Junction account']");
+  const disconnectButton = rendered.container.querySelector("button[aria-label='Disconnect account']");
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
-  assert.equal(disconnectButton.textContent, "Disconnect Junction account");
+  assert.equal(disconnectButton.textContent, "Disconnect");
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Junction account/u);
 
   await act(async () => {
     disconnectButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
-  assert.match(rendered.container.textContent ?? "", /Disconnect Junction account\?/);
+  assert.match(rendered.container.textContent ?? "", /Disconnect account\?/);
   assert.match(
     rendered.container.textContent ?? "",
-    /Murph will stop syncing new data from every source in this Junction connection\. Your history is kept\./,
+    /Murph will stop syncing new data from every source in this connection\. Your history is kept\./,
   );
 
   const confirmButton = [...rendered.container.querySelectorAll("button")]
@@ -2378,7 +2379,7 @@ test("ConnectSourcesGrid uses account-scoped Junction disconnect copy", async ()
   });
 
   await vi.waitFor(() => {
-    assert.match(rendered.container.textContent ?? "", /Disconnected this Junction account\. Your history is still saved\./);
+    assert.match(rendered.container.textContent ?? "", /Disconnected this connection\. Your history is still saved\./);
   });
   assert.equal(fetch.mock.calls[0]?.[0], "/api/settings/device-sync/connections/dsc_junction_multi/disconnect");
 

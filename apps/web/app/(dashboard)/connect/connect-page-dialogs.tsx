@@ -114,7 +114,7 @@ export function ConnectDisconnectDialog({
 
 function resolveDisconnectDialogTitle(source: ConnectSource | null): string {
   if (source?.disconnectScope === "junction_account") {
-    return "Disconnect Junction account?";
+    return "Disconnect account?";
   }
 
   return `Disconnect ${source?.name ?? "source"}?`;
@@ -122,7 +122,7 @@ function resolveDisconnectDialogTitle(source: ConnectSource | null): string {
 
 function resolveDisconnectDialogDescription(source: ConnectSource | null): string {
   if (source?.disconnectScope === "junction_account") {
-    return "Murph will stop syncing new data from every source in this Junction connection. Your history is kept.";
+    return "Murph will stop syncing new data from every source in this connection. Your history is kept.";
   }
 
   return "Murph will stop syncing new data from this connection. Your history is kept.";

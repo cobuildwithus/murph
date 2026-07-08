@@ -26,7 +26,6 @@ export function SourceCard({
   const canStart = authenticated && isAvailable;
   const canDisconnect = authenticated && Boolean(source.disconnectConnectionId);
   const actionLabel = source.requiresReconnect ? "Reconnect" : "Connect";
-  const disconnectActionLabel = resolveDisconnectActionLabel(source);
   const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
   const reconnectUnavailable = source.requiresReconnect && !isAvailable;
   const showReconnectStateDisconnect = canDisconnect
@@ -69,7 +68,7 @@ export function SourceCard({
                 onClick={() => onDisconnectTargetChange(source)}
                 className="relative self-start text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
               >
-                {pendingDisconnect ? "Disconnecting..." : disconnectActionLabel}
+                {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
               </button>
             ) : null}
             {errorMessage ? (
@@ -124,7 +123,7 @@ export function SourceCard({
                 onClick={() => onDisconnectTargetChange(source)}
                 className="relative self-start text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
               >
-                {pendingDisconnect ? "Disconnecting..." : disconnectActionLabel}
+                {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
               </button>
             ) : null}
             {errorMessage ? (
@@ -139,15 +138,9 @@ export function SourceCard({
   );
 }
 
-function resolveDisconnectActionLabel(source: ConnectSource): string {
-  return source.disconnectScope === "junction_account"
-    ? "Disconnect Junction account"
-    : "Disconnect";
-}
-
 function resolveDisconnectAriaLabel(source: ConnectSource): string {
   return source.disconnectScope === "junction_account"
-    ? "Disconnect Junction account"
+    ? "Disconnect account"
     : `Disconnect ${source.name}`;
 }
 
