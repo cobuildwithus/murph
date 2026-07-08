@@ -34,6 +34,11 @@ export function createRetellPhoneCallRuntime(input: {
 class RetellPhoneCallRuntime implements PhoneCallRuntime {
   constructor(private readonly fetchImpl: typeof fetch | undefined) {}
 
+  validateStart(call: HostedPhoneCallRuntimeRecord): void {
+    buildRetellCreatePhoneCallRequest(call);
+    this.buildClient();
+  }
+
   async start(call: HostedPhoneCallRuntimeRecord): Promise<PhoneCallRuntimeStartResult> {
     const params = buildRetellCreatePhoneCallRequest(call);
     const client = this.buildClient();

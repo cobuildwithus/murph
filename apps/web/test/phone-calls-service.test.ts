@@ -515,6 +515,54 @@ describe("createHostedPhoneCall", () => {
     });
   });
 
+  it("fails before provider start when runtime validation fails", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({
+      providerCallId: "retell_unused",
+      validateError: new Error("Retell local config invalid"),
+    });
+
+    await expect(createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver("+12125550000"),
+    })).rejects.toThrow("Retell local config invalid");
+
+    const createdCallId = store.createCalls[0]!.data.id;
+    expect(runtime.validateCalls).toEqual([expect.objectContaining({
+      brief: VALID_BRIEF,
+      id: createdCallId,
+      memberId: created.memberId,
+      transferNumber: "+12125550000",
+    })]);
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.updateManyCalls).toEqual([{
+      data: {
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        id: createdCallId,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    }]);
+    expect(store.currentCall()).toMatchObject({
+      providerCallId: null,
+      providerStartAttemptedAt: null,
+      status: "failed",
+    });
+  });
+
   it("fails before provider start when no result notification route is available", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
@@ -814,9 +862,17 @@ function createPhoneCallRuntime(input: {
   error?: Error;
   onStart?: (call: Parameters<PhoneCallRuntime["start"]>[0]) => Promise<void> | void;
   providerCallId: string;
+  validateError?: Error;
 }) {
+  const validateCalls: Array<Parameters<NonNullable<PhoneCallRuntime["validateStart"]>>[0]> = [];
   const startCalls: Array<Parameters<PhoneCallRuntime["start"]>[0]> = [];
   const runtime: PhoneCallRuntime = {
+    validateStart: async (call) => {
+      validateCalls.push(call);
+      if (input.validateError) {
+        throw input.validateError;
+      }
+    },
     start: async (call) => {
       startCalls.push(call);
       await input.onStart?.(call);
@@ -830,6 +886,7 @@ function createPhoneCallRuntime(input: {
   return {
     runtime,
     startCalls,
+    validateCalls,
   };
 }
 

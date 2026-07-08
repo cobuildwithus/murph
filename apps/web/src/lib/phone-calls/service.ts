@@ -226,6 +226,16 @@ async function startHostedPhoneCallReservation(input: {
           memberId: input.memberId,
         })
       : null;
+    const runtimeRecord = {
+      brief: input.brief,
+      id: call.id,
+      memberId: input.memberId,
+      openingLine: input.runtimeOptions?.openingLine ?? null,
+      retellAgentId: input.runtimeOptions?.retellAgentId ?? null,
+      retellAgentVersion: input.runtimeOptions?.retellAgentVersion ?? null,
+      transferNumber,
+    };
+    await input.runtime.validateStart?.(runtimeRecord);
     const providerStartAttempt = await markHostedPhoneCallProviderStartAttempt({
       call,
       prisma: input.prisma,
@@ -237,15 +247,7 @@ async function startHostedPhoneCallReservation(input: {
       };
     }
     call = providerStartAttempt.call;
-    started = await input.runtime.start({
-      brief: input.brief,
-      id: call.id,
-      memberId: input.memberId,
-      openingLine: input.runtimeOptions?.openingLine ?? null,
-      retellAgentId: input.runtimeOptions?.retellAgentId ?? null,
-      retellAgentVersion: input.runtimeOptions?.retellAgentVersion ?? null,
-      transferNumber,
-    });
+    started = await input.runtime.start(runtimeRecord);
   } catch (error) {
     if (hasProviderStartAttemptMarker(call)) {
       return {

@@ -17,5 +17,6 @@ export interface PhoneCallRuntimeStartResult {
 }
 
 export interface PhoneCallRuntime {
+  validateStart?(call: HostedPhoneCallRuntimeRecord): Promise<void> | void;
   start(call: HostedPhoneCallRuntimeRecord): Promise<PhoneCallRuntimeStartResult>;
 }

@@ -42,6 +42,8 @@ import {
 import { getPrisma } from "../prisma";
 
 const CALL_CIRCLE_COUNTER_WINDOW_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+const CALL_CIRCLE_CONFIRM_NOTIFICATION_DEDUPE_PREFIX =
+  "assistant.notification.requested:call-circle:";
 const CALL_CIRCLE_SETUP_NOTIFICATION_DEDUPE_PREFIX =
   "assistant.notification.requested:call-circle:setup:";
 const CALL_CIRCLE_REPLY_CONTEXT_MAILBOX_ITEM_LIMIT = 20;
@@ -373,6 +375,11 @@ type CallCircleSetupContextResolution =
   | { status: "ambiguous" }
   | { groupId: string; status: "exact" };
 
+type CallCircleConfirmContextResolution =
+  | { status: "none" }
+  | { status: "ambiguous" }
+  | { matchId: string; status: "exact" };
+
 async function resolveCallCircleSetupGroupIdFromReplyContext(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
@@ -466,10 +473,27 @@ async function resolveCallCircleResponseMatch(input: {
   replyContext: HostedCallCircleRespondContext | null;
   request: HostedCallCircleRespondRequest;
 }): Promise<ResolvedCallCircleResponseMatch | null> {
-  const match = input.request.matchId
+  const confirmContext = await resolveCallCircleConfirmMatchIdFromReplyContext({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    replyContext: input.replyContext,
+  });
+  if (confirmContext.status === "ambiguous") return null;
+  if (
+    confirmContext.status === "exact"
+    && input.request.matchId
+    && input.request.matchId !== confirmContext.matchId
+  ) {
+    return null;
+  }
+
+  const matchId = confirmContext.status === "exact"
+    ? confirmContext.matchId
+    : input.request.matchId;
+  const match = matchId
     ? await input.prisma.hostedCallCircleMatch.findUnique({
       select: callCircleResponseMatchSelect,
-      where: { id: input.request.matchId },
+      where: { id: matchId },
     })
     : await resolveSinglePendingCallCircleResponseMatch(input);
   if (!match) return null;
@@ -514,6 +538,68 @@ async function resolveCallCircleResponseMatch(input: {
     side,
     status: match.status,
   };
+}
+
+async function resolveCallCircleConfirmMatchIdFromReplyContext(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  replyContext: HostedCallCircleRespondContext | null;
+}): Promise<CallCircleConfirmContextResolution> {
+  const mailboxItemIds = normalizeReplyContextMailboxItemIds(
+    input.replyContext?.inboundMailboxItemIds,
+  );
+  if (mailboxItemIds.length === 0) return { status: "none" };
+
+  const confirmNotifications = await input.prisma.hostedMailboxItem.findMany({
+    select: { dedupeKey: true },
+    where: {
+      dedupeKey: {
+        startsWith: CALL_CIRCLE_CONFIRM_NOTIFICATION_DEDUPE_PREFIX,
+      },
+      id: { in: mailboxItemIds },
+      kind: "assistant.notification.requested",
+      userId: input.memberId,
+    },
+  });
+
+  const anchors: Array<{ key: string; matchId: string }> = [];
+  for (const notification of confirmNotifications) {
+    const anchor = readCallCircleConfirmAnchorFromDedupeKey({
+      dedupeKey: notification.dedupeKey,
+      memberId: input.memberId,
+    });
+    if (anchor && !anchors.some((entry) => entry.key === anchor.key)) {
+      anchors.push(anchor);
+    }
+  }
+  if (anchors.length === 0) return { status: "none" };
+  return anchors.length === 1
+    ? { matchId: anchors[0]!.matchId, status: "exact" }
+    : { status: "ambiguous" };
+}
+
+function readCallCircleConfirmAnchorFromDedupeKey(input: {
+  dedupeKey: string;
+  memberId: string;
+}): { key: string; matchId: string } | null {
+  for (const stage of ["am", "final"] as const) {
+    const prefix = `${CALL_CIRCLE_CONFIRM_NOTIFICATION_DEDUPE_PREFIX}${stage}:`;
+    if (!input.dedupeKey.startsWith(prefix)) continue;
+    const remainder = input.dedupeKey.slice(prefix.length);
+    const memberMarker = `:${input.memberId}:`;
+    const memberIndex = remainder.indexOf(memberMarker);
+    if (memberIndex <= 0) return null;
+    const matchId = remainder.slice(0, memberIndex).trim();
+    const windowStartAt = remainder.slice(memberIndex + memberMarker.length).trim();
+    if (!matchId || Number.isNaN(new Date(windowStartAt).getTime())) {
+      return null;
+    }
+    return {
+      key: `${stage}:${matchId}:${windowStartAt}`,
+      matchId,
+    };
+  }
+  return null;
 }
 
 const callCircleResponseMatchSelect = {

@@ -449,6 +449,106 @@ describe("handleCallCircleRespond", () => {
     });
   });
 
+  it("uses the confirmation notification anchor when multiple pending matches exist", async () => {
+    const anchoredMatch = callCircleMatch({
+      id: "hccm_anchor",
+      memberAId: "member_other",
+      memberBId: "member_123",
+    });
+    const otherMatch = callCircleMatch({
+      groupId: "hgrp_other",
+      id: "hccm_other",
+      memberAId: "member_other_2",
+      memberBId: "member_123",
+    });
+    const prisma = createResponsePrisma({
+      confirmNotificationItems: [{
+        id: "mailbox_confirm_anchor",
+        matchId: "hccm_anchor",
+        memberId: "member_123",
+        stage: "am",
+        windowStartAt: anchoredMatch.windowStartAt,
+      }],
+      matches: [anchoredMatch, otherMatch],
+      participantGroups: ["hgrp_123", "hgrp_other"],
+      participantStatus: "enrolled",
+    });
+    const now = new Date("2026-07-06T15:00:00.000Z");
+
+    await expect(handleCallCircleRespond({
+      context: {
+        inboundMailboxItemIds: ["mailbox_reply", "mailbox_confirm_anchor"],
+      },
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      request: {
+        kind: "confirm",
+      },
+    })).resolves.toEqual({ status: "ok" });
+
+    expect(prisma.tx.hostedCallCircleMatch.findMany).not.toHaveBeenCalled();
+    expect(prisma.tx.hostedCallCircleMatch.findUnique).toHaveBeenCalledWith({
+      select: expect.any(Object),
+      where: { id: "hccm_anchor" },
+    });
+    expect(mocks.confirmCallCircleMatchSide).toHaveBeenCalledWith({
+      groupId: "hgrp_123",
+      matchId: "hccm_anchor",
+      memberId: "member_123",
+      now,
+      prisma: expect.any(Object),
+      side: "B",
+    });
+  });
+
+  it("fails closed when reply context contains multiple confirmation anchors", async () => {
+    const prisma = createResponsePrisma({
+      confirmNotificationItems: [
+        {
+          id: "mailbox_confirm_first",
+          matchId: "hccm_first",
+          memberId: "member_123",
+          stage: "am",
+          windowStartAt: new Date("2026-07-06T16:00:00.000Z"),
+        },
+        {
+          id: "mailbox_confirm_second",
+          matchId: "hccm_second",
+          memberId: "member_123",
+          stage: "am",
+          windowStartAt: new Date("2026-07-06T16:30:00.000Z"),
+        },
+      ],
+      matches: [
+        callCircleMatch({ id: "hccm_first" }),
+        callCircleMatch({ id: "hccm_second" }),
+      ],
+      participantStatus: "enrolled",
+    });
+
+    await expect(handleCallCircleRespond({
+      context: {
+        inboundMailboxItemIds: [
+          "mailbox_reply",
+          "mailbox_confirm_first",
+          "mailbox_confirm_second",
+        ],
+      },
+      memberId: "member_123",
+      now: new Date("2026-07-06T15:00:00.000Z"),
+      prisma: prisma as never,
+      request: {
+        kind: "confirm",
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    });
+
+    expect(mocks.confirmCallCircleMatchSide).not.toHaveBeenCalled();
+  });
+
   it("rejects stale morning confirmations after the final ask resets consent", async () => {
     const prisma = createResponsePrisma({
       match: callCircleMatch({
@@ -894,6 +994,13 @@ describe("handleCallCircleRespond", () => {
 });
 
 function createResponsePrisma(input: {
+  confirmNotificationItems?: Array<{
+    id: string;
+    matchId: string;
+    memberId: string;
+    stage: "am" | "final";
+    windowStartAt: Date;
+  }>;
   match?: ReturnType<typeof callCircleMatch>;
   matches?: Array<ReturnType<typeof callCircleMatch>>;
   memberInGroup?: boolean;
@@ -928,7 +1035,7 @@ function createResponsePrisma(input: {
           : input.setupNotificationGroupId
             ? [{ groupId: input.setupNotificationGroupId, id: "mailbox_setup" }]
             : []);
-      return setupNotificationItems
+      const setupNotifications = setupNotificationItems
         .filter((item) => requestedIds.has(item.id))
         .map((item) => ({
             dedupeKey:
@@ -936,15 +1043,32 @@ function createResponsePrisma(input: {
             occurredAt: input.setupNotificationOccurredAt
               ?? new Date("2026-07-06T14:00:00.000Z"),
           }));
+      const confirmNotifications = (input.confirmNotificationItems ?? [])
+        .filter((item) => requestedIds.has(item.id))
+        .map((item) => ({
+          dedupeKey: [
+            "assistant.notification.requested",
+            "call-circle",
+            item.stage,
+            item.matchId,
+            item.memberId,
+            item.windowStartAt.toISOString(),
+          ].join(":"),
+          occurredAt: input.setupNotificationOccurredAt
+            ?? new Date("2026-07-06T14:00:00.000Z"),
+        }));
+      return [...setupNotifications, ...confirmNotifications];
     }
     return [{
       occurredAt: input.replyOccurredAt ?? FRESH_CALL_CIRCLE_REPLY_OCCURRED_AT,
     }];
   });
+  const matches = input.matches ?? [match];
   const tx = {
     hostedCallCircleMatch: {
-      findMany: vi.fn(async () => input.matches ?? [match]),
-      findUnique: vi.fn(async () => match),
+      findMany: vi.fn(async () => matches),
+      findUnique: vi.fn(async (args: { where: { id: string } }) =>
+        matches.find((candidate) => candidate.id === args.where.id) ?? null),
     },
     hostedMailboxItem: {
       findMany: hostedMailboxItemFindMany,

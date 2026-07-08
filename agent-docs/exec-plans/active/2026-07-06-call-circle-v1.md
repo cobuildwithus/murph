@@ -421,6 +421,34 @@ Focused follow-up verification:
 - `pnpm --filter @murphai/hosted-web typecheck`
 - `pnpm --filter @murphai/assistant-engine typecheck`
 
+## ReviewGPT Follow-Up 10 2026-07-08
+
+Accepted findings from the tenth PR ReviewGPT pass:
+
+- Confirmation, decline, and counter replies can omit model-authored
+  `matchId` when the reply context already contains the exact Call Circle
+  confirmation notification mailbox item. Resolve exactly one
+  `assistant.notification.requested:call-circle:{stage}:{matchId}:{memberId}:{windowStartAt}`
+  anchor from the reply context before falling back to single-pending-match
+  disambiguation; fail closed if multiple distinct confirmation anchors are
+  present.
+- Retell local validation must remain pre-egress. Run runtime start
+  validation before setting `providerStartAttemptedAt`, so deterministic
+  local env/request failures fail the local phone-call row instead of leaving
+  a permanent `starting` reservation.
+
+Not accepted from this pass:
+
+- The suggestion to replace model-authored Call Circle group offer copy with
+  a deterministic server template conflicts with the current product direction
+  for this PR. Keep the model-authored offer surface plus server-side
+  validation/binding/reaction activation.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-response-service.test.ts apps/web/test/phone-calls-service.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT
