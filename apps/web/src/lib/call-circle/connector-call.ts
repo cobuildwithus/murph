@@ -56,7 +56,12 @@ export async function startCallCircleConnectorCall(input: {
       memberA: { select: { pendingActivationTimeZone: true } },
       memberB: { select: { pendingActivationTimeZone: true } },
       phoneCall: {
-        select: { analyzedAt: true, providerCallId: true, status: true },
+        select: {
+          analyzedAt: true,
+          providerCallId: true,
+          providerStartAttemptedAt: true,
+          status: true,
+        },
       },
     },
     where: { id: input.matchId },
@@ -267,12 +272,14 @@ function isUnstartedAttachedCallCirclePhoneCall(
   phoneCall: {
     analyzedAt: Date | null;
     providerCallId: string | null;
+    providerStartAttemptedAt: Date | null;
     status: string;
   } | null,
 ): boolean {
   return phoneCall !== null
     && phoneCall.analyzedAt === null
     && phoneCall.providerCallId === null
+    && phoneCall.providerStartAttemptedAt === null
     && phoneCall.status === "starting";
 }
 

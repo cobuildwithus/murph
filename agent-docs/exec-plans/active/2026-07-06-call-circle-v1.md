@@ -477,6 +477,23 @@ Focused follow-up verification:
 - `pnpm docs:drift`
 - `git diff --check`
 
+## ReviewGPT Follow-Up 12 2026-07-08
+
+Accepted finding from the twelfth PR ReviewGPT pass:
+
+- Call Circle scheduler recovery must not terminalize an attached Retell call
+  after the phone-call owner has durably recorded
+  `providerStartAttemptedAt`. Scheduler and connector-call retry predicates
+  now only treat attached calls as unstarted when `providerStartAttemptedAt`
+  is null; provider-attempted rows stay owned by the Retell webhook or hosted
+  phone-call stale-start sweep.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/phone-calls-call-circle-result.test.ts`
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/phone-calls-service.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/phone-calls-retell-real-consult-route.test.ts apps/web/test/phone-calls-call-circle-result.test.ts apps/web/test/call-circle-cron-route.test.ts apps/web/test/hosted-retention-cleanup.test.ts apps/web/test/hosted-retention-cron-route.test.ts apps/web/test/production-migration-guard.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT

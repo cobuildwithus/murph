@@ -852,6 +852,40 @@ describe("runCallCircleScheduler", () => {
     });
   });
 
+  it("does not retry an attached bridge after provider start was attempted", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const prisma = createSchedulerPrisma({
+      dueMatches: [schedulerMatch({
+        finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+        phoneCall: {
+          analyzedAt: null,
+          id: "hpc_starting",
+          providerCallId: null,
+          providerStartAttemptedAt: new Date("2026-07-06T15:00:01.000Z"),
+          status: "starting",
+        },
+        status: "bridging",
+        windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+        windowStartAt: now,
+      })],
+      groups: [],
+    });
+    const connectorStarter = vi.fn(async () => ({
+      phoneCallId: "hpc_starting",
+      status: "ignored" as const,
+    }));
+
+    await expect(runCallCircleScheduler({
+      connectorStarter,
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      bridgeAttempts: 0,
+    });
+
+    expect(connectorStarter).not.toHaveBeenCalled();
+  });
+
   it("retries setup asks for enrolled participants that have not written preferences", async () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const prisma = createSchedulerPrisma({
@@ -1238,6 +1272,36 @@ describe("runCallCircleScheduler", () => {
         }),
       }),
     );
+  });
+
+  it("does not hand off an attached provider-attempted bridge after the window", async () => {
+    const now = new Date("2026-07-06T17:45:00.000Z");
+    const prisma = createSchedulerPrisma({
+      dueMatches: [schedulerMatch({
+        finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+        phoneCall: {
+          analyzedAt: null,
+          id: "hpc_starting",
+          providerCallId: null,
+          providerStartAttemptedAt: new Date("2026-07-06T15:00:01.000Z"),
+          status: "starting",
+        },
+        status: "bridging",
+        windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+      })],
+      groups: [],
+    });
+
+    await expect(runCallCircleScheduler({
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      handoffs: 0,
+    });
+
+    expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
   });
 
   it("retries terminal Call Circle outcome notifications that were not appended yet", async () => {
@@ -1673,6 +1737,7 @@ function schedulerMatch(input: {
     endedAt?: Date | null;
     id: string;
     providerCallId?: string | null;
+    providerStartAttemptedAt?: Date | null;
     status: string;
   } | null;
   outcome?: string | null;
@@ -1697,6 +1762,7 @@ function schedulerMatch(input: {
       ? {
           ...input.phoneCall,
           providerCallId: input.phoneCall.providerCallId ?? null,
+          providerStartAttemptedAt: input.phoneCall.providerStartAttemptedAt ?? null,
         }
       : null,
     sideAResponse: input.sideAResponse ?? "pending",

@@ -117,6 +117,7 @@ export async function runCallCircleScheduler(input: {
             endedAt: true,
             id: true,
             providerCallId: true,
+            providerStartAttemptedAt: true,
             status: true,
           },
         },
@@ -463,12 +464,13 @@ async function appendMissedCallCircleBridgeHandoffs(input: {
       phoneCall: {
         select: {
           analyzedAt: true,
-          endedAt: true,
-          id: true,
-          providerCallId: true,
-          status: true,
+            endedAt: true,
+            id: true,
+            providerCallId: true,
+            providerStartAttemptedAt: true,
+            status: true,
+          },
         },
-      },
     },
     orderBy: { windowEndAt: "asc" },
     take: 100,
@@ -1217,6 +1219,7 @@ function isRecoverableCallCircleBridgePhoneCall(
     || (
       phoneCall.analyzedAt === null
       && phoneCall.providerCallId === null
+      && phoneCall.providerStartAttemptedAt === null
       && phoneCall.status === "starting"
     );
 }
@@ -1248,6 +1251,7 @@ interface SchedulerMatch {
     endedAt: Date | null;
     id: string;
     providerCallId: string | null;
+    providerStartAttemptedAt: Date | null;
     status: string;
   } | null;
   sideAResponse: string;

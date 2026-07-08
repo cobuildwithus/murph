@@ -315,6 +315,35 @@ describe("startCallCircleConnectorCall", () => {
     expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
   });
 
+  it("ignores an attached bridge after provider start was attempted", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const prisma = createPrisma({
+      finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+      phoneCall: {
+        analyzedAt: null,
+        providerCallId: null,
+        providerStartAttemptedAt: new Date("2026-07-06T15:00:01.000Z"),
+        status: "starting",
+      },
+      phoneCallId: "hpc_existing",
+      status: "bridging",
+      windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+      windowStartAt: now,
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(startCallCircleConnectorCall({
+      matchId: "hccm_123",
+      now,
+    })).resolves.toEqual({
+      status: "ignored",
+    });
+
+    expect(mocks.claimCallCircleMatchForConnector).not.toHaveBeenCalled();
+    expect(mocks.createHostedPhoneCall).not.toHaveBeenCalled();
+    expect(mocks.attachCallCirclePhoneCall).not.toHaveBeenCalled();
+  });
+
   it("does not notify handoff when the outcome transition no longer applies", async () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const prisma = createPrisma({
@@ -391,6 +420,7 @@ function createPrisma(input: {
   phoneCall?: {
     analyzedAt: Date | null;
     providerCallId: string | null;
+    providerStartAttemptedAt?: Date | null;
     status: string;
   } | null;
   phoneCallId: string | null;
@@ -410,7 +440,12 @@ function createPrisma(input: {
         memberAId: "member_a",
         memberB: { pendingActivationTimeZone: "UTC" },
         memberBId: "member_b",
-        phoneCall: input.phoneCall ?? null,
+        phoneCall: input.phoneCall
+          ? {
+              ...input.phoneCall,
+              providerStartAttemptedAt: input.phoneCall.providerStartAttemptedAt ?? null,
+            }
+          : null,
         phoneCallId: input.phoneCallId,
         status: input.status,
         windowEndAt: input.windowEndAt,
