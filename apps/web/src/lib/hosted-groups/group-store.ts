@@ -168,10 +168,18 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
   ]);
   const existing = await input.tx.hostedGroup.findUnique({
     where: { runtimeMemberId: container.memberId },
-    select: { id: true },
+    select: { displayName: true, id: true },
   });
   if (existing) {
     await lockHostedGroupRow(input.tx, existing.id);
+    const normalizedDisplayName = normalizeHostedGroupDisplayName(input.displayName ?? null);
+    if (existing.displayName === null && normalizedDisplayName !== null) {
+      await input.tx.hostedGroup.update({
+        where: { id: existing.id },
+        data: { displayName: normalizedDisplayName },
+        select: { id: true },
+      });
+    }
     await ensureHostedGroupOwnerMembershipTx(input.tx, {
       groupId: existing.id,
       memberId: container.ownerMemberId,

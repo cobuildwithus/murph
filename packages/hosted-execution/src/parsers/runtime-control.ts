@@ -910,13 +910,18 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
   const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
   assertAllowedObjectKeys(
     record,
-    new Set(["messageTemplate", "projectionKinds", "projectionScopes"]),
+    new Set(["displayName", "messageTemplate", "projectionKinds", "projectionScopes"]),
     "Hosted runtime group tool post_join_offer joinOffer",
+  );
+  const displayName = parseHostedRuntimeGroupDisplayName(
+    record.displayName,
+    "Hosted runtime group tool post_join_offer displayName",
   );
   const messageTemplate = record.messageTemplate === undefined || record.messageTemplate === null
     ? null
     : parseHostedRuntimeGroupJoinOfferMessageTemplate(record.messageTemplate);
   return {
+    displayName,
     ...(messageTemplate === null ? {} : { messageTemplate }),
     projectionKinds: parseHostedRuntimeGroupProjectionKindArray(
       record.projectionKinds,
@@ -977,16 +982,11 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
     ]),
     "Hosted runtime group tool create_join_link joinLink",
   );
-  const displayName = readNullableString(
+  const displayName = parseHostedRuntimeGroupDisplayName(
     record.displayName,
     "Hosted runtime group tool create_join_link displayName",
   );
-  if (displayName !== null && displayName.trim().length === 0) {
-    throw new TypeError("Hosted runtime group tool create_join_link displayName must not be blank.");
-  }
-  if (displayName !== null && displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
-    throw new TypeError("Hosted runtime group tool create_join_link displayName is too long.");
-  }
+
   return {
     displayName,
     kind: readHostedRuntimeGroupKind(record.kind),
@@ -1004,6 +1004,20 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
       "Hosted runtime group tool create_join_link requestedVaultShareProjectionScopes",
     ),
   };
+}
+
+function parseHostedRuntimeGroupDisplayName(
+  value: unknown,
+  label: string,
+): string | null {
+  const displayName = readNullableString(value, label);
+  if (displayName !== null && displayName.trim().length === 0) {
+    throw new TypeError(`${label} must not be blank.`);
+  }
+  if (displayName !== null && displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
+    throw new TypeError(`${label} is too long.`);
+  }
+  return displayName;
 }
 
 function readHostedRuntimeGroupKind(value: unknown): HostedRuntimeGroupKind | null {
