@@ -4532,7 +4532,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // Pin the literal version: a revert of the latest bump would keep every
       // constant-relative assertion green while legacy stores still carried old
       // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 14);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 15);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -5240,7 +5240,7 @@ test("importer sleep keys, canonical day keys, and losing providers all resolve 
   }
 });
 
-test("listMetricPointsRuntime rebuilds v13 metric-content projections before serving metric points", async () => {
+test("listMetricPointsRuntime rebuilds v14 wearable-summary projections before serving metric points", async () => {
   const vaultRoot = await createMetricObservationVault([
     {
       id: "evt_metric_observation_caffeine_rebuild_01",
@@ -5260,7 +5260,7 @@ test("listMetricPointsRuntime rebuilds v13 metric-content projections before ser
     const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
     try {
       staleDatabase.exec(`
-        PRAGMA user_version = 13;
+        PRAGMA user_version = 14;
         DELETE FROM query_metric_points;
       `);
     } finally {

@@ -418,6 +418,278 @@ test("daily sleep summary treats zeroed Apple HealthKit asleep metrics as missin
   assert.equal(night?.awakeMinutes.selection.value, 18.5);
 });
 
+test("daily sleep summary scopes zeroed Apple HealthKit repair to the invalid sleep window", () => {
+  const date = "2026-07-07";
+  const napStartAt = "2026-07-07T18:00:00.000Z";
+  const napEndAt = "2026-07-07T18:30:00.000Z";
+  const overnightStartAt = "2026-07-07T08:17:04.000Z";
+  const overnightEndAt = "2026-07-07T14:02:56.000Z";
+  const appleMetric = (input: {
+    entityId: string;
+    metric: string;
+    occurredAt: string;
+    resourceId: string;
+    value: number;
+  }) =>
+    makeJunctionSleepMetric({
+      date,
+      entityId: input.entityId,
+      metric: input.metric,
+      occurredAt: input.occurredAt,
+      recordedAt: "2026-07-07T18:53:32.000Z",
+      resourceId: input.resourceId,
+      sourceProviderSlug: "apple-health-kit",
+      value: input.value,
+    });
+  const vault = createVaultReadModel({
+    entities: [
+      makeJunctionSleepSession({
+        date,
+        durationMinutes: 30,
+        endAt: napEndAt,
+        entityId: "evt_apple_a_nap_window",
+        recordedAt: "2026-07-07T18:40:00.000Z",
+        resourceId: "sleep-apple-a-nap",
+        sourceProviderSlug: "apple-health-kit",
+        startAt: napStartAt,
+      }),
+      makeJunctionSleepSession({
+        date,
+        durationMinutes: 346,
+        endAt: overnightEndAt,
+        entityId: "evt_apple_z_overnight_window",
+        recordedAt: "2026-07-07T18:53:32.000Z",
+        resourceId: "sleep-apple-z-overnight",
+        sourceProviderSlug: "apple-health-kit",
+        startAt: overnightStartAt,
+      }),
+      appleMetric({
+        entityId: "evt_apple_a_nap_total",
+        metric: "sleep-total-minutes",
+        occurredAt: napEndAt,
+        resourceId: "sleep-apple-a-nap",
+        value: 25,
+      }),
+      appleMetric({
+        entityId: "evt_apple_a_nap_awake",
+        metric: "sleep-awake-minutes",
+        occurredAt: napEndAt,
+        resourceId: "sleep-stage-apple-a-nap",
+        value: 5,
+      }),
+      appleMetric({
+        entityId: "evt_apple_z_overnight_total",
+        metric: "sleep-total-minutes",
+        occurredAt: overnightEndAt,
+        resourceId: "sleep-apple-z-overnight",
+        value: 0,
+      }),
+      appleMetric({
+        entityId: "evt_apple_z_overnight_efficiency",
+        metric: "sleep-efficiency",
+        occurredAt: overnightEndAt,
+        resourceId: "sleep-apple-z-overnight",
+        value: 0,
+      }),
+      appleMetric({
+        entityId: "evt_apple_z_overnight_deep",
+        metric: "sleep-deep-minutes",
+        occurredAt: overnightEndAt,
+        resourceId: "sleep-stage-apple-z-overnight",
+        value: 0,
+      }),
+      appleMetric({
+        entityId: "evt_apple_z_overnight_rem",
+        metric: "sleep-rem-minutes",
+        occurredAt: overnightEndAt,
+        resourceId: "sleep-stage-apple-z-overnight",
+        value: 0,
+      }),
+      appleMetric({
+        entityId: "evt_apple_z_overnight_light",
+        metric: "sleep-light-minutes",
+        occurredAt: overnightEndAt,
+        resourceId: "sleep-stage-apple-z-overnight",
+        value: 0,
+      }),
+      appleMetric({
+        entityId: "evt_apple_z_overnight_awake",
+        metric: "sleep-awake-minutes",
+        occurredAt: overnightEndAt,
+        resourceId: "sleep-stage-apple-z-overnight",
+        value: 18.5,
+      }),
+    ],
+    metadata: null,
+    vaultRoot: "/virtual/wearables-junction-apple-zero-with-nap",
+  });
+
+  const [night] = summarizeWearableSleep(vault, { date });
+
+  assert.equal(night?.sleepStartAt, overnightStartAt);
+  assert.equal(night?.sessionMinutes.selection.value, 346);
+  assert.equal(night?.totalSleepMinutes.selection.value, null);
+  assert.equal(night?.sleepEfficiency.selection.value, null);
+  assert.equal(night?.deepMinutes.selection.value, null);
+  assert.equal(night?.remMinutes.selection.value, null);
+  assert.equal(night?.lightMinutes.selection.value, null);
+  assert.equal(night?.awakeMinutes.selection.value, 18.5);
+});
+
+test("daily sleep summary does not fill missing WHOOP duplicate metrics from zeroed Apple HealthKit sleep", () => {
+  const date = "2026-07-07";
+  const napStartAt = "2026-07-07T18:00:00.000Z";
+  const napEndAt = "2026-07-07T18:30:00.000Z";
+  const overnightStartAt = "2026-07-07T08:17:04.000Z";
+  const overnightEndAt = "2026-07-07T14:02:56.000Z";
+  const junctionMetric = (input: {
+    entityId: string;
+    metric: string;
+    occurredAt: string;
+    provider: string;
+    resourceId: string;
+    value: number;
+  }) =>
+    makeJunctionSleepMetric({
+      date,
+      entityId: input.entityId,
+      metric: input.metric,
+      occurredAt: input.occurredAt,
+      recordedAt: input.provider === "whoop-v2" ? "2026-07-07T14:24:36.000Z" : "2026-07-07T18:53:32.000Z",
+      resourceId: input.resourceId,
+      sourceProviderSlug: input.provider,
+      value: input.value,
+    });
+  const vault = createVaultReadModel({
+    entities: [
+      makeJunctionSleepSession({
+        date,
+        durationMinutes: 346,
+        endAt: overnightEndAt,
+        entityId: "evt_whoop_missing_metric_window",
+        recordedAt: "2026-07-07T14:24:36.000Z",
+        resourceId: "sleep-whoop-overnight",
+        sourceProviderSlug: "whoop-v2",
+        startAt: overnightStartAt,
+      }),
+      makeJunctionSleepSession({
+        date,
+        durationMinutes: 30,
+        endAt: napEndAt,
+        entityId: "evt_apple_valid_nap_window",
+        recordedAt: "2026-07-07T18:40:00.000Z",
+        resourceId: "sleep-apple-valid-nap",
+        sourceProviderSlug: "apple-health-kit",
+        startAt: napStartAt,
+      }),
+      makeJunctionSleepSession({
+        date,
+        durationMinutes: 346,
+        endAt: overnightEndAt,
+        entityId: "evt_apple_zero_duplicate_window",
+        recordedAt: "2026-07-07T18:53:32.000Z",
+        resourceId: "sleep-apple-zero-duplicate",
+        sourceProviderSlug: "apple-health-kit",
+        startAt: overnightStartAt,
+      }),
+      junctionMetric({
+        entityId: "evt_apple_valid_nap_total",
+        metric: "sleep-total-minutes",
+        occurredAt: napEndAt,
+        provider: "apple-health-kit",
+        resourceId: "sleep-apple-valid-nap",
+        value: 25,
+      }),
+      junctionMetric({
+        entityId: "evt_apple_valid_nap_awake",
+        metric: "sleep-awake-minutes",
+        occurredAt: napEndAt,
+        provider: "apple-health-kit",
+        resourceId: "sleep-stage-apple-valid-nap",
+        value: 5,
+      }),
+      junctionMetric({
+        entityId: "evt_whoop_missing_metric_total",
+        metric: "sleep-total-minutes",
+        occurredAt: overnightEndAt,
+        provider: "whoop-v2",
+        resourceId: "sleep-whoop-overnight",
+        value: 327.3667,
+      }),
+      junctionMetric({
+        entityId: "evt_whoop_missing_metric_awake",
+        metric: "sleep-awake-minutes",
+        occurredAt: overnightEndAt,
+        provider: "whoop-v2",
+        resourceId: "sleep-stage-whoop-overnight",
+        value: 18.5,
+      }),
+      junctionMetric({
+        entityId: "evt_apple_zero_duplicate_total",
+        metric: "sleep-total-minutes",
+        occurredAt: overnightEndAt,
+        provider: "apple-health-kit",
+        resourceId: "sleep-apple-zero-duplicate",
+        value: 0,
+      }),
+      junctionMetric({
+        entityId: "evt_apple_zero_duplicate_efficiency",
+        metric: "sleep-efficiency",
+        occurredAt: overnightEndAt,
+        provider: "apple-health-kit",
+        resourceId: "sleep-apple-zero-duplicate",
+        value: 0,
+      }),
+      junctionMetric({
+        entityId: "evt_apple_zero_duplicate_deep",
+        metric: "sleep-deep-minutes",
+        occurredAt: overnightEndAt,
+        provider: "apple-health-kit",
+        resourceId: "sleep-stage-apple-zero-duplicate",
+        value: 0,
+      }),
+      junctionMetric({
+        entityId: "evt_apple_zero_duplicate_rem",
+        metric: "sleep-rem-minutes",
+        occurredAt: overnightEndAt,
+        provider: "apple-health-kit",
+        resourceId: "sleep-stage-apple-zero-duplicate",
+        value: 0,
+      }),
+      junctionMetric({
+        entityId: "evt_apple_zero_duplicate_light",
+        metric: "sleep-light-minutes",
+        occurredAt: overnightEndAt,
+        provider: "apple-health-kit",
+        resourceId: "sleep-stage-apple-zero-duplicate",
+        value: 0,
+      }),
+      junctionMetric({
+        entityId: "evt_apple_zero_duplicate_awake",
+        metric: "sleep-awake-minutes",
+        occurredAt: overnightEndAt,
+        provider: "apple-health-kit",
+        resourceId: "sleep-stage-apple-zero-duplicate",
+        value: 18.5,
+      }),
+    ],
+    metadata: null,
+    vaultRoot: "/virtual/wearables-junction-whoop-missing-apple-zero-fill",
+  });
+
+  const [night] = summarizeWearableSleep(vault, { date });
+
+  assert.equal(night?.sleepWindowProvider, "whoop");
+  assert.equal(night?.totalSleepMinutes.selection.provider, "whoop");
+  assert.equal(night?.totalSleepMinutes.selection.value, 327.3667);
+  assert.equal(night?.sleepEfficiency.selection.value, null);
+  assert.equal(night?.deepMinutes.selection.value, null);
+  assert.equal(night?.remMinutes.selection.value, null);
+  assert.equal(night?.lightMinutes.selection.value, null);
+  assert.equal(night?.awakeMinutes.selection.provider, "whoop");
+  assert.equal(night?.awakeMinutes.selection.value, 18.5);
+});
+
 test("daily sleep summary anchors metrics to the selected overnight sleep session instead of same-day nap", () => {
   const longSleepResourceId = "z-overnight-sleep";
   const napResourceId = "a-afternoon-nap";

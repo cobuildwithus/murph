@@ -335,6 +335,7 @@ function rankSleepWindows(
     candidates.map((candidate) => candidate.recordedAt ?? candidate.endAt ?? candidate.startAt),
   );
   const durationScores = buildNumberRankScores(candidates.map((candidate) => candidate.durationMinutes));
+  const maxDurationMinutes = Math.max(0, ...candidates.map((candidate) => candidate.durationMinutes));
   const scorecards = new Map<string, WearableSleepWindowScorecard>();
 
   for (const candidate of candidates) {
@@ -343,7 +344,7 @@ function rankSleepWindows(
     const recencyScore = recencyScores.get(candidate.recordedAt ?? candidate.endAt ?? candidate.startAt ?? "") ?? 0;
     const durationScore = durationScores.get(candidate.durationMinutes) ?? 0;
     const agreementScore = scoreSleepWindowAgreement(candidate, candidates);
-    const napPenalty = candidate.nap ? -6 : 0;
+    const napPenalty = candidate.nap || isShortWindowBesideMainSleep(candidate, maxDurationMinutes) ? -6 : 0;
 
     scorecards.set(candidate.candidateId, {
       agreementScore,
@@ -382,6 +383,13 @@ function rankSleepWindows(
     scorecards,
     sortedCandidates,
   };
+}
+
+function isShortWindowBesideMainSleep(
+  candidate: WearableSleepWindowCandidate,
+  maxDurationMinutes: number,
+): boolean {
+  return maxDurationMinutes >= 180 && candidate.durationMinutes < maxDurationMinutes / 2;
 }
 
 function buildProviderRankScores(
