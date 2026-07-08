@@ -6791,7 +6791,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: "member_123",
-      noticeCode: "pulse_upgrade_edge",
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -7088,12 +7087,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     })).rejects.toThrow("linq send failed");
 
     expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
-    expect(mocks.releaseHostedAiUsageLimitNotice).toHaveBeenCalledWith({
-      memberId: "member_123",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma,
-      sentAt: expect.any(String),
-    });
+    expect(mocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(readHostedWebhookReceiptCreateMock(prisma)).not.toHaveBeenCalled();
@@ -7164,7 +7158,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
     const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: "member_123",
-      noticeCode: "pulse_upgrade_edge",
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(

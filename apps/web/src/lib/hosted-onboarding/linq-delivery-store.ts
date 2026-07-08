@@ -278,6 +278,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       delivery: existing,
       prisma: input.prisma,
       reclaimFreshPreProviderAttempt: input.reclaimFreshPreProviderAttempt ?? false,
+      reclaimFreshPreProviderAttemptSource: input.source,
     });
   }
 
@@ -307,6 +308,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       delivery: concurrent,
       prisma: input.prisma,
       reclaimFreshPreProviderAttempt: input.reclaimFreshPreProviderAttempt ?? false,
+      reclaimFreshPreProviderAttemptSource: input.source,
     });
   }
 }
@@ -1265,6 +1267,7 @@ const hostedLinqDeliveryLifecycleSelect = {
   messageLookupKey: true,
   phoneNumberLookupKey: true,
   skippedAt: true,
+  source: true,
   status: true,
 } satisfies Prisma.HostedLinqDeliverySelect;
 
@@ -1280,10 +1283,12 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     lastReceiptAt: Date | null;
     messageLookupKey: string | null;
     skippedAt: Date | null;
+    source: string | null;
     status: string;
   };
   prisma: HostedLinqDeliveryClient;
   reclaimFreshPreProviderAttempt: boolean;
+  reclaimFreshPreProviderAttemptSource: string;
 }): Promise<{ claimed: boolean; id: string | null }> {
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
@@ -1313,6 +1318,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
           status: "attempted",
         },
         ...(input.reclaimFreshPreProviderAttempt
+          && input.delivery.source === input.reclaimFreshPreProviderAttemptSource
           ? [{ status: "attempted" }]
           : []),
       ],

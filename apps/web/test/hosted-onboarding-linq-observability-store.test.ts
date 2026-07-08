@@ -1173,6 +1173,7 @@ describe("hosted Linq observability stores", () => {
       messageLookupKey: null,
       phoneNumberLookupKey: null,
       skippedAt: null,
+      source: "hosted_webhook_side_effect",
       status: "attempted",
     });
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
@@ -1222,6 +1223,7 @@ describe("hosted Linq observability stores", () => {
       messageLookupKey: null,
       phoneNumberLookupKey: null,
       skippedAt: null,
+      source: "hosted_webhook_side_effect",
       status: "attempted",
     });
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
@@ -1259,6 +1261,46 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
+  it("does not reclaim fresh pre-provider delivery rows from another source", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:30.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_fresh_telegram_attempt",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      status: "attempted",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      reclaimFreshPreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "ai-usage-gate:member_123:2026-03",
+      targetKind: "thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_fresh_telegram_attempt",
+    });
+
+    const updateWhere = fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0]?.where;
+    expect(updateWhere).toEqual(expect.objectContaining({
+      id: "hld_fresh_telegram_attempt",
+    }));
+    expect(updateWhere?.OR).not.toContainEqual({ status: "attempted" });
+  });
+
   it("reclaims stale pre-provider delivery rows for a later provider dispatch retry", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
@@ -1272,6 +1314,7 @@ describe("hosted Linq observability stores", () => {
       messageLookupKey: null,
       phoneNumberLookupKey: null,
       skippedAt: null,
+      source: "hosted_webhook_side_effect",
       status: "attempted",
     });
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });

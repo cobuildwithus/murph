@@ -463,7 +463,6 @@ describe("hosted Linq usage reset e2e", () => {
     });
     const expectedUsageLimitIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: MEMBER_ID,
-      noticeCode: "pulse_upgrade_edge",
       periodStart: new Date("2026-04-01T00:00:00.000Z"),
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
@@ -591,7 +590,6 @@ describe("hosted Linq usage reset e2e", () => {
     });
     const expectedUsageLimitIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: MEMBER_ID,
-      noticeCode: "pulse_upgrade_edge",
       periodStart: new Date("2026-04-01T00:00:00.000Z"),
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);

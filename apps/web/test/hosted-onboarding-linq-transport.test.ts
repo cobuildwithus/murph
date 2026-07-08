@@ -82,7 +82,6 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   markHostedAiUsageLimitNoticeSent,
-  releaseHostedAiUsageLimitNotice,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import {
   createHostedLinqChat,
@@ -575,7 +574,6 @@ describe("hosted Linq webhook transport", () => {
     });
     const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: "member-1",
-      noticeCode: "pulse_upgrade_edge",
       periodStart: "2026-03-01T00:00:00.000Z",
     });
 
@@ -652,10 +650,9 @@ describe("hosted Linq webhook transport", () => {
 
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
-    expect(releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
-  it("keeps claimed AI usage quota replies period-scoped across source events", () => {
+  it("keeps claimed AI usage quota replies period-scoped across source events and notice codes", () => {
     const firstEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
@@ -678,7 +675,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
+      noticeCode: "edge_usage_limit_reached",
       occurredAt: "2026-03-26T12:30:00.000Z",
       replyToMessageId: "message-2",
       sourceEventId: "event-ai-usage-2",
@@ -686,7 +683,6 @@ describe("hosted Linq webhook transport", () => {
     });
     const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: "member-1",
-      noticeCode: "pulse_upgrade_edge",
       periodStart: new Date("2026-03-01T00:00:00.000Z"),
     });
 
@@ -794,7 +790,7 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
-  it("releases AI usage quota notice claims when delivery fails", async () => {
+  it("does not release usage-period sent markers when AI usage quota delivery fails", async () => {
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -819,12 +815,6 @@ describe("hosted Linq webhook transport", () => {
       }),
     ).rejects.toThrow("send failed");
 
-    expect(releaseHostedAiUsageLimitNotice).toHaveBeenCalledWith({
-      memberId: "member-1",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma: {},
-      sentAt: "2026-03-26T12:00:01.000Z",
-    });
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
     expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
   });
@@ -853,7 +843,6 @@ describe("hosted Linq webhook transport", () => {
       }),
     ).rejects.toThrow("send failed");
 
-    expect(releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();

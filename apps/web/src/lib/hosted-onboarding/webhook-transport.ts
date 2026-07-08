@@ -6,7 +6,6 @@ import type {
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   markHostedAiUsageLimitNoticeSent,
-  releaseHostedAiUsageLimitNotice,
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";
 import { sha256Hex } from "../primitives";
@@ -262,7 +261,6 @@ function buildHostedWebhookLinqMessageEffectId(
   if (input.template === "ai_usage_quota" && input.claimToken) {
     return buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: input.memberId,
-      noticeCode: input.noticeCode,
       periodStart: input.claimToken.periodStart,
     });
   }
@@ -1074,15 +1072,6 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
         });
         return;
       case "ai_usage_quota":
-        if (!effect.payload.claimToken) {
-          return;
-        }
-        await releaseHostedAiUsageLimitNotice({
-          memberId: effect.payload.memberId,
-          periodStart: effect.payload.claimToken.periodStart,
-          prisma,
-          sentAt: effect.payload.claimToken.sentAt,
-        });
         return;
       case "invite_signin":
       case "conversation_home_redirect":

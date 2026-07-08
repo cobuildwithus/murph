@@ -938,14 +938,12 @@ export async function checkHostedAiUsageGate(input: {
 
 export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
   memberId: string;
-  noticeCode: HostedAiUsageGateNoticeCode | string;
   periodStart: Date | string;
 }): string {
   const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
 
   return `ai-usage-gate:${sha256Hex(JSON.stringify({
     memberId: input.memberId,
-    noticeCode: input.noticeCode,
     periodStart: periodStart.toISOString(),
   })).slice(0, 32)}`;
 }
