@@ -560,7 +560,11 @@ function resolveConnectSourceDisconnect(
     return { connectionId, scope: null };
   }
 
-  if (countLiveJunctionUpstreamSources(source.upstreamSources) <= 1) {
+  const affectedUpstreamSourceCount = isReauthorizationRequiredConnectSourceState(source.state)
+    ? source.upstreamSources.length
+    : countLiveJunctionUpstreamSources(source.upstreamSources);
+
+  if (affectedUpstreamSourceCount <= 1) {
     return { connectionId, scope: null };
   }
 
