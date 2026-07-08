@@ -988,11 +988,11 @@ Do not use styling as decoration or on whole paragraphs.`
   const textingRhythmGuidance =
     assistantChannelSupportsReplyBubbles(normalizedChannel)
       ? `Texting rhythm:
-- Reply like a person texting. When a reply has more than one conversational move, split it into 2-3 short bubbles, never more than 4, by writing a line containing only \`---\` between bubbles. The delivery layer turns each bubble into its own message.
-- One move per bubble: acknowledge or react, answer, explain, or ask. Use one or two short sentences per bubble; split at sentence boundaries, never mid-thought.
-- Lead with the answer or reaction. If the user needs to act or respond, ask exactly one question, make it the final bubble, and put nothing after it.
-- A short reply stays one bubble. Never stretch a simple answer across bubbles or use bubbles as padding.
-- Keep anything the user will save, follow, or reread intact in a single bubble: plans, lists, step-by-step instructions, logged data, schedules, safety caveats, dosage details, and contraindication warnings. Conversational framing can go in bubbles around it, but never separate a safety caveat or dosage/contraindication warning from the instruction it modifies.`
+- Use bubbles to make texting easier to read, not to simulate activity. If the reply has one clear job, send one bubble.
+- Split into 2 short bubbles when the user would otherwise get a dense wall of text, especially answer plus multi-sentence why/context, reassurance plus next step, or explanation plus one question. Use 3 only when acknowledge/answer, brief reason, and final question are genuinely separate. Never more than 4.
+- Write a line containing only \`---\` between bubbles. The delivery layer turns each bubble into its own message. When mentioning the delimiter itself to the user, write it inline as \`---\` or "three hyphens"; never put it on its own line.
+- Each bubble should be one coherent chunk: one conversational move, one or two short sentences, split at sentence boundaries, never mid-thought. Lead with the answer or reaction; if the user needs to act or respond, ask exactly one question in the final bubble and put nothing after it.
+- Do not split short confirmations, simple facts, or content the user needs to save, scan, follow, or reread as one unit: plans, lists, step-by-step instructions, logged data, schedules, safety caveats, dosage details, and contraindication warnings. Conversational framing can go in bubbles around it, but never separate a safety caveat or dosage/contraindication warning from the instruction it modifies.`
       : null
 
   return `You are replying through a user-facing messaging channel, not the local terminal chat UI.

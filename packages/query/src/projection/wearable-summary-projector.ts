@@ -41,6 +41,7 @@ export function buildWearableSummaryProjectionFromDataset(dataset: WearableDatas
 
 type MutableWearableDataset = {
   activitySessionAggregates: WearableActivitySessionAggregate[];
+  metricSuppressionEvidence: WearableDataset["metricSuppressionEvidence"][number][];
   metricCandidates: WearableMetricCandidate[];
   provenanceDiagnostics: WearableDataset["provenanceDiagnostics"][number][];
   rawMetricCandidates: WearableMetricCandidate[];
@@ -91,6 +92,7 @@ function groupWearableDatasetByPublicProvider(dataset: WearableDataset): Map<str
 function emptyWearableDataset(): MutableWearableDataset {
   return {
     activitySessionAggregates: [],
+    metricSuppressionEvidence: [],
     metricCandidates: [],
     provenanceDiagnostics: [],
     rawMetricCandidates: [],
