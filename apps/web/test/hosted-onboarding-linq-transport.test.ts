@@ -77,7 +77,6 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   >("@/src/lib/hosted-execution/usage-allowance");
   return {
     ...actual,
-    claimHostedAiUsageLimitNoticeForRollout: vi.fn().mockResolvedValue(true),
     hasFreshHostedAiUsageLimitNoticeClaim: vi.fn().mockResolvedValue(false),
     markHostedAiUsageLimitNoticeSent: vi.fn().mockResolvedValue(true),
   };
@@ -85,7 +84,6 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
 
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
-  claimHostedAiUsageLimitNoticeForRollout,
   hasFreshHostedAiUsageLimitNoticeClaim,
   markHostedAiUsageLimitNoticeSent,
 } from "@/src/lib/hosted-execution/usage-allowance";
@@ -143,7 +141,6 @@ describe("hosted Linq webhook transport", () => {
       .mockResolvedValue(false);
     vi.mocked(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx)
       .mockResolvedValue(false);
-    vi.mocked(claimHostedAiUsageLimitNoticeForRollout).mockResolvedValue(true);
     vi.mocked(hasFreshHostedAiUsageLimitNoticeClaim).mockResolvedValue(false);
     vi.mocked(markHostedAiUsageLimitNoticeSent).mockResolvedValue(true);
   });
@@ -627,7 +624,6 @@ describe("hosted Linq webhook transport", () => {
     const [deliveryClaimOrder] = vi.mocked(claimHostedLinqDeliveryProviderDispatchTx)
       .mock.invocationCallOrder;
     expect(deliveryClaimOrder).toBeDefined();
-    expect(claimHostedAiUsageLimitNoticeForRollout).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).toHaveBeenCalledWith({
       memberId: "member-1",
       periodStart: "2026-03-01T00:00:00.000Z",
@@ -639,10 +635,6 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("skips already-claimed AI usage quota replies before provider dispatch", async () => {
-    vi.mocked(claimHostedLinqDeliveryProviderDispatchTx).mockResolvedValueOnce({
-      claimed: false,
-      id: "hld_existing",
-    });
     vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
@@ -670,6 +662,7 @@ describe("hosted Linq webhook transport", () => {
     ).resolves.toBeUndefined();
 
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });
 
@@ -714,7 +707,49 @@ describe("hosted Linq webhook transport", () => {
         idempotencyKeys: expect.any(Array),
         prisma: {},
       });
-    expect(claimHostedAiUsageLimitNoticeForRollout).not.toHaveBeenCalled();
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
+  });
+
+  it("skips AI usage quota replies already delivered under the current delivery key before reading old period claims", async () => {
+    vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage",
+      template: "ai_usage_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        collectResult: true,
+        currentInboundReply,
+        prisma: {} as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toEqual({
+      sentCount: 0,
+      skipped: [
+        {
+          effectId: effect.effectId,
+          reason: "notice_already_claimed",
+          template: "ai_usage_quota",
+        },
+      ],
+    });
+
+    expect(hasFreshHostedAiUsageLimitNoticeClaim).not.toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
@@ -761,14 +796,12 @@ describe("hosted Linq webhook transport", () => {
       periodStart: "2026-03-01T00:00:00.000Z",
       prisma: {},
     });
-    expect(claimHostedAiUsageLimitNoticeForRollout).not.toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });
 
-  it("sends AI usage quota replies without a rollout period claim", async () => {
-    vi.mocked(claimHostedAiUsageLimitNoticeForRollout).mockResolvedValueOnce(false);
+  it("sends AI usage quota replies from the delivery row", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
@@ -796,7 +829,6 @@ describe("hosted Linq webhook transport", () => {
       skipped: [],
     });
 
-    expect(claimHostedAiUsageLimitNoticeForRollout).not.toHaveBeenCalled();
     expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).toHaveBeenCalled();

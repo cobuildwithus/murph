@@ -461,6 +461,14 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     if (legacyDeliveryInFlight) {
       return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
+    const currentDeliverySentNotice =
+      await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+        idempotencyKeys: [idempotencyKey],
+        prisma: input.prisma,
+      });
+    if (currentDeliverySentNotice) {
+      return { status: "already_notified" };
+    }
     const legacyPeriodClaimOwnsNotice =
       await hasFreshHostedAiUsageLimitNoticeClaim({
         memberId: input.userId,
@@ -475,18 +483,19 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       attemptedAt: sentAt,
       idempotencyKey,
       prisma: input.prisma,
+      reclaimStalePreProviderAttempt: true,
       source: "hosted_runtime_ai_usage_limit_notice",
       sourceRef: wake.eventId,
       targetKind: "telegram_thread",
       template: "ai_usage_quota",
     });
     if (!claimed.claimed) {
-      const currentDeliverySentNotice =
+      const claimedCurrentDeliverySentNotice =
         await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
           idempotencyKeys: [idempotencyKey],
           prisma: input.prisma,
         });
-      return currentDeliverySentNotice
+      return claimedCurrentDeliverySentNotice
         ? { status: "already_notified" }
         : buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
@@ -498,15 +507,10 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         replyToMessageId: wake.message.telegramMessage.messageId,
       });
     } catch (error) {
-      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeUnknownError) {
-        await markHostedLinqDeliveryAcceptedTx({
-          acceptedAt: sentAt,
-          idempotencyKey,
-          prisma: input.prisma,
-        });
-        return { status: "already_notified" };
-      }
-      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError) {
+      if (
+        error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError
+        || error instanceof HostedRuntimeTelegramUsageLimitNoticeUnknownError
+      ) {
         await markHostedLinqDeliverySendFailedTx({
           failedAt: sentAt,
           failureCode: error.name,

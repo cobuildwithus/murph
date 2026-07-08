@@ -60,7 +60,6 @@ function buildTrialConversionPendingMessage(input: {
 const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
-    claimHostedAiUsageLimitNoticeForRollout: vi.fn(),
     hasFreshHostedAiUsageLimitNoticeClaim: vi.fn(),
     hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx: vi.fn(),
     hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx: vi.fn(),
@@ -278,8 +277,6 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   return {
     ...actual,
     checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
-    claimHostedAiUsageLimitNoticeForRollout:
-      mocks.claimHostedAiUsageLimitNoticeForRollout,
     hasFreshHostedAiUsageLimitNoticeClaim: mocks.hasFreshHostedAiUsageLimitNoticeClaim,
     markHostedAiUsageLimitNoticeSent: mocks.markHostedAiUsageLimitNoticeSent,
   };
@@ -567,7 +564,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       .mockResolvedValue(false);
     mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx
       .mockResolvedValue(false);
-    mocks.claimHostedAiUsageLimitNoticeForRollout.mockResolvedValue(true);
     mocks.hasFreshHostedAiUsageLimitNoticeClaim.mockResolvedValue(false);
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
@@ -6825,7 +6821,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       targetKind: "thread",
       template: "ai_usage_quota",
     });
-    expect(mocks.claimHostedAiUsageLimitNoticeForRollout).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).toHaveBeenCalledWith({
       memberId: "member_123",
       periodStart: "2026-03-01T00:00:00.000Z",
@@ -7179,10 +7174,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("skips repeat Linq AI usage quota provider dispatch after the delivery row is provider-correlated", async () => {
-    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValueOnce({
-      claimed: false,
-      id: "hld_existing",
-    });
     mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
@@ -7243,12 +7234,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "ai-usage-quota-already-notified",
     });
-    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        linqChatId: "chat_123",
-        template: "ai_usage_quota",
-      }),
-    );
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();

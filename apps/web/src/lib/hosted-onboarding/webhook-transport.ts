@@ -1109,6 +1109,14 @@ async function claimHostedLinqNoticeForSideEffect(
       if (legacyDeliveryInFlight) {
         return { status: "in_flight" };
       }
+      const currentDeliverySentNotice =
+        await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+          idempotencyKeys: [effect.effectId],
+          prisma,
+        });
+      if (currentDeliverySentNotice) {
+        return { status: "already_claimed" };
+      }
       const legacyPeriodClaimOwnsNotice =
         await hasFreshHostedAiUsageLimitNoticeClaim({
           memberId: effect.payload.memberId,
@@ -1131,12 +1139,12 @@ async function claimHostedLinqNoticeForSideEffect(
         template: effect.payload.template,
       });
       if (!claim.claimed) {
-        const currentDeliverySentNotice =
+        const claimedCurrentDeliverySentNotice =
           await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
             idempotencyKeys: [effect.effectId],
             prisma,
           });
-        return currentDeliverySentNotice
+        return claimedCurrentDeliverySentNotice
           ? { status: "already_claimed" }
           : { status: "in_flight" };
       }
