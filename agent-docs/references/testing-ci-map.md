@@ -81,21 +81,24 @@ Last verified: 2026-07-06
   expand/backfill/switch/final-cleanup sequencing; only final cleanup belongs in
   `apps/web/prisma/contract-migrations`. Destructive hosted web contract cleanup
   is applied by `.github/workflows/hosted-web-contract-migrations.yml` after a
-  successful Vercel-originated production deployment status; that workflow
-  checks out the deployed SHA, verifies it is reachable from `origin/main`,
-  waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior
-  production function executions to drain, rechecks that the configured Vercel
-  production alias still points at that SHA before exposing the database secret,
-  does not use GitHub Actions concurrency for this lane so stale events cannot
-  replace valid pending runs, and requires GitHub Actions values for
+  successful Vercel-originated completed production deployment status; that
+  workflow checks out the deployed SHA, verifies it is reachable from
+  `origin/main`, waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for
+  prior production function executions to drain, rechecks that the configured
+  Vercel production alias still points at that SHA before exposing the database
+  secret, supports manual dispatch with `deployed_sha` for the same current-alias
+  proof path, does not use GitHub Actions concurrency for this lane so stale
+  events cannot replace valid pending runs, and requires GitHub Actions values for
   `HOSTED_WEB_VERCEL_TOKEN`,
   `HOSTED_WEB_VERCEL_PROJECT_ID`, `HOSTED_WEB_PRODUCTION_BASE_URL`, and
-  `HOSTED_WEB_DIRECT_DATABASE_URL`. After contract cleanup applies, the rollback
-  floor is the first deployed Vercel commit that no longer reads or writes the
-  dropped schema shape; rollback below that floor requires DB restore/re-expand
-  or a forward deploy. Cloudflare `container_rollout=immediate` is not
-  applicable to this Vercel-only lane; the bounded drain wait and final alias
-  check own the old-function window.
+  `HOSTED_WEB_DIRECT_DATABASE_URL`. The shared production migration URL resolver
+  removes Prisma-style `sslcert=system`, `sslkey=system`, and
+  `sslrootcert=system` markers before handing Postgres URLs to raw `pg` clients.
+  After contract cleanup applies, the rollback floor is the first deployed Vercel
+  commit that no longer reads or writes the dropped schema shape; rollback below
+  that floor requires DB restore/re-expand or a forward deploy. Cloudflare
+  `container_rollout=immediate` is not applicable to this Vercel-only lane; the
+  bounded drain wait and final alias check own the old-function window.
 
 ## Current Gaps
 

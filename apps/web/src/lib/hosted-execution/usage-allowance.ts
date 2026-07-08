@@ -4,6 +4,9 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
+  classifyAssistantOpenAiImageUsageBasis,
+  type AssistantOpenAiImageUsageTokenBuckets,
+  type AssistantOpenAiImageUsageUnpriceableReason,
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
   type AssistantUsageTokenPricingBasis,
@@ -13,9 +16,11 @@ import {
   isHostedAiUsageOpenAiTokenPricingProviderName,
   normalizeHostedAiUsageAllowanceElevenLabsMusicModelId,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
+  normalizeHostedAiUsageAllowanceOpenAiImageModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
   type HostedAiUsageAllowanceElevenLabsMusicPricedModel,
   type HostedAiUsageAllowanceElevenLabsTtsPricedModel,
+  type HostedAiUsageAllowanceOpenAiImagePricedModel,
   type HostedAiUsageAllowancePricedModel,
   type HostedAiUsageOpenAiFlexTokenPricingModel,
 } from "@murphai/hosted-execution/runtime-control";
@@ -206,6 +211,20 @@ interface HostedAiUsageAllowanceBillingRef {
   usageLimitUsdMicrosOverride?: bigint | null;
 }
 
+type HostedAiUsageAllowancePricingDecision =
+  | {
+    kind: "priced";
+    priced: HostedAiUsageAllowancePricingResult;
+  }
+  | {
+    counted: boolean;
+    credentialSource: AssistantUsageCredentialSource;
+    kind: "unpriceable_openai_image";
+    modelResolution: HostedAiUsageAllowanceOpenAiImageModelResolution;
+    reason: AssistantOpenAiImageUsageUnpriceableReason;
+    tokenPricingBasis: AssistantUsageTokenPricingBasis;
+  };
+
 async function resolveHostedAiUsageAllowanceBillingRefForMember(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
@@ -331,6 +350,26 @@ const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
 const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
+// GPT Image API pricing has separate text/image token buckets and is not part
+// of HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS, which validates the assistant
+// chat model in deploy preflight.
+const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICING_VERSION =
+  "openai-image-api-pricing-2026-07-08-standard";
+const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_MALFORMED_PRICING_VERSION =
+  "openai-image-api-malformed-usage-block-2026-07-08";
+const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICING_SOURCE =
+  "https://developers.openai.com/api/docs/pricing";
+const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_TEXT_INPUT_USD_MICROS_PER_MILLION_TOKENS =
+  5_000_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_CACHED_TEXT_INPUT_USD_MICROS_PER_MILLION_TOKENS =
+  1_250_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_INPUT_USD_MICROS_PER_MILLION_TOKENS =
+  8_000_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_CACHED_INPUT_USD_MICROS_PER_MILLION_TOKENS =
+  2_000_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_OUTPUT_USD_MICROS_PER_MILLION_TOKENS =
+  30_000_000n;
+
 // Workers AI audio transcription is duration-priced rather than token-priced.
 // Rate: $0.00051 per audio minute, from
 // https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/
@@ -403,6 +442,19 @@ const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
 export function priceHostedAiUsageForAllowance(
   record: AssistantUsageRecord,
 ): HostedAiUsageAllowancePricingResult {
+  const decision = resolveHostedAiUsageAllowancePricingDecision(record);
+  if (decision.kind === "unpriceable_openai_image") {
+    throw new TypeError(
+      "OpenAI image hosted AI usage requires period-aware allowance accounting.",
+    );
+  }
+
+  return decision.priced;
+}
+
+function resolveHostedAiUsageAllowancePricingDecision(
+  record: AssistantUsageRecord,
+): HostedAiUsageAllowancePricingDecision {
   const credentialSource = normalizeAssistantUsageCredentialSource(record.credentialSource);
   const counted = credentialSource !== "member";
   const tokenPricingBasis =
@@ -410,33 +462,67 @@ export function priceHostedAiUsageForAllowance(
 
   if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
     assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
-    return priceHostedAiUsageAudioForAllowance({
-      counted,
-      credentialSource,
-      record,
-    });
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageAudioForAllowance({
+        counted,
+        credentialSource,
+        record,
+      }),
+    };
+  }
+
+  const imageMatch = matchHostedAiUsageOpenAiImageRecord(record);
+  if (imageMatch !== null) {
+    assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(tokenPricingBasis);
+    if (imageMatch.kind === "unpriceable") {
+      return {
+        counted,
+        credentialSource,
+        kind: "unpriceable_openai_image",
+        modelResolution: imageMatch.modelResolution,
+        reason: imageMatch.reason,
+        tokenPricingBasis,
+      };
+    }
+
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageOpenAiImageForAllowance({
+        counted,
+        credentialSource,
+        match: imageMatch,
+        record,
+      }),
+    };
   }
 
   const ttsMatch = matchHostedAiUsageElevenLabsTtsRecord(record);
   if (ttsMatch !== null) {
     assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "TTS");
-    return priceHostedAiUsageElevenLabsTtsForAllowance({
-      counted,
-      credentialSource,
-      match: ttsMatch,
-      record,
-    });
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageElevenLabsTtsForAllowance({
+        counted,
+        credentialSource,
+        match: ttsMatch,
+        record,
+      }),
+    };
   }
 
   const musicMatch = matchHostedAiUsageElevenLabsMusicRecord(record);
   if (musicMatch !== null) {
     assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(tokenPricingBasis, "Music");
-    return priceHostedAiUsageElevenLabsMusicForAllowance({
-      counted,
-      credentialSource,
-      match: musicMatch,
-      record,
-    });
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageElevenLabsMusicForAllowance({
+        counted,
+        credentialSource,
+        match: musicMatch,
+        record,
+      }),
+    };
   }
 
   const modelResolution = resolveHostedAiUsageAllowancePricingModel(record);
@@ -450,17 +536,21 @@ export function priceHostedAiUsageForAllowance(
 
   if (!counted) {
     return {
-      costUsdMicros: 0n,
-      counted: false,
-      pricingSnapshot: {
-        credentialSource,
-        ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
-        pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
-        schema: "murph.hosted-ai-usage-allowance-pricing.v1",
-        tokenPricingBasis,
-        tokens: tokenSnapshot,
+      kind: "priced",
+      priced: {
+        costUsdMicros: 0n,
+        counted: false,
+        pricingSnapshot: {
+          credentialSource,
+          ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
+          pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
+          schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+          tokenPricingBasis,
+          tokens: tokenSnapshot,
+        },
+        pricingVersion:
+          tokenPricing?.pricingVersion ?? HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION,
       },
-      pricingVersion: tokenPricing?.pricingVersion ?? HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION,
     };
   }
 
@@ -497,30 +587,33 @@ export function priceHostedAiUsageForAllowance(
   );
 
   return {
-    costUsdMicros,
-    counted: true,
-    pricingSnapshot: {
-      credentialSource,
-      ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
-      pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
-      ratesUsdMicrosPerMillionTokens: {
-        cachedInput: prices.cachedInputUsdMicrosPerMillionTokens.toString(),
-        input: prices.inputUsdMicrosPerMillionTokens.toString(),
-        output: prices.outputUsdMicrosPerMillionTokens.toString(),
+    kind: "priced",
+    priced: {
+      costUsdMicros,
+      counted: true,
+      pricingSnapshot: {
+        credentialSource,
+        ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
+        pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: prices.cachedInputUsdMicrosPerMillionTokens.toString(),
+          input: prices.inputUsdMicrosPerMillionTokens.toString(),
+          output: prices.outputUsdMicrosPerMillionTokens.toString(),
+        },
+        schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+        standardCostUsdMicros: standardCostUsdMicros.toString(),
+        tokenPricingAdjustment: {
+          denominator: resolvedTokenPricing.multiplierDenominator.toString(),
+          numerator: resolvedTokenPricing.multiplierNumerator.toString(),
+        },
+        tokenPricingBasis: resolvedTokenPricing.basis,
+        tokens: {
+          ...tokenSnapshot,
+          billableInput: billableInputTokens.toString(),
+        },
       },
-      schema: "murph.hosted-ai-usage-allowance-pricing.v1",
-      standardCostUsdMicros: standardCostUsdMicros.toString(),
-      tokenPricingAdjustment: {
-        denominator: resolvedTokenPricing.multiplierDenominator.toString(),
-        numerator: resolvedTokenPricing.multiplierNumerator.toString(),
-      },
-      tokenPricingBasis: resolvedTokenPricing.basis,
-      tokens: {
-        ...tokenSnapshot,
-        billableInput: billableInputTokens.toString(),
-      },
+      pricingVersion: resolvedTokenPricing.pricingVersion,
     },
-    pricingVersion: resolvedTokenPricing.pricingVersion,
   };
 }
 
@@ -530,12 +623,17 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
   const tokenPricingBasis =
     normalizeAssistantUsageTokenPricingBasis(record.tokenPricingBasis);
 
-  if (tokenPricingBasis === "standard") {
+  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
+    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
     return tokenPricingBasis;
   }
 
-  if (isHostedAiUsageAllowanceAudioModelRecord(record)) {
-    assertHostedAiUsageAllowanceAudioTokenPricingBasis(tokenPricingBasis);
+  if (isHostedAiUsageAllowanceOpenAiImageRecord(record)) {
+    assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(tokenPricingBasis);
+    return tokenPricingBasis;
+  }
+
+  if (tokenPricingBasis === "standard") {
     return tokenPricingBasis;
   }
 
@@ -636,7 +734,18 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     return null;
   }
 
-  const priced = priceHostedAiUsageForAllowance(input.record);
+  const pricingDecision = resolveHostedAiUsageAllowancePricingDecision(input.record);
+  if (pricingDecision.kind === "unpriceable_openai_image") {
+    return accountHostedAiUsageOpenAiImageMalformedForAllowanceTx({
+      decision: pricingDecision,
+      memberId: input.memberId,
+      now,
+      period,
+      record: input.record,
+      tx: input.tx,
+    });
+  }
+  const priced = pricingDecision.priced;
 
   const accounted = await input.tx.hostedAiUsage.updateMany({
     where: {
@@ -663,6 +772,66 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     memberId: input.memberId,
     now,
     period,
+    recordOccurredAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
+    sourceUsageId: input.record.usageId,
+    tx: input.tx,
+  });
+}
+
+async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
+  decision: Extract<
+    HostedAiUsageAllowancePricingDecision,
+    { kind: "unpriceable_openai_image" }
+  >;
+  memberId: string;
+  now: Date;
+  period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>;
+  record: AssistantUsageRecord;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageLimitNoticeCandidate | null> {
+  const blockCostUsdMicros = input.decision.counted
+    ? resolveHostedAiUsageAllowanceRemainingUsdMicros(input.period)
+    : 0n;
+
+  const accounted = await input.tx.hostedAiUsage.updateMany({
+    where: {
+      allowanceAccountedAt: null,
+      id: input.record.usageId,
+    },
+    data: {
+      allowanceAccountedAt: input.now,
+      allowanceCostUsdMicros: blockCostUsdMicros,
+      allowanceCounted: input.decision.counted,
+      allowancePeriodEnd: input.period.periodEnd,
+      allowancePeriodStart: input.period.periodStart,
+      allowancePricingSnapshotJson: {
+        blockCostUsdMicros: blockCostUsdMicros.toString(),
+        credentialSource: input.decision.credentialSource,
+        model: input.decision.modelResolution.model,
+        modelSource: input.decision.modelResolution.source,
+        pricingSource: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICING_SOURCE,
+        reason: input.decision.reason,
+        requestedModel: input.record.requestedModel ?? null,
+        schema: "murph.hosted-ai-usage-allowance-malformed.v1",
+        servedModel: input.record.servedModel ?? null,
+        tokenPricingBasis: input.decision.tokenPricingBasis,
+        tokens: buildHostedAiUsageAllowanceTokenSnapshot(input.record),
+        usageExtractionSourcePath: input.record.usageExtractionSourcePath,
+      },
+      allowancePricingVersion:
+        HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_MALFORMED_PRICING_VERSION,
+    },
+  });
+
+  if (accounted.count !== 1 || !input.decision.counted) {
+    return null;
+  }
+
+  return accountHostedAiUsageAllowancePeriodSpendTx({
+    costUsdMicros: blockCostUsdMicros,
+    memberId: input.memberId,
+    now: input.now,
+    period: input.period,
     recordOccurredAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
     sourceUsageId: input.record.usageId,
     tx: input.tx,
@@ -1402,6 +1571,14 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
   };
 }
 
+function resolveHostedAiUsageAllowanceRemainingUsdMicros(
+  period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>,
+): bigint {
+  return period.limitUsdMicros > period.spentUsdMicros
+    ? period.limitUsdMicros - period.spentUsdMicros
+    : 0n;
+}
+
 function resolveHostedAiUsageAllowancePeriod(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
@@ -1754,6 +1931,16 @@ function assertHostedAiUsageAllowanceAudioTokenPricingBasis(
   }
 }
 
+function assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(
+  basis: AssistantUsageTokenPricingBasis,
+): void {
+  if (basis !== "standard") {
+    throw new TypeError(
+      "OpenAI image hosted AI usage must use standard token pricing basis.",
+    );
+  }
+}
+
 function assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(
   basis: AssistantUsageTokenPricingBasis,
   feature: "TTS" | "Music",
@@ -1763,6 +1950,200 @@ function assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(
       `ElevenLabs ${feature} hosted AI usage must use standard token pricing basis.`,
     );
   }
+}
+
+interface HostedAiUsageAllowanceOpenAiImageModelResolution {
+  model: HostedAiUsageAllowanceOpenAiImagePricedModel;
+  source: HostedAiUsageAllowancePricingModelSource;
+}
+
+type HostedAiUsageAllowanceOpenAiImageMatch =
+  | {
+    kind: "priceable";
+    modelResolution: HostedAiUsageAllowanceOpenAiImageModelResolution;
+    tokenBuckets: AssistantOpenAiImageUsageTokenBuckets;
+  }
+  | {
+    kind: "unpriceable";
+    modelResolution: HostedAiUsageAllowanceOpenAiImageModelResolution;
+    reason: AssistantOpenAiImageUsageUnpriceableReason;
+  };
+
+function matchHostedAiUsageOpenAiImageRecord(
+  record: AssistantUsageRecord,
+): HostedAiUsageAllowanceOpenAiImageMatch | null {
+  if (
+    record.provider !== "openai-images"
+    || !isHostedAiUsageOpenAiImageSourcePath(record.usageExtractionSourcePath)
+    || record.cacheWriteTokens !== null
+  ) {
+    return null;
+  }
+
+  const modelResolution = resolveHostedAiUsageAllowanceOpenAiImageModel(record);
+  if (modelResolution.model === null || modelResolution.source === null) {
+    return null;
+  }
+
+  const usageBasis = classifyAssistantOpenAiImageUsageBasis(record);
+  if (!usageBasis.priceable) {
+    return {
+      kind: "unpriceable",
+      modelResolution: {
+        model: modelResolution.model,
+        source: modelResolution.source,
+      },
+      reason: usageBasis.reason,
+    };
+  }
+
+  return {
+    kind: "priceable",
+    modelResolution: {
+      model: modelResolution.model,
+      source: modelResolution.source,
+    },
+    tokenBuckets: usageBasis.tokenBuckets,
+  };
+}
+
+function isHostedAiUsageAllowanceOpenAiImageRecord(
+  record: AssistantUsageRecord,
+): boolean {
+  if (
+    record.provider !== "openai-images"
+    || !isHostedAiUsageOpenAiImageSourcePath(record.usageExtractionSourcePath)
+    || record.cacheWriteTokens !== null
+  ) {
+    return false;
+  }
+
+  const modelResolution = resolveHostedAiUsageAllowanceOpenAiImageModel(record);
+  return modelResolution.model !== null && modelResolution.source !== null;
+}
+
+function isHostedAiUsageOpenAiImageSourcePath(value: string | null): boolean {
+  return value === "openai.images.generate" || value === "openai.images.edit";
+}
+
+function priceHostedAiUsageOpenAiImageForAllowance(input: {
+  counted: boolean;
+  credentialSource: AssistantUsageCredentialSource;
+  match: Extract<HostedAiUsageAllowanceOpenAiImageMatch, { kind: "priceable" }>;
+  record: AssistantUsageRecord;
+}): HostedAiUsageAllowancePricingResult {
+  const { modelResolution, tokenBuckets } = input.match;
+  const standardCostUsdMicros =
+    priceTokenBucketUsdMicros(
+      tokenBuckets.billableTextInputTokens,
+      HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_TEXT_INPUT_USD_MICROS_PER_MILLION_TOKENS,
+    )
+    + priceTokenBucketUsdMicros(
+      tokenBuckets.cachedTextInputTokens,
+      HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_CACHED_TEXT_INPUT_USD_MICROS_PER_MILLION_TOKENS,
+    )
+    + priceTokenBucketUsdMicros(
+      tokenBuckets.billableImageInputTokens,
+      HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_INPUT_USD_MICROS_PER_MILLION_TOKENS,
+    )
+    + priceTokenBucketUsdMicros(
+      tokenBuckets.cachedImageInputTokens,
+      HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_CACHED_INPUT_USD_MICROS_PER_MILLION_TOKENS,
+    )
+    + priceTokenBucketUsdMicros(
+      tokenBuckets.outputTokens,
+      HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_OUTPUT_USD_MICROS_PER_MILLION_TOKENS,
+    );
+
+  return {
+    costUsdMicros: input.counted ? standardCostUsdMicros : 0n,
+    counted: input.counted,
+    pricingSnapshot: {
+      credentialSource: input.credentialSource,
+      model: modelResolution.model,
+      modelSource: modelResolution.source,
+      pricingSource: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICING_SOURCE,
+      ratesUsdMicrosPerMillionTokens: {
+        cachedImageInput:
+          HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_CACHED_INPUT_USD_MICROS_PER_MILLION_TOKENS
+            .toString(),
+        cachedTextInput:
+          HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_CACHED_TEXT_INPUT_USD_MICROS_PER_MILLION_TOKENS
+            .toString(),
+        imageInput:
+          HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_INPUT_USD_MICROS_PER_MILLION_TOKENS
+            .toString(),
+        imageOutput:
+          HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_OUTPUT_USD_MICROS_PER_MILLION_TOKENS
+            .toString(),
+        textInput:
+          HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_TEXT_INPUT_USD_MICROS_PER_MILLION_TOKENS
+            .toString(),
+      },
+      requestedModel: input.record.requestedModel,
+      schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+      servedModel: input.record.servedModel,
+      standardCostUsdMicros: standardCostUsdMicros.toString(),
+      tokenPricingBasis: "standard",
+      tokens: {
+        ...buildHostedAiUsageAllowanceTokenSnapshot(input.record),
+        openAiImage: {
+          billableImageInput: tokenBuckets.billableImageInputTokens.toString(),
+          billableTextInput: tokenBuckets.billableTextInputTokens.toString(),
+          cachedImageInput: tokenBuckets.cachedImageInputTokens.toString(),
+          cachedInput: tokenBuckets.cachedInputTokens.toString(),
+          cachedInputAllocation:
+            resolveHostedAiUsageAllowanceOpenAiImageCachedInputAllocation(
+              tokenBuckets,
+            ),
+          cachedTextInput: tokenBuckets.cachedTextInputTokens.toString(),
+          imageInput: tokenBuckets.imageInputTokens.toString(),
+          output: tokenBuckets.outputTokens.toString(),
+          textInput: tokenBuckets.textInputTokens.toString(),
+        },
+      },
+    },
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICING_VERSION,
+  };
+}
+
+function resolveHostedAiUsageAllowanceOpenAiImageCachedInputAllocation(
+  tokenBuckets: AssistantOpenAiImageUsageTokenBuckets,
+): "single_modality_only" | "text_first_conservative" {
+  return tokenBuckets.cachedInputTokens > 0n
+    && tokenBuckets.textInputTokens > 0n
+    && tokenBuckets.imageInputTokens > 0n
+    ? "text_first_conservative"
+    : "single_modality_only";
+}
+
+function resolveHostedAiUsageAllowanceOpenAiImageModel(
+  record: AssistantUsageRecord,
+): {
+  model: HostedAiUsageAllowanceOpenAiImagePricedModel | null;
+  source: HostedAiUsageAllowancePricingModelSource | null;
+} {
+  const served = normalizeHostedAiUsageAllowanceOpenAiImageModelId(record.servedModel);
+  if (served) {
+    return {
+      model: served,
+      source: "served",
+    };
+  }
+
+  const requested =
+    normalizeHostedAiUsageAllowanceOpenAiImageModelId(record.requestedModel);
+  if (requested) {
+    return {
+      model: requested,
+      source: "requested",
+    };
+  }
+
+  return {
+    model: null,
+    source: null,
+  };
 }
 
 // Only Worker-recorded Workers AI transcription rows take the audio-priced
