@@ -832,6 +832,54 @@ test("ConnectPage keeps account disconnects visible for parent-level Junction re
   assert.equal(markup.match(/aria-label="Disconnect Junction account"/gu)?.length, 2);
 });
 
+test("ConnectPage does not apply parent Junction reauthorization to disconnected upstream projections", async () => {
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
+  vi.stubEnv("JUNCTION_REGION", "us");
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_multi",
+        provider: "junction",
+        state: "reauthorization_required",
+        upstreamSources: [
+          {
+            connectProvider: "junction",
+            connectTarget: "garmin",
+            providerLabel: "Garmin",
+            resourceCount: 2,
+            sourceProviderSlug: "garmin",
+            status: "unavailable",
+          },
+          {
+            providerLabel: "Apple Health",
+            resourceCount: 4,
+            sourceProviderSlug: "apple_health_kit",
+            status: "disconnected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Garmin needs reconnect/u);
+  assert.match(markup, /aria-label="Reconnect Garmin"/u);
+  assert.match(markup, /Apple Health not connected/u);
+  assert.match(markup, /Apple Health web setup is coming soon\. Connect from the Murph iOS app for now\./u);
+  assert.match(markup, /aria-label="Apple Health web setup is not available yet"/u);
+  assert.doesNotMatch(markup, /Apple Health needs reconnect/u);
+  assert.doesNotMatch(markup, /aria-label="Reconnect Apple Health"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Apple Health"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Junction account"/u);
+});
+
 test("ConnectPage shows mobile-managed guidance for Apple Health reconnect states without web target", async () => {
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-01T00:00:00.000Z",

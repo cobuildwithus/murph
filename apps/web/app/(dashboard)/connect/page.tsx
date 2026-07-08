@@ -502,6 +502,10 @@ function resolveConnectSourceConnectionMatches(
     }
 
     for (const upstreamSource of source.upstreamSources) {
+      if (!isDisconnectableJunctionUpstreamSource(upstreamSource)) {
+        continue;
+      }
+
       const upstreamOwnRequiresReconnect = upstreamSource.requiresReconnect === true;
       const upstreamInheritsSourceReconnect =
         sourceRequiresReconnect
