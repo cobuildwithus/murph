@@ -58,14 +58,18 @@ export type HostedRuntimeControlMailboxKind =
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
   "gpt-5.5",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
 ] as const;
 
 export type HostedAiUsageAllowancePricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS)[number];
 
-// Add models here only after the provider request path sends `service_tier: flex`.
 export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
-  ["gpt-5.5"] as readonly HostedAiUsageAllowancePricedModel[];
+  [
+    ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
+  ] as readonly HostedAiUsageAllowancePricedModel[];
 
 export type HostedAiUsageOpenAiFlexTokenPricingModel =
   (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];

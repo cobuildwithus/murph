@@ -841,6 +841,7 @@ jobs:
       - name: Validate required deploy environment
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HOSTED_EXECUTION_CONTAINER_ROLLOUT: ${{ inputs.container_rollout }}
           HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}
           HOSTED_EXECUTION_DEPLOY_WORKER: ${{ inputs.deploy_worker }}
           HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}
