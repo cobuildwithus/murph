@@ -463,6 +463,71 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
+  it("fails closed on malformed DocumentReference inline text data", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "DocumentReference",
+          relativePath: "DocumentReference/page-1.json",
+          count: 2,
+        },
+      ],
+      pages: {
+        "DocumentReference/page-1.json": [
+          {
+            resourceType: "DocumentReference",
+            id: "document-malformed-base64",
+            status: "current",
+            docStatus: "final",
+            date: "2026-07-02T08:30:00.000Z",
+            description: "Malformed clinical note",
+            content: [
+              {
+                attachment: {
+                  contentType: "text/plain",
+                  data: "not-base64!!!!",
+                },
+              },
+            ],
+          },
+          {
+            resourceType: "DocumentReference",
+            id: "document-invalid-utf8",
+            status: "current",
+            docStatus: "final",
+            date: "2026-07-02T08:31:00.000Z",
+            description: "Invalid UTF-8 clinical note",
+            content: [
+              {
+                attachment: {
+                  contentType: "text/plain",
+                  data: Buffer.from([0xff, 0xfe, 0xfd]).toString("base64"),
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toHaveLength(2);
+    expect(plan.unsupported).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: "document-malformed-base64",
+          reason: "document reference text is not available in raw FHIR page",
+        }),
+        expect.objectContaining({
+          resourceId: "document-invalid-utf8",
+          reason: "document reference text is not available in raw FHIR page",
+        }),
+      ]),
+    );
+  });
+
   it("plans complete laboratory panels atomically", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [

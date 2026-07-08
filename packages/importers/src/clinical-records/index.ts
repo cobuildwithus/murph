@@ -76,6 +76,9 @@ const VITAL_LOINC_BY_CODE = new Map<string, VitalDefinition>([
   ["29463-7", { facet: "body-weight", metric: "body-weight", title: "Body weight", unit: "kg" }],
 ]);
 
+const CANONICAL_BASE64_TEXT = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const DOCUMENT_REFERENCE_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
+
 const NO_KNOWN_ALLERGY_CODES = new Set(["716186003"]);
 const NO_KNOWN_ALLERGY_TEXTS = new Set([
   "no known allergy",
@@ -1259,17 +1262,32 @@ function readDocumentReferenceText(resource: DocumentReference): string | null {
     if (!data || !contentType.startsWith("text/")) {
       continue;
     }
-    try {
-      const decoded = Buffer.from(data, "base64").toString("utf8").trim();
-      if (decoded.length > 0) {
-        return decoded;
-      }
-    } catch {
-      continue;
+
+    const decoded = decodeDocumentReferenceTextData(data)?.trim();
+    if (decoded && decoded.length > 0) {
+      return decoded;
     }
   }
 
   return null;
+}
+
+function decodeDocumentReferenceTextData(value: string): string | null {
+  const normalized = value.replace(/\s+/gu, "");
+  if (normalized.length === 0 || !CANONICAL_BASE64_TEXT.test(normalized)) {
+    return null;
+  }
+
+  const bytes = Buffer.from(normalized, "base64");
+  if (bytes.toString("base64") !== normalized) {
+    return null;
+  }
+
+  try {
+    return DOCUMENT_REFERENCE_TEXT_DECODER.decode(bytes);
+  } catch {
+    return null;
+  }
 }
 
 function textFromNarrative(value: Narrative | undefined): string | null {
