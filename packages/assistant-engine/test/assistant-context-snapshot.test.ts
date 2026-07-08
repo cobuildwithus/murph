@@ -58,6 +58,74 @@ describe('assistant context snapshot', () => {
         'ledger/metric-samples/2026-06.jsonl',
       ),
     ).toEqual([])
+    expect(
+      listAssistantContextSnapshotDirtyDomainsForPath(
+        'bank/habitat/sleep-environment.md',
+      ),
+    ).toEqual(['habitat'])
+  })
+
+  it('summarizes habitat life-context coverage in the prompt snapshot', async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-context-snapshot-'))
+    const vaultRoot = path.join(parentRoot, 'vault')
+
+    try {
+      await initializeVault({
+        createdAt: '2026-06-01T00:00:00.000Z',
+        vaultRoot,
+      })
+      await writeTestSnapshotSources(vaultRoot)
+      await mkdir(path.join(vaultRoot, 'bank/habitat'), {
+        recursive: true,
+      })
+      await writeFile(
+        path.join(vaultRoot, 'bank/habitat/sleep-environment.md'),
+        [
+          '---',
+          'schemaVersion: murph.frontmatter.habitat.v1',
+          'docType: habitat',
+          'habitatId: hab_01JNV422Y2M5ZBV64ZP4N1DRB1',
+          'slug: sleep-environment',
+          'title: Bedroom & sleep',
+          'status: active',
+          'domain: environment',
+          'aspect: sleep-environment',
+          'indicators:',
+          '  night_temp_c: 19',
+          '  window_at_night: open',
+          '  co2_meter: declined',
+          '---',
+          '# Bedroom & sleep',
+          '',
+        ].join('\n'),
+        'utf8',
+      )
+
+      await markAssistantContextSnapshotDirty({
+        domains: ['habitat'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({
+        now: () => '2026-06-01T00:05:00.000Z',
+        vaultRoot,
+      })
+      const prompt = await readAssistantContextSnapshotPrompt({
+        vaultRoot,
+      })
+
+      expect(prompt).toContain('Habitat life-context: 2 of')
+      expect(prompt).toContain('1 declined')
+      expect(prompt).toContain('across sleep-environment')
+      expect(prompt).toContain('top open gaps:')
+      expect(prompt).toContain('vault-cli habitat save')
+      const state = await readAssistantContextSnapshotState(vaultRoot)
+      expect(state?.lastCompleted?.sectionPresence.habitat).toBe(true)
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
   })
 
   it('does not refresh missing snapshots without a dirty marker', async () => {

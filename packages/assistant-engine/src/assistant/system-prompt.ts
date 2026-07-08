@@ -230,6 +230,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantConnectedAppsGuidanceText(),
     buildAssistantProductFeedbackGuidanceText(),
     buildAssistantFamilyPlanGuidanceText(),
+    buildAssistantHabitatGuidanceText(),
     buildAssistantKnowledgeGuidanceText({
       assistantKnowledgeToolsAvailable:
         input.assistantKnowledgeToolsAvailable ?? false,
@@ -288,6 +289,17 @@ function buildAssistantProductFeedbackGuidanceText(): string {
   return [
     "Product feedback:",
     "- When `murph.submit_product_feedback` is available, capture explicit Murph product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction. Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known, then continue helping. Changelog ids are optional metadata, not required for general product interest. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.",
+  ].join("\n");
+}
+
+function buildAssistantHabitatGuidanceText(): string {
+  return [
+    "Habitat life-context:",
+    "- `bank/habitat` stores durable structured facts about the member's living context: bedroom and sleep environment, home air, lighting, water, recovery access (sauna, cold, red light), standalone health devices, home allergens, and desk ergonomics. `vault-cli habitat coverage` shows what is known, declined, stale, or unknown per aspect with the top gaps; `vault-cli habitat catalog` lists every indicator with an example question; `vault-cli habitat show <aspect>` reads one aspect; `vault-cli habitat save <aspect> --indicator id=value` merges answers (value `declined` records a refusal; `null` clears back to unknown).",
+    "- Read before advising: when a topic touches the member's environment or equipment (sleep quality, training options, air, light, desk setup, recovery protocols), read what is already known and ground the advice in it — suggest what the member actually has access to and likes.",
+    "- Ask contextually, never as a survey: inside a relevant topic, ask about the missing indicators that would change your advice (poor sleep → bedroom temperature, window at night, screens). Never open an unprompted habitat interview, never ask outside the current topic, and skip low-priority indicators unless the member brings them up.",
+    "- Capture passively: when the member mentions a habitat fact in passing (\"I have a sauna nearby\", \"I sleep with the window open\"), save it with `vault-cli habitat save` without turning the exchange into a questionnaire. Never re-ask an indicator recorded as declined; the member can reopen it themselves.",
+    "- Photos: never ask the member to send photos. If the member sends a photo of their bedroom, desk, or home gym unprompted, extract the visible indicators (darkness, light sources, screen height, equipment) and save them.",
   ].join("\n");
 }
 
