@@ -11,8 +11,12 @@ import {
   buildAssistantMaintenanceUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
+  classifyAssistantOpenAiImageUsageBasis,
   createAssistantUsageId,
   createAssistantUsageReportingUserId,
+  formatAssistantOpenAiImageUsageBasisErrorMessage,
+  isAssistantOpenAiImageUsageBasisError,
+  normalizeAssistantOpenAiImageUsageBasisErrorReason,
   parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
 } from "../src/assistant-usage.ts";
@@ -120,6 +124,90 @@ test("usage records default and validate token pricing basis", () => {
       tokenPricingBasis: "flex",
     }),
     /tokenPricingBasis must be/u,
+  );
+});
+
+test("OpenAI image usage basis classifier returns priceable token buckets", () => {
+  const result = classifyAssistantOpenAiImageUsageBasis({
+    cachedInputTokens: 0,
+    inputTokens: 1_300,
+    outputTokens: 400,
+    rawUsageJson: {
+      input_tokens: 1_300,
+      input_tokens_details: {
+        cached_tokens: 0,
+        image_tokens: 1_000,
+        text_tokens: 300,
+      },
+      output_tokens: 400,
+      output_tokens_details: {
+        image_tokens: 400,
+        reasoning_tokens: 0,
+        text_tokens: 0,
+      },
+      total_tokens: 1_700,
+    },
+    totalTokens: 1_700,
+  });
+
+  assert.equal(result.priceable, true);
+  if (!result.priceable) throw new Error("Expected priceable image usage.");
+  assert.deepEqual(result.tokenBuckets, {
+    billableImageInputTokens: 1_000n,
+    billableTextInputTokens: 300n,
+    cachedImageInputTokens: 0n,
+    cachedInputTokens: 0n,
+    cachedTextInputTokens: 0n,
+    imageInputTokens: 1_000n,
+    outputTokens: 400n,
+    textInputTokens: 300n,
+  });
+});
+
+test("OpenAI image usage basis classifier explains unpriceable usage", () => {
+  assert.deepEqual(
+    classifyAssistantOpenAiImageUsageBasis({
+      cachedInputTokens: 0,
+      inputTokens: 120,
+      outputTokens: 40,
+      rawUsageJson: {
+        input_tokens: 120,
+        output_tokens: 40,
+        total_tokens: 160,
+      },
+      totalTokens: 160,
+    }),
+    {
+      priceable: false,
+      reason: "missing_provider_usage_tokens",
+    },
+  );
+
+  assert.deepEqual(
+    classifyAssistantOpenAiImageUsageBasis({
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      rawUsageJson: {
+        input_tokens: 101,
+        output_tokens: 400,
+        total_tokens: 500,
+      },
+      totalTokens: 500,
+    }),
+    {
+      priceable: false,
+      reason: "inconsistent_provider_usage_tokens",
+    },
+  );
+
+  const error = new TypeError(formatAssistantOpenAiImageUsageBasisErrorMessage(
+    "inconsistent_provider_usage_tokens",
+  ));
+  assert.equal(isAssistantOpenAiImageUsageBasisError(error), true);
+  assert.equal(
+    normalizeAssistantOpenAiImageUsageBasisErrorReason(error),
+    "inconsistent_provider_usage_tokens",
   );
 });
 

@@ -6,6 +6,9 @@ import path from 'node:path'
 import type {
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  classifyAssistantOpenAiImageUsageBasis,
+} from '@murphai/hosted-execution/assistant-usage'
 
 import type {
   AssistantHostedGeneratedImageUploader,
@@ -238,10 +241,16 @@ function buildGeneratedImageUsageDraft(input: {
   usage: OpenAiImageGenerationUsage | null
   usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath
 }): AssistantProviderUsageDraft {
-  const priceableUsage =
-    input.usage && hasPriceableGeneratedImageUsageBasis(input.usage)
-      ? input.usage
-      : null
+  const usageBasis = input.usage
+    ? classifyAssistantOpenAiImageUsageBasis({
+        cachedInputTokens: input.usage.input_tokens_details?.cached_tokens ?? null,
+        inputTokens: input.usage.input_tokens ?? null,
+        outputTokens: input.usage.output_tokens ?? null,
+        rawUsageJson: input.rawUsageJson,
+        totalTokens: input.usage.total_tokens ?? null,
+      })
+    : null
+  const priceableUsage = usageBasis?.priceable === true ? input.usage : null
   return {
     provider: 'openai-images',
     providerRequestOrdinal: input.providerRequestOrdinal,
@@ -277,52 +286,6 @@ function buildGeneratedImageUsageDraft(input: {
       usageExtractionVersion: OPENAI_IMAGE_GENERATION_USAGE_EXTRACTION_VERSION,
     },
   }
-}
-
-function hasPriceableGeneratedImageUsageBasis(
-  usage: OpenAiImageGenerationUsage,
-): boolean {
-  const inputTokens = usage.input_tokens ?? null
-  const outputTokens = usage.output_tokens ?? null
-  if (inputTokens === null || outputTokens === null) return false
-  if (
-    usage.total_tokens !== undefined &&
-    usage.total_tokens !== inputTokens + outputTokens
-  ) {
-    return false
-  }
-
-  const textInputTokens = usage.input_tokens_details?.text_tokens ?? null
-  const imageInputTokens = usage.input_tokens_details?.image_tokens ?? null
-  if (textInputTokens === null && imageInputTokens === null) return false
-
-  const detailedInputTokens = (textInputTokens ?? 0) + (imageInputTokens ?? 0)
-  if (detailedInputTokens !== inputTokens) return false
-
-  const cachedInputTokens = usage.input_tokens_details?.cached_tokens ?? 0
-  if (cachedInputTokens > detailedInputTokens) return false
-  if (
-    cachedInputTokens > 0 &&
-    (textInputTokens ?? 0) > 0 &&
-    (imageInputTokens ?? 0) > 0
-  ) {
-    return false
-  }
-
-  const outputDetails = usage.output_tokens_details
-  const hasOutputDetails =
-    outputDetails?.image_tokens !== undefined ||
-    outputDetails?.reasoning_tokens !== undefined ||
-    outputDetails?.text_tokens !== undefined
-  if (hasOutputDetails) {
-    const detailedOutputTokens =
-      (outputDetails?.image_tokens ?? 0) +
-      (outputDetails?.reasoning_tokens ?? 0) +
-      (outputDetails?.text_tokens ?? 0)
-    if (detailedOutputTokens !== outputTokens) return false
-  }
-
-  return detailedInputTokens > 0 && outputTokens > 0
 }
 
 async function writeLocalGeneratedImage(input: {

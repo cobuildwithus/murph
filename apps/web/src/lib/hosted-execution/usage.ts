@@ -3,6 +3,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
+  isAssistantOpenAiImageUsageBasisError,
   parseAssistantUsageRecord,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
@@ -327,15 +328,7 @@ function shouldPreserveHostedAiUsageRecordAfterAllowanceError(
 function isHostedAiUsageRecordPreservingAllowanceError(
   error: unknown,
 ): boolean {
-  return error instanceof TypeError
-    && (
-      error.message.startsWith(
-        "OpenAI image hosted AI usage requires provider usage tokens",
-      )
-      || error.message.startsWith(
-        "OpenAI image hosted AI usage has inconsistent provider usage tokens",
-      )
-    );
+  return isAssistantOpenAiImageUsageBasisError(error);
 }
 
 async function runHostedAiUsageRecordTransaction<T>(

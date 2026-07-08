@@ -4,6 +4,10 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
+  classifyAssistantOpenAiImageUsageBasis,
+  formatAssistantOpenAiImageUsageBasisErrorMessage,
+  type AssistantOpenAiImageUsageTokenBuckets,
+  normalizeAssistantOpenAiImageUsageBasisErrorReason,
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
   type AssistantUsageTokenPricingBasis,
@@ -1904,23 +1908,12 @@ function assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(
   }
 }
 
-interface HostedAiUsageAllowanceOpenAiImageTokenBuckets {
-  billableImageInputTokens: bigint;
-  billableTextInputTokens: bigint;
-  cachedImageInputTokens: bigint;
-  cachedInputTokens: bigint;
-  cachedTextInputTokens: bigint;
-  imageInputTokens: bigint;
-  outputTokens: bigint;
-  textInputTokens: bigint;
-}
-
 interface HostedAiUsageAllowanceOpenAiImageMatch {
   modelResolution: {
     model: HostedAiUsageAllowanceOpenAiImagePricedModel;
     source: HostedAiUsageAllowancePricingModelSource;
   };
-  tokenBuckets: HostedAiUsageAllowanceOpenAiImageTokenBuckets;
+  tokenBuckets: AssistantOpenAiImageUsageTokenBuckets;
 }
 
 function matchHostedAiUsageOpenAiImageRecord(
@@ -1939,10 +1932,10 @@ function matchHostedAiUsageOpenAiImageRecord(
     return null;
   }
 
-  const tokenBuckets = buildHostedAiUsageAllowanceOpenAiImageTokenBuckets(record);
-  if (!hasHostedAiUsageAllowanceOpenAiImageProviderUsagePricingBasis(tokenBuckets)) {
+  const usageBasis = classifyAssistantOpenAiImageUsageBasis(record);
+  if (!usageBasis.priceable) {
     throw new TypeError(
-      "OpenAI image hosted AI usage requires provider usage tokens.",
+      formatAssistantOpenAiImageUsageBasisErrorMessage(usageBasis.reason),
     );
   }
 
@@ -1951,7 +1944,7 @@ function matchHostedAiUsageOpenAiImageRecord(
       model: modelResolution.model,
       source: modelResolution.source,
     },
-    tokenBuckets,
+    tokenBuckets: usageBasis.tokenBuckets,
   };
 }
 
@@ -1979,26 +1972,14 @@ function isHostedAiUsageAllowanceOpenAiImageUsageBasisError(
   error: unknown,
 ): boolean {
   return isHostedAiUsageAllowanceOpenAiImageRecord(record)
-    && error instanceof TypeError
-    && (
-      error.message.startsWith(
-        "OpenAI image hosted AI usage requires provider usage tokens",
-      )
-      || error.message.startsWith(
-        "OpenAI image hosted AI usage has inconsistent provider usage tokens",
-      )
-    );
+    && normalizeAssistantOpenAiImageUsageBasisErrorReason(error) !== null;
 }
 
 function normalizeHostedAiUsageOpenAiImageUsageBasisErrorReason(
   error: unknown,
 ): "inconsistent_provider_usage_tokens" | "missing_provider_usage_tokens" {
-  return error instanceof TypeError
-    && error.message.startsWith(
-      "OpenAI image hosted AI usage has inconsistent provider usage tokens",
-    )
-    ? "inconsistent_provider_usage_tokens"
-    : "missing_provider_usage_tokens";
+  return normalizeAssistantOpenAiImageUsageBasisErrorReason(error)
+    ?? "missing_provider_usage_tokens";
 }
 
 function priceHostedAiUsageOpenAiImageForAllowance(input: {
@@ -2079,189 +2060,6 @@ function priceHostedAiUsageOpenAiImageForAllowance(input: {
   };
 }
 
-function buildHostedAiUsageAllowanceOpenAiImageTokenBuckets(
-  record: AssistantUsageRecord,
-): HostedAiUsageAllowanceOpenAiImageTokenBuckets {
-  const totalInputTokens = readHostedAiUsageOpenAiImageAggregateToken(
-    record,
-    "inputTokens",
-    "input_tokens",
-  );
-  const totalOutputTokens = readHostedAiUsageOpenAiImageAggregateToken(
-    record,
-    "outputTokens",
-    "output_tokens",
-  );
-  const totalTokens = readHostedAiUsageOpenAiImageAggregateToken(
-    record,
-    "totalTokens",
-    "total_tokens",
-  );
-  if (
-    totalTokens !== null
-    && totalInputTokens !== null
-    && totalOutputTokens !== null
-    && totalTokens !== totalInputTokens + totalOutputTokens
-  ) {
-    throw new TypeError(
-      "OpenAI image hosted AI usage has inconsistent provider usage tokens.",
-    );
-  }
-
-  const detailTextInputTokens = readHostedAiUsageRawDetailToken(
-    record,
-    "input_tokens_details",
-    "text_tokens",
-  );
-  const detailImageInputTokens = readHostedAiUsageRawDetailToken(
-    record,
-    "input_tokens_details",
-    "image_tokens",
-  );
-  const hasInputDetails =
-    detailTextInputTokens !== null || detailImageInputTokens !== null;
-  if (!hasInputDetails) {
-    throw new TypeError(
-      "OpenAI image hosted AI usage requires provider usage tokens.",
-    );
-  }
-  const textInputTokens = hasInputDetails ? detailTextInputTokens ?? 0n : 0n;
-  const imageInputTokens = hasInputDetails ? detailImageInputTokens ?? 0n : 0n;
-  const detailedInputTokens = textInputTokens + imageInputTokens;
-  if (
-    hasInputDetails
-    && (
-      totalInputTokens === null
-      || detailedInputTokens !== totalInputTokens
-    )
-  ) {
-    throw new TypeError(
-      "OpenAI image hosted AI usage has inconsistent provider usage tokens.",
-    );
-  }
-  const inputTokensForCacheAllocation = textInputTokens + imageInputTokens;
-  const cachedInputTokens = readHostedAiUsageOpenAiImageCachedInputTokens(record);
-  if (cachedInputTokens > inputTokensForCacheAllocation) {
-    throw new TypeError(
-      "OpenAI image hosted AI usage has inconsistent provider usage tokens.",
-    );
-  }
-  if (
-    cachedInputTokens > 0n
-    && textInputTokens > 0n
-    && imageInputTokens > 0n
-  ) {
-    throw new TypeError(
-      "OpenAI image hosted AI usage requires provider usage tokens.",
-    );
-  }
-  const detailImageOutputTokens = readHostedAiUsageRawDetailToken(
-    record,
-    "output_tokens_details",
-    "image_tokens",
-  );
-  const detailTextOutputTokens = readHostedAiUsageRawDetailToken(
-    record,
-    "output_tokens_details",
-    "text_tokens",
-  );
-  const detailReasoningOutputTokens = readHostedAiUsageRawDetailToken(
-    record,
-    "output_tokens_details",
-    "reasoning_tokens",
-  );
-  const hasOutputDetails =
-    detailImageOutputTokens !== null
-    || detailTextOutputTokens !== null
-    || detailReasoningOutputTokens !== null;
-  const outputTokens = hasOutputDetails
-    ? (detailImageOutputTokens ?? 0n)
-      + (detailTextOutputTokens ?? 0n)
-      + (detailReasoningOutputTokens ?? 0n)
-    : totalOutputTokens ?? 0n;
-  if (
-    hasOutputDetails
-    && (
-      totalOutputTokens === null
-      || outputTokens !== totalOutputTokens
-    )
-  ) {
-    throw new TypeError(
-      "OpenAI image hosted AI usage has inconsistent provider usage tokens.",
-    );
-  }
-
-  const cachedTextInputTokens =
-    textInputTokens > 0n ? minTokenCount(textInputTokens, cachedInputTokens) : 0n;
-  const cachedAfterText = cachedInputTokens - cachedTextInputTokens;
-  const cachedImageInputTokens =
-    imageInputTokens > 0n ? minTokenCount(imageInputTokens, cachedAfterText) : 0n;
-
-  return {
-    billableImageInputTokens:
-      subtractTokenCountFloor(imageInputTokens, cachedImageInputTokens),
-    billableTextInputTokens:
-      subtractTokenCountFloor(textInputTokens, cachedTextInputTokens),
-    cachedImageInputTokens,
-    cachedInputTokens,
-    cachedTextInputTokens,
-    imageInputTokens,
-    outputTokens,
-    textInputTokens,
-  };
-}
-
-function hasHostedAiUsageAllowanceOpenAiImageProviderUsagePricingBasis(
-  tokenBuckets: HostedAiUsageAllowanceOpenAiImageTokenBuckets,
-): boolean {
-  const hasInputPricingBasis = tokenBuckets.textInputTokens > 0n
-    || tokenBuckets.imageInputTokens > 0n;
-
-  return hasInputPricingBasis && tokenBuckets.outputTokens > 0n;
-}
-
-function readHostedAiUsageOpenAiImageAggregateToken(
-  record: AssistantUsageRecord,
-  recordKey: "inputTokens" | "outputTokens" | "totalTokens",
-  rawKey: "input_tokens" | "output_tokens" | "total_tokens",
-): bigint | null {
-  const recordTokens = readHostedAiUsageRecordToken(record[recordKey]);
-  const rawTokens = readHostedAiUsageRawTopLevelToken(record, rawKey);
-  if (
-    recordTokens !== null
-    && rawTokens !== null
-    && recordTokens !== rawTokens
-  ) {
-    throw new TypeError(
-      "OpenAI image hosted AI usage has inconsistent provider usage tokens.",
-    );
-  }
-
-  return recordTokens ?? rawTokens;
-}
-
-function readHostedAiUsageOpenAiImageCachedInputTokens(
-  record: AssistantUsageRecord,
-): bigint {
-  const recordTokens = readHostedAiUsageRecordToken(record.cachedInputTokens);
-  const rawTokens = readHostedAiUsageRawDetailToken(
-    record,
-    "input_tokens_details",
-    "cached_tokens",
-  );
-  if (
-    recordTokens !== null
-    && rawTokens !== null
-    && recordTokens !== rawTokens
-  ) {
-    throw new TypeError(
-      "OpenAI image hosted AI usage has inconsistent provider usage tokens.",
-    );
-  }
-
-  return recordTokens ?? rawTokens ?? 0n;
-}
-
 function resolveHostedAiUsageAllowanceOpenAiImageModel(
   record: AssistantUsageRecord,
 ): {
@@ -2289,52 +2087,6 @@ function resolveHostedAiUsageAllowanceOpenAiImageModel(
     model: null,
     source: null,
   };
-}
-
-function readHostedAiUsageRawDetailToken(
-  record: AssistantUsageRecord,
-  detailKey: "input_tokens_details" | "output_tokens_details",
-  tokenKey: string,
-): bigint | null {
-  const detail = record.rawUsageJson?.[detailKey];
-  if (typeof detail !== "object" || detail === null || Array.isArray(detail)) {
-    return null;
-  }
-
-  const value = (detail as Record<string, unknown>)[tokenKey];
-  return typeof value === "number"
-      && Number.isSafeInteger(value)
-      && value >= 0
-    ? BigInt(value)
-    : null;
-}
-
-function readHostedAiUsageRecordToken(value: number | null): bigint | null {
-  return typeof value === "number"
-      && Number.isSafeInteger(value)
-      && value >= 0
-    ? BigInt(value)
-    : null;
-}
-
-function readHostedAiUsageRawTopLevelToken(
-  record: AssistantUsageRecord,
-  tokenKey: "input_tokens" | "output_tokens" | "total_tokens",
-): bigint | null {
-  const value = record.rawUsageJson?.[tokenKey];
-  return typeof value === "number"
-      && Number.isSafeInteger(value)
-      && value >= 0
-    ? BigInt(value)
-    : null;
-}
-
-function minTokenCount(left: bigint, right: bigint): bigint {
-  return left < right ? left : right;
-}
-
-function subtractTokenCountFloor(value: bigint, subtract: bigint): bigint {
-  return value > subtract ? value - subtract : 0n;
 }
 
 // Only Worker-recorded Workers AI transcription rows take the audio-priced
