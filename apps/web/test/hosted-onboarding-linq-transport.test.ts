@@ -73,9 +73,7 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   >("@/src/lib/hosted-execution/usage-allowance");
   return {
     ...actual,
-    claimHostedAiUsageLimitNotice: vi.fn().mockResolvedValue(true),
     markHostedAiUsageLimitNoticeSent: vi.fn().mockResolvedValue(true),
-    releaseHostedAiUsageLimitNotice: vi.fn().mockResolvedValue(undefined),
   };
 });
 

@@ -11,7 +11,6 @@ const MEMBER_ID = "member_orch_1";
 const UNSAFE_SENTINEL = "UNSAFE_STATUS_SENTINEL";
 
 const mocks = vi.hoisted(() => ({
-  claimHostedAiUsageLimitNotice: vi.fn(),
   claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
   decodeHostedMailboxStoredPayload: vi.fn(),
   fetch: vi.fn(),
@@ -32,7 +31,6 @@ const mocks = vi.hoisted(() => ({
   markHostedAiUsageLimitNoticeSent: vi.fn(),
   markHostedLinqDeliveryAcceptedTx: vi.fn(),
   markHostedLinqDeliverySendFailedTx: vi.fn(),
-  releaseHostedAiUsageLimitNotice: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
 }));
@@ -59,9 +57,7 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async (importOriginal) => 
 
   return {
     ...original,
-    claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
     markHostedAiUsageLimitNoticeSent: mocks.markHostedAiUsageLimitNoticeSent,
-    releaseHostedAiUsageLimitNotice: mocks.releaseHostedAiUsageLimitNotice,
   };
 });
 
@@ -169,7 +165,6 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMailboxPayload.mockResolvedValue(null);
     mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate.mockResolvedValue(false);
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(null);
-    mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(false);
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
       id: "hld_usage_limit",
@@ -188,7 +183,6 @@ describe("hosted orchestration reconciliation facts", () => {
       }),
     );
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
-    mocks.releaseHostedAiUsageLimitNotice.mockResolvedValue(undefined);
     vi.stubEnv("TELEGRAM_API_BASE_URL", "https://telegram.example.test/");
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-token");
     vi.stubGlobal("fetch", mocks.fetch);
@@ -598,7 +592,6 @@ describe("hosted orchestration reconciliation facts", () => {
       prisma: expect.objectContaining({ kind: "prisma" }),
       userId: MEMBER_ID,
     });
-    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith({
       chatId: "chat_runtime_denied",
       claimToken: {
@@ -656,7 +649,6 @@ describe("hosted orchestration reconciliation facts", () => {
       memberId: MEMBER_ID,
       periodStart: deniedDecision.periodStart,
     });
-    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith({
       attemptedAt: new Date(FIXED_NOW),
       idempotencyKey: expectedIdempotencyKey,
@@ -755,7 +747,6 @@ describe("hosted orchestration reconciliation facts", () => {
       idempotencyKey: expectedIdempotencyKey,
       prisma: expect.objectContaining({ kind: "prisma" }),
     });
-    expect(mocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });
 
@@ -796,7 +787,6 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: null,
     });
-    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
@@ -839,7 +829,6 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: null,
     });
-    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
@@ -978,7 +967,6 @@ describe("hosted orchestration reconciliation facts", () => {
       retryAt: null,
     });
     expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
-    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 

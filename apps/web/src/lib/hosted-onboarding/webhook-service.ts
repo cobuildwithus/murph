@@ -55,6 +55,7 @@ import {
 import {
   drainHostedLinqSideEffectsDirect,
   type HostedLinqCurrentInboundReplyProof,
+  type HostedLinqSideEffectDrainResult,
 } from "./webhook-transport";
 import {
   buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision,
@@ -363,13 +364,19 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
+    let response = plan.response;
     if (plan.desiredSideEffects.length > 0) {
-      await drainHostedLinqSideEffectsDirect({
+      const drainResult = await drainHostedLinqSideEffectsDirect({
+        collectResult: true,
         currentInboundReply,
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
         sideEffects: plan.desiredSideEffects,
         signal: input.signal,
+      });
+      response = resolveHostedLinqWebhookResponseAfterDrain({
+        drainResult,
+        response,
       });
     }
 
@@ -379,10 +386,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
-    responseReason = plan.response.reason ?? null;
+    responseReason = response.reason ?? null;
     const wakeHandoff = plan.wakeHandoffs?.[0];
     const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
-      response: plan.response,
+      response,
       scheduleAfterResponse: input.scheduleAfterResponse,
       wakeHandoff,
     });
@@ -410,7 +417,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       wakeHandoffSignalAccepted: wakeHandoffResult?.signalAccepted ?? false,
       wakeHandoffStarted: wakeHandoffResult?.started ?? false,
     });
-    return plan.response;
+    return response;
   } catch (error) {
     finishHostedOnboardingTiming(timing, "failed", {
       errorName: deriveHostedOnboardingTimingErrorName(error),
@@ -421,6 +428,32 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
+}
+
+function resolveHostedLinqWebhookResponseAfterDrain(input: {
+  drainResult: HostedLinqSideEffectDrainResult;
+  response: HostedOnboardingLinqWebhookResponse;
+}): HostedOnboardingLinqWebhookResponse {
+  if (
+    input.response.reason !== "sent-ai-usage-quota-reply"
+    || input.drainResult.sentCount > 0
+  ) {
+    return input.response;
+  }
+
+  const alreadyClaimedAiUsageNotice = input.drainResult.skipped.some((skip) =>
+    skip.reason === "notice_already_claimed"
+    && skip.template === "ai_usage_quota"
+  );
+  if (!alreadyClaimedAiUsageNotice) {
+    return input.response;
+  }
+
+  return {
+    ...input.response,
+    ignored: true,
+    reason: "ai-usage-quota-already-notified",
+  };
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {

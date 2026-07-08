@@ -13,11 +13,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   accountHostedAiUsageForAllowanceTx,
   checkHostedAiUsageGate,
-  claimHostedAiUsageLimitNotice,
   markHostedAiUsageLimitNoticeSent,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
-  releaseHostedAiUsageLimitNotice,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
 
@@ -2109,59 +2107,6 @@ describe("checkHostedAiUsageGate", () => {
   });
 });
 
-describe("claimHostedAiUsageLimitNotice", () => {
-  it("claims the usage-period limit notice once", async () => {
-    const updateMany = vi.fn()
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 0 });
-    const prisma = {
-      hostedAiUsagePeriod: {
-        updateMany,
-      },
-    };
-
-    await expect(claimHostedAiUsageLimitNotice({
-      memberId: "member_123",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma: prisma as never,
-      sentAt: "2026-03-29T12:00:00.000Z",
-    })).resolves.toBe(true);
-
-    await expect(claimHostedAiUsageLimitNotice({
-      memberId: "member_123",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma: prisma as never,
-      sentAt: "2026-03-29T12:00:01.000Z",
-    })).resolves.toBe(false);
-
-    expect(updateMany).toHaveBeenNthCalledWith(1, {
-      data: {
-        limitNoticeSentAt: new Date("2026-03-29T12:00:00.000Z"),
-      },
-      where: {
-        AND: [
-          {
-            periodStart: {
-              lte: new Date("2026-03-29T12:00:00.000Z"),
-            },
-          },
-          {
-            periodEnd: {
-              gt: new Date("2026-03-29T12:00:00.000Z"),
-            },
-          },
-        ],
-        blockedAt: {
-          not: null,
-        },
-        limitNoticeSentAt: null,
-        memberId: "member_123",
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      },
-    });
-  });
-});
-
 describe("markHostedAiUsageLimitNoticeSent", () => {
   it("marks a blocked usage-period limit notice after delivery is confirmed", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
@@ -2198,35 +2143,6 @@ describe("markHostedAiUsageLimitNoticeSent", () => {
         blockedAt: {
           not: null,
         },
-        memberId: "member_123",
-        periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      },
-    });
-  });
-});
-
-describe("releaseHostedAiUsageLimitNotice", () => {
-  it("clears only a claim with the exact sentAt timestamp", async () => {
-    const updateMany = vi.fn(async () => ({ count: 1 }));
-    const prisma = {
-      hostedAiUsagePeriod: {
-        updateMany,
-      },
-    };
-
-    await releaseHostedAiUsageLimitNotice({
-      memberId: "member_123",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma: prisma as never,
-      sentAt: "2026-03-29T12:00:00.000Z",
-    });
-
-    expect(updateMany).toHaveBeenCalledWith({
-      data: {
-        limitNoticeSentAt: null,
-      },
-      where: {
-        limitNoticeSentAt: new Date("2026-03-29T12:00:00.000Z"),
         memberId: "member_123",
         periodStart: new Date("2026-03-01T00:00:00.000Z"),
       },

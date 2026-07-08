@@ -298,20 +298,58 @@ function buildHostedLinqConversationHomeRedirectEffectId(
   return `linq-home-redirect:${hash}`;
 }
 
-export async function drainHostedLinqSideEffectsDirect(input: {
+type HostedLinqSideEffectDrainInput = {
+  collectResult?: boolean;
   currentInboundReply?: HostedLinqCurrentInboundReplyProof | null;
   prisma: HostedLinqTransportPersistenceClient;
   scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
   sideEffects: readonly HostedLinqMessageSideEffect[];
   signal?: AbortSignal;
-}): Promise<void> {
+};
+
+type HostedLinqSideEffectDrainSkipReason =
+  | "delivery_skipped"
+  | "effect_unresolved"
+  | "notice_already_claimed";
+
+export type HostedLinqSideEffectDrainResult = {
+  sentCount: number;
+  skipped: readonly {
+    effectId: string;
+    reason: HostedLinqSideEffectDrainSkipReason;
+    template: HostedLinqMessagePayload["template"];
+  }[];
+};
+
+export async function drainHostedLinqSideEffectsDirect(
+  input: HostedLinqSideEffectDrainInput & { collectResult: true },
+): Promise<HostedLinqSideEffectDrainResult>;
+export async function drainHostedLinqSideEffectsDirect(
+  input: HostedLinqSideEffectDrainInput & { collectResult?: false },
+): Promise<void>;
+export async function drainHostedLinqSideEffectsDirect(
+  input: HostedLinqSideEffectDrainInput,
+): Promise<HostedLinqSideEffectDrainResult | void> {
+  let sentCount = 0;
+  const skipped: HostedLinqSideEffectDrainResult["skipped"][number][] = [];
+
   for (const plannedEffect of input.sideEffects) {
     const effect = await resolveHostedLinqDispatchSideEffect(plannedEffect, input.prisma);
     if (!effect) {
+      skipped.push({
+        effectId: plannedEffect.effectId,
+        reason: "effect_unresolved",
+        template: plannedEffect.payload.template,
+      });
       continue;
     }
     const noticeClaimed = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
     if (!noticeClaimed) {
+      skipped.push({
+        effectId: effect.effectId,
+        reason: "notice_already_claimed",
+        template: effect.payload.template,
+      });
       continue;
     }
 
@@ -325,6 +363,11 @@ export async function drainHostedLinqSideEffectsDirect(input: {
 
       if (result.status === "skipped") {
         await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
+        skipped.push({
+          effectId: effect.effectId,
+          reason: "delivery_skipped",
+          template: effect.payload.template,
+        });
         continue;
       }
     } catch (error) {
@@ -337,6 +380,14 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
       await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
     }
+    sentCount += 1;
+  }
+
+  if (input.collectResult === true) {
+    return {
+      sentCount,
+      skipped,
+    };
   }
 }
 

@@ -1254,7 +1254,10 @@ describe("hosted Linq observability stores", () => {
         where: expect.objectContaining({
           id: "hld_fresh_attempt",
           OR: expect.arrayContaining([
-            { status: "attempted" },
+            {
+              source: "hosted_webhook_side_effect",
+              status: "attempted",
+            },
           ]),
         }),
       }),
@@ -1299,6 +1302,49 @@ describe("hosted Linq observability stores", () => {
       id: "hld_fresh_telegram_attempt",
     }));
     expect(updateWhere?.OR).not.toContainEqual({ status: "attempted" });
+  });
+
+  it("does not reclaim stale pre-provider Telegram usage notice rows", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_stale_telegram_attempt",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      status: "attempted",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      prisma: fixture.prisma as never,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "telegram_event_runtime_denied",
+      targetKind: "telegram_thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_stale_telegram_attempt",
+    });
+
+    const updateWhere = fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0]?.where;
+    expect(updateWhere).toEqual(expect.objectContaining({
+      id: "hld_stale_telegram_attempt",
+    }));
+    expect(updateWhere?.OR).not.toContainEqual({
+      attemptedAt: {
+        lte: new Date("2026-03-26T12:15:00.000Z"),
+      },
+      status: "attempted",
+    });
   });
 
   it("reclaims stale pre-provider delivery rows for a later provider dispatch retry", async () => {

@@ -35,7 +35,6 @@ vi.mock("../src/lib/hosted-execution/usage-allowance", async (importOriginal) =>
   return {
     ...actual,
     checkHostedAiUsageGate: vi.fn(),
-    claimHostedAiUsageLimitNotice: vi.fn(),
   };
 });
 
@@ -1337,7 +1336,6 @@ describe("Linq explicit external-thread routing", () => {
         sentAt: expect.any(String),
       },
     });
-    expect(usageAllowance.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 

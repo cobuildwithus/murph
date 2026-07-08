@@ -948,45 +948,6 @@ export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
   })).slice(0, 32)}`;
 }
 
-export async function claimHostedAiUsageLimitNotice(input: {
-  memberId: string;
-  periodStart: Date | string;
-  prisma?: HostedAiUsageAllowanceClient;
-  sentAt?: Date | string;
-}): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
-  const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
-  const sentAt = normalizeHostedAiUsageAllowanceDate(input.sentAt ?? new Date());
-
-  const claimed = await prisma.hostedAiUsagePeriod.updateMany({
-    where: {
-      AND: [
-        {
-          periodStart: {
-            lte: sentAt,
-          },
-        },
-        {
-          periodEnd: {
-            gt: sentAt,
-          },
-        },
-      ],
-      blockedAt: {
-        not: null,
-      },
-      limitNoticeSentAt: null,
-      memberId: input.memberId,
-      periodStart,
-    },
-    data: {
-      limitNoticeSentAt: sentAt,
-    },
-  });
-
-  return claimed.count === 1;
-}
-
 export async function markHostedAiUsageLimitNoticeSent(input: {
   memberId: string;
   periodStart: Date | string;
@@ -1023,26 +984,6 @@ export async function markHostedAiUsageLimitNoticeSent(input: {
   });
 
   return marked.count === 1;
-}
-
-export async function releaseHostedAiUsageLimitNotice(input: {
-  memberId: string;
-  periodStart: Date | string;
-  prisma?: HostedAiUsageAllowanceClient;
-  sentAt: Date | string;
-}): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-
-  await prisma.hostedAiUsagePeriod.updateMany({
-    where: {
-      limitNoticeSentAt: normalizeHostedAiUsageAllowanceDate(input.sentAt),
-      memberId: input.memberId,
-      periodStart: normalizeHostedAiUsageAllowanceDate(input.periodStart),
-    },
-    data: {
-      limitNoticeSentAt: null,
-    },
-  });
 }
 
 function resolveHostedAiUsageInactiveGateDecision(input: {

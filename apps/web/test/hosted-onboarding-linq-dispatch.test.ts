@@ -60,9 +60,7 @@ function buildTrialConversionPendingMessage(input: {
 const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
-    claimHostedAiUsageLimitNotice: vi.fn(),
     markHostedAiUsageLimitNoticeSent: vi.fn(),
-    releaseHostedAiUsageLimitNotice: vi.fn(),
     claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
@@ -271,10 +269,8 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   >("@/src/lib/hosted-execution/usage-allowance");
   return {
     ...actual,
-    claimHostedAiUsageLimitNotice: mocks.claimHostedAiUsageLimitNotice,
     checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
     markHostedAiUsageLimitNoticeSent: mocks.markHostedAiUsageLimitNoticeSent,
-    releaseHostedAiUsageLimitNotice: mocks.releaseHostedAiUsageLimitNotice,
   };
 });
 
@@ -551,7 +547,6 @@ async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebh
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
     mocks.markHostedAiUsageLimitNoticeSent.mockResolvedValue(true);
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
@@ -6804,7 +6799,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         replyToMessageId: "msg_123",
       }),
     );
-    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith({
       idempotencyKey: expectedIdempotencyKey,
       linqChatId: "chat_123",
@@ -6883,7 +6877,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-ai-usage-quota-reply",
     });
-    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
@@ -7006,7 +6999,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-ai-usage-quota-reply",
     });
-    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_current_inbound",
@@ -7085,9 +7077,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       signature: null,
       timestamp: null,
     })).rejects.toThrow("linq send failed");
-
-    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
-    expect(mocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
     expect(readHostedWebhookReceiptCreateMock(prisma)).not.toHaveBeenCalled();
@@ -7233,10 +7222,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(response).toMatchObject({
+      ignored: true,
       ok: true,
-      reason: "sent-ai-usage-quota-reply",
+      reason: "ai-usage-quota-already-notified",
     });
-    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
       expect.objectContaining({
         linqChatId: "chat_123",
@@ -8331,7 +8320,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "daily-quota-reached",
     });
-    expect(mocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();

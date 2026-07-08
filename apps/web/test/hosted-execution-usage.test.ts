@@ -7,8 +7,6 @@ import {
 
 const allowanceMocks = vi.hoisted(() => ({
   accountHostedAiUsageForAllowanceTx: vi.fn(),
-  claimHostedAiUsageLimitNotice: vi.fn(),
-  releaseHostedAiUsageLimitNotice: vi.fn(),
 }));
 
 const routingMocks = vi.hoisted(() => ({
@@ -22,8 +20,6 @@ const noticeMocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   accountHostedAiUsageForAllowanceTx: allowanceMocks.accountHostedAiUsageForAllowanceTx,
-  claimHostedAiUsageLimitNotice: allowanceMocks.claimHostedAiUsageLimitNotice,
-  releaseHostedAiUsageLimitNotice: allowanceMocks.releaseHostedAiUsageLimitNotice,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
@@ -96,8 +92,6 @@ describe("recordHostedAiUsageRecords", () => {
     vi.setSystemTime(new Date("2026-03-29T12:00:06.000Z"));
     vi.clearAllMocks();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(null);
-    allowanceMocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
-    allowanceMocks.releaseHostedAiUsageLimitNotice.mockResolvedValue(undefined);
     noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue(undefined);
     routingMocks.readHostedMemberRoutingState.mockResolvedValue({
       linqChatId: "chat_home_123",
@@ -152,7 +146,6 @@ describe("recordHostedAiUsageRecords", () => {
       }),
     });
     expect(hostedAiUsageFindUnique).not.toHaveBeenCalled();
-    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(routingMocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma,
@@ -171,7 +164,6 @@ describe("recordHostedAiUsageRecords", () => {
         prisma,
         sourceEventId: "turn_123.attempt-1",
       });
-    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -219,7 +211,6 @@ describe("recordHostedAiUsageRecords", () => {
 
     expect(hostedAiUsageUpsert).toHaveBeenCalledOnce();
     expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledOnce();
-    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
   it("keeps the transaction-compatible recorder DB-only when accounting reports a crossing", async () => {
@@ -239,7 +230,6 @@ describe("recordHostedAiUsageRecords", () => {
     });
 
     expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledOnce();
-    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
@@ -255,7 +245,6 @@ describe("recordHostedAiUsageRecords", () => {
     });
 
     expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledOnce();
-    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
   it("dedupes multiple crossing records in one flush to one notice claim", async () => {
@@ -286,7 +275,6 @@ describe("recordHostedAiUsageRecords", () => {
     });
 
     expect(allowanceMocks.accountHostedAiUsageForAllowanceTx).toHaveBeenCalledTimes(2);
-    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledOnce();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -330,7 +318,6 @@ describe("recordHostedAiUsageRecords", () => {
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
       buildUsageLimitNoticeCandidate(),
     );
-    allowanceMocks.claimHostedAiUsageLimitNotice.mockResolvedValue(false);
 
     await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
       accountAllowance: true,
@@ -340,11 +327,8 @@ describe("recordHostedAiUsageRecords", () => {
     })).resolves.toEqual({
       recordedIds: ["turn_123.attempt-1"],
     });
-
-    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(routingMocks.readHostedMemberRoutingState).toHaveBeenCalledOnce();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledOnce();
-    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
   it("skips crossing notices for usage periods that have already ended", async () => {
@@ -368,11 +352,8 @@ describe("recordHostedAiUsageRecords", () => {
       })).resolves.toEqual({
         recordedIds: ["turn_123.attempt-1"],
       });
-
-      expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
       expect(routingMocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
       expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
-      expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -398,9 +379,6 @@ describe("recordHostedAiUsageRecords", () => {
       recordedIds: ["turn_123.attempt-1"],
     });
     consoleWarnSpy.mockRestore();
-
-    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
-    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
@@ -423,9 +401,6 @@ describe("recordHostedAiUsageRecords", () => {
       recordedIds: ["turn_123.attempt-1"],
     });
     consoleWarnSpy.mockRestore();
-
-    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
-    expect(allowanceMocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
   it("does not account allowance when accounting is disabled", async () => {

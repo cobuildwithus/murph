@@ -34,6 +34,8 @@ import { generateHostedRandomPrefixedId, sha256Hex } from "../primitives";
 
 type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
 const HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS = 15 * 60 * 1000;
+const HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE =
+  "hosted_runtime_ai_usage_limit_notice";
 
 type HostedLinqDeliveryReceiptData = {
   deliveryStatus: "delivered" | "failed";
@@ -1300,6 +1302,8 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   const staleAttemptBefore = new Date(
     input.attemptedAt.getTime() - HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS,
   );
+  const canReclaimStalePreProviderAttempt =
+    input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       acceptedAt: null,
@@ -1311,15 +1315,23 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
         { failedAt: { not: null } },
         { skippedAt: { not: null } },
         { status: { in: ["failed", "skipped"] } },
-        {
-          attemptedAt: {
-            lte: staleAttemptBefore,
-          },
-          status: "attempted",
-        },
+        ...(canReclaimStalePreProviderAttempt
+          ? [
+              {
+                attemptedAt: {
+                  lte: staleAttemptBefore,
+                },
+                status: "attempted",
+              },
+            ]
+          : []),
         ...(input.reclaimFreshPreProviderAttempt
-          && input.delivery.source === input.reclaimFreshPreProviderAttemptSource
-          ? [{ status: "attempted" }]
+          ? [
+              {
+                source: input.reclaimFreshPreProviderAttemptSource,
+                status: "attempted",
+              },
+            ]
           : []),
       ],
     },
