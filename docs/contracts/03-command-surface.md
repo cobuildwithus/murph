@@ -342,6 +342,8 @@ Read surfaces intentionally separate summary from detail:
 - `show` returns the full canonical read entity, including `markdown` when that noun owns body text.
 - `list` returns summary rows, not many embedded `show` payloads.
 - List rows never include full `markdown`; when a family owns first-class body text, list rows may carry a compact `excerpt` instead.
+- Default read/status/list/tail pages are model-facing summaries and should fit under roughly 15k characters with `--full-output --format json` on representative oversized fixtures.
+- Assistant timelines, raw provenance, import manifests, full nested telemetry arrays, and long instruction/body text require an explicit detail/export/schema path or an explicitly raised `--limit`; `--full-output` is an envelope selector, not an uncompression switch.
 - Callers that need the full body must follow a list result with `show`.
 
 ## Shared Option Rules

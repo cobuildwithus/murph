@@ -414,8 +414,8 @@ function withWearableListOptions() {
       .int()
       .positive()
       .max(200)
-      .default(5)
-      .describe('Maximum number of daily summaries to return. Defaults to 5.'),
+      .default(3)
+      .describe('Maximum number of daily summaries to return. Defaults to 3.'),
   })
 }
 

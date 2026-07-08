@@ -87,8 +87,8 @@ const workoutListLimitOptionSchema = z
   .int()
   .positive()
   .max(200)
-  .default(10)
-  .describe('Maximum number of results to return. Defaults to 10.')
+  .default(5)
+  .describe('Maximum number of results to return. Defaults to 5.')
 
 interface WorkoutAddExerciseDraft {
   groupId?: string

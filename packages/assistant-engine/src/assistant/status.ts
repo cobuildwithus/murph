@@ -7,6 +7,7 @@ import {
   assistantStatusResultSchema,
   type AssistantStatusResult,
   type AssistantTurnReceipt,
+  type AssistantTurnReceiptSummary,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { buildAssistantOutboxSummary } from './outbox.js'
 import { readAssistantDiagnosticsSnapshot } from './diagnostics.js'
@@ -31,9 +32,11 @@ import {
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
+import { sanitizeAssistantPortableStateString } from './redaction.js'
 
 const ASSISTANT_STATUS_SNAPSHOT_SCHEMA = 'murph.assistant-status-snapshot.v1'
 const ASSISTANT_STATUS_SNAPSHOT_SCHEMA_VERSION = 1
+const ASSISTANT_STATUS_TIMELINE_DETAIL_MAX_LENGTH = 160
 
 export async function getAssistantStatus(
   input:
@@ -205,17 +208,53 @@ async function resolveRecentTurns(
         vault: string
       }
     | undefined,
-): Promise<AssistantTurnReceipt[]> {
+): Promise<AssistantTurnReceiptSummary[]> {
   const limit = normalizeTurnLimit(input?.limit)
   const sessionFilter = input?.sessionId?.trim() || null
-  if (sessionFilter) {
-    return await listRecentAssistantTurnReceiptsForSession(
-      vault,
-      sessionFilter,
-      limit,
-    )
+  const receipts = sessionFilter
+    ? await listRecentAssistantTurnReceiptsForSession(
+        vault,
+        sessionFilter,
+        limit,
+      )
+    : await listRecentAssistantTurnReceipts(vault, limit)
+  return receipts.map(toAssistantTurnReceiptSummary)
+}
+
+function toAssistantTurnReceiptSummary(
+  receipt: AssistantTurnReceipt,
+): AssistantTurnReceiptSummary {
+  const latestTimelineEvent = receipt.timeline.at(-1) ?? null
+  return {
+    schema: 'murph.assistant-turn-receipt-summary.v1',
+    turnId: receipt.turnId,
+    sessionId: receipt.sessionId,
+    provider: receipt.provider,
+    providerModel: receipt.providerModel,
+    promptPreview: receipt.promptPreview,
+    responsePreview: receipt.responsePreview,
+    status: receipt.status,
+    deliveryRequested: receipt.deliveryRequested,
+    deliveryDisposition: receipt.deliveryDisposition,
+    deliveryIntentId: receipt.deliveryIntentId,
+    startedAt: receipt.startedAt,
+    updatedAt: receipt.updatedAt,
+    completedAt: receipt.completedAt,
+    lastError: receipt.lastError,
+    timelineEventCount: receipt.timeline.length,
+    latestTimelineEvent: latestTimelineEvent
+      ? {
+          at: latestTimelineEvent.at,
+          kind: latestTimelineEvent.kind,
+          detail: latestTimelineEvent.detail
+            ? sanitizeAssistantPortableStateString(
+                latestTimelineEvent.detail,
+                ASSISTANT_STATUS_TIMELINE_DETAIL_MAX_LENGTH,
+              )
+            : null,
+        }
+      : null,
   }
-  return await listRecentAssistantTurnReceipts(vault, limit)
 }
 
 function normalizeTurnLimit(value?: number): number {

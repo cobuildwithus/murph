@@ -109,6 +109,14 @@ export const assistantTurnReceiptStatusValues = [
   'blocked',
   'failed',
 ] as const
+export const assistantTurnDeliveryDispositionValues = [
+  'not-requested',
+  'queued',
+  'sent',
+  'retryable',
+  'blocked',
+  'failed',
+] as const
 export const assistantTurnTimelineEventKindValues = [
   'turn.started',
   'user.persisted',
@@ -786,20 +794,43 @@ export const assistantTurnReceiptSchema = z
     responsePreview: z.string().nullable(),
     status: z.enum(assistantTurnReceiptStatusValues),
     deliveryRequested: z.boolean(),
-    deliveryDisposition: z.enum([
-      'not-requested',
-      'queued',
-      'sent',
-      'retryable',
-      'blocked',
-      'failed',
-    ]),
+    deliveryDisposition: z.enum(assistantTurnDeliveryDispositionValues),
     deliveryIntentId: assistantOutboxIntentIdSchema.nullable(),
     startedAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
     completedAt: isoTimestampSchema.nullable(),
     lastError: assistantDeliveryErrorSchema.nullable(),
     timeline: z.array(assistantTurnTimelineEventSchema),
+  })
+  .strict()
+
+export const assistantTurnReceiptSummaryTimelineEventSchema = z
+  .object({
+    at: isoTimestampSchema,
+    kind: z.enum(assistantTurnTimelineEventKindValues),
+    detail: z.string().nullable(),
+  })
+  .strict()
+
+export const assistantTurnReceiptSummarySchema = z
+  .object({
+    schema: z.literal('murph.assistant-turn-receipt-summary.v1'),
+    turnId: assistantTurnIdSchema,
+    sessionId: assistantSessionIdSchema,
+    provider: z.enum(assistantChatProviderValues),
+    providerModel: z.string().min(1).nullable(),
+    promptPreview: z.string().nullable(),
+    responsePreview: z.string().nullable(),
+    status: z.enum(assistantTurnReceiptStatusValues),
+    deliveryRequested: z.boolean(),
+    deliveryDisposition: z.enum(assistantTurnDeliveryDispositionValues),
+    deliveryIntentId: assistantOutboxIntentIdSchema.nullable(),
+    startedAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    completedAt: isoTimestampSchema.nullable(),
+    lastError: assistantDeliveryErrorSchema.nullable(),
+    timelineEventCount: z.number().int().nonnegative(),
+    latestTimelineEvent: assistantTurnReceiptSummaryTimelineEventSchema.nullable(),
   })
   .strict()
 
@@ -1016,7 +1047,7 @@ export const assistantStatusResultSchema = z
     diagnostics: assistantDiagnosticsSnapshotSchema,
     quarantine: assistantQuarantineSummarySchema,
     runtimeBudget: assistantRuntimeBudgetSnapshotSchema,
-    recentTurns: z.array(assistantTurnReceiptSchema),
+    recentTurns: z.array(assistantTurnReceiptSummarySchema),
     warnings: z.array(z.string()),
   })
   .strict()
@@ -1614,6 +1645,9 @@ export type AssistantTurnTimelineEvent = z.infer<
   typeof assistantTurnTimelineEventSchema
 >
 export type AssistantTurnReceipt = z.infer<typeof assistantTurnReceiptSchema>
+export type AssistantTurnReceiptSummary = z.infer<
+  typeof assistantTurnReceiptSummarySchema
+>
 export type AssistantOutboxIntent = z.infer<typeof assistantOutboxIntentSchema>
 export type AssistantDiagnosticEvent = z.infer<
   typeof assistantDiagnosticEventSchema
@@ -1797,6 +1831,8 @@ export type AssistantCronRunStatus =
   (typeof assistantCronRunStatusValues)[number]
 export type AssistantTurnReceiptStatus =
   (typeof assistantTurnReceiptStatusValues)[number]
+export type AssistantTurnDeliveryDisposition =
+  (typeof assistantTurnDeliveryDispositionValues)[number]
 export type AssistantTurnTimelineEventKind =
   (typeof assistantTurnTimelineEventKindValues)[number]
 export type AssistantOutboxStatus =
