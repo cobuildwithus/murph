@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -26,6 +27,7 @@ import {
   type ClinicalImportPlan,
   type ClinicalImportUnsupportedResource,
   type ClinicalRawManifest,
+  type ClinicalRawManifestResourceFile,
 } from "@murphai/clinical-records";
 import { isStrictIsoDate, isStrictIsoDateTime, type BloodTestResultRecord } from "@murphai/contracts";
 
@@ -35,9 +37,15 @@ export interface BuildClinicalImportPlanInput {
 }
 
 type FhirResourceContext<TResource extends Resource = Resource> = {
+  hasImportablePositiveAllergyEvidence: boolean;
   manifest: ClinicalRawManifest;
   rawRef: string;
   resource: TResource;
+};
+
+type FhirResourcePage = {
+  rawRef: string;
+  resources: Resource[];
 };
 
 type MappedFhirResource = {
@@ -66,14 +74,18 @@ const NO_KNOWN_ALLERGY_CODES = new Set(["716186003"]);
 const LABORATORY_CATEGORY_CODES = new Set(["laboratory", "lab"]);
 const RESULT_STATUS_NORMAL_CODES = new Set(["n", "normal"]);
 const RESULT_STATUS_ABNORMAL_CODES = new Set(["a", "aa", "h", "hh", "l", "ll", "abnormal", "high", "low"]);
-const MEASUREMENT_UNIT_PATTERN = /^[A-Za-z0-9._/%-]+$/u;
-const FHIR_VITAL_UNIT_ALIASES = new Map<string, string>([
-  ["mm[hg]", "mmHg"],
+const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, string>>([
+  ["body-weight", new Map([["[lb_av]", "lb"], ["lb", "lb"]])],
+  ["bp-diastolic", new Map([["mm[hg]", "mmHg"], ["mmhg", "mmHg"]])],
+  ["bp-systolic", new Map([["mm[hg]", "mmHg"], ["mmhg", "mmHg"]])],
+  ["spo2", new Map([["%", "percent"], ["percent", "percent"]])],
+  ["temperature", new Map([["cel", "Cel"]])],
 ]);
 type QuantityComparator = NonNullable<BloodTestResultRecord["comparator"]>;
 const IMPORTABLE_OBSERVATION_STATUSES = new Set(["amended", "corrected", "final"]);
 const IMPORTABLE_DIAGNOSTIC_REPORT_STATUSES = new Set(["amended", "appended", "corrected", "final"]);
 const IMPORTABLE_DOCUMENT_REFERENCE_STATUSES = new Set(["current"]);
+const IMPORTABLE_DOCUMENT_REFERENCE_DOC_STATUSES = new Set(["amended", "appended", "corrected", "final"]);
 const IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES = new Set(["active"]);
 const IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["confirmed"]);
 
@@ -84,17 +96,29 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
   );
   const candidates: ClinicalImportCandidate[] = [];
   const unsupported: ClinicalImportUnsupportedResource[] = [];
+  const resourcePages: FhirResourcePage[] = [];
 
   for (const resourceFile of manifest.resourceFiles) {
     const rawRef = rawRefForClinicalManifestFile({
       manifestPath,
       resourceFile,
     });
-    const page = JSON.parse(await readVaultRelativeText(input.vaultRoot, rawRef));
+    const pageText = await readVaultRelativeText(input.vaultRoot, rawRef);
+    assertRawResourceFileHash({ rawRef, resourceFile, text: pageText });
+    const page = JSON.parse(pageText);
     const resources = extractFhirResources(page);
+    assertRawResourceFileCount({ actualCount: resources.length, rawRef, resourceFile });
+    resourcePages.push({ rawRef, resources });
+  }
 
+  const hasImportablePositiveAllergyEvidence = resourcePages.some(({ resources }) =>
+    resources.some(isImportablePositiveAllergyEvidence)
+  );
+
+  for (const { rawRef, resources } of resourcePages) {
     for (const resource of resources) {
       const context: FhirResourceContext = {
+        hasImportablePositiveAllergyEvidence,
         manifest,
         rawRef,
         resource,
@@ -125,6 +149,31 @@ async function readVaultRelativeText(vaultRoot: string, relativePath: string): P
   }
 
   return readFile(path.join(vaultRoot, relativePath), "utf8");
+}
+
+function assertRawResourceFileHash(input: {
+  rawRef: string;
+  resourceFile: ClinicalRawManifestResourceFile;
+  text: string;
+}): void {
+  const actualSha256 = sha256Hex(input.text);
+  if (actualSha256 !== input.resourceFile.sha256) {
+    throw new Error(`Clinical FHIR raw resource file hash mismatch for ${input.rawRef}.`);
+  }
+}
+
+function assertRawResourceFileCount(input: {
+  actualCount: number;
+  rawRef: string;
+  resourceFile: ClinicalRawManifestResourceFile;
+}): void {
+  if (input.actualCount !== input.resourceFile.count) {
+    throw new Error(`Clinical FHIR raw resource count mismatch for ${input.rawRef}.`);
+  }
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function mapFhirResource(context: FhirResourceContext): {
@@ -166,6 +215,7 @@ function resourceContext<TResource extends Resource>(
   resource: TResource,
 ): FhirResourceContext<TResource> {
   return {
+    hasImportablePositiveAllergyEvidence: context.hasImportablePositiveAllergyEvidence,
     manifest: context.manifest,
     rawRef: context.rawRef,
     resource,
@@ -210,6 +260,11 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
       unsupported.push(unsupportedResource(context, "vital quantity comparator is not importable"));
       continue;
     }
+    const unit = normalizeVitalUnit(value.unit, vital);
+    if (!unit) {
+      unsupported.push(unsupportedResource(context, "vital quantity unit is not importable"));
+      continue;
+    }
 
     candidates.push(buildVitalsCandidate(context, {
       occurredAt,
@@ -217,7 +272,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
       title: vital.title,
       facet: vital.facet,
       metric: vital.metric,
-      unit: normalizeVitalUnit(value.unit, vital),
+      unit,
       value: value.value,
     }));
   }
@@ -235,6 +290,10 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     if (quantity.comparator) {
       return unsupportedOnly(context, "vital quantity comparator is not importable");
     }
+    const unit = normalizeVitalUnit(quantity.unit, vital);
+    if (!unit) {
+      return unsupportedOnly(context, "vital quantity unit is not importable");
+    }
 
     return {
       candidates: [
@@ -244,7 +303,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
           title: vital.title,
           facet: vital.facet,
           metric: vital.metric,
-          unit: normalizeVitalUnit(quantity.unit, vital),
+          unit,
           value: quantity.value,
         }),
       ],
@@ -362,6 +421,10 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
     return unsupportedOnly(context, "document reference status is not importable");
   }
 
+  if (!hasImportableOptionalStatus(context.resource.docStatus, IMPORTABLE_DOCUMENT_REFERENCE_DOC_STATUSES)) {
+    return unsupportedOnly(context, "document reference docStatus is not importable");
+  }
+
   const note = readDocumentReferenceText(context.resource);
   if (!note) {
     return emptyMappedResource();
@@ -409,8 +472,12 @@ function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>)
     return { candidates: [], unsupported: [unsupportedResource(context, "allergy registry import not implemented")] };
   }
 
-  if (!isImportableNoKnownAllergy(context.resource)) {
+  if (!hasImportableAllergyStatus(context.resource)) {
     return unsupportedOnly(context, "allergy status is not importable");
+  }
+
+  if (context.hasImportablePositiveAllergyEvidence) {
+    return unsupportedOnly(context, "no-known allergy conflicts with positive allergy evidence");
   }
 
   const occurredAt = readClinicalOccurredAt(context.resource);
@@ -483,15 +550,15 @@ function buildVitalsCandidate(
   };
 }
 
-function normalizeVitalUnit(rawUnit: string | undefined, vital: VitalDefinition): string {
+function normalizeVitalUnit(rawUnit: string | undefined, vital: VitalDefinition): string | null {
   const trimmedUnit = rawUnit?.trim();
   if (!trimmedUnit) {
-    return vital.unit;
+    return null;
   }
 
-  const alias = FHIR_VITAL_UNIT_ALIASES.get(trimmedUnit.toLowerCase());
+  const alias = FHIR_VITAL_UNIT_ALIASES_BY_FACET.get(vital.facet)?.get(trimmedUnit.toLowerCase());
   const unit = alias ?? trimmedUnit;
-  return MEASUREMENT_UNIT_PATTERN.test(unit) ? unit : vital.unit;
+  return unit === vital.unit || alias !== undefined ? unit : null;
 }
 
 function buildBloodTestResult(resource: Observation | ObservationComponent): BloodTestResultRecord | null {
@@ -614,18 +681,16 @@ function isLaboratoryObservation(resource: Observation): boolean {
 }
 
 function isNoKnownAllergy(resource: AllergyIntolerance): boolean {
-  const text = textForCodeableConcept(resource.code)?.toLowerCase() ?? "";
-
-  if (text.includes("no known allerg")) {
-    return true;
-  }
-
   return codingsForCodeableConcept(resource.code).some((coding) =>
     typeof coding.code === "string" && NO_KNOWN_ALLERGY_CODES.has(coding.code)
   );
 }
 
-function isImportableNoKnownAllergy(resource: AllergyIntolerance): boolean {
+function isImportablePositiveAllergyEvidence(resource: Resource): boolean {
+  return isAllergyIntolerance(resource) && !isNoKnownAllergy(resource) && hasImportableAllergyStatus(resource);
+}
+
+function hasImportableAllergyStatus(resource: AllergyIntolerance): boolean {
   return (
     codeableConceptHasCode(resource.clinicalStatus, IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES)
     && codeableConceptHasCode(resource.verificationStatus, IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES)
@@ -635,6 +700,11 @@ function isImportableNoKnownAllergy(resource: AllergyIntolerance): boolean {
 function hasImportableStatus(value: unknown, importableStatuses: ReadonlySet<string>): boolean {
   const status = readString(value)?.toLowerCase();
   return status !== undefined && importableStatuses.has(status);
+}
+
+function hasImportableOptionalStatus(value: unknown, importableStatuses: ReadonlySet<string>): boolean {
+  const status = readString(value)?.toLowerCase();
+  return status === undefined || importableStatuses.has(status);
 }
 
 function codeableConceptHasCode(value: CodeableConcept | undefined, codes: ReadonlySet<string>): boolean {
@@ -718,7 +788,7 @@ function readQuantityValue(
 
   return {
     comparator,
-    unit: readString(quantity.unit) ?? readString(quantity.code),
+    unit: readString(quantity.code) ?? readString(quantity.unit),
     value: numericValue,
   };
 }

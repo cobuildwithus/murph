@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,7 +7,7 @@ import type { ClinicalImportCandidate } from "@murphai/clinical-records";
 import { buildClinicalImportPlan } from "../src/clinical-records/index.ts";
 import { afterEach, describe, expect, it } from "vitest";
 
-const SHA256 = "a".repeat(64);
+const BAD_SHA256 = "a".repeat(64);
 const FHIR_BASE_URL_HASH = "b".repeat(64);
 const PATIENT_ID_HASH = "c".repeat(64);
 const OTHER_PATIENT_ID_HASH = "d".repeat(64);
@@ -27,8 +28,7 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "Observation",
           relativePath: "Observation/page-1.json",
-          count: 4,
-          sha256: SHA256,
+          count: 5,
         },
       ],
       pages: {
@@ -112,6 +112,19 @@ describe("buildClinicalImportPlan", () => {
             },
             {
               resource: {
+                resourceType: "Observation",
+                id: "weight-1",
+                status: "final",
+                effectiveDateTime: "2026-07-01T12:08:00.000Z",
+                code: {
+                  text: "Body weight",
+                  coding: [{ system: "http://loinc.org", code: "29463-7", display: "Body weight" }],
+                },
+                valueQuantity: { value: 180, system: "http://unitsofmeasure.org", code: "[lb_av]" },
+              },
+            },
+            {
+              resource: {
                 resourceType: "Condition",
                 id: "condition-positive-1",
                 code: {
@@ -131,6 +144,7 @@ describe("buildClinicalImportPlan", () => {
       "vitals",
       "vitals",
       "diagnostic-test",
+      "vitals",
     ]);
     expect(plan.candidates.some((candidate) => candidate.kind === "assertion")).toBe(false);
     expect(plan.unsupported).toEqual([
@@ -156,6 +170,14 @@ describe("buildClinicalImportPlan", () => {
       facet: "bp-systolic",
     });
 
+    const bodyWeight = plan.candidates.find(
+      (candidate): candidate is ClinicalImportCandidateOfKind<"vitals"> =>
+        candidate.kind === "vitals" && candidate.resource.facet === "body-weight",
+    );
+    expect(bodyWeight?.payload.measurements).toEqual([
+      { metric: "body-weight", unit: "lb", value: 180 },
+    ]);
+
     const glucose = plan.candidates.find(
       (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
         candidate.kind === "diagnostic-test",
@@ -174,20 +196,18 @@ describe("buildClinicalImportPlan", () => {
     ]);
   });
 
-  it("plans supported assertions and notes without importing positive allergies", async () => {
+  it("plans supported assertions and notes", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
           resourceType: "DocumentReference",
           relativePath: "DocumentReference/page-1.json",
           count: 1,
-          sha256: SHA256,
         },
         {
           resourceType: "AllergyIntolerance",
           relativePath: "AllergyIntolerance/page-1.json",
-          count: 2,
-          sha256: SHA256,
+          count: 1,
         },
       ],
       pages: {
@@ -195,6 +215,7 @@ describe("buildClinicalImportPlan", () => {
           resourceType: "DocumentReference",
           id: "document-1",
           status: "current",
+          docStatus: "final",
           date: "2026-07-02T08:30:00.000Z",
           description: "Discharge instructions",
           type: { text: "Discharge summary" },
@@ -226,15 +247,6 @@ describe("buildClinicalImportPlan", () => {
               coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
             },
           },
-          {
-            resourceType: "AllergyIntolerance",
-            id: "allergy-positive-1",
-            recordedDate: "2026-07-02T09:05:00.000Z",
-            code: {
-              text: "Penicillin",
-              coding: [{ system: "http://snomed.info/sct", code: "91936005", display: "Penicillin allergy" }],
-            },
-          },
         ],
       },
     });
@@ -242,13 +254,7 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(plan.candidates.map((candidate) => candidate.kind)).toEqual(["clinical-note", "assertion"]);
-    expect(plan.unsupported).toEqual([
-      expect.objectContaining({
-        resourceType: "AllergyIntolerance",
-        resourceId: "allergy-positive-1",
-        reason: "allergy registry import not implemented",
-      }),
-    ]);
+    expect(plan.unsupported).toEqual([]);
 
     const note = plan.candidates.find(
       (candidate): candidate is ClinicalImportCandidateOfKind<"clinical-note"> =>
@@ -278,26 +284,22 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "Observation",
           relativePath: "Observation/page-1.json",
-          count: 3,
-          sha256: SHA256,
+          count: 5,
         },
         {
           resourceType: "DiagnosticReport",
           relativePath: "DiagnosticReport/page-1.json",
           count: 1,
-          sha256: SHA256,
         },
         {
           resourceType: "DocumentReference",
           relativePath: "DocumentReference/page-1.json",
-          count: 1,
-          sha256: SHA256,
+          count: 2,
         },
         {
           resourceType: "AllergyIntolerance",
           relativePath: "AllergyIntolerance/page-1.json",
-          count: 3,
-          sha256: SHA256,
+          count: 4,
         },
       ],
       pages: {
@@ -331,6 +333,33 @@ describe("buildClinicalImportPlan", () => {
             },
             valueQuantity: { comparator: "<", value: 128, unit: "mmHg" },
           },
+          {
+            resourceType: "Observation",
+            id: "weight-unsupported-unit",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:01:00.000Z",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "29463-7", display: "Body weight" }],
+            },
+            valueQuantity: { value: 12, system: "http://unitsofmeasure.org", code: "[stone_av]" },
+          },
+          {
+            resourceType: "Observation",
+            id: "bp-component-unsupported-unit",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:02:00.000Z",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "85354-9", display: "Blood pressure panel" }],
+            },
+            component: [
+              {
+                code: {
+                  coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+                },
+                valueQuantity: { value: 12, system: "http://unitsofmeasure.org", code: "[stone_av]" },
+              },
+            ],
+          },
         ],
         "DiagnosticReport/page-1.json": {
           resourceType: "DiagnosticReport",
@@ -340,21 +369,39 @@ describe("buildClinicalImportPlan", () => {
           code: { text: "Metabolic panel" },
           conclusion: "Cancelled result.",
         },
-        "DocumentReference/page-1.json": {
-          resourceType: "DocumentReference",
-          id: "document-entered-in-error",
-          status: "entered-in-error",
-          date: "2026-07-02T08:30:00.000Z",
-          description: "Retracted note",
-          content: [
-            {
-              attachment: {
-                contentType: "text/plain",
-                data: Buffer.from("This note was retracted.").toString("base64"),
+        "DocumentReference/page-1.json": [
+          {
+            resourceType: "DocumentReference",
+            id: "document-entered-in-error",
+            status: "entered-in-error",
+            date: "2026-07-02T08:30:00.000Z",
+            description: "Retracted note",
+            content: [
+              {
+                attachment: {
+                  contentType: "text/plain",
+                  data: Buffer.from("This note was retracted.").toString("base64"),
+                },
               },
-            },
-          ],
-        },
+            ],
+          },
+          {
+            resourceType: "DocumentReference",
+            id: "document-docstatus-entered-in-error",
+            status: "current",
+            docStatus: "entered-in-error",
+            date: "2026-07-02T08:31:00.000Z",
+            description: "Retracted note",
+            content: [
+              {
+                attachment: {
+                  contentType: "text/plain",
+                  data: Buffer.from("This note was entered in error.").toString("base64"),
+                },
+              },
+            ],
+          },
+        ],
         "AllergyIntolerance/page-1.json": [
           {
             resourceType: "AllergyIntolerance",
@@ -401,6 +448,23 @@ describe("buildClinicalImportPlan", () => {
               coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
             },
           },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-scoped-negative",
+            recordedDate: "2026-07-02T09:03:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
+            code: {
+              text: "No known drug allergies",
+            },
+          },
         ],
       },
     });
@@ -408,7 +472,7 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toHaveLength(8);
+    expect(plan.unsupported).toHaveLength(12);
     expect(plan.unsupported).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -424,12 +488,24 @@ describe("buildClinicalImportPlan", () => {
           reason: "vital quantity comparator is not importable",
         }),
         expect.objectContaining({
+          resourceId: "weight-unsupported-unit",
+          reason: "vital quantity unit is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "bp-component-unsupported-unit",
+          reason: "vital quantity unit is not importable",
+        }),
+        expect.objectContaining({
           resourceId: "report-cancelled",
           reason: "diagnostic report status is not importable",
         }),
         expect.objectContaining({
           resourceId: "document-entered-in-error",
           reason: "document reference status is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "document-docstatus-entered-in-error",
+          reason: "document reference docStatus is not importable",
         }),
         expect.objectContaining({
           resourceId: "allergy-refuted",
@@ -443,6 +519,112 @@ describe("buildClinicalImportPlan", () => {
           resourceId: "allergy-unknown-status",
           reason: "allergy status is not importable",
         }),
+        expect.objectContaining({
+          resourceId: "allergy-scoped-negative",
+          reason: "allergy registry import not implemented",
+        }),
+      ]),
+    );
+  });
+
+  it("rejects raw FHIR pages whose manifest integrity does not match", async () => {
+    const page = {
+      resourceType: "Observation",
+      id: "shared-bp",
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      code: {
+        coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+      },
+      valueQuantity: { value: 128, unit: "mmHg" },
+    };
+    const resourceFile = {
+      resourceType: "Observation",
+      relativePath: "Observation/page-1.json",
+      count: 1,
+    };
+
+    const hashMismatchRoot = await writeClinicalFixture({
+      resourceFiles: [{ ...resourceFile, sha256: BAD_SHA256 }],
+      pages: { "Observation/page-1.json": page },
+    });
+    await expect(
+      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: hashMismatchRoot }),
+    ).rejects.toThrow("hash mismatch");
+
+    const countMismatchRoot = await writeClinicalFixture({
+      resourceFiles: [{ ...resourceFile, count: 2 }],
+      pages: { "Observation/page-1.json": page },
+    });
+    await expect(
+      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: countMismatchRoot }),
+    ).rejects.toThrow("count mismatch");
+  });
+
+  it("does not import global no-known allergies when confirmed positive allergy evidence is present", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-1.json",
+          count: 2,
+        },
+      ],
+      pages: {
+        "AllergyIntolerance/page-1.json": [
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-negative-conflict",
+            recordedDate: "2026-07-02T09:00:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+          },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-positive-conflict",
+            recordedDate: "2026-07-02T09:05:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
+            code: {
+              text: "Penicillin",
+              coding: [{ system: "http://snomed.info/sct", code: "91936005", display: "Penicillin allergy" }],
+            },
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: "allergy-negative-conflict",
+          reason: "no-known allergy conflicts with positive allergy evidence",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-positive-conflict",
+          reason: "allergy registry import not implemented",
+        }),
       ]),
     );
   });
@@ -453,7 +635,6 @@ describe("buildClinicalImportPlan", () => {
         resourceType: "Observation",
         relativePath: "Observation/page-1.json",
         count: 1,
-        sha256: SHA256,
       },
     ];
     const pages = {
@@ -510,11 +691,19 @@ async function writeClinicalFixture(input: {
     count: number;
     relativePath: string;
     resourceType: string;
-    sha256: string;
+    sha256?: string;
   }>;
 }): Promise<string> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-"));
   tempRoots.push(vaultRoot);
+
+  const pageTexts = new Map(
+    Object.entries(input.pages).map(([relativePath, value]) => [relativePath, serializeJson(value)]),
+  );
+  const resourceFiles = input.resourceFiles.map((resourceFile) => ({
+    ...resourceFile,
+    sha256: resourceFile.sha256 ?? sha256Hex(pageTexts.get(resourceFile.relativePath) ?? ""),
+  }));
 
   await writeJson(vaultRoot, MANIFEST_PATH, {
     schemaVersion: "murph.clinical-raw-manifest.v1",
@@ -525,16 +714,16 @@ async function writeClinicalFixture(input: {
     fhirBaseUrlHash: input.manifest?.fhirBaseUrlHash ?? FHIR_BASE_URL_HASH,
     patientIdHash: input.manifest?.patientIdHash ?? PATIENT_ID_HASH,
     fetchedAt: "2026-07-01T12:00:00.000Z",
-    resourceFiles: input.resourceFiles,
+    resourceFiles,
     requestedScopes: ["patient/*.read"],
     grantedScopes: ["patient/*.read"],
   });
 
-  for (const [relativePath, value] of Object.entries(input.pages)) {
-    await writeJson(
+  for (const [relativePath, text] of pageTexts) {
+    await writeText(
       vaultRoot,
       `raw/clinical/fhir/clinical-connection-1/retrieval-job-1/${relativePath}`,
-      value,
+      text,
     );
   }
 
@@ -542,7 +731,19 @@ async function writeClinicalFixture(input: {
 }
 
 async function writeJson(root: string, relativePath: string, value: unknown): Promise<void> {
+  await writeText(root, relativePath, serializeJson(value));
+}
+
+async function writeText(root: string, relativePath: string, text: string): Promise<void> {
   const targetPath = path.join(root, relativePath);
   await mkdir(path.dirname(targetPath), { recursive: true });
-  await writeFile(targetPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await writeFile(targetPath, text, "utf8");
+}
+
+function serializeJson(value: unknown): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
