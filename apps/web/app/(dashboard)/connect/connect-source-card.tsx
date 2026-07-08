@@ -26,6 +26,13 @@ export function SourceCard({
   const canStart = authenticated && isAvailable;
   const canDisconnect = authenticated && Boolean(source.disconnectConnectionId);
   const actionLabel = source.requiresReconnect ? "Reconnect" : "Connect";
+  const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
+  const reconnectUnavailable = source.requiresReconnect && !isAvailable;
+  const showReconnectStateDisconnect = canDisconnect
+    && (reconnectUnavailable || source.disconnectScope === "junction_account");
+  const unavailableMessage = !source.requiresReconnect && !isAvailable
+    ? source.unavailableMessage
+    : undefined;
 
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
@@ -56,7 +63,7 @@ export function SourceCard({
             {canDisconnect ? (
               <button
                 type="button"
-                aria-label={`Disconnect ${source.name}`}
+                aria-label={disconnectAriaLabel}
                 disabled={pendingDisconnect}
                 onClick={() => onDisconnectTargetChange(source)}
                 className="relative self-start text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
@@ -74,14 +81,29 @@ export function SourceCard({
           <div className="flex shrink-0 flex-col items-start gap-2 sm:mt-auto sm:shrink">
             {source.requiresReconnect ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
-                Please reconnect {source.name} to resume syncing.
+                {reconnectUnavailable
+                  ? `${source.name} needs attention from the connected app before Murph can keep syncing it.`
+                  : `Please reconnect ${source.name} to resume syncing.`}
+              </p>
+            ) : null}
+            {unavailableMessage ? (
+              <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-muted-foreground">
+                {unavailableMessage}
               </p>
             ) : null}
             {!authenticated ? (
               <AuthButton aria-label={`Sign in to connect ${source.name}`}>
                 Sign in
               </AuthButton>
-            ) : (
+            ) : unavailableMessage && source.unavailableActionLabel ? (
+              <Button
+                type="button"
+                disabled
+                aria-label={`${source.name} web setup is not available yet`}
+              >
+                {source.unavailableActionLabel}
+              </Button>
+            ) : reconnectUnavailable || unavailableMessage ? null : (
               <Button
                 type="button"
                 disabled={!canStart || pending}
@@ -93,6 +115,17 @@ export function SourceCard({
                 {pending ? "Opening..." : isAvailable ? actionLabel : "Not available"}
               </Button>
             )}
+            {showReconnectStateDisconnect ? (
+              <button
+                type="button"
+                aria-label={disconnectAriaLabel}
+                disabled={pendingDisconnect}
+                onClick={() => onDisconnectTargetChange(source)}
+                className="relative self-start text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
+              >
+                {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
+              </button>
+            ) : null}
             {errorMessage ? (
               <p role="alert" className="text-xs leading-snug text-destructive">
                 {errorMessage}
@@ -103,6 +136,12 @@ export function SourceCard({
       </div>
     </div>
   );
+}
+
+function resolveDisconnectAriaLabel(source: ConnectSource): string {
+  return source.disconnectScope === "junction_account"
+    ? "Disconnect account"
+    : `Disconnect ${source.name}`;
 }
 
 function SourceStatusDot({

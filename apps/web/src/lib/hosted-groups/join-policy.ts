@@ -48,87 +48,87 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   "group-email.v0": {
     label: "Email address",
     description:
-      "Share your email so this group's Murph can send the newsletter. Your address is visible to the group.",
+      "Share your email so this group's Murph can send the newsletter. Your email is visible to the group.",
   },
   "activity-days.v0": {
-    label: "Recent activity minutes",
+    label: "Activity minutes",
     description:
-      "Allows this group to receive your recent daily active-minute totals as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily active minutes.",
   },
   "active-calories-days.v0": {
-    label: "Recent active calories",
+    label: "Active calories",
     description:
-      "Allows this group to receive your recent daily active-calorie totals as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily active calories.",
   },
   "activity-score-days.v0": {
-    label: "Recent activity scores",
+    label: "Activity scores",
     description:
-      "Allows this group to receive your recent daily activity scores as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily activity scores.",
   },
   "day-strain-days.v0": {
-    label: "Recent day strain",
+    label: "Day strain",
     description:
-      "Allows this group to receive your recent daily strain values as bounded shared records.",
+      "Lets this group see your 7 most recent days of day strain.",
   },
   "distance-days.v0": {
-    label: "Recent distance",
+    label: "Distance",
     description:
-      "Allows this group to receive your recent daily distance totals as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily distance totals.",
   },
   "elevation-gain-days.v0": {
-    label: "Recent elevation gain",
+    label: "Elevation gain",
     description:
-      "Allows this group to receive your recent daily elevation-gain totals as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily elevation gain.",
   },
   "floors-climbed-days.v0": {
-    label: "Recent floors climbed",
+    label: "Floors climbed",
     description:
-      "Allows this group to receive your recent daily floors-climbed totals as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily floors climbed.",
   },
   "heart-rate-zones-days.v0": {
-    label: "Recent heart-rate zones",
+    label: "Heart-rate zones",
     description:
-      "Allows this group to receive your recent daily workout heart-rate zone minutes as bounded shared records.",
+      "Lets this group see your 7 most recent days of workout heart-rate zone minutes.",
   },
   "hrv-days.v0": {
-    label: "Recent HRV",
+    label: "HRV",
     description:
-      "Allows this group to receive your recent daily HRV values as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily HRV.",
   },
   "max-heart-rate-days.v0": {
-    label: "Recent daily max heart rate",
+    label: "Daily max heart rate",
     description:
-      "Allows this group to receive your recent daily observed max heart rate as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily max heart rate.",
   },
   "resting-heart-rate-days.v0": {
-    label: "Recent resting heart rate",
+    label: "Resting heart rate",
     description:
-      "Allows this group to receive your recent daily resting heart rate as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily resting heart rate.",
   },
   "sleep-times.v0": {
-    label: "Recent sleep timing",
+    label: "Sleep timing",
     description:
-      "Allows this group to receive your recent sleep start and end times as bounded shared records.",
+      "Lets this group see your 7 most recent days of sleep start and end times.",
   },
   "steps-days.v0": {
-    label: "Recent steps",
+    label: "Steps",
     description:
-      "Allows this group to receive your recent daily step totals as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily step totals.",
   },
   "vo2-max-days.v0": {
-    label: "Recent VO2 max",
+    label: "VO2 max",
     description:
-      "Allows this group to receive your recent estimated VO2 max values as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily VO2 max estimates.",
   },
   "workout-days.v0": {
-    label: "Recent workout summaries",
+    label: "Workout summaries",
     description:
-      "Allows this group to receive your recent daily workout counts and minutes as bounded shared records.",
+      "Lets this group see your 7 most recent days of workout counts and minutes.",
   },
   "workout-strain-days.v0": {
-    label: "Recent workout strain",
+    label: "Workout strain",
     description:
-      "Allows this group to receive your recent daily workout strain values as bounded shared records.",
+      "Lets this group see your 7 most recent days of daily workout strain.",
   },
 };
 
@@ -263,9 +263,9 @@ function hostedVaultShareProjectionScopeDisplay(
       projectionScope.selector.activityKind,
     );
     return {
-      label: `Recent ${label} minutes`,
+      label: `${capitalizeHostedVaultShareLabel(label)} minutes`,
       description:
-        `Allows this group to receive your recent daily ${label}-minute totals as bounded shared records.`,
+        `Lets this group see your 7 most recent days of daily ${label} minutes.`,
     };
   }
   if (projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND) {
@@ -296,4 +296,9 @@ function hostedVaultShareProjectionScopeDisplay(
 
 function formatHostedVaultShareActivityKindLabel(activityKind: string): string {
   return activityKind.replace(/-/gu, " ");
+}
+
+function capitalizeHostedVaultShareLabel(label: string): string {
+  const first = label[0];
+  return first ? `${first.toUpperCase()}${label.slice(1)}` : label;
 }

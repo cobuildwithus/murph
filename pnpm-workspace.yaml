@@ -26,9 +26,9 @@ overrides:
   '@privy-io/js-sdk-core@0.62.0>js-cookie': 3.0.8
   '@privy-io/react-auth@3.24.0>js-cookie': 3.0.8
   '@solana/rpc-subscriptions-channel-websocket@5.5.1>ws': 8.21.0
-  '@temporalio/client@1.16.2>@grpc/grpc-js': 1.14.4
-  '@temporalio/core-bridge@1.16.2>@grpc/grpc-js': 1.14.4
-  '@temporalio/worker@1.16.2>@grpc/grpc-js': 1.14.4
+  '@temporalio/client@1.16.3>@grpc/grpc-js': 1.14.4
+  '@temporalio/core-bridge@1.16.3>@grpc/grpc-js': 1.14.4
+  '@temporalio/worker@1.16.3>@grpc/grpc-js': 1.14.4
   '@workflow/builders@4.0.5>esbuild': 0.28.1
   '@workflow/cli@4.2.4>esbuild': 0.28.1
   axios-retry@4.5.0>axios: 1.17.0
@@ -45,6 +45,7 @@ overrides:
   miniflare@4.20260507.1>ws: 8.21.0
   next@16.2.6>postcss: 8.5.15
   porto@0.2.35>hono: 4.12.25
+  protobufjs: 7.6.5
   terser-webpack-plugin@5.6.0>esbuild: 0.28.1
   tsx@4.21.0>esbuild: 0.28.1
   viem@2.23.2>ws: 8.21.0
@@ -64,6 +65,15 @@ overrides:
 minimumReleaseAgeExclude:
   - incur@0.4.4
   - '@cobuild/review-gpt@0.5.95'
+  - '@openai/codex@0.143.0||0.143.0-darwin-arm64||0.143.0-darwin-x64||0.143.0-linux-arm64||0.143.0-linux-x64||0.143.0-win32-arm64||0.143.0-win32-x64'
+  - '@temporalio/activity@1.16.3'
+  - '@temporalio/client@1.16.3'
+  - '@temporalio/common@1.16.3'
+  - '@temporalio/core-bridge@1.16.3'
+  - '@temporalio/nexus@1.16.3'
+  - '@temporalio/proto@1.16.3'
+  - '@temporalio/worker@1.16.3'
+  - '@temporalio/workflow@1.16.3'
   - fast-uri@3.1.2
   - fast-xml-builder@1.2.0
 nodeVersion: 24.14.1

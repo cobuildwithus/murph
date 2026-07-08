@@ -12,7 +12,7 @@ type CodexTurnMessage = Record<string, unknown>
 export const ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE =
   'ASSISTANT_CODEX_USAGE_LIMIT'
 
-// CodexErrorInfo variants (app-server protocol, pinned codex 0.142.5) that
+// CodexErrorInfo variants (app-server protocol, pinned codex 0.143.0) that
 // describe a lost or unusable provider connection. These map to the
 // retryable ASSISTANT_CODEX_CONNECTION_LOST process-exit classification.
 const CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS = new Set([

@@ -59,7 +59,8 @@ test("listVisibleConnectSources covers every hosted-visible device source with U
 
   const expectedVisibleSourceIds = DEVICE_CONNECT_SOURCES
     .filter((source) =>
-      source.routes.some((route) => route.kind === "direct" || route.kind === "junction_link"),
+      source.connectSourceId === "apple-health"
+      || source.routes.some((route) => route.kind === "direct" || route.kind === "junction_link"),
     )
     .map((source) => source.connectSourceId)
     .sort();

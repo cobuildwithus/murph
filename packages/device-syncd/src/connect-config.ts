@@ -37,6 +37,7 @@ export {
   normalizeDeviceConnectSourceId,
   normalizeJunctionLinkProviderFilter,
   normalizeJunctionProviderSlug,
+  resolveDeviceConnectSourceIdForJunctionProviderSlug,
   resolveDeviceConnectSourceById,
   resolveDirectDeviceConnectRouteByProvider,
   resolveJunctionDeviceConnectRouteByProviderSlug,

@@ -78,6 +78,14 @@ current-task user opt-out.
    the round does not count. Rerun it against the same pushed head after fixing
    the concrete tooling/profile problem.
 
+   Treat a suspiciously fast turnaround as the same kind of invalid round. A
+   genuine `pr-review` sweep on the intended reasoning model takes several
+   minutes; a round that comes back in roughly a minute or two almost always
+   means ReviewGPT answered on a different or downgraded model instead of
+   actually reviewing the diff. Do not triage or trust that output — discard the
+   round, confirm the Eragon profile is on the intended model, and rerun against
+   the same pushed head.
+
 4. Triage every finding locally before fixing:
    - **Accepted bug/edge case**: confirm the issue through a
      production-faithful path before fixing. Use the closest actual runtime
@@ -105,6 +113,16 @@ current-task user opt-out.
    new durable state owner, index, lifecycle enum, queue, transaction layer,
    reconciliation loop, policy manager, or abstraction without production-path
    proof that the simpler owner-boundary fix is insufficient.
+
+   For deploy-skew or legacy-compatibility findings, first prove that the
+   incompatible state can actually exist outside the current PR branch before
+   adding compatibility machinery. Check whether the feature or producer has
+   already shipped, whether old consumers/producers can still run during the
+   proposed rollout or rollback window, and whether production data or external
+   clients already contain the legacy shape. If the answer is no, reject the
+   finding as speculative or handle it with a deployment note; do not add repair
+   paths, migrations, shims, queues, or reconciliation code for rows or deployed
+   versions that do not exist.
 
 5. Fix only accepted findings after the reproduction/proof above is in place,
    run the verification required by

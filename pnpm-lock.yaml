@@ -18,9 +18,9 @@ overrides:
   '@privy-io/js-sdk-core@0.62.0>js-cookie': 3.0.8
   '@privy-io/react-auth@3.24.0>js-cookie': 3.0.8
   '@solana/rpc-subscriptions-channel-websocket@5.5.1>ws': 8.21.0
-  '@temporalio/client@1.16.2>@grpc/grpc-js': 1.14.4
-  '@temporalio/core-bridge@1.16.2>@grpc/grpc-js': 1.14.4
-  '@temporalio/worker@1.16.2>@grpc/grpc-js': 1.14.4
+  '@temporalio/client@1.16.3>@grpc/grpc-js': 1.14.4
+  '@temporalio/core-bridge@1.16.3>@grpc/grpc-js': 1.14.4
+  '@temporalio/worker@1.16.3>@grpc/grpc-js': 1.14.4
   '@workflow/builders@4.0.5>esbuild': 0.28.1
   '@workflow/cli@4.2.4>esbuild': 0.28.1
   axios-retry@4.5.0>axios: 1.17.0
@@ -37,6 +37,7 @@ overrides:
   miniflare@4.20260507.1>ws: 8.21.0
   next@16.2.6>postcss: 8.5.15
   porto@0.2.35>hono: 4.12.25
+  protobufjs: 7.6.5
   terser-webpack-plugin@5.6.0>esbuild: 0.28.1
   tsx@4.21.0>esbuild: 0.28.1
   viem@2.23.2>ws: 8.21.0
@@ -212,8 +213,8 @@ importers:
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@temporalio/client':
-        specifier: 1.16.2
-        version: 1.16.2
+        specifier: ~1.16.3
+        version: 1.16.3
       '@vercel/analytics':
         specifier: 2.0.1
         version: 2.0.1(next@16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(@playwright/test@1.59.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(react@19.2.6)
@@ -401,8 +402,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@openai/codex':
-        specifier: 0.142.5
-        version: 0.142.5
+        specifier: 0.143.0
+        version: 0.143.0
       openai:
         specifier: 6.45.0
         version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
@@ -712,20 +713,20 @@ importers:
         specifier: workspace:*
         version: link:../hosted-execution
       '@temporalio/activity':
-        specifier: 1.16.2
-        version: 1.16.2
+        specifier: ~1.16.3
+        version: 1.16.3
       '@temporalio/client':
-        specifier: 1.16.2
-        version: 1.16.2
+        specifier: ~1.16.3
+        version: 1.16.3
       '@temporalio/common':
-        specifier: 1.16.2
-        version: 1.16.2
+        specifier: ~1.16.3
+        version: 1.16.3
       '@temporalio/worker':
-        specifier: 1.16.2
-        version: 1.16.2(@swc/helpers@0.5.21)(esbuild@0.28.1)(tslib@2.8.1)
+        specifier: ~1.16.3
+        version: 1.16.3(@swc/helpers@0.5.21)(esbuild@0.28.1)(tslib@2.8.1)
       '@temporalio/workflow':
-        specifier: 1.16.2
-        version: 1.16.2
+        specifier: ~1.16.3
+        version: 1.16.3
 
   packages/importers:
     dependencies:
@@ -2457,43 +2458,43 @@ packages:
   '@open-draft/until@2.1.0':
     resolution: {integrity: sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg==}
 
-  '@openai/codex@0.142.5':
-    resolution: {integrity: sha512-WQEpD7l3k68eIAP0aq28EdR18ENBAf8DyprzFhzNwCOQJSv4nHzpwT8Fl30IJacprko2ZCmUBZjM2u941l2yLw==}
+  '@openai/codex@0.143.0':
+    resolution: {integrity: sha512-6h53sNtESIYncWVwU7zEjdVajwcad/0H94MOrgGqhwBMa9RRUDVG6DU9E9euC7yRdtrsKDAkJkz/m5moZ6MU3A==}
     engines: {node: '>=16'}
     hasBin: true
 
-  '@openai/codex@0.142.5-darwin-arm64':
-    resolution: {integrity: sha512-l43p8xv+Z/2/b6fCUc7/FmcQZsaPB7RFizLponGwHAnFOWe3i9Vky69p+up3BUam9AetoQQUv7Mo+2KdaFEqhA==}
+  '@openai/codex@0.143.0-darwin-arm64':
+    resolution: {integrity: sha512-hs9bPkE1c0+EtbHxxVfhaaGl1u6/LVdhEtOX5t9N+ri54yjMUkzKJLc7MOBa1DYRMDTWT+lPEfeB+8Fv9coTKg==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [darwin]
 
-  '@openai/codex@0.142.5-darwin-x64':
-    resolution: {integrity: sha512-yk6A06/VmW7NFsa48OVPaj//g/zeSpd79wjuqfXZwW8ZKRYQm3+wCd3hWjPl79F3QnXvDvM2j3JMIBL3m3GXXg==}
+  '@openai/codex@0.143.0-darwin-x64':
+    resolution: {integrity: sha512-xHbrb/Qkj+ZZqYkAuio3mcFxpqlg/NNpBDz5iMKlGa7XfK3miUu6R50c9cRW1ZPQVRfRnFhs4l7OhI5u5r+HvA==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [darwin]
 
-  '@openai/codex@0.142.5-linux-arm64':
-    resolution: {integrity: sha512-77ka5PSnm5HdxdBT99IwntCasmbqevlS0eiC0AtEb6ZXCLkim2gm0AWm+jNYy0EhbssvNK+KghayWo34HMgXeA==}
+  '@openai/codex@0.143.0-linux-arm64':
+    resolution: {integrity: sha512-1TMx1a/YBEY0SBhPGn8z9HjOpaDssw+WJiIi/+r0CB5uZf6qnALN02TrZTZl2PSUI8olnBf/VccjnwVCrzR38w==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [linux]
 
-  '@openai/codex@0.142.5-linux-x64':
-    resolution: {integrity: sha512-pxY+d3NgNE57Y/MApD3/TZUAygxJN6I9h3ZeDUwe67mxWjUxsuapxMRFTKSznCalYbRAeZp752+AAXmUbmguEg==}
+  '@openai/codex@0.143.0-linux-x64':
+    resolution: {integrity: sha512-B6v6oUgBbjt1bL7yBbRp7e0vLiVOjRdz9Wykotve52Aq2H2TeiCqxM5BSOaFkmNO6VxE0seW7hTi2UZF9x8LLA==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [linux]
 
-  '@openai/codex@0.142.5-win32-arm64':
-    resolution: {integrity: sha512-65BEqGbUZ7r0ayunIHdBjo5crwgbwKX/6puOcO+VCswUw/dXvDsN2IGcbXB52+bS9U5+FxP783cUHfTT6m40DQ==}
+  '@openai/codex@0.143.0-win32-arm64':
+    resolution: {integrity: sha512-8ntYPI3IQWZuayL214tYanuYhom23RxHUWRkmay45hGymEW4TwwFqzppKXEzcBXrCF5uSWlOMMG+B2elN6kWuQ==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [win32]
 
-  '@openai/codex@0.142.5-win32-x64':
-    resolution: {integrity: sha512-a+wI4PEx9a2fg6V5ueTTDkOkr1XpEvA5RFXIbo/L2hOfzMmGtyRnbG24bCGu5Q2RSgVxSQV0aLkdb3vdYMNH9A==}
+  '@openai/codex@0.143.0-win32-x64':
+    resolution: {integrity: sha512-d60HLkzSQ7rdL35xPxH1x3g8DuJjEbhEx1UOK5ivA1PBD9eWvP46rtdHkSvCZyqHUhaHFr5We2SugE9+Y8HhVA==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [win32]
@@ -2686,17 +2687,14 @@ packages:
   '@protobufjs/codegen@2.0.5':
     resolution: {integrity: sha512-zgXFLzW3Ap33e6d0Wlj4MGIm6Ce8O89n/apUaGNB/jx+hw+ruWEp7EwGUshdLKVRCxZW12fp9r40E1mQrf/34g==}
 
-  '@protobufjs/eventemitter@1.1.0':
-    resolution: {integrity: sha512-j9ednRT81vYJ9OfVuXG6ERSTdEL1xVsNgqpkxMsbIabzSo3goCjDIveeGv5d03om39ML71RdmrGNjG5SReBP/Q==}
+  '@protobufjs/eventemitter@1.1.1':
+    resolution: {integrity: sha512-vW1GmwMZNnL+gMRaovlh9yZX74kc+TTU3FObkkurpMaRtBfLP3ldjS9KQWlwZgraRE0+dheEEoAxdzcJQ8eXZg==}
 
   '@protobufjs/fetch@1.1.1':
     resolution: {integrity: sha512-GpptLrs57adMSuHi3VNj0mAF8dwh36LMaYF6XyJ6JMWlVsc+t42tm1HSEDmOs3A8fC9yyeisgLhsTVQokOZ0zw==}
 
   '@protobufjs/float@1.0.2':
     resolution: {integrity: sha512-Ddb+kVXlXst9d+R9PfTIxh1EdNkgoRe5tOX6t01f1lYWOvJnSPDBlG241QLzcyPdoNTsblLUdujGSE4RzrTZGQ==}
-
-  '@protobufjs/inquire@1.1.2':
-    resolution: {integrity: sha512-pa0vFRuws4wkvaXKK1uXZMAwAX4/t8ANaJo45iw/oQHNQ9q5xUzwgFmVJGXiga2BeN+zpX7Vf9vmsiIa2J+MUw==}
 
   '@protobufjs/path@1.1.2':
     resolution: {integrity: sha512-6JOcJ5Tm08dOHAbdR3GrvP+yUUfkjG5ePsHYczMFLq3ZmMkAD98cDgcT2iA1lJ9NVwFd4tH/iSSoe44YWkltEA==}
@@ -3921,36 +3919,36 @@ packages:
   '@tanstack/virtual-core@3.14.0':
     resolution: {integrity: sha512-JLANqGy/D6k4Ujmh8Tr25lGimuOXNiaVyXaCAZS0W+1390sADdGnyUdSWNIfd49gebtIxGMij4IktRVzrdr12Q==}
 
-  '@temporalio/activity@1.16.2':
-    resolution: {integrity: sha512-fhemoI7xBO6rR1wOedaQPJEKE5KuYdRX5tEQt4SMp9XqdoOyC4oYzljoXQ+/Q62d4skK3/fNSK86HTKHF2ngDQ==}
+  '@temporalio/activity@1.16.3':
+    resolution: {integrity: sha512-yrfEn0WXMGWouceXaCRG81d9jh9CNQu8eZpNv37mAaRuHrDcvkTiSw+gYT5YrNbYrrBfMZqTFDJ62F3Yxw1N1w==}
     engines: {node: '>= 20.0.0'}
 
-  '@temporalio/client@1.16.2':
-    resolution: {integrity: sha512-SvuFpikonwOSLjedesueh71010h304ub436OA16mHeunQgUfldqtI9ZrHqP9L5jzBxWOxRIKZL52clMjaebSxQ==}
+  '@temporalio/client@1.16.3':
+    resolution: {integrity: sha512-LAE+JLiefzkiK7GmDSh/rytL6085YVN6rXPtK2IjzEwaeeEUOsE/Fn8UiXuYKlmoWs/fXchmeg+2KLLOCmAmuQ==}
     engines: {node: '>= 20.0.0'}
 
-  '@temporalio/common@1.16.2':
-    resolution: {integrity: sha512-Yu62OW85wU3/XDt/xXDxw1lB3bce0xCrrgfd7aJJ5lp7FGzPgIgcC7bu2iIcSZnnCJGF86pnLJb+emo0mwINVg==}
+  '@temporalio/common@1.16.3':
+    resolution: {integrity: sha512-Rd5/nJ8zCDyFkvix3LQfbYRO3YLyMaN761EJzuIc1YvqAduI+T9jP+HTFUxh4XpYDmPsJTE+5sPTx43EOlTqxA==}
     engines: {node: '>= 20.0.0'}
 
-  '@temporalio/core-bridge@1.16.2':
-    resolution: {integrity: sha512-KJ301Lh7xzjprWVM9GqwRj3PnLHaxycQQv83QKeo59rqHh0AmR+wmWDKkDEHLG9CITNx4X/XtJdG1McjpFc3WA==}
+  '@temporalio/core-bridge@1.16.3':
+    resolution: {integrity: sha512-nMTkWscmaNRoQGsG4W2B2GYOIO6sSXzjCdoqXrWKSMHLxSqyn/HHUP+LFrp1nI7W0mrUz+Wsc3n/ymI/nVe9/Q==}
     engines: {node: '>= 20.0.0'}
 
-  '@temporalio/nexus@1.16.2':
-    resolution: {integrity: sha512-IVcyztAUEWUC2ae/7maQiRwnE9pXz4SYfypI6sBdxpCHe3OxV21sMCqHku3Lot/IuFV9kyHYnL3Srn0WAZWQwA==}
+  '@temporalio/nexus@1.16.3':
+    resolution: {integrity: sha512-hbBiWXoJjgT6ExHNsqffvJ3DrgMXvicpwmd6LeLwBZ1yci2iT9+Rp2Rfd1XA74ql8TPec6U+ZPer3b7UMu/mIQ==}
     engines: {node: '>= 20.0.0'}
 
-  '@temporalio/proto@1.16.2':
-    resolution: {integrity: sha512-KIBlGV38W3HiHsDFSEs33TsXl7I2KcApbuLlBcCKtjHVdl5pzEt1nQpD5szi+y6saIENaXBifmVTELtYh2w7Rw==}
+  '@temporalio/proto@1.16.3':
+    resolution: {integrity: sha512-dCgil6TwdcJ+2HC7Th8VIj+XqH6vIph8xjhG27hC7U3mLTF0ZyweCcTXnX0GE+iWz2CapLjjSZr8tUMA9Wx0vA==}
     engines: {node: '>= 20.0.0'}
 
-  '@temporalio/worker@1.16.2':
-    resolution: {integrity: sha512-kdLwWOn/vEDgaUV7OBqjq6ZIMFDJqGOGHmSzZ8j7PLrGrKJ521yai29/2VeqAL6JKQBxCllRNNhocdQBQfZDtg==}
+  '@temporalio/worker@1.16.3':
+    resolution: {integrity: sha512-p4jSDgf6FeVFrVTg4skgQsrZvzMeLM+JbOt8A8RqcI7g3825P9Ykco5eCyqN6G5BEu//16lcX2XAbFBx5iEbIw==}
     engines: {node: '>= 20.0.0'}
 
-  '@temporalio/workflow@1.16.2':
-    resolution: {integrity: sha512-EESJV9CsRSpLgebrzMY9FOMrDD1BHrXvaDB+++69eYNvH5nWNS94zfVzpPZpUoRRRLfNvSJd3jSXV/pH1HwLiQ==}
+  '@temporalio/workflow@1.16.3':
+    resolution: {integrity: sha512-Vi7agsYwTBddWEf6RD5+LGxgnRqzEUMZdKMhhyfgE+KpDYdEmSp6W89IJRnVNb0sLS/QEubqBcOvs+6uxgdwmw==}
     engines: {node: '>= 20.0.0'}
 
   '@tokenizer/inflate@0.4.1':
@@ -8083,8 +8081,8 @@ packages:
     resolution: {integrity: sha512-SAzp/O4Yh02jGdRc+uIrGoe87dkN/XtwxfZ4ZyafJHymd79ozp5VG5nyZ7ygqPM5+cpLDjjGnYFUkngonyDPOQ==}
     engines: {node: '>=14.0.0'}
 
-  protobufjs@7.6.0:
-    resolution: {integrity: sha512-LtESOsMPTZgyYtwxhvdgdjGL0HmXEaRA/hVD6sol4zA60hVXXXP/SGmxnqDbgGE8gy7pYex7cym+5vYPcmaXBQ==}
+  protobufjs@7.6.5:
+    resolution: {integrity: sha512-/FPD0nUc9jH6rfFjji9IBqOz4pcSE3CsT1m7Ep6Mdb0LxSUMj8hgl6GomOvZzpNpAqqGaXA0P3VSrZLFzIhQrw==}
     engines: {node: '>=12.0.0'}
 
   protocols@2.0.2:
@@ -10756,7 +10754,7 @@ snapshots:
     dependencies:
       lodash.camelcase: 4.3.0
       long: 5.3.2
-      protobufjs: 7.6.0
+      protobufjs: 7.6.5
       yargs: 17.7.2
 
   '@hcaptcha/loader@2.3.0': {}
@@ -11671,31 +11669,31 @@ snapshots:
 
   '@open-draft/until@2.1.0': {}
 
-  '@openai/codex@0.142.5':
+  '@openai/codex@0.143.0':
     optionalDependencies:
-      '@openai/codex-darwin-arm64': '@openai/codex@0.142.5-darwin-arm64'
-      '@openai/codex-darwin-x64': '@openai/codex@0.142.5-darwin-x64'
-      '@openai/codex-linux-arm64': '@openai/codex@0.142.5-linux-arm64'
-      '@openai/codex-linux-x64': '@openai/codex@0.142.5-linux-x64'
-      '@openai/codex-win32-arm64': '@openai/codex@0.142.5-win32-arm64'
-      '@openai/codex-win32-x64': '@openai/codex@0.142.5-win32-x64'
+      '@openai/codex-darwin-arm64': '@openai/codex@0.143.0-darwin-arm64'
+      '@openai/codex-darwin-x64': '@openai/codex@0.143.0-darwin-x64'
+      '@openai/codex-linux-arm64': '@openai/codex@0.143.0-linux-arm64'
+      '@openai/codex-linux-x64': '@openai/codex@0.143.0-linux-x64'
+      '@openai/codex-win32-arm64': '@openai/codex@0.143.0-win32-arm64'
+      '@openai/codex-win32-x64': '@openai/codex@0.143.0-win32-x64'
 
-  '@openai/codex@0.142.5-darwin-arm64':
+  '@openai/codex@0.143.0-darwin-arm64':
     optional: true
 
-  '@openai/codex@0.142.5-darwin-x64':
+  '@openai/codex@0.143.0-darwin-x64':
     optional: true
 
-  '@openai/codex@0.142.5-linux-arm64':
+  '@openai/codex@0.143.0-linux-arm64':
     optional: true
 
-  '@openai/codex@0.142.5-linux-x64':
+  '@openai/codex@0.143.0-linux-x64':
     optional: true
 
-  '@openai/codex@0.142.5-win32-arm64':
+  '@openai/codex@0.143.0-win32-arm64':
     optional: true
 
-  '@openai/codex@0.142.5-win32-x64':
+  '@openai/codex@0.143.0-win32-x64':
     optional: true
 
   '@opentelemetry/api@1.9.0':
@@ -11984,15 +11982,13 @@ snapshots:
 
   '@protobufjs/codegen@2.0.5': {}
 
-  '@protobufjs/eventemitter@1.1.0': {}
+  '@protobufjs/eventemitter@1.1.1': {}
 
   '@protobufjs/fetch@1.1.1':
     dependencies:
       '@protobufjs/aspromise': 1.1.2
 
   '@protobufjs/float@1.0.2': {}
-
-  '@protobufjs/inquire@1.1.2': {}
 
   '@protobufjs/path@1.1.2': {}
 
@@ -13742,64 +13738,64 @@ snapshots:
 
   '@tanstack/virtual-core@3.14.0': {}
 
-  '@temporalio/activity@1.16.2':
+  '@temporalio/activity@1.16.3':
     dependencies:
-      '@temporalio/client': 1.16.2
-      '@temporalio/common': 1.16.2
+      '@temporalio/client': 1.16.3
+      '@temporalio/common': 1.16.3
       abort-controller: 3.0.0
 
-  '@temporalio/client@1.16.2':
+  '@temporalio/client@1.16.3':
     dependencies:
       '@grpc/grpc-js': 1.14.4
-      '@temporalio/common': 1.16.2
-      '@temporalio/proto': 1.16.2
+      '@temporalio/common': 1.16.3
+      '@temporalio/proto': 1.16.3
       abort-controller: 3.0.0
       long: 5.3.2
       uuid: 11.1.1
 
-  '@temporalio/common@1.16.2':
+  '@temporalio/common@1.16.3':
     dependencies:
-      '@temporalio/proto': 1.16.2
+      '@temporalio/proto': 1.16.3
       long: 5.3.2
       ms: 3.0.0-canary.1
       nexus-rpc: 0.0.2
       proto3-json-serializer: 2.0.2
 
-  '@temporalio/core-bridge@1.16.2':
+  '@temporalio/core-bridge@1.16.3':
     dependencies:
       '@grpc/grpc-js': 1.14.4
-      '@temporalio/common': 1.16.2
+      '@temporalio/common': 1.16.3
 
-  '@temporalio/nexus@1.16.2':
+  '@temporalio/nexus@1.16.3':
     dependencies:
-      '@temporalio/client': 1.16.2
-      '@temporalio/common': 1.16.2
-      '@temporalio/proto': 1.16.2
+      '@temporalio/client': 1.16.3
+      '@temporalio/common': 1.16.3
+      '@temporalio/proto': 1.16.3
       long: 5.3.2
       nexus-rpc: 0.0.2
 
-  '@temporalio/proto@1.16.2':
+  '@temporalio/proto@1.16.3':
     dependencies:
       long: 5.3.2
-      protobufjs: 7.6.0
+      protobufjs: 7.6.5
 
-  '@temporalio/worker@1.16.2(@swc/helpers@0.5.21)(esbuild@0.28.1)(tslib@2.8.1)':
+  '@temporalio/worker@1.16.3(@swc/helpers@0.5.21)(esbuild@0.28.1)(tslib@2.8.1)':
     dependencies:
       '@grpc/grpc-js': 1.14.4
       '@swc/core': 1.15.3(@swc/helpers@0.5.21)
-      '@temporalio/activity': 1.16.2
-      '@temporalio/client': 1.16.2
-      '@temporalio/common': 1.16.2
-      '@temporalio/core-bridge': 1.16.2
-      '@temporalio/nexus': 1.16.2
-      '@temporalio/proto': 1.16.2
-      '@temporalio/workflow': 1.16.2
+      '@temporalio/activity': 1.16.3
+      '@temporalio/client': 1.16.3
+      '@temporalio/common': 1.16.3
+      '@temporalio/core-bridge': 1.16.3
+      '@temporalio/nexus': 1.16.3
+      '@temporalio/proto': 1.16.3
+      '@temporalio/workflow': 1.16.3
       abort-controller: 3.0.0
       heap-js: 2.7.1
       memfs: 4.57.2(tslib@2.8.1)
       nexus-rpc: 0.0.2
       proto3-json-serializer: 2.0.2
-      protobufjs: 7.6.0
+      protobufjs: 7.6.5
       rxjs: 7.8.2
       source-map: 0.7.6
       source-map-loader: 4.0.2(webpack@5.106.2(@swc/core@1.15.3(@swc/helpers@0.5.21))(esbuild@0.28.1))
@@ -13823,10 +13819,10 @@ snapshots:
       - uglify-js
       - webpack-cli
 
-  '@temporalio/workflow@1.16.2':
+  '@temporalio/workflow@1.16.3':
     dependencies:
-      '@temporalio/common': 1.16.2
-      '@temporalio/proto': 1.16.2
+      '@temporalio/common': 1.16.3
+      '@temporalio/proto': 1.16.3
       nexus-rpc: 0.0.2
 
   '@tokenizer/inflate@0.4.1':
@@ -19270,17 +19266,16 @@ snapshots:
 
   proto3-json-serializer@2.0.2:
     dependencies:
-      protobufjs: 7.6.0
+      protobufjs: 7.6.5
 
-  protobufjs@7.6.0:
+  protobufjs@7.6.5:
     dependencies:
       '@protobufjs/aspromise': 1.1.2
       '@protobufjs/base64': 1.1.2
       '@protobufjs/codegen': 2.0.5
-      '@protobufjs/eventemitter': 1.1.0
+      '@protobufjs/eventemitter': 1.1.1
       '@protobufjs/fetch': 1.1.1
       '@protobufjs/float': 1.0.2
-      '@protobufjs/inquire': 1.1.2
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.1

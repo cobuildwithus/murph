@@ -13,9 +13,16 @@ import {
 
 const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinOfferTx: vi.fn(),
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort:
+    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -31,6 +38,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
   signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
 }));
 
@@ -65,7 +73,11 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_reactor", suspendedAt: null },
     });
+    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
+      undefined,
+    );
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
   });
 
@@ -99,6 +111,46 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      userId: "member_reactor",
+    });
+  });
+
+  it("enqueues private missing-email nudge candidates after accepting an email-sharing offer", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      alreadyMember: false,
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
+      groupId: "group_1",
+      joinCode: "join_1",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      membershipId: "membership_1",
+      revokedVaultShareProjectionKinds: [],
+      selectedVaultShareProjectionKinds: ["group-email.v0"],
+      vaultShareCleanupSignals: [],
+    });
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
+    });
+
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .toHaveBeenCalledWith({
+        groupId: "group_1",
+        memberId: "member_reactor",
+        prisma,
+      });
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
       userId: "member_reactor",
     });
@@ -121,6 +173,8 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       status: "accepted",
     });
 
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
       userId: "member_reactor",
     });
@@ -185,6 +239,42 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     );
   });
 
+  it("drains cleanup runtime signals after a successful accept", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
+      alreadyMember: true,
+      grantedVaultShareProjectionKinds: [],
+      groupId: "group_1",
+      joinCode: "join_1",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      membershipId: "membership_1",
+      revokedVaultShareProjectionKinds: ["sleep-times.v0"],
+      selectedVaultShareProjectionKinds: [],
+      vaultShareCleanupSignals: [{
+        mailboxItemId: "mailbox_item_cleanup_1",
+        memberId: "member_group_runtime",
+      }],
+    });
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
+    });
+
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_group_runtime",
+      mailboxItemId: "mailbox_item_cleanup_1",
+    });
+  });
+
   it("records unsupported reactions as skipped without accepting or replying", async () => {
     const event = parseReactionEvent({
       customEmoji: "😂",
@@ -201,7 +291,10 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("records revoked offers as a distinct skip reason", async () => {
@@ -225,6 +318,9 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
   });
 });
 
