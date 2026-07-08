@@ -4,10 +4,11 @@ Last verified: 2026-07-08
 
 Required post-completion ReviewGPT loop for non-trivial PR-lane work. It runs
 the repo-local `pr-review` preset through `pnpm review:gpt`, using one of the
-managed ReviewGPT browser lanes. The repo config chooses randomly among
-Eragon, Phlebas, and Mountain by default so PR-review load is spread across
-signed-in browser profiles. It does **not** run the local Codex `deep-review`
-pass.
+managed ReviewGPT browser lanes. The repo config chooses randomly among usable
+Eragon, Phlebas, and Mountain lanes by default so PR-review load is spread
+across signed-in browser profiles without selecting a profile that is already
+locked without remote debugging. It does **not** run the local Codex
+`deep-review` pass.
 
 For PR-lane patch implementation, this loop is the audit gate: the worktree /
 PR-lane skip in `agent-docs/operations/completion-workflow.md` lets the parent
@@ -52,8 +53,8 @@ current-task user opt-out.
    scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>
    ```
 
-2. Run ReviewGPT with the PR preset and the default randomized managed browser
-   lane. Pass the PR ref through `REVIEW_GPT_PR_URL` so
+2. Run ReviewGPT with the PR preset and the default randomized usable managed
+   browser lane. Pass the PR ref through `REVIEW_GPT_PR_URL` so
    `scripts/package-audit-context-full.sh` adds
    `review-gpt-pr-context/pr.diff` and `changed-files.txt` to the guarded
    source snapshot. Capture the response in an uncommitted `audit-packages/`
@@ -70,11 +71,22 @@ current-task user opt-out.
        --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Use the PR body as the intent contract."
    ```
 
-   The repo wrapper chooses one ReviewGPT browser lane per run:
+   The repo wrapper chooses one usable ReviewGPT browser lane per run:
    `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`, or
    `Mountain.app` on `9450`, always with profile `Default` and
    `app_connector=current` so review context comes from the guarded ZIP and
    repomix attachments, not a ChatGPT connector.
+
+   A lane is considered usable when its managed profile is unlocked, or when its
+   configured CDP endpoint is already alive. The default random path skips a
+   profile that has a stale or GUI-held `SingletonLock` and no live CDP endpoint;
+   an explicit `REVIEW_GPT_BROWSER_LANE` pin still targets that lane directly
+   and fails loudly if the profile needs operator cleanup.
+
+   The wrapper requests the configured Pro review model on the selected lane.
+   If ChatGPT reports that the selected lane has reached its model limit, rerun
+   the same round on a different lane with `REVIEW_GPT_BROWSER_LANE` instead of
+   downgrading the model.
 
    To pin a specific lane while recovering or debugging one profile, set
    `REVIEW_GPT_BROWSER_LANE=eragon|phlebas|mountain` on that command.
