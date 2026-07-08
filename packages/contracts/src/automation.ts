@@ -230,6 +230,7 @@ export const automationRouteSchema = z
     identityId: z.string().min(1).nullable(),
     participantId: z.string().min(1).nullable(),
     threadId: z.string().min(1).nullable(),
+    threadIsDirect: z.boolean().nullable().optional(),
   })
   .strict();
 

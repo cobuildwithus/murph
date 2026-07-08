@@ -9,6 +9,7 @@ export interface AssistantDeliveryRouteFields {
   identityId?: string | null
   participantId?: string | null
   threadId?: string | null
+  threadIsDirect?: boolean | null
 }
 
 export interface AssistantAutomationRouteFields extends AssistantDeliveryRouteFields {
@@ -36,6 +37,7 @@ export interface NormalizedAssistantDeliveryRouteFields {
   identityId: string | null
   participantId: string | null
   threadId: string | null
+  threadIsDirect?: boolean | null
 }
 
 export interface AssistantCurrentDeliveryRoute {
@@ -44,6 +46,7 @@ export interface AssistantCurrentDeliveryRoute {
   identityId?: string | null
   participantId?: string | null
   threadId?: string | null
+  threadIsDirect?: boolean | null
 }
 
 export type AssistantAutomationRouteValidationProfile = 'hosted' | 'local'
@@ -61,6 +64,7 @@ export function resolveAssistantDeliveryRouteWithCurrentRoute(
     identityId: normalizeAssistantRouteString(input.identityId),
     participantId: normalizeAssistantRouteString(input.participantId),
     threadId: normalizeAssistantRouteString(input.threadId),
+    ...normalizeAssistantRouteThreadIsDirect(input.threadIsDirect),
   }
   if (
     normalizedCurrentRoute === null ||
@@ -92,6 +96,13 @@ export function resolveAssistantDeliveryRouteWithCurrentRoute(
     identityId: explicit.identityId ?? normalizedCurrentRoute.identityId,
     participantId: explicit.participantId ?? normalizedCurrentRoute.participantId,
     threadId: explicit.threadId ?? normalizedCurrentRoute.threadId,
+    ...(
+      explicit.threadIsDirect !== undefined
+        ? { threadIsDirect: explicit.threadIsDirect }
+        : normalizedCurrentRoute.threadIsDirect !== undefined
+          ? { threadIsDirect: normalizedCurrentRoute.threadIsDirect }
+          : {}
+    ),
   }
 }
 
@@ -109,7 +120,14 @@ function normalizeAssistantCurrentDeliveryRoute(
     identityId: normalizeAssistantRouteString(currentRoute?.identityId),
     participantId: normalizeAssistantRouteString(currentRoute?.participantId),
     threadId: normalizeAssistantRouteString(currentRoute?.threadId),
+    ...normalizeAssistantRouteThreadIsDirect(currentRoute?.threadIsDirect),
   }
+}
+
+function normalizeAssistantRouteThreadIsDirect(
+  value: boolean | null | undefined,
+): { threadIsDirect?: boolean | null } {
+  return typeof value === 'boolean' ? { threadIsDirect: value } : {}
 }
 
 export function stripPrivateAssistantRoutePlaceholders(

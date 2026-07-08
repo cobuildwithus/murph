@@ -53,6 +53,7 @@ export interface AssistantCronTargetInput {
   participantId?: string | null
   sessionId?: string | null
   threadId?: string | null
+  threadIsDirect?: boolean | null
 }
 
 export async function ensureAssistantCronState(
@@ -328,6 +329,9 @@ export function buildAssistantCronTarget(
     identityId: normalizeNullableString(input.identityId),
     participantId: normalizeNullableString(input.participantId),
     threadId: normalizeNullableString(input.threadId),
+    ...(typeof input.threadIsDirect === 'boolean'
+      ? { threadIsDirect: input.threadIsDirect }
+      : {}),
     deliveryTarget: normalizeNullableString(input.deliveryTarget),
   }
 }

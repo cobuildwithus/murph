@@ -98,7 +98,7 @@ import {
   resolveAssistantCronNextRunAfterSuccess,
 } from './finalization.js'
 import {
-  resolveAssistantCronTargetBindingDelivery,
+  resolveAssistantCronNotificationDeliveryRoute,
   validateAssistantCronDeliveryTarget,
 } from './targets.js'
 
@@ -595,7 +595,7 @@ export async function executeClaimedAssistantCronJob(input: {
           turnEnvironment: input.turnEnvironment ?? null,
           turnTrigger: 'automation-cron',
         })
-        const bindingDelivery = resolveAssistantCronTargetBindingDelivery(
+        const deliveryRoute = resolveAssistantCronNotificationDeliveryRoute(
           claimedJob.target,
         )
         // Run lifecycle-owned deterministic eligibility + persistence BEFORE
@@ -693,12 +693,13 @@ export async function executeClaimedAssistantCronJob(input: {
             turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
             threadId: claimedJob.target.threadId,
-            bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
+            bindingDeliveryTarget: deliveryRoute.bindingDelivery?.target ?? undefined,
             deferCommitUntilDeliveryAccepted:
               input.deliveryDispatchMode === 'queue-only',
-            deliveryKind: bindingDelivery?.kind ?? undefined,
+            deliveryKind: deliveryRoute.bindingDelivery?.kind ?? undefined,
             deliverySource: claimedJob.target.deliverySource,
-            deliveryTarget: claimedJob.target.deliveryTarget,
+            deliveryTarget: deliveryRoute.deliveryTarget,
+            threadIsDirect: deliveryRoute.threadIsDirect,
             operatorAuthority: 'direct-operator',
             workingDirectory: input.vault,
           })

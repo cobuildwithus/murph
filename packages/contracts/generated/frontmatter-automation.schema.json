@@ -235,6 +235,16 @@
               "type": "null"
             }
           ]
+        },
+        "threadIsDirect": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

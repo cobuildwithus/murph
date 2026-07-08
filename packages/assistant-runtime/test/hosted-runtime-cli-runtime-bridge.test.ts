@@ -273,6 +273,7 @@ test("hosted CLI runtime bridge exposes current route continuity locators", asyn
       identityId: "h1_111111111111111111111111",
       participantId: "h1_222222222222222222222222",
       threadId: "h1_333333333333333333333333",
+      threadIsDirect: true,
     },
     deviceSyncPort: null,
   }, async (bridge) => {
@@ -290,6 +291,7 @@ test("hosted CLI runtime bridge exposes current route continuity locators", asyn
         identityId: "h1_111111111111111111111111",
         participantId: "h1_222222222222222222222222",
         threadId: "h1_333333333333333333333333",
+        threadIsDirect: true,
       },
     });
   });

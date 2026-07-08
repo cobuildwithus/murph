@@ -184,6 +184,7 @@ export function projectCanonicalAssistantCronJob(input: {
           identityId: null,
           participantId: null,
           threadId: null,
+          threadIsDirect: undefined,
         }
   const target = assistantCronTargetSchema.parse({
     sessionId: continuitySessionId,
@@ -193,6 +194,9 @@ export function projectCanonicalAssistantCronJob(input: {
     identityId: targetRoute.identityId,
     participantId: targetRoute.participantId,
     threadId: targetRoute.threadId,
+    ...(typeof targetRoute.threadIsDirect === 'boolean'
+      ? { threadIsDirect: targetRoute.threadIsDirect }
+      : {}),
     deliveryTarget: targetRoute.deliveryTarget,
   })
   const projectedState = projectCanonicalAssistantCronJobState({

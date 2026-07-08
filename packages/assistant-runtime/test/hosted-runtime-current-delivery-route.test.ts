@@ -31,6 +31,7 @@ test("hosted current route keeps reply target delivery separate from conversatio
       identityId: "h1_111111111111111111111111",
       participantId: "h1_222222222222222222222222",
       threadId: "h1_333333333333333333333333",
+      threadIsDirect: false,
     },
   );
 });
@@ -69,6 +70,7 @@ test("unambiguous current route keeps locators when every message agrees", () =>
     identityId: "h1_111111111111111111111111",
     participantId: "h1_222222222222222222222222",
     threadId: "h1_333333333333333333333333",
+    threadIsDirect: true,
   };
   assert.deepEqual(resolveUnambiguousCurrentDeliveryRoute([route, route]), route);
 });

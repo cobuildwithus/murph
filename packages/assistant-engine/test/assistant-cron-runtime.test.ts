@@ -31,6 +31,7 @@ type MockAutomationRecord = {
     identityId: string | null
     participantId: string | null
     threadId: string | null
+    threadIsDirect?: boolean | null
   }
   schedule: AutomationSchedule
   relativePath?: string
@@ -5029,6 +5030,77 @@ describe('assistant cron runtime orchestration', () => {
       (record) => record.jobId === claimed.job.jobId,
     )
     expect(runtimeRecord?.sessionId).toBeNull()
+  })
+
+  it('executes hosted Linq current-route snapshots as direct thread binding deliveries', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-linq-current-route-binding-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: 'automation-linq-current-route-binding',
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Send the morning reminder.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'old-home-chat',
+        identityId: 'h1_111111111111111111111111',
+        participantId: 'h1_222222222222222222222222',
+        threadId: 'h1_333333333333333333333333',
+        threadIsDirect: true,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '10:00',
+      },
+      slug: 'linq-current-route-binding-reminder',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled'],
+      title: 'Linq current route binding reminder',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    })
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
+
+    if (!source) {
+      throw new Error('Expected canonical source to exist.')
+    }
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
+    const claimed = await claimResolvedAssistantCronJob({
+      job: {
+        kind: 'canonical',
+        source,
+        runtimeState,
+        job: projectCanonicalAssistantCronJob({
+          source,
+          runtimeState,
+        }),
+      },
+      paths,
+    })
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'old-home-chat',
+        deliveryKind: 'thread',
+        deliveryTarget: null,
+        threadId: 'h1_333333333333333333333333',
+        threadIsDirect: true,
+      }),
+    )
   })
 
   it('executes canonical Telegram cron jobs with a thread-only route', async () => {

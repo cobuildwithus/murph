@@ -90,6 +90,14 @@ function normalizeNullableRouteString(value: unknown): string | null {
   return null;
 }
 
+function normalizeOptionalNullableRouteBoolean(value: unknown): boolean | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === null || typeof value === "boolean" ? value : undefined;
+}
+
 function requireStringValue(value: unknown, fieldName: string): string {
   const normalized = normalizeNullableString(typeof value === "string" ? value : null);
   if (!normalized) {
@@ -264,6 +272,7 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
   }
 
   const object = value as Record<string, unknown>;
+  const threadIsDirect = normalizeOptionalNullableRouteBoolean(object.threadIsDirect);
   return {
     channel: requireStringValue(object.channel, "route.channel"),
     deliverySource: normalizeAutomationRouteDeliverySource(object.deliverySource),
@@ -271,6 +280,7 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
     identityId: normalizeNullableRouteString(object.identityId),
     participantId: normalizeNullableRouteString(object.participantId),
     threadId: normalizeNullableRouteString(object.threadId),
+    ...(threadIsDirect !== undefined ? { threadIsDirect } : {}),
   };
 }
 
