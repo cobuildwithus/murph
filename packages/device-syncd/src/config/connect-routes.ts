@@ -12,12 +12,14 @@ export interface DeviceConnectJunctionLinkRoute {
   readonly kind: "junction_link";
   readonly connectTarget: string;
   readonly sourceProviderSlug: string;
+  readonly sourceProviderSlugAliases?: readonly string[];
   readonly defaultEnabled: boolean;
 }
 
 export interface DeviceConnectJunctionSdkRoute {
   readonly kind: "junction_sdk";
   readonly sourceProviderSlug: string;
+  readonly sourceProviderSlugAliases?: readonly string[];
 }
 
 export interface DeviceConnectDirectRoute {
@@ -207,7 +209,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "apple-health",
     label: "Apple Health",
-    routes: [junctionSdkRoute("apple_health_kit")],
+    routes: [junctionSdkRoute("apple_health_kit", { aliases: ["apple_health", "apple_healthkit"] })],
   },
   {
     connectSourceId: "health-connect",
@@ -224,9 +226,7 @@ const DIRECT_ROUTE_ENTRY_BY_PROVIDER = new Map(
   listDirectDeviceConnectRouteEntries().map((entry) => [entry.route.provider, entry] as const),
 );
 
-const JUNCTION_ROUTE_ENTRY_BY_PROVIDER_SLUG = new Map(
-  listJunctionDeviceConnectRouteEntries().map((entry) => [entry.route.sourceProviderSlug, entry] as const),
-);
+const JUNCTION_ROUTE_ENTRY_BY_PROVIDER_SLUG = buildJunctionDeviceConnectRouteEntryMap();
 
 const JUNCTION_LINK_ROUTE_ENTRY_BY_PROVIDER_SLUG = new Map(
   listJunctionLinkDeviceConnectRouteEntries().map((entry) => [entry.route.sourceProviderSlug, entry] as const),
@@ -354,6 +354,10 @@ export function resolveJunctionDeviceConnectRouteByProviderSlug(
   return normalized ? JUNCTION_ROUTE_ENTRY_BY_PROVIDER_SLUG.get(normalized) ?? null : null;
 }
 
+export function resolveDeviceConnectSourceIdForJunctionProviderSlug(providerSlug: string): string | null {
+  return resolveJunctionDeviceConnectRouteByProviderSlug(providerSlug)?.source.connectSourceId ?? null;
+}
+
 export function resolveJunctionLinkDeviceConnectRouteByProviderSlug(
   providerSlug: string,
 ): DeviceConnectRouteEntry<DeviceConnectJunctionLinkRoute> | null {
@@ -363,7 +367,7 @@ export function resolveJunctionLinkDeviceConnectRouteByProviderSlug(
 
 function junctionLinkRoute(
   sourceProviderSlug: string,
-  options: { connectTarget?: string; defaultEnabled?: boolean } = {},
+  options: { aliases?: readonly string[]; connectTarget?: string; defaultEnabled?: boolean } = {},
 ): DeviceConnectJunctionLinkRoute {
   const normalizedProviderSlug = normalizeJunctionProviderSlug(sourceProviderSlug);
   const normalizedConnectTarget = normalizeJunctionProviderSlug(options.connectTarget ?? sourceProviderSlug);
@@ -376,17 +380,25 @@ function junctionLinkRoute(
     kind: "junction_link",
     connectTarget: normalizedConnectTarget,
     sourceProviderSlug: normalizedProviderSlug,
+    ...normalizeJunctionProviderSlugAliases(options.aliases),
     defaultEnabled: options.defaultEnabled ?? true,
   };
 }
 
-function junctionSdkRoute(sourceProviderSlug: string): DeviceConnectJunctionSdkRoute {
+function junctionSdkRoute(
+  sourceProviderSlug: string,
+  options: { aliases?: readonly string[] } = {},
+): DeviceConnectJunctionSdkRoute {
   const normalizedProviderSlug = normalizeJunctionProviderSlug(sourceProviderSlug);
   if (!normalizedProviderSlug) {
     throw new TypeError("Junction SDK routes require normalized provider slugs.");
   }
 
-  return { kind: "junction_sdk", sourceProviderSlug: normalizedProviderSlug };
+  return {
+    kind: "junction_sdk",
+    sourceProviderSlug: normalizedProviderSlug,
+    ...normalizeJunctionProviderSlugAliases(options.aliases),
+  };
 }
 
 function directRoute(
@@ -408,4 +420,49 @@ function directRoute(
 
 function unavailableRoute(reason: string): DeviceConnectUnavailableRoute {
   return { kind: "unavailable", reason };
+}
+
+function buildJunctionDeviceConnectRouteEntryMap(): ReadonlyMap<
+  string,
+  DeviceConnectRouteEntry<DeviceConnectJunctionLinkRoute | DeviceConnectJunctionSdkRoute>
+> {
+  const entries = new Map<
+    string,
+    DeviceConnectRouteEntry<DeviceConnectJunctionLinkRoute | DeviceConnectJunctionSdkRoute>
+  >();
+
+  for (const entry of listJunctionDeviceConnectRouteEntries()) {
+    for (const providerSlug of [
+      entry.route.sourceProviderSlug,
+      ...(entry.route.sourceProviderSlugAliases ?? []),
+    ]) {
+      const existing = entries.get(providerSlug);
+      if (existing && existing.source.connectSourceId !== entry.source.connectSourceId) {
+        throw new TypeError(
+          `Junction provider slug ${providerSlug} is mapped to multiple device connect sources.`,
+        );
+      }
+      entries.set(providerSlug, entry);
+    }
+  }
+
+  return entries;
+}
+
+function normalizeJunctionProviderSlugAliases(
+  aliases: readonly string[] | undefined,
+): { sourceProviderSlugAliases?: readonly string[] } {
+  if (!aliases || aliases.length === 0) {
+    return {};
+  }
+
+  const normalizedAliases = [...new Set(
+    aliases
+      .map((alias) => normalizeJunctionProviderSlug(alias))
+      .filter((alias): alias is string => Boolean(alias)),
+  )];
+
+  return normalizedAliases.length > 0
+    ? { sourceProviderSlugAliases: Object.freeze(normalizedAliases) }
+    : {};
 }

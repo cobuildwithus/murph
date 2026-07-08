@@ -1257,6 +1257,59 @@ test("ConnectPage gives each reconnect-required Junction child its own target", 
   );
 });
 
+test("ConnectPage keeps account disconnects visible when all Junction children need reconnect", async () => {
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_multi",
+        connectSourceId: "whoop",
+        connectTarget: "whoop",
+        primaryAction: {
+          kind: "reconnect",
+          label: "Reconnect",
+        },
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            connectProvider: "junction",
+            connectSourceId: "garmin",
+            connectTarget: "garmin",
+            providerLabel: "Garmin",
+            requiresReconnect: true,
+            resourceCount: 2,
+            sourceProviderSlug: "garmin",
+            status: "error",
+          },
+          {
+            connectProvider: "junction",
+            connectSourceId: "whoop",
+            connectTarget: "whoop",
+            providerLabel: "WHOOP",
+            requiresReconnect: true,
+            resourceCount: 3,
+            sourceProviderSlug: "whoop_v2",
+            status: "error",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Garmin needs reconnect/u);
+  assert.match(markup, /Whoop needs reconnect/u);
+  assert.match(markup, /aria-label="Reconnect Garmin"/u);
+  assert.match(markup, /aria-label="Reconnect Whoop"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Garmin"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Whoop"/u);
+  assert.equal(markup.match(/aria-label="Disconnect Junction account"/gu)?.length, 2);
+});
+
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
   const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
 

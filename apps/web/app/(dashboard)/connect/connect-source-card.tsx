@@ -29,6 +29,8 @@ export function SourceCard({
   const disconnectActionLabel = resolveDisconnectActionLabel(source);
   const disconnectAriaLabel = resolveDisconnectAriaLabel(source);
   const reconnectUnavailable = source.requiresReconnect && !isAvailable;
+  const showReconnectStateDisconnect = canDisconnect
+    && (reconnectUnavailable || source.disconnectScope === "junction_account");
   const unavailableMessage = !source.requiresReconnect && !isAvailable
     ? source.unavailableMessage
     : undefined;
@@ -114,7 +116,7 @@ export function SourceCard({
                 {pending ? "Opening..." : isAvailable ? actionLabel : "Not available"}
               </Button>
             )}
-            {reconnectUnavailable && canDisconnect ? (
+            {showReconnectStateDisconnect ? (
               <button
                 type="button"
                 aria-label={disconnectAriaLabel}

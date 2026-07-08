@@ -5,7 +5,7 @@ import {
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
   readConfiguredDeviceSyncConnectTargetConfigs,
-  resolveJunctionConnectTargetForSourceId,
+  resolveDeviceConnectSourceIdForJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 
 import { PageHeader } from "@/src/components/ui/page-header";
@@ -52,9 +52,6 @@ type ConnectSourceConnectionState = {
 type ConnectSourceDisconnectScope = NonNullable<ConnectSource["disconnectScope"]>;
 
 const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>(["apple-health"]);
-const SOURCE_ID_BY_JUNCTION_UPSTREAM_ALIAS = new Map<string, string>([
-  ["apple_health", "apple-health"],
-]);
 
 const CONNECT_SOURCE_UI = {
   "apple-health": {
@@ -436,17 +433,11 @@ function resolveConnectSourceConnectionMatches(
   const connectedConnections = new Map<string, ConnectSourceConnectionState>();
   const visibleSourceIds = new Set(sources.map((source) => source.id));
   const sourceIdByDirectProvider = new Map<string, string>();
-  const sourceIdByJunctionTarget = new Map<string, string>();
 
   for (const source of sources) {
     const directProvider = normalizeDeviceSyncConnectTargetKey(source.id);
     if (directProvider) {
       sourceIdByDirectProvider.set(directProvider, source.id);
-    }
-
-    const junctionTarget = resolveJunctionConnectTargetForSourceId(source.id);
-    if (junctionTarget) {
-      sourceIdByJunctionTarget.set(junctionTarget, source.id);
     }
   }
 
@@ -537,10 +528,9 @@ function resolveConnectSourceConnectionMatches(
 
       const sourceProviderSlug = normalizeDeviceSyncConnectTargetKey(upstreamSource.sourceProviderSlug);
       const sourceId = sourceProviderSlug
-        ? sourceIdByJunctionTarget.get(sourceProviderSlug)
-          ?? SOURCE_ID_BY_JUNCTION_UPSTREAM_ALIAS.get(sourceProviderSlug)
+        ? resolveDeviceConnectSourceIdForJunctionProviderSlug(sourceProviderSlug)
         : null;
-      if (sourceId) {
+      if (sourceId && visibleSourceIds.has(sourceId)) {
         upsertConnectSourceConnection(connectedConnections, {
           connectionId: disconnect.connectionId,
           connectProvider: upstreamRequiresReconnect ? upstreamConnectProvider : provider,

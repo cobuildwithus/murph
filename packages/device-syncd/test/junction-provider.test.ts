@@ -20,6 +20,7 @@ import {
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
 } from "../src/config/junction-connect-sources.ts";
+import { resolveDeviceConnectSourceIdForJunctionProviderSlug } from "../src/config/connect-routes.ts";
 import {
   isAllowedJunctionLinkHost,
   JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
@@ -577,7 +578,10 @@ test("Junction default provider filter covers hosted Link connect routes", () =>
   assert.equal(resolveJunctionConnectTargetForSourceId("onetouch"), "onetouch_ble");
   assert.equal(resolveJunctionConnectTargetForSourceId("apple-health"), "apple_health_kit");
   assert.equal(resolveJunctionConnectSourceLabel("accuchek_ble"), "Accu-Chek");
-  assert.equal(resolveJunctionConnectSourceLabel("apple_health_kit"), "Apple Health");
+  for (const providerSlug of ["apple_health_kit", "apple_health", "apple-healthkit"]) {
+    assert.equal(resolveDeviceConnectSourceIdForJunctionProviderSlug(providerSlug), "apple-health");
+    assert.equal(resolveJunctionConnectSourceLabel(providerSlug), "Apple Health");
+  }
 });
 
 test("Junction empty historical backfill records progress and stores the retry wake in metadata", async () => {
