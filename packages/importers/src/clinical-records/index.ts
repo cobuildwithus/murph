@@ -83,6 +83,7 @@ const FHIR_SYSTEM_LOINC = "http://loinc.org";
 const FHIR_SYSTEM_OBSERVATION_CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
 const FHIR_SYSTEM_OBSERVATION_INTERPRETATION = "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation";
 const FHIR_SYSTEM_SNOMED_CT = "http://snomed.info/sct";
+const FHIR_SYSTEM_UCUM = "http://unitsofmeasure.org";
 const LABORATORY_CATEGORY_CODES = new Set(["laboratory"]);
 const RESULT_STATUS_NORMAL_CODES = new Set(["n"]);
 const RESULT_STATUS_ABNORMAL_CODES = new Set(["a", "aa", "h", "hh", "l", "ll"]);
@@ -99,8 +100,20 @@ const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, str
   ["temperature", new Map([["cel", "Cel"]])],
 ]);
 type QuantityComparator = NonNullable<BloodTestResultRecord["comparator"]>;
+type BloodTestResultFlag = NonNullable<BloodTestResultRecord["flag"]>;
+type QuantityValue = {
+  comparator?: QuantityComparator;
+  system?: string;
+  unit?: string;
+  unitSource?: "code" | "unit";
+  value: number;
+};
 type ResultStatus = "normal" | "abnormal" | "unknown";
 type ParsedResultStatus = ResultStatus | "ambiguous";
+type ResultInterpretation = {
+  flag?: BloodTestResultFlag;
+  status: ParsedResultStatus;
+};
 const IMPORTABLE_OBSERVATION_STATUSES = new Set(["amended", "corrected", "final"]);
 const IMPORTABLE_DIAGNOSTIC_REPORT_STATUSES = new Set(["amended", "appended", "corrected", "final"]);
 const IMPORTABLE_DOCUMENT_REFERENCE_STATUSES = new Set(["current"]);
@@ -415,7 +428,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
       unsupported.push(unsupportedResource(context, "vital quantity comparator is not importable"));
       continue;
     }
-    const unit = normalizeVitalUnit(value.unit, vital);
+    const unit = normalizeVitalUnit(value, vital);
     if (!unit) {
       unsupported.push(unsupportedResource(context, "vital quantity unit is not importable"));
       continue;
@@ -462,7 +475,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     if (quantity.comparator) {
       return unsupportedOnly(context, "vital quantity comparator is not importable");
     }
-    const unit = normalizeVitalUnit(quantity.unit, vital);
+    const unit = normalizeVitalUnit(quantity, vital);
     if (!unit) {
       return unsupportedOnly(context, "vital quantity unit is not importable");
     }
@@ -488,13 +501,23 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
 
   const results: BloodTestResultRecord[] = [];
   for (const component of components) {
-    const componentResult = buildBloodTestResult(component);
+    const componentInterpretation = resultInterpretationFromInterpretation(component.interpretation);
+    if (componentInterpretation.status === "ambiguous") {
+      return unsupportedOnly(context, "clinical result interpretation is ambiguous");
+    }
+
+    const componentResult = buildBloodTestResult(component, componentInterpretation.flag);
     if (!componentResult) {
       return unsupportedOnly(context, "laboratory observation component result is not importable");
     }
     results.push(componentResult);
   }
-  const singleResult = buildBloodTestResult(context.resource);
+  const topLevelInterpretation = resultInterpretationFromInterpretation(context.resource.interpretation);
+  if (topLevelInterpretation.status === "ambiguous") {
+    return unsupportedOnly(context, "clinical result interpretation is ambiguous");
+  }
+
+  const singleResult = buildBloodTestResult(context.resource, topLevelInterpretation.flag);
   if (singleResult) {
     results.unshift(singleResult);
   }
@@ -511,10 +534,17 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   }
 
   const testName = textForCodeableConcept(context.resource.code) ?? "FHIR laboratory observation";
-  const resultStatus = resultStatusFromInterpretation(context.resource.interpretation);
-  if (resultStatus === "ambiguous") {
+  const componentResultStatus = resultStatusFromBloodTestResults(results);
+  if (
+    topLevelInterpretation.status !== "unknown"
+    && componentResultStatus !== "unknown"
+    && topLevelInterpretation.status !== componentResultStatus
+  ) {
     return unsupportedOnly(context, "clinical result interpretation is ambiguous");
   }
+  const resultStatus = topLevelInterpretation.status === "unknown"
+    ? componentResultStatus
+    : topLevelInterpretation.status;
 
   return candidateOnly(
     context,
@@ -564,10 +594,11 @@ function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): Ma
     if (summary.length > DIAGNOSTIC_SUMMARY_MAX_LENGTH) {
       return unsupportedOnly(context, "diagnostic report summary exceeds candidate bounds");
     }
-    const resultStatus = resultStatusFromInterpretation(context.resource.conclusionCode);
-    if (resultStatus === "ambiguous") {
+    const resultInterpretation = resultInterpretationFromInterpretation(context.resource.conclusionCode);
+    if (resultInterpretation.status === "ambiguous") {
       return unsupportedOnly(context, "clinical result interpretation is ambiguous");
     }
+    const resultStatus = resultInterpretation.status;
 
     return candidateOnly(
       context,
@@ -745,8 +776,18 @@ function buildVitalsCandidate(
   };
 }
 
-function normalizeVitalUnit(rawUnit: string | undefined, vital: VitalDefinition): string | null {
-  const trimmedUnit = rawUnit?.trim();
+function normalizeVitalUnit(
+  quantity: QuantityValue,
+  vital: VitalDefinition,
+): string | null {
+  if (quantity.system !== undefined && quantity.system !== FHIR_SYSTEM_UCUM) {
+    return null;
+  }
+  if (quantity.unitSource === "code" && quantity.system !== FHIR_SYSTEM_UCUM) {
+    return null;
+  }
+
+  const trimmedUnit = quantity.unit?.trim();
   if (!trimmedUnit) {
     return null;
   }
@@ -756,7 +797,10 @@ function normalizeVitalUnit(rawUnit: string | undefined, vital: VitalDefinition)
   return unit === vital.unit || alias !== undefined ? unit : null;
 }
 
-function buildBloodTestResult(resource: Observation | ObservationComponent): BloodTestResultRecord | null {
+function buildBloodTestResult(
+  resource: Observation | ObservationComponent,
+  flag?: BloodTestResultFlag,
+): BloodTestResultRecord | null {
   const analyte = textForCodeableConcept(resource.code);
   if (!analyte || analyte.length > LAB_RESULT_TEXT_MAX_LENGTH) {
     return null;
@@ -769,6 +813,7 @@ function buildBloodTestResult(resource: Observation | ObservationComponent): Blo
       analyte,
       ...slugFields,
       comparator: quantity.comparator,
+      ...(flag ? { flag } : {}),
       unit: quantity.unit,
       value: quantity.value,
     };
@@ -783,6 +828,7 @@ function buildBloodTestResult(resource: Observation | ObservationComponent): Blo
     return {
       analyte,
       ...slugFields,
+      ...(flag ? { flag } : {}),
       textValue,
     };
   }
@@ -957,9 +1003,10 @@ function codeableConceptHasCodeWithUnexpectedSystem(
   });
 }
 
-function resultStatusFromInterpretation(value: CodeableConcept[] | undefined): ParsedResultStatus {
+function resultInterpretationFromInterpretation(value: CodeableConcept[] | undefined): ResultInterpretation {
   let hasAbnormal = false;
   let hasNormal = false;
+  let flag: BloodTestResultFlag | undefined;
 
   for (const interpretation of readFhirArray(value)) {
     for (const coding of codingsForCodeableConcept(interpretation)) {
@@ -969,6 +1016,7 @@ function resultStatusFromInterpretation(value: CodeableConcept[] | undefined): P
       const code = coding.code?.toLowerCase();
       if (code && RESULT_STATUS_ABNORMAL_CODES.has(code)) {
         hasAbnormal = true;
+        flag = combineResultFlags(flag, flagForInterpretationCode(code));
       }
       if (code && RESULT_STATUS_NORMAL_CODES.has(code)) {
         hasNormal = true;
@@ -977,16 +1025,62 @@ function resultStatusFromInterpretation(value: CodeableConcept[] | undefined): P
   }
 
   if (hasAbnormal && hasNormal) {
-    return "ambiguous";
+    return { status: "ambiguous" };
   }
   if (hasAbnormal) {
-    return "abnormal";
+    return { flag: flag ?? "abnormal", status: "abnormal" };
   }
   if (hasNormal) {
+    return { flag: "normal", status: "normal" };
+  }
+
+  return { status: "unknown" };
+}
+
+function flagForInterpretationCode(code: string): BloodTestResultFlag {
+  switch (code) {
+    case "aa":
+    case "hh":
+    case "ll":
+      return "critical";
+    case "h":
+      return "high";
+    case "l":
+      return "low";
+    default:
+      return "abnormal";
+  }
+}
+
+function combineResultFlags(
+  current: BloodTestResultFlag | undefined,
+  next: BloodTestResultFlag,
+): BloodTestResultFlag {
+  if (current === "critical" || next === "critical") {
+    return "critical";
+  }
+  if (current === "high" && next === "low") {
+    return "abnormal";
+  }
+  if (current === "low" && next === "high") {
+    return "abnormal";
+  }
+
+  return current ?? next;
+}
+
+function resultStatusFromBloodTestResults(results: readonly BloodTestResultRecord[]): ResultStatus {
+  const flags = results
+    .map((result) => result.flag)
+    .filter((flag): flag is BloodTestResultFlag => flag !== undefined && flag !== "unknown");
+  if (flags.length === 0) {
+    return "unknown";
+  }
+  if (flags.every((flag) => flag === "normal")) {
     return "normal";
   }
 
-  return "unknown";
+  return "abnormal";
 }
 
 function readClinicalOccurredAt(
@@ -1042,7 +1136,7 @@ function readResourceVersion(resource: Resource): string | undefined {
 
 function readQuantityValue(
   quantity: Quantity | undefined,
-): { comparator?: QuantityComparator; unit?: string; value: number } | null {
+): QuantityValue | null {
   if (!quantity) {
     return null;
   }
@@ -1056,9 +1150,14 @@ function readQuantityValue(
     return null;
   }
 
+  const code = readString(quantity.code);
+  const unit = readString(quantity.unit);
+
   return {
     comparator,
-    unit: readString(quantity.code) ?? readString(quantity.unit),
+    system: readString(quantity.system),
+    unit: code ?? unit,
+    unitSource: code ? "code" : unit ? "unit" : undefined,
     value: numericValue,
   };
 }

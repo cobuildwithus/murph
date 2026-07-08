@@ -209,6 +209,7 @@ describe("buildClinicalImportPlan", () => {
         analyte: "Glucose",
         biomarkerSlug: "glucose",
         comparator: "<",
+        flag: "normal",
         slug: "glucose",
         unit: "mg/dL",
         value: 91,
@@ -821,13 +822,188 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
+  it("uses lab component interpretations without hiding abnormal results", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 4,
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            resourceType: "Observation",
+            id: "component-abnormal-panel",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Metabolic panel" },
+            component: [
+              {
+                code: { text: "Glucose" },
+                interpretation: [{
+                  coding: [{
+                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                    code: "H",
+                  }],
+                }],
+                valueQuantity: { value: 191, unit: "mg/dL" },
+              },
+            ],
+          },
+          {
+            resourceType: "Observation",
+            id: "component-normal-panel",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:01:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Metabolic panel" },
+            component: [
+              {
+                code: { text: "Albumin" },
+                interpretation: [{
+                  coding: [{
+                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                    code: "N",
+                  }],
+                }],
+                valueString: "Normal",
+              },
+            ],
+          },
+          {
+            resourceType: "Observation",
+            id: "component-conflicting-panel",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:02:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Metabolic panel" },
+            component: [
+              {
+                code: { text: "Potassium" },
+                interpretation: [{
+                  coding: [
+                    {
+                      system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                      code: "N",
+                    },
+                    {
+                      system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                      code: "H",
+                    },
+                  ],
+                }],
+                valueQuantity: { value: 5.8, unit: "mmol/L" },
+              },
+            ],
+          },
+          {
+            resourceType: "Observation",
+            id: "parent-component-conflict-panel",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:03:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Metabolic panel" },
+            interpretation: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                code: "N",
+              }],
+            }],
+            component: [
+              {
+                code: { text: "Potassium" },
+                interpretation: [{
+                  coding: [{
+                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                    code: "H",
+                  }],
+                }],
+                valueQuantity: { value: 5.8, unit: "mmol/L" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toHaveLength(2);
+    const abnormalPanel = plan.candidates.find(
+      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
+        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "component-abnormal-panel",
+    );
+    expect(abnormalPanel?.payload.resultStatus).toBe("abnormal");
+    expect(abnormalPanel?.payload.results).toEqual([
+      {
+        analyte: "Glucose",
+        biomarkerSlug: "glucose",
+        flag: "high",
+        slug: "glucose",
+        unit: "mg/dL",
+        value: 191,
+      },
+    ]);
+
+    const normalPanel = plan.candidates.find(
+      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
+        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "component-normal-panel",
+    );
+    expect(normalPanel?.payload.resultStatus).toBe("normal");
+    expect(normalPanel?.payload.results).toEqual([
+      {
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        flag: "normal",
+        slug: "albumin",
+        textValue: "Normal",
+      },
+    ]);
+
+    expect(plan.unsupported).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: "component-conflicting-panel",
+          reason: "clinical result interpretation is ambiguous",
+        }),
+        expect.objectContaining({
+          resourceId: "parent-component-conflict-panel",
+          reason: "clinical result interpretation is ambiguous",
+        }),
+      ]),
+    );
+  });
+
   it("leaves unsafe clinical resources unsupported instead of importing live candidates", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
           {
             resourceType: "Observation",
             relativePath: "Observation/page-1.json",
-            count: 9,
+            count: 11,
           },
           {
             resourceType: "DiagnosticReport",
@@ -888,6 +1064,16 @@ describe("buildClinicalImportPlan", () => {
           },
           {
             resourceType: "Observation",
+            id: "bp-local-unit-system",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+            },
+            valueQuantity: { value: 128, system: "urn:vendor:units", code: "mm[Hg]" },
+          },
+          {
+            resourceType: "Observation",
             id: "bp-missing-code-system",
             status: "final",
             effectiveDateTime: "2026-07-01T12:00:00.000Z",
@@ -920,6 +1106,23 @@ describe("buildClinicalImportPlan", () => {
                   coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
                 },
                 valueQuantity: { value: 12, system: "http://unitsofmeasure.org", code: "[stone_av]" },
+              },
+            ],
+          },
+          {
+            resourceType: "Observation",
+            id: "bp-component-local-unit-system",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:02:30.000Z",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "85354-9", display: "Blood pressure panel" }],
+            },
+            component: [
+              {
+                code: {
+                  coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+                },
+                valueQuantity: { value: 128, system: "urn:vendor:units", code: "mm[Hg]" },
               },
             ],
           },
@@ -1144,7 +1347,7 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toHaveLength(21);
+    expect(plan.unsupported).toHaveLength(23);
     expect(plan.unsupported).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1164,6 +1367,10 @@ describe("buildClinicalImportPlan", () => {
           reason: "vital coding system is not importable",
         }),
         expect.objectContaining({
+          resourceId: "bp-local-unit-system",
+          reason: "vital quantity unit is not importable",
+        }),
+        expect.objectContaining({
           resourceId: "bp-missing-code-system",
           reason: "vital coding system is not importable",
         }),
@@ -1173,6 +1380,10 @@ describe("buildClinicalImportPlan", () => {
         }),
         expect.objectContaining({
           resourceId: "bp-component-unsupported-unit",
+          reason: "vital quantity unit is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "bp-component-local-unit-system",
           reason: "vital quantity unit is not importable",
         }),
         expect.objectContaining({
