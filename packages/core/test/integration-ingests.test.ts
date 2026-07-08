@@ -183,6 +183,19 @@ function createZip(
   return Buffer.concat([...localParts, centralDirectory, eocd]);
 }
 
+function prefixSingleEntryZip(zip: Buffer, prefix: Buffer): Buffer {
+  const centralDirectoryOffset = findZipSignature(zip, 0x02014b50);
+  const eocdOffset = findZipSignature(zip, 0x06054b50);
+  const localAndPayload = zip.subarray(0, centralDirectoryOffset);
+  const centralDirectoryAndEocd = Buffer.from(zip.subarray(centralDirectoryOffset));
+  centralDirectoryAndEocd.writeUInt32LE(prefix.byteLength, 42);
+  centralDirectoryAndEocd.writeUInt32LE(
+    prefix.byteLength + centralDirectoryOffset,
+    eocdOffset - centralDirectoryOffset + 16,
+  );
+  return Buffer.concat([prefix, localAndPayload, centralDirectoryAndEocd]);
+}
+
 function findZipSignature(buffer: Buffer, signature: number): number {
   for (let offset = 0; offset <= buffer.byteLength - 4; offset += 1) {
     if (buffer.readUInt32LE(offset) === signature) {
@@ -330,6 +343,34 @@ test("integration ingest zip archive reader rejects hidden macOS archive entries
       assert.equal(error instanceof VaultError, true);
       assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ARCHIVE_INVALID");
       assert.equal((error as VaultError).details.entryCount, 2);
+      return true;
+    },
+  );
+});
+
+test("integration ingest zip archive reader rejects hidden leading archive bytes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-hidden-zip-bytes");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-10.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_ArchivedZipHidden1",
+    eventId: "evt_ArchivedZipHidden1",
+    importedAt: "2025-10-12T09:00:00.000Z",
+  });
+  const content = `${JSON.stringify(archivedRecord)}\n`;
+  const zip = prefixSingleEntryZip(
+    createSingleEntryZip(path.basename(logicalPath), content),
+    Buffer.from("hidden bytes\n", "utf8"),
+  );
+  await fs.mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, `${logicalPath}.zip`), zip);
+
+  await assert.rejects(
+    readIntegrationIngestEntries(vaultRoot),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ARCHIVE_INVALID");
       return true;
     },
   );
