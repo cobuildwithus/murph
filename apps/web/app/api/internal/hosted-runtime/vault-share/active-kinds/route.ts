@@ -2,9 +2,9 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS,
-  isHostedVaultShareProjectionKind,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+  parseHostedVaultShareProjectionScopeKey,
   type HostedVaultShareActiveProjectionKindsResponse,
-  type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -22,13 +22,17 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_VAULT_SHARE_ACTIVE_KINDS_BODY_LIMIT_BYTES = 0;
-const HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_KIND_PARAM = "supportedProjectionKind";
+const HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM = "supportedProjectionScope";
+const HOSTED_VAULT_SHARE_LEGACY_SUPPORTED_PROJECTION_KIND_PARAM = "supportedProjectionKind";
 
-const HOSTED_VAULT_SHARE_DEFAULT_SUPPORTED_PROJECTION_KINDS =
-  new Set<HostedVaultShareProjectionKind>([
-    ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS,
-    HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
-  ]);
+const HOSTED_VAULT_SHARE_DEFAULT_SUPPORTED_PROJECTION_SCOPE_KEYS =
+  new Set(HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES
+    .filter((scope) =>
+      (HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS as readonly string[])
+        .includes(scope.projectionKind)
+      || scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND
+    )
+    .map((scope) => buildHostedVaultShareProjectionScopeKey(scope)));
 
 export const GET = withJsonError(async (request: Request) => {
   const grantorMemberId = await requireHostedCloudflareCallbackRequest(request, {
@@ -48,13 +52,13 @@ export const GET = withJsonError(async (request: Request) => {
     throw error;
   }
 
-  const supportedProjectionKinds = readSupportedProjectionKinds(request);
+  const supportedProjectionScopeKeys = readSupportedProjectionScopeKeys(request);
   const projectionScopes = filterSupportedProjectionScopes(
     await readDeliverableHostedVaultShareProjectionScopes({
       grantorMemberId,
       prisma,
     }),
-    supportedProjectionKinds,
+    supportedProjectionScopeKeys,
   );
 
   return jsonOk({
@@ -66,32 +70,39 @@ export const GET = withJsonError(async (request: Request) => {
   } satisfies HostedVaultShareActiveProjectionKindsResponse);
 });
 
-function readSupportedProjectionKinds(request: Request): Set<HostedVaultShareProjectionKind> {
+function readSupportedProjectionScopeKeys(request: Request): Set<string> {
   const url = new URL(request.url);
   const values = url.searchParams.getAll(
-    HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_KIND_PARAM,
+    HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM,
   );
   if (values.length === 0) {
-    return HOSTED_VAULT_SHARE_DEFAULT_SUPPORTED_PROJECTION_KINDS;
+    return url.searchParams.has(HOSTED_VAULT_SHARE_LEGACY_SUPPORTED_PROJECTION_KIND_PARAM)
+      ? new Set()
+      : HOSTED_VAULT_SHARE_DEFAULT_SUPPORTED_PROJECTION_SCOPE_KEYS;
   }
 
-  const supported = new Set<HostedVaultShareProjectionKind>();
+  const supported = new Set<string>();
   for (const value of values) {
-    if (isHostedVaultShareProjectionKind(value)) {
-      supported.add(value);
+    try {
+      supported.add(buildHostedVaultShareProjectionScopeKey(
+        parseHostedVaultShareProjectionScopeKey(
+          value,
+          "Vault share supported projection scope",
+        ),
+      ));
+    } catch {
+      // Unknown future scopes are not a reason to fall back to legacy support.
     }
   }
 
-  return supported.size === 0
-    ? HOSTED_VAULT_SHARE_DEFAULT_SUPPORTED_PROJECTION_KINDS
-    : supported;
+  return supported;
 }
 
 function filterSupportedProjectionScopes(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
-  supportedProjectionKinds: ReadonlySet<HostedVaultShareProjectionKind>,
+  supportedProjectionScopeKeys: ReadonlySet<string>,
 ): HostedVaultShareProjectionScope[] {
   return projectionScopes.filter((scope) =>
-    supportedProjectionKinds.has(scope.projectionKind)
+    supportedProjectionScopeKeys.has(buildHostedVaultShareProjectionScopeKey(scope))
   );
 }

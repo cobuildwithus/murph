@@ -169,12 +169,13 @@ turns to warm old runner bundles; otherwise old bundles can parse a current
 group summary after new grants exist and fail closed.
 
 The active-scope delivery callback is separately capability-negotiated. New
-runner bundles must send repeated `supportedProjectionKind` query params for
-every projection kind they can parse. Web filters returned active scopes to that
-declared set before serializing the response.
+runner bundles must send repeated `supportedProjectionScope` query params for
+every exact projection-scope key they can parse, using the same key format as
+`buildHostedVaultShareProjectionScopeKey`. Web filters returned active scopes
+to that declared exact set before serializing the response.
 
-Warm old runner bundles omit `supportedProjectionKind`; web must treat that as
-support for the pre-distance/count scope set: fixed projection kinds plus
+Warm old runner bundles omit `supportedProjectionScope`; web must treat that as
+support for the pre-distance/count scope set: fixed projection scopes plus
 `activity-minutes-days.v1`. During gradual rollout, newly granted
 `activity-distance-days.v1` and `activity-session-count-days.v1` scopes are
 therefore hidden from old runners on the delivery callback rather than making

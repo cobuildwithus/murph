@@ -292,6 +292,30 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES =
     })),
   ] satisfies HostedVaultShareSelectableProjectionScope[]);
 
+export const HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES =
+  Object.freeze(uniqueHostedVaultShareProjectionScopeList([
+    ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS.map((projectionKind) => ({
+      projectionKind,
+    })),
+    ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  ] satisfies HostedVaultShareProjectionScope[]));
+
+function uniqueHostedVaultShareProjectionScopeList(
+  projectionScopes: readonly HostedVaultShareProjectionScope[],
+): HostedVaultShareProjectionScope[] {
+  const seen = new Set<string>();
+  const unique: HostedVaultShareProjectionScope[] = [];
+  for (const projectionScope of projectionScopes) {
+    const key = buildHostedVaultShareProjectionScopeKey(projectionScope);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(projectionScope);
+  }
+  return unique;
+}
+
 export function isHostedVaultShareActivitySelectorActivityKind(
   value: unknown,
 ): value is HostedVaultShareActivitySelectorActivityKind {
@@ -565,6 +589,20 @@ export function buildHostedVaultShareProjectionScopeKey(
     default:
       return scope.projectionKind;
   }
+}
+
+export function parseHostedVaultShareProjectionScopeKey(
+  value: unknown,
+  label: string,
+): HostedVaultShareProjectionScope {
+  const scopeKey = requireString(value, label);
+  const projectionScope = HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.find(
+    (scope) => buildHostedVaultShareProjectionScopeKey(scope) === scopeKey,
+  );
+  if (!projectionScope) {
+    throw new TypeError(`${label} must be a known vault-share projection scope key.`);
+  }
+  return projectionScope;
 }
 
 export function parseHostedVaultShareProjectionScope(

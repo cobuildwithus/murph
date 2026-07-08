@@ -31,7 +31,8 @@ import {
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
-  HOSTED_VAULT_SHARE_PROJECTION_KINDS,
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
 } from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({
@@ -40,8 +41,11 @@ const mocks = vi.hoisted(() => ({
 
 function buildExpectedVaultShareActiveKindsPath(): string {
   const params = new URLSearchParams();
-  for (const projectionKind of HOSTED_VAULT_SHARE_PROJECTION_KINDS) {
-    params.append("supportedProjectionKind", projectionKind);
+  for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
+    params.append(
+      "supportedProjectionScope",
+      buildHostedVaultShareProjectionScopeKey(projectionScope),
+    );
   }
 
   return `${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}?${params.toString()}`;

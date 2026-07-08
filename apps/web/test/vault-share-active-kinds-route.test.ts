@@ -59,6 +59,14 @@ function buildRequest(search = ""): Request {
 	});
 }
 
+function supportedScopeSearch(...scopes: Parameters<typeof buildHostedVaultShareProjectionScopeKey>[0][]): string {
+	const params = new URLSearchParams();
+	for (const scope of scopes) {
+		params.append("supportedProjectionScope", buildHostedVaultShareProjectionScopeKey(scope));
+	}
+	return `?${params.toString()}`;
+}
+
 describe("vault-share active-kinds route", () => {
 	beforeAll(async () => {
 		activeKindsRoute = await import(
@@ -125,9 +133,11 @@ describe("vault-share active-kinds route", () => {
 		]);
 
 		const response = await activeKindsRoute.GET(buildRequest(
-			"?supportedProjectionKind=activity-days.v0"
-				+ "&supportedProjectionKind=activity-distance-days.v1"
-				+ "&supportedProjectionKind=activity-session-count-days.v1",
+			supportedScopeSearch(
+				ACTIVITY_SCOPE,
+				RUNNING_DISTANCE_SCOPE,
+				RUNNING_SESSION_COUNT_SCOPE,
+			),
 		));
 
 		expect(response.status).toBe(200);
@@ -145,6 +155,38 @@ describe("vault-share active-kinds route", () => {
 				buildHostedVaultShareProjectionScopeKey(left)
 					.localeCompare(buildHostedVaultShareProjectionScopeKey(right))
 			),
+		});
+	});
+
+	it("does not fall back to defaults when exact support scopes are unknown", async () => {
+		mocks.readDeliverableHostedVaultShareProjectionScopes.mockResolvedValue([
+			ACTIVITY_SCOPE,
+		]);
+
+		const response = await activeKindsRoute.GET(buildRequest(
+			"?supportedProjectionScope=future-kind.v1.activityKind.running",
+		));
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			projectionKinds: [],
+			projectionScopes: [],
+		});
+	});
+
+	it("does not treat retired kind support params as legacy no-param runners", async () => {
+		mocks.readDeliverableHostedVaultShareProjectionScopes.mockResolvedValue([
+			ACTIVITY_SCOPE,
+		]);
+
+		const response = await activeKindsRoute.GET(buildRequest(
+			"?supportedProjectionKind=future-kind.v1",
+		));
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			projectionKinds: [],
+			projectionScopes: [],
 		});
 	});
 

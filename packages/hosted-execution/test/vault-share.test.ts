@@ -21,6 +21,7 @@ import {
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliverRequest,
   parseHostedVaultShareDeliverResponse,
+  parseHostedVaultShareProjectionScopeKey,
 } from "../src/vault-share.ts";
 
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
@@ -472,6 +473,23 @@ describe("vault-share contracts", () => {
         projectionScopes: [{ projectionKind: "future-challenge-kind.v0" }],
       })
     ).toThrow(/known vault-share projection kind/u);
+  });
+
+  it("parses exact projection scope keys for capability negotiation", () => {
+    expect(parseHostedVaultShareProjectionScopeKey(
+      buildHostedVaultShareProjectionScopeKey(RUNNING_DISTANCE_SCOPE),
+      "supported scope",
+    )).toEqual(RUNNING_DISTANCE_SCOPE);
+    expect(parseHostedVaultShareProjectionScopeKey(
+      buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE),
+      "supported scope",
+    )).toEqual(PROFILE_SCOPE);
+    expect(() =>
+      parseHostedVaultShareProjectionScopeKey(
+        "activity-distance-days.v1.activityKind.future-sport",
+        "supported scope",
+      )
+    ).toThrow(/known vault-share projection scope key/u);
   });
 
   it("rejects malformed activity selector projection scopes", () => {

@@ -690,8 +690,8 @@ describe("hosted group join policy", () => {
       },
       {
         description:
-          "Shares daily total distance for running activities. Does not share routes, GPS, pace, timestamps, heart rate, calories, or individual workouts.",
-        label: "Recent running distance",
+          "Shares daily total distance and session count for running activities. Does not share routes, GPS, pace, timestamps, heart rate, calories, or individual workouts.",
+        label: "Recent running distance and session count",
         projectionKind: "activity-distance-days.v1",
         projectionScope: RUNNING_DISTANCE_SCOPE,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_DISTANCE_SCOPE),
@@ -835,6 +835,40 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       tx: fakeTx,
     });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+  });
+
+  it("discloses session count in distance-scope join offer copy", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+          projectionScopes: [RUNNING_DISTANCE_SCOPE],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "sent",
+      },
+    });
+
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedVaultShareProjectionScopes: [RUNNING_DISTANCE_SCOPE],
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Like this to join. It shares your Murph profile name and recent running distance and session count with the group. Join page: https://www.withmurph.ai/groups/join/abc123.",
+      }),
+    );
   });
 
   it("does not create or send a join offer without the required message template", async () => {

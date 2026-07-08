@@ -273,9 +273,9 @@ function hostedVaultShareProjectionScopeDisplay(
       projectionScope.selector.activityKind,
     );
     return {
-      label: `Recent ${label} distance`,
+      label: `Recent ${label} distance and session count`,
       description:
-        `Shares daily total distance for ${label} activities. Does not share routes, GPS, pace, timestamps, heart rate, calories, or individual workouts.`,
+        `Shares daily total distance and session count for ${label} activities. Does not share routes, GPS, pace, timestamps, heart rate, calories, or individual workouts.`,
     };
   }
   if (projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {

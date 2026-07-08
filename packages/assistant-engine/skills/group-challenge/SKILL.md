@@ -35,11 +35,11 @@ provider traces, or private 1:1 data for a group challenge.
   - Walking minutes or walking minutes per day: `activityKind: "walking"`
   - Swimming minutes: `activityKind: "swimming"`
   - Sauna minutes or sauna minutes per week: `activityKind: "sauna"`
-- Activity distance for a specific distance-capable movement alias:
+- Activity distance and session count for a specific distance-capable movement alias:
   `{ "projectionKind": "activity-distance-days.v1", "selector": { "activityKind": "<alias>" } }`
-  - Running distance: `activityKind: "running"`
-  - Walking distance: `activityKind: "walking"`
-  - Cycling distance: `activityKind: "cycling"`
+  - Running distance and session count: `activityKind: "running"`
+  - Walking distance and session count: `activityKind: "walking"`
+  - Cycling distance and session count: `activityKind: "cycling"`
 - Activity session count for a specific activity or intervention alias, excluding sleep:
   `{ "projectionKind": "activity-session-count-days.v1", "selector": { "activityKind": "<alias>" } }`
   - Running session count: `activityKind: "running"`

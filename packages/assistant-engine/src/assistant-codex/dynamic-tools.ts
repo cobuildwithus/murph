@@ -471,7 +471,7 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projection scopes the join page may offer joining members. Joining never shares them automatically; each member approves their own selection. Use activity-minutes-days.v1 with a recognized activity alias, activity-distance-days.v1 with a distance-capable movement alias, or activity-session-count-days.v1 with a recognized activity/intervention alias.',
+          'Optional bounded health projection scopes the join page may offer joining members. Joining never shares them automatically; each member approves their own selection. Use activity-minutes-days.v1 with a recognized activity alias, activity-distance-days.v1 with a distance-capable movement alias for daily distance plus session count, or activity-session-count-days.v1 with a recognized activity/intervention alias.',
       },
       projectionScopes: {
         type: 'array',

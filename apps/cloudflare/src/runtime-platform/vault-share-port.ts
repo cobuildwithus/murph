@@ -1,6 +1,7 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  HOSTED_VAULT_SHARE_PROJECTION_KINDS,
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliverResponse,
 } from "@murphai/hosted-execution/vault-share";
@@ -11,7 +12,7 @@ import {
 
 import { fetchHostedWebControlPlaneJson, type HostedWebControlTransport } from "./web-control-transport.ts";
 
-const HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_KIND_PARAM = "supportedProjectionKind";
+const HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM = "supportedProjectionScope";
 
 export function createHostedWebVaultSharePort(input: {
   boundUserId: string;
@@ -51,8 +52,11 @@ export function createHostedWebVaultSharePort(input: {
 
 function buildHostedVaultShareActiveKindsPath(): string {
   const params = new URLSearchParams();
-  for (const projectionKind of HOSTED_VAULT_SHARE_PROJECTION_KINDS) {
-    params.append(HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_KIND_PARAM, projectionKind);
+  for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
+    params.append(
+      HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM,
+      buildHostedVaultShareProjectionScopeKey(projectionScope),
+    );
   }
 
   return `${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}?${params.toString()}`;
