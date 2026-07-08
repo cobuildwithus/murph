@@ -315,7 +315,7 @@ const INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS = new Map<WearableMetricKey, st
 const INVALID_ZERO_SLEEP_METRICS = new Set<string>(INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS.keys());
 
 interface InvalidZeroSleepWindow {
-  candidateIds: ReadonlySet<string>;
+  recordIds: ReadonlySet<string>;
   window: WearableSleepWindowCandidate;
 }
 
@@ -476,7 +476,7 @@ function isInvalidZeroSleepMetricCandidate(
 ): boolean {
   return INVALID_ZERO_SLEEP_METRICS.has(metric) &&
     candidate.value === 0 &&
-    invalidZeroWindows.some((entry) => entry.candidateIds.has(candidate.candidateId));
+    invalidZeroWindows.some((entry) => candidate.recordIds.some((recordId) => entry.recordIds.has(recordId)));
 }
 
 function preferDirectSleepMetricCandidates(
@@ -561,7 +561,7 @@ function collectInvalidZeroSleepSummaryWindows(
     }
 
     invalidWindows.push({
-      candidateIds: new Set(invalidZeroCandidates.map((candidate) => candidate.candidateId)),
+      recordIds: new Set(invalidZeroCandidates.flatMap((candidate) => candidate.recordIds)),
       window,
     });
   }
