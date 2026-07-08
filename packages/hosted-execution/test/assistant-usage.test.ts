@@ -162,6 +162,37 @@ test("OpenAI image usage basis classifier returns priceable token buckets", () =
     outputTokens: 400n,
     textInputTokens: 300n,
   });
+
+  const mixedCachedInput = classifyAssistantOpenAiImageUsageBasis({
+    cachedInputTokens: 100,
+    inputTokens: 1_300,
+    outputTokens: 400,
+    rawUsageJson: {
+      input_tokens: 1_300,
+      input_tokens_details: {
+        cached_tokens: 100,
+        image_tokens: 1_000,
+        text_tokens: 300,
+      },
+      output_tokens: 400,
+      total_tokens: 1_700,
+    },
+    totalTokens: 1_700,
+  });
+  assert.equal(mixedCachedInput.priceable, true);
+  if (!mixedCachedInput.priceable) {
+    throw new Error("Expected mixed cached image usage to be priceable.");
+  }
+  assert.deepEqual(mixedCachedInput.tokenBuckets, {
+    billableImageInputTokens: 1_000n,
+    billableTextInputTokens: 200n,
+    cachedImageInputTokens: 0n,
+    cachedInputTokens: 100n,
+    cachedTextInputTokens: 100n,
+    imageInputTokens: 1_000n,
+    outputTokens: 400n,
+    textInputTokens: 300n,
+  });
 });
 
 test("OpenAI image usage basis classifier explains unpriceable usage", () => {

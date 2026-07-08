@@ -193,14 +193,6 @@ export function classifyAssistantOpenAiImageUsageBasis(
   if (cachedInputTokenCount > detailedInputTokens) {
     return inconsistentOpenAiImageUsageBasis();
   }
-  if (
-    cachedInputTokenCount > 0n
-    && textInputTokens > 0n
-    && imageInputTokens > 0n
-  ) {
-    return missingOpenAiImageUsageBasis();
-  }
-
   const detailImageOutputTokens = readAssistantOpenAiImageRawDetailToken(
     input.rawUsageJson,
     "output_tokens_details",

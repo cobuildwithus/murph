@@ -388,8 +388,8 @@ describe("hosted AI usage allowance pricing", () => {
     )).toThrow("OpenAI image hosted AI usage requires provider usage tokens");
   });
 
-  it("rejects OpenAI image usage when cached input cannot be assigned to one modality", () => {
-    expect(() => priceHostedAiUsageForAllowance({
+  it("prices mixed cached OpenAI image input with conservative text-first allocation", () => {
+    expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       cachedInputTokens: 100,
       inputTokens: 1_300,
@@ -411,7 +411,27 @@ describe("hosted AI usage allowance pricing", () => {
       totalTokens: 1_700,
       usageExtractionSourcePath: "openai.images.generate",
       usageExtractionVersion: "openai-images-v1",
-    })).toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+    })).toMatchObject({
+      costUsdMicros: 21_125n,
+      counted: true,
+      pricingSnapshot: {
+        standardCostUsdMicros: "21125",
+        tokens: {
+          openAiImage: {
+            billableImageInput: "1000",
+            billableTextInput: "200",
+            cachedImageInput: "0",
+            cachedInput: "100",
+            cachedInputAllocation: "text_first_conservative",
+            cachedTextInput: "100",
+            imageInput: "1000",
+            output: "400",
+            textInput: "300",
+          },
+        },
+      },
+      pricingVersion: "openai-image-api-pricing-2026-07-08-standard",
+    });
   });
 
   it("rejects OpenAI image usage when provider usage tokens are missing", () => {

@@ -2048,7 +2048,10 @@ function priceHostedAiUsageOpenAiImageForAllowance(input: {
           billableTextInput: tokenBuckets.billableTextInputTokens.toString(),
           cachedImageInput: tokenBuckets.cachedImageInputTokens.toString(),
           cachedInput: tokenBuckets.cachedInputTokens.toString(),
-          cachedInputAllocation: "single_modality_only",
+          cachedInputAllocation:
+            resolveHostedAiUsageAllowanceOpenAiImageCachedInputAllocation(
+              tokenBuckets,
+            ),
           cachedTextInput: tokenBuckets.cachedTextInputTokens.toString(),
           imageInput: tokenBuckets.imageInputTokens.toString(),
           output: tokenBuckets.outputTokens.toString(),
@@ -2058,6 +2061,16 @@ function priceHostedAiUsageOpenAiImageForAllowance(input: {
     },
     pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICING_VERSION,
   };
+}
+
+function resolveHostedAiUsageAllowanceOpenAiImageCachedInputAllocation(
+  tokenBuckets: AssistantOpenAiImageUsageTokenBuckets,
+): "single_modality_only" | "text_first_conservative" {
+  return tokenBuckets.cachedInputTokens > 0n
+    && tokenBuckets.textInputTokens > 0n
+    && tokenBuckets.imageInputTokens > 0n
+    ? "text_first_conservative"
+    : "single_modality_only";
 }
 
 function resolveHostedAiUsageAllowanceOpenAiImageModel(
