@@ -53,8 +53,6 @@ overrides:
   ajv@8.18.0>fast-uri: 3.1.2
   ajv@8.20.0>fast-uri: 3.1.2
   fast-xml-parser@5.7.2>fast-xml-builder: 1.2.0
-  '@cobuild/review-gpt>repomix': 1.14.1
-  repomix@1.14.0>fast-xml-builder: 1.2.0
 
 patchedDependencies:
   incur@0.4.5:
@@ -69,8 +67,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.96
-        version: 0.5.96(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
+        specifier: ^0.5.97
+        version: 0.5.97(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:packages/health-metrics
@@ -1291,8 +1289,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.96':
-    resolution: {integrity: sha512-YMVhZNeQv26gPvYqcrzez0FvYK08JMfuafbMu7G4DoBpm2bP8yohBDOkVAF0dR9kceQWtQD8ID+VRvqZv4sk5A==}
+  '@cobuild/review-gpt@0.5.97':
+    resolution: {integrity: sha512-Zz7L1vHALJg9UVCdMfNGiw2Gc/MlTVgHBw7w2vOR+s8mOZJyWmTVGexqXpcMLbhE+Zmx4xGbzg8Ah/YkZJ91Aw==}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.48.3':
@@ -3122,20 +3120,20 @@ packages:
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
 
-  '@secretlint/core@11.7.1':
-    resolution: {integrity: sha512-D1a/6U3JT2hhs+OpocAf1j+2t79ExrFqNm8j7pilhCQqpJ9QIEexGs1ty3v9wDACm48v0PFhCNCyn4hyctGYig==}
-    engines: {node: '>=20.0.0'}
+  '@secretlint/core@13.0.2':
+    resolution: {integrity: sha512-15vg+zCmjQuDFVoOPNt0TyEu0Z95eir2MO19++wG82yM/vbPtFu/m9qd6oh54ZOBXgMcchdGDTxMwJNDnCLxcA==}
+    engines: {node: '>=22.0.0'}
 
-  '@secretlint/profiler@11.7.1':
-    resolution: {integrity: sha512-Fa1fCVT4izv8PRXL8t4KB6FwBEL2OYqOYtNsyssWd7giNoNcohCoLGnDhJNLcTxTyTqkDzLlGV0M4CYsCkcfZQ==}
+  '@secretlint/profiler@13.0.2':
+    resolution: {integrity: sha512-vGaLZCoi9KewOF+sM0iIEBviWaH9mls1HmQFBgEPq4fnvmVO4PfKIkVr4CcAFm3Msg4NjzFE2RBAGwRR+5HEmQ==}
 
-  '@secretlint/secretlint-rule-preset-recommend@11.7.1':
-    resolution: {integrity: sha512-LsiEhDWoXi9GNx1Zp5eYRNajeUvBrZ82h3k/vzFqo0WoSdmpyDnkkzBTLXqWqj1VNyPCcTwlxOqnEmlz6lXc7A==}
-    engines: {node: '>=20.0.0'}
+  '@secretlint/secretlint-rule-preset-recommend@13.0.2':
+    resolution: {integrity: sha512-D03Kw51qOgffj9zNlJFZUarVmP8zGcCZNi7A14+vZtHskbbBPEsS/f09idb48rrlMSaRMBN29IkqfbmPyL9xtw==}
+    engines: {node: '>=22.0.0'}
 
-  '@secretlint/types@11.7.1':
-    resolution: {integrity: sha512-bIkBwIdQScZX5xm3DsLp3oL5U/KKUYWgmst39dZsDi55X9tKuPd7/uVpO1PqNrDW1I0QD5t6es/2LonG5RjxXg==}
-    engines: {node: '>=20.0.0'}
+  '@secretlint/types@13.0.2':
+    resolution: {integrity: sha512-cAZjr6ZTKgSuJMLyTGDrUEtK3XEZa+JStIkD+DmdkT32VGAN+dQJiYr1So3XJopsKSrqhP5kjZKT8WWtftZIpQ==}
+    engines: {node: '>=22.0.0'}
 
   '@simplewebauthn/browser@13.3.0':
     resolution: {integrity: sha512-BE/UWv6FOToAdVk0EokzkqQQDOWtNydYlY6+OrmiZ5SCNmb41VehttboTetUM3T/fr6EAFYVXjz4My2wg230rQ==}
@@ -5286,6 +5284,10 @@ packages:
   commander@14.0.3:
     resolution: {integrity: sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw==}
     engines: {node: '>=20'}
+
+  commander@15.0.0:
+    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
+    engines: {node: '>=22.12.0'}
 
   commander@2.20.3:
     resolution: {integrity: sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ==}
@@ -8301,8 +8303,8 @@ packages:
   remeda@2.33.4:
     resolution: {integrity: sha512-ygHswjlc/opg2VrtiYvUOPLjxjtdKvjGz1/plDhkG66hjNjFr1xmfrs2ClNFo/E6TyUFiwYNh53bKV26oBoMGQ==}
 
-  repomix@1.14.1:
-    resolution: {integrity: sha512-RQKku9nASd7LGyUVhj2Z1B4/ro6R2NcExF+bqjmLtsqDd6MdM4ltdM1nFaY+q2UWHn6pQXNBqHlx7VyRrW0MKA==}
+  repomix@1.16.0:
+    resolution: {integrity: sha512-C41hGZsuwpcOJXKtbBCQ0agbT1yTOyIPoA9LYbS5MMHvj19jLML148r98iYthqI7B3VaHvlscxv7o6U0fqI7BQ==}
     engines: {node: '>=22.0.0', yarn: '>=1.22.22'}
     hasBin: true
 
@@ -10441,11 +10443,11 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.96(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
+  '@cobuild/review-gpt@0.5.97(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.4.5(patch_hash=a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e)
-      repomix: 1.14.1(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
+      repomix: 1.16.0(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - supports-color
@@ -12826,20 +12828,20 @@ snapshots:
 
   '@sec-ant/readable-stream@0.4.1': {}
 
-  '@secretlint/core@11.7.1':
+  '@secretlint/core@13.0.2':
     dependencies:
-      '@secretlint/profiler': 11.7.1
-      '@secretlint/types': 11.7.1
+      '@secretlint/profiler': 13.0.2
+      '@secretlint/types': 13.0.2
       debug: 4.4.3(supports-color@8.1.1)
       structured-source: 4.0.0
     transitivePeerDependencies:
       - supports-color
 
-  '@secretlint/profiler@11.7.1': {}
+  '@secretlint/profiler@13.0.2': {}
 
-  '@secretlint/secretlint-rule-preset-recommend@11.7.1': {}
+  '@secretlint/secretlint-rule-preset-recommend@13.0.2': {}
 
-  '@secretlint/types@11.7.1': {}
+  '@secretlint/types@13.0.2': {}
 
   '@simplewebauthn/browser@13.3.0': {}
 
@@ -16277,6 +16279,8 @@ snapshots:
 
   commander@14.0.3: {}
 
+  commander@15.0.0: {}
+
   commander@2.20.3: {}
 
   commander@6.2.1: {}
@@ -19531,15 +19535,16 @@ snapshots:
 
   remeda@2.33.4: {}
 
-  repomix@1.14.1(@cfworker/json-schema@4.1.1)(typescript@5.9.3):
+  repomix@1.16.0(@cfworker/json-schema@4.1.1)(typescript@5.9.3):
     dependencies:
       '@clack/prompts': 0.11.0
       '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
       '@repomix/strip-comments': 2.4.2
       '@repomix/tree-sitter-wasms': 0.1.17
-      '@secretlint/core': 11.7.1
-      '@secretlint/secretlint-rule-preset-recommend': 11.7.1
-      commander: 14.0.3
+      '@secretlint/core': 13.0.2
+      '@secretlint/secretlint-rule-preset-recommend': 13.0.2
+      chokidar: 5.0.0
+      commander: 15.0.0
       fast-xml-builder: 1.2.0
       git-url-parse: 16.1.0
       globby: 16.2.0
