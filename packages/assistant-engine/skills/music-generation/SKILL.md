@@ -79,9 +79,16 @@ back rushed and garbled rather than trimmed. A relaxed vocal carries roughly a
 word and a half per second, and the intro and outro spend a few of those
 seconds before anyone sings — so a 15-second track holds about 18 words, a
 20-second track about 25 (a couplet or two), and a 30-second track about 40.
-Count the words in your lyrics
-before calling the tool; if you are over budget, cut lines first, and raise
-`durationSeconds` only when every remaining word earns its place.
+The budget scales with the
+duration you request — a 60-second track holds a real verse and chorus, a
+90-second track holds two.
+
+Count the words in your lyrics before calling the tool. If they run over
+budget, fix it from either side: trim the lyric, or ask for a longer track —
+both are fine, as long as words and seconds match. Reminder songs stay short
+and tight; when the song is the main event — an introduction, a celebration,
+something the user asked for — give the lyric the 45, 60, or 90 seconds it
+actually needs rather than squeezing it down.
 
 For reminder songs specifically, name the action to do now, say
 why it matters to this person, fold in at most two non-sensitive personal
@@ -95,10 +102,10 @@ instruments, tempo, key, mood — still belongs in the prompt.
 
 ## Duration
 
-`durationSeconds` is 3-300. Reminder songs are 15-30s. Shorter tracks are
-tighter and land faster. Pick the duration and the lyric together: the track
-is exactly as long as you ask for, so words beyond the budget in the Lyrics
-section get rushed, not dropped.
+`durationSeconds` is 3-300. Reminder songs are 15-30s; a song that is the
+main event can comfortably run 45-90s. Pick the duration and the lyric
+together: the track is exactly as long as you ask for, so words beyond the
+budget in the Lyrics section get rushed, not dropped.
 
 ## House style and preferences
 
