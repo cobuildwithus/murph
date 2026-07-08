@@ -661,21 +661,30 @@ export async function synchronizeAssistantIndexes(
 
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
 
+type AssistantRecentSessionsProjectionRead = {
+  recentSessions: Record<string, string>
+  state: 'ready' | 'missing' | 'unreadable'
+}
+
 // Bounded projection reader. Deliberately does NOT go through
 // readAssistantIndexStore: that reader's missing/corrupt fallbacks
 // rebuild the index by scanning every session file, which is only acceptable on
 // explicit routing/repair paths. A parseable legacy index returns an in-memory
-// empty projection so user-visible list and recurring maintenance reads stay
-// cheap until normal assistant saves warm the bounded projection.
-export async function ensureAssistantRecentSessionsProjection(
+// empty projection so recurring maintenance stays cheap until normal assistant
+// saves warm the bounded projection. User-visible compact list reads can reject
+// this state and point the operator at the explicit repair path instead.
+export async function readAssistantRecentSessionsProjection(
   paths: AssistantStatePaths,
-): Promise<Record<string, string>> {
+): Promise<AssistantRecentSessionsProjectionRead> {
   let raw: string
   try {
     raw = await readFile(paths.indexesPath, 'utf8')
   } catch (error) {
     if (isMissingFileError(error)) {
-      return {}
+      return {
+        recentSessions: {},
+        state: 'missing',
+      }
     }
     throw error
   }
@@ -685,14 +694,29 @@ export async function ensureAssistantRecentSessionsProjection(
     store = assistantAliasStoreSchema.parse(JSON.parse(raw))
   } catch {
     // Corrupt index: quarantine/rebuild belongs to the routing read path.
-    return {}
+    return {
+      recentSessions: {},
+      state: 'unreadable',
+    }
   }
 
   if (store.recentSessions !== undefined) {
-    return store.recentSessions
+    return {
+      recentSessions: store.recentSessions,
+      state: 'ready',
+    }
   }
 
-  return {}
+  return {
+    recentSessions: {},
+    state: 'missing',
+  }
+}
+
+export async function repairAssistantIndexStore(
+  paths: AssistantStatePaths,
+): Promise<AssistantAliasStore> {
+  return rebuildAssistantIndexStore(paths)
 }
 
 function pruneAssistantRecentSessions(

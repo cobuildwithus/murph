@@ -47,7 +47,7 @@ vault-cli assistant stop --vault <path> [--request-id <id>]
 vault-cli status --vault <path> [--session <id>] [--limit <n>] [--request-id <id>]
 vault-cli doctor --vault <path> [--repair] [--request-id <id>]
 vault-cli stop --vault <path> [--request-id <id>]
-vault-cli assistant session list --vault <path> [--limit <n>] [--request-id <id>]
+vault-cli assistant session list --vault <path> [--limit <n>] [--repair] [--request-id <id>]
 vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
 vault-cli memory show [memoryId] --vault <path>
 vault-cli memory upsert <text> --vault <path> --section <section>

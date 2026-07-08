@@ -17,6 +17,7 @@ import {
   appendAssistantTranscriptEntriesWithRefs,
   listAssistantSessionsLocal,
   listRecentAssistantSessions,
+  repairAssistantSessionIndexes,
   updateAssistantAutomationState,
 } from '../src/assistant/store.ts'
 import {
@@ -677,6 +678,12 @@ describe('assistant store persistence seams', () => {
 
     await expect(listRecentAssistantSessions(context.vaultRoot, {
       limit: 1,
+      requireProjection: true,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_INDEX_REPAIR_REQUIRED',
+    })
+    await expect(listRecentAssistantSessions(context.vaultRoot, {
+      limit: 1,
     })).resolves.toEqual([])
     await expect(JSON.parse(await readFile(paths.indexesPath, 'utf8'))).toEqual({
       version: 1,
@@ -685,10 +692,38 @@ describe('assistant store persistence seams', () => {
     })
     await expect(listAssistantQuarantineEntriesAtPaths(paths)).resolves.toEqual([])
 
+    await repairAssistantSessionIndexes(context.vaultRoot)
+
+    await expect(listRecentAssistantSessions(context.vaultRoot, {
+      limit: 2,
+      requireProjection: true,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        sessionId: 'session-newer',
+      }),
+      expect.objectContaining({
+        sessionId: 'session-older',
+      }),
+    ])
+
+    const repaired = JSON.parse(await readFile(paths.indexesPath, 'utf8')) as {
+      recentSessions?: Record<string, string>
+    }
+    expect(repaired.recentSessions).toEqual({
+      'session-newer': '2026-04-08T00:02:00.000Z',
+      'session-older': '2026-04-08T00:01:00.000Z',
+    })
+
+    await writeFile(paths.indexesPath, JSON.stringify({
+      version: 1,
+      aliases: {},
+      conversationKeys: {},
+    }), 'utf8')
     await synchronizeAssistantIndexes(paths, newer, null)
 
     await expect(listRecentAssistantSessions(context.vaultRoot, {
       limit: 1,
+      requireProjection: true,
     })).resolves.toEqual([
       expect.objectContaining({
         sessionId: 'session-newer',

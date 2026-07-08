@@ -301,9 +301,9 @@ export const assistantAliasStoreSchema = z
     // Bounded sessionId -> last-activity timestamp projection so recurring
     // maintenance can pick recent sessions without scanning the directory.
     // Absent (not defaulted) for index files written before the field
-    // existed. Bounded list/maintenance readers treat that as empty until a
-    // normal assistant save warms the projection without scanning old
-    // durable session records.
+    // existed. Bounded maintenance readers treat that as empty until a normal
+    // assistant save warms the projection without scanning old durable session
+    // records; user-visible compact list reads require explicit repair.
     recentSessions: z.record(z.string(), isoTimestampSchema).optional(),
   })
   .strict()
