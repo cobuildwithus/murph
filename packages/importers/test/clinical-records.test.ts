@@ -3,7 +3,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { ClinicalImportCandidate } from "@murphai/clinical-records";
+import {
+  CLINICAL_RAW_MANIFEST_MAX_BYTES,
+  CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+  CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
+  CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
+  type ClinicalImportCandidate,
+} from "@murphai/clinical-records";
 import { buildClinicalImportPlan } from "../src/clinical-records/index.ts";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -83,7 +89,13 @@ describe("buildClinicalImportPlan", () => {
                   text: "Glucose",
                   coding: [{ system: "http://loinc.org", code: "2345-7", display: "Glucose" }],
                 },
-                interpretation: [{ coding: [{ code: "N", display: "Normal" }] }],
+                interpretation: [{
+                  coding: [{
+                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                    code: "N",
+                    display: "Normal",
+                  }],
+                }],
                 valueQuantity: { comparator: "<", value: 91, unit: "mg/dL" },
               },
             },
@@ -194,6 +206,101 @@ describe("buildClinicalImportPlan", () => {
         value: 91,
       },
     ]);
+  });
+
+  it("requires trusted lab category and result status coding systems", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 3,
+        },
+        {
+          resourceType: "DiagnosticReport",
+          relativePath: "DiagnosticReport/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            resourceType: "Observation",
+            id: "lab-local-category",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:05:00.000Z",
+            category: [{ coding: [{ system: "urn:vendor", code: "lab" }] }],
+            code: { text: "Vendor panel" },
+            interpretation: [{ coding: [{ system: "urn:vendor-status", code: "N", display: "Normal" }] }],
+            valueString: "ok",
+          },
+          {
+            resourceType: "Observation",
+            id: "lab-local-interpretation",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:06:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Glucose" },
+            interpretation: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                code: "vendor-normal",
+                display: "Normal",
+              }],
+            }],
+            valueQuantity: { value: 91, unit: "mg/dL" },
+          },
+          {
+            resourceType: "Observation",
+            id: "lab-canonical-short-code",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:07:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "lab",
+              }],
+            }],
+            code: { text: "Vendor panel" },
+            valueString: "ok",
+          },
+        ],
+        "DiagnosticReport/page-1.json": {
+          resourceType: "DiagnosticReport",
+          id: "report-local-conclusion-code",
+          status: "final",
+          issued: "2026-07-01T12:07:00.000Z",
+          code: { text: "Metabolic panel" },
+          conclusion: "Within range.",
+          conclusionCode: [{ coding: [{ system: "urn:vendor-status", code: "N", display: "Normal" }] }],
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.unsupported).toEqual([]);
+    expect(plan.candidates).toHaveLength(2);
+    expect(plan.candidates.some((candidate) => candidate.resource.resourceId === "lab-local-category")).toBe(false);
+    expect(plan.candidates.some((candidate) => candidate.resource.resourceId === "lab-canonical-short-code"))
+      .toBe(false);
+
+    const observation = plan.candidates.find(
+      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
+        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "lab-local-interpretation",
+    );
+    expect(observation?.payload.resultStatus).toBe("unknown");
+
+    const report = plan.candidates.find(
+      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
+        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "report-local-conclusion-code",
+    );
+    expect(report?.payload.resultStatus).toBe("unknown");
   });
 
   it("plans supported assertions and notes", async () => {
@@ -652,6 +759,95 @@ describe("buildClinicalImportPlan", () => {
     await expect(
       buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: countMismatchRoot }),
     ).rejects.toThrow("count mismatch");
+
+    const overDeclaredCountRoot = await writeClinicalFixture({
+      resourceFiles: [{ ...resourceFile, count: 1 }],
+      pages: {
+        "Observation/page-1.json": [
+          page,
+          { ...page, id: "shared-bp-extra" },
+        ],
+      },
+    });
+    await expect(
+      buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot: overDeclaredCountRoot }),
+    ).rejects.toThrow("exceeds declared count");
+  });
+
+  it("rejects oversized raw FHIR manifests before parsing them", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-"));
+    tempRoots.push(vaultRoot);
+
+    await writeText(
+      vaultRoot,
+      MANIFEST_PATH,
+      `${JSON.stringify({
+        schemaVersion: "murph.clinical-raw-manifest.v1",
+        kind: "clinical_fhir_retrieval",
+        connectionId: "clinical-connection-1",
+        retrievalJobId: "retrieval-job-1",
+        sourceSystem: "epic-fhir",
+        fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+        patientIdHash: PATIENT_ID_HASH,
+        fetchedAt: "2026-07-01T12:00:00.000Z",
+        resourceFiles: [],
+        requestedScopes: ["patient/*.read"],
+        grantedScopes: ["patient/*.read"],
+      })}${" ".repeat(CLINICAL_RAW_MANIFEST_MAX_BYTES + 1)}`,
+    );
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("raw file exceeds");
+  });
+
+  it("rejects over-cap raw FHIR manifests before reading resource pages", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-records-"));
+    tempRoots.push(vaultRoot);
+
+    const overCapFileCount = Math.floor(
+      CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES / CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+    ) + 1;
+    await writeJson(vaultRoot, MANIFEST_PATH, {
+      schemaVersion: "murph.clinical-raw-manifest.v1",
+      kind: "clinical_fhir_retrieval",
+      connectionId: "clinical-connection-1",
+      retrievalJobId: "retrieval-job-1",
+      sourceSystem: "epic-fhir",
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      patientIdHash: PATIENT_ID_HASH,
+      fetchedAt: "2026-07-01T12:00:00.000Z",
+      resourceFiles: Array.from({ length: overCapFileCount }, (_, index) => ({
+        resourceType: "Observation",
+        relativePath: `Observation/missing-page-${index}.json`,
+        count: CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+        sha256: BAD_SHA256,
+      })),
+      requestedScopes: ["patient/*.read"],
+      grantedScopes: ["patient/*.read"],
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("total resource count");
+  });
+
+  it("rejects oversized raw FHIR pages before parsing them", async () => {
+    const oversizedPage = "x".repeat(CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES + 1);
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 0,
+          sha256: sha256Hex(oversizedPage),
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": oversizedPage,
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("raw resource file exceeds");
   });
 
   it("does not import global no-known allergies when positive allergy evidence is present", async () => {

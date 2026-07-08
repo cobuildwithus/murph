@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -17,6 +17,11 @@ import type {
   Resource,
 } from "@medplum/fhirtypes";
 import {
+  CLINICAL_IMPORT_PLAN_MAX_CANDIDATES,
+  CLINICAL_IMPORT_PLAN_MAX_UNSUPPORTED,
+  CLINICAL_RAW_MANIFEST_MAX_BYTES,
+  CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES,
+  CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
   clinicalFacetSlug,
   clinicalImportPlanSchema,
   clinicalRawManifestSchema,
@@ -74,10 +79,12 @@ const NO_KNOWN_ALLERGY_CODES = new Set(["716186003"]);
 const FHIR_SYSTEM_ALLERGY_CLINICAL_STATUS = "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical";
 const FHIR_SYSTEM_ALLERGY_VERIFICATION_STATUS = "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification";
 const FHIR_SYSTEM_LOINC = "http://loinc.org";
+const FHIR_SYSTEM_OBSERVATION_CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
+const FHIR_SYSTEM_OBSERVATION_INTERPRETATION = "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation";
 const FHIR_SYSTEM_SNOMED_CT = "http://snomed.info/sct";
-const LABORATORY_CATEGORY_CODES = new Set(["laboratory", "lab"]);
-const RESULT_STATUS_NORMAL_CODES = new Set(["n", "normal"]);
-const RESULT_STATUS_ABNORMAL_CODES = new Set(["a", "aa", "h", "hh", "l", "ll", "abnormal", "high", "low"]);
+const LABORATORY_CATEGORY_CODES = new Set(["laboratory"]);
+const RESULT_STATUS_NORMAL_CODES = new Set(["n"]);
+const RESULT_STATUS_ABNORMAL_CODES = new Set(["a", "aa", "h", "hh", "l", "ll"]);
 const VITAL_LOINC_CODES = new Set(VITAL_LOINC_BY_CODE.keys());
 const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, string>>([
   ["body-weight", new Map([["[lb_av]", "lb"], ["lb", "lb"]])],
@@ -97,30 +104,30 @@ const IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["confirmed"]);
 export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInput): Promise<ClinicalImportPlan> {
   const manifestPath = clinicalRawPathSchema.parse(input.manifestPath);
   const manifest = clinicalRawManifestSchema.parse(
-    JSON.parse(await readVaultRelativeText(input.vaultRoot, manifestPath)),
+    JSON.parse(await readVaultRelativeText(input.vaultRoot, manifestPath, {
+      maxBytes: CLINICAL_RAW_MANIFEST_MAX_BYTES,
+    })),
   );
+  await assertRawResourceFileByteBounds({
+    manifest,
+    manifestPath,
+    vaultRoot: input.vaultRoot,
+  });
   const candidates: ClinicalImportCandidate[] = [];
   const unsupported: ClinicalImportUnsupportedResource[] = [];
-  const resourcePages: FhirResourcePage[] = [];
+
+  const hasAllergyConflictEvidence = await scanAllergyConflictEvidence({
+    manifest,
+    manifestPath,
+    vaultRoot: input.vaultRoot,
+  });
 
   for (const resourceFile of manifest.resourceFiles) {
-    const rawRef = rawRefForClinicalManifestFile({
+    const { rawRef, resources } = await readClinicalResourcePage({
       manifestPath,
       resourceFile,
+      vaultRoot: input.vaultRoot,
     });
-    const pageText = await readVaultRelativeText(input.vaultRoot, rawRef);
-    assertRawResourceFileHash({ rawRef, resourceFile, text: pageText });
-    const page = JSON.parse(pageText);
-    const resources = extractFhirResources(page);
-    assertRawResourceFileCount({ actualCount: resources.length, rawRef, resourceFile });
-    resourcePages.push({ rawRef, resources });
-  }
-
-  const hasAllergyConflictEvidence = resourcePages.some(({ resources }) =>
-    resources.some(isAllergyConflictEvidence)
-  );
-
-  for (const { rawRef, resources } of resourcePages) {
     for (const resource of resources) {
       const context: FhirResourceContext = {
         hasAllergyConflictEvidence,
@@ -129,8 +136,7 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
         resource,
       };
       const mapped = mapFhirResource(context);
-      candidates.push(...mapped.candidates);
-      unsupported.push(...mapped.unsupported);
+      appendMappedResource({ candidates, mapped, unsupported });
     }
   }
 
@@ -148,12 +154,114 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
   });
 }
 
-async function readVaultRelativeText(vaultRoot: string, relativePath: string): Promise<string> {
+async function scanAllergyConflictEvidence(input: {
+  manifest: ClinicalRawManifest;
+  manifestPath: string;
+  vaultRoot: string;
+}): Promise<boolean> {
+  for (const resourceFile of input.manifest.resourceFiles) {
+    const { resources } = await readClinicalResourcePage({
+      manifestPath: input.manifestPath,
+      resourceFile,
+      vaultRoot: input.vaultRoot,
+    });
+    if (resources.some(isAllergyConflictEvidence)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function assertRawResourceFileByteBounds(input: {
+  manifest: ClinicalRawManifest;
+  manifestPath: string;
+  vaultRoot: string;
+}): Promise<void> {
+  let totalBytes = 0;
+
+  for (const resourceFile of input.manifest.resourceFiles) {
+    const rawRef = rawRefForClinicalManifestFile({
+      manifestPath: input.manifestPath,
+      resourceFile,
+    });
+    const byteSize = await readVaultRelativeFileSize(input.vaultRoot, rawRef);
+    if (byteSize > CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES) {
+      throw new Error(`Clinical FHIR raw resource file exceeds ${CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES} bytes for ${rawRef}.`);
+    }
+
+    totalBytes += byteSize;
+    if (totalBytes > CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES) {
+      throw new Error(`Clinical FHIR raw resource files exceed ${CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES} total bytes.`);
+    }
+  }
+}
+
+async function readClinicalResourcePage(input: {
+  manifestPath: string;
+  resourceFile: ClinicalRawManifestResourceFile;
+  vaultRoot: string;
+}): Promise<FhirResourcePage> {
+  const rawRef = rawRefForClinicalManifestFile({
+    manifestPath: input.manifestPath,
+    resourceFile: input.resourceFile,
+  });
+  const pageText = await readVaultRelativeText(input.vaultRoot, rawRef, {
+    maxBytes: CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES,
+  });
+  assertRawResourceFileHash({ rawRef, resourceFile: input.resourceFile, text: pageText });
+  const page = JSON.parse(pageText);
+  const resources = extractFhirResources(page, {
+    maxResources: input.resourceFile.count,
+    rawRef,
+  });
+  assertRawResourceFileCount({ actualCount: resources.length, rawRef, resourceFile: input.resourceFile });
+  return { rawRef, resources };
+}
+
+async function readVaultRelativeText(
+  vaultRoot: string,
+  relativePath: string,
+  options?: { maxBytes?: number },
+): Promise<string> {
+  const targetPath = vaultRelativePath(vaultRoot, relativePath);
+  if (options?.maxBytes !== undefined) {
+    const byteSize = await readVaultRelativeFileSize(vaultRoot, relativePath);
+    if (byteSize > options.maxBytes) {
+      throw new Error(`Clinical FHIR raw file exceeds ${options.maxBytes} bytes for ${relativePath}.`);
+    }
+  }
+
+  return readFile(targetPath, "utf8");
+}
+
+async function readVaultRelativeFileSize(vaultRoot: string, relativePath: string): Promise<number> {
+  const fileStat = await stat(vaultRelativePath(vaultRoot, relativePath));
+  return fileStat.size;
+}
+
+function vaultRelativePath(vaultRoot: string, relativePath: string): string {
   if (path.isAbsolute(relativePath) || relativePath.split("/").includes("..")) {
     throw new Error("Clinical FHIR imports read only vault-relative raw paths.");
   }
 
-  return readFile(path.join(vaultRoot, relativePath), "utf8");
+  return path.join(vaultRoot, relativePath);
+}
+
+function appendMappedResource(input: {
+  candidates: ClinicalImportCandidate[];
+  mapped: MappedFhirResource;
+  unsupported: ClinicalImportUnsupportedResource[];
+}): void {
+  if (input.candidates.length + input.mapped.candidates.length > CLINICAL_IMPORT_PLAN_MAX_CANDIDATES) {
+    throw new Error(`Clinical FHIR import plan candidate count exceeds ${CLINICAL_IMPORT_PLAN_MAX_CANDIDATES}.`);
+  }
+  if (input.unsupported.length + input.mapped.unsupported.length > CLINICAL_IMPORT_PLAN_MAX_UNSUPPORTED) {
+    throw new Error(`Clinical FHIR import plan unsupported resource count exceeds ${CLINICAL_IMPORT_PLAN_MAX_UNSUPPORTED}.`);
+  }
+
+  input.candidates.push(...input.mapped.candidates);
+  input.unsupported.push(...input.mapped.unsupported);
 }
 
 function assertRawResourceFileHash(input: {
@@ -657,20 +765,40 @@ function unsupportedResource(
   };
 }
 
-function extractFhirResources(value: unknown): Resource[] {
+function extractFhirResources(
+  value: unknown,
+  input: { maxResources: number; rawRef: string },
+): Resource[] {
+  const resources: Resource[] = [];
+  const appendResource = (resource: unknown): void => {
+    if (!isFhirResource(resource)) {
+      return;
+    }
+    resources.push(resource);
+    if (resources.length > input.maxResources) {
+      throw new Error(`Clinical FHIR raw resource count exceeds declared count for ${input.rawRef}.`);
+    }
+  };
+
   if (Array.isArray(value)) {
-    return value.filter(isFhirResource);
+    for (const resource of value) {
+      appendResource(resource);
+    }
+    return resources;
   }
   if (isFhirResource(value) && !isFhirBundle(value)) {
-    return [value];
+    appendResource(value);
+    return resources;
   }
   if (!isFhirBundle(value)) {
-    return [];
+    return resources;
   }
 
-  return readUnknownArray(value.entry)
-    .map((entry) => isRecord(entry) ? entry.resource : null)
-    .filter(isFhirResource);
+  for (const entry of readUnknownArray(value.entry)) {
+    appendResource(isRecord(entry) ? entry.resource : null);
+  }
+
+  return resources;
 }
 
 function vitalForCodeableConcept(value: CodeableConcept | undefined): VitalDefinition | null {
@@ -684,15 +812,9 @@ function vitalForCodeableConcept(value: CodeableConcept | undefined): VitalDefin
 }
 
 function isLaboratoryObservation(resource: Observation): boolean {
-  for (const category of readFhirArray(resource.category)) {
-    for (const coding of codingsForCodeableConcept(category)) {
-      if (coding.code && LABORATORY_CATEGORY_CODES.has(coding.code.toLowerCase())) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+  return readFhirArray(resource.category).some((category) =>
+    codeableConceptHasSystemCode(category, FHIR_SYSTEM_OBSERVATION_CATEGORY, LABORATORY_CATEGORY_CODES)
+  );
 }
 
 function isNoKnownAllergy(resource: AllergyIntolerance): boolean {
@@ -757,12 +879,14 @@ function codeableConceptHasCodeWithUnexpectedSystem(
 function resultStatusFromInterpretation(value: CodeableConcept[] | undefined): "normal" | "abnormal" | "unknown" {
   for (const interpretation of readFhirArray(value)) {
     for (const coding of codingsForCodeableConcept(interpretation)) {
+      if (coding.system !== FHIR_SYSTEM_OBSERVATION_INTERPRETATION) {
+        continue;
+      }
       const code = coding.code?.toLowerCase();
-      const display = coding.display?.toLowerCase();
-      if ((code && RESULT_STATUS_ABNORMAL_CODES.has(code)) || (display && RESULT_STATUS_ABNORMAL_CODES.has(display))) {
+      if (code && RESULT_STATUS_ABNORMAL_CODES.has(code)) {
         return "abnormal";
       }
-      if ((code && RESULT_STATUS_NORMAL_CODES.has(code)) || (display && RESULT_STATUS_NORMAL_CODES.has(display))) {
+      if (code && RESULT_STATUS_NORMAL_CODES.has(code)) {
         return "normal";
       }
     }

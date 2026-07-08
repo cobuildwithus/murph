@@ -47,6 +47,15 @@ export const CLINICAL_IMPORT_CANDIDATE_KINDS = Object.freeze([
   "vitals",
 ] as const);
 
+export const CLINICAL_IMPORT_PLAN_MAX_CANDIDATES = 5_000;
+export const CLINICAL_IMPORT_PLAN_MAX_UNSUPPORTED = 10_000;
+export const CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES = 500;
+export const CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE = 1_000;
+export const CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES = 5_000;
+export const CLINICAL_RAW_MANIFEST_MAX_BYTES = 1024 * 1024;
+export const CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES = 5 * 1024 * 1024;
+export const CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+
 const RAW_PATH_PATTERN = /^raw\/[A-Za-z0-9._/-]+$/u;
 const RELATIVE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/u;
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
@@ -92,11 +101,24 @@ export const clinicalRawManifestResourceFileSchema = z
   .object({
     resourceType: z.string().min(1).max(80),
     relativePath: clinicalRawRelativePathSchema,
-    count: z.number().int().min(0),
+    count: z.number().int().min(0).max(CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE),
     sha256: sha256HexSchema,
     pageUrlHash: sha256HexSchema.optional(),
   })
   .strict();
+
+const clinicalRawManifestResourceFilesSchema = z
+  .array(clinicalRawManifestResourceFileSchema)
+  .max(CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES)
+  .superRefine((resourceFiles, context) => {
+    const totalResourceCount = resourceFiles.reduce((sum, resourceFile) => sum + resourceFile.count, 0);
+    if (totalResourceCount > CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Clinical raw FHIR manifest total resource count exceeds ${CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES}.`,
+      });
+    }
+  });
 
 export const clinicalRawManifestErrorSchema = z
   .object({
@@ -117,7 +139,7 @@ export const clinicalRawManifestSchema = z
     fhirBaseUrlHash: sha256HexSchema,
     patientIdHash: sha256HexSchema,
     fetchedAt: isoDateTimeTextSchema,
-    resourceFiles: z.array(clinicalRawManifestResourceFileSchema).max(500),
+    resourceFiles: clinicalRawManifestResourceFilesSchema,
     requestedScopes: z.array(z.string().min(1).max(200)).max(50),
     grantedScopes: z.array(z.string().min(1).max(200)).max(50),
     errors: z.array(clinicalRawManifestErrorSchema).max(100).optional(),
@@ -258,8 +280,8 @@ export const clinicalImportPlanSchema = z
         retrievalJobId: z.string().min(1).max(120),
       })
       .strict(),
-    candidates: z.array(clinicalImportCandidateSchema).max(5_000),
-    unsupported: z.array(clinicalImportUnsupportedResourceSchema).max(10_000),
+    candidates: z.array(clinicalImportCandidateSchema).max(CLINICAL_IMPORT_PLAN_MAX_CANDIDATES),
+    unsupported: z.array(clinicalImportUnsupportedResourceSchema).max(CLINICAL_IMPORT_PLAN_MAX_UNSUPPORTED),
   })
   .strict();
 
