@@ -939,6 +939,13 @@ async function readZippedIntegrationIngestJsonlText(
 
   const fileNameLength = archive.readUInt16LE(localHeaderOffset + 26);
   const extraLength = archive.readUInt16LE(localHeaderOffset + 28);
+  if (extraLength !== 0) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_INVALID",
+      `Integration ingest archive "${source.sourcePath}" has hidden local header metadata.`,
+      { relativePath: source.sourcePath },
+    );
+  }
   const localNameStart = localHeaderOffset + 30;
   const localNameEnd = localNameStart + fileNameLength;
   assertZipReadableRange(archive, localNameStart, fileNameLength, source.sourcePath);
@@ -1059,6 +1066,13 @@ function readZipCentralDirectory(
     const extraLength = archive.readUInt16LE(offset + 30);
     const commentLength = archive.readUInt16LE(offset + 32);
     const localHeaderOffset = archive.readUInt32LE(offset + 42);
+    if (extraLength !== 0 || commentLength !== 0) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ARCHIVE_INVALID",
+        `Integration ingest archive "${relativePath}" has hidden central directory metadata.`,
+        { relativePath },
+      );
+    }
     if (
       compressedSize === ZIP64_MARKER_32
       || uncompressedSize === ZIP64_MARKER_32

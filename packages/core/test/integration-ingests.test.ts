@@ -196,6 +196,61 @@ function prefixSingleEntryZip(zip: Buffer, prefix: Buffer): Buffer {
   return Buffer.concat([prefix, localAndPayload, centralDirectoryAndEocd]);
 }
 
+function addLocalExtraFieldToSingleEntryZip(zip: Buffer, extraField: Buffer): Buffer {
+  const centralDirectoryOffset = findZipSignature(zip, 0x02014b50);
+  const eocdOffset = findZipSignature(zip, 0x06054b50);
+  const fileNameLength = zip.readUInt16LE(26);
+  const insertOffset = 30 + fileNameLength;
+  const withExtraField = Buffer.concat([
+    zip.subarray(0, insertOffset),
+    extraField,
+    zip.subarray(insertOffset),
+  ]);
+  withExtraField.writeUInt16LE(extraField.byteLength, 28);
+  withExtraField.writeUInt32LE(
+    centralDirectoryOffset + extraField.byteLength,
+    eocdOffset + extraField.byteLength + 16,
+  );
+  return withExtraField;
+}
+
+function addCentralDirectoryExtraFieldToSingleEntryZip(zip: Buffer, extraField: Buffer): Buffer {
+  const centralDirectoryOffset = findZipSignature(zip, 0x02014b50);
+  const eocdOffset = findZipSignature(zip, 0x06054b50);
+  const fileNameLength = zip.readUInt16LE(centralDirectoryOffset + 28);
+  const insertOffset = centralDirectoryOffset + 46 + fileNameLength;
+  const withExtraField = Buffer.concat([
+    zip.subarray(0, insertOffset),
+    extraField,
+    zip.subarray(insertOffset),
+  ]);
+  withExtraField.writeUInt16LE(extraField.byteLength, centralDirectoryOffset + 30);
+  withExtraField.writeUInt32LE(
+    zip.readUInt32LE(eocdOffset + 12) + extraField.byteLength,
+    eocdOffset + extraField.byteLength + 12,
+  );
+  return withExtraField;
+}
+
+function addCentralDirectoryFileCommentToSingleEntryZip(zip: Buffer, comment: Buffer): Buffer {
+  const centralDirectoryOffset = findZipSignature(zip, 0x02014b50);
+  const eocdOffset = findZipSignature(zip, 0x06054b50);
+  const fileNameLength = zip.readUInt16LE(centralDirectoryOffset + 28);
+  const extraLength = zip.readUInt16LE(centralDirectoryOffset + 30);
+  const insertOffset = centralDirectoryOffset + 46 + fileNameLength + extraLength;
+  const withComment = Buffer.concat([
+    zip.subarray(0, insertOffset),
+    comment,
+    zip.subarray(insertOffset),
+  ]);
+  withComment.writeUInt16LE(comment.byteLength, centralDirectoryOffset + 32);
+  withComment.writeUInt32LE(
+    zip.readUInt32LE(eocdOffset + 12) + comment.byteLength,
+    eocdOffset + comment.byteLength + 12,
+  );
+  return withComment;
+}
+
 function findZipSignature(buffer: Buffer, signature: number): number {
   for (let offset = 0; offset <= buffer.byteLength - 4; offset += 1) {
     if (buffer.readUInt32LE(offset) === signature) {
@@ -374,6 +429,55 @@ test("integration ingest zip archive reader rejects hidden leading archive bytes
       return true;
     },
   );
+});
+
+test("integration ingest zip archive reader rejects hidden entry metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-hidden-zip-metadata");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-10.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_ArchivedZipMetadata1",
+    eventId: "evt_ArchivedZipMetadata1",
+    importedAt: "2025-10-12T09:00:00.000Z",
+  });
+  const content = `${JSON.stringify(archivedRecord)}\n`;
+  await fs.mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+
+  for (const [label, zip] of [
+    [
+      "local extra field",
+      addLocalExtraFieldToSingleEntryZip(
+        createSingleEntryZip(path.basename(logicalPath), content),
+        Buffer.from("hidden local metadata\n", "utf8"),
+      ),
+    ],
+    [
+      "central directory file comment",
+      addCentralDirectoryFileCommentToSingleEntryZip(
+        createSingleEntryZip(path.basename(logicalPath), content),
+        Buffer.from("hidden central metadata\n", "utf8"),
+      ),
+    ],
+    [
+      "central directory extra field",
+      addCentralDirectoryExtraFieldToSingleEntryZip(
+        createSingleEntryZip(path.basename(logicalPath), content),
+        Buffer.from("hidden central extra metadata\n", "utf8"),
+      ),
+    ],
+  ] as const) {
+    await fs.writeFile(path.join(vaultRoot, `${logicalPath}.zip`), zip);
+
+    await assert.rejects(
+      readIntegrationIngestEntries(vaultRoot),
+      (error) => {
+        assert.equal(error instanceof VaultError, true, label);
+        assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ARCHIVE_INVALID", label);
+        return true;
+      },
+    );
+  }
 });
 
 test("integration ingest readers reject live and archived copies of the same shard", async () => {
