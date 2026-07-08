@@ -457,6 +457,34 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("fails closed instead of waiting on hosted web contract migration lock contention", async () => {
+    const database = new FakeContractMigrationDatabase({
+      advisoryLockAcquired: false,
+    });
+    const migration: HostedWebContractMigration = {
+      checksum: "checksum-1",
+      id: "20260707180000_drop_legacy_column",
+      sql: 'ALTER TABLE "hosted_member_routing" DROP COLUMN IF EXISTS "legacy";',
+      sqlPath: "migration.sql",
+    };
+
+    await assert.rejects(
+      () => applyHostedWebContractMigrations(database, [migration]),
+      /lock is already held/u,
+    );
+    assert.ok(
+      database.queries.some((query) => query.includes("pg_try_advisory_xact_lock")),
+    );
+    assert.ok(
+      !database.queries.some((query) =>
+        /\bpg_advisory_xact_lock\s*\(/u.test(query),
+      ),
+      "contract migrations must not wait on the advisory lock",
+    );
+    assert.ok(!database.queries.includes(migration.sql));
+    assert.ok(database.queries.includes("ROLLBACK"));
+  });
+
   test("keeps package build non-mutating and keeps Vercel deploy migrations automatic", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(appRoot, "package.json"), "utf8"),
@@ -651,11 +679,23 @@ class FakeContractMigrationDatabase implements HostedWebContractMigrationDatabas
   readonly checksums = new Map<string, string>();
   readonly queries: string[] = [];
 
+  constructor(
+    private readonly options: {
+      advisoryLockAcquired?: boolean;
+    } = {},
+  ) {}
+
   async query(
     text: string,
     values?: unknown[],
   ): Promise<{ rows: Array<Record<string, unknown>> }> {
     this.queries.push(text);
+
+    if (text.includes("pg_try_advisory_xact_lock")) {
+      return {
+        rows: [{ acquired: this.options.advisoryLockAcquired ?? true }],
+      };
+    }
 
     if (text.includes("SELECT checksum")) {
       const migrationId = String(values?.[0] ?? "");

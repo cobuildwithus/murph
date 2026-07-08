@@ -129,9 +129,22 @@ export async function applyHostedWebContractMigrations(
   for (const migration of migrations) {
     await database.query("BEGIN");
     try {
-      await database.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
-        CONTRACT_MIGRATION_LOCK_NAME,
-      ]);
+      const lock = await database.query(
+        "SELECT pg_try_advisory_xact_lock(hashtext($1)) AS acquired",
+        [CONTRACT_MIGRATION_LOCK_NAME],
+      );
+      if (!readAdvisoryLockAcquired(lock.rows[0])) {
+        throw new Error(
+          "Hosted web contract migration lock is already held; refusing to wait past the current-production proof.",
+        );
+      }
+
+      await database.query(
+        `SET LOCAL lock_timeout = '${CONTRACT_MIGRATION_LOCK_TIMEOUT}'`,
+      );
+      await database.query(
+        `SET LOCAL statement_timeout = '${CONTRACT_MIGRATION_STATEMENT_TIMEOUT}'`,
+      );
       await database.query(`
         CREATE TABLE IF NOT EXISTS ${CONTRACT_MIGRATION_TABLE} (
           migration_id TEXT PRIMARY KEY,
@@ -158,12 +171,6 @@ export async function applyHostedWebContractMigrations(
         );
       }
 
-      await database.query(
-        `SET LOCAL lock_timeout = '${CONTRACT_MIGRATION_LOCK_TIMEOUT}'`,
-      );
-      await database.query(
-        `SET LOCAL statement_timeout = '${CONTRACT_MIGRATION_STATEMENT_TIMEOUT}'`,
-      );
       await database.query(migration.sql);
       await database.query(
         `INSERT INTO ${CONTRACT_MIGRATION_TABLE} (migration_id, checksum) VALUES ($1, $2)`,
@@ -209,6 +216,12 @@ async function rollbackAfterContractMigrationFailure(
 
 function readChecksum(row: Record<string, unknown> | undefined): string | undefined {
   return typeof row?.checksum === "string" ? row.checksum : undefined;
+}
+
+function readAdvisoryLockAcquired(
+  row: Record<string, unknown> | undefined,
+): boolean {
+  return row?.acquired === true;
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

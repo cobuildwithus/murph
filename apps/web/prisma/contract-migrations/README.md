@@ -28,6 +28,10 @@ The runner sets short transaction-local lock and statement timeouts before each
 migration body; if cleanup cannot run without waiting on live traffic, let it
 fail and retry later. Do not use commands that PostgreSQL forbids inside a
 transaction, such as `CREATE INDEX CONCURRENTLY`.
+If another contract migration run already owns the database advisory lock, the
+runner fails closed instead of waiting past its current-production alias proof;
+rerun the workflow after the active run finishes if cleanup still needs to
+apply.
 
 After cleanup applies, the rollback floor is the first deployed Vercel commit
 that no longer reads or writes the dropped schema shape. Rolling back below that
