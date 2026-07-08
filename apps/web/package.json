@@ -28,6 +28,7 @@
     "prisma:generate": "prisma generate && pnpm --dir ../.. exec tsx apps/web/scripts/ensure-prisma-client-link.ts",
     "prisma:migrate:deploy": "pnpm --dir ../.. exec tsx apps/web/scripts/run-prisma-migrate-deploy.ts",
     "prisma:migrate:dev": "prisma migrate dev",
+    "release:production:contract-migrate": "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-contract-migrations.ts",
     "release:production:migrate": "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
     "verify": "bash scripts/verify-fast.sh",
     "verify:parallel": "MURPH_VERIFY_STEP_PARALLEL=1 bash scripts/verify-fast.sh"

@@ -1,10 +1,124 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CONFIG_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const HOSTED_WEB_PRISMA_MIGRATIONS_DIR = path.join(CONFIG_DIR, "prisma", "migrations");
 const KNOWN_POOLER_PORTS = new Set(["6432", "6543"]);
+
+export const hostedWebPrismaPredeployDestructiveMigrationBaseline =
+  "20260707170000_drop_stale_linq_recency_columns";
+
+const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
+  "2026040600_init",
+  "20260425000000_drop_legacy_linq_control_plane",
+  "20260425010000_drop_revnet_issuance",
+  "20260426000000_hosted_member_pending_activation_timezone",
+  "20260426010000_hosted_mailbox_workspace_groundwork",
+  "20260426020000_hosted_mailbox_payload_hash",
+  "2026042700_hosted_runtime_hard_cut",
+  "20260428010000_drop_hosted_share_tables",
+  "20260429020000_hosted_legal_consent",
+  "20260501000000_hosted_user_crypto_envelopes",
+  "20260501000001_hosted_user_crypto_envelope_hardening",
+  "2026050100_device_connection_credentials_setup",
+  "2026050101_device_connection_sources",
+  "20260502000000_hosted_web_session",
+  "2026050400_hosted_ai_usage_provider_request_outcome",
+  "2026050401_hosted_ai_usage_sanitized_usage_metadata",
+  "2026050402_device_oauth_session_metadata",
+  "2026050403_linq_pending_participant_contact",
+  "2026050500_device_sync_dirty_connection",
+  "2026050501_stripe_checkout_email_authorization",
+  "2026050502_hosted_ai_usage_allowance",
+  "2026050503_pulse_trial_checkout_offer",
+  "2026050601_hosted_ai_usage_limit_notice_sent",
+  "2026050602_hosted_plan_switch_schedule_ref",
+  "2026050801_device_webhook_trace_claim_token",
+  "2026050802_device_connect_intent",
+  "2026050900_hosted_web_session_row_cap_index",
+  "2026051000_hosted_ai_usage_stripe_meter_skipped",
+  "2026051900_device_connection_due_reconcile_sweep_idx",
+  "2026052400_device_connection_refresh_lease",
+  "2026052600_device_sync_dirty_payload",
+  "2026052700_hosted_ingress_latency_trace",
+  "2026052700_hosted_runtime_log_event_cooldown_index",
+  "2026052800_hosted_signup_welcome_email_attempt",
+  "2026060300_hosted_latency_milestones",
+  "2026060501_device_sync_source_confirmed_backfill",
+  "2026060900_hosted_latency_phase_breakdown",
+  "2026061000_hosted_mailbox_consumed_seq",
+  "2026061000_hosted_vault_share",
+  "2026061001_hosted_ai_usage_turn_profile",
+  "2026061500_hosted_ai_usage_token_pricing_basis",
+  "2026061500_hosted_signup_notification_email_attempt",
+  "2026061700_hosted_computer_use",
+  "2026061800_hosted_family_plan",
+  "2026062100_hosted_computer_single_member_profile",
+  "2026062101_hosted_subscription_cancellation_email_sent",
+  "20260622120000_connected_apps",
+  "20260622190000_add_hosted_product_feedback",
+  "20260623060000_hosted_workspace_inbox_media_retention_wake",
+  "20260623120000_hosted_codex_auth_connection",
+  "20260623170000_generalize_hosted_product_feedback",
+  "20260623193000_hosted_product_feedback_summary",
+  "20260624000000_clear_hosted_codex_auth_connected",
+  "20260624090000_hosted_sensitive_action_challenge",
+  "20260624120000_hosted_thread_routes",
+  "20260624150000_hosted_sensitive_action_approval",
+  "20260624200000_hosted_action_approval_return_contact_kind",
+  "20260624210000_family_invite_telegram_username_lookup",
+  "20260624230000_family_invite_email_lookup",
+  "20260625000100_hosted_phone_calls",
+  "2026062500_hosted_linq_observability",
+  "2026062501_hosted_linq_egress_engagement",
+  "20260625150000_hosted_action_approval_consumed_at",
+  "20260626000000_linq_first_contact_admission_decision",
+  "2026062600_computer_handoff_return_contact_kind",
+  "20260626010000_linq_first_contact_admission_budget",
+  "20260627210000_linq_first_contact_admission_drop_category",
+  "20260627230000_hosted_linq_contact_card_share",
+  "20260627230000_linq_first_contact_rejected_message_text",
+  "20260628000000_linq_first_contact_scrub_rejected_message_text",
+  "20260628010000_linq_first_contact_drop_rejected_message_text",
+  "20260629160000_computer_handoff_viewport_session_hint",
+  "20260630190000_hosted_linq_db_home_lines",
+  "20260701040000_hosted_groups",
+  "20260701050000_hosted_vault_share_drop_source",
+  "20260701153000_hosted_vault_share_active_indexes",
+  "20260703160000_device_oauth_session_consumed_at",
+  "20260705120000_hosted_mailbox_item_consumed_at",
+  "20260706120000_hosted_thread_container_participant",
+  "20260706130000_hosted_group_join_offer",
+  "20260706130000_hosted_growth_daily_snapshot",
+  "20260707170000_drop_stale_linq_recency_columns",
+  "20260707180000_hosted_vault_share_projection_scopes",
+]);
+
+const incompatiblePredeploySqlPatterns = [
+  {
+    label: "ADD COLUMN NOT NULL",
+    pattern: /\bADD\s+COLUMN\b[\s\S]{0,240}?\bNOT\s+NULL\b/iu,
+  },
+  { label: "DROP COLUMN", pattern: /\bDROP\s+COLUMN\b/iu },
+  { label: "DROP CONSTRAINT", pattern: /\bDROP\s+CONSTRAINT\b/iu },
+  { label: "DROP INDEX", pattern: /\bDROP\s+INDEX\b/iu },
+  { label: "DROP TABLE", pattern: /\bDROP\s+TABLE\b/iu },
+  { label: "DROP TYPE", pattern: /\bDROP\s+TYPE\b/iu },
+  { label: "DROP VIEW", pattern: /\bDROP\s+(?:MATERIALIZED\s+)?VIEW\b/iu },
+  { label: "RENAME COLUMN", pattern: /\bRENAME\s+COLUMN\b/iu },
+  { label: "RENAME TABLE", pattern: /\bALTER\s+TABLE\b[\s\S]*?\bRENAME\s+TO\b/iu },
+  {
+    label: "ALTER COLUMN SET NOT NULL",
+    pattern: /\bALTER\s+COLUMN\b[\s\S]{0,240}?\bSET\s+NOT\s+NULL\b/iu,
+  },
+  {
+    label: "ALTER COLUMN TYPE",
+    pattern: /\bALTER\s+COLUMN\b[\s\S]{0,240}?\b(?:SET\s+DATA\s+)?TYPE\b/iu,
+  },
+] as const;
 
 export const hostedWebPrismaMigrateDeployCommand = {
   command: resolvePnpmCommand(),
@@ -19,9 +133,19 @@ export type HostedWebMigrationRunner = (
   environment: NodeJS.ProcessEnv,
 ) => Promise<void>;
 
+export interface HostedWebPrismaMigrateDeployOptions {
+  prismaMigrationsDir?: string;
+}
+
 export interface HostedWebMigrationDatabaseUrl {
   source: "DIRECT_DATABASE_URL" | "DATABASE_URL";
   url: string;
+}
+
+export interface HostedWebPredeployDestructiveMigration {
+  migrationId: string;
+  reason: string;
+  sqlPath: string;
 }
 
 export function resolveHostedWebMigrationDatabaseUrl(
@@ -74,7 +198,12 @@ export function assertDirectMigrationDatabaseUrl(
 export async function runHostedWebPrismaMigrateDeploy(
   environment: HostedWebMigrationEnvironment = process.env,
   runCommand: HostedWebMigrationRunner = runCommandInherited,
+  options: HostedWebPrismaMigrateDeployOptions = {},
 ): Promise<void> {
+  await assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
+    options.prismaMigrationsDir,
+  );
+
   const migrationDatabaseUrl = resolveHostedWebMigrationDatabaseUrl(environment);
   console.log(`Applying hosted web Prisma migrations with ${migrationDatabaseUrl.source}.`);
   await runCommand(
@@ -86,6 +215,57 @@ export async function runHostedWebPrismaMigrateDeploy(
       DATABASE_URL: migrationDatabaseUrl.url,
     },
   );
+}
+
+export async function assertHostedWebPrismaPredeployMigrationsAreExpandOnly(
+  migrationsDir = HOSTED_WEB_PRISMA_MIGRATIONS_DIR,
+): Promise<void> {
+  const destructiveMigrations =
+    await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+  if (destructiveMigrations.length === 0) {
+    return;
+  }
+
+  const summary = destructiveMigrations
+    .map((migration) => `${migration.migrationId} (${migration.reason})`)
+    .join(", ");
+
+  throw new Error(
+    `Destructive or incompatible hosted web Prisma migration(s) cannot run in the predeploy Prisma path outside the frozen hosted web migration history set ending at ${hostedWebPrismaPredeployDestructiveMigrationBaseline}: ${summary}. Use an expand/backfill/switch/final-cleanup sequence; only final cleanup SQL belongs in apps/web/prisma/contract-migrations after production promotion.`,
+  );
+}
+
+export async function findHostedWebPrismaPredeployDestructiveMigrations(
+  migrationsDir = HOSTED_WEB_PRISMA_MIGRATIONS_DIR,
+): Promise<HostedWebPredeployDestructiveMigration[]> {
+  const entries = await readdir(migrationsDir, { withFileTypes: true });
+  const violations: HostedWebPredeployDestructiveMigration[] = [];
+
+  for (const entry of entries) {
+    if (
+      !entry.isDirectory() ||
+      hostedWebPrismaPredeployHistoricalMigrationIds.has(entry.name)
+    ) {
+      continue;
+    }
+
+    const sqlPath = path.join(migrationsDir, entry.name, "migration.sql");
+    const sql = stripSqlComments(await readFile(sqlPath, "utf8"));
+    const destructivePattern = incompatiblePredeploySqlPatterns.find(({ pattern }) =>
+      pattern.test(sql),
+    );
+
+    if (destructivePattern !== undefined) {
+      violations.push({
+        migrationId: entry.name,
+        reason: destructivePattern.label,
+        sqlPath,
+      });
+    }
+  }
+
+  return violations;
 }
 
 async function main(): Promise<void> {
@@ -113,6 +293,10 @@ function shouldRequireDirectDatabaseUrl(environment: HostedWebMigrationEnvironme
 function nonEmptyEnv(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+}
+
+function stripSqlComments(sql: string): string {
+  return sql.replace(/--.*$/gmu, "").replace(/\/\*[\s\S]*?\*\//gu, "");
 }
 
 function runCommandInherited(

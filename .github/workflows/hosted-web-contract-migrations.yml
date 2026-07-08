@@ -1,0 +1,154 @@
+name: Hosted Web Contract Migrations
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+
+jobs:
+  production-contract-migrations:
+    name: Run post-deploy contract migrations
+    if: ${{ github.event.deployment_status.state == 'success' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]') }}
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.deployment.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify deployed commit is from main
+        id: production-branch
+        shell: bash
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha }}
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+          if git merge-base --is-ancestor "${DEPLOYED_SHA}" origin/main; then
+            echo "should_run=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "should_run=false" >> "${GITHUB_OUTPUT}"
+          echo "::notice::Skipping hosted web contract migrations because deployed SHA is not reachable from origin/main."
+
+      - name: Setup pnpm
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Install deps
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify current Vercel production deployment and apply contract migrations
+        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
+        shell: bash
+        env:
+          HOSTED_WEB_DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}
+          DEPLOYED_SHA: ${{ github.event.deployment.sha }}
+          HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+          HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
+          HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
+          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
+          HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS: ${{ vars.HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS || '300' }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${HOSTED_WEB_VERCEL_TOKEN}" ]; then
+            echo "::error::HOSTED_WEB_VERCEL_TOKEN is required to verify the current Vercel production deployment."
+            exit 1
+          fi
+
+          if [ -z "${HOSTED_WEB_DIRECT_DATABASE_URL}" ]; then
+            echo "::error::HOSTED_WEB_DIRECT_DATABASE_URL is required to apply hosted web contract migrations."
+            exit 1
+          fi
+
+          if [ -z "${HOSTED_WEB_VERCEL_PROJECT_ID}" ]; then
+            echo "::error::HOSTED_WEB_VERCEL_PROJECT_ID is required to verify the current Vercel production deployment."
+            exit 1
+          fi
+
+          if [ -z "${HOSTED_WEB_PRODUCTION_BASE_URL}" ]; then
+            echo "::error::HOSTED_WEB_PRODUCTION_BASE_URL is required to verify the current Vercel production deployment."
+            exit 1
+          fi
+
+          if ! [[ "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}" =~ ^[0-9]+$ ]]; then
+            echo "::error::HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS must be a non-negative integer."
+            exit 1
+          fi
+
+          if [ "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}" -gt 600 ]; then
+            echo "::error::HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS must be 600 or less unless the workflow timeout is also raised."
+            exit 1
+          fi
+
+          alias_host="${HOSTED_WEB_PRODUCTION_BASE_URL#http://}"
+          alias_host="${alias_host#https://}"
+          alias_host="${alias_host%%/*}"
+
+          if [ -z "${alias_host}" ]; then
+            echo "::error::HOSTED_WEB_PRODUCTION_BASE_URL must include a host."
+            exit 1
+          fi
+
+          alias_url="https://api.vercel.com/v4/aliases/${alias_host}?projectId=${HOSTED_WEB_VERCEL_PROJECT_ID}"
+          if [ -n "${HOSTED_WEB_VERCEL_TEAM_ID}" ]; then
+            alias_url="${alias_url}&teamId=${HOSTED_WEB_VERCEL_TEAM_ID}"
+          fi
+
+          if [ "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}" -gt 0 ]; then
+            echo "::notice::Waiting ${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}s for prior production function executions to drain before contract migrations."
+            sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"
+          fi
+
+          alias_response="$(
+            curl \
+              --fail-with-body \
+              --silent \
+              --show-error \
+              --header "Authorization: Bearer ${HOSTED_WEB_VERCEL_TOKEN}" \
+              "${alias_url}"
+          )"
+          current_sha="$(
+            node -e '
+              let input = "";
+              process.stdin.on("data", (chunk) => {
+                input += chunk;
+              });
+              process.stdin.on("end", () => {
+                const data = JSON.parse(input);
+                const sha = data?.deployment?.meta?.githubCommitSha;
+                process.stdout.write(typeof sha === "string" ? sha : "");
+              });
+            ' <<< "${alias_response}"
+          )"
+
+          if [ -z "${current_sha}" ]; then
+            echo "::error::Vercel alias response did not include deployment.meta.githubCommitSha."
+            exit 1
+          fi
+
+          if [ "${current_sha}" = "${DEPLOYED_SHA}" ]; then
+            DIRECT_DATABASE_URL="${HOSTED_WEB_DIRECT_DATABASE_URL}" \
+              MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS=1 \
+              MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS=1 \
+              pnpm --dir apps/web release:production:contract-migrate
+            exit $?
+          fi
+
+          echo "::notice::Skipping hosted web contract migrations because current Vercel production is ${current_sha}, not ${DEPLOYED_SHA}."
