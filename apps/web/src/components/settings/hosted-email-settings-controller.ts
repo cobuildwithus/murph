@@ -99,6 +99,11 @@ export function useHostedEmailSettingsController(input: {
   const isSubmittingCode = state.status === "submitting-code";
   const isBusy = !privyReady || isSendingCode || isSubmittingCode || isSyncingEmailRoute;
 
+  function handleClientAuthRequired() {
+    setNoticeMessage("Sign in on this device to manage email.");
+    input.onClientAuthRequired?.();
+  }
+
   async function requestCodeForEmail(nextEmailAddress: string) {
     setErrorMessage(null);
     setNoticeMessage(null);
@@ -115,8 +120,7 @@ export function useHostedEmailSettingsController(input: {
     }
 
     if (!clientAuthenticated) {
-      setNoticeMessage("Sign in on this device to manage email.");
-      input.onClientAuthRequired?.();
+      handleClientAuthRequired();
       return;
     }
 
@@ -260,8 +264,7 @@ export function useHostedEmailSettingsController(input: {
     }
 
     if (!clientAuthenticated) {
-      setNoticeMessage("Sign in on this device to manage email.");
-      input.onClientAuthRequired?.();
+      handleClientAuthRequired();
       return;
     }
 
@@ -356,6 +359,7 @@ export function useHostedEmailSettingsController(input: {
     setCode,
     setEmailAddress,
     handleLinkEmail,
+    handleClientAuthRequired,
     handleResendCode,
     handleSendCode,
     handleSyncVerifiedEmail,
