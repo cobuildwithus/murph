@@ -14,6 +14,12 @@ import type {
 
 type HostedAiUsageLimitNoticeClient = PrismaClient | Prisma.TransactionClient;
 
+export type HostedAiUsageLimitNoticeDeliveryResult =
+  | { status: "already_notified" }
+  | { status: "in_flight" }
+  | { status: "not_applicable" }
+  | { status: "sent" };
+
 export async function sendClaimedHostedAiUsageLimitNoticeToLinqChat(input: {
   chatId: string;
   claimToken: HostedLinqAiUsageQuotaClaimToken;
@@ -26,8 +32,9 @@ export async function sendClaimedHostedAiUsageLimitNoticeToLinqChat(input: {
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   signal?: AbortSignal;
   sourceEventId: string;
-}): Promise<void> {
-  await drainHostedLinqSideEffectsDirect({
+}): Promise<HostedAiUsageLimitNoticeDeliveryResult> {
+  const result = await drainHostedLinqSideEffectsDirect({
+    collectResult: true,
     prisma: input.prisma,
     sideEffects: [
       createHostedWebhookLinqMessageSideEffect({
@@ -45,4 +52,17 @@ export async function sendClaimedHostedAiUsageLimitNoticeToLinqChat(input: {
     ],
     ...(input.signal ? { signal: input.signal } : {}),
   });
+  if (result.sentCount > 0) {
+    return { status: "sent" };
+  }
+
+  const usageNoticeSkip = result.skipped.find((skip) => skip.template === "ai_usage_quota");
+  switch (usageNoticeSkip?.reason) {
+    case "notice_already_claimed":
+      return { status: "already_notified" };
+    case "notice_in_flight":
+      return { status: "in_flight" };
+    default:
+      return { status: "not_applicable" };
+  }
 }

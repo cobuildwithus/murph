@@ -191,7 +191,7 @@ describe("hosted orchestration reconciliation facts", () => {
       restoreOnboardingLink: null,
     });
     mocks.markHostedLinqDeliverySendFailedTx.mockResolvedValue(undefined);
-    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue(undefined);
+    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue({ status: "sent" });
     mocks.fetch.mockResolvedValue(
       new Response(JSON.stringify({ ok: true, result: { message_id: 7001 } }), {
         headers: { "content-type": "application/json" },
@@ -625,6 +625,56 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
+  it("sets a runtime retry when the Linq usage-limit notice is still in flight", async () => {
+    const deniedDecision = buildDeniedUsageGateDecision();
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "3",
+      },
+      {
+        lane: "system",
+        maxSeq: "0",
+      },
+    ]);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: deniedDecision,
+      status: "denied",
+    });
+    mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(
+      buildPendingConversationItem(),
+    );
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake({
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:line_runtime_denied",
+        channel: "linq",
+        containerMemberId: MEMBER_ID,
+        threadId: "chat_runtime_denied",
+      },
+    }));
+    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValueOnce({
+      status: "in_flight",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toEqual({
+      reason: "ai_usage_denied",
+      retryAt: "2026-05-20T12:15:00.000Z",
+    });
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledOnce();
+  });
+
   it("sends the current-chat Telegram usage-limit notice when pending conversation work is runtime-denied", async () => {
     const deniedDecision = buildDeniedUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -805,7 +855,7 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
-      retryAt: null,
+      retryAt: "2026-05-20T12:15:00.000Z",
     });
     expect(mocks.hasFreshHostedAiUsageLimitNoticeClaim).toHaveBeenCalledWith({
       memberId: MEMBER_ID,

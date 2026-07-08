@@ -6737,9 +6737,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("sends a deterministic Linq quota reply instead of the daily quota reply when the usage gate denies an active member", async () => {
-    mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
-    }));
     mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
       allowed: false,
       billingPlanCode: "launch_monthly",
@@ -6797,6 +6794,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-ai-usage-quota-reply",
     });
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
@@ -7022,6 +7020,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-ai-usage-quota-reply",
     });
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_current_inbound",
@@ -7107,10 +7106,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("sends Linq AI usage quota replies even after the daily quota notice is already marked", async () => {
-    mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
-      quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
-    }));
     mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
       allowed: false,
       billingPlanCode: "launch_monthly",
@@ -7167,6 +7162,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-ai-usage-quota-reply",
     });
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
     const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
       memberId: "member_123",
@@ -7265,7 +7261,26 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("retries Linq AI usage quota replies when only a fresh period rollout claim exists", async () => {
-    mocks.hasFreshHostedAiUsageLimitNoticeClaim.mockResolvedValueOnce(true);
+    mocks.hasFreshHostedAiUsageLimitNoticeClaim.mockResolvedValue(true);
+    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
+      allowed: false,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 100_000n,
+      memberId: "member_123",
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros: 0n,
+      retryAfter: new Date("2026-04-01T00:00:00.000Z"),
+      spentUsdMicros: 100_000n,
+      userNotice: {
+        code: "pulse_upgrade_edge",
+        message: buildPulseUpgradeEdgeMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        }),
+      },
+    });
     mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
       allowed: false,
       billingPlanCode: "launch_monthly",
@@ -7308,12 +7323,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       },
     });
+    const rawBody = buildHostedLinqWebhookBody({
+      eventId: "evt_ai_usage_limit_period_claim_in_flight",
+    });
 
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
-      rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_ai_usage_limit_period_claim_in_flight",
-      }),
+      rawBody,
       signature: null,
       timestamp: null,
     })).rejects.toMatchObject({
@@ -7321,6 +7337,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       httpStatus: 503,
       retryable: true,
     });
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_AI_USAGE_QUOTA_NOTICE_IN_FLIGHT",
+      httpStatus: 503,
+      retryable: true,
+    });
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
       expect.objectContaining({
         linqChatId: "chat_123",

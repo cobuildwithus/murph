@@ -38,9 +38,11 @@ import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   claimHostedAiUsageLimitNoticeForRollout,
   hasFreshHostedAiUsageLimitNoticeClaim,
+  HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
   markHostedAiUsageLimitNoticeSent,
 } from "../hosted-execution/usage-allowance";
 import {
+  type HostedAiUsageLimitNoticeDeliveryResult,
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
 } from "../hosted-execution/usage-limit-notice";
 import {
@@ -221,8 +223,11 @@ export async function readHostedRuntimeReconciliationFacts(
     });
 
     if (gate.status === "denied") {
+      let usageNoticeResult: HostedRuntimeAiUsageLimitNoticeResult = {
+        status: "not_applicable",
+      };
       if ((input.usageGateMode ?? "mutating") === "mutating") {
-        await sendHostedRuntimeAiUsageLimitNoticeForPendingConversation({
+        usageNoticeResult = await sendHostedRuntimeAiUsageLimitNoticeForPendingConversation({
           consumedSeqByLane,
           gate,
           mailboxLag,
@@ -235,7 +240,9 @@ export async function readHostedRuntimeReconciliationFacts(
         mailboxLag,
         reason: "ai_usage_denied",
         retryAt: resolveHostedRuntimeAiBlockedRetryAt({
-          aiRetryAt: null,
+          aiRetryAt: usageNoticeResult.status === "in_flight"
+            ? usageNoticeResult.retryAt
+            : null,
           now,
           workspace: projectedWorkspace,
         }),
@@ -375,6 +382,12 @@ function resolveHostedRuntimeAiBlockedRetryAt(input: {
   ]);
 }
 
+type HostedRuntimeAiUsageLimitNoticeResult =
+  | { status: "already_notified" }
+  | { retryAt: string; status: "in_flight" }
+  | { status: "not_applicable" }
+  | { status: "sent" };
+
 async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: {
   consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
   gate: Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>;
@@ -382,7 +395,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
   now: Date;
   prisma: NonNullable<Parameters<typeof readHostedMailboxMaxSeqByLane>[0]["prisma"]>;
   userId: string;
-}): Promise<void> {
+}): Promise<HostedRuntimeAiUsageLimitNoticeResult> {
   const decision = input.gate.decision;
   if (
     decision.reason !== "ai_usage_limit_exceeded" ||
@@ -392,7 +405,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       mailboxLag: input.mailboxLag,
     })
   ) {
-    return;
+    return { status: "not_applicable" };
   }
 
   const pendingItem = await readHostedMailboxFirstPendingConversationItem({
@@ -404,7 +417,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     userId: input.userId,
   });
   if (!pendingItem) {
-    return;
+    return { status: "not_applicable" };
   }
 
   const wake = await readHostedRuntimePendingConversationWake({
@@ -412,7 +425,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     prisma: input.prisma,
   });
   if (!wake) {
-    return;
+    return { status: "not_applicable" };
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {
@@ -420,7 +433,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       target: wake.message.telegramMessage.threadId,
     });
     if (!noticeDelivery) {
-      return;
+      return { status: "not_applicable" };
     }
 
     const sentAt = input.now;
@@ -436,9 +449,9 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
         idempotencyKeys: legacyIdempotencyKeys,
         prisma: input.prisma,
-      });
+    });
     if (legacyDeliverySentNotice) {
-      return;
+      return { status: "already_notified" };
     }
     const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: sentAt,
@@ -451,16 +464,23 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       template: "ai_usage_quota",
     });
     if (!claimed.claimed) {
-      return;
+      const currentDeliverySentNotice =
+        await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+          idempotencyKeys: [idempotencyKey],
+          prisma: input.prisma,
+        });
+      return currentDeliverySentNotice
+        ? { status: "already_notified" }
+        : buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
     const legacyDeliveryInFlight =
       await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
         attemptedAt: sentAt,
         idempotencyKeys: legacyIdempotencyKeys,
         prisma: input.prisma,
-      });
+    });
     if (legacyDeliveryInFlight) {
-      return;
+      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
     const legacyPeriodClaimOwnsNotice =
       await hasFreshHostedAiUsageLimitNoticeClaim({
@@ -468,9 +488,9 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         now: sentAt,
         periodStart: decision.periodStart,
         prisma: input.prisma,
-      });
+    });
     if (legacyPeriodClaimOwnsNotice) {
-      return;
+      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
     const rolloutClaimedNotice =
       await claimHostedAiUsageLimitNoticeForRollout({
@@ -478,9 +498,9 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         memberId: input.userId,
         periodStart: decision.periodStart,
         prisma: input.prisma,
-      });
+    });
     if (!rolloutClaimedNotice) {
-      return;
+      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
 
     try {
@@ -512,18 +532,18 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       prisma: input.prisma,
       sentAt,
     });
-    return;
+    return { status: "sent" };
   }
 
   if (!isHostedLinqConversationMessageWake(wake)) {
-    return;
+    return { status: "not_applicable" };
   }
   if (decision.userNotice.code === "trial_conversion_pending") {
-    return;
+    return { status: "not_applicable" };
   }
 
   const sentAt = input.now;
-  await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
+  const linqNoticeResult = await sendClaimedHostedAiUsageLimitNoticeToLinqChat({
     chatId: wake.message.linqMessage.chatId,
     claimToken: {
       periodStart: decision.periodStart.toISOString(),
@@ -538,6 +558,27 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     routeAuthority: wake.message.routeAuthority ?? null,
     sourceEventId: wake.eventId,
   });
+  return mapHostedRuntimeAiUsageLinqNoticeResult(linqNoticeResult, input.now);
+}
+
+function buildHostedRuntimeAiUsageNoticeInFlightResult(
+  now: Date,
+): HostedRuntimeAiUsageLimitNoticeResult {
+  return {
+    retryAt: new Date(
+      now.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+    ).toISOString(),
+    status: "in_flight",
+  };
+}
+
+function mapHostedRuntimeAiUsageLinqNoticeResult(
+  result: HostedAiUsageLimitNoticeDeliveryResult,
+  now: Date,
+): HostedRuntimeAiUsageLimitNoticeResult {
+  return result.status === "in_flight"
+    ? buildHostedRuntimeAiUsageNoticeInFlightResult(now)
+    : result;
 }
 
 async function sendHostedRuntimeTelegramUsageLimitNotice(input: {

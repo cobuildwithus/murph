@@ -46,7 +46,7 @@ import { sha256Hex } from "../primitives";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
-const HOSTED_AI_USAGE_LEGACY_NOTICE_CLAIM_STALE_MS = 15 * 60 * 1000;
+export const HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS = 15 * 60 * 1000;
 
 export type HostedAiUsageGateDeniedReason =
   | "ai_usage_limit_exceeded"
@@ -1034,7 +1034,7 @@ export async function claimHostedAiUsageLimitNoticeForRollout(input: {
   const claimedAt = normalizeHostedAiUsageAllowanceDate(input.claimedAt ?? new Date());
   const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
   const staleBefore = new Date(
-    claimedAt.getTime() - HOSTED_AI_USAGE_LEGACY_NOTICE_CLAIM_STALE_MS,
+    claimedAt.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
   );
 
   const claimed = await prisma.hostedAiUsagePeriod.updateMany({
@@ -1083,7 +1083,7 @@ export async function hasFreshHostedAiUsageLimitNoticeClaim(input: {
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
   const periodStart = normalizeHostedAiUsageAllowanceDate(input.periodStart);
   const staleBefore = new Date(
-    now.getTime() - HOSTED_AI_USAGE_LEGACY_NOTICE_CLAIM_STALE_MS,
+    now.getTime() - HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
   );
 
   const period = await prisma.hostedAiUsagePeriod.findUnique({
