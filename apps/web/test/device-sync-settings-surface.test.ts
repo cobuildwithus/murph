@@ -457,6 +457,58 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     ]);
   });
 
+  it("does not borrow another Junction child source's target for Apple Health reconnect", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [
+        {
+          connectionId: "dspc_junction_multi",
+          firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastSeenAt: "2026-06-09T08:30:00.000Z",
+          resourceCount: 2,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+        {
+          connectionId: "dspc_junction_multi",
+          firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastSeenAt: "2026-06-09T08:50:48.000Z",
+          requiresReconnect: true,
+          resourceCount: 3,
+          sourceProviderSlug: "apple_health_kit",
+          status: "error",
+        },
+      ],
+      connectTargets: [{
+        connectSourceId: "garmin",
+        connectTarget: "garmin",
+        provider: "junction",
+        sourceProviderSlug: "garmin",
+      }],
+      connections: [buildConnection({
+        id: "dspc_junction_multi",
+        lastSyncCompletedAt: "2026-06-09T07:00:00.000Z",
+        provider: "junction",
+        status: "active",
+        updatedAt: "2026-06-09T08:50:48.000Z",
+      })],
+      now: new Date("2026-06-09T12:00:00.000Z"),
+      providers: [JUNCTION_PROVIDER],
+    });
+
+    expect(source).toMatchObject({
+      connectSourceId: null,
+      connectTarget: null,
+      detail: "Apple Health needs to be reconnected before Murph can keep syncing it.",
+      guidance: "Disconnect this source if you no longer need it.",
+      primaryAction: null,
+      provider: "junction",
+      providerLabel: "Apple Health",
+      secondaryAction: { kind: "disconnect", label: "Disconnect" },
+      statusLabel: "Needs access",
+      tone: "attention",
+    });
+  });
+
   it("keeps pending external-link setup separate from the active lifecycle state", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connections: [buildConnection({
