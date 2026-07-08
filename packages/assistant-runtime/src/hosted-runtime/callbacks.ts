@@ -93,7 +93,6 @@ import {
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
   resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest,
-  resolveHostedAssistantLinqDeliveryContextForRequest,
   resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
@@ -930,17 +929,22 @@ function resolveHostedAssistantOutboxIntentWakeAt(
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryPreparation> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
+  const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
+    context: input.linqDeliveryContext ?? null,
+    contexts: input.linqDeliveryContexts ?? null,
+  });
   for (const effect of input.assistantDeliveryEffects) {
     if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
       continue;
     }
     const linqDeliveryContext = resolveHostedAssistantLinqDeliveryContextForEffect({
-      context: input.linqDeliveryContext ?? null,
+      contexts: linqDeliveryContexts,
       effect,
     });
     const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
@@ -1000,12 +1004,12 @@ function hasHostedAssistantVaultFileMedia(
 }
 
 function resolveHostedAssistantLinqDeliveryContextForEffect(input: {
-  context: HostedAssistantLinqDeliveryContext | null;
+  contexts: readonly HostedAssistantLinqDeliveryContext[];
   effect: HostedAssistantDeliveryEffect;
 }): HostedAssistantLinqDeliveryContext | null {
   for (const target of readHostedAssistantDeliveryPayloadTargets(input.effect.payload)) {
-    const context = resolveHostedAssistantLinqDeliveryContextForRequest({
-      context: input.context,
+    const context = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+      contexts: input.contexts,
       replyToMessageId: input.effect.payload.replyToMessageId,
       target: target.target,
       targetKind: target.targetKind,
