@@ -391,7 +391,65 @@ test('typing indicators use the current audience route', async () => {
   expect(indicator).not.toBeNull()
   await vi.waitFor(() => {
     expect(startLinqTyping).toHaveBeenCalledWith({
+      replyToMessageId: null,
       target: 'linq-thread',
+      targetKind: 'thread',
+    })
+  })
+  await indicator?.stop()
+})
+
+test('typing indicators forward explicit Linq targets with reply-to proof', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'linq-participant',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'linq-thread',
+      },
+      identityId: null,
+      threadId: 'linq-thread',
+      threadIsDirect: true,
+    },
+  })
+  const input: AssistantMessageInput = {
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryReplyToMessageId: 'msg_123',
+    deliveryTarget: 'h1_0123456789abcdef01234567',
+    participantId: 'linq-participant',
+    prompt: 'Send the reply.',
+    threadId: 'linq-thread',
+    vault: '/vaults/test',
+  }
+  const startLinqTyping = vi.fn(async () => ({
+    stop: async () => undefined,
+  }))
+
+  const indicator = startAssistantChannelTypingIndicator({
+    channelDependencies: {
+      startLinqTyping,
+    },
+    input,
+    session,
+    sharedPlan: createSharedPlan({
+      audience: {
+        actorId: 'linq-participant',
+        channel: 'linq',
+        threadId: 'linq-thread',
+        threadIsDirect: true,
+      },
+    }),
+  })
+
+  expect(indicator).not.toBeNull()
+  await vi.waitFor(() => {
+    expect(startLinqTyping).toHaveBeenCalledWith({
+      replyToMessageId: 'msg_123',
+      target: 'h1_0123456789abcdef01234567',
+      targetKind: 'explicit',
     })
   })
   await indicator?.stop()

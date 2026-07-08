@@ -64,6 +64,8 @@ export interface AssistantChannelDependencies {
   signal?: AbortSignal
   startLinqTyping?: (input: {
     target: string
+    targetKind?: AssistantChannelDeliveryTargetKind | null
+    replyToMessageId?: string | null
   }) => Promise<AssistantChannelActivityHandle | void>
   startTelegramTyping?: (input: {
     target: string
@@ -231,6 +233,7 @@ export interface AssistantChannelAdapter {
       bindingDelivery: AssistantBindingDelivery | null
       explicitTarget: string | null
       identityId: string | null
+      replyToMessageId?: string | null
     },
     dependencies: AssistantChannelDependencies,
   ) => Promise<AssistantChannelActivityHandle | null>
@@ -279,6 +282,7 @@ export interface AssistantChannelAdapterSpec {
     candidate: AssistantDeliveryCandidate
     dependencies: AssistantChannelDependencies
     identityId: string | null
+    replyToMessageId: string | null
   }) => Promise<AssistantChannelActivityHandle | null | void>
   supportsIdempotencyKey: boolean
   resolveDeliveryTransportIdempotent?: (input: {

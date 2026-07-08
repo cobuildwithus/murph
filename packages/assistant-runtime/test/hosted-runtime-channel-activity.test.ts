@@ -149,6 +149,41 @@ test("hosted Linq typing starts without route authority when the target context 
   );
 });
 
+test("hosted Linq typing resolves explicit current-inbound targets through the delivery context", async () => {
+  const typing = createHostedAssistantChannelTypingDependencies({
+    forwardedEnv: {
+      LINQ_API_TOKEN: "linq-token",
+    },
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority: buildLinqRouteAuthority("chat_123"),
+        service: "iMessage",
+        target: "chat_123",
+        threadIsDirect: true,
+      },
+    ],
+    platformEnv: {},
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+  });
+
+  await expect(typing.startLinqTyping?.({
+    replyToMessageId: "msg_123",
+    target: "h1_0123456789abcdef01234567",
+    targetKind: "explicit",
+  })).resolves.toBeUndefined();
+
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledWith(
+    {
+      target: "chat_123",
+    },
+    expect.any(Object),
+  );
+});
+
 test("hosted Linq typing no-ops when no delivery context is present", async () => {
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {
