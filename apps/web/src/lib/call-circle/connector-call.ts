@@ -349,14 +349,27 @@ async function markCallCircleConnectorHandoff(input: {
   }> => {
     const current = await tx.hostedCallCircleMatch.findUnique({
       select: {
+        phoneCall: {
+          select: {
+            analyzedAt: true,
+            endedAt: true,
+            providerCallId: true,
+            providerStartAttemptedAt: true,
+            status: true,
+          },
+        },
         phoneCallId: true,
         status: true,
       },
       where: { id: input.match.id },
     });
+    const expectedPhoneCallId = current?.phoneCallId ?? null;
     if (
       !current
-      || current.phoneCallId !== null
+      || (
+        current.phoneCallId !== null
+        && !isPreProviderFailedCallCirclePhoneCall(current.phoneCall)
+      )
       || !["both_confirmed", "bridging"].includes(current.status)
     ) {
       return { handedOff: false, signals: [] };
@@ -371,7 +384,7 @@ async function markCallCircleConnectorHandoff(input: {
         matchId: input.match.id,
         now: input.now,
         outcome: "participant_unavailable",
-        phoneCallId: null,
+        phoneCallId: expectedPhoneCallId,
         prisma: tx,
         status: "canceled",
       });
@@ -381,7 +394,7 @@ async function markCallCircleConnectorHandoff(input: {
       matchId: input.match.id,
       now: input.now,
       outcome: input.outcome,
-      phoneCallId: null,
+      phoneCallId: expectedPhoneCallId,
       prisma: tx,
       status: "dropped",
     });
@@ -417,6 +430,21 @@ async function markCallCircleConnectorHandoff(input: {
   });
   await signalCallCircleNotificationRuntimesBestEffort(transaction.signals);
   return transaction.handedOff;
+}
+
+function isPreProviderFailedCallCirclePhoneCall(phoneCall: {
+  analyzedAt: Date | null;
+  endedAt: Date | null;
+  providerCallId: string | null;
+  providerStartAttemptedAt: Date | null;
+  status: string;
+} | null): boolean {
+  return phoneCall !== null
+    && phoneCall.analyzedAt === null
+    && phoneCall.endedAt === null
+    && phoneCall.providerCallId === null
+    && phoneCall.providerStartAttemptedAt === null
+    && phoneCall.status === "failed";
 }
 
 async function appendConnectorHandoffNotificationIfReachableTx(input: {

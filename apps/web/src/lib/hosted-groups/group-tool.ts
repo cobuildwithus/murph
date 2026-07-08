@@ -75,6 +75,9 @@ import {
   normalizeHostedVaultShareProjectionKinds,
   projectHostedVaultShareProjectionDisplays,
 } from "./join-policy";
+import {
+  drainPendingHostedGroupJoinOfferReactionsForOffer,
+} from "./join-offer-reaction";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
@@ -516,9 +519,10 @@ async function postHostedRuntimeGroupOffer(input: {
     return unavailable("provider_message_unavailable");
   }
 
+  let offerBinding: Awaited<ReturnType<typeof recordHostedGroupJoinOfferTx>>;
   try {
-    await prisma.$transaction(async (tx) => {
-      await recordHostedGroupJoinOfferTx({
+    offerBinding = await prisma.$transaction(async (tx) => {
+      return await recordHostedGroupJoinOfferTx({
         groupId: created.group.id,
         messageId: sent.messageId,
         offerScope,
@@ -526,6 +530,11 @@ async function postHostedRuntimeGroupOffer(input: {
         tx,
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    await drainPendingHostedGroupJoinOfferReactionsForOffer({
+      messageLookupKey: offerBinding.messageLookupKey,
+      now,
+      prisma,
+    });
   } catch {
     return unavailable("offer_binding_failed");
   }

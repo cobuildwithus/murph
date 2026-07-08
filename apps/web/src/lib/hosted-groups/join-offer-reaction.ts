@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import {
   appendCallCircleSetupNotificationTx,
+  type CallCircleNotificationSignal,
   readCallCircleNotificationSignal,
   signalCallCircleNotificationRuntimesBestEffort,
   type CallCircleNotificationAppendResult,
@@ -19,6 +20,9 @@ import {
   normalizeHostedLinqGroupJoinOfferReaction,
   type ParsedHostedLinqProviderEvent,
 } from "../hosted-onboarding/linq-provider-events";
+import {
+  createHostedLinqProviderEventLookupKey,
+} from "../hosted-onboarding/linq-observability-identifiers";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
@@ -41,6 +45,16 @@ type HostedGroupJoinOfferReactionSkipReason =
 export type HostedGroupJoinOfferReactionResult =
   | { status: "accepted"; reason: "accepted" }
   | { status: "ignored"; reason: HostedGroupJoinOfferReactionSkipReason };
+
+type HostedGroupJoinOfferReactionAcceptanceResult =
+  | {
+      callCircleSetupSignal: CallCircleNotificationSignal | null;
+      status: "accepted";
+    }
+  | {
+      callCircleSetupSignal: null;
+      status: "already_processed";
+    };
 
 export async function handleHostedGroupJoinOfferReaction(input: {
   event: ParsedHostedLinqProviderEvent;
@@ -101,50 +115,171 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     threadId: input.event.linqChatId,
   });
 
-  let accepted: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>> & {
-    callCircleSetupNotification: CallCircleNotificationAppendResult | null;
-  };
+  let accepted: HostedGroupJoinOfferReactionAcceptanceResult;
   try {
-    accepted = await input.prisma.$transaction(async (tx) => {
-      const offerAcceptance = await acceptHostedGroupJoinOfferTx({
-        memberId: member.id,
-        messageLookupKeyReadCandidates,
-        now: input.event.providerCreatedAt,
-        threadIdentityLookupKeyReadCandidates,
-        tx,
-      });
-      return {
-        ...offerAcceptance,
-        callCircleSetupNotification: await applyHostedGroupOfferFeatureActivationsTx({
-          featureActivations: offerAcceptance.featureActivations,
-          groupId: offerAcceptance.groupId,
-          memberId: member.id,
-          now: input.event.providerCreatedAt,
-          tx,
-        }),
-      };
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    accepted = await acceptHostedGroupJoinOfferReactionForMember({
+      memberId: member.id,
+      messageLookupKeyReadCandidates,
+      now: input.event.providerCreatedAt,
+      prisma: input.prisma,
+      threadIdentityLookupKeyReadCandidates,
+    });
   } catch (error) {
     const reason = readHostedGroupJoinOfferReactionSkipReason(error);
     if (!reason) {
       throw error;
+    }
+    if (reason === "no_offer_match") {
+      await recordPendingHostedGroupJoinOfferReaction({
+        event: input.event,
+        memberId: member.id,
+        messageLookupKeyReadCandidates,
+        prisma: input.prisma,
+        threadIdentityLookupKeyReadCandidates,
+      });
     }
     return skipHostedGroupJoinOfferReaction({
       reason,
     });
   }
 
-  const callCircleSetupSignal = accepted.callCircleSetupNotification
-    ? readCallCircleNotificationSignal({
-      memberId: member.id,
-      notification: accepted.callCircleSetupNotification,
-    })
-    : null;
-  if (callCircleSetupSignal) {
-    await signalCallCircleNotificationRuntimesBestEffort([callCircleSetupSignal]);
+  if (accepted.callCircleSetupSignal) {
+    await signalCallCircleNotificationRuntimesBestEffort([accepted.callCircleSetupSignal]);
   }
 
   return { status: "accepted", reason: "accepted" };
+}
+
+export async function drainPendingHostedGroupJoinOfferReactionsForOffer(input: {
+  limit?: number;
+  messageLookupKey: string;
+  now?: Date;
+  prisma: PrismaClient;
+}): Promise<{ acceptedCount: number; scannedCount: number }> {
+  const pendingReactions = await input.prisma.hostedGroupJoinOfferPendingReaction.findMany({
+    orderBy: [
+      { providerCreatedAt: "asc" },
+      { createdAt: "asc" },
+    ],
+    take: input.limit ?? 50,
+    where: {
+      acceptedAt: null,
+      messageLookupKey: input.messageLookupKey,
+    },
+  });
+  const acceptedAt = input.now ?? new Date();
+  const signals: CallCircleNotificationSignal[] = [];
+  let acceptedCount = 0;
+
+  for (const reaction of pendingReactions) {
+    try {
+      const accepted = await acceptHostedGroupJoinOfferReactionForMember({
+        memberId: reaction.memberId,
+        messageLookupKeyReadCandidates: readJsonStringArray(
+          reaction.messageLookupKeyCandidatesJson,
+        ),
+        now: reaction.providerCreatedAt,
+        pendingReaction: {
+          acceptedAt,
+          eventId: reaction.eventId,
+        },
+        prisma: input.prisma,
+        threadIdentityLookupKeyReadCandidates: readJsonStringArray(
+          reaction.threadIdentityLookupKeyCandidatesJson,
+        ),
+      });
+      if (accepted.status !== "accepted") {
+        continue;
+      }
+      acceptedCount += 1;
+      if (accepted.callCircleSetupSignal) {
+        signals.push(accepted.callCircleSetupSignal);
+      }
+    } catch (error) {
+      if (!readHostedGroupJoinOfferReactionSkipReason(error)) {
+        throw error;
+      }
+    }
+  }
+
+  if (signals.length > 0) {
+    await signalCallCircleNotificationRuntimesBestEffort(signals);
+  }
+
+  return { acceptedCount, scannedCount: pendingReactions.length };
+}
+
+async function acceptHostedGroupJoinOfferReactionForMember(input: {
+  memberId: string;
+  messageLookupKeyReadCandidates: readonly string[];
+  now: Date;
+  pendingReaction?: {
+    acceptedAt: Date;
+    eventId: string;
+  };
+  prisma: PrismaClient;
+  threadIdentityLookupKeyReadCandidates: readonly string[];
+}): Promise<HostedGroupJoinOfferReactionAcceptanceResult> {
+  return await input.prisma.$transaction(async (tx) => {
+    if (input.pendingReaction) {
+      const claimed = await tx.hostedGroupJoinOfferPendingReaction.updateMany({
+        data: { acceptedAt: input.pendingReaction.acceptedAt },
+        where: {
+          acceptedAt: null,
+          eventId: input.pendingReaction.eventId,
+        },
+      });
+      if (claimed.count === 0) {
+        return { callCircleSetupSignal: null, status: "already_processed" };
+      }
+    }
+
+    const offerAcceptance = await acceptHostedGroupJoinOfferTx({
+      memberId: input.memberId,
+      messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
+      now: input.now,
+      threadIdentityLookupKeyReadCandidates: input.threadIdentityLookupKeyReadCandidates,
+      tx,
+    });
+    const callCircleSetupNotification = await applyHostedGroupOfferFeatureActivationsTx({
+      featureActivations: offerAcceptance.featureActivations,
+      groupId: offerAcceptance.groupId,
+      memberId: input.memberId,
+      now: input.now,
+      tx,
+    });
+    const callCircleSetupSignal = callCircleSetupNotification
+      ? readCallCircleNotificationSignal({
+        memberId: input.memberId,
+        notification: callCircleSetupNotification,
+      })
+      : null;
+    return { callCircleSetupSignal, status: "accepted" };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function recordPendingHostedGroupJoinOfferReaction(input: {
+  event: ParsedHostedLinqProviderEvent;
+  memberId: string;
+  messageLookupKeyReadCandidates: readonly string[];
+  prisma: PrismaClient;
+  threadIdentityLookupKeyReadCandidates: readonly string[];
+}): Promise<void> {
+  if (!input.event.messageLookupKey) {
+    return;
+  }
+  await input.prisma.hostedGroupJoinOfferPendingReaction.createMany({
+    data: {
+      eventId: createHostedLinqProviderEventLookupKey(input.event.eventId),
+      memberId: input.memberId,
+      messageLookupKey: input.event.messageLookupKey,
+      messageLookupKeyCandidatesJson: toJsonStringArray(input.messageLookupKeyReadCandidates),
+      providerCreatedAt: input.event.providerCreatedAt,
+      threadIdentityLookupKeyCandidatesJson:
+        toJsonStringArray(input.threadIdentityLookupKeyReadCandidates),
+    },
+    skipDuplicates: true,
+  });
 }
 
 async function applyHostedGroupOfferFeatureActivationsTx(input: {
@@ -194,6 +329,14 @@ function readHostedGroupJoinOfferReactionSkipReason(
   if (error.code === "HOSTED_CONSENT_REQUIRED") {
     return "launch_consent_missing";
   }
+  if (
+    error.code === "HOSTED_ACCESS_REQUIRED"
+    || error.code === "HOSTED_GROUP_JOIN_MEMBER_NOT_FOUND"
+    || error.code === "HOSTED_MEMBER_NOT_FOUND"
+    || error.code === "HOSTED_MEMBER_SUSPENDED"
+  ) {
+    return "member_inactive";
+  }
   if (error.code === "HOSTED_GROUP_JOIN_OFFER_REVOKED") {
     return "offer_revoked";
   }
@@ -232,4 +375,17 @@ function skipHostedGroupJoinOfferReaction(input: {
   reason: HostedGroupJoinOfferReactionSkipReason;
 }): HostedGroupJoinOfferReactionResult {
   return { status: "ignored", reason: input.reason };
+}
+
+function toJsonStringArray(values: readonly string[]): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(values)) as Prisma.InputJsonValue;
+}
+
+function readJsonStringArray(value: Prisma.JsonValue): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return normalizeLookupKeyCandidates(
+    value.map((entry) => typeof entry === "string" ? entry : null),
+  );
 }

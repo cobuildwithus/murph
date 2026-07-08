@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
   createHostedGroupJoinOfferFingerprint: vi.fn(),
+  drainPendingHostedGroupJoinOfferReactionsForOffer: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
@@ -90,6 +91,11 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
   recordHostedGroupJoinOfferTx: mocks.recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
+}));
+
+vi.mock("@/src/lib/hosted-groups/join-offer-reaction", () => ({
+  drainPendingHostedGroupJoinOfferReactionsForOffer:
+    mocks.drainPendingHostedGroupJoinOfferReactionsForOffer,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -181,6 +187,10 @@ describe("handleHostedRuntimeGroupTool", () => {
         schema: "murph.hosted-group.offer-scope.v1",
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
+    });
+    mocks.drainPendingHostedGroupJoinOfferReactionsForOffer.mockResolvedValue({
+      acceptedCount: 0,
+      scannedCount: 0,
     });
   });
 
@@ -724,6 +734,15 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
     expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.recordHostedGroupJoinOfferTx.mock.invocationCallOrder[0]);
+    expect(mocks.recordHostedGroupJoinOfferTx.mock.invocationCallOrder[0])
+      .toBeLessThan(
+        mocks.drainPendingHostedGroupJoinOfferReactionsForOffer.mock.invocationCallOrder[0],
+      );
+    expect(mocks.drainPendingHostedGroupJoinOfferReactionsForOffer).toHaveBeenCalledWith({
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      now: expect.any(Date),
+      prisma: expect.any(Object),
+    });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
@@ -800,6 +819,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       },
       postedAt: expect.any(Date),
       tx: fakeTx,
+    });
+    expect(mocks.drainPendingHostedGroupJoinOfferReactionsForOffer).toHaveBeenCalledTimes(1);
+    expect(mocks.drainPendingHostedGroupJoinOfferReactionsForOffer).toHaveBeenCalledWith({
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      now: expect.any(Date),
+      prisma: expect.any(Object),
     });
   });
 

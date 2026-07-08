@@ -654,6 +654,27 @@ Focused follow-up verification:
 
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/call-circle-scheduler.test.ts`
 
+## ReviewGPT Follow-Up 21 2026-07-08
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- A local connector failure after `beforeStart` attached a phone call, but
+  before provider start was attempted, could strand a `bridging` match with
+  an attached failed call and no fallback. Connector handoff now re-reads
+  the attached phone call and permits terminalization only for the narrow
+  pre-provider failed shape, passing the exact attached `phoneCallId` into
+  the existing conditional outcome write.
+- A reaction to a visible group offer could arrive after provider send but
+  before the provider-bound `HostedGroupJoinOffer` row existed. Valid
+  positive no-offer reactions now persist a narrow pending reaction keyed by
+  the hashed provider event id, member id, and existing hashed message/thread
+  lookup candidates; provider-bound offer recording drains those pending
+  rows through the same acceptance path.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-connector-call.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT

@@ -390,6 +390,7 @@ describe("startCallCircleConnectorCall", () => {
     const tx = {
       hostedCallCircleMatch: {
         findUnique: vi.fn(async () => ({
+          phoneCall: null,
           phoneCallId: "hpc_attached",
           status: "bridging",
         })),
@@ -415,6 +416,60 @@ describe("startCallCircleConnectorCall", () => {
       }),
     );
     expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+  });
+
+  it("hands off an attached local pre-provider connector failure", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const tx = {
+      hostedCallCircleMatch: {
+        findUnique: vi.fn(async () => ({
+          phoneCall: {
+            analyzedAt: null,
+            endedAt: null,
+            providerCallId: null,
+            providerStartAttemptedAt: null,
+            status: "failed",
+          },
+          phoneCallId: "hpc_failed",
+          status: "bridging",
+        })),
+      },
+    };
+    const prisma = createPrisma({
+      finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+      phoneCallId: null,
+      status: "both_confirmed",
+      windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+      windowStartAt: now,
+    }, tx);
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.createHostedPhoneCall.mockImplementationOnce(async (input) => {
+      expect(await input.beforeStart({
+        memberId: input.memberId,
+        phoneCallId: "hpc_failed",
+      })).toBe(true);
+      throw new Error("Retell config failed before provider start.");
+    });
+
+    await expect(startCallCircleConnectorCall({
+      matchId: "hccm_123",
+      now,
+    })).resolves.toEqual({ status: "handoff" });
+
+    expect(mocks.attachCallCirclePhoneCall).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      phoneCallId: "hpc_failed",
+      prisma,
+    });
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      now,
+      outcome: "connector_start_failed",
+      phoneCallId: "hpc_failed",
+      prisma: tx,
+      status: "dropped",
+    });
+    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
   });
 
   it("terminalizes connector handoff even when one notification preflight is blocked", async () => {
