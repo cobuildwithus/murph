@@ -26,7 +26,6 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shar
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import {
   acceptHostedGroupJoinOfferTx,
-  bindHostedGroupJoinOfferTx,
   type HostedGroupFeatureActivationKind,
 } from "./group-store";
 
@@ -123,38 +122,24 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     if (!reason) {
       throw error;
     }
-    if (reason === "no_offer_match") {
-      const recovery = await bindUnboundHostedGroupJoinOfferForReactionThread({
-        messageId: input.event.linqMessageId,
+    if (
+      reason === "no_offer_match"
+      && await hasUnboundHostedGroupJoinOfferForReactionThread({
         now: input.event.providerCreatedAt,
         prisma: input.prisma,
         threadIdentityLookupKeyReadCandidates,
-      });
-      if (recovery === "bound") {
-        accepted = await acceptHostedGroupJoinOfferReactionForMember({
-          memberId: member.id,
-          messageLookupKeyReadCandidates,
-          now: input.event.providerCreatedAt,
-          prisma: input.prisma,
-          threadIdentityLookupKeyReadCandidates,
-        });
-      } else if (recovery === "pending") {
-        throw hostedOnboardingError({
-          code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
-          httpStatus: 503,
-          message: "This group offer is still being bound to the provider message.",
-          retryable: true,
-        });
-      } else {
-        return skipHostedGroupJoinOfferReaction({
-          reason,
-        });
-      }
-    } else {
-      return skipHostedGroupJoinOfferReaction({
-        reason,
+      })
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OFFER_BINDING_PENDING",
+        httpStatus: 503,
+        message: "This group offer is still being bound to the provider message.",
+        retryable: true,
       });
     }
+    return skipHostedGroupJoinOfferReaction({
+      reason,
+    });
   }
 
   if (accepted.callCircleSetupSignal) {
@@ -197,17 +182,16 @@ async function acceptHostedGroupJoinOfferReactionForMember(input: {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
-async function bindUnboundHostedGroupJoinOfferForReactionThread(input: {
-  messageId: string;
+async function hasUnboundHostedGroupJoinOfferForReactionThread(input: {
   now: Date;
   prisma: PrismaClient;
   threadIdentityLookupKeyReadCandidates: readonly string[];
-}): Promise<"bound" | "none" | "pending"> {
+}): Promise<boolean> {
   const threadIdentityLookupKeyReadCandidates = normalizeLookupKeyCandidates(
     input.threadIdentityLookupKeyReadCandidates,
   );
   if (threadIdentityLookupKeyReadCandidates.length === 0) {
-    return "none";
+    return false;
   }
   const route = await input.prisma.hostedThreadRoute.findFirst({
     select: { containerMemberId: true },
@@ -217,7 +201,7 @@ async function bindUnboundHostedGroupJoinOfferForReactionThread(input: {
     },
   });
   if (!route) {
-    return "none";
+    return false;
   }
   const activeCutoff = new Date(
     input.now.getTime() - HOSTED_GROUP_JOIN_OFFER_BINDING_GRACE_MS,
@@ -233,10 +217,8 @@ async function bindUnboundHostedGroupJoinOfferForReactionThread(input: {
       revokedAt: null,
     },
   });
-  const offers = await input.prisma.hostedGroupJoinOffer.findMany({
-    orderBy: { postedAt: "asc" },
-    select: { groupId: true, id: true },
-    take: 2,
+  const offer = await input.prisma.hostedGroupJoinOffer.findFirst({
+    select: { id: true },
     where: {
       group: {
         runtimeMemberId: route.containerMemberId,
@@ -246,25 +228,7 @@ async function bindUnboundHostedGroupJoinOfferForReactionThread(input: {
       revokedAt: null,
     },
   });
-  if (offers.length === 0) {
-    return "none";
-  }
-  if (offers.length > 1) {
-    return "pending";
-  }
-  const offer = offers[0];
-  if (!offer) {
-    return "none";
-  }
-  await input.prisma.$transaction(async (tx) => {
-    await bindHostedGroupJoinOfferTx({
-      groupId: offer.groupId,
-      messageId: input.messageId,
-      offerId: offer.id,
-      tx,
-    });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  return "bound";
+  return offer !== null;
 }
 
 async function applyHostedGroupOfferFeatureActivationsTx(input: {

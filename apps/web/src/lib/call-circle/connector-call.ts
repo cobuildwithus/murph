@@ -443,7 +443,6 @@ function isPreProviderFailedCallCirclePhoneCall(phoneCall: {
     && phoneCall.analyzedAt === null
     && phoneCall.endedAt === null
     && phoneCall.providerCallId === null
-    && phoneCall.providerStartAttemptedAt === null
     && phoneCall.status === "failed";
 }
 

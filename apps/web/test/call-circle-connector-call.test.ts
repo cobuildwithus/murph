@@ -472,6 +472,55 @@ describe("startCallCircleConnectorCall", () => {
     expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
   });
 
+  it("hands off an attached definite provider rejection without provider identity", async () => {
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const tx = {
+      hostedCallCircleMatch: {
+        findUnique: vi.fn(async () => ({
+          phoneCall: {
+            analyzedAt: null,
+            endedAt: null,
+            providerCallId: null,
+            providerStartAttemptedAt: new Date("2026-07-06T15:00:01.000Z"),
+            status: "failed",
+          },
+          phoneCallId: "hpc_failed",
+          status: "bridging",
+        })),
+      },
+    };
+    const prisma = createPrisma({
+      finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+      phoneCallId: null,
+      status: "both_confirmed",
+      windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+      windowStartAt: now,
+    }, tx);
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.createHostedPhoneCall.mockResolvedValueOnce({
+      phoneCallId: "hpc_failed",
+      status: "failed",
+    });
+
+    await expect(startCallCircleConnectorCall({
+      matchId: "hccm_123",
+      now,
+    })).resolves.toEqual({
+      phoneCallId: "hpc_failed",
+      status: "handoff",
+    });
+
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      now,
+      outcome: "connector_start_failed",
+      phoneCallId: "hpc_failed",
+      prisma: tx,
+      status: "dropped",
+    });
+    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
+  });
+
   it("terminalizes connector handoff even when one notification preflight is blocked", async () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const prisma = createPrisma({
