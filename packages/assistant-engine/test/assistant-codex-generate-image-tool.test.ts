@@ -178,6 +178,70 @@ describe('executeGenerateImageTool', () => {
       rpcText: 'generated image attached to the final response',
     })
     expect(result.usageDraft?.providerRequestOrdinal).toBe(4)
+    expect(result.usageDraft?.providerRequestOutcome).toBe('succeeded')
+    expect(result.usageDraft?.usage).toMatchObject({
+      inputTokens: 3,
+      outputTokens: 5,
+      rawUsageJson: {
+        input_tokens: 3,
+        output_tokens: 5,
+        total_tokens: 8,
+      },
+      totalTokens: 8,
+    })
+  })
+
+  it('emits a succeeded usage draft when a successful image response omits usage', async () => {
+    const uploader = {
+      uploadGeneratedImage: vi.fn(async (input) => ({
+        alt: input.alt,
+        kind: 'image' as const,
+        source: input.source,
+        url: 'https://imagedelivery.net/account/image/public',
+      })),
+    }
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+      }, {
+        headers: {
+          'x-request-id': 'req_image_no_usage',
+        },
+      }))
+
+    const result = await executeGenerateImageTool({
+      args: {
+        alt: 'A product photo',
+        outputFormat: 'webp',
+        prompt: 'Render the object.',
+        quality: 'high',
+        size: '1536x1024',
+      },
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      hostedGeneratedImageUploader: uploader,
+      providerRequestOrdinal: 5,
+      requireHostedGeneratedImageUploader: true,
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.usageDraft).toMatchObject({
+      provider: 'openai-images',
+      providerRequestOrdinal: 5,
+      providerRequestOutcome: 'succeeded',
+      usage: {
+        inputTokens: null,
+        outputTokens: null,
+        providerName: 'OpenAI Images',
+        providerRequestId: 'req_image_no_usage',
+        rawUsageJson: null,
+        rawUsageJsonHash: null,
+        requestedModel: 'gpt-image-2',
+        totalTokens: null,
+      },
+    })
   })
 
   it('returns a structured failure when the provider fetch rejects', async () => {
@@ -296,6 +360,7 @@ describe('executeGenerateImageTool', () => {
     expect(result.rpcSuccess).toBe(false)
     expect(result.rpcText).toBe('image generation returned invalid image data')
     expect(result.usageDraft?.providerRequestOrdinal).toBe(6)
+    expect(result.usageDraft?.providerRequestOutcome).toBe('partial')
   })
 
   it('hashes raw usage JSON on generated image usage drafts', async () => {
@@ -332,6 +397,12 @@ describe('executeGenerateImageTool', () => {
       total_tokens: 8,
     })
     expect(result.usageDraft?.usage.rawUsageJsonHash).toMatch(/^sha256:[0-9a-f]{64}$/u)
+    expect(result.usageDraft?.providerRequestOutcome).toBe('succeeded')
+    expect(result.usageDraft?.usage).toMatchObject({
+      inputTokens: 3,
+      outputTokens: 5,
+      totalTokens: 8,
+    })
   })
 
   it('fails before OpenAI when hosted upload is required but unavailable', async () => {
@@ -674,8 +745,15 @@ describe('murph.generate_image dynamic tool execution', () => {
       providerRequestOrdinal: 3,
       providerRequestOutcome: 'succeeded',
       usage: {
+        inputTokens: 12,
+        outputTokens: 34,
         providerName: 'OpenAI Images',
         providerRequestId: 'req_dynamic_image',
+        rawUsageJson: {
+          input_tokens: 12,
+          output_tokens: 34,
+          total_tokens: 46,
+        },
         requestedModel: 'gpt-image-2',
         totalTokens: 46,
       },

@@ -147,11 +147,16 @@ export async function executeGenerateImageTool(input: {
     }
   }
 
+  const hasValidGeneratedImageBytes = isValidGeneratedImageBytes({
+    bytes: openAiResult.imageBytes,
+    outputFormat: input.args.outputFormat,
+  })
   const usageDraft = buildGeneratedImageUsageDraft({
     args: input.args,
     operation,
     providerRequestId: openAiResult.providerRequestId,
     providerRequestOrdinal: input.providerRequestOrdinal,
+    providerRequestOutcome: hasValidGeneratedImageBytes ? 'succeeded' : 'partial',
     rawUsageJson: openAiResult.rawUsageJson,
     referenceImageCount: referenceImages.length,
     referenceImageSha256s: referenceImages.map((reference) => reference.sha256),
@@ -163,12 +168,7 @@ export async function executeGenerateImageTool(input: {
     usageExtractionSourcePath,
   })
 
-  if (
-    !isValidGeneratedImageBytes({
-      bytes: openAiResult.imageBytes,
-      outputFormat: input.args.outputFormat,
-    })
-  ) {
+  if (!hasValidGeneratedImageBytes) {
     return {
       rpcSuccess: false,
       rpcText: 'image generation returned invalid image data',
@@ -230,6 +230,7 @@ function buildGeneratedImageUsageDraft(input: {
   operation: GenerateImageOperation
   providerRequestId: string | null
   providerRequestOrdinal: number
+  providerRequestOutcome: AssistantProviderUsageDraft['providerRequestOutcome']
   rawUsageJson: Record<string, unknown> | null
   referenceImageCount: number
   referenceImageSha256s: readonly string[]
@@ -241,7 +242,7 @@ function buildGeneratedImageUsageDraft(input: {
   return {
     provider: 'openai-images',
     providerRequestOrdinal: input.providerRequestOrdinal,
-    providerRequestOutcome: 'succeeded',
+    providerRequestOutcome: input.providerRequestOutcome,
     usage: {
       apiKeyEnv: 'OPENAI_API_KEY',
       baseUrl: OPENAI_IMAGES_BASE_URL,

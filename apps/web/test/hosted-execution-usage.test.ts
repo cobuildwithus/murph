@@ -257,6 +257,23 @@ describe("recordHostedAiUsageRecords", () => {
     expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
+  it("rolls back valid usage rows when allowance accounting fails generically", async () => {
+    const prisma = makeRollbackAwareUsagePrismaClient();
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockRejectedValue(
+      new Error("database unavailable"),
+    );
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    })).rejects.toThrow("database unavailable");
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prisma.readHostedAiUsageRows()).toEqual([]);
+  });
+
   it("dedupes multiple crossing records in one flush to one notice claim", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
@@ -961,6 +978,76 @@ function makeUsagePrismaClient(
   return {
     ...tx,
     $transaction: vi.fn(async <T>(run: (transaction: typeof tx) => Promise<T>) => run(tx)),
+  };
+}
+
+function makeRollbackAwareUsagePrismaClient() {
+  type HostedAiUsageRow = Record<string, unknown>;
+  type HostedAiUsageUpdateManyArgs = {
+    data?: HostedAiUsageRow;
+    where?: {
+      id?: string;
+    };
+  };
+  type HostedAiUsageUpsertArgs = {
+    create: HostedAiUsageRow;
+    where: {
+      id: string;
+    };
+  };
+
+  let rows = new Map<string, HostedAiUsageRow>();
+
+  const createTx = (workingRows: Map<string, HostedAiUsageRow>) => ({
+    hostedAiUsage: {
+      findUnique: vi.fn(async () => null),
+      updateMany: vi.fn(async (args: HostedAiUsageUpdateManyArgs) => {
+        const id = args.where?.id;
+        const row = id ? workingRows.get(id) : null;
+        if (!row) {
+          return { count: 0 };
+        }
+
+        if (args.data) {
+          Object.assign(row, args.data);
+        }
+        return { count: 1 };
+      }),
+      upsert: vi.fn(async (args: HostedAiUsageUpsertArgs) => {
+        const existing = workingRows.get(args.where.id);
+        if (existing) {
+          return existing;
+        }
+
+        const row = {
+          allowanceAccountedAt: null,
+          allowanceCostUsdMicros: null,
+          allowanceCounted: null,
+          ...args.create,
+          rawUsageJson: args.create.rawUsageJson ?? null,
+          turnProfileJson: args.create.turnProfileJson ?? null,
+        };
+        workingRows.set(args.where.id, row);
+        return row;
+      }),
+    },
+    hostedMemberBillingRef: {
+      findUnique: vi.fn(async () => null),
+    },
+  });
+
+  type RollbackAwareUsageTx = ReturnType<typeof createTx>;
+
+  return {
+    $transaction: vi.fn(async <T>(run: (transaction: RollbackAwareUsageTx) => Promise<T>) => {
+      const workingRows = new Map(
+        [...rows].map(([id, row]) => [id, { ...row }] as const),
+      );
+      const result = await run(createTx(workingRows));
+      rows = workingRows;
+      return result;
+    }),
+    readHostedAiUsageRows: () => [...rows.values()],
   };
 }
 

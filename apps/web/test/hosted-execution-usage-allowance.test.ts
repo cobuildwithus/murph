@@ -62,6 +62,212 @@ const BASE_USAGE_RECORD = {
 type AllowanceExecuteRaw = (sql: TemplateStringsArray, ...params: unknown[]) => Promise<number>;
 type AllowanceExecuteRawMock = ReturnType<typeof vi.fn<AllowanceExecuteRaw>>;
 
+function buildMalformedOpenAiImageUsageRecords(input: {
+  occurredAt?: AssistantUsageRecord["occurredAt"];
+} = {}): AssistantUsageRecord[] {
+  const occurredAt = input.occurredAt ?? BASE_USAGE_RECORD.occurredAt;
+
+  return [
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: null,
+      inputTokens: null,
+      occurredAt,
+      outputTokens: null,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: null,
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: null,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 100,
+      inputTokens: 1_300,
+      occurredAt,
+      outputTokens: null,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 100,
+          image_tokens: 1_000,
+          text_tokens: 300,
+        },
+        total_tokens: 1_300,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 1_300,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: null,
+      inputTokens: null,
+      occurredAt,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        output_tokens: 400,
+        output_tokens_details: {
+          image_tokens: 400,
+          reasoning_tokens: 0,
+          text_tokens: 0,
+        },
+        total_tokens: 400,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 400,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+  ] satisfies AssistantUsageRecord[];
+}
+
+function buildInconsistentOpenAiImageUsageRecords(): AssistantUsageRecord[] {
+  return [
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 101,
+        output_tokens: 400,
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 0,
+          text_tokens: 300,
+        },
+        output_tokens: 400,
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 150,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 150,
+          image_tokens: 0,
+          text_tokens: 100,
+        },
+        output_tokens: 400,
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 0,
+          text_tokens: 100,
+        },
+        output_tokens: 400,
+        output_tokens_details: {
+          image_tokens: 399,
+          reasoning_tokens: 0,
+          text_tokens: 0,
+        },
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        output_tokens: 400,
+        total_tokens: 999,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 999,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+  ] satisfies AssistantUsageRecord[];
+}
+
+function buildAggregateOnlyOpenAiImageUsageRecord(): AssistantUsageRecord {
+  return {
+    ...BASE_USAGE_RECORD,
+    cachedInputTokens: 0,
+    inputTokens: 120,
+    outputTokens: 40,
+    provider: "openai-images",
+    providerName: "OpenAI Images",
+    rawUsageJson: {
+      input_tokens: 120,
+      output_tokens: 40,
+      total_tokens: 160,
+    },
+    requestedModel: "openai/gpt-image-2",
+    servedModel: null,
+    totalTokens: 160,
+    usageExtractionSourcePath: "openai.images.edit",
+    usageExtractionVersion: "openai-images-v1",
+  } satisfies AssistantUsageRecord;
+}
+
 describe("hosted AI usage allowance pricing", () => {
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
@@ -118,6 +324,145 @@ describe("hosted AI usage allowance pricing", () => {
         tokenPricingBasis: "openai-flex",
       },
     });
+  });
+
+  it("prices OpenAI image generation with GPT Image 2 text, image, and output tokens", () => {
+    const generatedImage = {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 1_300,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 1_000,
+          text_tokens: 300,
+        },
+        output_tokens: 400,
+        output_tokens_details: {
+          image_tokens: 400,
+          reasoning_tokens: 0,
+          text_tokens: 0,
+        },
+        total_tokens: 1_700,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 1_700,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    } satisfies AssistantUsageRecord;
+
+    expect(priceHostedAiUsageForAllowance(generatedImage)).toMatchObject({
+      costUsdMicros: 21_500n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-image-2",
+        modelSource: "requested",
+        pricingSource: "https://developers.openai.com/api/docs/pricing",
+        standardCostUsdMicros: "21500",
+        tokenPricingBasis: "standard",
+        tokens: {
+          openAiImage: {
+            billableImageInput: "1000",
+            billableTextInput: "300",
+            cachedInput: "0",
+            cachedInputAllocation: "single_modality_only",
+            cachedTextInput: "0",
+            imageInput: "1000",
+            output: "400",
+            textInput: "300",
+          },
+        },
+      },
+      pricingVersion: "openai-image-api-pricing-2026-07-08-standard",
+    });
+  });
+
+  it("prices mixed cached OpenAI image input with conservative text-first allocation", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 100,
+      inputTokens: 1_300,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 100,
+          image_tokens: 1_000,
+          text_tokens: 300,
+        },
+        output_tokens: 400,
+        total_tokens: 1_700,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 1_700,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    })).toMatchObject({
+      costUsdMicros: 21_125n,
+      counted: true,
+      pricingSnapshot: {
+        standardCostUsdMicros: "21125",
+        tokens: {
+          openAiImage: {
+            billableImageInput: "1000",
+            billableTextInput: "200",
+            cachedImageInput: "0",
+            cachedInput: "100",
+            cachedInputAllocation: "text_first_conservative",
+            cachedTextInput: "100",
+            imageInput: "1000",
+            output: "400",
+            textInput: "300",
+          },
+        },
+      },
+      pricingVersion: "openai-image-api-pricing-2026-07-08-standard",
+    });
+  });
+
+  it("rejects OpenAI image usage with OpenAI flex token pricing", () => {
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 1_300,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 1_000,
+          text_tokens: 300,
+        },
+        output_tokens: 400,
+        total_tokens: 1_700,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      tokenPricingBasis: "openai-flex",
+      totalTokens: 1_700,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    })).toThrow("OpenAI image hosted AI usage must use standard token pricing basis");
+  });
+
+  it("does not treat GPT Image 2 as a generic token-priced chat model", () => {
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      provider: "codex-cli",
+      providerName: "openai",
+      requestedModel: "gpt-image-2",
+      servedModel: "gpt-image-2",
+    })).toThrow("pricing is missing");
   });
 
   it("accepts production OpenAI provider evidence for OpenAI flex token pricing", () => {
@@ -695,6 +1040,102 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
+  it("blocks the allowance period when image provider usage pricing basis is missing", async () => {
+    for (const record of buildMalformedOpenAiImageUsageRecords()) {
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+      const tx = createAllowanceTx({
+        executeRaw,
+        hostedAiUsageUpdateMany: updateMany,
+      });
+
+      const notice = await accountHostedAiUsageForAllowanceTx({
+        memberId: "member_123",
+        record,
+        tx: tx as never,
+      });
+
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          allowanceCostUsdMicros: 10_000_000n,
+          allowanceCounted: true,
+          allowancePricingSnapshotJson: expect.objectContaining({
+            blockCostUsdMicros: "10000000",
+            reason: "missing_provider_usage_tokens",
+            schema: "murph.hosted-ai-usage-allowance-malformed.v1",
+            tokenPricingBasis: "standard",
+          }),
+          allowancePricingVersion: "openai-image-api-malformed-usage-block-2026-07-08",
+        }),
+      }));
+      expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+      expect(notice).toMatchObject({
+        memberId: "member_123",
+        sourceUsageId: record.usageId,
+      });
+    }
+  });
+
+  it("blocks the allowance period when image provider usage buckets are inconsistent", async () => {
+    for (const record of buildInconsistentOpenAiImageUsageRecords()) {
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+      const tx = createAllowanceTx({
+        executeRaw,
+        hostedAiUsageUpdateMany: updateMany,
+      });
+
+      await accountHostedAiUsageForAllowanceTx({
+        memberId: "member_123",
+        record,
+        tx: tx as never,
+      });
+
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          allowanceCostUsdMicros: 10_000_000n,
+          allowanceCounted: true,
+          allowancePricingSnapshotJson: expect.objectContaining({
+            blockCostUsdMicros: "10000000",
+            reason: "inconsistent_provider_usage_tokens",
+            schema: "murph.hosted-ai-usage-allowance-malformed.v1",
+          }),
+          allowancePricingVersion: "openai-image-api-malformed-usage-block-2026-07-08",
+        }),
+      }));
+      expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+    }
+  });
+
+  it("blocks the allowance period when image input detail buckets are missing", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+    });
+
+    await accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      record: buildAggregateOnlyOpenAiImageUsageRecord(),
+      tx: tx as never,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceCostUsdMicros: 10_000_000n,
+        allowanceCounted: true,
+        allowancePricingSnapshotJson: expect.objectContaining({
+          blockCostUsdMicros: "10000000",
+          reason: "missing_provider_usage_tokens",
+          schema: "murph.hosted-ai-usage-allowance-malformed.v1",
+        }),
+        allowancePricingVersion: "openai-image-api-malformed-usage-block-2026-07-08",
+      }),
+    }));
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+  });
+
   it("does not update period metadata again when allowanceAccountedAt was already set", async () => {
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
@@ -751,6 +1192,46 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     }));
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
     expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
+  it("marks stale-trial image usage denied when provider usage pricing basis is missing", async () => {
+    for (const record of buildMalformedOpenAiImageUsageRecords({
+      occurredAt: "2026-04-08T12:00:01.000Z",
+    })) {
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+      const tx = createAllowanceTx({
+        billingPhase: "trial",
+        checkoutOffer: "pulse_trial_7d",
+        executeRaw,
+        hostedAiUsageUpdateMany: updateMany,
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+        trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+      });
+
+      await accountHostedAiUsageForAllowanceTx({
+        memberId: "member_123",
+        now: new Date("2026-04-08T12:00:05.000Z"),
+        record,
+        tx: tx as never,
+      });
+
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          allowanceAccountedAt: new Date("2026-04-08T12:00:05.000Z"),
+          allowanceCostUsdMicros: 0n,
+          allowanceCounted: false,
+          allowancePricingSnapshotJson: expect.objectContaining({
+            reason: "trial_expired_pending_billing",
+            schema: "murph.hosted-ai-usage-allowance-denied.v1",
+            tokenPricingBasis: "standard",
+          }),
+          allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
+        }),
+      }));
+      expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
+    }
   });
 
   it("uses Family-sponsored allowance instead of stale direct trial state", async () => {

@@ -238,12 +238,13 @@ function createSignalControlledChild(): SpawnedChildForTest & {
 }
 
 async function waitForSpawnCalls(count: number): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
     if (spawnMock.mock.calls.length >= count) {
       return;
     }
     await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
+      setTimeout(resolve, 10);
     });
   }
   expect(spawnMock).toHaveBeenCalledTimes(count);
