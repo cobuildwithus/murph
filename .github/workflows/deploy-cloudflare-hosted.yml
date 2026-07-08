@@ -23,7 +23,7 @@ on:
       container_rollout:
         description: Container rollout behavior for Worker deploys
         required: true
-        default: gradual
+        default: immediate
         type: choice
         options:
           - gradual

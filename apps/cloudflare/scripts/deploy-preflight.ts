@@ -39,6 +39,7 @@ const REQUIRED_HOSTED_ASSISTANT_PROVIDER = "openai";
 const PRODUCTION_HOSTED_ASSISTANT_ROLLBACK_MODEL = "gpt-5.5";
 const PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT = "low";
 const FUTURE_HOSTED_ASSISTANT_MODEL_CONTAINER_ROLLOUT = "immediate";
+const SELECTOR_SCOPE_CONTAINER_ROLLOUT = "immediate";
 const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 
 const REQUIRED_DEPLOY_ENV_NAMES = [
@@ -224,9 +225,10 @@ export function listHostedDeployEnvironmentInvariantErrors(
   const hostedAssistantReasoningEffort = normalizeOptionalString(
     source.HOSTED_ASSISTANT_REASONING_EFFORT,
   );
-  const hostedExecutionContainerRollout = normalizeOptionalString(
+  const hostedExecutionContainerRollout = readHostedExecutionContainerRollout(
     source.HOSTED_EXECUTION_CONTAINER_ROLLOUT,
-  ) ?? "gradual";
+    deployContext,
+  );
   const hostedAssistantModelIsPriced = hostedAssistantModel
     ? isHostedAiUsageAllowancePricedModelId(hostedAssistantModel)
     : false;
@@ -289,6 +291,12 @@ export function listHostedDeployEnvironmentInvariantErrors(
   ) {
     errors.push(
       `production hosted assistant deploys must set HOSTED_ASSISTANT_REASONING_EFFORT=${PRODUCTION_HOSTED_ASSISTANT_REASONING_EFFORT}.`,
+    );
+  }
+
+  if (hostedExecutionContainerRollout !== SELECTOR_SCOPE_CONTAINER_ROLLOUT) {
+    errors.push(
+      `production vault-share selector-scope deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${SELECTOR_SCOPE_CONTAINER_ROLLOUT}; rollback floor is the selector-scope runner bundle.`,
     );
   }
 
@@ -439,6 +447,14 @@ function normalizeHostedOidcEnvironment(value: string | undefined): HostedDeploy
   }
 
   return normalized as HostedDeployContext;
+}
+
+function readHostedExecutionContainerRollout(
+  value: string | undefined,
+  deployContext: HostedDeployContext | null,
+): string {
+  return normalizeOptionalString(value)
+    ?? (deployContext === "production" ? SELECTOR_SCOPE_CONTAINER_ROLLOUT : "gradual");
 }
 
 function readProductionDeployUrl(

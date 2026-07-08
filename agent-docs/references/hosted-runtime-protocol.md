@@ -200,6 +200,10 @@ exposes distance/count selector grants must be deployed with
 accepted. Gradual Cloudflare container rollout is unsafe for this selector
 expansion: a warm old destination runner could import a selector delivery wake
 whose exact scope key it cannot preserve.
+Until that rollout window is closed, production Cloudflare deploy preflight must
+reject explicit `HOSTED_EXECUTION_CONTAINER_ROLLOUT=gradual`, and the manual
+production deploy workflow/default helper path must default missing rollout
+input to `immediate`.
 
 Rollback floor: after web has accepted distance/count grants, rolling web behind
 the projection-scope parser that knows those rows can make old web code unable
