@@ -129,7 +129,7 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    const limitNoticeCandidate = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+    await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
       const storedRecord = await tx.hostedAiUsage.upsert({
         where: {
           id: record.usageId,
@@ -148,17 +148,17 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
         id: storedRecord.id,
         tx,
       });
+    });
 
-      if (input.accountAllowance === true) {
-        return accountHostedAiUsageForAllowanceTx({
+    const limitNoticeCandidate = input.accountAllowance === true
+      ? await runHostedAiUsageRecordTransaction(prisma, async (tx) =>
+        accountHostedAiUsageForAllowanceTx({
           memberId,
           record,
           tx,
-        });
-      }
+        }))
+      : null;
 
-      return null;
-    });
     if (limitNoticeCandidate) {
       limitNoticeCandidates.push(limitNoticeCandidate);
     }

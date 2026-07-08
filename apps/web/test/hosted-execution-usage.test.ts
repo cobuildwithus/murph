@@ -257,6 +257,53 @@ describe("recordHostedAiUsageRecords", () => {
     expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
+  it("keeps malformed image usage rows when allowance accounting rolls back", async () => {
+    const prisma = makeRollbackAwareUsagePrismaClient();
+    allowanceMocks.accountHostedAiUsageForAllowanceTx.mockRejectedValue(
+      new TypeError("OpenAI image hosted AI usage requires provider usage tokens"),
+    );
+
+    await expect(recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [{
+        ...BASE_USAGE_RECORD,
+        cachedInputTokens: 100,
+        inputTokens: 1_300,
+        outputTokens: null,
+        provider: "openai-images",
+        providerName: "OpenAI Images",
+        rawUsageJson: {
+          input_tokens: 1_300,
+          input_tokens_details: {
+            cached_tokens: 100,
+            image_tokens: 1_000,
+            text_tokens: 300,
+          },
+          total_tokens: 1_300,
+        },
+        requestedModel: "gpt-image-2",
+        servedModel: null,
+        totalTokens: 1_300,
+        usageExtractionSourcePath: "openai.images.generate",
+        usageExtractionVersion: "openai-images-v1",
+      }],
+    })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.readHostedAiUsageRows()).toEqual([
+      expect.objectContaining({
+        allowanceAccountedAt: null,
+        id: "turn_123.attempt-1",
+        outputTokens: null,
+        provider: "openai-images",
+      }),
+    ]);
+    expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
+  });
+
   it("dedupes multiple crossing records in one flush to one notice claim", async () => {
     const hostedAiUsageUpsert = vi.fn(async (args: { create: Record<string, unknown> }) => args.create);
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
@@ -961,6 +1008,74 @@ function makeUsagePrismaClient(
   return {
     ...tx,
     $transaction: vi.fn(async <T>(run: (transaction: typeof tx) => Promise<T>) => run(tx)),
+  };
+}
+
+function makeRollbackAwareUsagePrismaClient() {
+  type HostedAiUsageRow = Record<string, unknown>;
+  type HostedAiUsageUpdateManyArgs = {
+    data?: HostedAiUsageRow;
+    where?: {
+      id?: string;
+    };
+  };
+  type HostedAiUsageUpsertArgs = {
+    create: HostedAiUsageRow;
+    where: {
+      id: string;
+    };
+  };
+
+  let rows = new Map<string, HostedAiUsageRow>();
+
+  const createTx = (workingRows: Map<string, HostedAiUsageRow>) => ({
+    hostedAiUsage: {
+      findUnique: vi.fn(async () => null),
+      updateMany: vi.fn(async (args: HostedAiUsageUpdateManyArgs) => {
+        const id = args.where?.id;
+        const row = id ? workingRows.get(id) : null;
+        if (!row) {
+          return { count: 0 };
+        }
+
+        if (args.data) {
+          Object.assign(row, args.data);
+        }
+        return { count: 1 };
+      }),
+      upsert: vi.fn(async (args: HostedAiUsageUpsertArgs) => {
+        const existing = workingRows.get(args.where.id);
+        if (existing) {
+          return existing;
+        }
+
+        const row = {
+          allowanceAccountedAt: null,
+          allowanceCostUsdMicros: null,
+          allowanceCounted: null,
+          ...args.create,
+        };
+        workingRows.set(args.where.id, row);
+        return row;
+      }),
+    },
+    hostedMemberBillingRef: {
+      findUnique: vi.fn(async () => null),
+    },
+  });
+
+  type RollbackAwareUsageTx = ReturnType<typeof createTx>;
+
+  return {
+    $transaction: vi.fn(async <T>(run: (transaction: RollbackAwareUsageTx) => Promise<T>) => {
+      const workingRows = new Map(
+        [...rows].map(([id, row]) => [id, { ...row }] as const),
+      );
+      const result = await run(createTx(workingRows));
+      rows = workingRows;
+      return result;
+    }),
+    readHostedAiUsageRows: () => [...rows.values()],
   };
 }
 
