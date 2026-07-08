@@ -19,8 +19,10 @@ import {
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
-  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
@@ -343,6 +345,8 @@ const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
       enum: [
         ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
         HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+        HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+        HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
       ],
     },
     selector: {
@@ -352,11 +356,11 @@ const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
       properties: {
         activityKind: {
           type: 'string',
-          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS],
+          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS],
         },
       },
       description:
-        'Required only for activity-minutes-days.v1; omit selector for fixed projection kinds.',
+        'Required only for activity-minutes-days.v1, activity-distance-days.v1, and activity-session-count-days.v1; omit selector for fixed projection kinds.',
     },
   },
 } as const
@@ -399,7 +403,7 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projection scopes the join page may offer joining members. Joining never shares them automatically; each member approves their own selection. Use activity-minutes-days.v1 with selector.activityKind for running, walking, swimming, sauna, or any other recognized activity alias.',
+          'Optional bounded health projection scopes the join page may offer joining members. Joining never shares them automatically; each member approves their own selection. Use activity-minutes-days.v1, activity-distance-days.v1, or activity-session-count-days.v1 with selector.activityKind for running, walking, swimming, sauna, or any other recognized activity alias.',
       },
       projectionScopes: {
         type: 'array',

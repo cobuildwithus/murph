@@ -6,12 +6,16 @@ import {
 } from "@murphai/contracts";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  getHostedVaultShareActivityDistanceProjectionSpec,
   getHostedVaultShareActivityMinutesProjectionSpec,
+  getHostedVaultShareActivitySessionCountProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
+  type HostedVaultShareActivityDistanceProjectionSpec,
   type HostedVaultShareActivityMinutesProjectionSpec,
+  type HostedVaultShareActivitySessionCountProjectionSpec,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareDailyMetricProjectionSpec,
   type HostedVaultShareProjectionKind,
@@ -34,6 +38,8 @@ import type { HostedRuntimeVaultSharePort } from "./platform.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY_MAX_MINUTES = 24 * 60;
+const DAY_MAX_DISTANCE_METERS = 1_000_000;
+const DAY_MAX_SESSIONS = 100;
 const ACTIVITY_SESSION_DUPLICATE_MIN_OVERLAP_RATIO = 0.8;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEY_PATTERN = /^heart-rate-zone-(\d+)-minutes$/u;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEYS = Array.from(
@@ -77,6 +83,7 @@ type HeartRateZoneMetricProjectionRow = MetricSourceRevisionPoint & Pick<
 export type ActivitySessionProjectionRow = MetricSourceRevisionPoint & {
   activityKind: string | null;
   date: string;
+  distanceMeters?: number | null;
   durationMinutes: number;
   endedAt?: string | null;
   startedAt?: string | null;
@@ -201,6 +208,18 @@ function resolveProjectableRecordReader(
       if (activityMinutesSpec) {
         return ({ context, vaultRoot }) =>
           readProjectableActivityMinutesDays(vaultRoot, activityMinutesSpec, context);
+      }
+      const activityDistanceSpec =
+        getHostedVaultShareActivityDistanceProjectionSpec(projectionScope);
+      if (activityDistanceSpec) {
+        return ({ context, vaultRoot }) =>
+          readProjectableActivityDistanceDays(vaultRoot, activityDistanceSpec, context);
+      }
+      const activitySessionCountSpec =
+        getHostedVaultShareActivitySessionCountProjectionSpec(projectionScope);
+      if (activitySessionCountSpec) {
+        return ({ context, vaultRoot }) =>
+          readProjectableActivitySessionCountDays(vaultRoot, activitySessionCountSpec, context);
       }
       const spec = getHostedVaultShareDailyMetricProjectionSpec(projectionKind);
       if (spec) {
@@ -361,6 +380,32 @@ export async function readProjectableActivityMinutesDays(
   ).toISOString().slice(0, 10);
   const rows = await readProjectableActivitySessionRows(vaultRoot, cutoffDate, context);
   return selectProjectableActivityMinutesDays({ nowMs, rows, spec });
+}
+
+export async function readProjectableActivityDistanceDays(
+  vaultRoot: string,
+  spec: HostedVaultShareActivityDistanceProjectionSpec,
+  context?: HostedVaultShareProjectionReadContext,
+): Promise<HostedVaultShareDeliveryRecord[]> {
+  const nowMs = Date.now();
+  const cutoffDate = new Date(
+    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
+  ).toISOString().slice(0, 10);
+  const rows = await readProjectableActivitySessionRows(vaultRoot, cutoffDate, context);
+  return selectProjectableActivityDistanceDays({ nowMs, rows, spec });
+}
+
+export async function readProjectableActivitySessionCountDays(
+  vaultRoot: string,
+  spec: HostedVaultShareActivitySessionCountProjectionSpec,
+  context?: HostedVaultShareProjectionReadContext,
+): Promise<HostedVaultShareDeliveryRecord[]> {
+  const nowMs = Date.now();
+  const cutoffDate = new Date(
+    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
+  ).toISOString().slice(0, 10);
+  const rows = await readProjectableActivitySessionRows(vaultRoot, cutoffDate, context);
+  return selectProjectableActivitySessionCountDays({ nowMs, rows, spec });
 }
 
 export async function readProjectableHeartRateZoneDays(
@@ -624,6 +669,128 @@ export function selectProjectableActivityMinutesDays(
   return records;
 }
 
+export function selectProjectableActivityDistanceDays(
+  input: {
+    nowMs: number;
+    rows: readonly ActivitySessionProjectionRow[];
+    spec: HostedVaultShareActivityDistanceProjectionSpec;
+  },
+): HostedVaultShareDeliveryRecord[] {
+  const cutoffMs =
+    input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const groups = new Map<string, {
+    date: string;
+    rows: ActivitySessionProjectionRow[];
+    sessionCount: number;
+    sessionDistanceMeters: number;
+  }>();
+
+  const projectableRows = input.rows.filter((row) =>
+    isProjectableActivitySessionRow(row, input.spec.activityKind, cutoffMs)
+    && isProjectableActivitySessionDistanceRow(row)
+  );
+  for (const row of dedupeActivitySessionRows(projectableRows, input.spec.activityKind)) {
+    const distanceMeters = row.distanceMeters ?? null;
+    if (distanceMeters === null) {
+      continue;
+    }
+    const group = groups.get(row.date) ?? {
+      date: row.date,
+      rows: [],
+      sessionCount: 0,
+      sessionDistanceMeters: 0,
+    };
+    group.rows.push(row);
+    group.sessionCount += 1;
+    group.sessionDistanceMeters += distanceMeters;
+    groups.set(row.date, group);
+  }
+
+  const records: HostedVaultShareDeliveryRecord[] = [];
+  for (const group of [...groups.values()].sort((left, right) => right.date.localeCompare(left.date))) {
+    if (
+      group.sessionCount <= 0
+      || group.sessionCount > DAY_MAX_SESSIONS
+      || group.sessionDistanceMeters <= 0
+      || group.sessionDistanceMeters > DAY_MAX_DISTANCE_METERS
+    ) {
+      continue;
+    }
+
+    records.push({
+      data: {
+        activityKind: input.spec.activityKind,
+        date: group.date,
+        sessionCount: group.sessionCount,
+        sessionDistanceMeters: group.sessionDistanceMeters,
+      },
+      occurredAt: `${group.date}T00:00:00.000Z`,
+      recordKey: group.date,
+      ...sourceRevisionField(deriveCompositeMetricSeriesSourceRevision(group.rows)),
+    });
+
+    if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
+      break;
+    }
+  }
+
+  return records;
+}
+
+export function selectProjectableActivitySessionCountDays(
+  input: {
+    nowMs: number;
+    rows: readonly ActivitySessionProjectionRow[];
+    spec: HostedVaultShareActivitySessionCountProjectionSpec;
+  },
+): HostedVaultShareDeliveryRecord[] {
+  const cutoffMs =
+    input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const groups = new Map<string, {
+    date: string;
+    rows: ActivitySessionProjectionRow[];
+    sessionCount: number;
+  }>();
+
+  const projectableRows = input.rows.filter((row) =>
+    isProjectableActivitySessionRow(row, input.spec.activityKind, cutoffMs)
+  );
+  for (const row of dedupeActivitySessionRows(projectableRows, input.spec.activityKind)) {
+    const group = groups.get(row.date) ?? {
+      date: row.date,
+      rows: [],
+      sessionCount: 0,
+    };
+    group.rows.push(row);
+    group.sessionCount += 1;
+    groups.set(row.date, group);
+  }
+
+  const records: HostedVaultShareDeliveryRecord[] = [];
+  for (const group of [...groups.values()].sort((left, right) => right.date.localeCompare(left.date))) {
+    if (group.sessionCount <= 0 || group.sessionCount > DAY_MAX_SESSIONS) {
+      continue;
+    }
+
+    records.push({
+      data: {
+        activityKind: input.spec.activityKind,
+        date: group.date,
+        sessionCount: group.sessionCount,
+      },
+      occurredAt: `${group.date}T00:00:00.000Z`,
+      recordKey: group.date,
+      ...sourceRevisionField(deriveCompositeMetricSeriesSourceRevision(group.rows)),
+    });
+
+    if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
+      break;
+    }
+  }
+
+  return records;
+}
+
 export function selectProjectableHeartRateZoneDays(
   points: readonly HeartRateZoneMetricProjectionRow[],
   nowMs: number,
@@ -780,10 +947,12 @@ function toActivitySessionProjectionRow(
   const observedAt = readOptionalString(entity.attributes.recordedAt)
     ?? entity.occurredAt
     ?? undefined;
+  const distanceMeters = readActivitySessionDistanceMeters(entity);
 
   return {
     activityKind: readActivitySessionKind(entity),
     date,
+    ...(distanceMeters === null ? {} : { distanceMeters }),
     durationMinutes,
     endedAt,
     observedAt,
@@ -840,6 +1009,32 @@ function readActivitySessionKind(entity: CanonicalEntity): string | null {
   });
 }
 
+function readActivitySessionDistanceMeters(entity: CanonicalEntity): number | null {
+  const distanceMeters = readFiniteNumber(entity.attributes.distanceMeters);
+  if (distanceMeters !== null) {
+    return normalizeActivitySessionDistanceMeters(distanceMeters);
+  }
+
+  const distanceKm = readFiniteNumber(entity.attributes.distanceKm);
+  if (distanceKm !== null) {
+    return normalizeActivitySessionDistanceMeters(distanceKm * 1_000);
+  }
+
+  return null;
+}
+
+function normalizeActivitySessionDistanceMeters(value: number): number | null {
+  const distanceMeters = Math.round(value);
+  if (
+    !Number.isInteger(distanceMeters)
+    || distanceMeters < 0
+    || distanceMeters > DAY_MAX_DISTANCE_METERS
+  ) {
+    return null;
+  }
+  return distanceMeters;
+}
+
 function isProjectableActivitySessionRow(
   row: ActivitySessionProjectionRow,
   activityKind: string,
@@ -852,6 +1047,17 @@ function isProjectableActivitySessionRow(
     && Number.isFinite(row.durationMinutes)
     && row.durationMinutes > 0
     && row.durationMinutes <= DAY_MAX_MINUTES;
+}
+
+function isProjectableActivitySessionDistanceRow(
+  row: ActivitySessionProjectionRow,
+): boolean {
+  const distanceMeters = row.distanceMeters;
+  return Number.isInteger(distanceMeters)
+    && distanceMeters !== null
+    && distanceMeters !== undefined
+    && distanceMeters > 0
+    && distanceMeters <= DAY_MAX_DISTANCE_METERS;
 }
 
 function dedupeActivitySessionRows(

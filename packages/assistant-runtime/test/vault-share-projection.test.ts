@@ -3,8 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  buildHostedVaultShareActivityDistanceProjectionScope,
   buildHostedVaultShareActivityMinutesProjectionScope,
+  buildHostedVaultShareActivitySessionCountProjectionScope,
+  getHostedVaultShareActivityDistanceProjectionSpec,
   getHostedVaultShareActivityMinutesProjectionSpec,
+  getHostedVaultShareActivitySessionCountProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   hostedVaultShareProjectionKindToScope,
@@ -25,11 +29,15 @@ import {
 import {
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
   offerHostedVaultShareProjectionBestEffort,
+  readProjectableActivityDistanceDays,
   readProjectableActivityMinutesDays,
+  readProjectableActivitySessionCountDays,
   readProjectableDailyMetricDays,
   readProjectableProfileName,
   selectProjectableDailyMetricDays,
+  selectProjectableActivityDistanceDays,
   selectProjectableActivityMinutesDays,
+  selectProjectableActivitySessionCountDays,
   selectProjectableHeartRateZoneDays,
   selectProjectableSleepNights,
   selectProjectableWorkoutDays,
@@ -58,6 +66,12 @@ const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
+  activityKind: "running",
+});
+const RUNNING_DISTANCE_SCOPE = buildHostedVaultShareActivityDistanceProjectionScope({
+  activityKind: "running",
+});
+const RUNNING_SESSION_COUNT_SCOPE = buildHostedVaultShareActivitySessionCountProjectionScope({
   activityKind: "running",
 });
 const WALKING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
@@ -149,6 +163,7 @@ function workoutRows(input: {
 function activitySessionRow(input: {
   activityKind: string | null;
   date: string;
+  distanceMeters?: number | null;
   durationMinutes: number;
   endedAt?: string | null;
   recordIds?: string[];
@@ -158,6 +173,7 @@ function activitySessionRow(input: {
   return {
     activityKind: input.activityKind,
     date: input.date,
+    ...(input.distanceMeters === undefined ? {} : { distanceMeters: input.distanceMeters }),
     durationMinutes: input.durationMinutes,
     endedAt: input.endedAt ?? null,
     observedAt: `${input.date}T12:00:00.000Z`,
@@ -779,7 +795,7 @@ describe("selectProjectableActivityMinutesDays", () => {
     expect(activitySessionReader).not.toContain("readVault(");
   });
 
-  it("shares one cached session read across activity-minute scopes in an offer", async () => {
+  it("shares one cached session read across activity selector scopes in an offer", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",
       id: "evt_run_cache_1",
@@ -790,21 +806,11 @@ describe("selectProjectableActivityMinutesDays", () => {
       startAt: "2026-07-03T07:00:00.000Z",
       endAt: "2026-07-03T07:40:00.000Z",
       activityType: "running",
+      distanceKm: 5,
       durationMinutes: 40,
       workout: {
         heartRateZones: [{ durationMinutes: 8, label: "Zone 5", zone: 5 }],
       },
-    }, {
-      schemaVersion: "murph.event.v1",
-      id: "evt_walk_cache_1",
-      kind: "activity_session",
-      occurredAt: "2026-07-03T18:00:00.000Z",
-      dayKey: ACTIVITY_DAY.date,
-      recordedAt: "2026-07-03T19:00:00.000Z",
-      startAt: "2026-07-03T18:00:00.000Z",
-      endAt: "2026-07-03T18:25:00.000Z",
-      activityType: "walking",
-      durationMinutes: 25,
     }]);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
     const deliver = vi.fn(async (request: HostedVaultShareDeliverRequest) => {
@@ -819,20 +825,239 @@ describe("selectProjectableActivityMinutesDays", () => {
         vaultRoot,
         vaultSharePort: {
           deliver,
-          listActiveProjectionScopes: async () => [RUNNING_SCOPE, WALKING_SCOPE],
+          listActiveProjectionScopes: async () => [
+            RUNNING_SCOPE,
+            RUNNING_DISTANCE_SCOPE,
+            RUNNING_SESSION_COUNT_SCOPE,
+          ],
         },
       })).resolves.toEqual({ outcome: "delivered" });
-      expect(deliver).toHaveBeenCalledTimes(2);
+      expect(deliver).toHaveBeenCalledTimes(3);
       expect(deliver.mock.calls.map(([request]) => request.projectionScope)).toEqual([
         RUNNING_SCOPE,
-        WALKING_SCOPE,
+        RUNNING_DISTANCE_SCOPE,
+        RUNNING_SESSION_COUNT_SCOPE,
       ]);
       expect(deliver.mock.calls[1]?.[0].records).toEqual([{
         data: {
-          activityKind: "walking",
+          activityKind: "running",
           date: ACTIVITY_DAY.date,
           sessionCount: 1,
-          sessionMinutes: 25,
+          sessionDistanceMeters: 5_000,
+        },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      }]);
+      expect(deliver.mock.calls[2]?.[0].records).toEqual([{
+        data: {
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          sessionCount: 1,
+        },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      }]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("selectProjectableActivityDistanceDays", () => {
+  const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
+  const runningDistanceSpec = requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE);
+
+  it("maps activity-session distance to activity-specific daily distance records", () => {
+    const selected = selectProjectableActivityDistanceDays({
+      nowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          distanceMeters: 5_000,
+          durationMinutes: 40,
+          recordIds: ["evt_run_1"],
+          startedAt: "2026-07-03T07:00:00.000Z",
+        }),
+        activitySessionRow({
+          activityKind: "run",
+          date: ACTIVITY_DAY.date,
+          distanceMeters: 3_400,
+          durationMinutes: 35,
+          recordIds: ["evt_run_2"],
+          startedAt: "2026-07-03T17:00:00.000Z",
+        }),
+        activitySessionRow({
+          activityKind: "walking",
+          date: ACTIVITY_DAY.date,
+          distanceMeters: 2_000,
+          durationMinutes: 30,
+          recordIds: ["evt_walk_1"],
+        }),
+      ],
+      spec: runningDistanceSpec,
+    });
+
+    expect(selected).toEqual([
+      {
+        data: {
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          sessionCount: 2,
+          sessionDistanceMeters: 8_400,
+        },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      },
+    ]);
+    expect(
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-distance-days.v1",
+        projectionScope: RUNNING_DISTANCE_SCOPE,
+        records: selected,
+      }).records,
+    ).toEqual(selected);
+  });
+
+  it("does not infer distance when matching sessions have no canonical distance", () => {
+    const selected = selectProjectableActivityDistanceDays({
+      nowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 40,
+          recordIds: ["evt_run_no_distance"],
+        }),
+      ],
+      spec: runningDistanceSpec,
+    });
+
+    expect(selected).toEqual([]);
+  });
+
+  it("reads canonical distanceKm from activity-session vault entities", async () => {
+    const vaultRoot = await createActivitySessionVault([{
+      schemaVersion: "murph.event.v1",
+      id: "evt_distance_run_1",
+      kind: "activity_session",
+      occurredAt: "2026-07-03T07:00:00.000Z",
+      dayKey: ACTIVITY_DAY.date,
+      recordedAt: "2026-07-03T08:00:00.000Z",
+      startAt: "2026-07-03T07:00:00.000Z",
+      endAt: "2026-07-03T07:42:00.000Z",
+      activityType: "running",
+      distanceKm: 8.4,
+      durationMinutes: 42,
+    }]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await expect(readProjectableActivityDistanceDays(
+        vaultRoot,
+        runningDistanceSpec,
+      )).resolves.toEqual([{
+        data: {
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          sessionCount: 1,
+          sessionDistanceMeters: 8_400,
+        },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      }]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("selectProjectableActivitySessionCountDays", () => {
+  const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
+  const runningSessionCountSpec =
+    requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE);
+
+  it("maps activity sessions to activity-specific daily count records", () => {
+    const selected = selectProjectableActivitySessionCountDays({
+      nowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 40,
+          recordIds: ["evt_run_1"],
+          startedAt: "2026-07-03T07:00:00.000Z",
+        }),
+        activitySessionRow({
+          activityKind: "run",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 35,
+          recordIds: ["evt_run_2"],
+          startedAt: "2026-07-03T17:00:00.000Z",
+        }),
+        activitySessionRow({
+          activityKind: "walking",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 60,
+          recordIds: ["evt_walk_1"],
+        }),
+      ],
+      spec: runningSessionCountSpec,
+    });
+
+    expect(selected).toEqual([
+      {
+        data: {
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          sessionCount: 2,
+        },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      },
+    ]);
+    expect(
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-session-count-days.v1",
+        projectionScope: RUNNING_SESSION_COUNT_SCOPE,
+        records: selected,
+      }).records,
+    ).toEqual(selected);
+  });
+
+  it("counts canonical intervention sessions with matching activity kinds", async () => {
+    const saunaSessionCountSpec = requireActivitySessionCountSpec(
+      buildHostedVaultShareActivitySessionCountProjectionScope({
+        activityKind: "sauna",
+      }),
+    );
+    const vaultRoot = await createActivitySessionVault([{
+      schemaVersion: "murph.event.v1",
+      id: "evt_sauna_count_1",
+      kind: "intervention_session",
+      occurredAt: "2026-07-03T18:00:00.000Z",
+      sessionLocalDate: ACTIVITY_DAY.date,
+      interventionType: "sauna",
+      durationMinutes: 20,
+    }]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await expect(readProjectableActivitySessionCountDays(
+        vaultRoot,
+        saunaSessionCountSpec,
+      )).resolves.toEqual([{
+        data: {
+          activityKind: "sauna",
+          date: ACTIVITY_DAY.date,
+          sessionCount: 1,
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
         recordKey: ACTIVITY_DAY.date,
@@ -954,6 +1179,26 @@ function requireActivityMinutesSpec(
   const spec = getHostedVaultShareActivityMinutesProjectionSpec(kind);
   if (!spec) {
     throw new Error(`Missing activity minutes projection spec for ${kind}.`);
+  }
+  return spec;
+}
+
+function requireActivityDistanceSpec(
+  kind: Parameters<typeof getHostedVaultShareActivityDistanceProjectionSpec>[0],
+) {
+  const spec = getHostedVaultShareActivityDistanceProjectionSpec(kind);
+  if (!spec) {
+    throw new Error("Missing activity distance projection spec.");
+  }
+  return spec;
+}
+
+function requireActivitySessionCountSpec(
+  kind: Parameters<typeof getHostedVaultShareActivitySessionCountProjectionSpec>[0],
+) {
+  const spec = getHostedVaultShareActivitySessionCountProjectionSpec(kind);
+  if (!spec) {
+    throw new Error("Missing activity session count projection spec.");
   }
   return spec;
 }

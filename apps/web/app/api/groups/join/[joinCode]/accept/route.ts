@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
-const BODY_LIMIT_BYTES = 4_096;
+const BODY_LIMIT_BYTES = 16_384;
 
 const SELECTABLE_SCOPE_KEYS = new Set(
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) =>

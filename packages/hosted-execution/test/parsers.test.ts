@@ -568,6 +568,14 @@ describe("parseHostedRuntimeGroupTool", () => {
             projectionKind: "activity-minutes-days.v1",
             selector: { activityKind: "running" },
           },
+          {
+            projectionKind: "activity-distance-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-session-count-days.v1",
+            selector: { activityKind: "running" },
+          },
         ],
       },
     })).toEqual({
@@ -580,6 +588,14 @@ describe("parseHostedRuntimeGroupTool", () => {
           { projectionKind: "sleep-times.v0" },
           {
             projectionKind: "activity-minutes-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-distance-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-session-count-days.v1",
             selector: { activityKind: "running" },
           },
         ],
@@ -659,6 +675,23 @@ describe("parseHostedRuntimeGroupTool", () => {
       parseHostedRuntimeGroupToolRequest({
         action: "create_join_link",
         joinLink: { requestedVaultShareProjectionScopes: [{ projectionKind: "activity-minutes-days.v1" }] },
+      })
+    ).toThrow(/unsupported projection scope/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [{ projectionKind: "activity-distance-days.v1" }] },
+      })
+    ).toThrow(/unsupported projection scope/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: {
+          requestedVaultShareProjectionScopes: [{
+            projectionKind: "activity-session-count-days.v1",
+            selector: { activityKind: "running+walking" },
+          }],
+        },
       })
     ).toThrow(/unsupported projection scope/u);
     // Membership-implied, never requestable: the join-link request contract is closed

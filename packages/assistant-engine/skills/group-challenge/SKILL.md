@@ -35,8 +35,18 @@ provider traces, or private 1:1 data for a group challenge.
   - Walking minutes or walking minutes per day: `activityKind: "walking"`
   - Swimming minutes: `activityKind: "swimming"`
   - Sauna minutes or sauna minutes per week: `activityKind: "sauna"`
+- Activity distance for a specific recognized activity alias:
+  `{ "projectionKind": "activity-distance-days.v1", "selector": { "activityKind": "<alias>" } }`
+  - Running distance: `activityKind: "running"`
+  - Walking distance: `activityKind: "walking"`
+  - Cycling distance: `activityKind: "cycling"`
+- Activity session count for a specific recognized activity alias:
+  `{ "projectionKind": "activity-session-count-days.v1", "selector": { "activityKind": "<alias>" } }`
+  - Running session count: `activityKind: "running"`
+  - Walking session count: `activityKind: "walking"`
+  - Sauna session count: `activityKind: "sauna"`
 - Steps: `steps-days.v0`
-- Distance: `distance-days.v0`
+- Broad daily distance: `distance-days.v0`
 - Elevation gain: `elevation-gain-days.v0`
 - Floors climbed: `floors-climbed-days.v0`
 - Active calories: `active-calories-days.v0`
@@ -151,8 +161,10 @@ schedule, `continuityPolicy: preserve`). Each run:
 1. Read the challenge page.
 2. Read fresh standings with the same scope shape used for the challenge
    share: fixed projections use `vault-cli group shared --kind steps-days.v0`;
-   selector activity-minute projections use
-   `vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>`.
+   selector activity projections use exact scopes such as
+   `vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>`,
+   `vault-cli group shared --scope activity-distance-days.v1.activityKind.<alias>`,
+   or `vault-cli group shared --scope activity-session-count-days.v1.activityKind.<alias>`.
    Never pass selector scopes through `--kind`.
    Never reuse remembered numbers — wrong scores turn jokes into noise. If
    the data is empty or missing for a member, say so plainly; never invent

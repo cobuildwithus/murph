@@ -42,6 +42,8 @@ export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS = [
 ] as const;
 
 const HOSTED_VAULT_SHARE_DAY_MAX_MINUTES = 24 * 60;
+const HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS = 1_000_000;
+const HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS = 100;
 
 export type HostedVaultShareDailyMetricProjectionKind =
   (typeof HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS)[number];
@@ -71,11 +73,24 @@ export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS = [
 
 export const HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND =
   "activity-minutes-days.v1" as const;
+export const HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND =
+  "activity-distance-days.v1" as const;
+export const HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND =
+  "activity-session-count-days.v1" as const;
 
 export type HostedVaultShareActivityMinutesProjectionKind =
   typeof HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND;
+export type HostedVaultShareActivityDistanceProjectionKind =
+  typeof HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND;
+export type HostedVaultShareActivitySessionCountProjectionKind =
+  typeof HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND;
 
-export const HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS =
+export type HostedVaultShareActivitySelectorProjectionKind =
+  | HostedVaultShareActivityDistanceProjectionKind
+  | HostedVaultShareActivityMinutesProjectionKind
+  | HostedVaultShareActivitySessionCountProjectionKind;
+
+export const HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS =
   Object.freeze(
     [...new Set(activityKindAliasGroups
       .flatMap((group) => [...group])
@@ -84,15 +99,45 @@ export const HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS =
       .sort((left, right) => left.localeCompare(right)),
   );
 
-export type HostedVaultShareActivityMinutesSelectorActivityKind = string;
+export const HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS =
+  HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS;
+export const HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS =
+  HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS;
+export const HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS =
+  HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS;
 
-export interface HostedVaultShareActivityMinutesSelector {
-  activityKind: HostedVaultShareActivityMinutesSelectorActivityKind;
+export type HostedVaultShareActivitySelectorActivityKind = string;
+export type HostedVaultShareActivityMinutesSelectorActivityKind =
+  HostedVaultShareActivitySelectorActivityKind;
+export type HostedVaultShareActivityDistanceSelectorActivityKind =
+  HostedVaultShareActivitySelectorActivityKind;
+export type HostedVaultShareActivitySessionCountSelectorActivityKind =
+  HostedVaultShareActivitySelectorActivityKind;
+
+export interface HostedVaultShareActivitySelector {
+  activityKind: HostedVaultShareActivitySelectorActivityKind;
 }
+
+export type HostedVaultShareActivityMinutesSelector =
+  HostedVaultShareActivitySelector;
+export type HostedVaultShareActivityDistanceSelector =
+  HostedVaultShareActivitySelector;
+export type HostedVaultShareActivitySessionCountSelector =
+  HostedVaultShareActivitySelector;
 
 export interface HostedVaultShareActivityMinutesProjectionSpec {
   activityKind: HostedVaultShareActivityMinutesSelectorActivityKind;
   projectionKind: HostedVaultShareActivityMinutesProjectionKind;
+}
+
+export interface HostedVaultShareActivityDistanceProjectionSpec {
+  activityKind: HostedVaultShareActivityDistanceSelectorActivityKind;
+  projectionKind: HostedVaultShareActivityDistanceProjectionKind;
+}
+
+export interface HostedVaultShareActivitySessionCountProjectionSpec {
+  activityKind: HostedVaultShareActivitySessionCountSelectorActivityKind;
+  projectionKind: HostedVaultShareActivitySessionCountProjectionKind;
 }
 
 export const HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS = [
@@ -110,6 +155,8 @@ export type HostedVaultShareFixedProjectionKind =
 export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
   ...HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
 ] as const;
 
 /**
@@ -174,8 +221,20 @@ export interface HostedVaultShareActivityMinutesProjectionScope {
   selector: HostedVaultShareActivityMinutesSelector;
 }
 
+export interface HostedVaultShareActivityDistanceProjectionScope {
+  projectionKind: HostedVaultShareActivityDistanceProjectionKind;
+  selector: HostedVaultShareActivityDistanceSelector;
+}
+
+export interface HostedVaultShareActivitySessionCountProjectionScope {
+  projectionKind: HostedVaultShareActivitySessionCountProjectionKind;
+  selector: HostedVaultShareActivitySessionCountSelector;
+}
+
 export type HostedVaultShareProjectionScope =
+  | HostedVaultShareActivityDistanceProjectionScope
   | HostedVaultShareActivityMinutesProjectionScope
+  | HostedVaultShareActivitySessionCountProjectionScope
   | HostedVaultShareFixedProjectionScope;
 
 export type HostedVaultShareSelectableProjectionScope =
@@ -190,19 +249,34 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES =
       projectionKind: HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
       selector: { activityKind },
     })),
+    ...HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS.map((activityKind) => ({
+      projectionKind: HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+      selector: { activityKind },
+    })),
+    ...HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS.map((activityKind) => ({
+      projectionKind: HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
+      selector: { activityKind },
+    })),
   ] satisfies HostedVaultShareSelectableProjectionScope[]);
 
-export function isHostedVaultShareActivityMinutesSelectorActivityKind(
+export function isHostedVaultShareActivitySelectorActivityKind(
   value: unknown,
-): value is HostedVaultShareActivityMinutesSelectorActivityKind {
+): value is HostedVaultShareActivitySelectorActivityKind {
   if (typeof value !== "string") {
     return false;
   }
   const normalized = normalizeActivityKindToken(value);
   return normalized !== null
     && normalized === value
-    && HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS.includes(normalized);
+    && HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS.includes(normalized);
 }
+
+export const isHostedVaultShareActivityMinutesSelectorActivityKind =
+  isHostedVaultShareActivitySelectorActivityKind;
+export const isHostedVaultShareActivityDistanceSelectorActivityKind =
+  isHostedVaultShareActivitySelectorActivityKind;
+export const isHostedVaultShareActivitySessionCountSelectorActivityKind =
+  isHostedVaultShareActivitySelectorActivityKind;
 
 export const HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA =
   "murph.vault-share.delivery.v1";
@@ -243,6 +317,19 @@ export interface HostedVaultShareActivityMinutesDayData {
   sessionMinutes: number;
 }
 
+export interface HostedVaultShareActivityDistanceDayData {
+  activityKind: string;
+  date: string;
+  sessionCount: number;
+  sessionDistanceMeters: number;
+}
+
+export interface HostedVaultShareActivitySessionCountDayData {
+  activityKind: string;
+  date: string;
+  sessionCount: number;
+}
+
 export interface HostedVaultShareHeartRateZoneBucket {
   durationMinutes: number;
   label?: string;
@@ -260,6 +347,8 @@ export interface HostedVaultShareProfileNameData {
 
 export type HostedVaultShareDeliveryRecordData =
   | HostedVaultShareActivityMinutesDayData
+  | HostedVaultShareActivityDistanceDayData
+  | HostedVaultShareActivitySessionCountDayData
   | HostedVaultShareDailyMetricData
   | HostedVaultShareHeartRateZoneDayData
   | HostedVaultShareProfileNameData
@@ -359,7 +448,7 @@ function parseHostedVaultShareFixedProjectionKind(
   label: string,
 ): HostedVaultShareFixedProjectionKind {
   const projectionKind = parseHostedVaultShareProjectionKind(value, label);
-  if (projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND) {
+  if (isHostedVaultShareActivitySelectorProjectionKind(projectionKind)) {
     throw new TypeError(`${label} requires a vault-share projection selector.`);
   }
   return projectionKind;
@@ -374,7 +463,7 @@ export function hostedVaultShareProjectionKindToScope(
 export function buildHostedVaultShareActivityMinutesProjectionScope(input: {
   activityKind: string;
 }): HostedVaultShareActivityMinutesProjectionScope {
-  const activityKind = parseHostedVaultShareActivityMinutesSelectorActivityKind(
+  const activityKind = parseHostedVaultShareActivitySelectorActivityKind(
     input.activityKind,
     "Vault share activity-minutes selector activityKind",
   );
@@ -384,13 +473,43 @@ export function buildHostedVaultShareActivityMinutesProjectionScope(input: {
   };
 }
 
+export function buildHostedVaultShareActivityDistanceProjectionScope(input: {
+  activityKind: string;
+}): HostedVaultShareActivityDistanceProjectionScope {
+  const activityKind = parseHostedVaultShareActivitySelectorActivityKind(
+    input.activityKind,
+    "Vault share activity-distance selector activityKind",
+  );
+  return {
+    projectionKind: HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+    selector: { activityKind },
+  };
+}
+
+export function buildHostedVaultShareActivitySessionCountProjectionScope(input: {
+  activityKind: string;
+}): HostedVaultShareActivitySessionCountProjectionScope {
+  const activityKind = parseHostedVaultShareActivitySelectorActivityKind(
+    input.activityKind,
+    "Vault share activity-session-count selector activityKind",
+  );
+  return {
+    projectionKind: HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
+    selector: { activityKind },
+  };
+}
+
 export function buildHostedVaultShareProjectionScopeKey(
   scope: HostedVaultShareProjectionScope,
 ): string {
-  if (scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND) {
-    return `${scope.projectionKind}.activityKind.${scope.selector.activityKind}`;
+  switch (scope.projectionKind) {
+    case HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND:
+    case HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND:
+    case HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND:
+      return `${scope.projectionKind}.activityKind.${scope.selector.activityKind}`;
+    default:
+      return scope.projectionKind;
   }
-  return scope.projectionKind;
 }
 
 export function parseHostedVaultShareProjectionScope(
@@ -411,10 +530,49 @@ export function parseHostedVaultShareProjectionScope(
 
   if (projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND) {
     const selector = requireObject(scope.selector, `${label} selector`);
+    assertObjectKeys(
+      selector,
+      `${label} selector`,
+      ["activityKind"],
+    );
     return {
       projectionKind,
       selector: {
-        activityKind: parseHostedVaultShareActivityMinutesSelectorActivityKind(
+        activityKind: parseHostedVaultShareActivitySelectorActivityKind(
+          selector.activityKind,
+          `${label} selector activityKind`,
+        ),
+      },
+    };
+  }
+  if (projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND) {
+    const selector = requireObject(scope.selector, `${label} selector`);
+    assertObjectKeys(
+      selector,
+      `${label} selector`,
+      ["activityKind"],
+    );
+    return {
+      projectionKind,
+      selector: {
+        activityKind: parseHostedVaultShareActivitySelectorActivityKind(
+          selector.activityKind,
+          `${label} selector activityKind`,
+        ),
+      },
+    };
+  }
+  if (projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {
+    const selector = requireObject(scope.selector, `${label} selector`);
+    assertObjectKeys(
+      selector,
+      `${label} selector`,
+      ["activityKind"],
+    );
+    return {
+      projectionKind,
+      selector: {
+        activityKind: parseHostedVaultShareActivitySelectorActivityKind(
           selector.activityKind,
           `${label} selector activityKind`,
         ),
@@ -429,17 +587,38 @@ export function parseHostedVaultShareProjectionScope(
   return { projectionKind };
 }
 
-function parseHostedVaultShareActivityMinutesSelectorActivityKind(
+function isHostedVaultShareActivitySelectorProjectionKind(
+  value: HostedVaultShareProjectionKind,
+): value is HostedVaultShareActivitySelectorProjectionKind {
+  return value === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND
+    || value === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND
+    || value === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND;
+}
+
+function parseHostedVaultShareActivitySelectorActivityKind(
   value: unknown,
   label: string,
-): HostedVaultShareActivityMinutesSelectorActivityKind {
+): HostedVaultShareActivitySelectorActivityKind {
   const activityKind = requireString(value, label);
-  if (!isHostedVaultShareActivityMinutesSelectorActivityKind(activityKind)) {
+  if (!isHostedVaultShareActivitySelectorActivityKind(activityKind)) {
     throw new TypeError(
       `${label} must be a recognized normalized activity alias.`,
     );
   }
   return activityKind;
+}
+
+function assertObjectKeys(
+  value: Record<string, unknown>,
+  label: string,
+  allowedKeys: readonly string[],
+): void {
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new TypeError(`${label} must not include ${key}.`);
+    }
+  }
 }
 
 function parseHostedVaultShareRequestProjectionScope(
@@ -472,6 +651,30 @@ export function getHostedVaultShareActivityMinutesProjectionSpec(
   scope: HostedVaultShareProjectionScope,
 ): HostedVaultShareActivityMinutesProjectionSpec | null {
   if (scope.projectionKind !== HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND) {
+    return null;
+  }
+  return {
+    activityKind: scope.selector.activityKind,
+    projectionKind: scope.projectionKind,
+  };
+}
+
+export function getHostedVaultShareActivityDistanceProjectionSpec(
+  scope: HostedVaultShareProjectionScope,
+): HostedVaultShareActivityDistanceProjectionSpec | null {
+  if (scope.projectionKind !== HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND) {
+    return null;
+  }
+  return {
+    activityKind: scope.selector.activityKind,
+    projectionKind: scope.projectionKind,
+  };
+}
+
+export function getHostedVaultShareActivitySessionCountProjectionSpec(
+  scope: HostedVaultShareProjectionScope,
+): HostedVaultShareActivitySessionCountProjectionSpec | null {
+  if (scope.projectionKind !== HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {
     return null;
   }
   return {
@@ -569,6 +772,22 @@ function parseHostedVaultShareDeliveryRecordData(
     getHostedVaultShareActivityMinutesProjectionSpec(context.projectionScope);
   if (activityMinutesSpec) {
     return parseHostedVaultShareActivityMinutesDayData(value, context, activityMinutesSpec);
+  }
+
+  const activityDistanceSpec =
+    getHostedVaultShareActivityDistanceProjectionSpec(context.projectionScope);
+  if (activityDistanceSpec) {
+    return parseHostedVaultShareActivityDistanceDayData(value, context, activityDistanceSpec);
+  }
+
+  const activitySessionCountSpec =
+    getHostedVaultShareActivitySessionCountProjectionSpec(context.projectionScope);
+  if (activitySessionCountSpec) {
+    return parseHostedVaultShareActivitySessionCountDayData(
+      value,
+      context,
+      activitySessionCountSpec,
+    );
   }
 
   switch (context.projectionKind) {
@@ -755,6 +974,113 @@ function parseHostedVaultShareActivityMinutesDayData(
   }
 
   return { activityKind, date, sessionCount, sessionMinutes };
+}
+
+function parseHostedVaultShareActivityDistanceDayData(
+  value: unknown,
+  context: { occurredAt: string; recordKey: string },
+  spec: HostedVaultShareActivityDistanceProjectionSpec,
+): HostedVaultShareActivityDistanceDayData {
+  const data = requireObject(
+    value,
+    `Vault share ${spec.projectionKind} data`,
+  );
+  assertObjectKeys(
+    data,
+    `Vault share ${spec.projectionKind} data`,
+    ["activityKind", "date", "sessionCount", "sessionDistanceMeters"],
+  );
+  const date = parseHostedVaultShareDailyDate(data.date, {
+    dataLabel: `Vault share ${spec.projectionKind} data`,
+    occurredAt: context.occurredAt,
+    occurredAtDescription: `${spec.projectionKind} date at UTC midnight`,
+    recordKey: context.recordKey,
+  });
+  const activityKind = requireString(
+    data.activityKind,
+    `Vault share ${spec.projectionKind} data activityKind`,
+  );
+  const sessionCount = requireNumber(
+    data.sessionCount,
+    `Vault share ${spec.projectionKind} data sessionCount`,
+  );
+  const sessionDistanceMeters = requireNumber(
+    data.sessionDistanceMeters,
+    `Vault share ${spec.projectionKind} data sessionDistanceMeters`,
+  );
+
+  if (activityKind !== spec.activityKind) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} activityKind must be ${spec.activityKind}.`,
+    );
+  }
+  if (
+    !Number.isInteger(sessionCount)
+    || sessionCount < 0
+    || sessionCount > HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS
+  ) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} sessionCount must be an integer between 0 and ${HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS}.`,
+    );
+  }
+  if (
+    !Number.isInteger(sessionDistanceMeters)
+    || sessionDistanceMeters < 0
+    || sessionDistanceMeters > HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS
+  ) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} sessionDistanceMeters must be an integer between 0 and ${HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS}.`,
+    );
+  }
+
+  return { activityKind, date, sessionCount, sessionDistanceMeters };
+}
+
+function parseHostedVaultShareActivitySessionCountDayData(
+  value: unknown,
+  context: { occurredAt: string; recordKey: string },
+  spec: HostedVaultShareActivitySessionCountProjectionSpec,
+): HostedVaultShareActivitySessionCountDayData {
+  const data = requireObject(
+    value,
+    `Vault share ${spec.projectionKind} data`,
+  );
+  assertObjectKeys(
+    data,
+    `Vault share ${spec.projectionKind} data`,
+    ["activityKind", "date", "sessionCount"],
+  );
+  const date = parseHostedVaultShareDailyDate(data.date, {
+    dataLabel: `Vault share ${spec.projectionKind} data`,
+    occurredAt: context.occurredAt,
+    occurredAtDescription: `${spec.projectionKind} date at UTC midnight`,
+    recordKey: context.recordKey,
+  });
+  const activityKind = requireString(
+    data.activityKind,
+    `Vault share ${spec.projectionKind} data activityKind`,
+  );
+  const sessionCount = requireNumber(
+    data.sessionCount,
+    `Vault share ${spec.projectionKind} data sessionCount`,
+  );
+
+  if (activityKind !== spec.activityKind) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} activityKind must be ${spec.activityKind}.`,
+    );
+  }
+  if (
+    !Number.isInteger(sessionCount)
+    || sessionCount < 0
+    || sessionCount > HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS
+  ) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} sessionCount must be an integer between 0 and ${HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS}.`,
+    );
+  }
+
+  return { activityKind, date, sessionCount };
 }
 
 function parseHostedVaultShareHeartRateZoneDayData(

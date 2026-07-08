@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import { parseHostedExecutionWake } from "../src/parsers.ts";
 import { HOSTED_MAILBOX_KINDS } from "../src/runtime-control.ts";
 import {
+  buildHostedVaultShareActivityDistanceProjectionScope,
   buildHostedVaultShareActivityMinutesProjectionScope,
+  buildHostedVaultShareActivitySessionCountProjectionScope,
   buildHostedVaultShareDeliveryDedupeKey,
   buildHostedVaultShareProjectionScopeKey,
   buildHostedVaultShareRevokeDedupeKey,
+  HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS,
   getHostedVaultShareDailyMetricProjectionSpec,
-  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
@@ -26,6 +28,12 @@ const WORKOUT_SCOPE = { projectionKind: "workout-days.v0" } as const;
 const HEART_RATE_ZONE_SCOPE = { projectionKind: "heart-rate-zones-days.v0" } as const;
 const PROFILE_SCOPE = { projectionKind: "profile-name.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
+  activityKind: "running",
+});
+const RUNNING_DISTANCE_SCOPE = buildHostedVaultShareActivityDistanceProjectionScope({
+  activityKind: "running",
+});
+const RUNNING_SESSION_COUNT_SCOPE = buildHostedVaultShareActivitySessionCountProjectionScope({
   activityKind: "running",
 });
 const SWIMMING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
@@ -80,6 +88,27 @@ const VALID_RUNNING_MINUTES_RECORD = {
     date: "2026-07-03",
     sessionCount: 2,
     sessionMinutes: 85,
+  },
+  occurredAt: "2026-07-03T00:00:00.000Z",
+  recordKey: "2026-07-03",
+};
+
+const VALID_RUNNING_DISTANCE_RECORD = {
+  data: {
+    activityKind: "running",
+    date: "2026-07-03",
+    sessionCount: 2,
+    sessionDistanceMeters: 8_400,
+  },
+  occurredAt: "2026-07-03T00:00:00.000Z",
+  recordKey: "2026-07-03",
+};
+
+const VALID_RUNNING_SESSION_COUNT_RECORD = {
+  data: {
+    activityKind: "running",
+    date: "2026-07-03",
+    sessionCount: 2,
   },
   occurredAt: "2026-07-03T00:00:00.000Z",
   recordKey: "2026-07-03",
@@ -150,8 +179,14 @@ describe("vault-share contracts", () => {
       ),
     ).toEqual([
       ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
-      ...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS.map((activityKind) =>
+      ...HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS.map((activityKind) =>
         `activity-minutes-days.v1.activityKind.${activityKind}`
+      ),
+      ...HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS.map((activityKind) =>
+        `activity-distance-days.v1.activityKind.${activityKind}`
+      ),
+      ...HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS.map((activityKind) =>
+        `activity-session-count-days.v1.activityKind.${activityKind}`
       ),
     ]);
     expect(getHostedVaultShareDailyMetricProjectionSpec("group-email.v0")).toBeNull();
@@ -437,6 +472,38 @@ describe("vault-share contracts", () => {
     ).toThrow(/known vault-share projection kind/u);
   });
 
+  it("rejects malformed activity selector projection scopes", () => {
+    for (const projectionScope of [
+      "activity-distance-days.v1",
+      "activity-distance-days.v1.running",
+      "activity-distance-days.v1.activityKind",
+      "activity-distance-days.v1.activityKind.running.extra",
+      { projectionKind: "activity-distance-days.v1" },
+      {
+        projectionKind: "activity-distance-days.v1",
+        selector: { activityKind: "*" },
+      },
+      {
+        projectionKind: "activity-distance-days.v1",
+        selector: { activityKind: "running", provider: "strava" },
+      },
+      {
+        projectionKind: "activity-session-count-days.v1",
+        selector: { activityKind: "running+walking" },
+      },
+      {
+        projectionKind: "activity-session-count-days.v1",
+        selector: { activityKind: "Running" },
+      },
+    ]) {
+      expect(() =>
+        parseHostedVaultShareActiveProjectionKindsResponse({
+          projectionScopes: [projectionScope],
+        })
+      ).toThrow();
+    }
+  });
+
   it("round-trips a vault-share delivery wake and pins the envelope occurredAt to the record", () => {
     // The envelope occurredAt becomes the plaintext occurred_at mailbox column, so the
     // builder derives it from the parsed record: a wire envelope timestamp that drifted
@@ -686,6 +753,124 @@ describe("activity-minutes-days.v1 selector delivery records", () => {
             activityKind: "swimming",
             sessionMinutes: 1_441,
           },
+        }],
+      })
+    ).toThrow(/sessionMinutes/u);
+  });
+});
+
+describe("activity-distance-days.v1 selector delivery records", () => {
+  it("parses a valid running distance daily record", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "activity-distance-days.v1",
+      projectionScope: RUNNING_DISTANCE_SCOPE,
+      records: [VALID_RUNNING_DISTANCE_RECORD],
+    })).toEqual({
+      projectionKind: "activity-distance-days.v1",
+      projectionScope: RUNNING_DISTANCE_SCOPE,
+      records: [VALID_RUNNING_DISTANCE_RECORD],
+    });
+  });
+
+  it("requires an explicit selector", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-distance-days.v1",
+        records: [VALID_RUNNING_DISTANCE_RECORD],
+      })
+    ).toThrow(/requires a vault-share projection selector/u);
+  });
+
+  it("rejects records whose activity kind does not match the projection", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-distance-days.v1",
+        projectionScope: RUNNING_DISTANCE_SCOPE,
+        records: [{
+          ...VALID_RUNNING_DISTANCE_RECORD,
+          data: { ...VALID_RUNNING_DISTANCE_RECORD.data, activityKind: "walking" },
+        }],
+      })
+    ).toThrow(/activityKind must be running/u);
+  });
+
+  it("rejects malformed or overbroad distance summaries", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-distance-days.v1",
+        projectionScope: RUNNING_DISTANCE_SCOPE,
+        records: [{
+          ...VALID_RUNNING_DISTANCE_RECORD,
+          data: { ...VALID_RUNNING_DISTANCE_RECORD.data, sessionDistanceMeters: 8_400.5 },
+        }],
+      })
+    ).toThrow(/sessionDistanceMeters/u);
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-distance-days.v1",
+        projectionScope: RUNNING_DISTANCE_SCOPE,
+        records: [{
+          ...VALID_RUNNING_DISTANCE_RECORD,
+          data: { ...VALID_RUNNING_DISTANCE_RECORD.data, route: [] },
+        }],
+      })
+    ).toThrow(/route/u);
+  });
+});
+
+describe("activity-session-count-days.v1 selector delivery records", () => {
+  it("parses a valid running session-count daily record", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "activity-session-count-days.v1",
+      projectionScope: RUNNING_SESSION_COUNT_SCOPE,
+      records: [VALID_RUNNING_SESSION_COUNT_RECORD],
+    })).toEqual({
+      projectionKind: "activity-session-count-days.v1",
+      projectionScope: RUNNING_SESSION_COUNT_SCOPE,
+      records: [VALID_RUNNING_SESSION_COUNT_RECORD],
+    });
+  });
+
+  it("requires an explicit selector", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-session-count-days.v1",
+        records: [VALID_RUNNING_SESSION_COUNT_RECORD],
+      })
+    ).toThrow(/requires a vault-share projection selector/u);
+  });
+
+  it("rejects records whose activity kind does not match the projection", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-session-count-days.v1",
+        projectionScope: RUNNING_SESSION_COUNT_SCOPE,
+        records: [{
+          ...VALID_RUNNING_SESSION_COUNT_RECORD,
+          data: { ...VALID_RUNNING_SESSION_COUNT_RECORD.data, activityKind: "walking" },
+        }],
+      })
+    ).toThrow(/activityKind must be running/u);
+  });
+
+  it("rejects malformed or overbroad session-count summaries", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-session-count-days.v1",
+        projectionScope: RUNNING_SESSION_COUNT_SCOPE,
+        records: [{
+          ...VALID_RUNNING_SESSION_COUNT_RECORD,
+          data: { ...VALID_RUNNING_SESSION_COUNT_RECORD.data, sessionCount: 1.5 },
+        }],
+      })
+    ).toThrow(/sessionCount/u);
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-session-count-days.v1",
+        projectionScope: RUNNING_SESSION_COUNT_SCOPE,
+        records: [{
+          ...VALID_RUNNING_SESSION_COUNT_RECORD,
+          data: { ...VALID_RUNNING_SESSION_COUNT_RECORD.data, sessionMinutes: 40 },
         }],
       })
     ).toThrow(/sessionMinutes/u);

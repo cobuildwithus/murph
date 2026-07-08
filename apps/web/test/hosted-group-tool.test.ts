@@ -129,7 +129,9 @@ import {
 } from "@/src/lib/hosted-groups/group-tool";
 import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareActivityDistanceProjectionScope,
   buildHostedVaultShareActivityMinutesProjectionScope,
+  buildHostedVaultShareActivitySessionCountProjectionScope,
   buildHostedVaultShareProjectionScopeKey,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -153,6 +155,12 @@ const RENAMED_GROUP_SUMMARY = {
 };
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
+  activityKind: "running",
+});
+const RUNNING_DISTANCE_SCOPE = buildHostedVaultShareActivityDistanceProjectionScope({
+  activityKind: "running",
+});
+const RUNNING_SESSION_COUNT_SCOPE = buildHostedVaultShareActivitySessionCountProjectionScope({
   activityKind: "running",
 });
 
@@ -636,6 +644,8 @@ describe("hosted group join policy", () => {
       { projectionKind: "sleep-times.v0" },
       { projectionKind: "activity-days.v0" },
       RUNNING_SCOPE,
+      RUNNING_DISTANCE_SCOPE,
+      RUNNING_SESSION_COUNT_SCOPE,
       { projectionKind: "heart-rate-zones-days.v0" },
     ])).toEqual([
       {
@@ -677,6 +687,22 @@ describe("hosted group join policy", () => {
         projectionKind: "activity-minutes-days.v1",
         projectionScope: RUNNING_SCOPE,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_SCOPE),
+      },
+      {
+        description:
+          "Shares daily total distance for running activities. Does not share routes, GPS, pace, timestamps, heart rate, calories, or individual workouts.",
+        label: "Recent running distance",
+        projectionKind: "activity-distance-days.v1",
+        projectionScope: RUNNING_DISTANCE_SCOPE,
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_DISTANCE_SCOPE),
+      },
+      {
+        description:
+          "Shares daily count of running activity sessions. Does not share duration, distance, routes, GPS, timestamps, heart rate, calories, or individual workouts.",
+        label: "Recent running session count",
+        projectionKind: "activity-session-count-days.v1",
+        projectionScope: RUNNING_SESSION_COUNT_SCOPE,
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_SESSION_COUNT_SCOPE),
       },
     ]);
 

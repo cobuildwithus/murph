@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
-  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA,
 } from "@murphai/hosted-execution/vault-share";
@@ -69,7 +69,7 @@ describe("murph.group dynamic tool", () => {
         .properties
         .activityKind
         .enum,
-    ).toEqual([...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS]);
+    ).toEqual([...HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS]);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("{{join_url}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
@@ -199,6 +199,14 @@ describe("murph.group dynamic tool", () => {
           projectionKind: "activity-minutes-days.v1",
           selector: { activityKind: "running" },
         },
+        {
+          projectionKind: "activity-distance-days.v1",
+          selector: { activityKind: "running" },
+        },
+        {
+          projectionKind: "activity-session-count-days.v1",
+          selector: { activityKind: "running" },
+        },
       ],
     }));
 
@@ -213,6 +221,14 @@ describe("murph.group dynamic tool", () => {
             { projectionKind: "sleep-times.v0" },
             {
               projectionKind: "activity-minutes-days.v1",
+              selector: { activityKind: "running" },
+            },
+            {
+              projectionKind: "activity-distance-days.v1",
+              selector: { activityKind: "running" },
+            },
+            {
+              projectionKind: "activity-session-count-days.v1",
               selector: { activityKind: "running" },
             },
           ],
@@ -246,6 +262,19 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "create_join_link",
       requestedVaultShareProjectionScopes: [{ projectionKind: "activity-minutes-days.v1" }],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "create_join_link",
+      requestedVaultShareProjectionScopes: [{ projectionKind: "activity-distance-days.v1" }],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "create_join_link",
+      requestedVaultShareProjectionScopes: [{
+        projectionKind: "activity-session-count-days.v1",
+        selector: { activityKind: "running+walking" },
+      }],
     }))?.kind).toBe("invalid-group-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({

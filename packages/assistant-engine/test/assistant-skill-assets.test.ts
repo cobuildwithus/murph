@@ -206,6 +206,12 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>',
     )
+    expect(raw).toContain(
+      'vault-cli group shared --scope activity-distance-days.v1.activityKind.<alias>',
+    )
+    expect(raw).toContain(
+      'vault-cli group shared --scope activity-session-count-days.v1.activityKind.<alias>',
+    )
     expect(raw).toContain('Never pass selector scopes through `--kind`')
   })
 
