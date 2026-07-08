@@ -463,6 +463,69 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
+  it("blocks no-known allergy assertions when manifest reports incomplete allergy retrieval", async () => {
+    const manifestErrorCases: Array<{
+      error: { code: string; message: string; resourceType?: string };
+      label: string;
+    }> = [
+      {
+        label: "scoped",
+        error: { resourceType: "AllergyIntolerance", code: "fetch-failed", message: "Allergy page failed" },
+      },
+      {
+        label: "unscoped",
+        error: { code: "fetch-failed", message: "FHIR retrieval was incomplete" },
+      },
+    ];
+
+    for (const { error, label } of manifestErrorCases) {
+      const resourceId = `allergy-negative-incomplete-${label}`;
+      const vaultRoot = await writeClinicalFixture({
+        manifest: { errors: [error] },
+        resourceFiles: [
+          {
+            resourceType: "AllergyIntolerance",
+            relativePath: `AllergyIntolerance/${label}.json`,
+            count: 1,
+          },
+        ],
+        pages: {
+          [`AllergyIntolerance/${label}.json`]: [
+            {
+              resourceType: "AllergyIntolerance",
+              id: resourceId,
+              recordedDate: "2026-07-02T09:00:00.000Z",
+              clinicalStatus: {
+                coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+              },
+              verificationStatus: {
+                coding: [{
+                  system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                  code: "confirmed",
+                }],
+              },
+              code: {
+                text: "No known allergies",
+                coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+              },
+            },
+          ],
+        },
+      });
+
+      const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+      expect(plan.candidates).toEqual([]);
+      expect(plan.unsupported).toEqual([
+        expect.objectContaining({
+          resourceType: "AllergyIntolerance",
+          resourceId,
+          reason: "no-known allergy conflicts with incomplete allergy evidence",
+        }),
+      ]);
+    }
+  });
+
   it("fails closed on malformed DocumentReference inline text data", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
@@ -1988,6 +2051,7 @@ describe("buildClinicalImportPlan", () => {
 
 async function writeClinicalFixture(input: {
   manifest?: {
+    errors?: Array<{ code: string; message: string; resourceType?: string }>;
     fhirBaseUrlHash?: string;
     patientIdHash?: string;
   };
@@ -2022,6 +2086,7 @@ async function writeClinicalFixture(input: {
     resourceFiles,
     requestedScopes: ["patient/*.read"],
     grantedScopes: ["patient/*.read"],
+    ...(input.manifest?.errors === undefined ? {} : { errors: input.manifest.errors }),
   });
 
   for (const [relativePath, text] of pageTexts) {

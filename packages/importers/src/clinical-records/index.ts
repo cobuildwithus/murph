@@ -44,6 +44,7 @@ export interface BuildClinicalImportPlanInput {
 
 type FhirResourceContext<TResource extends Resource = Resource> = {
   hasAllergyConflictEvidence: boolean;
+  hasIncompleteAllergyEvidence: boolean;
   manifest: ClinicalRawManifest;
   rawRef: string;
   resource: TResource;
@@ -150,6 +151,7 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
     manifestPath,
     vaultRoot: input.vaultRoot,
   });
+  const hasIncompleteAllergyEvidence = hasManifestAllergyRetrievalError(manifest);
 
   for (const resourceFile of manifest.resourceFiles) {
     const { rawRef, resources } = await readClinicalResourcePage({
@@ -160,6 +162,7 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
     for (const resource of resources) {
       const context: FhirResourceContext = {
         hasAllergyConflictEvidence,
+        hasIncompleteAllergyEvidence,
         manifest,
         rawRef,
         resource,
@@ -200,6 +203,12 @@ async function scanAllergyConflictEvidence(input: {
   }
 
   return false;
+}
+
+function hasManifestAllergyRetrievalError(manifest: ClinicalRawManifest): boolean {
+  return manifest.errors?.some((error) =>
+    error.resourceType === undefined || error.resourceType === "AllergyIntolerance"
+  ) ?? false;
 }
 
 async function assertRawResourceFileByteBounds(input: {
@@ -358,6 +367,7 @@ function resourceContext<TResource extends Resource>(
 ): FhirResourceContext<TResource> {
   return {
     hasAllergyConflictEvidence: context.hasAllergyConflictEvidence,
+    hasIncompleteAllergyEvidence: context.hasIncompleteAllergyEvidence,
     manifest: context.manifest,
     rawRef: context.rawRef,
     resource,
@@ -719,6 +729,9 @@ function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>)
 
   if (context.hasAllergyConflictEvidence) {
     return unsupportedOnly(context, "no-known allergy conflicts with allergy evidence");
+  }
+  if (context.hasIncompleteAllergyEvidence) {
+    return unsupportedOnly(context, "no-known allergy conflicts with incomplete allergy evidence");
   }
 
   const occurredAt = readClinicalOccurredAt(context.resource);
