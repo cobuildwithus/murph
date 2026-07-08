@@ -86,6 +86,10 @@ const LABORATORY_CATEGORY_CODES = new Set(["laboratory"]);
 const RESULT_STATUS_NORMAL_CODES = new Set(["n"]);
 const RESULT_STATUS_ABNORMAL_CODES = new Set(["a", "aa", "h", "hh", "l", "ll"]);
 const VITAL_LOINC_CODES = new Set(VITAL_LOINC_BY_CODE.keys());
+const CLINICAL_NOTE_MAX_LENGTH = 4_000;
+const DIAGNOSTIC_SUMMARY_MAX_LENGTH = 1_000;
+const LAB_RESULT_TEXT_MAX_LENGTH = 160;
+const LAB_RESULT_MAX_COUNT = 500;
 const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, string>>([
   ["body-weight", new Map([["[lb_av]", "lb"], ["lb", "lb"]])],
   ["bp-diastolic", new Map([["mm[hg]", "mmHg"], ["mmhg", "mmHg"]])],
@@ -445,9 +449,14 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     return unsupportedOnly(context, "observation code is not importable");
   }
 
-  const results = components
-    .map((component) => buildBloodTestResult(component))
-    .filter((result): result is BloodTestResultRecord => result !== null);
+  const results: BloodTestResultRecord[] = [];
+  for (const component of components) {
+    const componentResult = buildBloodTestResult(component);
+    if (!componentResult) {
+      return unsupportedOnly(context, "laboratory observation component result is not importable");
+    }
+    results.push(componentResult);
+  }
   const singleResult = buildBloodTestResult(context.resource);
   if (singleResult) {
     results.unshift(singleResult);
@@ -455,6 +464,9 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
 
   if (results.length === 0) {
     return unsupportedOnly(context, "laboratory observation result is not importable");
+  }
+  if (results.length > LAB_RESULT_MAX_COUNT) {
+    return unsupportedOnly(context, "laboratory observation result count exceeds candidate bounds");
   }
 
   if (!occurredAt) {
@@ -507,6 +519,10 @@ function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): Ma
     if (!occurredAt) {
       return unsupportedOnly(context, "clinical timestamp is missing");
     }
+    const summary = conclusion ?? narrativeText ?? "";
+    if (summary.length > DIAGNOSTIC_SUMMARY_MAX_LENGTH) {
+      return unsupportedOnly(context, "diagnostic report summary exceeds candidate bounds");
+    }
 
     return {
       candidates: [
@@ -520,7 +536,7 @@ function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): Ma
             title: `FHIR report: ${truncate(testName, 148)}`,
             testName: truncate(testName, 160),
             resultStatus: resultStatusFromInterpretation(context.resource.conclusionCode),
-            summary: truncate(conclusion ?? narrativeText ?? "", 1000),
+            summary,
             testCategory: "diagnostic-report",
             reportedAt: readIsoDateTime(context.resource.issued),
             rawRefs: [context.rawRef],
@@ -559,6 +575,9 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
   if (!note) {
     return unsupportedOnly(context, "document reference text is not available in raw FHIR page");
   }
+  if (note.length > CLINICAL_NOTE_MAX_LENGTH) {
+    return unsupportedOnly(context, "document reference text exceeds candidate bounds");
+  }
 
   const occurredAt = readClinicalOccurredAt(context.resource);
   if (!occurredAt) {
@@ -579,7 +598,7 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
           occurredAt,
           source: "import",
           title: truncate(title, 160),
-          note: truncate(note, 4000),
+          note,
           noteType: "fhir_document_reference",
           authoredAt: readIsoDateTime(context.resource.date),
           rawRefs: [context.rawRef],
@@ -697,14 +716,14 @@ function normalizeVitalUnit(rawUnit: string | undefined, vital: VitalDefinition)
 
 function buildBloodTestResult(resource: Observation | ObservationComponent): BloodTestResultRecord | null {
   const analyte = textForCodeableConcept(resource.code);
-  if (!analyte) {
+  if (!analyte || analyte.length > LAB_RESULT_TEXT_MAX_LENGTH) {
     return null;
   }
 
   const quantity = readQuantityValue(resource.valueQuantity);
   if (quantity) {
     return {
-      analyte: truncate(analyte, 160),
+      analyte,
       biomarkerSlug: clinicalFacetSlug(analyte),
       comparator: quantity.comparator,
       slug: clinicalFacetSlug(analyte),
@@ -715,11 +734,15 @@ function buildBloodTestResult(resource: Observation | ObservationComponent): Blo
 
   const textValue = readObservationTextValue(resource);
   if (textValue) {
+    if (textValue.length > LAB_RESULT_TEXT_MAX_LENGTH) {
+      return null;
+    }
+
     return {
-      analyte: truncate(analyte, 160),
+      analyte,
       biomarkerSlug: clinicalFacetSlug(analyte),
       slug: clinicalFacetSlug(analyte),
-      textValue: truncate(textValue, 160),
+      textValue,
     };
   }
 

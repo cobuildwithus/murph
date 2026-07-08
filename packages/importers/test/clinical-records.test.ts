@@ -405,6 +405,177 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
+  it("plans complete laboratory panels atomically", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": {
+          resourceType: "Observation",
+          id: "lab-complete-panel",
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          category: [{
+            coding: [{
+              system: "http://terminology.hl7.org/CodeSystem/observation-category",
+              code: "laboratory",
+            }],
+          }],
+          code: { text: "Metabolic panel" },
+          component: [
+            {
+              code: { text: "Glucose" },
+              valueQuantity: { value: 91, unit: "mg/dL" },
+            },
+            {
+              code: { text: "Albumin" },
+              valueString: "Normal",
+            },
+          ],
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.unsupported).toEqual([]);
+    expect(plan.candidates).toHaveLength(1);
+    const panel = plan.candidates.find(
+      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
+        candidate.kind === "diagnostic-test",
+    );
+    expect(panel?.payload.results).toEqual([
+      {
+        analyte: "Glucose",
+        biomarkerSlug: "glucose",
+        slug: "glucose",
+        unit: "mg/dL",
+        value: 91,
+      },
+      {
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        slug: "albumin",
+        textValue: "Normal",
+      },
+    ]);
+  });
+
+  it("fails closed instead of emitting lossy clinical candidates", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 2,
+        },
+        {
+          resourceType: "DiagnosticReport",
+          relativePath: "DiagnosticReport/page-1.json",
+          count: 1,
+        },
+        {
+          resourceType: "DocumentReference",
+          relativePath: "DocumentReference/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            resourceType: "Observation",
+            id: "lab-partial-panel",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Metabolic panel" },
+            component: [
+              {
+                code: { text: "Glucose" },
+                valueQuantity: { value: 91, unit: "mg/dL" },
+              },
+              {
+                code: { text: "Albumin" },
+              },
+            ],
+          },
+          {
+            resourceType: "Observation",
+            id: "lab-oversize-text-value",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:01:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Narrative lab" },
+            valueString: "x".repeat(161),
+          },
+        ],
+        "DiagnosticReport/page-1.json": {
+          resourceType: "DiagnosticReport",
+          id: "report-oversize-summary",
+          status: "final",
+          issued: "2026-07-01T12:02:00.000Z",
+          code: { text: "Pathology report" },
+          conclusion: "x".repeat(1001),
+        },
+        "DocumentReference/page-1.json": {
+          resourceType: "DocumentReference",
+          id: "document-oversize-note",
+          status: "current",
+          docStatus: "final",
+          date: "2026-07-02T08:30:00.000Z",
+          description: "Long clinical note",
+          content: [
+            {
+              attachment: {
+                contentType: "text/plain",
+                data: Buffer.from("x".repeat(4001)).toString("base64"),
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: "lab-partial-panel",
+          reason: "laboratory observation component result is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "lab-oversize-text-value",
+          reason: "laboratory observation result is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "report-oversize-summary",
+          reason: "diagnostic report summary exceeds candidate bounds",
+        }),
+        expect.objectContaining({
+          resourceId: "document-oversize-note",
+          reason: "document reference text exceeds candidate bounds",
+        }),
+      ]),
+    );
+  });
+
   it("leaves unsafe clinical resources unsupported instead of importing live candidates", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
