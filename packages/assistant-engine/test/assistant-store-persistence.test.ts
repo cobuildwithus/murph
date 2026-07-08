@@ -502,6 +502,9 @@ describe('assistant store persistence seams', () => {
         local: 'session-local',
       },
       conversationKeys: {},
+      recentSessions: {
+        'session-local': '2026-04-08T00:07:00.000Z',
+      },
     })
   })
 
@@ -528,6 +531,7 @@ describe('assistant store persistence seams', () => {
       conversationKeys: {
         'telegram:user-1:thread-external': 'session-external',
       },
+      recentSessions: {},
     })
   })
 
@@ -721,6 +725,43 @@ describe('assistant store persistence seams', () => {
       }),
     ])
     await expect(listAssistantQuarantineEntriesAtPaths(paths)).resolves.toEqual([])
+  })
+
+  it('rebuilds legacy recent-session indexes before bounded listing', async () => {
+    const context = await createTempVaultContext('assistant-store-persistence-recent-legacy-many-')
+    tempRoots.push(context.parentRoot)
+    const paths = resolveAssistantStatePaths(context.vaultRoot)
+    await ensureAssistantState(paths)
+
+    for (let index = 0; index < 60; index += 1) {
+      await writeAssistantSession(paths, createSession({
+        alias: `legacy-${index}`,
+        conversationKey: `local:legacy:${index}`,
+        sessionId: `session-legacy-${String(index).padStart(2, '0')}`,
+        updatedAt: `2026-04-08T00:${String(index).padStart(2, '0')}:00.000Z`,
+      }))
+    }
+    await writeFile(paths.indexesPath, JSON.stringify({
+      version: 1,
+      aliases: {},
+      conversationKeys: {},
+    }), 'utf8')
+
+    await expect(listAssistantSessions(context.vaultRoot, {
+      limit: 1,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        sessionId: 'session-legacy-59',
+      }),
+    ])
+
+    const rebuilt = JSON.parse(await readFile(paths.indexesPath, 'utf8')) as {
+      recentSessions?: Record<string, string>
+    }
+    expect(Object.keys(rebuilt.recentSessions ?? {})).toHaveLength(50)
+    expect(rebuilt.recentSessions?.['session-legacy-59']).toBe(
+      '2026-04-08T00:59:00.000Z',
+    )
   })
 
   it('treats corrupted session files as missing and ignores corrupted legacy sidecars for Codex sessions', async () => {
