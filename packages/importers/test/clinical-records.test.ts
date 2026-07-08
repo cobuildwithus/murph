@@ -7,6 +7,9 @@ import { buildClinicalImportPlan } from "../src/clinical-records/index.ts";
 import { afterEach, describe, expect, it } from "vitest";
 
 const SHA256 = "a".repeat(64);
+const FHIR_BASE_URL_HASH = "b".repeat(64);
+const PATIENT_ID_HASH = "c".repeat(64);
+const OTHER_PATIENT_ID_HASH = "d".repeat(64);
 const MANIFEST_PATH = "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json";
 
 const tempRoots: string[] = [];
@@ -37,6 +40,7 @@ describe("buildClinicalImportPlan", () => {
                 resourceType: "Observation",
                 id: "bp-panel-1",
                 meta: { versionId: "7" },
+                status: "final",
                 effectiveDateTime: "2026-07-01T12:00:00.000Z",
                 code: {
                   coding: [{ system: "http://loinc.org", code: "85354-9", display: "Blood pressure panel" }],
@@ -62,6 +66,7 @@ describe("buildClinicalImportPlan", () => {
                 resourceType: "Observation",
                 id: "glucose-1",
                 meta: { versionId: "1" },
+                status: "final",
                 effectiveDateTime: "2026-07-01T12:05:00.000Z",
                 issued: "2026-07-01T12:06:00.000Z",
                 category: [
@@ -79,13 +84,14 @@ describe("buildClinicalImportPlan", () => {
                   coding: [{ system: "http://loinc.org", code: "2345-7", display: "Glucose" }],
                 },
                 interpretation: [{ coding: [{ code: "N", display: "Normal" }] }],
-                valueQuantity: { value: 91, unit: "mg/dL" },
+                valueQuantity: { comparator: "<", value: 91, unit: "mg/dL" },
               },
             },
             {
               resource: {
                 resourceType: "Observation",
                 id: "height-1",
+                status: "final",
                 effectiveDateTime: "2026-07-01T12:07:00.000Z",
                 category: [
                   {
@@ -143,7 +149,7 @@ describe("buildClinicalImportPlan", () => {
       { metric: "systolic-blood-pressure", unit: "mmHg", value: 128 },
     ]);
     expect(systolic?.payload.externalRef).toEqual({
-      system: "epic-fhir-base-url-sha256-patient-id-sha256",
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
       resourceType: "observation",
       resourceId: "bp-panel-1",
       version: "7",
@@ -160,6 +166,7 @@ describe("buildClinicalImportPlan", () => {
       {
         analyte: "Glucose",
         biomarkerSlug: "glucose",
+        comparator: "<",
         slug: "glucose",
         unit: "mg/dL",
         value: 91,
@@ -187,6 +194,7 @@ describe("buildClinicalImportPlan", () => {
         "DocumentReference/page-1.json": {
           resourceType: "DocumentReference",
           id: "document-1",
+          status: "current",
           date: "2026-07-02T08:30:00.000Z",
           description: "Discharge instructions",
           type: { text: "Discharge summary" },
@@ -204,6 +212,15 @@ describe("buildClinicalImportPlan", () => {
             resourceType: "AllergyIntolerance",
             id: "allergy-negative-1",
             recordedDate: "2026-07-02T09:00:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
             code: {
               text: "No known allergies",
               coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
@@ -255,6 +272,181 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
+  it("leaves unsafe clinical resources unsupported instead of importing live candidates", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 3,
+          sha256: SHA256,
+        },
+        {
+          resourceType: "DiagnosticReport",
+          relativePath: "DiagnosticReport/page-1.json",
+          count: 1,
+          sha256: SHA256,
+        },
+        {
+          resourceType: "DocumentReference",
+          relativePath: "DocumentReference/page-1.json",
+          count: 1,
+          sha256: SHA256,
+        },
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-1.json",
+          count: 3,
+          sha256: SHA256,
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            resourceType: "Observation",
+            id: "bp-missing-time",
+            status: "final",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+            },
+            valueQuantity: { value: 128, unit: "mmHg" },
+          },
+          {
+            resourceType: "Observation",
+            id: "bp-entered-in-error",
+            status: "entered-in-error",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+            },
+            valueQuantity: { value: 128, unit: "mmHg" },
+          },
+          {
+            resourceType: "Observation",
+            id: "bp-comparator",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+            },
+            valueQuantity: { comparator: "<", value: 128, unit: "mmHg" },
+          },
+        ],
+        "DiagnosticReport/page-1.json": {
+          resourceType: "DiagnosticReport",
+          id: "report-cancelled",
+          status: "cancelled",
+          issued: "2026-07-01T12:00:00.000Z",
+          code: { text: "Metabolic panel" },
+          conclusion: "Cancelled result.",
+        },
+        "DocumentReference/page-1.json": {
+          resourceType: "DocumentReference",
+          id: "document-entered-in-error",
+          status: "entered-in-error",
+          date: "2026-07-02T08:30:00.000Z",
+          description: "Retracted note",
+          content: [
+            {
+              attachment: {
+                contentType: "text/plain",
+                data: Buffer.from("This note was retracted.").toString("base64"),
+              },
+            },
+          ],
+        },
+        "AllergyIntolerance/page-1.json": [
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-refuted",
+            recordedDate: "2026-07-02T09:00:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "refuted",
+              }],
+            },
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+          },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-missing-status",
+            recordedDate: "2026-07-02T09:01:00.000Z",
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+          },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-unknown-status",
+            recordedDate: "2026-07-02T09:02:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "provisional",
+              }],
+            },
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toHaveLength(8);
+    expect(plan.unsupported).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: "bp-missing-time",
+          reason: "clinical timestamp is missing",
+        }),
+        expect.objectContaining({
+          resourceId: "bp-entered-in-error",
+          reason: "observation status is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "bp-comparator",
+          reason: "vital quantity comparator is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "report-cancelled",
+          reason: "diagnostic report status is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "document-entered-in-error",
+          reason: "document reference status is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-refuted",
+          reason: "allergy status is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-missing-status",
+          reason: "allergy status is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-unknown-status",
+          reason: "allergy status is not importable",
+        }),
+      ]),
+    );
+  });
+
   it("namespaces FHIR external refs by source base and patient", async () => {
     const resourceFiles = [
       {
@@ -268,6 +460,7 @@ describe("buildClinicalImportPlan", () => {
       "Observation/page-1.json": {
         resourceType: "Observation",
         id: "shared-bp",
+        status: "final",
         effectiveDateTime: "2026-07-01T12:00:00.000Z",
         code: {
           coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
@@ -277,7 +470,7 @@ describe("buildClinicalImportPlan", () => {
     };
     const firstVaultRoot = await writeClinicalFixture({ pages, resourceFiles });
     const secondVaultRoot = await writeClinicalFixture({
-      manifest: { patientIdHash: "other-patient-id-sha256" },
+      manifest: { patientIdHash: OTHER_PATIENT_ID_HASH },
       pages,
       resourceFiles,
     });
@@ -289,7 +482,7 @@ describe("buildClinicalImportPlan", () => {
 
     expect(firstRef).toEqual(
       expect.objectContaining({
-        system: "epic-fhir-base-url-sha256-patient-id-sha256",
+        system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
         resourceType: "observation",
         resourceId: "shared-bp",
         facet: "bp-systolic",
@@ -297,7 +490,7 @@ describe("buildClinicalImportPlan", () => {
     );
     expect(secondRef).toEqual(
       expect.objectContaining({
-        system: "epic-fhir-base-url-sha256-other-patient-id-sha256",
+        system: `epic-fhir-${FHIR_BASE_URL_HASH}-${OTHER_PATIENT_ID_HASH}`,
         resourceType: "observation",
         resourceId: "shared-bp",
         facet: "bp-systolic",
@@ -329,8 +522,8 @@ async function writeClinicalFixture(input: {
     connectionId: "clinical-connection-1",
     retrievalJobId: "retrieval-job-1",
     sourceSystem: "epic-fhir",
-    fhirBaseUrlHash: input.manifest?.fhirBaseUrlHash ?? "base-url-sha256",
-    patientIdHash: input.manifest?.patientIdHash ?? "patient-id-sha256",
+    fhirBaseUrlHash: input.manifest?.fhirBaseUrlHash ?? FHIR_BASE_URL_HASH,
+    patientIdHash: input.manifest?.patientIdHash ?? PATIENT_ID_HASH,
     fetchedAt: "2026-07-01T12:00:00.000Z",
     resourceFiles: input.resourceFiles,
     requestedScopes: ["patient/*.read"],

@@ -35,10 +35,14 @@ export interface BuildClinicalImportPlanInput {
 }
 
 type FhirResourceContext<TResource extends Resource = Resource> = {
-  fallbackOccurredAt: string;
   manifest: ClinicalRawManifest;
   rawRef: string;
   resource: TResource;
+};
+
+type MappedFhirResource = {
+  candidates: ClinicalImportCandidate[];
+  unsupported: ClinicalImportUnsupportedResource[];
 };
 
 type VitalDefinition = {
@@ -66,6 +70,12 @@ const MEASUREMENT_UNIT_PATTERN = /^[A-Za-z0-9._/%-]+$/u;
 const FHIR_VITAL_UNIT_ALIASES = new Map<string, string>([
   ["mm[hg]", "mmHg"],
 ]);
+type QuantityComparator = NonNullable<BloodTestResultRecord["comparator"]>;
+const IMPORTABLE_OBSERVATION_STATUSES = new Set(["amended", "corrected", "final"]);
+const IMPORTABLE_DIAGNOSTIC_REPORT_STATUSES = new Set(["amended", "appended", "corrected", "final"]);
+const IMPORTABLE_DOCUMENT_REFERENCE_STATUSES = new Set(["current"]);
+const IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES = new Set(["active"]);
+const IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES = new Set(["confirmed"]);
 
 export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInput): Promise<ClinicalImportPlan> {
   const manifestPath = clinicalRawPathSchema.parse(input.manifestPath);
@@ -85,7 +95,6 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
 
     for (const resource of resources) {
       const context: FhirResourceContext = {
-        fallbackOccurredAt: manifest.fetchedAt,
         manifest,
         rawRef,
         resource,
@@ -123,22 +132,13 @@ function mapFhirResource(context: FhirResourceContext): {
   unsupported: ClinicalImportUnsupportedResource[];
 } {
   if (isObservation(context.resource)) {
-    return {
-      candidates: mapObservation(resourceContext(context, context.resource)),
-      unsupported: [],
-    };
+    return mapObservation(resourceContext(context, context.resource));
   }
   if (isDiagnosticReport(context.resource)) {
-    return {
-      candidates: mapDiagnosticReport(resourceContext(context, context.resource)),
-      unsupported: [],
-    };
+    return mapDiagnosticReport(resourceContext(context, context.resource));
   }
   if (isDocumentReference(context.resource)) {
-    return {
-      candidates: mapDocumentReference(resourceContext(context, context.resource)),
-      unsupported: [],
-    };
+    return mapDocumentReference(resourceContext(context, context.resource));
   }
   if (isAllergyIntolerance(context.resource)) {
     return mapAllergyIntolerance(resourceContext(context, context.resource));
@@ -166,27 +166,48 @@ function resourceContext<TResource extends Resource>(
   resource: TResource,
 ): FhirResourceContext<TResource> {
   return {
-    fallbackOccurredAt: context.fallbackOccurredAt,
     manifest: context.manifest,
     rawRef: context.rawRef,
     resource,
   };
 }
 
-function mapObservation(context: FhirResourceContext<Observation>): ClinicalImportCandidate[] {
+function emptyMappedResource(): MappedFhirResource {
+  return { candidates: [], unsupported: [] };
+}
+
+function unsupportedOnly(context: FhirResourceContext, reason: string): MappedFhirResource {
+  return { candidates: [], unsupported: [unsupportedResource(context, reason)] };
+}
+
+function mapObservation(context: FhirResourceContext<Observation>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return [];
+    return emptyMappedResource();
   }
 
-  const occurredAt = readClinicalOccurredAt(context.resource, context.fallbackOccurredAt);
+  if (!hasImportableStatus(context.resource.status, IMPORTABLE_OBSERVATION_STATUSES)) {
+    return unsupportedOnly(context, "observation status is not importable");
+  }
+
+  const occurredAt = readClinicalOccurredAt(context.resource);
   const candidates: ClinicalImportCandidate[] = [];
+  const unsupported: ClinicalImportUnsupportedResource[] = [];
   const components = readFhirArray(context.resource.component);
 
   for (const component of components) {
     const vital = vitalForCodeableConcept(component.code);
     const value = readQuantityValue(component.valueQuantity);
     if (!vital || !value) {
+      continue;
+    }
+
+    if (!occurredAt) {
+      unsupported.push(unsupportedResource(context, "clinical timestamp is missing"));
+      continue;
+    }
+    if (value.comparator) {
+      unsupported.push(unsupportedResource(context, "vital quantity comparator is not importable"));
       continue;
     }
 
@@ -201,28 +222,38 @@ function mapObservation(context: FhirResourceContext<Observation>): ClinicalImpo
     }));
   }
 
-  if (candidates.length > 0) {
-    return candidates;
+  if (candidates.length > 0 || unsupported.length > 0) {
+    return { candidates, unsupported };
   }
 
   const vital = vitalForCodeableConcept(context.resource.code);
   const quantity = readQuantityValue(context.resource.valueQuantity);
   if (vital && quantity) {
-    return [
-      buildVitalsCandidate(context, {
-        occurredAt,
-        resourceId,
-        title: vital.title,
-        facet: vital.facet,
-        metric: vital.metric,
-        unit: normalizeVitalUnit(quantity.unit, vital),
-        value: quantity.value,
-      }),
-    ];
+    if (!occurredAt) {
+      return unsupportedOnly(context, "clinical timestamp is missing");
+    }
+    if (quantity.comparator) {
+      return unsupportedOnly(context, "vital quantity comparator is not importable");
+    }
+
+    return {
+      candidates: [
+        buildVitalsCandidate(context, {
+          occurredAt,
+          resourceId,
+          title: vital.title,
+          facet: vital.facet,
+          metric: vital.metric,
+          unit: normalizeVitalUnit(quantity.unit, vital),
+          value: quantity.value,
+        }),
+      ],
+      unsupported: [],
+    };
   }
 
   if (!isLaboratoryObservation(context.resource)) {
-    return [];
+    return emptyMappedResource();
   }
 
   const results = components
@@ -234,125 +265,159 @@ function mapObservation(context: FhirResourceContext<Observation>): ClinicalImpo
   }
 
   if (results.length === 0) {
-    return [];
+    return emptyMappedResource();
+  }
+
+  if (!occurredAt) {
+    return unsupportedOnly(context, "clinical timestamp is missing");
   }
 
   const testName = textForCodeableConcept(context.resource.code) ?? "FHIR laboratory observation";
-  return [
-    {
-      kind: "diagnostic-test",
-      rawRef: context.rawRef,
-      resource: sourceRef(context, resourceId, "lab-observation"),
-      payload: {
-        occurredAt,
-        source: "import",
-        title: `FHIR lab: ${truncate(testName, 148)}`,
-        testName: truncate(testName, 160),
-        resultStatus: resultStatusFromInterpretation(context.resource.interpretation),
-        testCategory: "laboratory",
-        collectedAt: occurredAt,
-        reportedAt: readIsoDateTime(context.resource.issued),
-        results,
-        rawRefs: [context.rawRef],
-        evidence: [evidenceForResource(context, resourceId)],
-        externalRef: externalRefForResource(context, "Observation", resourceId, "lab-observation"),
+  return {
+    candidates: [
+      {
+        kind: "diagnostic-test",
+        rawRef: context.rawRef,
+        resource: sourceRef(context, resourceId, "lab-observation"),
+        payload: {
+          occurredAt,
+          source: "import",
+          title: `FHIR lab: ${truncate(testName, 148)}`,
+          testName: truncate(testName, 160),
+          resultStatus: resultStatusFromInterpretation(context.resource.interpretation),
+          testCategory: "laboratory",
+          collectedAt: occurredAt,
+          reportedAt: readIsoDateTime(context.resource.issued),
+          results,
+          rawRefs: [context.rawRef],
+          evidence: [evidenceForResource(context, resourceId)],
+          externalRef: externalRefForResource(context, "Observation", resourceId, "lab-observation"),
+        },
       },
-    },
-  ];
+    ],
+    unsupported: [],
+  };
 }
 
-function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): ClinicalImportCandidate[] {
+function mapDiagnosticReport(context: FhirResourceContext<DiagnosticReport>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return [];
+    return emptyMappedResource();
   }
 
-  const occurredAt = readClinicalOccurredAt(context.resource, context.fallbackOccurredAt);
+  if (!hasImportableStatus(context.resource.status, IMPORTABLE_DIAGNOSTIC_REPORT_STATUSES)) {
+    return unsupportedOnly(context, "diagnostic report status is not importable");
+  }
+
+  const occurredAt = readClinicalOccurredAt(context.resource);
   const testName = textForCodeableConcept(context.resource.code) ?? "FHIR diagnostic report";
   const conclusion = readString(context.resource.conclusion);
   const narrativeText = textFromNarrative(context.resource.text);
 
   if (conclusion || narrativeText) {
-    return [
-      {
-        kind: "diagnostic-test",
-        rawRef: context.rawRef,
-        resource: sourceRef(context, resourceId, "diagnostic-report-summary"),
-        payload: {
-          occurredAt,
-          source: "import",
-          title: `FHIR report: ${truncate(testName, 148)}`,
-          testName: truncate(testName, 160),
-          resultStatus: resultStatusFromInterpretation(context.resource.conclusionCode),
-          summary: truncate(conclusion ?? narrativeText ?? "", 1000),
-          testCategory: "diagnostic-report",
-          reportedAt: readIsoDateTime(context.resource.issued),
-          rawRefs: [context.rawRef],
-          evidence: [evidenceForResource(context, resourceId)],
-          externalRef: externalRefForResource(
-            context,
-            "DiagnosticReport",
-            resourceId,
-            "diagnostic-report-summary",
-          ),
+    if (!occurredAt) {
+      return unsupportedOnly(context, "clinical timestamp is missing");
+    }
+
+    return {
+      candidates: [
+        {
+          kind: "diagnostic-test",
+          rawRef: context.rawRef,
+          resource: sourceRef(context, resourceId, "diagnostic-report-summary"),
+          payload: {
+            occurredAt,
+            source: "import",
+            title: `FHIR report: ${truncate(testName, 148)}`,
+            testName: truncate(testName, 160),
+            resultStatus: resultStatusFromInterpretation(context.resource.conclusionCode),
+            summary: truncate(conclusion ?? narrativeText ?? "", 1000),
+            testCategory: "diagnostic-report",
+            reportedAt: readIsoDateTime(context.resource.issued),
+            rawRefs: [context.rawRef],
+            evidence: [evidenceForResource(context, resourceId)],
+            externalRef: externalRefForResource(
+              context,
+              "DiagnosticReport",
+              resourceId,
+              "diagnostic-report-summary",
+            ),
+          },
         },
-      },
-    ];
+      ],
+      unsupported: [],
+    };
   }
 
-  return [];
+  return emptyMappedResource();
 }
 
-function mapDocumentReference(context: FhirResourceContext<DocumentReference>): ClinicalImportCandidate[] {
+function mapDocumentReference(context: FhirResourceContext<DocumentReference>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return [];
+    return emptyMappedResource();
+  }
+
+  if (!hasImportableStatus(context.resource.status, IMPORTABLE_DOCUMENT_REFERENCE_STATUSES)) {
+    return unsupportedOnly(context, "document reference status is not importable");
   }
 
   const note = readDocumentReferenceText(context.resource);
   if (!note) {
-    return [];
+    return emptyMappedResource();
   }
 
-  const occurredAt = readClinicalOccurredAt(context.resource, context.fallbackOccurredAt);
+  const occurredAt = readClinicalOccurredAt(context.resource);
+  if (!occurredAt) {
+    return unsupportedOnly(context, "clinical timestamp is missing");
+  }
+
   const title = readString(context.resource.description)
     ?? textForCodeableConcept(context.resource.type)
     ?? "FHIR document reference";
 
-  return [
-    {
-      kind: "clinical-note",
-      rawRef: context.rawRef,
-      resource: sourceRef(context, resourceId, "document-note"),
-      payload: {
-        occurredAt,
-        source: "import",
-        title: truncate(title, 160),
-        note: truncate(note, 4000),
-        noteType: "fhir_document_reference",
-        authoredAt: readIsoDateTime(context.resource.date),
-        rawRefs: [context.rawRef],
-        evidence: [evidenceForResource(context, resourceId)],
-        externalRef: externalRefForResource(context, "DocumentReference", resourceId, "document-note"),
+  return {
+    candidates: [
+      {
+        kind: "clinical-note",
+        rawRef: context.rawRef,
+        resource: sourceRef(context, resourceId, "document-note"),
+        payload: {
+          occurredAt,
+          source: "import",
+          title: truncate(title, 160),
+          note: truncate(note, 4000),
+          noteType: "fhir_document_reference",
+          authoredAt: readIsoDateTime(context.resource.date),
+          rawRefs: [context.rawRef],
+          evidence: [evidenceForResource(context, resourceId)],
+          externalRef: externalRefForResource(context, "DocumentReference", resourceId, "document-note"),
+        },
       },
-    },
-  ];
+    ],
+    unsupported: [],
+  };
 }
 
-function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>): {
-  candidates: ClinicalImportCandidate[];
-  unsupported: ClinicalImportUnsupportedResource[];
-} {
+function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>): MappedFhirResource {
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
-    return { candidates: [], unsupported: [] };
+    return emptyMappedResource();
   }
 
   if (!isNoKnownAllergy(context.resource)) {
     return { candidates: [], unsupported: [unsupportedResource(context, "allergy registry import not implemented")] };
   }
 
-  const occurredAt = readClinicalOccurredAt(context.resource, context.fallbackOccurredAt);
+  if (!isImportableNoKnownAllergy(context.resource)) {
+    return unsupportedOnly(context, "allergy status is not importable");
+  }
+
+  const occurredAt = readClinicalOccurredAt(context.resource);
+  if (!occurredAt) {
+    return unsupportedOnly(context, "clinical timestamp is missing");
+  }
+
   return {
     candidates: [
       {
@@ -440,6 +505,7 @@ function buildBloodTestResult(resource: Observation | ObservationComponent): Blo
     return {
       analyte: truncate(analyte, 160),
       biomarkerSlug: clinicalFacetSlug(analyte),
+      comparator: quantity.comparator,
       slug: clinicalFacetSlug(analyte),
       unit: quantity.unit,
       value: quantity.value,
@@ -559,6 +625,25 @@ function isNoKnownAllergy(resource: AllergyIntolerance): boolean {
   );
 }
 
+function isImportableNoKnownAllergy(resource: AllergyIntolerance): boolean {
+  return (
+    codeableConceptHasCode(resource.clinicalStatus, IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES)
+    && codeableConceptHasCode(resource.verificationStatus, IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES)
+  );
+}
+
+function hasImportableStatus(value: unknown, importableStatuses: ReadonlySet<string>): boolean {
+  const status = readString(value)?.toLowerCase();
+  return status !== undefined && importableStatuses.has(status);
+}
+
+function codeableConceptHasCode(value: CodeableConcept | undefined, codes: ReadonlySet<string>): boolean {
+  return codingsForCodeableConcept(value).some((coding) => {
+    const code = coding.code?.toLowerCase();
+    return code !== undefined && codes.has(code);
+  });
+}
+
 function resultStatusFromInterpretation(value: CodeableConcept[] | undefined): "normal" | "abnormal" | "unknown" {
   for (const interpretation of readFhirArray(value)) {
     for (const coding of codingsForCodeableConcept(interpretation)) {
@@ -578,16 +663,13 @@ function resultStatusFromInterpretation(value: CodeableConcept[] | undefined): "
 
 function readClinicalOccurredAt(
   resource: AllergyIntolerance | DiagnosticReport | DocumentReference | Observation,
-  fallback: string,
-): string {
+): string | undefined {
   return (
     readIsoDateTime("effectiveDateTime" in resource ? resource.effectiveDateTime : undefined)
     ?? readIsoDateTime(readPeriodStart("effectivePeriod" in resource ? resource.effectivePeriod : undefined))
     ?? readIsoDateTime("issued" in resource ? resource.issued : undefined)
     ?? readIsoDateTime("date" in resource ? resource.date : undefined)
     ?? readIsoDateTime("recordedDate" in resource ? resource.recordedDate : undefined)
-    ?? readIsoDateTime(resource.meta?.lastUpdated)
-    ?? fallback
   );
 }
 
@@ -618,7 +700,9 @@ function readResourceVersion(resource: Resource): string | undefined {
   return readString(resource.meta?.versionId);
 }
 
-function readQuantityValue(quantity: Quantity | undefined): { unit?: string; value: number } | null {
+function readQuantityValue(
+  quantity: Quantity | undefined,
+): { comparator?: QuantityComparator; unit?: string; value: number } | null {
   if (!quantity) {
     return null;
   }
@@ -626,11 +710,29 @@ function readQuantityValue(quantity: Quantity | undefined): { unit?: string; val
   if (numericValue === undefined) {
     return null;
   }
+  const rawComparator = readString(quantity.comparator);
+  const comparator = readQuantityComparator(rawComparator);
+  if (rawComparator && !comparator) {
+    return null;
+  }
 
   return {
+    comparator,
     unit: readString(quantity.unit) ?? readString(quantity.code),
     value: numericValue,
   };
+}
+
+function readQuantityComparator(comparator: string | undefined): QuantityComparator | undefined {
+  switch (comparator) {
+    case "<":
+    case "<=":
+    case ">":
+    case ">=":
+      return comparator;
+    default:
+      return undefined;
+  }
 }
 
 function readObservationTextValue(resource: Observation | ObservationComponent): string | null {

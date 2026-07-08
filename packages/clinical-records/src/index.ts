@@ -52,6 +52,7 @@ const RELATIVE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const UNIT_PATTERN = /^[A-Za-z0-9._/%-]+$/u;
+const sha256HexSchema = z.string().regex(SHA256_HEX_PATTERN);
 
 export const clinicalSourceSystemSchema = z.enum(CLINICAL_SOURCE_SYSTEMS);
 export const clinicalFhirResourceTypeSchema = z.enum(CLINICAL_FHIR_RESOURCE_TYPES);
@@ -92,8 +93,8 @@ export const clinicalRawManifestResourceFileSchema = z
     resourceType: z.string().min(1).max(80),
     relativePath: clinicalRawRelativePathSchema,
     count: z.number().int().min(0),
-    sha256: z.string().regex(SHA256_HEX_PATTERN),
-    pageUrlHash: z.string().min(1).max(200).optional(),
+    sha256: sha256HexSchema,
+    pageUrlHash: sha256HexSchema.optional(),
   })
   .strict();
 
@@ -113,8 +114,8 @@ export const clinicalRawManifestSchema = z
     retrievalJobId: z.string().min(1).max(120),
     providerDirectoryEntryId: z.string().min(1).max(120).optional(),
     sourceSystem: clinicalSourceSystemSchema,
-    fhirBaseUrlHash: z.string().min(1).max(200),
-    patientIdHash: z.string().min(1).max(200),
+    fhirBaseUrlHash: sha256HexSchema,
+    patientIdHash: sha256HexSchema,
     fetchedAt: isoDateTimeTextSchema,
     resourceFiles: z.array(clinicalRawManifestResourceFileSchema).max(500),
     requestedScopes: z.array(z.string().min(1).max(200)).max(50),
@@ -285,15 +286,6 @@ export function clinicalFacetSlug(value: string): string {
   return fhirResourceTypeToSlug(value);
 }
 
-function clinicalNamespaceSlug(value: string): string {
-  const slug = clinicalFacetSlug(value);
-  if (!slug) {
-    throw new Error("FHIR namespace hash must include at least one alphanumeric character.");
-  }
-
-  return slug;
-}
-
 export function externalRefForFhir(input: {
   fhirBaseUrlHash: string;
   patientIdHash: string;
@@ -303,10 +295,12 @@ export function externalRefForFhir(input: {
   version?: string | undefined;
   facet?: string | undefined;
 }) {
+  const fhirBaseUrlHash = sha256HexSchema.parse(input.fhirBaseUrlHash);
+  const patientIdHash = sha256HexSchema.parse(input.patientIdHash);
   const system = [
     input.sourceSystem,
-    clinicalNamespaceSlug(input.fhirBaseUrlHash),
-    clinicalNamespaceSlug(input.patientIdHash),
+    fhirBaseUrlHash,
+    patientIdHash,
   ].join("-");
 
   return externalRefSchema.parse({

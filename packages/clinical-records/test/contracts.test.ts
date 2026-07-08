@@ -10,6 +10,9 @@ import {
 import { describe, expect, it } from "vitest";
 
 const SHA256 = "0".repeat(64);
+const FHIR_BASE_URL_HASH = "1".repeat(64);
+const PATIENT_ID_HASH = "2".repeat(64);
+const OTHER_PATIENT_ID_HASH = "3".repeat(64);
 
 describe("clinical records contracts", () => {
   it("validates raw manifests and derives raw FHIR refs", () => {
@@ -25,8 +28,8 @@ describe("clinical records contracts", () => {
       connectionId: "clinical-connection-1",
       retrievalJobId: "retrieval-job-1",
       sourceSystem: "epic-fhir",
-      fhirBaseUrlHash: "base-url-sha256",
-      patientIdHash: "patient-id-sha256",
+      fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+      patientIdHash: PATIENT_ID_HASH,
       fetchedAt: "2026-07-01T12:00:00.000Z",
       resourceFiles: [resourceFile],
       requestedScopes: ["patient/Observation.read"],
@@ -34,6 +37,12 @@ describe("clinical records contracts", () => {
     });
 
     expect(manifest.resourceFiles).toEqual([resourceFile]);
+    expect(() =>
+      clinicalRawManifestSchema.parse({
+        ...manifest,
+        fhirBaseUrlHash: "https-example.test-fhir",
+      }),
+    ).toThrow();
     expect(
       rawRefForClinicalManifestFile({
         manifestPath: "raw/clinical/fhir/clinical-connection-1/retrieval-job-1/manifest.json",
@@ -47,8 +56,8 @@ describe("clinical records contracts", () => {
     expect(clinicalFacetSlug("Systolic BP (mmHg)")).toBe("systolic-bp-mm-hg");
     expect(
       externalRefForFhir({
-        fhirBaseUrlHash: "base-url-sha256",
-        patientIdHash: "patient-id-sha256",
+        fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+        patientIdHash: PATIENT_ID_HASH,
         sourceSystem: "epic-fhir",
         resourceType: "Observation",
         resourceId: "obs-1",
@@ -56,7 +65,7 @@ describe("clinical records contracts", () => {
         facet: "BP Systolic",
       }),
     ).toEqual({
-      system: "epic-fhir-base-url-sha256-patient-id-sha256",
+      system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`,
       resourceType: "observation",
       resourceId: "obs-1",
       version: "3",
@@ -64,8 +73,8 @@ describe("clinical records contracts", () => {
     });
     expect(
       externalRefForFhir({
-        fhirBaseUrlHash: "base-url-sha256",
-        patientIdHash: "other-patient-id-sha256",
+        fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+        patientIdHash: OTHER_PATIENT_ID_HASH,
         sourceSystem: "epic-fhir",
         resourceType: "Observation",
         resourceId: "obs-1",
@@ -73,14 +82,24 @@ describe("clinical records contracts", () => {
       }).system,
     ).not.toBe(
       externalRefForFhir({
-        fhirBaseUrlHash: "base-url-sha256",
-        patientIdHash: "patient-id-sha256",
+        fhirBaseUrlHash: FHIR_BASE_URL_HASH,
+        patientIdHash: PATIENT_ID_HASH,
         sourceSystem: "epic-fhir",
         resourceType: "Observation",
         resourceId: "obs-1",
         facet: "BP Systolic",
       }).system,
     );
+    expect(() =>
+      externalRefForFhir({
+        fhirBaseUrlHash: "a-b",
+        patientIdHash: "c",
+        sourceSystem: "epic-fhir",
+        resourceType: "Observation",
+        resourceId: "obs-1",
+        facet: "BP Systolic",
+      }),
+    ).toThrow();
   });
 
   it("rejects raw path parent traversal at the contract boundary", () => {
