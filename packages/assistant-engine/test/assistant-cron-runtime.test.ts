@@ -1311,6 +1311,154 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('consumes generated device activity jobs when a skip overlaps foreground preemption', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-activity-skip-no-retry-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const parentAutomationId = 'automation-device-activity-skip-listener'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Only send when imported sleep data clearly needs a note.',
+      relativePath: 'bank/automations/device-activity-skip-listener.md',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'deviceActivity',
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'sleep',
+        source: 'whoop',
+      },
+      slug: 'device-activity-skip-listener',
+      status: 'active',
+      summary: null,
+      tags: ['device'],
+      title: 'Device activity skip listener',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    }
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
+    const localJob = assistantCronJobSchema.parse({
+      createdAt: '2026-04-08T08:59:00.000Z',
+      enabled: true,
+      jobId: 'cron_device_activity_sleep_skip',
+      keepAfterRun: false,
+      name: appendAssistantDeviceActivityCronJobMetadata(
+        'Device activity skip listener',
+        {
+          authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+          occurrenceKey: 'abcdef1234567890abcdef1234567890abcdef12',
+          parentAutomationId,
+          parentAutomationRelativePath: 'bank/automations/device-activity-skip-listener.md',
+        },
+      ),
+      prompt: 'Review the sleep import and skip noisy or duplicate records.',
+      schedule: {
+        at: '2026-04-08T08:59:30.000Z',
+        kind: 'at',
+      },
+      schema: 'murph.assistant-cron-job.v1',
+      state: {
+        consecutiveFailures: 0,
+        lastError: null,
+        lastFailedAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        nextRunAt: '2026-04-08T08:59:30.000Z',
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        sessionId: null,
+        threadId: null,
+      },
+      updatedAt: '2026-04-08T08:59:00.000Z',
+    })
+    await writeAssistantCronStore(paths, {
+      version: 1,
+      jobs: [localJob],
+    })
+    let shouldYield = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+      beforeCommit?: ((context: {
+        decision: {
+          kind: 'skip'
+          privateSummary: string
+        }
+        deliveryOutcome: null
+        response: null
+      }) => Promise<void> | void) | null
+    }) => {
+      const decision = {
+        kind: 'skip',
+        privateSummary: 'No user-facing notification needed.',
+      } as const
+      shouldYield = true
+      await input.beforeCommit?.({
+        decision,
+        deliveryOutcome: null,
+        response: null,
+      })
+      return {
+        decision,
+        response: null,
+        session: {
+          sessionId: 'session-device-activity-skip',
+        },
+      }
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      shouldYield: () => shouldYield,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: 'Review the sleep import and skip noisy or duplicate records.',
+        responsePolicy: null,
+      }),
+    )
+    await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
+    await expect(
+      listAssistantCronRuns({
+        job: localJob.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      jobId: localJob.jobId,
+      runs: [
+        expect.objectContaining({
+          error: null,
+          outcome: 'no_op',
+          reason: 'no_delivery',
+          status: 'succeeded',
+        }),
+      ],
+    })
+  })
+
   it('runs queued device activity jobs with legacy no-override authority keys', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
