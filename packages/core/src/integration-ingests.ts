@@ -1047,6 +1047,13 @@ function readZipCentralDirectory(
   const entries: ZipCentralDirectoryEntry[] = [];
   let offset = centralDirectoryOffset;
   const centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize;
+  if (centralDirectoryEnd !== eocdOffset) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_INVALID",
+      `Integration ingest archive "${relativePath}" has hidden central directory padding.`,
+      { relativePath },
+    );
+  }
   assertZipReadableRange(archive, centralDirectoryOffset, centralDirectorySize, relativePath);
   for (let index = 0; index < entryCount; index += 1) {
     assertZipReadableRange(archive, offset, 46, relativePath);

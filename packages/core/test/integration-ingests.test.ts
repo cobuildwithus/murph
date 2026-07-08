@@ -251,6 +251,15 @@ function addCentralDirectoryFileCommentToSingleEntryZip(zip: Buffer, comment: Bu
   return withComment;
 }
 
+function insertBytesBetweenCentralDirectoryAndEocd(zip: Buffer, hiddenBytes: Buffer): Buffer {
+  const eocdOffset = findZipSignature(zip, 0x06054b50);
+  return Buffer.concat([
+    zip.subarray(0, eocdOffset),
+    hiddenBytes,
+    zip.subarray(eocdOffset),
+  ]);
+}
+
 function findZipSignature(buffer: Buffer, signature: number): number {
   for (let offset = 0; offset <= buffer.byteLength - 4; offset += 1) {
     if (buffer.readUInt32LE(offset) === signature) {
@@ -478,6 +487,34 @@ test("integration ingest zip archive reader rejects hidden entry metadata", asyn
       },
     );
   }
+});
+
+test("integration ingest zip archive reader rejects hidden central directory padding", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-hidden-zip-directory-padding");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-10.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_ArchivedZipDirectoryPadding1",
+    eventId: "evt_ArchivedZipDirectoryPadding1",
+    importedAt: "2025-10-12T09:00:00.000Z",
+  });
+  const content = `${JSON.stringify(archivedRecord)}\n`;
+  const zip = insertBytesBetweenCentralDirectoryAndEocd(
+    createSingleEntryZip(path.basename(logicalPath), content),
+    Buffer.from("hidden central directory padding\n", "utf8"),
+  );
+  await fs.mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, `${logicalPath}.zip`), zip);
+
+  await assert.rejects(
+    readIntegrationIngestEntries(vaultRoot),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ARCHIVE_INVALID");
+      return true;
+    },
+  );
 });
 
 test("integration ingest readers reject live and archived copies of the same shard", async () => {
