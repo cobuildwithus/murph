@@ -46,87 +46,71 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   "group-email.v0": {
     label: "Email address",
     description:
-      "Share your email so this group's Murph can send the newsletter. Your email is visible to the group.",
+      "Shares your email so the group's Murph can send the newsletter. Visible to the group.",
   },
   "activity-days.v0": {
     label: "Activity minutes",
-    description:
-      "Lets this group see your 7 most recent days of daily active minutes.",
+    description: "Shares your last 7 days of active minutes.",
   },
   "active-calories-days.v0": {
     label: "Active calories",
-    description:
-      "Lets this group see your 7 most recent days of daily active calories.",
+    description: "Shares your last 7 days of active calories.",
   },
   "activity-score-days.v0": {
     label: "Activity scores",
-    description:
-      "Lets this group see your 7 most recent days of daily activity scores.",
+    description: "Shares your last 7 days of activity scores.",
   },
   "day-strain-days.v0": {
     label: "Day strain",
-    description:
-      "Lets this group see your 7 most recent days of day strain.",
+    description: "Shares your last 7 days of day strain.",
   },
   "distance-days.v0": {
     label: "Distance",
-    description:
-      "Lets this group see your 7 most recent days of daily distance totals.",
+    description: "Shares your last 7 days of distance.",
   },
   "elevation-gain-days.v0": {
     label: "Elevation gain",
-    description:
-      "Lets this group see your 7 most recent days of daily elevation gain.",
+    description: "Shares your last 7 days of elevation gain.",
   },
   "floors-climbed-days.v0": {
     label: "Floors climbed",
-    description:
-      "Lets this group see your 7 most recent days of daily floors climbed.",
+    description: "Shares your last 7 days of floors climbed.",
   },
   "heart-rate-zones-days.v0": {
     label: "Heart-rate zones",
-    description:
-      "Lets this group see your 7 most recent days of workout heart-rate zone minutes.",
+    description: "Shares your last 7 days of heart-rate zone minutes.",
   },
   "hrv-days.v0": {
     label: "HRV",
-    description:
-      "Lets this group see your 7 most recent days of daily HRV.",
+    description: "Shares your last 7 days of HRV.",
   },
   "max-heart-rate-days.v0": {
     label: "Daily max heart rate",
-    description:
-      "Lets this group see your 7 most recent days of daily max heart rate.",
+    description: "Shares your last 7 days of max heart rate.",
   },
   "resting-heart-rate-days.v0": {
     label: "Resting heart rate",
-    description:
-      "Lets this group see your 7 most recent days of daily resting heart rate.",
+    description: "Shares your last 7 days of resting heart rate.",
   },
   "sleep-times.v0": {
     label: "Sleep timing",
-    description:
-      "Lets this group see your 7 most recent days of sleep start and end times.",
+    description: "Shares your last 7 days of sleep start and end times.",
   },
   "steps-days.v0": {
     label: "Steps",
-    description:
-      "Lets this group see your 7 most recent days of daily step totals.",
+    description: "Shares your last 7 days of steps.",
   },
   "vo2-max-days.v0": {
     label: "VO2 max",
-    description:
-      "Lets this group see your 7 most recent days of daily VO2 max estimates.",
+    description: "Shares your last 7 days of VO2 max.",
   },
   "workout-days.v0": {
     label: "Workout summaries",
-    description:
-      "Lets this group see your 7 most recent days of workout counts and minutes.",
+    description: "Shares your last 7 days of workout counts and minutes.",
   },
   "workout-strain-days.v0": {
     label: "Workout strain",
-    description:
-      "Lets this group see your 7 most recent days of daily workout strain.",
+    description: "Shares your last 7 days of workout strain.",
   },
 };
 
@@ -262,8 +246,7 @@ function hostedVaultShareProjectionScopeDisplay(
     );
     return {
       label: `${capitalizeHostedVaultShareLabel(label)} minutes`,
-      description:
-        `Lets this group see your 7 most recent days of daily ${label} minutes.`,
+      description: `Shares your last 7 days of ${label} minutes.`,
     };
   }
   if (!isHostedVaultShareSelectableProjectionKind(projectionScope.projectionKind)) {

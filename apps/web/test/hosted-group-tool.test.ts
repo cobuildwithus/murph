@@ -740,39 +740,35 @@ describe("hosted group join policy", () => {
     ])).toEqual([
       {
         description:
-          "Share your email so this group's Murph can send the newsletter. Your email is visible to the group.",
+          "Shares your email so the group's Murph can send the newsletter. Visible to the group.",
         label: "Email address",
         projectionKind: "group-email.v0",
         projectionScope: { projectionKind: "group-email.v0" },
         projectionScopeKey: "group-email.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of sleep start and end times.",
+        description: "Shares your last 7 days of sleep start and end times.",
         label: "Sleep timing",
         projectionKind: "sleep-times.v0",
         projectionScope: { projectionKind: "sleep-times.v0" },
         projectionScopeKey: "sleep-times.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of daily active minutes.",
+        description: "Shares your last 7 days of active minutes.",
         label: "Activity minutes",
         projectionKind: "activity-days.v0",
         projectionScope: { projectionKind: "activity-days.v0" },
         projectionScopeKey: "activity-days.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of workout heart-rate zone minutes.",
+        description: "Shares your last 7 days of heart-rate zone minutes.",
         label: "Heart-rate zones",
         projectionKind: "heart-rate-zones-days.v0",
         projectionScope: { projectionKind: "heart-rate-zones-days.v0" },
         projectionScopeKey: "heart-rate-zones-days.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of daily running minutes.",
+        description: "Shares your last 7 days of running minutes.",
         label: "Running minutes",
         projectionKind: "activity-minutes-days.v1",
         projectionScope: RUNNING_SCOPE,

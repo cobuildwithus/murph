@@ -123,7 +123,7 @@ export function GroupJoinAcceptForm(props: {
               Optional sharing
             </span>
             <p className="text-[13px] leading-5 text-muted-foreground">
-              You can join either way, and change this anytime from this link.
+              Join either way. Change anytime.
             </p>
           </div>
           <div className="flex flex-col gap-2.5">
@@ -182,7 +182,7 @@ export function GroupJoinAcceptForm(props: {
               : "Joining..."
             : props.alreadyActiveMember
               ? "Save changes"
-              : `Join ${props.groupName}`}
+              : "Join group"}
         </Button>
         {errorMessage ? (
           <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">
