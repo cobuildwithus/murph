@@ -1814,15 +1814,12 @@ function assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(
 interface HostedAiUsageAllowanceOpenAiImageTokenBuckets {
   billableImageInputTokens: bigint;
   billableTextInputTokens: bigint;
-  billableUnclassifiedInputTokens: bigint;
   cachedImageInputTokens: bigint;
   cachedInputTokens: bigint;
   cachedTextInputTokens: bigint;
-  cachedUnclassifiedInputTokens: bigint;
   imageInputTokens: bigint;
   outputTokens: bigint;
   textInputTokens: bigint;
-  unclassifiedInputTokens: bigint;
 }
 
 interface HostedAiUsageAllowanceOpenAiImageMatch {
@@ -1876,12 +1873,6 @@ function priceHostedAiUsageOpenAiImageForAllowance(input: {
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowancePricingResult {
   const { modelResolution, tokenBuckets } = input.match;
-  const billableImageRateTokens =
-    tokenBuckets.billableImageInputTokens
-    + tokenBuckets.billableUnclassifiedInputTokens;
-  const cachedImageRateTokens =
-    tokenBuckets.cachedImageInputTokens
-    + tokenBuckets.cachedUnclassifiedInputTokens;
   const standardCostUsdMicros =
     priceTokenBucketUsdMicros(
       tokenBuckets.billableTextInputTokens,
@@ -1892,11 +1883,11 @@ function priceHostedAiUsageOpenAiImageForAllowance(input: {
       HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_CACHED_TEXT_INPUT_USD_MICROS_PER_MILLION_TOKENS,
     )
     + priceTokenBucketUsdMicros(
-      billableImageRateTokens,
+      tokenBuckets.billableImageInputTokens,
       HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_INPUT_USD_MICROS_PER_MILLION_TOKENS,
     )
     + priceTokenBucketUsdMicros(
-      cachedImageRateTokens,
+      tokenBuckets.cachedImageInputTokens,
       HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_CACHED_INPUT_USD_MICROS_PER_MILLION_TOKENS,
     )
     + priceTokenBucketUsdMicros(
@@ -1939,18 +1930,13 @@ function priceHostedAiUsageOpenAiImageForAllowance(input: {
         openAiImage: {
           billableImageInput: tokenBuckets.billableImageInputTokens.toString(),
           billableTextInput: tokenBuckets.billableTextInputTokens.toString(),
-          billableUnclassifiedInput:
-            tokenBuckets.billableUnclassifiedInputTokens.toString(),
           cachedImageInput: tokenBuckets.cachedImageInputTokens.toString(),
           cachedInput: tokenBuckets.cachedInputTokens.toString(),
-          cachedInputAllocation: "text_then_image_then_unclassified",
+          cachedInputAllocation: "single_modality_only",
           cachedTextInput: tokenBuckets.cachedTextInputTokens.toString(),
-          cachedUnclassifiedInput:
-            tokenBuckets.cachedUnclassifiedInputTokens.toString(),
           imageInput: tokenBuckets.imageInputTokens.toString(),
           output: tokenBuckets.outputTokens.toString(),
           textInput: tokenBuckets.textInputTokens.toString(),
-          unclassifiedInput: tokenBuckets.unclassifiedInputTokens.toString(),
         },
       },
     },
@@ -1999,6 +1985,11 @@ function buildHostedAiUsageAllowanceOpenAiImageTokenBuckets(
   );
   const hasInputDetails =
     detailTextInputTokens !== null || detailImageInputTokens !== null;
+  if (!hasInputDetails) {
+    throw new TypeError(
+      "OpenAI image hosted AI usage requires provider usage tokens.",
+    );
+  }
   const textInputTokens = hasInputDetails ? detailTextInputTokens ?? 0n : 0n;
   const imageInputTokens = hasInputDetails ? detailImageInputTokens ?? 0n : 0n;
   const detailedInputTokens = textInputTokens + imageInputTokens;
@@ -2013,13 +2004,20 @@ function buildHostedAiUsageAllowanceOpenAiImageTokenBuckets(
       "OpenAI image hosted AI usage has inconsistent provider usage tokens.",
     );
   }
-  const unclassifiedInputTokens = hasInputDetails ? 0n : totalInputTokens ?? 0n;
-  const inputTokensForCacheAllocation =
-    textInputTokens + imageInputTokens + unclassifiedInputTokens;
+  const inputTokensForCacheAllocation = textInputTokens + imageInputTokens;
   const cachedInputTokens = readHostedAiUsageOpenAiImageCachedInputTokens(record);
   if (cachedInputTokens > inputTokensForCacheAllocation) {
     throw new TypeError(
       "OpenAI image hosted AI usage has inconsistent provider usage tokens.",
+    );
+  }
+  if (
+    cachedInputTokens > 0n
+    && textInputTokens > 0n
+    && imageInputTokens > 0n
+  ) {
+    throw new TypeError(
+      "OpenAI image hosted AI usage requires provider usage tokens.",
     );
   }
   const detailImageOutputTokens = readHostedAiUsageRawDetailToken(
@@ -2058,33 +2056,23 @@ function buildHostedAiUsageAllowanceOpenAiImageTokenBuckets(
     );
   }
 
-  const cachedTextInputTokens = minTokenCount(textInputTokens, cachedInputTokens);
+  const cachedTextInputTokens =
+    textInputTokens > 0n ? minTokenCount(textInputTokens, cachedInputTokens) : 0n;
   const cachedAfterText = cachedInputTokens - cachedTextInputTokens;
-  const cachedImageInputTokens = minTokenCount(imageInputTokens, cachedAfterText);
-  const cachedAfterImage = cachedAfterText - cachedImageInputTokens;
-  const cachedUnclassifiedInputTokens = minTokenCount(
-    unclassifiedInputTokens,
-    cachedAfterImage,
-  );
+  const cachedImageInputTokens =
+    imageInputTokens > 0n ? minTokenCount(imageInputTokens, cachedAfterText) : 0n;
 
   return {
     billableImageInputTokens:
       subtractTokenCountFloor(imageInputTokens, cachedImageInputTokens),
     billableTextInputTokens:
       subtractTokenCountFloor(textInputTokens, cachedTextInputTokens),
-    billableUnclassifiedInputTokens:
-      subtractTokenCountFloor(
-        unclassifiedInputTokens,
-        cachedUnclassifiedInputTokens,
-      ),
     cachedImageInputTokens,
     cachedInputTokens,
     cachedTextInputTokens,
-    cachedUnclassifiedInputTokens,
     imageInputTokens,
     outputTokens,
     textInputTokens,
-    unclassifiedInputTokens,
   };
 }
 
@@ -2092,8 +2080,7 @@ function hasHostedAiUsageAllowanceOpenAiImageProviderUsagePricingBasis(
   tokenBuckets: HostedAiUsageAllowanceOpenAiImageTokenBuckets,
 ): boolean {
   const hasInputPricingBasis = tokenBuckets.textInputTokens > 0n
-    || tokenBuckets.imageInputTokens > 0n
-    || tokenBuckets.unclassifiedInputTokens > 0n;
+    || tokenBuckets.imageInputTokens > 0n;
 
   return hasInputPricingBasis && tokenBuckets.outputTokens > 0n;
 }

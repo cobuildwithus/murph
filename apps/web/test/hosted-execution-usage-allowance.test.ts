@@ -207,6 +207,11 @@ function buildInconsistentOpenAiImageUsageRecords(): AssistantUsageRecord[] {
       providerName: "OpenAI Images",
       rawUsageJson: {
         input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 0,
+          text_tokens: 100,
+        },
         output_tokens: 400,
         output_tokens_details: {
           image_tokens: 399,
@@ -240,6 +245,27 @@ function buildInconsistentOpenAiImageUsageRecords(): AssistantUsageRecord[] {
       usageExtractionVersion: "openai-images-v1",
     },
   ] satisfies AssistantUsageRecord[];
+}
+
+function buildAggregateOnlyOpenAiImageUsageRecord(): AssistantUsageRecord {
+  return {
+    ...BASE_USAGE_RECORD,
+    cachedInputTokens: 0,
+    inputTokens: 120,
+    outputTokens: 40,
+    provider: "openai-images",
+    providerName: "OpenAI Images",
+    rawUsageJson: {
+      input_tokens: 120,
+      output_tokens: 40,
+      total_tokens: 160,
+    },
+    requestedModel: "openai/gpt-image-2",
+    servedModel: null,
+    totalTokens: 160,
+    usageExtractionSourcePath: "openai.images.edit",
+    usageExtractionVersion: "openai-images-v1",
+  } satisfies AssistantUsageRecord;
 }
 
 describe("hosted AI usage allowance pricing", () => {
@@ -303,7 +329,7 @@ describe("hosted AI usage allowance pricing", () => {
   it("prices OpenAI image generation with GPT Image 2 text, image, and output tokens", () => {
     const generatedImage = {
       ...BASE_USAGE_RECORD,
-      cachedInputTokens: 100,
+      cachedInputTokens: 0,
       inputTokens: 1_300,
       outputTokens: 400,
       provider: "openai-images",
@@ -311,7 +337,7 @@ describe("hosted AI usage allowance pricing", () => {
       rawUsageJson: {
         input_tokens: 1_300,
         input_tokens_details: {
-          cached_tokens: 100,
+          cached_tokens: 0,
           image_tokens: 1_000,
           text_tokens: 300,
         },
@@ -331,21 +357,21 @@ describe("hosted AI usage allowance pricing", () => {
     } satisfies AssistantUsageRecord;
 
     expect(priceHostedAiUsageForAllowance(generatedImage)).toMatchObject({
-      costUsdMicros: 21_125n,
+      costUsdMicros: 21_500n,
       counted: true,
       pricingSnapshot: {
         model: "gpt-image-2",
         modelSource: "requested",
         pricingSource: "https://developers.openai.com/api/docs/pricing",
-        standardCostUsdMicros: "21125",
+        standardCostUsdMicros: "21500",
         tokenPricingBasis: "standard",
         tokens: {
           openAiImage: {
             billableImageInput: "1000",
-            billableTextInput: "200",
-            cachedInput: "100",
-            cachedInputAllocation: "text_then_image_then_unclassified",
-            cachedTextInput: "100",
+            billableTextInput: "300",
+            cachedInput: "0",
+            cachedInputAllocation: "single_modality_only",
+            cachedTextInput: "0",
             imageInput: "1000",
             output: "400",
             textInput: "300",
@@ -356,34 +382,36 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("prices OpenAI image generation from aggregate token fields when details are missing", () => {
-    expect(priceHostedAiUsageForAllowance({
+  it("rejects OpenAI image generation when input detail buckets are missing", () => {
+    expect(() => priceHostedAiUsageForAllowance(
+      buildAggregateOnlyOpenAiImageUsageRecord(),
+    )).toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+  });
+
+  it("rejects OpenAI image usage when cached input cannot be assigned to one modality", () => {
+    expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      cachedInputTokens: 20,
-      inputTokens: 120,
-      outputTokens: 40,
+      cachedInputTokens: 100,
+      inputTokens: 1_300,
+      outputTokens: 400,
       provider: "openai-images",
       providerName: "OpenAI Images",
-      rawUsageJson: null,
-      requestedModel: "openai/gpt-image-2",
-      servedModel: null,
-      totalTokens: 160,
-      usageExtractionSourcePath: "openai.images.edit",
-      usageExtractionVersion: "openai-images-v1",
-    })).toMatchObject({
-      costUsdMicros: 2_040n,
-      counted: true,
-      pricingSnapshot: {
-        model: "gpt-image-2",
-        tokens: {
-          openAiImage: {
-            billableUnclassifiedInput: "100",
-            cachedUnclassifiedInput: "20",
-            unclassifiedInput: "120",
-          },
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 100,
+          image_tokens: 1_000,
+          text_tokens: 300,
         },
+        output_tokens: 400,
+        total_tokens: 1_700,
       },
-    });
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 1_700,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    })).toThrow("OpenAI image hosted AI usage requires provider usage tokens");
   });
 
   it("rejects OpenAI image usage when provider usage tokens are missing", () => {
@@ -469,11 +497,25 @@ describe("hosted AI usage allowance pricing", () => {
   it("rejects OpenAI image usage with OpenAI flex token pricing", () => {
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 1_300,
+      outputTokens: 400,
       provider: "openai-images",
       providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 1_000,
+          text_tokens: 300,
+        },
+        output_tokens: 400,
+        total_tokens: 1_700,
+      },
       requestedModel: "gpt-image-2",
       servedModel: null,
       tokenPricingBasis: "openai-flex",
+      totalTokens: 1_700,
       usageExtractionSourcePath: "openai.images.generate",
       usageExtractionVersion: "openai-images-v1",
     })).toThrow("OpenAI image hosted AI usage must use standard token pricing basis");
@@ -1102,6 +1144,24 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       expect(updateMany).not.toHaveBeenCalled();
       expect(executeRaw).not.toHaveBeenCalled();
     }
+  });
+
+  it("fails image accounting before claiming rows when input detail buckets are missing", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      record: buildAggregateOnlyOpenAiImageUsageRecord(),
+      tx: tx as never,
+    })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(executeRaw).not.toHaveBeenCalled();
   });
 
   it("does not update period metadata again when allowanceAccountedAt was already set", async () => {
