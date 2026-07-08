@@ -66,10 +66,9 @@ import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
-  bindHostedGroupJoinOfferMessageTx,
+  createHostedGroupJoinOfferFingerprint,
   readHostedGroupByRuntimeMemberId,
-  reserveHostedGroupJoinOfferAttemptTx,
-  revokeHostedGroupJoinOfferAttemptTx,
+  recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
   type HostedGroupFeatureActivationKind,
 } from "./group-store";
@@ -498,51 +497,41 @@ async function postHostedRuntimeGroupOffer(input: {
     vaultShareProjectionKinds: input.projectionKinds,
   };
 
-  let offerAttempt: Awaited<ReturnType<typeof reserveHostedGroupJoinOfferAttemptTx>>;
+  const offerFingerprint = createHostedGroupJoinOfferFingerprint({
+    groupId: created.group.id,
+    message,
+    offerKind: input.action,
+    offerScope,
+  });
+  let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
-    offerAttempt = await prisma.$transaction(async (tx) => reserveHostedGroupJoinOfferAttemptTx({
-      groupId: created.group.id,
+    sent = await sendHostedLinqChatMessage({
+      chatId: authorized.chatId,
+      idempotencyKey: `${input.idempotencyKeyPrefix}:${offerFingerprint}`,
       message,
-      offerKind: input.action,
-      offerScope,
-      postedAt: now,
-      tx,
-    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    });
   } catch {
-    return unavailable("offer_binding_failed");
+    return unavailable("send_failed");
+  }
+  if (!sent.messageId) {
+    return unavailable("provider_message_unavailable");
   }
 
-  if (!offerAttempt.providerMessageBound) {
-    let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
-    try {
-      sent = await sendHostedLinqChatMessage({
-        chatId: authorized.chatId,
-        idempotencyKey: `${input.idempotencyKeyPrefix}:${offerAttempt.id}`,
-        message,
-      });
-    } catch {
-      return unavailable("send_failed");
-    }
-    if (!sent.messageId) {
-      return unavailable("provider_message_unavailable");
-    }
-
-    try {
-      await prisma.$transaction(async (tx) => {
-        await bindHostedGroupJoinOfferMessageTx({
-          attemptId: offerAttempt.id,
-          messageId: sent.messageId,
-          tx,
-        });
-      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-    } catch {
-      await cleanupHostedGroupJoinOfferAttemptAfterBindFailure({
-        attemptId: offerAttempt.id,
+  try {
+    await prisma.$transaction(async (tx) => {
+      await recordHostedGroupJoinOfferTx({
+        groupId: created.group.id,
         messageId: sent.messageId,
-        prisma,
+        offerScope,
+        postedAt: now,
+        tx,
       });
-      return unavailable("offer_binding_failed");
-    }
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch {
+    await cleanupHostedGroupJoinOfferMessageAfterRecordFailure({
+      messageId: sent.messageId,
+    });
+    return unavailable("offer_binding_failed");
   }
 
   try {
@@ -558,35 +547,14 @@ async function postHostedRuntimeGroupOffer(input: {
   };
 }
 
-async function cleanupHostedGroupJoinOfferAttemptAfterBindFailure(input: {
-  attemptId: string;
+async function cleanupHostedGroupJoinOfferMessageAfterRecordFailure(input: {
   messageId: string;
-  prisma: Pick<ReturnType<typeof getPrisma>, "$transaction">;
 }): Promise<void> {
-  try {
-    await input.prisma.$transaction(async (tx) => {
-      await revokeHostedGroupJoinOfferAttemptTx({
-        attemptId: input.attemptId,
-        now: new Date(),
-        tx,
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  } catch (error) {
-    console.warn("Hosted group join-offer attempt cleanup failed.", {
-      ...sanitizeHostedOnboardingStructuredLogDetails({
-        attemptIdSuffix: toHostedOnboardingLogIdSuffix(input.attemptId),
-        errorName: deriveHostedOnboardingTimingErrorName(error),
-        messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
-      }),
-    });
-  }
-
   try {
     await deleteHostedLinqMessage({ messageId: input.messageId });
   } catch (error) {
     console.warn("Hosted group join-offer provider-message cleanup failed.", {
       ...sanitizeHostedOnboardingStructuredLogDetails({
-        attemptIdSuffix: toHostedOnboardingLogIdSuffix(input.attemptId),
         errorName: deriveHostedOnboardingTimingErrorName(error),
         messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
       }),

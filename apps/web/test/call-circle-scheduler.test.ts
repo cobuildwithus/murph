@@ -1282,8 +1282,8 @@ describe("runCallCircleScheduler", () => {
     );
   });
 
-  it("does not hand off an attached provider-attempted bridge after the window", async () => {
-    const now = new Date("2026-07-06T17:45:00.000Z");
+  it("does not hand off an attached provider-attempted bridge before the grace elapses", async () => {
+    const now = new Date("2026-07-06T15:35:00.000Z");
     const prisma = createSchedulerPrisma({
       dueMatches: [schedulerMatch({
         finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
@@ -1310,6 +1310,49 @@ describe("runCallCircleScheduler", () => {
 
     expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
     expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+  });
+
+  it("hands off an attached provider-attempted bridge after the window grace elapses", async () => {
+    const now = new Date("2026-07-06T15:45:00.000Z");
+    const tx = {};
+    const prisma = createSchedulerPrisma({
+      dueMatches: [schedulerMatch({
+        finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+        phoneCall: {
+          analyzedAt: null,
+          id: "hpc_starting",
+          providerCallId: null,
+          providerStartAttemptedAt: new Date("2026-07-06T15:00:01.000Z"),
+          status: "starting",
+        },
+        status: "bridging",
+        windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+      })],
+      groups: [],
+      tx,
+    });
+
+    await expect(runCallCircleScheduler({
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      handoffs: 1,
+    });
+
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      now,
+      outcome: "text_handoff",
+      phoneCallId: "hpc_starting",
+      prisma: tx,
+      status: "dropped",
+    });
+    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
+    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).toHaveBeenCalledWith([
+      { mailboxItemId: "mailbox_handoff", memberId: "member_a" },
+      { mailboxItemId: "mailbox_handoff", memberId: "member_b" },
+    ]);
   });
 
   it("retries terminal Call Circle outcome notifications that were not appended yet", async () => {

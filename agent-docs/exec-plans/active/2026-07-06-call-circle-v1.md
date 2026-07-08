@@ -613,6 +613,28 @@ Focused follow-up verification:
 
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts`
 
+## ReviewGPT Follow-Up 19 2026-07-08
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- Provider-attempted/no-provider-id Call Circle bridges must not be retried
+  during the call window, but they also must not wait for generic phone-call
+  retention before users get the text-handoff fallback. The scheduler now
+  terminalizes the narrow ambiguous-start shape after the match window plus
+  the existing bridge grace, reusing the existing `text_handoff` outcome and
+  notification path.
+- The synthetic unbound group-offer attempt lifecycle added too much state
+  around the like-to-consent primitive. Follow-Up 19 supersedes the
+  Follow-Up 18 cleanup shape by deleting unbound attempt rows, bind/revoke
+  transitions, and `providerMessageBound`. Group offers now use a stable
+  content fingerprint as the provider idempotency key and persist only
+  provider-bound `HostedGroupJoinOffer` rows; recording the same provider
+  message id is idempotent for retry recovery.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts apps/web/test/call-circle-scheduler.test.ts`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT

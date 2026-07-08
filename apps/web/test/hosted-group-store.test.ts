@@ -43,11 +43,9 @@ import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
-  bindHostedGroupJoinOfferMessageTx,
+  createHostedGroupJoinOfferFingerprint,
   normalizeHostedGroupOfferScope,
   recordHostedGroupJoinOfferTx,
-  reserveHostedGroupJoinOfferAttemptTx,
-  revokeHostedGroupJoinOfferAttemptTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
   normalizeHostedVaultShareProjectionKinds,
@@ -491,25 +489,56 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
-  it("reserves a stable join-offer attempt before the provider message is sent", async () => {
+  it("builds a stable provider idempotency fingerprint from offer content", () => {
+    const first = createHostedGroupJoinOfferFingerprint({
+      groupId: "group_1",
+      message: "React here: https://www.withmurph.ai/groups/join/join_1",
+      offerKind: "post_call_circle_offer",
+      offerScope: {
+        featureActivations: ["call-circle.enroll.v0"],
+        vaultShareProjectionKinds: [],
+      },
+    });
+    const second = createHostedGroupJoinOfferFingerprint({
+      groupId: "group_1",
+      message: "React here: https://www.withmurph.ai/groups/join/join_1",
+      offerKind: "post_call_circle_offer",
+      offerScope: {
+        featureActivations: ["call-circle.enroll.v0"],
+        vaultShareProjectionKinds: [],
+      },
+    });
+    const differentMessage = createHostedGroupJoinOfferFingerprint({
+      groupId: "group_1",
+      message: "Like this: https://www.withmurph.ai/groups/join/join_1",
+      offerKind: "post_call_circle_offer",
+      offerScope: {
+        featureActivations: ["call-circle.enroll.v0"],
+        vaultShareProjectionKinds: [],
+      },
+    });
+
+    expect(first).toMatch(/^[a-f0-9]{32}$/u);
+    expect(second).toBe(first);
+    expect(differentMessage).not.toBe(first);
+  });
+
+  it("records the same provider-bound join offer idempotently after provider retry recovery", async () => {
     const tx = buildStatefulJoinOfferTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
-    const message = "Like this to join: https://www.withmurph.ai/groups/join/join_1";
 
-    const reserved = await reserveHostedGroupJoinOfferAttemptTx({
+    const first = await recordHostedGroupJoinOfferTx({
       groupId: "group_1",
-      message,
-      offerKind: "post_join_offer",
+      messageId: "msg_offer_123",
       offerScope: {
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
       postedAt,
       tx,
     });
-    const reread = await reserveHostedGroupJoinOfferAttemptTx({
+    const second = await recordHostedGroupJoinOfferTx({
       groupId: "group_1",
-      message,
-      offerKind: "post_join_offer",
+      messageId: "msg_offer_123",
       offerScope: {
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
@@ -517,148 +546,22 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     });
 
-    expect(reserved).toMatchObject({
+    expect(second).toEqual(first);
+    expect(first).toMatchObject({
       groupId: "group_1",
-      id: expect.stringMatching(/^hgrpjo_/u),
-      messageIdSuffix: null,
-      messageLookupKey: expect.stringMatching(
-        /^hosted-group-join-offer-attempt:[a-f0-9]{32}:hgrpjo_/u,
-      ),
-      providerMessageBound: false,
+      messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_123"),
       offerScope: {
         featureActivations: [],
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
     });
-    expect(reread.id).toBe(reserved.id);
-    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(1);
-  });
-
-  it("binds a reserved join-offer attempt to the provider message lookup key", async () => {
-    const tx = buildStatefulJoinOfferTx();
-    const postedAt = new Date("2026-07-01T00:00:00.000Z");
-    const message = "Like this to join: https://www.withmurph.ai/groups/join/join_1";
-    const reserved = await reserveHostedGroupJoinOfferAttemptTx({
-      groupId: "group_1",
-      message,
-      offerKind: "post_join_offer",
-      offerScope: {
-        featureActivations: ["call-circle.enroll.v0"],
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-      postedAt,
-      tx,
-    });
-
-    const bound = await bindHostedGroupJoinOfferMessageTx({
-      attemptId: reserved.id,
-      messageId: "msg_offer_123",
-      tx,
-    });
-    const reread = await reserveHostedGroupJoinOfferAttemptTx({
-      groupId: "group_1",
-      message,
-      offerKind: "post_join_offer",
-      offerScope: {
-        featureActivations: ["call-circle.enroll.v0"],
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-      postedAt: new Date("2026-07-01T00:05:00.000Z"),
-      tx,
-    });
-    const repeatAfterBound = await reserveHostedGroupJoinOfferAttemptTx({
-      groupId: "group_1",
-      message,
-      offerKind: "post_join_offer",
-      offerScope: {
-        featureActivations: ["call-circle.enroll.v0"],
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-      postedAt: new Date("2026-07-01T00:10:00.000Z"),
-      tx,
-    });
-
-    expect(bound).toMatchObject({
-      groupId: "group_1",
-      id: reserved.id,
-      messageIdSuffix: expect.stringContaining("123"),
-      messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_123"),
-      offerScope: {
-        featureActivations: ["call-circle.enroll.v0"],
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-    });
-    expect(reread.id).not.toBe(reserved.id);
-    expect(reread).toMatchObject({
-      messageLookupKey: expect.stringMatching(
-        /^hosted-group-join-offer-attempt:[a-f0-9]{32}:hgrpjo_/u,
-      ),
-      providerMessageBound: false,
-    });
-    expect(repeatAfterBound.id).toBe(reread.id);
     expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(2);
-    expect(tx.hostedGroupJoinOffer.update).toHaveBeenCalledWith({
-      where: { id: reserved.id },
-      data: {
-        messageIdSuffix: expect.stringContaining("123"),
-        messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_123"),
-      },
-    });
-  });
-
-  it("revokes an unbound join-offer attempt so retries create a fresh anchor", async () => {
-    const tx = buildStatefulJoinOfferTx();
-    const postedAt = new Date("2026-07-01T00:00:00.000Z");
-    const message = "Like this to join: https://www.withmurph.ai/groups/join/join_1";
-
-    const reserved = await reserveHostedGroupJoinOfferAttemptTx({
-      groupId: "group_1",
-      message,
-      offerKind: "post_join_offer",
-      offerScope: {
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-      postedAt,
-      tx,
-    });
-    await expect(revokeHostedGroupJoinOfferAttemptTx({
-      attemptId: reserved.id,
-      now: new Date("2026-07-01T00:02:00.000Z"),
-      tx,
-    })).resolves.toBe(true);
-    await expect(bindHostedGroupJoinOfferMessageTx({
-      attemptId: reserved.id,
-      messageId: "msg_offer_123",
-      tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
-      httpStatus: 410,
-    });
-
-    const retry = await reserveHostedGroupJoinOfferAttemptTx({
-      groupId: "group_1",
-      message,
-      offerKind: "post_join_offer",
-      offerScope: {
-        vaultShareProjectionKinds: ["sleep-times.v0"],
-      },
-      postedAt: new Date("2026-07-01T00:03:00.000Z"),
-      tx,
-    });
-
-    expect(retry.id).not.toBe(reserved.id);
-    expect(retry.messageLookupKey).toMatch(
-      /^hosted-group-join-offer-attempt:[a-f0-9]{32}:hgrpjo_/u,
-    );
-    expect(tx.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: reserved.id,
-        messageLookupKey: reserved.messageLookupKey,
-        revokedAt: null,
-      },
-      data: {
-        revokedAt: new Date("2026-07-01T00:02:00.000Z"),
-      },
+    expect(tx.hostedGroupJoinOffer.findUnique).toHaveBeenCalledWith({
+      where: { messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_123") },
+      select: expect.objectContaining({
+        messageLookupKey: true,
+        revokedAt: true,
+      }),
     });
   });
 
@@ -1177,6 +1080,9 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
           offerScopeJson: Prisma.InputJsonValue;
         };
       }) => {
+        if (offers.some((entry) => entry.messageLookupKey === args.data.messageLookupKey)) {
+          throw Object.assign(new Error("duplicate message lookup key"), { code: "P2002" });
+        }
         offers.push({
           groupId: args.data.groupId,
           id: args.data.id,

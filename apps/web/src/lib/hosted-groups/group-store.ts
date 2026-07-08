@@ -107,11 +107,6 @@ export interface HostedGroupJoinOfferBindingTxResult {
   offerScope: HostedGroupOfferScope;
 }
 
-export interface HostedGroupJoinOfferAttemptTxResult
-  extends HostedGroupJoinOfferBindingTxResult {
-  providerMessageBound: boolean;
-}
-
 export interface HostedGroupJoinOfferAcceptanceTxResult
   extends HostedGroupJoinAcceptanceTxResult {
   joinCode: string;
@@ -478,76 +473,13 @@ export async function recordHostedGroupJoinOfferTx(input: {
     });
   }
   const id = generateHostedGroupJoinOfferId();
-  await input.tx.hostedGroupJoinOffer.create({
-    data: {
-      id,
-      groupId: input.groupId,
-      messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
-      messageLookupKey,
-      offerScopeJson: toHostedGroupOfferScopeJson(offerScope),
-      postedAt: input.postedAt,
-    },
-  });
-
-  return {
-    groupId: input.groupId,
-    id,
-    messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
-    messageLookupKey,
-    offerScope,
-  };
-}
-
-export async function reserveHostedGroupJoinOfferAttemptTx(input: {
-  groupId: string;
-  message: string;
-  offerKind: "post_call_circle_offer" | "post_join_offer";
-  offerScope: HostedGroupOfferScopeInput;
-  postedAt: Date;
-  tx: Prisma.TransactionClient;
-}): Promise<HostedGroupJoinOfferAttemptTxResult> {
-  const offerScope = normalizeHostedGroupOfferScopeInput(input.offerScope);
-  const fingerprint = createHostedGroupJoinOfferAttemptFingerprint({
-    groupId: input.groupId,
-    message: input.message,
-    offerKind: input.offerKind,
-    offerScope,
-  });
-
-  await lockHostedGroupRow(input.tx, input.groupId);
-  const group = await input.tx.hostedGroup.findUnique({
-    where: { id: input.groupId },
-    select: { joinCode: true },
-  });
-  if (!group?.joinCode) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
-      httpStatus: 404,
-      message: "This group offer is no longer active.",
-      retryable: false,
-    });
-  }
-
-  const existing = await readUnboundHostedGroupJoinOfferAttemptTx(input.tx, {
-    fingerprint,
-    groupId: input.groupId,
-  });
-  if (existing) {
-    return existing;
-  }
-
-  const id = generateHostedGroupJoinOfferId();
-  const attemptLookupKey = createHostedGroupJoinOfferAttemptLookupKey({
-    fingerprint,
-    id,
-  });
   try {
     await input.tx.hostedGroupJoinOffer.create({
       data: {
-        groupId: input.groupId,
         id,
-        messageIdSuffix: null,
-        messageLookupKey: attemptLookupKey,
+        groupId: input.groupId,
+        messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+        messageLookupKey,
         offerScopeJson: toHostedGroupOfferScopeJson(offerScope),
         postedAt: input.postedAt,
       },
@@ -556,115 +488,7 @@ export async function reserveHostedGroupJoinOfferAttemptTx(input: {
     if (!isUniqueConstraintError(error)) {
       throw error;
     }
-    const raced = await readUnboundHostedGroupJoinOfferAttemptTx(input.tx, {
-      fingerprint,
-      groupId: input.groupId,
-    });
-    if (raced) {
-      return raced;
-    }
-    throw error;
-  }
-
-  return {
-    groupId: input.groupId,
-    id,
-    messageIdSuffix: null,
-    messageLookupKey: attemptLookupKey,
-    offerScope,
-    providerMessageBound: false,
-  };
-}
-
-export async function bindHostedGroupJoinOfferMessageTx(input: {
-  attemptId: string;
-  messageId: string | null;
-  tx: Prisma.TransactionClient;
-}): Promise<HostedGroupJoinOfferBindingTxResult> {
-  const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
-  if (!messageLookupKey) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_MESSAGE_ID_REQUIRED",
-      httpStatus: 502,
-      message: "Could not bind this group offer to a provider message.",
-      retryable: true,
-    });
-  }
-
-  const offerLookup = await input.tx.hostedGroupJoinOffer.findUnique({
-    where: { id: input.attemptId },
-    select: { groupId: true },
-  });
-  if (!offerLookup) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
-      httpStatus: 404,
-      message: "This group offer is no longer active.",
-      retryable: true,
-    });
-  }
-
-  await lockHostedGroupRow(input.tx, offerLookup.groupId);
-  const offer = await input.tx.hostedGroupJoinOffer.findUnique({
-    where: { id: input.attemptId },
-    select: {
-      groupId: true,
-      id: true,
-      messageIdSuffix: true,
-      messageLookupKey: true,
-      offerScopeJson: true,
-      revokedAt: true,
-    },
-  });
-  if (!offer) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
-      httpStatus: 404,
-      message: "This group offer is no longer active.",
-      retryable: true,
-    });
-  }
-  if (offer.revokedAt) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
-      httpStatus: 410,
-      message: "This group offer has been revoked.",
-      retryable: false,
-    });
-  }
-
-  const offerScope = normalizeHostedGroupOfferScope(offer.offerScopeJson);
-  if (offer.messageLookupKey === messageLookupKey) {
-    return {
-      groupId: offer.groupId,
-      id: offer.id,
-      messageIdSuffix: offer.messageIdSuffix,
-      messageLookupKey,
-      offerScope,
-    };
-  }
-  if (!isHostedGroupJoinOfferAttemptLookupKey(offer.messageLookupKey)) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_JOIN_OFFER_MESSAGE_CONFLICT",
-      httpStatus: 409,
-      message: "This group offer is already bound to a different provider message.",
-      retryable: false,
-    });
-  }
-
-  try {
-    await input.tx.hostedGroupJoinOffer.update({
-      where: { id: input.attemptId },
-      data: {
-        messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
-        messageLookupKey,
-      },
-    });
-  } catch (error) {
-    if (!isUniqueConstraintError(error)) {
-      throw error;
-    }
-    const bound = await input.tx.hostedGroupJoinOffer.findUnique({
+    const existing = await input.tx.hostedGroupJoinOffer.findUnique({
       where: { messageLookupKey },
       select: {
         groupId: true,
@@ -672,161 +496,44 @@ export async function bindHostedGroupJoinOfferMessageTx(input: {
         messageIdSuffix: true,
         messageLookupKey: true,
         offerScopeJson: true,
+        revokedAt: true,
       },
     });
-    if (bound?.id === input.attemptId) {
+    if (existing && existing.groupId === input.groupId && existing.revokedAt === null) {
       return {
-        groupId: bound.groupId,
-        id: bound.id,
-        messageIdSuffix: bound.messageIdSuffix,
-        messageLookupKey: bound.messageLookupKey,
-        offerScope: normalizeHostedGroupOfferScope(bound.offerScopeJson),
+        groupId: existing.groupId,
+        id: existing.id,
+        messageIdSuffix: existing.messageIdSuffix,
+        messageLookupKey: existing.messageLookupKey,
+        offerScope: normalizeHostedGroupOfferScope(existing.offerScopeJson),
       };
     }
     throw error;
   }
 
   return {
-    groupId: offer.groupId,
-    id: offer.id,
+    groupId: input.groupId,
+    id,
     messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
     messageLookupKey,
     offerScope,
   };
 }
 
-export async function revokeHostedGroupJoinOfferAttemptTx(input: {
-  attemptId: string;
-  now: Date;
-  tx: Prisma.TransactionClient;
-}): Promise<boolean> {
-  const offerLookup = await input.tx.hostedGroupJoinOffer.findUnique({
-    where: { id: input.attemptId },
-    select: { groupId: true },
-  });
-  if (!offerLookup) {
-    return false;
-  }
-
-  await lockHostedGroupRow(input.tx, offerLookup.groupId);
-  const offer = await input.tx.hostedGroupJoinOffer.findUnique({
-    where: { id: input.attemptId },
-    select: {
-      messageLookupKey: true,
-      revokedAt: true,
-    },
-  });
-  if (
-    !offer
-    || offer.revokedAt
-    || !isHostedGroupJoinOfferAttemptLookupKey(offer.messageLookupKey)
-  ) {
-    return false;
-  }
-
-  const updated = await input.tx.hostedGroupJoinOffer.updateMany({
-    where: {
-      id: input.attemptId,
-      messageLookupKey: offer.messageLookupKey,
-      revokedAt: null,
-    },
-    data: {
-      revokedAt: input.now,
-    },
-  });
-  return updated.count > 0;
-}
-
-async function readHostedGroupJoinOfferAttemptByIdTx(
-  tx: Prisma.TransactionClient,
-  id: string,
-): Promise<HostedGroupJoinOfferAttemptTxResult | null> {
-  const offer = await tx.hostedGroupJoinOffer.findUnique({
-    where: { id },
-    select: {
-      groupId: true,
-      id: true,
-      messageIdSuffix: true,
-      messageLookupKey: true,
-      offerScopeJson: true,
-      revokedAt: true,
-    },
-  });
-  if (!offer || offer.revokedAt) {
-    return null;
-  }
-  return {
-    groupId: offer.groupId,
-    id: offer.id,
-    messageIdSuffix: offer.messageIdSuffix,
-    messageLookupKey: offer.messageLookupKey,
-    offerScope: normalizeHostedGroupOfferScope(offer.offerScopeJson),
-    providerMessageBound: !isHostedGroupJoinOfferAttemptLookupKey(offer.messageLookupKey),
-  };
-}
-
-async function readUnboundHostedGroupJoinOfferAttemptTx(
-  tx: Prisma.TransactionClient,
-  input: { fingerprint: string; groupId: string },
-): Promise<HostedGroupJoinOfferAttemptTxResult | null> {
-  const offer = await tx.hostedGroupJoinOffer.findFirst({
-    where: {
-      groupId: input.groupId,
-      messageLookupKey: {
-        startsWith: createHostedGroupJoinOfferAttemptLookupKeyPrefix(input.fingerprint),
-      },
-      revokedAt: null,
-    },
-    orderBy: { postedAt: "asc" },
-    select: {
-      groupId: true,
-      id: true,
-      messageIdSuffix: true,
-      messageLookupKey: true,
-      offerScopeJson: true,
-    },
-  });
-  if (!offer) {
-    return null;
-  }
-  return {
-    groupId: offer.groupId,
-    id: offer.id,
-    messageIdSuffix: offer.messageIdSuffix,
-    messageLookupKey: offer.messageLookupKey,
-    offerScope: normalizeHostedGroupOfferScope(offer.offerScopeJson),
-    providerMessageBound: false,
-  };
-}
-
-function createHostedGroupJoinOfferAttemptFingerprint(input: {
+export function createHostedGroupJoinOfferFingerprint(input: {
   groupId: string;
   message: string;
   offerKind: "post_call_circle_offer" | "post_join_offer";
-  offerScope: HostedGroupOfferScope;
+  offerScope: HostedGroupOfferScopeInput;
 }): string {
+  const offerScope = normalizeHostedGroupOfferScopeInput(input.offerScope);
   return sha256Hex(JSON.stringify({
     groupId: input.groupId,
     message: input.message,
     offerKind: input.offerKind,
-    offerScope: input.offerScope,
-    schema: "murph.hosted-group.join-offer-attempt.v1",
+    offerScope,
+    schema: "murph.hosted-group.join-offer-send.v1",
   })).slice(0, 32);
-}
-
-function createHostedGroupJoinOfferAttemptLookupKey(input: {
-  fingerprint: string;
-  id: string;
-}): string {
-  return `${createHostedGroupJoinOfferAttemptLookupKeyPrefix(input.fingerprint)}${input.id}`;
-}
-
-function createHostedGroupJoinOfferAttemptLookupKeyPrefix(fingerprint: string): string {
-  return `hosted-group-join-offer-attempt:${fingerprint}:`;
-}
-
-function isHostedGroupJoinOfferAttemptLookupKey(value: string): boolean {
-  return value.startsWith("hosted-group-join-offer-attempt:");
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
