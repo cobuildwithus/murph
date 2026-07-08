@@ -34,6 +34,7 @@ import {
   readHostedMailboxPayload,
 } from "../hosted-mailbox/store";
 import {
+  buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
   markHostedAiUsageLimitNoticeSent,
 } from "../hosted-execution/usage-allowance";
@@ -42,6 +43,7 @@ import {
 } from "../hosted-execution/usage-limit-notice";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
 } from "../hosted-onboarding/linq-delivery-store";
@@ -423,6 +425,17 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       memberId: input.userId,
       periodStart: decision.periodStart,
     });
+    const legacyDeliveryAlreadySent =
+      await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+        idempotencyKeys: buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
+          memberId: input.userId,
+          periodStart: decision.periodStart,
+        }),
+        prisma: input.prisma,
+      });
+    if (legacyDeliveryAlreadySent) {
+      return;
+    }
     const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: sentAt,
       idempotencyKey,
@@ -532,7 +545,7 @@ async function sendHostedRuntimeTelegramUsageLimitNotice(input: {
     }
 
     const payload = await readHostedRuntimeTelegramJsonResponse(response);
-    if (response.ok && isHostedRuntimeTelegramSuccessResponse(payload)) {
+    if (response.ok && isHostedRuntimeTelegramSendMessageSuccessResponse(payload)) {
       return;
     }
     if (response.ok) {
@@ -598,13 +611,22 @@ async function readHostedRuntimeTelegramJsonResponse(
   }
 }
 
-function isHostedRuntimeTelegramSuccessResponse(value: unknown): boolean {
-  return Boolean(
-    value
-      && typeof value === "object"
-      && "ok" in value
-      && value.ok === true,
-  );
+function isHostedRuntimeTelegramSendMessageSuccessResponse(value: unknown): boolean {
+  if (
+    !value
+    || typeof value !== "object"
+    || !("ok" in value)
+    || value.ok !== true
+    || !("result" in value)
+    || !value.result
+    || typeof value.result !== "object"
+    || !("message_id" in value.result)
+  ) {
+    return false;
+  }
+
+  return typeof value.result.message_id === "number"
+    && Number.isSafeInteger(value.result.message_id);
 }
 
 function readHostedRuntimeTelegramErrorContext(value: unknown): {
