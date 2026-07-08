@@ -15,6 +15,7 @@ import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import type { AssistantProviderProgressEvent } from './provider-progress.js'
 import type { AssistantUsageAttribution } from './usage-attribution.js'
 import type {
+  AssistantProviderRequestStartTiming,
   AssistantProviderServiceTier,
   AssistantProviderTurnExecutionResult,
 } from './providers/types.js'
@@ -91,7 +92,7 @@ export type AssistantProviderRequestStartHook = (event: {
   sessionResolveMs?: number
   startedAt: string
   turnLockWaitMs?: number
-}) => Promise<void> | void
+} & AssistantProviderRequestStartTiming) => Promise<void> | void
 
 export type AssistantFinishWithoutReplyAcceptedHook = (event: {
   acceptedInputIds: readonly string[]
