@@ -116,7 +116,19 @@ export async function assertJsonlAppendTargetCanAppend(
   const comparisonOptions = options ?? {
     caseInsensitive: await isVaultFilesystemCaseInsensitive(target.vaultRoot),
   };
-  if (!isIntegrationIngestJsonlAppendTarget(target.relativePath, comparisonOptions)) {
+  await assertIntegrationIngestTargetHasNoArchiveSibling(
+    target,
+    comparisonOptions,
+    `Integration ingest shard "${target.relativePath}" is archived and cannot be appended.`,
+  );
+}
+
+async function assertIntegrationIngestTargetHasNoArchiveSibling(
+  target: ResolvedVaultPath,
+  options: VaultPathComparisonOptions,
+  message: string,
+): Promise<void> {
+  if (!isIntegrationIngestJsonlAppendTarget(target.relativePath, options)) {
     return;
   }
   for (const suffix of INTEGRATION_INGEST_ARCHIVE_SUFFIXES) {
@@ -124,7 +136,7 @@ export async function assertJsonlAppendTargetCanAppend(
     if (await pathExists(archivedAbsolutePath)) {
       throw new VaultError(
         "INTEGRATION_INGEST_SHARD_ARCHIVED",
-        `Integration ingest shard "${target.relativePath}" is archived and cannot be appended.`,
+        message,
         { relativePath: target.relativePath },
       );
     }
@@ -203,9 +215,17 @@ export async function assertWriteTargetPolicyForVault(
   relativePath: string,
   policy: WriteTargetPolicy,
 ): Promise<void> {
-  assertWriteTargetPolicy(relativePath, policy, {
+  const comparisonOptions = {
     caseInsensitive: await isVaultFilesystemCaseInsensitive(vaultRoot),
-  });
+  };
+  assertWriteTargetPolicy(relativePath, policy, comparisonOptions);
+  if (policy.kind !== "jsonl_append" && isIntegrationIngestJsonlAppendTarget(relativePath, comparisonOptions)) {
+    await assertIntegrationIngestTargetHasNoArchiveSibling(
+      resolveVaultPath(vaultRoot, relativePath),
+      comparisonOptions,
+      `Integration ingest shard "${relativePath}" is archived and cannot be mutated by generic write paths.`,
+    );
+  }
 }
 
 async function prepareVerifiedTarget(

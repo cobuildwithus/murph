@@ -2575,9 +2575,16 @@ export class WriteBatch {
             action.allowArchivedIntegrationIngestAmendment &&
             isArchivedIntegrationIngestAppendError(error, target, comparisonOptions)
           ) {
+            const baseContentReceipt = action.baseContentReceipt;
+            if (!baseContentReceipt) {
+              throw this.buildResumeConflictError(
+                action,
+                `Archived append target "${action.targetRelativePath}" is missing its prepared base receipt.`,
+              );
+            }
             const result = await appendArchivedIntegrationIngestShard({
-              expectedBaseByteLength: action.baseContentReceipt?.byteLength,
-              expectedBaseSha256: action.baseContentReceipt?.sha256,
+              expectedBaseByteLength: baseContentReceipt.byteLength,
+              expectedBaseSha256: baseContentReceipt.sha256,
               payload,
               targetRelativePath: action.targetRelativePath,
               vaultRoot: this.vaultRoot,

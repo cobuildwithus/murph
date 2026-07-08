@@ -69,8 +69,8 @@ export interface ArchivedIntegrationIngestShardText {
 }
 
 export interface AppendArchivedIntegrationIngestShardInput {
-  expectedBaseByteLength?: number;
-  expectedBaseSha256?: string;
+  expectedBaseByteLength: number;
+  expectedBaseSha256: string;
   payload: string;
   targetRelativePath: string;
   vaultRoot: string;
@@ -494,42 +494,40 @@ export async function appendArchivedIntegrationIngestShard({
   const payloadBytes = Buffer.from(payload, "utf8");
   const records = await parseIntegrationIngestAppendPayload(payload, targetRelativePath);
 
-  if ((expectedBaseByteLength === undefined) !== (expectedBaseSha256 === undefined)) {
+  if (typeof expectedBaseByteLength !== "number" || typeof expectedBaseSha256 !== "string") {
     throw new VaultError(
       "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
-      `Integration ingest archive "${source.sourcePath}" append receipt base is incomplete.`,
+      `Integration ingest archive "${source.sourcePath}" append receipt base is required.`,
       { relativePath: source.sourcePath },
     );
   }
 
-  if (expectedBaseByteLength !== undefined && expectedBaseSha256 !== undefined) {
-    const baseSlice = baseBytes.subarray(0, expectedBaseByteLength);
-    const baseSliceSha256 = createHash("sha256").update(baseSlice).digest("hex");
-    if (baseSlice.byteLength !== expectedBaseByteLength || baseSliceSha256 !== expectedBaseSha256) {
-      throw new VaultError(
-        "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
-        `Integration ingest archive "${source.sourcePath}" base content does not match the append receipt.`,
-        { relativePath: source.sourcePath },
-      );
+  const baseSlice = baseBytes.subarray(0, expectedBaseByteLength);
+  const baseSliceSha256 = createHash("sha256").update(baseSlice).digest("hex");
+  if (baseSlice.byteLength !== expectedBaseByteLength || baseSliceSha256 !== expectedBaseSha256) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
+      `Integration ingest archive "${source.sourcePath}" base content does not match the append receipt.`,
+      { relativePath: source.sourcePath },
+    );
+  }
+
+  if (baseBytes.byteLength > expectedBaseByteLength) {
+    const appendedEnd = expectedBaseByteLength + payloadBytes.byteLength;
+    if (
+      baseBytes.byteLength >= appendedEnd &&
+      baseBytes.subarray(expectedBaseByteLength, appendedEnd).equals(payloadBytes)
+    ) {
+      return {
+        originalSize: expectedBaseByteLength,
+      };
     }
 
-    if (baseBytes.byteLength > expectedBaseByteLength) {
-      const appendedEnd = expectedBaseByteLength + payloadBytes.byteLength;
-      if (
-        baseBytes.byteLength >= appendedEnd &&
-        baseBytes.subarray(expectedBaseByteLength, appendedEnd).equals(payloadBytes)
-      ) {
-        return {
-          originalSize: expectedBaseByteLength,
-        };
-      }
-
-      throw new VaultError(
-        "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
-        `Integration ingest archive "${source.sourcePath}" changed after the append receipt base.`,
-        { relativePath: source.sourcePath },
-      );
-    }
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
+      `Integration ingest archive "${source.sourcePath}" changed after the append receipt base.`,
+      { relativePath: source.sourcePath },
+    );
   }
 
   if (baseContent.length > 0 && !baseContent.endsWith("\n")) {
@@ -544,7 +542,7 @@ export async function appendArchivedIntegrationIngestShard({
     allowArchivedShardAmendments: true,
   });
   const appendPayload = appendPlan.payloads.get(targetRelativePath);
-  const originalSize = expectedBaseByteLength ?? baseBytes.byteLength;
+  const originalSize = expectedBaseByteLength;
   if (!appendPayload) {
     return {
       originalSize,

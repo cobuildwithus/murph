@@ -759,6 +759,50 @@ test("generic JSONL append paths refuse archived integration ingest shards", asy
   await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
 });
 
+test("generic text writes refuse archived integration ingest logical shards", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-generic-text-archive");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-01.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_GenericArchivedText1",
+    eventId: "evt_GenericArchivedText1",
+    importedAt: "2025-01-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [archivedRecord]);
+
+  const replacementRecord = makeIntegrationIngestRecord({
+    id: "xfm_GenericArchivedText2",
+    eventId: "evt_GenericArchivedText2",
+    importedAt: "2025-01-13T09:00:00.000Z",
+  });
+  await assert.rejects(
+    runCanonicalWrite({
+      vaultRoot,
+      operationType: "integration_ingest_generic_text_archive",
+      summary: "reject generic text write to archived integration ingest shard",
+      mutate: async ({ batch }) => {
+        await batch.stageTextWrite(
+          logicalPath,
+          `${JSON.stringify(replacementRecord)}\n`,
+          { allowAppendOnlyJsonl: true, overwrite: true },
+        );
+      },
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_SHARD_ARCHIVED");
+      return true;
+    },
+  );
+  await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+  await fs.access(path.join(vaultRoot, `${logicalPath}.zip`));
+  assert.deepEqual(
+    (await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id),
+    ["xfm_GenericArchivedText1"],
+  );
+});
+
 test("integration ingest archive amendments roll back with canonical write batches", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-archive-rollback");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
