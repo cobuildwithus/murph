@@ -138,6 +138,7 @@ type HostedAiUsageAllowanceSourceKind =
 interface HostedAiUsageAllowanceTokenPricingBasisConfig {
   multiplierDenominator: bigint;
   multiplierNumerator: bigint;
+  pricingSource: string;
   pricingVersion: string;
   requiredProviderKind: "openai" | null;
 }
@@ -159,6 +160,13 @@ type HostedAiUsageAllowanceTokenPricingBasisResolution =
   HostedAiUsageAllowanceTokenPricingBasisConfig & {
     basis: AssistantUsageTokenPricingBasis;
   };
+
+interface HostedAiUsageAllowanceModelPrice {
+  cachedInputUsdMicrosPerMillionTokens: bigint;
+  cacheWriteUsdMicrosPerMillionTokens?: bigint;
+  inputUsdMicrosPerMillionTokens: bigint;
+  outputUsdMicrosPerMillionTokens: bigint;
+}
 
 interface HostedAiUsageAllowancePeriod {
   allowanceSource: HostedAiUsageAllowanceSourceKind;
@@ -345,8 +353,14 @@ async function hasHostedAiUsageThreadContainerAccess(input: {
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-05-05-openai-flex";
+const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_VERSION =
+  "openai-gpt-5.6-preview-pricing-2026-07-08-standard";
+const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_OPENAI_FLEX_PRICING_VERSION =
+  "openai-gpt-5.6-preview-pricing-2026-07-08-openai-flex";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
+const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_SOURCE =
+  "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna";
 const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
@@ -407,36 +421,82 @@ const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICING_SOURCE =
   "https://elevenlabs.io/pricing/api";
 const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_USD_MICROS_PER_MINUTE = 150_000n;
 
-const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
-  "gpt-5.5": {
-    cachedInputUsdMicrosPerMillionTokens: 500_000n,
-    inputUsdMicrosPerMillionTokens: 5_000_000n,
-    outputUsdMicrosPerMillionTokens: 30_000_000n,
-  },
-} as const satisfies Record<
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE = {
+  cachedInputUsdMicrosPerMillionTokens: 500_000n,
+  inputUsdMicrosPerMillionTokens: 5_000_000n,
+  outputUsdMicrosPerMillionTokens: 30_000_000n,
+} as const;
+
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
+  cachedInputUsdMicrosPerMillionTokens: 500_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 6_250_000n,
+  inputUsdMicrosPerMillionTokens: 5_000_000n,
+  outputUsdMicrosPerMillionTokens: 30_000_000n,
+} as const;
+
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE = {
+  cachedInputUsdMicrosPerMillionTokens: 250_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 3_125_000n,
+  inputUsdMicrosPerMillionTokens: 2_500_000n,
+  outputUsdMicrosPerMillionTokens: 15_000_000n,
+} as const;
+
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE = {
+  cachedInputUsdMicrosPerMillionTokens: 100_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 1_250_000n,
+  inputUsdMicrosPerMillionTokens: 1_000_000n,
+  outputUsdMicrosPerMillionTokens: 6_000_000n,
+} as const;
+
+const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
-  {
-    cachedInputUsdMicrosPerMillionTokens: bigint;
-    inputUsdMicrosPerMillionTokens: bigint;
-    outputUsdMicrosPerMillionTokens: bigint;
-  }
->;
+  HostedAiUsageAllowanceModelPrice
+> = {
+  "gpt-5.5": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE,
+  "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE,
+  "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
+  "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
+};
+
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_TOKEN_PRICING_BASES = {
+  "openai-flex": {
+    multiplierDenominator: 2n,
+    multiplierNumerator: 1n,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_FLEX_PRICING_VERSION,
+    requiredProviderKind: "openai",
+  },
+  standard: {
+    multiplierDenominator: 1n,
+    multiplierNumerator: 1n,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION,
+    requiredProviderKind: null,
+  },
+} as const;
+
+const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES = {
+  "openai-flex": {
+    multiplierDenominator: 2n,
+    multiplierNumerator: 1n,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_SOURCE,
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_OPENAI_FLEX_PRICING_VERSION,
+    requiredProviderKind: "openai",
+  },
+  standard: {
+    multiplierDenominator: 1n,
+    multiplierNumerator: 1n,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_SOURCE,
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_VERSION,
+    requiredProviderKind: null,
+  },
+} as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
-  "gpt-5.5": {
-    "openai-flex": {
-      multiplierDenominator: 2n,
-      multiplierNumerator: 1n,
-      pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_FLEX_PRICING_VERSION,
-      requiredProviderKind: "openai",
-    },
-    standard: {
-      multiplierDenominator: 1n,
-      multiplierNumerator: 1n,
-      pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION,
-      requiredProviderKind: null,
-    },
-  },
+  "gpt-5.5": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_TOKEN_PRICING_BASES,
+  "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
+  "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
+  "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
 } as const satisfies HostedAiUsageAllowanceTokenPricingBasesByModel;
 
 export function priceHostedAiUsageForAllowance(
@@ -527,12 +587,12 @@ function resolveHostedAiUsageAllowancePricingDecision(
 
   const modelResolution = resolveHostedAiUsageAllowancePricingModel(record);
   const tokenSnapshot = buildHostedAiUsageAllowanceTokenSnapshot(record);
-  const tokenPricing = tokenPricingBasis === "standard"
-    ? null
-    : resolveHostedAiUsageAllowanceTokenPricingBasis({
+  const tokenPricing = modelResolution.model || tokenPricingBasis !== "standard"
+    ? resolveHostedAiUsageAllowanceTokenPricingBasis({
         model: modelResolution.model,
         record,
-      });
+      })
+    : null;
 
   if (!counted) {
     return {
@@ -543,7 +603,7 @@ function resolveHostedAiUsageAllowancePricingDecision(
         pricingSnapshot: {
           credentialSource,
           ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
-          pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
+          pricingSource: tokenPricing?.pricingSource ?? HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
           schema: "murph.hosted-ai-usage-allowance-pricing.v1",
           tokenPricingBasis,
           tokens: tokenSnapshot,
@@ -563,10 +623,16 @@ function resolveHostedAiUsageAllowancePricingDecision(
   const resolvedTokenPricing = tokenPricing
     ?? resolveHostedAiUsageAllowanceTokenPricingBasis({ model, record });
   const cachedInputTokens = normalizeTokenCount(record.cachedInputTokens);
+  const cacheWriteTokens = normalizeTokenCount(record.cacheWriteTokens);
+  const cacheWriteUsdMicrosPerMillionTokens =
+    prices.cacheWriteUsdMicrosPerMillionTokens ?? 0n;
   const inputTokens = normalizeTokenCount(record.inputTokens);
   const outputTokens = normalizeTokenCount(record.outputTokens);
-  const billableInputTokens = inputTokens > cachedInputTokens
-    ? inputTokens - cachedInputTokens
+  const inputTokenSubsetTokens = cachedInputTokens + (
+    cacheWriteUsdMicrosPerMillionTokens > 0n ? cacheWriteTokens : 0n
+  );
+  const billableInputTokens = inputTokens > inputTokenSubsetTokens
+    ? inputTokens - inputTokenSubsetTokens
     : 0n;
   const standardCostUsdMicros =
     priceTokenBucketUsdMicros(
@@ -576,6 +642,10 @@ function resolveHostedAiUsageAllowancePricingDecision(
     + priceTokenBucketUsdMicros(
       cachedInputTokens,
       prices.cachedInputUsdMicrosPerMillionTokens,
+    )
+    + priceTokenBucketUsdMicros(
+      cacheWriteTokens,
+      cacheWriteUsdMicrosPerMillionTokens,
     )
     + priceTokenBucketUsdMicros(
       outputTokens,
@@ -594,9 +664,12 @@ function resolveHostedAiUsageAllowancePricingDecision(
       pricingSnapshot: {
         credentialSource,
         ...buildHostedAiUsageAllowanceModelSnapshot(modelResolution),
-        pricingSource: HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE,
+        pricingSource: resolvedTokenPricing.pricingSource,
         ratesUsdMicrosPerMillionTokens: {
           cachedInput: prices.cachedInputUsdMicrosPerMillionTokens.toString(),
+          ...(cacheWriteUsdMicrosPerMillionTokens > 0n
+            ? { cacheWrite: cacheWriteUsdMicrosPerMillionTokens.toString() }
+            : {}),
           input: prices.inputUsdMicrosPerMillionTokens.toString(),
           output: prices.outputUsdMicrosPerMillionTokens.toString(),
         },

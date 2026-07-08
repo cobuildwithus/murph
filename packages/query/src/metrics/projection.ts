@@ -17,7 +17,8 @@ import {
   type WearableSleepSummary,
   type WearableSummaryBundle,
 } from "../wearables.ts";
-import type { WearableDataset } from "../wearables/types.ts";
+import { collectWearableDataset } from "../wearables/candidates.ts";
+import type { WearableDataset, WearableMetricSuppressionEvidence } from "../wearables/types.ts";
 import { formatProviderName } from "../wearables/provider-policy.ts";
 import {
   extractMetricPoints,
@@ -41,12 +42,6 @@ export interface BuildMetricProjectionOptions {
 interface WearableMetricProjectionEvidence {
   rows: MetricRowEvidence[];
   suppressionEvidence: WearableMetricSuppressionEvidence[];
-}
-
-interface WearableMetricSuppressionEvidence {
-  date: string;
-  metricKey: string;
-  recordIds: readonly string[];
 }
 
 interface WearableMetricEvidenceResult {
@@ -85,15 +80,17 @@ function resolveWearableMetricProjectionEvidence(
   vault: VaultReadModel,
   options: BuildMetricProjectionOptions,
 ): WearableMetricProjectionEvidence {
-  if (options.wearableDataset) {
-    return buildWearableMetricProjectionEvidenceFromBundle(
-      buildWearableSummaryBundleFromDataset(options.wearableDataset),
-    );
-  }
-  return buildWearableMetricProjectionEvidenceFromBundle(buildWearableSummaryBundle(vault));
+  const dataset = options.wearableDataset ?? collectWearableDataset(vault, {});
+  return buildWearableMetricProjectionEvidenceFromBundle(
+    buildWearableSummaryBundleFromDataset(dataset),
+    dataset.metricSuppressionEvidence,
+  );
 }
 
-function buildWearableMetricProjectionEvidenceFromBundle(bundle: WearableSummaryBundle): WearableMetricProjectionEvidence {
+function buildWearableMetricProjectionEvidenceFromBundle(
+  bundle: WearableSummaryBundle,
+  additionalSuppressionEvidence: readonly WearableMetricSuppressionEvidence[] = [],
+): WearableMetricProjectionEvidence {
   const sleepSummaries = summarizeWearableSleepFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
   const recoverySummaries = summarizeWearableRecoveryFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
   const activitySummaries = summarizeWearableActivityFromBundle(bundle, { limit: METRIC_PROJECTION_LIMIT });
@@ -111,7 +108,10 @@ function buildWearableMetricProjectionEvidenceFromBundle(bundle: WearableSummary
 
   return {
     rows: evidence.map((entry) => entry.row),
-    suppressionEvidence: evidence.map((entry) => entry.suppressionEvidence),
+    suppressionEvidence: [
+      ...evidence.map((entry) => entry.suppressionEvidence),
+      ...additionalSuppressionEvidence,
+    ],
   };
 }
 
