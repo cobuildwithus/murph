@@ -49,7 +49,7 @@
     "@privy-io/node": "^0.18.0",
     "@privy-io/react-auth": "^3.24.0",
     "@radix-ui/react-dialog": "^1.1.15",
-    "@temporalio/client": "1.16.2",
+    "@temporalio/client": "~1.16.3",
     "@vercel/analytics": "2.0.1",
     "@vercel/oidc": "^3.4.1",
     "@vercel/speed-insights": "2.0.0",
