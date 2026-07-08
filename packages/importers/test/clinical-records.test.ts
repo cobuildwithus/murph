@@ -284,7 +284,7 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "Observation",
           relativePath: "Observation/page-1.json",
-          count: 5,
+          count: 7,
         },
         {
           resourceType: "DiagnosticReport",
@@ -299,7 +299,7 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "AllergyIntolerance",
           relativePath: "AllergyIntolerance/page-1.json",
-          count: 4,
+          count: 6,
         },
       ],
       pages: {
@@ -332,6 +332,26 @@ describe("buildClinicalImportPlan", () => {
               coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
             },
             valueQuantity: { comparator: "<", value: 128, unit: "mmHg" },
+          },
+          {
+            resourceType: "Observation",
+            id: "bp-local-code-system",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            code: {
+              coding: [{ system: "urn:vendor:loinc-alias", code: "8480-6", display: "Local systolic blood pressure" }],
+            },
+            valueQuantity: { value: 128, unit: "mmHg" },
+          },
+          {
+            resourceType: "Observation",
+            id: "bp-missing-code-system",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            code: {
+              coding: [{ code: "8480-6", display: "Systolic blood pressure" }],
+            },
+            valueQuantity: { value: 128, unit: "mmHg" },
           },
           {
             resourceType: "Observation",
@@ -408,6 +428,7 @@ describe("buildClinicalImportPlan", () => {
             docStatus: "final",
             date: "2026-07-02T08:32:00.000Z",
             description: "Pathology report",
+            text: { status: "generated", div: "<div>Pathology report</div>" },
             content: [
               {
                 attachment: {
@@ -481,6 +502,42 @@ describe("buildClinicalImportPlan", () => {
               text: "No known drug allergies",
             },
           },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-local-no-known-code",
+            recordedDate: "2026-07-02T09:04:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
+            code: {
+              text: "Penicillin",
+              coding: [{ system: "urn:vendor:allergies", code: "716186003", display: "Penicillin" }],
+            },
+          },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-local-status-system",
+            recordedDate: "2026-07-02T09:05:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "urn:vendor:allergy-status", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+          },
         ],
       },
     });
@@ -488,7 +545,7 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toHaveLength(13);
+    expect(plan.unsupported).toHaveLength(17);
     expect(plan.unsupported).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -502,6 +559,14 @@ describe("buildClinicalImportPlan", () => {
         expect.objectContaining({
           resourceId: "bp-comparator",
           reason: "vital quantity comparator is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "bp-local-code-system",
+          reason: "vital coding system is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "bp-missing-code-system",
+          reason: "vital coding system is not importable",
         }),
         expect.objectContaining({
           resourceId: "weight-unsupported-unit",
@@ -542,6 +607,14 @@ describe("buildClinicalImportPlan", () => {
         expect.objectContaining({
           resourceId: "allergy-scoped-negative",
           reason: "allergy registry import not implemented",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-local-no-known-code",
+          reason: "no-known allergy code system is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-local-status-system",
+          reason: "allergy status is not importable",
         }),
       ]),
     );

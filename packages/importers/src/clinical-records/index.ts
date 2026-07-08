@@ -71,9 +71,14 @@ const VITAL_LOINC_BY_CODE = new Map<string, VitalDefinition>([
 ]);
 
 const NO_KNOWN_ALLERGY_CODES = new Set(["716186003"]);
+const FHIR_SYSTEM_ALLERGY_CLINICAL_STATUS = "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical";
+const FHIR_SYSTEM_ALLERGY_VERIFICATION_STATUS = "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification";
+const FHIR_SYSTEM_LOINC = "http://loinc.org";
+const FHIR_SYSTEM_SNOMED_CT = "http://snomed.info/sct";
 const LABORATORY_CATEGORY_CODES = new Set(["laboratory", "lab"]);
 const RESULT_STATUS_NORMAL_CODES = new Set(["n", "normal"]);
 const RESULT_STATUS_ABNORMAL_CODES = new Set(["a", "aa", "h", "hh", "l", "ll", "abnormal", "high", "low"]);
+const VITAL_LOINC_CODES = new Set(VITAL_LOINC_BY_CODE.keys());
 const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, string>>([
   ["body-weight", new Map([["[lb_av]", "lb"], ["lb", "lb"]])],
   ["bp-diastolic", new Map([["mm[hg]", "mmHg"], ["mmhg", "mmHg"]])],
@@ -247,6 +252,11 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
 
   for (const component of components) {
     const vital = vitalForCodeableConcept(component.code);
+    if (!vital && codeableConceptHasCodeWithUnexpectedSystem(component.code, FHIR_SYSTEM_LOINC, VITAL_LOINC_CODES)) {
+      unsupported.push(unsupportedResource(context, "vital coding system is not importable"));
+      continue;
+    }
+
     const value = readQuantityValue(component.valueQuantity);
     if (!vital || !value) {
       continue;
@@ -282,6 +292,10 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   }
 
   const vital = vitalForCodeableConcept(context.resource.code);
+  if (!vital && codeableConceptHasCodeWithUnexpectedSystem(context.resource.code, FHIR_SYSTEM_LOINC, VITAL_LOINC_CODES)) {
+    return unsupportedOnly(context, "vital coding system is not importable");
+  }
+
   const quantity = readQuantityValue(context.resource.valueQuantity);
   if (vital && quantity) {
     if (!occurredAt) {
@@ -466,6 +480,10 @@ function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>)
   const resourceId = readResourceId(context.resource);
   if (!resourceId) {
     return emptyMappedResource();
+  }
+
+  if (codeableConceptHasCodeWithUnexpectedSystem(context.resource.code, FHIR_SYSTEM_SNOMED_CT, NO_KNOWN_ALLERGY_CODES)) {
+    return unsupportedOnly(context, "no-known allergy code system is not importable");
   }
 
   if (!isNoKnownAllergy(context.resource)) {
@@ -657,10 +675,7 @@ function extractFhirResources(value: unknown): Resource[] {
 
 function vitalForCodeableConcept(value: CodeableConcept | undefined): VitalDefinition | null {
   for (const coding of codingsForCodeableConcept(value)) {
-    if (coding.system && !coding.system.toLowerCase().includes("loinc")) {
-      continue;
-    }
-    if (coding.code && VITAL_LOINC_BY_CODE.has(coding.code)) {
+    if (coding.system === FHIR_SYSTEM_LOINC && coding.code && VITAL_LOINC_BY_CODE.has(coding.code)) {
       return VITAL_LOINC_BY_CODE.get(coding.code) ?? null;
     }
   }
@@ -681,9 +696,7 @@ function isLaboratoryObservation(resource: Observation): boolean {
 }
 
 function isNoKnownAllergy(resource: AllergyIntolerance): boolean {
-  return codingsForCodeableConcept(resource.code).some((coding) =>
-    typeof coding.code === "string" && NO_KNOWN_ALLERGY_CODES.has(coding.code)
-  );
+  return codeableConceptHasSystemCode(resource.code, FHIR_SYSTEM_SNOMED_CT, NO_KNOWN_ALLERGY_CODES);
 }
 
 function isAllergyConflictEvidence(resource: Resource): boolean {
@@ -692,8 +705,16 @@ function isAllergyConflictEvidence(resource: Resource): boolean {
 
 function hasImportableAllergyStatus(resource: AllergyIntolerance): boolean {
   return (
-    codeableConceptHasCode(resource.clinicalStatus, IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES)
-    && codeableConceptHasCode(resource.verificationStatus, IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES)
+    codeableConceptHasSystemCode(
+      resource.clinicalStatus,
+      FHIR_SYSTEM_ALLERGY_CLINICAL_STATUS,
+      IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES,
+    )
+    && codeableConceptHasSystemCode(
+      resource.verificationStatus,
+      FHIR_SYSTEM_ALLERGY_VERIFICATION_STATUS,
+      IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES,
+    )
   );
 }
 
@@ -707,10 +728,29 @@ function hasImportableOptionalStatus(value: unknown, importableStatuses: Readonl
   return status === undefined || importableStatuses.has(status);
 }
 
-function codeableConceptHasCode(value: CodeableConcept | undefined, codes: ReadonlySet<string>): boolean {
+function codeableConceptHasSystemCode(
+  value: CodeableConcept | undefined,
+  system: string,
+  codes: ReadonlySet<string>,
+): boolean {
   return codingsForCodeableConcept(value).some((coding) => {
     const code = coding.code?.toLowerCase();
-    return code !== undefined && codes.has(code);
+    return coding.system === system && code !== undefined && codes.has(code);
+  });
+}
+
+function codeableConceptHasCodeWithUnexpectedSystem(
+  value: CodeableConcept | undefined,
+  expectedSystem: string,
+  codes: ReadonlySet<string>,
+): boolean {
+  if (codeableConceptHasSystemCode(value, expectedSystem, codes)) {
+    return false;
+  }
+
+  return codingsForCodeableConcept(value).some((coding) => {
+    const code = coding.code?.toLowerCase();
+    return code !== undefined && codes.has(code) && coding.system !== expectedSystem;
   });
 }
 
@@ -843,11 +883,6 @@ function codingsForCodeableConcept(value: CodeableConcept | undefined): Array<Pi
 }
 
 function readDocumentReferenceText(resource: DocumentReference): string | null {
-  const narrative = textFromNarrative(resource.text);
-  if (narrative) {
-    return narrative;
-  }
-
   for (const content of readUnknownArray(resource.content)) {
     const attachment = isRecord(content) && isRecord(content.attachment) ? content.attachment : null;
     const contentType = readString(attachment?.contentType)?.toLowerCase() ?? "";
