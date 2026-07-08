@@ -303,16 +303,57 @@ const ASLEEP_STAGE_TOTAL_METRICS: readonly WearableMetricKey[] = [
   "remMinutes",
 ];
 const APPLE_HEALTH_KIT_PROVIDER = "apple-health-kit";
-const INVALID_ZERO_SLEEP_METRICS = new Set<string>([
-  "totalSleepMinutes",
-  "sleepEfficiency",
-  "deepMinutes",
-  "lightMinutes",
-  "remMinutes",
+const INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS = new Map<WearableMetricKey, string>([
+  ["totalSleepMinutes", "total-sleep-minutes"],
+  ["sleepEfficiency", "sleep-efficiency"],
+  ["deepMinutes", "deep-sleep-minutes"],
+  ["lightMinutes", "sleep-light-minutes"],
+  ["remMinutes", "rem-sleep-minutes"],
 ]);
+const INVALID_ZERO_SLEEP_METRICS = new Set<string>(INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS.keys());
 
 interface InvalidZeroSleepWindow {
   window: WearableSleepWindowCandidate;
+}
+
+export interface WearableMetricRecordSuppressionEvidence {
+  date: string;
+  metricKey: string;
+  recordIds: readonly string[];
+}
+
+export function collectWearableSleepMetricSuppressionEvidenceFromDataset(
+  dataset: WearableDataset,
+): WearableMetricRecordSuppressionEvidence[] {
+  const metricCandidatesByDate = groupMetricCandidatesByDate(
+    dataset.metricCandidates.filter((candidate) => metricSetHas(SLEEP_METRIC_KEYS, candidate.metric)),
+  );
+  const sleepWindowsByDate = groupSleepWindowsByDate(dataset.sleepWindows);
+  const dates = collectSortedDatesDesc([
+    ...metricCandidatesByDate.keys(),
+    ...sleepWindowsByDate.keys(),
+  ]);
+
+  return dates.flatMap((date) => {
+    const dateCandidates = metricCandidatesByDate.get(date) ?? [];
+    const invalidZeroSleepWindows = collectInvalidZeroSleepSummaryWindows(
+      dateCandidates,
+      sleepWindowsByDate.get(date) ?? [],
+    );
+    if (invalidZeroSleepWindows.length === 0) {
+      return [];
+    }
+
+    return [...INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS.entries()].flatMap(([metric, metricKey]) => {
+      const recordIds = uniqueStrings(
+        selectMetricCandidates(dateCandidates, metric)
+          .filter((candidate) => isInvalidZeroSleepMetricCandidate(candidate, metric, invalidZeroSleepWindows))
+          .flatMap((candidate) => candidate.recordIds),
+      );
+
+      return recordIds.length > 0 ? [{ date, metricKey, recordIds }] : [];
+    });
+  });
 }
 
 function buildDerivedTotalSleepCandidates(

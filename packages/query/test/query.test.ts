@@ -3591,6 +3591,35 @@ async function createMetricObservationVault(
   return vaultRoot;
 }
 
+async function createEventLedgerVault(events: readonly Record<string, unknown>[]): Promise<string> {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-event-ledger-"));
+
+  await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+  await writeFile(
+    path.join(vaultRoot, "vault.json"),
+    `${JSON.stringify({
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      title: "Event ledger vault",
+      timezone: "UTC",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(vaultRoot, "ledger/events/2026/2026-07.jsonl"),
+    `${events.map((event) =>
+      JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        ...event,
+      })
+    ).join("\n")}\n`,
+    "utf8",
+  );
+
+  return vaultRoot;
+}
+
 interface MetricSampleInput {
   id: string;
   metric: string;
@@ -5235,6 +5264,288 @@ test("importer sleep keys, canonical day keys, and losing providers all resolve 
     assert.equal(spo2Evidence.recordIds.includes(selectedRecordId), true);
     assert.equal(spo2Evidence.recordIds.includes(losingRecordId), false);
     assert.equal(Object.prototype.hasOwnProperty.call(spo2Evidence, "suppressionRecordIds"), false);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("listMetricPointsRuntime suppresses invalid Apple HealthKit zero sleep totals without a direct provider", async () => {
+  const date = "2026-07-07";
+  const startAt = "2026-07-07T08:17:04.000Z";
+  const endAt = "2026-07-07T14:02:56.000Z";
+  const appleOrigin = {
+    version: 1,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "apple-health-kit",
+    sourceType: "unknown",
+  };
+  const appleRef = (resourceId: string, facet?: string) => ({
+    facet,
+    resourceId,
+    resourceType: "junction-apple-health-kit-sleep",
+    system: "junction",
+  });
+  const appleMetric = (input: {
+    id: string;
+    metric: string;
+    resourceId: string;
+    unit: string;
+    value: number;
+  }) => ({
+    id: input.id,
+    kind: "observation",
+    occurredAt: endAt,
+    recordedAt: "2026-07-07T18:53:32.000Z",
+    dayKey: date,
+    source: "device",
+    title: `Apple ${input.metric}`,
+    metric: input.metric,
+    value: input.value,
+    unit: input.unit,
+    dataOrigin: appleOrigin,
+    externalRef: appleRef(input.resourceId, input.metric),
+  });
+  const zeroRecordIds = [
+    "evt_apple_projection_zero_total",
+    "evt_apple_projection_zero_efficiency",
+    "evt_apple_projection_zero_deep",
+    "evt_apple_projection_zero_rem",
+    "evt_apple_projection_zero_light",
+  ];
+  const vaultRoot = await createEventLedgerVault([
+    {
+      id: "evt_apple_projection_sleep_window",
+      kind: "sleep_session",
+      occurredAt: endAt,
+      recordedAt: "2026-07-07T18:53:32.000Z",
+      dayKey: date,
+      source: "device",
+      title: "Apple overnight sleep",
+      startAt,
+      endAt,
+      durationMinutes: 346,
+      dataOrigin: appleOrigin,
+      externalRef: appleRef("sleep-apple-projection-zero"),
+    },
+    appleMetric({
+      id: "evt_apple_projection_zero_total",
+      metric: "sleep-total-minutes",
+      resourceId: "sleep-apple-projection-zero",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_projection_zero_efficiency",
+      metric: "sleep-efficiency",
+      resourceId: "sleep-apple-projection-zero",
+      unit: "%",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_projection_zero_deep",
+      metric: "sleep-deep-minutes",
+      resourceId: "sleep-stage-apple-projection-zero",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_projection_zero_rem",
+      metric: "sleep-rem-minutes",
+      resourceId: "sleep-stage-apple-projection-zero",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_projection_zero_light",
+      metric: "sleep-light-minutes",
+      resourceId: "sleep-stage-apple-projection-zero",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_projection_awake",
+      metric: "sleep-awake-minutes",
+      resourceId: "sleep-stage-apple-projection-zero",
+      unit: "minutes",
+      value: 18.5,
+    }),
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const totalSleep = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      metricKey: "total-sleep-minutes",
+      to: date,
+    });
+    const allDayPoints = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      to: date,
+    });
+
+    assert.equal(totalSleep.length, 0);
+    assert.equal(
+      allDayPoints.some((point) => zeroRecordIds.includes(point.source.recordId)),
+      false,
+    );
+    assert.equal(
+      allDayPoints.some((point) => point.source.recordId === "evt_apple_projection_awake"),
+      true,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("listMetricPointsRuntime suppresses invalid Apple HealthKit zero totals beside WHOOP sleep", async () => {
+  const date = "2026-07-07";
+  const startAt = "2026-07-07T08:17:04.000Z";
+  const endAt = "2026-07-07T14:02:56.000Z";
+  const origin = (sourceProviderSlug: string) => ({
+    version: 1,
+    aggregatorProvider: "junction",
+    sourceProviderSlug,
+    sourceType: "unknown",
+  });
+  const externalRef = (sourceProviderSlug: string, resourceId: string, facet?: string) => ({
+    facet,
+    resourceId,
+    resourceType: `junction-${sourceProviderSlug}-sleep`,
+    system: "junction",
+  });
+  const sleepWindow = (input: {
+    id: string;
+    resourceId: string;
+    sourceProviderSlug: string;
+  }) => ({
+    id: input.id,
+    kind: "sleep_session",
+    occurredAt: endAt,
+    recordedAt: input.sourceProviderSlug === "whoop-v2"
+      ? "2026-07-07T14:24:36.000Z"
+      : "2026-07-07T18:53:32.000Z",
+    dayKey: date,
+    source: "device",
+    title: `${input.sourceProviderSlug} overnight sleep`,
+    startAt,
+    endAt,
+    durationMinutes: 346,
+    dataOrigin: origin(input.sourceProviderSlug),
+    externalRef: externalRef(input.sourceProviderSlug, input.resourceId),
+  });
+  const sleepMetric = (input: {
+    id: string;
+    metric: string;
+    resourceId: string;
+    sourceProviderSlug: string;
+    unit: string;
+    value: number;
+  }) => ({
+    id: input.id,
+    kind: "observation",
+    occurredAt: endAt,
+    recordedAt: input.sourceProviderSlug === "whoop-v2"
+      ? "2026-07-07T14:24:36.000Z"
+      : "2026-07-07T18:53:32.000Z",
+    dayKey: date,
+    source: "device",
+    title: `${input.sourceProviderSlug} ${input.metric}`,
+    metric: input.metric,
+    value: input.value,
+    unit: input.unit,
+    dataOrigin: origin(input.sourceProviderSlug),
+    externalRef: externalRef(input.sourceProviderSlug, input.resourceId, input.metric),
+  });
+  const vaultRoot = await createEventLedgerVault([
+    sleepWindow({
+      id: "evt_whoop_projection_sleep_window",
+      resourceId: "sleep-whoop-projection-valid",
+      sourceProviderSlug: "whoop-v2",
+    }),
+    sleepWindow({
+      id: "evt_apple_projection_duplicate_sleep_window",
+      resourceId: "sleep-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+    }),
+    sleepMetric({
+      id: "evt_whoop_projection_total",
+      metric: "sleep-total-minutes",
+      resourceId: "sleep-whoop-projection-valid",
+      sourceProviderSlug: "whoop-v2",
+      unit: "minutes",
+      value: 327.3667,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_zero_total",
+      metric: "sleep-total-minutes",
+      resourceId: "sleep-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "minutes",
+      value: 0,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_zero_efficiency",
+      metric: "sleep-efficiency",
+      resourceId: "sleep-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "%",
+      value: 0,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_zero_deep",
+      metric: "sleep-deep-minutes",
+      resourceId: "sleep-stage-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "minutes",
+      value: 0,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_zero_rem",
+      metric: "sleep-rem-minutes",
+      resourceId: "sleep-stage-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "minutes",
+      value: 0,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_zero_light",
+      metric: "sleep-light-minutes",
+      resourceId: "sleep-stage-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "minutes",
+      value: 0,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_awake",
+      metric: "sleep-awake-minutes",
+      resourceId: "sleep-stage-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "minutes",
+      value: 18.5,
+    }),
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const totalSleep = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      metricKey: "total-sleep-minutes",
+      to: date,
+    });
+
+    assert.equal(totalSleep.length, 1);
+    assert.equal(totalSleep[0]?.value, 327.3667);
+    assert.equal(totalSleep[0]?.source.family, "derived");
+    assert.notEqual(totalSleep[0]?.source.kind, "observation");
+    assert.equal(
+      totalSleep.some((point) => point.source.recordId === "evt_apple_projection_duplicate_zero_total"),
+      false,
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
