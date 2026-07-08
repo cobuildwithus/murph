@@ -998,6 +998,46 @@ describe("selectProjectableActivityDistanceDays", () => {
     expect(selected).toEqual([]);
   });
 
+  it("skips a distance day when any matching same-day session lacks distance", () => {
+    const rows = [
+      activitySessionRow({
+        activityKind: "running",
+        date: ACTIVITY_DAY.date,
+        distanceMeters: 5_000,
+        durationMinutes: 40,
+        recordIds: ["evt_run_with_distance"],
+        startedAt: "2026-07-03T07:00:00.000Z",
+      }),
+      activitySessionRow({
+        activityKind: "running",
+        date: ACTIVITY_DAY.date,
+        durationMinutes: 35,
+        recordIds: ["evt_run_no_distance"],
+        startedAt: "2026-07-03T17:00:00.000Z",
+      }),
+    ];
+
+    expect(selectProjectableActivityDistanceDays({
+      nowMs,
+      rows,
+      spec: runningDistanceSpec,
+    })).toEqual([]);
+    expect(selectProjectableActivitySessionCountDays({
+      nowMs,
+      rows,
+      spec: requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE),
+    })).toEqual([{
+      data: {
+        activityKind: "running",
+        date: ACTIVITY_DAY.date,
+        sessionCount: 2,
+      },
+      occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+      recordKey: ACTIVITY_DAY.date,
+      sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+    }]);
+  });
+
   it("reads canonical distanceKm from activity-session vault entities", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",

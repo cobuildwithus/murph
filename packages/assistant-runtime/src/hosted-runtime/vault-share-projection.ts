@@ -688,6 +688,7 @@ export function selectProjectableActivityDistanceDays(
     input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
   const groups = new Map<string, {
     date: string;
+    hasIncompleteDistance: boolean;
     rows: ActivitySessionProjectionRow[];
     sessionCount: number;
     sessionDistanceMeters: number;
@@ -695,21 +696,20 @@ export function selectProjectableActivityDistanceDays(
 
   const projectableRows = input.rows.filter((row) =>
     isProjectableActivitySessionRow(row, input.spec.activityKind, cutoffMs)
-    && isProjectableActivitySessionDistanceRow(row)
   );
   for (const row of dedupeActivitySessionRows(projectableRows, input.spec.activityKind)) {
-    const distanceMeters = row.distanceMeters ?? null;
-    if (distanceMeters === null) {
-      continue;
-    }
+    const hasDistance = isProjectableActivitySessionDistanceRow(row);
+    const distanceMeters = hasDistance ? row.distanceMeters ?? 0 : 0;
     const group = groups.get(row.date) ?? {
       date: row.date,
+      hasIncompleteDistance: false,
       rows: [],
       sessionCount: 0,
       sessionDistanceMeters: 0,
     };
     group.rows.push(row);
     group.sessionCount += 1;
+    group.hasIncompleteDistance ||= !hasDistance;
     group.sessionDistanceMeters += distanceMeters;
     groups.set(row.date, group);
   }
@@ -719,6 +719,7 @@ export function selectProjectableActivityDistanceDays(
     if (
       group.sessionCount <= 0
       || group.sessionCount > DAY_MAX_SESSIONS
+      || group.hasIncompleteDistance
       || group.sessionDistanceMeters <= 0
       || group.sessionDistanceMeters > DAY_MAX_DISTANCE_METERS
     ) {
