@@ -39,6 +39,10 @@ const hostedWebWorkspaceEntries = resolveHostedWebWorkspaceSourceEntries(path.jo
 
 test("resolveHostedWebWorkspaceSourceEntries points at hosted source package entries", () => {
   assert.equal(
+    hostedWebWorkspaceEntries["@murphai/clinical-records"],
+    path.join(repoRoot, "packages/clinical-records/src/index.ts"),
+  );
+  assert.equal(
     hostedWebWorkspaceEntries["@murphai/cloudflare-hosted-control"],
     path.join(repoRoot, "packages/cloudflare-hosted-control/package.json"),
   );
