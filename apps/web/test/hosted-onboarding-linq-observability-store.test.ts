@@ -9,6 +9,7 @@ import {
   hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
+  markHostedLinqDeliveryProviderDispatchStartedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
   recordHostedLinqDeliveryAttemptTx,
@@ -1307,6 +1308,37 @@ describe("hosted Linq observability stores", () => {
     expect(updateWhere?.OR).not.toContainEqual({ status: "attempted" });
   });
 
+  it("marks provider dispatch started before an external send leaves the pre-provider state", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const startedAt = new Date("2026-03-26T12:00:01.000Z");
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(markHostedLinqDeliveryProviderDispatchStartedTx({
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      prisma: fixture.prisma as never,
+      startedAt,
+    })).resolves.toBe(true);
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith({
+      data: {
+        attemptedAt: startedAt,
+        status: "provider_dispatch_started",
+      },
+      where: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: null,
+        idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(
+          "ai-usage-gate:member_123:2026-03",
+        ),
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        skippedAt: null,
+        status: "attempted",
+      },
+    });
+  });
+
   it("does not reclaim stale pre-provider Telegram usage notice rows without opt-in", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
@@ -1390,12 +1422,49 @@ describe("hosted Linq observability stores", () => {
     expect(updateWhere?.OR).not.toContainEqual({ status: { in: ["failed", "skipped"] } });
   });
 
-  it("reclaims retry-after failed Telegram usage notice rows", async () => {
+  it("does not reclaim retry-after failed Telegram usage notice rows before their not-before time", async () => {
     const fixture = createObservabilityPrismaFixture();
-    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    const attemptedAt = new Date("2026-03-26T12:00:30.000Z");
+    const retryAt = new Date("2026-03-26T12:01:00.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
       acceptedAt: null,
-      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      attemptedAt: retryAt,
+      deliveredAt: null,
+      failureCode: "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
+      failedAt: new Date("2026-03-26T12:00:01.000Z"),
+      id: "hld_retry_after_telegram_notice",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      status: "failed",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      prisma: fixture.prisma as never,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "telegram_event_runtime_denied",
+      targetKind: "telegram_thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_retry_after_telegram_notice",
+      retryAt,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("reclaims retry-after failed Telegram usage notice rows after their not-before time", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:01:00.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:01:00.000Z"),
       deliveredAt: null,
       failureCode: "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
       failedAt: new Date("2026-03-26T12:00:01.000Z"),
@@ -1433,8 +1502,18 @@ describe("hosted Linq observability stores", () => {
         where: expect.objectContaining({
           id: "hld_retry_after_telegram_notice",
           OR: expect.arrayContaining([
-            { failedAt: { not: null } },
-            { status: { in: ["failed", "skipped"] } },
+            {
+              attemptedAt: {
+                lte: attemptedAt,
+              },
+              failedAt: { not: null },
+            },
+            {
+              attemptedAt: {
+                lte: attemptedAt,
+              },
+              status: "failed",
+            },
           ]),
         }),
       }),
@@ -2627,6 +2706,29 @@ describe("hosted Linq observability stores", () => {
     expect(JSON.stringify(update)).not.toContain("provider_msg_123");
     expect(JSON.stringify(update)).not.toContain("+15551234567");
     expect(JSON.stringify(update)).not.toContain("private member text");
+  });
+
+  it("records direct send-failure retry boundaries on the delivery attempted timestamp", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const retryAt = new Date("2026-03-26T12:01:00.000Z");
+
+    await markHostedLinqDeliverySendFailedTx({
+      failureCode: "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
+      failureReason: "Hosted Telegram usage-limit notice delivery was rate-limited by the Bot API.",
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      nextAttemptAt: retryAt,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt: retryAt,
+          failureCode: "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
+          status: "failed",
+        }),
+      }),
+    );
   });
 });
 

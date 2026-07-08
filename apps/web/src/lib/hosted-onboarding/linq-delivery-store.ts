@@ -36,6 +36,10 @@ type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
 const HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS = 15 * 60 * 1000;
 const HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE =
   "hosted_runtime_ai_usage_limit_notice";
+const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
+  "provider_dispatch_started";
+const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_FAILURE_CODE =
+  "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError";
 
 type HostedLinqDeliveryReceiptData = {
   deliveryStatus: "delivered" | "failed";
@@ -227,7 +231,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   sourceRef?: string | null;
   targetKind?: string | null;
   template?: string | null;
-}): Promise<{ claimed: boolean; id: string | null }> {
+}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
   const attemptedAt = input.attemptedAt ?? new Date();
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     normalizeNullable(input.idempotencyKey),
@@ -372,7 +376,7 @@ export async function hasHostedLinqTerminalTelegramUsageLimitFailureForIdempoten
 
   return deliveries.some((delivery) =>
     (delivery.failedAt !== null || delivery.status === "failed")
-    && delivery.failureCode !== "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError"
+    && delivery.failureCode !== HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_FAILURE_CODE
   );
 }
 
@@ -418,6 +422,34 @@ export async function hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempoten
       && delivery.attemptedAt > staleAttemptBefore
     )
   );
+}
+
+export async function markHostedLinqDeliveryProviderDispatchStartedTx(input: {
+  idempotencyKey: string;
+  prisma: HostedLinqDeliveryClient;
+  startedAt?: Date;
+}): Promise<boolean> {
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
+  if (!idempotencyKey) {
+    return false;
+  }
+  const updated = await input.prisma.hostedLinqDelivery.updateMany({
+    where: {
+      acceptedAt: null,
+      deliveredAt: null,
+      failedAt: null,
+      idempotencyKey,
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      skippedAt: null,
+      status: "attempted",
+    },
+    data: {
+      attemptedAt: input.startedAt ?? new Date(),
+      status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+    },
+  });
+  return updated.count === 1;
 }
 
 async function updateHostedLinqDeliveryAttemptIfPreProvider(input: {
@@ -877,6 +909,7 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
   failureCode?: string | null;
   failureReason?: string | null;
   idempotencyKey: string;
+  nextAttemptAt?: Date | null;
   prisma: HostedLinqDeliveryClient;
 }): Promise<void> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
@@ -892,6 +925,7 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
       messageLookupKey: null,
     },
     data: {
+      ...(input.nextAttemptAt ? { attemptedAt: input.nextAttemptAt } : {}),
       failedAt: input.failedAt ?? new Date(),
       failureCode: sanitizeHostedOnboardingPersistedErrorCode(
         normalizeNullable(input.failureCode),
@@ -1399,11 +1433,26 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   reclaimFreshPreProviderAttempt: boolean;
   reclaimFreshPreProviderAttemptSource: string;
   reclaimStalePreProviderAttempt?: boolean;
-}): Promise<{ claimed: boolean; id: string | null }> {
+}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
       claimed: false,
       id: input.delivery.id,
+    };
+  }
+
+  const telegramRetryAfterAt =
+    input.delivery.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
+    && input.delivery.failedAt !== null
+    && input.delivery.failureCode
+      === HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_FAILURE_CODE
+      ? input.delivery.attemptedAt
+      : null;
+  if (telegramRetryAfterAt && telegramRetryAfterAt > input.attemptedAt) {
+    return {
+      claimed: false,
+      id: input.delivery.id,
+      retryAt: telegramRetryAfterAt,
     };
   }
 
@@ -1413,9 +1462,31 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   const canReclaimStalePreProviderAttempt =
     input.reclaimStalePreProviderAttempt
     ?? input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
-  const canReclaimTerminalPreProviderAttempt =
+  const canReclaimRetryAfterTelegramAttempt =
+    telegramRetryAfterAt !== null && telegramRetryAfterAt <= input.attemptedAt;
+  const terminalPreProviderReclaimPredicates =
     input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
-    || input.delivery.failureCode === "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError";
+      ? [
+          { failedAt: { not: null } },
+          { skippedAt: { not: null } },
+          { status: { in: ["failed", "skipped"] } },
+        ]
+      : canReclaimRetryAfterTelegramAttempt
+        ? [
+            {
+              attemptedAt: {
+                lte: input.attemptedAt,
+              },
+              failedAt: { not: null },
+            },
+            {
+              attemptedAt: {
+                lte: input.attemptedAt,
+              },
+              status: "failed",
+            },
+          ]
+        : [];
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       acceptedAt: null,
@@ -1424,13 +1495,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       lastReceiptAt: null,
       messageLookupKey: null,
       OR: [
-        ...(canReclaimTerminalPreProviderAttempt
-          ? [
-              { failedAt: { not: null } },
-              { skippedAt: { not: null } },
-              { status: { in: ["failed", "skipped"] } },
-            ]
-          : []),
+        ...terminalPreProviderReclaimPredicates,
         ...(canReclaimStalePreProviderAttempt
           ? [
               {

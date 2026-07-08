@@ -49,6 +49,7 @@ import {
   hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
+  markHostedLinqDeliveryProviderDispatchStartedTx,
   markHostedLinqDeliverySendFailedTx,
 } from "../hosted-onboarding/linq-delivery-store";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
@@ -501,9 +502,25 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
           idempotencyKeys: [idempotencyKey],
           prisma: input.prisma,
         });
+      if (claimed.retryAt) {
+        return {
+          retryAt: claimed.retryAt.toISOString(),
+          status: "in_flight",
+        };
+      }
       return claimedCurrentDeliveryTerminalFailure
         ? { status: "already_notified" }
         : buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+    }
+
+    const dispatchStarted =
+      await markHostedLinqDeliveryProviderDispatchStartedTx({
+        idempotencyKey,
+        prisma: input.prisma,
+        startedAt: sentAt,
+      });
+    if (!dispatchStarted) {
+      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
 
     try {
@@ -514,6 +531,23 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       });
     } catch (error) {
       if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRetryAfterError) {
+        const retryAt = new Date(
+          sentAt.getTime() + error.retryAfterSeconds * 1000,
+        );
+        await markHostedLinqDeliverySendFailedTx({
+          failedAt: sentAt,
+          failureCode: error.name,
+          failureReason: error.message,
+          idempotencyKey,
+          nextAttemptAt: retryAt,
+          prisma: input.prisma,
+        });
+        return {
+          retryAt: retryAt.toISOString(),
+          status: "in_flight",
+        };
+      }
+      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError) {
         await markHostedLinqDeliverySendFailedTx({
           failedAt: sentAt,
           failureCode: error.name,
@@ -521,14 +555,9 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
           idempotencyKey,
           prisma: input.prisma,
         });
-        return {
-          retryAt: new Date(
-            sentAt.getTime() + error.retryAfterSeconds * 1000,
-          ).toISOString(),
-          status: "in_flight",
-        };
+        return { status: "already_notified" };
       }
-      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError) {
+      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeUnknownError) {
         await markHostedLinqDeliverySendFailedTx({
           failedAt: sentAt,
           failureCode: error.name,
