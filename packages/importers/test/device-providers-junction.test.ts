@@ -4857,6 +4857,46 @@ test("Junction Apple HealthKit zeroed sleep summary preserves awake and derives 
   );
 });
 
+test("Junction sleep_cycle generic asleep total includes explicit detailed asleep intervals", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-07-08T12:00:00.000Z",
+      summaries: {
+        sleep_cycle: [{
+          id: "apple-healthkit-mixed-generic-detailed-cycle",
+          sourceProviderSlug: "apple_health_kit",
+          sourceType: "unknown",
+          session_start: "2026-07-08T00:00:00+00:00",
+          session_end: "2026-07-08T08:00:00+00:00",
+          stage_start_offset_second: [0, 7200, 10800, 25200],
+          stage_end_offset_second: [7200, 10800, 25200, 28800],
+          stage_type: [-1, 1, 2, 4],
+          time_zone: "UTC",
+          created_at: "2026-07-08T12:00:00+00:00",
+        }],
+      },
+    },
+    { defaultTimeZone: "UTC" },
+  );
+
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  const metricValues = (metric: string) =>
+    observations.filter((event) => event.fields?.metric === metric).map((event) => event.fields?.value);
+  const positiveMetricValues = (metric: string) =>
+    metricValues(metric).filter((value) => typeof value === "number" && value > 0);
+
+  assert.deepEqual(metricValues("sleep-total-minutes"), [420]);
+  assert.deepEqual(positiveMetricValues("sleep-deep-minutes"), [60]);
+  assert.deepEqual(positiveMetricValues("sleep-light-minutes"), [240]);
+  assert.deepEqual(positiveMetricValues("sleep-awake-minutes"), [60]);
+  assert.deepEqual(positiveMetricValues("sleep-rem-minutes"), []);
+  assert.ok(
+    observations
+      .filter((event) => event.fields?.metric === "sleep-total-minutes")
+      .every((event) => event.dataOrigin?.normalizerVersion === "junction-sleep-unspecified-total.v1"),
+  );
+});
+
 test("Junction sleep_cycle direct intervals use timezone for local sleep-stage day", () => {
   const payload = normalizeJunctionSnapshot(
     {

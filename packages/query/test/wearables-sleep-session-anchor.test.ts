@@ -231,6 +231,8 @@ test("daily sleep summary prefers direct WHOOP over zeroed Apple HealthKit dupli
   const date = "2026-07-07";
   const startAt = "2026-07-07T08:17:04.000Z";
   const endAt = "2026-07-07T14:02:56.000Z";
+  const appleStartAt = "2026-07-07T08:17:05.000Z";
+  const appleEndAt = "2026-07-07T14:02:57.000Z";
   const whoopSleepResourceId = "sleep-direct-whoop";
   const appleSleepResourceId = "sleep-healthkit-copy";
   const whoopStageResourceId = "sleep-stage-direct-whoop";
@@ -272,12 +274,12 @@ test("daily sleep summary prefers direct WHOOP over zeroed Apple HealthKit dupli
       makeJunctionSleepSession({
         date,
         durationMinutes: 346,
-        endAt,
+        endAt: appleEndAt,
         entityId: "evt_apple_sleep_window",
         recordedAt: "2026-07-07T18:53:32.000Z",
         resourceId: appleSleepResourceId,
         sourceProviderSlug: "apple-health-kit",
-        startAt,
+        startAt: appleStartAt,
       }),
       whoopMetric("sleep-total-minutes", 327.3667),
       whoopMetric("sleep-efficiency", 94.6511),
@@ -302,6 +304,8 @@ test("daily sleep summary prefers direct WHOOP over zeroed Apple HealthKit dupli
 
   assert.equal(night?.provider, "whoop");
   assert.equal(night?.sleepWindowProvider, "whoop");
+  assert.equal(night?.sleepStartAt, startAt);
+  assert.equal(night?.sleepEndAt, endAt);
   assert.equal(night?.totalSleepMinutes.selection.provider, "whoop");
   assert.equal(night?.totalSleepMinutes.selection.value, 327.3667);
   assert.equal(night?.sleepEfficiency.selection.provider, "whoop");

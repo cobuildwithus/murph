@@ -2227,6 +2227,7 @@ function collectJunctionSleepStageAggregates(
   const buckets = new Map<string, JunctionSleepStageAggregateBucket>();
   const entryAggregates = new Map<string, JunctionSleepStageAggregate>();
   const entryTotalAggregates = new Map<string, JunctionSleepTotalAggregate>();
+  const hasGenericAsleepStage = covered.intervals.some((interval) => interval.stage === "asleep_unspecified");
   const hasDetailedAsleepStage = covered.intervals.some((interval) => isDetailedAsleepStage(interval.stage));
   for (const interval of covered.intervals) {
     const stageTimestamp = withTimestampOverride(interval.timestamp, {
@@ -2248,7 +2249,7 @@ function collectJunctionSleepStageAggregates(
       covered.coverageWindow.startAt,
       covered.coverageWindow.endAt,
     );
-    if (interval.stage === "asleep_unspecified") {
+    if (hasGenericAsleepStage && isSleepTotalStage(interval.stage)) {
       addSleepTotalAggregateDuration(entryTotalAggregates, totalAggregateKey, {
         coverageEndAt: covered.coverageWindow.endAt,
         coverageStartAt: covered.coverageWindow.startAt,
@@ -2262,6 +2263,9 @@ function collectJunctionSleepStageAggregates(
         timestamp: stageTimestamp,
         timeZone: interval.timeZone,
       });
+    }
+
+    if (interval.stage === "asleep_unspecified") {
       continue;
     }
 
@@ -2567,6 +2571,10 @@ function compareSleepStageDisplayPreference(
 
 function isDetailedAsleepStage(stage: JunctionSleepStageValue): stage is Exclude<JunctionSleepStage, "awake"> {
   return stage === "light" || stage === "deep" || stage === "rem";
+}
+
+function isSleepTotalStage(stage: JunctionSleepStageValue): boolean {
+  return stage !== "awake";
 }
 
 function sleepStageTimeZonePreference(timeZone: string | undefined): number {

@@ -454,9 +454,28 @@ function sleepWindowsRepresentSameWindow(
   left: WearableSleepWindowCandidate,
   right: WearableSleepWindowCandidate,
 ): boolean {
-  return left.startAt === right.startAt &&
-    left.endAt === right.endAt &&
-    Math.abs(left.durationMinutes - right.durationMinutes) <= resolveMetricTolerance("sessionMinutes");
+  const toleranceMinutes = resolveMetricTolerance("sessionMinutes");
+  return timestampsWithinMinutes(left.startAt, right.startAt, toleranceMinutes) &&
+    timestampsWithinMinutes(left.endAt, right.endAt, toleranceMinutes) &&
+    Math.abs(left.durationMinutes - right.durationMinutes) <= toleranceMinutes;
+}
+
+function timestampsWithinMinutes(
+  left: string | null | undefined,
+  right: string | null | undefined,
+  toleranceMinutes: number,
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (!Number.isFinite(leftMs) || !Number.isFinite(rightMs)) {
+    return left === right;
+  }
+
+  return Math.abs(leftMs - rightMs) / 60000 <= toleranceMinutes;
 }
 
 function collectInvalidZeroSleepSummaryProviders(
