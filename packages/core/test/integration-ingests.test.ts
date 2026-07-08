@@ -22,6 +22,8 @@ import {
   MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES,
   readIntegrationIngestById,
   readIntegrationIngestEntries,
+  runCanonicalWrite,
+  stageIntegrationIngestAppendPlan,
   validateVault,
   VaultError,
 } from "../src/index.ts";
@@ -463,10 +465,11 @@ test("integration ingest gzip archive reader rejects oversized compressed files"
   );
 });
 
-test("integration ingest append plans refuse new rows for archived months", async () => {
+test("integration ingest append plans require opt-in before amending archived months", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-archive-append");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
 
+  const logicalPath = "ledger/integration-ingests/2025/2025-12.jsonl";
   const archivedRecord = makeIntegrationIngestRecord({
     id: "xfm_ArchivedAppend1",
     eventId: "evt_ArchivedAppend1",
@@ -474,7 +477,7 @@ test("integration ingest append plans refuse new rows for archived months", asyn
   });
   await writeIntegrationIngestZipArchive(
     vaultRoot,
-    "ledger/integration-ingests/2025/2025-12.jsonl",
+    logicalPath,
     [archivedRecord],
   );
 
@@ -510,6 +513,35 @@ test("integration ingest append plans refuse new rows for archived months", asyn
       return true;
     },
   );
+
+  const amendmentPlan = await buildIntegrationIngestAppendPlan(
+    vaultRoot,
+    [newArchivedMonthRecord],
+    { allowArchivedShardAmendments: true },
+  );
+  assert.deepEqual(amendmentPlan.appendedIds, ["xfm_ArchivedAppend2"]);
+  assert.deepEqual(amendmentPlan.archivedAmendmentShardPaths, [logicalPath]);
+  assert.deepEqual([...amendmentPlan.payloads.keys()], [logicalPath]);
+
+  await runCanonicalWrite({
+    vaultRoot,
+    operationType: "integration_ingest_archive_amend",
+    summary: "amend archived integration ingest shard",
+    mutate: async ({ batch }) => {
+      await stageIntegrationIngestAppendPlan(batch, amendmentPlan);
+    },
+  });
+
+  await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+  await fs.access(path.join(vaultRoot, `${logicalPath}.zip`));
+  assert.deepEqual(
+    (await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id),
+    ["xfm_ArchivedAppend1", "xfm_ArchivedAppend2"],
+  );
+  assert.deepEqual(
+    (await listIntegrationIngestsForEvent(vaultRoot, "evt_ArchivedAppend2")).map((entry) => entry.record.id),
+    ["xfm_ArchivedAppend2"],
+  );
 });
 
 test("generic JSONL append paths refuse archived integration ingest shards", async () => {
@@ -538,6 +570,57 @@ test("generic JSONL append paths refuse archived integration ingest shards", asy
     },
   );
   await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+});
+
+test("integration ingest archive amendments roll back with canonical write batches", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-archive-rollback");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-01.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_RollbackArchivedAppend1",
+    eventId: "evt_RollbackArchivedAppend1",
+    importedAt: "2025-01-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [archivedRecord]);
+
+  const newRecord = makeIntegrationIngestRecord({
+    id: "xfm_RollbackArchivedAppend2",
+    eventId: "evt_RollbackArchivedAppend2",
+    importedAt: "2025-01-13T09:00:00.000Z",
+  });
+  const amendmentPlan = await buildIntegrationIngestAppendPlan(
+    vaultRoot,
+    [newRecord],
+    { allowArchivedShardAmendments: true },
+  );
+  const conflictPath = "bank/archive-rollback-conflict.md";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, conflictPath)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, conflictPath), "existing\n", "utf8");
+
+  await assert.rejects(
+    runCanonicalWrite({
+      vaultRoot,
+      operationType: "integration_ingest_archive_amend_rollback",
+      summary: "roll back archived integration ingest amendment",
+      mutate: async ({ batch }) => {
+        await stageIntegrationIngestAppendPlan(batch, amendmentPlan);
+        await batch.stageTextWrite(conflictPath, "replacement\n", { overwrite: false });
+      },
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "VAULT_FILE_EXISTS");
+      return true;
+    },
+  );
+
+  await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+  assert.deepEqual(
+    (await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id),
+    ["xfm_RollbackArchivedAppend1"],
+  );
+  assert.equal(await fs.readFile(path.join(vaultRoot, conflictPath), "utf8"), "existing\n");
 });
 
 test("hosted JSONL receipt replay refuses archived integration ingest shards", async () => {
@@ -594,6 +677,71 @@ test("hosted JSONL receipt replay refuses archived integration ingest shards", a
     },
   );
   await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+});
+
+test("hosted JSONL receipt replay can amend archived integration ingest shards when opted in", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-hosted-replay-archive-amend");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2024/2024-12.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_HostedArchivedReplayAmend1",
+    eventId: "evt_HostedArchivedReplayAmend1",
+    importedAt: "2024-12-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [archivedRecord]);
+
+  const newRecord = makeIntegrationIngestRecord({
+    id: "xfm_HostedArchivedReplayAmend2",
+    eventId: "evt_HostedArchivedReplayAmend2",
+    importedAt: "2024-12-13T09:00:00.000Z",
+  });
+  const basePayload = `${JSON.stringify(archivedRecord)}\n`;
+  const baseSha256 = createHash("sha256").update(basePayload).digest("hex");
+  const appendPayload = `${JSON.stringify(newRecord)}\n`;
+  const appendSha256 = createHash("sha256").update(appendPayload).digest("hex");
+  const receipt = {
+    schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+    operationId: "op_hosted_integration_archive_replay_amend",
+    operationType: "hosted_integration_archive_replay_amend",
+    summary: "amend archived integration ingest replay",
+    createdAt: "2026-03-01T00:00:00.000Z",
+    updatedAt: "2026-03-01T00:00:00.000Z",
+    occurredAt: "2026-03-01T00:00:00.000Z",
+    committedAt: "2026-03-01T00:00:00.000Z",
+    actions: [{
+      kind: "jsonl_append",
+      targetRelativePath: logicalPath,
+      appendSha256,
+      appendByteLength: Buffer.byteLength(appendPayload),
+      baseSha256,
+      baseByteLength: Buffer.byteLength(basePayload),
+      originalSize: Buffer.byteLength(basePayload),
+      allowArchivedIntegrationIngestAmendment: true,
+      contentRef: {
+        sha256: appendSha256,
+        byteSize: Buffer.byteLength(appendPayload),
+      },
+    }],
+  } satisfies Parameters<typeof applyHostedCanonicalWriteReceipt>[0]["receipt"];
+
+  await applyHostedCanonicalWriteReceipt({
+    vaultRoot,
+    readPayload: async () => Buffer.from(appendPayload, "utf8"),
+    receipt,
+  });
+  await applyHostedCanonicalWriteReceipt({
+    vaultRoot,
+    readPayload: async () => Buffer.from(appendPayload, "utf8"),
+    receipt,
+  });
+
+  await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+  await fs.access(path.join(vaultRoot, `${logicalPath}.zip`));
+  assert.deepEqual(
+    (await readIntegrationIngestEntries(vaultRoot)).map((entry) => entry.record.id),
+    ["xfm_HostedArchivedReplayAmend1", "xfm_HostedArchivedReplayAmend2"],
+  );
 });
 
 test("generic canonical writes cannot overwrite or delete integration ingest archives", async () => {

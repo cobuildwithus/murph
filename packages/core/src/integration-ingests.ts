@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
-import { createGunzip, crc32, inflateRawSync } from "node:zlib";
+import { createGunzip, crc32, deflateRawSync, gzipSync, inflateRawSync } from "node:zlib";
 
 import {
   integrationIngestReceiptSchema,
@@ -14,6 +14,7 @@ import {
   type IntegrationIngestRecord,
 } from "@murphai/contracts";
 
+import { writeFileAtomic } from "./atomic-write.ts";
 import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
 import { pathExists, walkVaultFiles } from "./fs.ts";
@@ -53,9 +54,37 @@ export interface BuildIntegrationIngestRecordInput {
 }
 
 export interface IntegrationIngestAppendPlan {
+  archivedAmendmentShardPaths: string[];
   appendedIds: string[];
   payloads: Map<string, string>;
   targetShardPaths: string[];
+}
+
+export interface BuildIntegrationIngestAppendPlanOptions {
+  allowArchivedShardAmendments?: boolean;
+}
+
+export interface ArchivedIntegrationIngestShardText {
+  content: string;
+}
+
+export interface AppendArchivedIntegrationIngestShardInput {
+  expectedBaseByteLength?: number;
+  expectedBaseSha256?: string;
+  payload: string;
+  targetRelativePath: string;
+  vaultRoot: string;
+}
+
+export interface AppendArchivedIntegrationIngestShardResult {
+  originalSize: number;
+}
+
+export interface TruncateArchivedIntegrationIngestShardInput {
+  expectedBaseByteLength: number;
+  expectedBaseSha256: string;
+  targetRelativePath: string;
+  vaultRoot: string;
 }
 
 export interface StoredIntegrationIngestEntry {
@@ -323,6 +352,7 @@ async function readIntegrationIngestEntriesByIdFromSources(
 export async function buildIntegrationIngestAppendPlan(
   vaultRoot: string,
   records: readonly IntegrationIngestRecord[],
+  options: BuildIntegrationIngestAppendPlanOptions = {},
 ): Promise<IntegrationIngestAppendPlan> {
   const targetShardPaths = [
     ...new Set(records.map((record) => integrationIngestShardPath(record.importedAt))),
@@ -340,6 +370,7 @@ export async function buildIntegrationIngestAppendPlan(
     ),
   );
   const pendingById = new Map<string, IntegrationIngestRecord>();
+  const archivedAmendmentShardPaths = new Set<string>();
   const payloads = new Map<string, string>();
   const appendedIds: string[] = [];
 
@@ -361,11 +392,14 @@ export async function buildIntegrationIngestAppendPlan(
     appendedIds.push(record.id);
     const relativePath = integrationIngestShardPath(record.importedAt);
     if (archivedTargets.has(relativePath)) {
-      throw new VaultError(
-        "INTEGRATION_INGEST_SHARD_ARCHIVED",
-        `Integration ingest shard "${relativePath}" is archived and cannot be appended.`,
-        { ingestId: record.id, relativePath },
-      );
+      if (!options.allowArchivedShardAmendments) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_SHARD_ARCHIVED",
+          `Integration ingest shard "${relativePath}" is archived and cannot be appended.`,
+          { ingestId: record.id, relativePath },
+        );
+      }
+      archivedAmendmentShardPaths.add(relativePath);
     }
     const rowPayload = `${JSON.stringify(record)}\n`;
     const rowPayloadBytes = Buffer.byteLength(rowPayload, "utf8");
@@ -379,7 +413,12 @@ export async function buildIntegrationIngestAppendPlan(
     payloads.set(relativePath, `${payloads.get(relativePath) ?? ""}${rowPayload}`);
   }
 
-  return { appendedIds, payloads, targetShardPaths };
+  return {
+    archivedAmendmentShardPaths: [...archivedAmendmentShardPaths].sort(),
+    appendedIds,
+    payloads,
+    targetShardPaths,
+  };
 }
 
 export async function parseIntegrationIngestAppendPayload(
@@ -407,15 +446,147 @@ export async function parseIntegrationIngestAppendPayload(
 }
 
 export async function stageIntegrationIngestAppendPlan(
-  batch: { stageJsonlAppend(relativePath: string, content: string): Promise<string> },
+  batch: {
+    stageJsonlAppend(
+      relativePath: string,
+      content: string,
+      options?: { allowArchivedIntegrationIngestAmendment?: boolean },
+    ): Promise<string>;
+  },
   plan: IntegrationIngestAppendPlan,
 ): Promise<void> {
+  const archivedAmendmentShardPaths = new Set(plan.archivedAmendmentShardPaths);
   for (const relativePath of [...plan.payloads.keys()].sort()) {
     const payload = plan.payloads.get(relativePath);
     if (payload) {
-      await batch.stageJsonlAppend(relativePath, payload);
+      await batch.stageJsonlAppend(relativePath, payload, {
+        allowArchivedIntegrationIngestAmendment: archivedAmendmentShardPaths.has(relativePath),
+      });
     }
   }
+}
+
+export async function readArchivedIntegrationIngestShardText(
+  vaultRoot: string,
+  logicalPath: string,
+): Promise<ArchivedIntegrationIngestShardText | null> {
+  const [source] = await listIntegrationIngestRowSourcesForLogicalPaths(vaultRoot, [logicalPath]);
+  if (!source || source.kind === "jsonl") {
+    return null;
+  }
+
+  return {
+    content: await readIntegrationIngestSourceText(vaultRoot, source),
+  };
+}
+
+export async function appendArchivedIntegrationIngestShard({
+  expectedBaseByteLength,
+  expectedBaseSha256,
+  payload,
+  targetRelativePath,
+  vaultRoot,
+}: AppendArchivedIntegrationIngestShardInput): Promise<AppendArchivedIntegrationIngestShardResult> {
+  const source = await readArchivedIntegrationIngestShardSource(vaultRoot, targetRelativePath);
+  const baseContent = await readIntegrationIngestSourceText(vaultRoot, source);
+  const baseBytes = Buffer.from(baseContent, "utf8");
+  const payloadBytes = Buffer.from(payload, "utf8");
+  const records = await parseIntegrationIngestAppendPayload(payload, targetRelativePath);
+
+  if ((expectedBaseByteLength === undefined) !== (expectedBaseSha256 === undefined)) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
+      `Integration ingest archive "${source.sourcePath}" append receipt base is incomplete.`,
+      { relativePath: source.sourcePath },
+    );
+  }
+
+  if (expectedBaseByteLength !== undefined && expectedBaseSha256 !== undefined) {
+    const baseSlice = baseBytes.subarray(0, expectedBaseByteLength);
+    const baseSliceSha256 = createHash("sha256").update(baseSlice).digest("hex");
+    if (baseSlice.byteLength !== expectedBaseByteLength || baseSliceSha256 !== expectedBaseSha256) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
+        `Integration ingest archive "${source.sourcePath}" base content does not match the append receipt.`,
+        { relativePath: source.sourcePath },
+      );
+    }
+
+    if (baseBytes.byteLength > expectedBaseByteLength) {
+      const appendedEnd = expectedBaseByteLength + payloadBytes.byteLength;
+      if (
+        baseBytes.byteLength >= appendedEnd &&
+        baseBytes.subarray(expectedBaseByteLength, appendedEnd).equals(payloadBytes)
+      ) {
+        return {
+          originalSize: expectedBaseByteLength,
+        };
+      }
+
+      throw new VaultError(
+        "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
+        `Integration ingest archive "${source.sourcePath}" changed after the append receipt base.`,
+        { relativePath: source.sourcePath },
+      );
+    }
+  }
+
+  if (baseContent.length > 0 && !baseContent.endsWith("\n")) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_INVALID",
+      `Integration ingest archive "${source.sourcePath}" is not newline-terminated.`,
+      { relativePath: source.sourcePath },
+    );
+  }
+
+  const appendPlan = await buildIntegrationIngestAppendPlan(vaultRoot, records, {
+    allowArchivedShardAmendments: true,
+  });
+  const appendPayload = appendPlan.payloads.get(targetRelativePath);
+  const originalSize = expectedBaseByteLength ?? baseBytes.byteLength;
+  if (!appendPayload) {
+    return {
+      originalSize,
+    };
+  }
+
+  await writeIntegrationIngestArchiveText(vaultRoot, source, `${baseContent}${appendPayload}`);
+  return {
+    originalSize,
+  };
+}
+
+export async function truncateArchivedIntegrationIngestShard({
+  expectedBaseByteLength,
+  expectedBaseSha256,
+  targetRelativePath,
+  vaultRoot,
+}: TruncateArchivedIntegrationIngestShardInput): Promise<void> {
+  const source = await readArchivedIntegrationIngestShardSource(vaultRoot, targetRelativePath);
+  const content = await readIntegrationIngestSourceText(vaultRoot, source);
+  const contentBytes = Buffer.from(content, "utf8");
+  if (contentBytes.byteLength < expectedBaseByteLength) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
+      `Integration ingest archive "${source.sourcePath}" is smaller than the rollback base.`,
+      { relativePath: source.sourcePath },
+    );
+  }
+
+  const baseBytes = contentBytes.subarray(0, expectedBaseByteLength);
+  const baseSha256 = createHash("sha256").update(baseBytes).digest("hex");
+  if (baseSha256 !== expectedBaseSha256) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_BASE_MISMATCH",
+      `Integration ingest archive "${source.sourcePath}" base content does not match the rollback receipt.`,
+      { relativePath: source.sourcePath },
+    );
+  }
+
+  if (contentBytes.byteLength === expectedBaseByteLength) {
+    return;
+  }
+  await writeIntegrationIngestArchiveText(vaultRoot, source, baseBytes.toString("utf8"));
 }
 
 export async function listIntegrationIngestsForEvent(
@@ -531,14 +702,11 @@ async function openIntegrationIngestLineStream(
   vaultRoot: string,
   source: IntegrationIngestRowSource,
 ): Promise<NodeJS.ReadableStream> {
-  const absolutePath = resolveVaultPath(vaultRoot, source.sourcePath).absolutePath;
   if (source.kind === "jsonl") {
+    const absolutePath = resolveVaultPath(vaultRoot, source.sourcePath).absolutePath;
     return createReadStream(absolutePath, { encoding: "utf8" });
   }
-  if (source.kind === "gzip") {
-    return Readable.from([await readGzippedIntegrationIngestJsonlText(absolutePath, source.sourcePath)]);
-  }
-  return Readable.from([await readZippedIntegrationIngestJsonlText(vaultRoot, source)]);
+  return Readable.from([await readIntegrationIngestSourceText(vaultRoot, source)]);
 }
 
 async function listIntegrationIngestRowSources(
@@ -595,6 +763,66 @@ function integrationIngestRowSourceFromPath(sourcePath: string): IntegrationInge
     logicalPath: sourcePath,
     sourcePath,
   };
+}
+
+async function readArchivedIntegrationIngestShardSource(
+  vaultRoot: string,
+  logicalPath: string,
+): Promise<IntegrationIngestRowSource> {
+  const [source] = await listIntegrationIngestRowSourcesForLogicalPaths(vaultRoot, [logicalPath]);
+  if (!source || source.kind === "jsonl") {
+    throw new VaultError(
+      "INTEGRATION_INGEST_SHARD_ARCHIVED",
+      `Integration ingest shard "${logicalPath}" is not archived.`,
+      { relativePath: logicalPath },
+    );
+  }
+  return source;
+}
+
+async function readIntegrationIngestSourceText(
+  vaultRoot: string,
+  source: IntegrationIngestRowSource,
+): Promise<string> {
+  const absolutePath = resolveVaultPath(vaultRoot, source.sourcePath).absolutePath;
+  if (source.kind === "jsonl") {
+    return readFile(absolutePath, "utf8");
+  }
+  if (source.kind === "gzip") {
+    return readGzippedIntegrationIngestJsonlText(absolutePath, source.sourcePath);
+  }
+  return readZippedIntegrationIngestJsonlText(vaultRoot, source);
+}
+
+async function writeIntegrationIngestArchiveText(
+  vaultRoot: string,
+  source: IntegrationIngestRowSource,
+  content: string,
+): Promise<void> {
+  if (source.kind === "jsonl") {
+    throw new VaultError(
+      "INTEGRATION_INGEST_SHARD_ARCHIVED",
+      `Integration ingest shard "${source.logicalPath}" is not archived.`,
+      { relativePath: source.logicalPath },
+    );
+  }
+
+  const archivePath = resolveVaultPath(vaultRoot, source.sourcePath).absolutePath;
+  if (source.kind === "gzip") {
+    const archive = gzipSync(content);
+    assertIntegrationIngestArchiveReplacementSize(content, archive, source.sourcePath);
+    await writeFileAtomic(archivePath, archive);
+    return;
+  }
+  const archive = createSingleEntryIntegrationIngestZipArchive(
+    source.logicalPath.split("/").at(-1) ?? "",
+    content,
+  );
+  assertIntegrationIngestArchiveReplacementSize(content, archive, source.sourcePath);
+  await writeFileAtomic(
+    archivePath,
+    archive,
+  );
 }
 
 function sortIntegrationIngestRowSources(
@@ -948,6 +1176,78 @@ function assertZipReadableRange(
 
 function zipEntryBaseName(name: string): string {
   return name.split("/").at(-1) ?? name;
+}
+
+function assertIntegrationIngestArchiveReplacementSize(
+  content: string,
+  archive: Buffer,
+  relativePath: string,
+): void {
+  const entryBytes = Buffer.byteLength(content, "utf8");
+  if (entryBytes > MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE",
+      `Integration ingest archive "${relativePath}" exceeds the ${MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES}-byte uncompressed size limit.`,
+      { byteSize: entryBytes, relativePath },
+    );
+  }
+  if (archive.byteLength > MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE",
+      `Integration ingest archive "${relativePath}" exceeds the ${MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES}-byte compressed size limit.`,
+      { byteSize: archive.byteLength, relativePath },
+    );
+  }
+}
+
+function createSingleEntryIntegrationIngestZipArchive(
+  fileName: string,
+  content: string,
+): Buffer {
+  const fileNameBytes = Buffer.from(fileName, "utf8");
+  if (fileNameBytes.byteLength === 0 || fileNameBytes.byteLength > 0xffff) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_UNSUPPORTED",
+      "Integration ingest ZIP archive entry name is unsupported.",
+    );
+  }
+
+  const contentBytes = Buffer.from(content, "utf8");
+  const compressed = deflateRawSync(contentBytes);
+  const contentCrc32 = crc32(contentBytes) >>> 0;
+  const localHeader = Buffer.alloc(30 + fileNameBytes.byteLength);
+  localHeader.writeUInt32LE(ZIP_LOCAL_FILE_HEADER_SIGNATURE, 0);
+  localHeader.writeUInt16LE(20, 4);
+  localHeader.writeUInt16LE(0, 6);
+  localHeader.writeUInt16LE(8, 8);
+  localHeader.writeUInt32LE(contentCrc32, 14);
+  localHeader.writeUInt32LE(compressed.byteLength, 18);
+  localHeader.writeUInt32LE(contentBytes.byteLength, 22);
+  localHeader.writeUInt16LE(fileNameBytes.byteLength, 26);
+  fileNameBytes.copy(localHeader, 30);
+
+  const centralDirectoryOffset = localHeader.byteLength + compressed.byteLength;
+  const centralDirectory = Buffer.alloc(46 + fileNameBytes.byteLength);
+  centralDirectory.writeUInt32LE(ZIP_CENTRAL_DIRECTORY_SIGNATURE, 0);
+  centralDirectory.writeUInt16LE(20, 4);
+  centralDirectory.writeUInt16LE(20, 6);
+  centralDirectory.writeUInt16LE(0, 8);
+  centralDirectory.writeUInt16LE(8, 10);
+  centralDirectory.writeUInt32LE(contentCrc32, 16);
+  centralDirectory.writeUInt32LE(compressed.byteLength, 20);
+  centralDirectory.writeUInt32LE(contentBytes.byteLength, 24);
+  centralDirectory.writeUInt16LE(fileNameBytes.byteLength, 28);
+  centralDirectory.writeUInt32LE(0, 42);
+  fileNameBytes.copy(centralDirectory, 46);
+
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(ZIP_EOCD_SIGNATURE, 0);
+  eocd.writeUInt16LE(1, 8);
+  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt32LE(centralDirectory.byteLength, 12);
+  eocd.writeUInt32LE(centralDirectoryOffset, 16);
+
+  return Buffer.concat([localHeader, compressed, centralDirectory, eocd]);
 }
 
 function isZlibMaxOutputLengthError(error: unknown): boolean {
