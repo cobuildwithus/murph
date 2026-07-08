@@ -128,6 +128,9 @@ import {
   reconcileHostedThreadContainerParticipants,
 } from "@/src/lib/hosted-groups/group-tool";
 import {
+  filterHostedRuntimeGroupToolResponseProjectionScopes,
+} from "@/src/lib/hosted-groups/group-tool-scope-filter";
+import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareActivityDistanceProjectionScope,
   buildHostedVaultShareActivityMinutesProjectionScope,
@@ -603,6 +606,77 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.revokeHostedGroupMemberEmailShareTx).not.toHaveBeenCalled();
+  });
+});
+
+describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
+  const groupWithSelectorScopes = {
+    ...GROUP_SUMMARY,
+    members: [{
+      grantedVaultShareProjectionKinds: [
+        "sleep-times.v0" as const,
+        RUNNING_DISTANCE_SCOPE.projectionKind,
+      ],
+      grantedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
+      handle: "+15551234567",
+      memberId: "member_runner",
+      role: "member",
+    }],
+    requestedVaultShareProjectionKinds: [
+      "sleep-times.v0" as const,
+      RUNNING_DISTANCE_SCOPE.projectionKind,
+    ],
+    requestedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
+  };
+
+  it("hides unsupported selector scopes from legacy group-tool callers", () => {
+    const filtered = filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "read_current",
+      result: {
+        group: groupWithSelectorScopes,
+        status: "ok",
+      },
+    }, new Set([buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE)]));
+
+    expect(filtered).toEqual({
+      action: "read_current",
+      result: {
+        group: {
+          ...groupWithSelectorScopes,
+          members: [{
+            ...groupWithSelectorScopes.members[0],
+            grantedVaultShareProjectionKinds: ["sleep-times.v0"],
+            grantedVaultShareProjectionScopes: [SLEEP_SCOPE],
+          }],
+          requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+          requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+        },
+        status: "ok",
+      },
+    });
+  });
+
+  it("keeps selector scopes for current group-tool callers", () => {
+    const filtered = filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "create_join_link",
+      result: {
+        group: groupWithSelectorScopes,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "ok",
+      },
+    }, new Set([
+      buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE),
+      buildHostedVaultShareProjectionScopeKey(RUNNING_DISTANCE_SCOPE),
+    ]));
+
+    expect(filtered).toEqual({
+      action: "create_join_link",
+      result: {
+        group: groupWithSelectorScopes,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "ok",
+      },
+    });
   });
 });
 

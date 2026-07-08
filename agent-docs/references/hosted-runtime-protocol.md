@@ -160,13 +160,13 @@ Selector-scoped vault-share additions span two independent surfaces:
 The group-tool schema is bundled into the runner and parsed by web. Scope
 registry widenings on that path are therefore web-first deploys: web must know
 how to parse the new group-tool request/response scopes before a runner bundle
-exposes them to the model. Do not roll the runner behind the parser/schema once
-new grants can appear in `read_current` group summaries unless the response path
-has explicit supported-scope filtering or the new grants have been removed.
-For runner deploys that expose new group-tool selector scopes,
-`container_rollout=immediate` is required in environments that may route group
-turns to warm old runner bundles; otherwise old bundles can parse a current
-group summary after new grants exist and fail closed.
+exposes them to the model. New runners must also send repeated
+`supportedProjectionScope` query params on the group-tool callback. Web filters
+`requestedVaultShareProjectionScopes`, `grantedVaultShareProjectionScopes`, and
+the legacy projection-kind arrays in group summaries to the declared exact scope
+set. Warm old runners that omit `supportedProjectionScope` receive only the
+pre-distance/count response scope set, so `container_rollout=immediate` is not
+required for parser safety on the group-summary path.
 
 The active-scope delivery callback is separately capability-negotiated. New
 runner bundles must send repeated `supportedProjectionScope` query params for
@@ -186,7 +186,9 @@ support.
 Rollback floor: after web has accepted distance/count grants, rolling web behind
 the projection-scope parser that knows those rows can make old web code unable
 to read or serve the stored scope keys. Roll back web to a build with this
-parser or newer, or remove the new grants before rolling web behind it.
+parser and group-summary filtering or newer, or remove the new grants before
+rolling web behind it. Runner rollback is allowed only while web stays at this
+build or newer; old runners will not see or deliver unsupported selector scopes.
 
 ## Current Protocol
 
