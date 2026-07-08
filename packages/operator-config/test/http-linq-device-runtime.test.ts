@@ -348,7 +348,6 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
           url: 'https://cdn.example.test/dead-bug/finish.png',
         },
       ],
-      reply_to: { message_id: 'reply-1' },
     },
   })
 })
@@ -1221,7 +1220,7 @@ test('linq runtime records safe request and response diagnostics for provider ht
           'Linq request POST /chats/[chat]/messages failed with HTTP 400.' &&
         error.context?.path === '/chats/[chat]/messages' &&
         error.context?.requestBodyShape ===
-          'object:message|message:idempotency_key,parts,reply_to' &&
+          'object:message|message:idempotency_key,parts' &&
         error.context?.requestMessageLength === 'hello reminder'.length &&
         error.context?.requestMessagePartCount === 1 &&
         error.context?.responseBodyKind === 'json_object' &&

@@ -536,7 +536,6 @@ function buildHostedLinqTextMessageBody(input: {
   replyToMessageId?: string | null;
 }): MessageSendParams {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey);
-  const replyToMessageId = normalizeNullableString(input.replyToMessageId);
   const textPart: TextPart = {
     type: "text",
     value: normalizeRequiredString(input.message, "message"),
@@ -550,13 +549,6 @@ function buildHostedLinqTextMessageBody(input: {
       ...(idempotencyKey
         ? {
             idempotency_key: idempotencyKey,
-          }
-        : {}),
-      ...(replyToMessageId
-        ? {
-            reply_to: {
-              message_id: replyToMessageId,
-            },
           }
         : {}),
     },
