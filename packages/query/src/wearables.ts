@@ -29,6 +29,13 @@ import {
 import { buildWearableSourceHealth } from "./wearables/source-health.ts";
 import { resolveWearablePublicSourceProvider, wearableDataOriginKey } from "./wearables/origin.ts";
 import {
+  isAppleHealthKitSleepCandidate,
+  sleepMetricAssociatedWithWindow,
+  sleepMetricMatchesNonSelectedWindow,
+  sleepMetricMatchesWindow,
+  sleepWindowsRepresentSameWindow,
+} from "./wearables/sleep-association.ts";
+import {
   buildCandidateId,
   collectLatestDate,
   collectSortedDatesDesc,
@@ -302,62 +309,6 @@ const ASLEEP_STAGE_TOTAL_METRICS: readonly WearableMetricKey[] = [
   "lightMinutes",
   "remMinutes",
 ];
-const APPLE_HEALTH_KIT_PROVIDER = "apple-health-kit";
-const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
-const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
-const INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS = new Map<WearableMetricKey, string>([
-  ["totalSleepMinutes", "total-sleep-minutes"],
-  ["sleepEfficiency", "sleep-efficiency"],
-  ["deepMinutes", "deep-sleep-minutes"],
-  ["lightMinutes", "sleep-light-minutes"],
-  ["remMinutes", "rem-sleep-minutes"],
-]);
-const INVALID_ZERO_SLEEP_METRICS = new Set<string>(INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS.keys());
-
-interface InvalidZeroSleepWindow {
-  recordIds: ReadonlySet<string>;
-  window: WearableSleepWindowCandidate;
-}
-
-export interface WearableMetricRecordSuppressionEvidence {
-  date: string;
-  metricKey: string;
-  recordIds: readonly string[];
-}
-
-export function collectWearableSleepMetricSuppressionEvidenceFromDataset(
-  dataset: WearableDataset,
-): WearableMetricRecordSuppressionEvidence[] {
-  const metricCandidatesByDate = groupMetricCandidatesByDate(
-    dataset.metricCandidates.filter((candidate) => metricSetHas(SLEEP_METRIC_KEYS, candidate.metric)),
-  );
-  const sleepWindowsByDate = groupSleepWindowsByDate(dataset.sleepWindows);
-  const dates = collectSortedDatesDesc([
-    ...metricCandidatesByDate.keys(),
-    ...sleepWindowsByDate.keys(),
-  ]);
-
-  return dates.flatMap((date) => {
-    const dateCandidates = metricCandidatesByDate.get(date) ?? [];
-    const invalidZeroSleepWindows = collectInvalidZeroSleepSummaryWindows(
-      dateCandidates,
-      sleepWindowsByDate.get(date) ?? [],
-    );
-    if (invalidZeroSleepWindows.length === 0) {
-      return [];
-    }
-
-    return [...INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS.entries()].flatMap(([metric, metricKey]) => {
-      const recordIds = uniqueStrings(
-        selectMetricCandidates(dateCandidates, metric)
-          .filter((candidate) => isInvalidZeroSleepMetricCandidate(candidate, metric, invalidZeroSleepWindows))
-          .flatMap((candidate) => candidate.recordIds),
-      );
-
-      return recordIds.length > 0 ? [{ date, metricKey, recordIds }] : [];
-    });
-  });
-}
 
 function buildDerivedTotalSleepCandidates(
   date: string,
@@ -456,27 +407,15 @@ function selectSleepMetricCandidates(
   return selectSleepWindowMetricCandidates(selectMetricCandidates(candidates, metric), selectedWindow, sleepWindows);
 }
 
-function selectValidSleepMetricCandidates(
+function selectPreferredSleepMetricCandidates(
   candidates: readonly WearableMetricCandidate[],
   metric: WearableMetricKey,
   selectedWindow: WearableSleepWindowCandidate | null,
   sleepWindows: readonly WearableSleepWindowCandidate[],
-  invalidZeroWindows: readonly InvalidZeroSleepWindow[],
 ): WearableMetricCandidate[] {
-  const validMetricCandidates = selectMetricCandidates(candidates, metric)
-    .filter((candidate) => !isInvalidZeroSleepMetricCandidate(candidate, metric, invalidZeroWindows));
-  const selectedCandidates = selectSleepWindowMetricCandidates(validMetricCandidates, selectedWindow, sleepWindows);
-  return preferDirectSleepMetricCandidates(selectedCandidates);
-}
-
-function isInvalidZeroSleepMetricCandidate(
-  candidate: WearableMetricCandidate,
-  metric: string,
-  invalidZeroWindows: readonly InvalidZeroSleepWindow[],
-): boolean {
-  return INVALID_ZERO_SLEEP_METRICS.has(metric) &&
-    candidate.value === 0 &&
-    invalidZeroWindows.some((entry) => candidate.recordIds.some((recordId) => entry.recordIds.has(recordId)));
+  return preferDirectSleepMetricCandidates(
+    selectSleepMetricCandidates(candidates, metric, selectedWindow, sleepWindows),
+  );
 }
 
 function preferDirectSleepMetricCandidates(
@@ -504,176 +443,6 @@ function preferDirectSleepWindows(
   );
 }
 
-function sleepWindowsRepresentSameWindow(
-  left: WearableSleepWindowCandidate,
-  right: WearableSleepWindowCandidate,
-): boolean {
-  const toleranceMinutes = resolveMetricTolerance("sessionMinutes");
-  return timestampsWithinMinutes(left.startAt, right.startAt, toleranceMinutes) &&
-    timestampsWithinMinutes(left.endAt, right.endAt, toleranceMinutes) &&
-    Math.abs(left.durationMinutes - right.durationMinutes) <= toleranceMinutes;
-}
-
-function timestampsWithinMinutes(
-  left: string | null | undefined,
-  right: string | null | undefined,
-  toleranceMinutes: number,
-): boolean {
-  if (!left || !right) {
-    return left === right;
-  }
-
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-  if (!Number.isFinite(leftMs) || !Number.isFinite(rightMs)) {
-    return left === right;
-  }
-
-  return Math.abs(leftMs - rightMs) / 60000 <= toleranceMinutes;
-}
-
-function collectInvalidZeroSleepSummaryWindows(
-  candidates: readonly WearableMetricCandidate[],
-  sleepWindows: readonly WearableSleepWindowCandidate[],
-): InvalidZeroSleepWindow[] {
-  const invalidWindows: InvalidZeroSleepWindow[] = [];
-
-  for (const window of sleepWindows) {
-    const provider = resolveSleepCandidateProvider(window);
-    if (provider !== APPLE_HEALTH_KIT_PROVIDER) {
-      continue;
-    }
-
-    const windowCandidates = candidates.filter((candidate) => sleepMetricAssociatedWithWindow(candidate, window));
-    const awakeMinutes = firstPositiveMetricValue(windowCandidates, "awakeMinutes");
-    const invalidZeroTotalCandidates = collectInvalidZeroSleepTotalCandidates(windowCandidates, window);
-    const invalidZeroCandidates = collectInvalidZeroSleepMetricCandidates(
-      windowCandidates,
-      window,
-      invalidZeroTotalCandidates,
-    );
-    if (
-      invalidZeroTotalCandidates.length === 0 ||
-      awakeMinutes === null ||
-      window.durationMinutes <= awakeMinutes + 1
-    ) {
-      continue;
-    }
-
-    invalidWindows.push({
-      recordIds: new Set(invalidZeroCandidates.flatMap((candidate) => candidate.recordIds)),
-      window,
-    });
-  }
-
-  return invalidWindows;
-}
-
-function collectInvalidZeroSleepTotalCandidates(
-  candidates: readonly WearableMetricCandidate[],
-  window: WearableSleepWindowCandidate,
-): WearableMetricCandidate[] {
-  return candidates.filter((candidate) =>
-    candidate.metric === "totalSleepMinutes" &&
-    candidate.value === 0 &&
-    isInvalidZeroSleepSummaryOwnedCandidate(candidate, window)
-  );
-}
-
-function collectInvalidZeroSleepMetricCandidates(
-  candidates: readonly WearableMetricCandidate[],
-  window: WearableSleepWindowCandidate,
-  invalidZeroTotalCandidates: readonly WearableMetricCandidate[],
-): WearableMetricCandidate[] {
-  return candidates.filter((candidate) =>
-    INVALID_ZERO_SLEEP_METRICS.has(candidate.metric) &&
-    candidate.value === 0 &&
-    (
-      isInvalidZeroSleepSummaryOwnedCandidate(candidate, window) ||
-      isLegacyInvalidZeroSleepSummaryCompanion(candidate, invalidZeroTotalCandidates)
-    )
-  );
-}
-
-function isInvalidZeroSleepSummaryOwnedCandidate(
-  candidate: WearableMetricCandidate,
-  window: WearableSleepWindowCandidate,
-): boolean {
-  const normalizerVersion = normalizeResourceToken(candidate.dataOrigin?.normalizerVersion);
-  if (normalizerVersion === JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION) {
-    return false;
-  }
-
-  return sleepMetricMatchesWindow(candidate, window) ||
-    normalizerVersion === JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION;
-}
-
-function isLegacyInvalidZeroSleepSummaryCompanion(
-  candidate: WearableMetricCandidate,
-  invalidZeroTotalCandidates: readonly WearableMetricCandidate[],
-): boolean {
-  if (normalizeResourceToken(candidate.dataOrigin?.normalizerVersion)) {
-    return false;
-  }
-
-  return invalidZeroTotalCandidates.some((totalCandidate) =>
-    candidate.provider === totalCandidate.provider &&
-    wearableDataOriginKey(candidate.dataOrigin) === wearableDataOriginKey(totalCandidate.dataOrigin) &&
-    candidate.recordedAt === totalCandidate.recordedAt
-  );
-}
-
-function sleepMetricAssociatedWithWindow(
-  candidate: WearableMetricCandidate,
-  window: WearableSleepWindowCandidate,
-): boolean {
-  if (resolveSleepCandidateProvider(candidate) !== resolveSleepCandidateProvider(window)) {
-    return false;
-  }
-
-  return sleepMetricMatchesWindow(candidate, window) || sleepMetricOccursInsideWindow(candidate, window);
-}
-
-function sleepMetricOccursInsideWindow(
-  candidate: WearableMetricCandidate,
-  window: WearableSleepWindowCandidate,
-): boolean {
-  const occurredAtMs = Date.parse(candidate.occurredAt ?? "");
-  const startAtMs = Date.parse(window.startAt ?? "");
-  const endAtMs = Date.parse(window.endAt ?? "");
-  if (!Number.isFinite(occurredAtMs) || !Number.isFinite(startAtMs) || !Number.isFinite(endAtMs)) {
-    return false;
-  }
-
-  const toleranceMs = resolveMetricTolerance("sessionMinutes") * 60000;
-  return occurredAtMs >= startAtMs - toleranceMs && occurredAtMs <= endAtMs + toleranceMs;
-}
-
-function firstPositiveMetricValue(
-  candidates: readonly WearableMetricCandidate[],
-  metric: WearableMetricKey,
-): number | null {
-  return candidates.find((candidate) => candidate.metric === metric && candidate.value > 0)?.value ?? null;
-}
-
-function isAppleHealthKitSleepCandidate(
-  candidate: Pick<WearableMetricCandidate | WearableSleepWindowCandidate, "dataOrigin" | "externalRef" | "provider">,
-): boolean {
-  return resolveSleepCandidateProvider(candidate) === APPLE_HEALTH_KIT_PROVIDER;
-}
-
-function resolveSleepCandidateProvider(
-  candidate: Pick<WearableMetricCandidate | WearableSleepWindowCandidate, "dataOrigin" | "externalRef" | "provider">,
-): string {
-  return resolveWearablePublicSourceProvider({
-    dataOrigin: candidate.dataOrigin,
-    externalRef: candidate.externalRef,
-    provider: candidate.provider,
-  }, {
-    suppressJunctionSourceInstanceFallback: true,
-  });
-}
-
 function buildDerivedTotalSleepCandidatesForWindow(
   date: string,
   candidates: readonly WearableMetricCandidate[],
@@ -697,61 +466,6 @@ function buildDerivedTotalSleepCandidatesForWindow(
       );
 }
 
-function sleepMetricMatchesWindow(
-  candidate: WearableMetricCandidate,
-  selectedWindow: WearableSleepWindowCandidate,
-): boolean {
-  const candidateRef = candidate.externalRef;
-  const windowRef = selectedWindow.externalRef;
-  const candidateResourceId = normalizeResourceToken(candidateRef?.resourceId);
-  const windowResourceId = normalizeResourceToken(windowRef?.resourceId);
-
-  if (!candidateResourceId || !windowResourceId || candidateResourceId !== windowResourceId) {
-    return false;
-  }
-
-  if (candidate.provider !== selectedWindow.provider) {
-    return false;
-  }
-
-  const candidateSystem = normalizeResourceToken(candidateRef?.system);
-  const windowSystem = normalizeResourceToken(windowRef?.system);
-  if (candidateSystem && windowSystem && candidateSystem !== windowSystem) {
-    return false;
-  }
-
-  return sleepResourceTypesCompatible(candidateRef?.resourceType, windowRef?.resourceType);
-}
-
-function sleepMetricMatchesNonSelectedWindow(
-  candidate: WearableMetricCandidate,
-  selectedWindow: WearableSleepWindowCandidate,
-  sleepWindows: readonly WearableSleepWindowCandidate[],
-): boolean {
-  return sleepWindows.some((window) =>
-    window.candidateId !== selectedWindow.candidateId && sleepMetricAssociatedWithWindow(candidate, window)
-  );
-}
-
-function sleepResourceTypesCompatible(
-  candidateResourceType: string | null | undefined,
-  windowResourceType: string | null | undefined,
-): boolean {
-  const candidateType = normalizeResourceToken(candidateResourceType);
-  const windowType = normalizeResourceToken(windowResourceType);
-
-  if (!candidateType || !windowType) {
-    return true;
-  }
-
-  return candidateType === windowType || (candidateType.includes("sleep") && windowType.includes("sleep"));
-}
-
-function normalizeResourceToken(value: string | null | undefined): string | null {
-  const trimmed = value?.trim().toLowerCase() ?? "";
-  return trimmed.length > 0 ? trimmed : null;
-}
-
 function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableSleepNight[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
     dataset.metricCandidates.filter((candidate) => metricSetHas(SLEEP_METRIC_KEYS, candidate.metric)),
@@ -768,11 +482,10 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
     const sleepWindows = preferDirectSleepWindows(rawSleepWindows);
     const windowSelection = resolveSleepWindowSelection(sleepWindows);
     const selectedWindow = windowSelection.selection;
-    const invalidZeroSleepWindows = collectInvalidZeroSleepSummaryWindows(dateCandidates, rawSleepWindows);
     const sessionMinutes = resolveSessionMinutesForSleepWindows(selectedWindow, sleepWindows);
     const directTotalSleepMinutes = resolveMetric(
       "totalSleepMinutes",
-      selectValidSleepMetricCandidates(dateCandidates, "totalSleepMinutes", selectedWindow, sleepWindows, invalidZeroSleepWindows),
+      selectPreferredSleepMetricCandidates(dateCandidates, "totalSleepMinutes", selectedWindow, sleepWindows),
       {
         metricFamily: "sleep",
       },
@@ -782,34 +495,32 @@ function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableS
         ? directTotalSleepMinutes
         : resolveMetric("totalSleepMinutes", buildDerivedTotalSleepCandidatesForWindow(
             date,
-            dateCandidates.filter((candidate) =>
-              !isInvalidZeroSleepMetricCandidate(candidate, candidate.metric, invalidZeroSleepWindows)
-            ),
+            dateCandidates,
             selectedWindow,
             sleepWindows,
           ), {
             metricFamily: "sleep",
           });
     const timeInBedMinutes = withMetricFallback(
-      resolveMetric("timeInBedMinutes", selectValidSleepMetricCandidates(dateCandidates, "timeInBedMinutes", selectedWindow, sleepWindows, invalidZeroSleepWindows), {
+      resolveMetric("timeInBedMinutes", selectPreferredSleepMetricCandidates(dateCandidates, "timeInBedMinutes", selectedWindow, sleepWindows), {
         metricFamily: "sleep",
       }),
       sessionMinutes,
       "Used the selected sleep session duration because no explicit time-in-bed metric was available.",
     );
-    const sleepEfficiency = resolveMetric("sleepEfficiency", selectValidSleepMetricCandidates(dateCandidates, "sleepEfficiency", selectedWindow, sleepWindows, invalidZeroSleepWindows), {
+    const sleepEfficiency = resolveMetric("sleepEfficiency", selectPreferredSleepMetricCandidates(dateCandidates, "sleepEfficiency", selectedWindow, sleepWindows), {
       metricFamily: "sleep",
     });
-    const awakeMinutes = resolveMetric("awakeMinutes", selectValidSleepMetricCandidates(dateCandidates, "awakeMinutes", selectedWindow, sleepWindows, invalidZeroSleepWindows), {
+    const awakeMinutes = resolveMetric("awakeMinutes", selectPreferredSleepMetricCandidates(dateCandidates, "awakeMinutes", selectedWindow, sleepWindows), {
       metricFamily: "sleep",
     });
-    const lightMinutes = resolveMetric("lightMinutes", selectValidSleepMetricCandidates(dateCandidates, "lightMinutes", selectedWindow, sleepWindows, invalidZeroSleepWindows), {
+    const lightMinutes = resolveMetric("lightMinutes", selectPreferredSleepMetricCandidates(dateCandidates, "lightMinutes", selectedWindow, sleepWindows), {
       metricFamily: "sleep",
     });
-    const deepMinutes = resolveMetric("deepMinutes", selectValidSleepMetricCandidates(dateCandidates, "deepMinutes", selectedWindow, sleepWindows, invalidZeroSleepWindows), {
+    const deepMinutes = resolveMetric("deepMinutes", selectPreferredSleepMetricCandidates(dateCandidates, "deepMinutes", selectedWindow, sleepWindows), {
       metricFamily: "sleep",
     });
-    const remMinutes = resolveMetric("remMinutes", selectValidSleepMetricCandidates(dateCandidates, "remMinutes", selectedWindow, sleepWindows, invalidZeroSleepWindows), {
+    const remMinutes = resolveMetric("remMinutes", selectPreferredSleepMetricCandidates(dateCandidates, "remMinutes", selectedWindow, sleepWindows), {
       metricFamily: "sleep",
     });
     const sleepScore = resolveMetric("sleepScore", selectSleepMetricCandidates(dateCandidates, "sleepScore", selectedWindow, sleepWindows), {

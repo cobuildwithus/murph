@@ -151,6 +151,7 @@ function buildFixtureDataset(providers: readonly string[]): WearableDataset {
 
   return {
     activitySessionAggregates: [],
+    metricSuppressionEvidence: [],
     metricCandidates,
     provenanceDiagnostics: [],
     rawMetricCandidates: metricCandidates,
@@ -209,6 +210,7 @@ test("compose preserves stored same-public provider conflict evidence", () => {
   const date = "2026-05-03";
   const dataset: WearableDataset = {
     activitySessionAggregates: [],
+    metricSuppressionEvidence: [],
     metricCandidates: [
       candidate({
         date,
@@ -296,6 +298,7 @@ test("compose preserves stored activity aggregate-owned types and heart-rate zon
         provider: "garmin",
       }),
     ],
+    metricSuppressionEvidence: [],
     metricCandidates: [],
     provenanceDiagnostics: [],
     rawMetricCandidates: [],
@@ -326,6 +329,7 @@ test("compose rebuilt stored sleep rows drops zeroed Apple HealthKit summary in 
   const endAt = "2026-07-07T14:02:56.000Z";
   const dataset: WearableDataset = {
     activitySessionAggregates: [],
+    metricSuppressionEvidence: [],
     metricCandidates: [
       candidate({ date, facet: "whoop-asleep", metric: "totalSleepMinutes", provider: "whoop", unit: "minutes", value: 327.3667 }),
       candidate({ date, facet: "whoop-efficiency", metric: "sleepEfficiency", provider: "whoop", unit: "%", value: 94.6511 }),
@@ -380,6 +384,7 @@ test("compose preserves non-selected provider same-public conflict evidence", ()
   const date = "2026-05-03";
   const dataset: WearableDataset = {
     activitySessionAggregates: [],
+    metricSuppressionEvidence: [],
     metricCandidates: [
       candidate({
         date,
@@ -447,6 +452,7 @@ test("compose recomputes source health and summary notes after stored conflicts 
   const date = "2026-05-03";
   const dataset: WearableDataset = {
     activitySessionAggregates: [],
+    metricSuppressionEvidence: [],
     metricCandidates: [
       candidate({
         date,
@@ -523,6 +529,7 @@ test("compose preserves stored same-public sleep-window conflict evidence", () =
   const date = "2026-05-04";
   const dataset: WearableDataset = {
     activitySessionAggregates: [],
+    metricSuppressionEvidence: [],
     metricCandidates: [],
     provenanceDiagnostics: [],
     rawMetricCandidates: [],

@@ -5,7 +5,6 @@ import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts"
 import {
   buildWearableSummaryBundle,
   buildWearableSummaryBundleFromDataset,
-  collectWearableSleepMetricSuppressionEvidenceFromDataset,
   summarizeWearableActivityFromBundle,
   summarizeWearableBodyStateFromBundle,
   summarizeWearableRecoveryFromBundle,
@@ -19,7 +18,7 @@ import {
   type WearableSummaryBundle,
 } from "../wearables.ts";
 import { collectWearableDataset } from "../wearables/candidates.ts";
-import type { WearableDataset } from "../wearables/types.ts";
+import type { WearableDataset, WearableMetricSuppressionEvidence } from "../wearables/types.ts";
 import { formatProviderName } from "../wearables/provider-policy.ts";
 import {
   extractMetricPoints,
@@ -43,12 +42,6 @@ export interface BuildMetricProjectionOptions {
 interface WearableMetricProjectionEvidence {
   rows: MetricRowEvidence[];
   suppressionEvidence: WearableMetricSuppressionEvidence[];
-}
-
-interface WearableMetricSuppressionEvidence {
-  date: string;
-  metricKey: string;
-  recordIds: readonly string[];
 }
 
 interface WearableMetricEvidenceResult {
@@ -90,7 +83,7 @@ function resolveWearableMetricProjectionEvidence(
   const dataset = options.wearableDataset ?? collectWearableDataset(vault, {});
   return buildWearableMetricProjectionEvidenceFromBundle(
     buildWearableSummaryBundleFromDataset(dataset),
-    collectWearableSleepMetricSuppressionEvidenceFromDataset(dataset),
+    dataset.metricSuppressionEvidence,
   );
 }
 
