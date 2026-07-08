@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
-import { createGunzip, inflateRawSync } from "node:zlib";
+import { createGunzip, crc32, inflateRawSync } from "node:zlib";
 
 import {
   integrationIngestReceiptSchema,
@@ -81,6 +81,7 @@ interface IntegrationIngestRowSource {
 interface ZipCentralDirectoryEntry {
   compressedSize: number;
   compressionMethod: number;
+  crc32: number;
   flags: number;
   localHeaderOffset: number;
   name: string;
@@ -475,6 +476,14 @@ async function* parseIntegrationIngestJsonlLines(
   for await (const line of lines) {
     lineNumber += 1;
     if (line.length === 0) continue;
+    const lineBytes = Buffer.byteLength(line, "utf8");
+    if (lineBytes > MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ROW_TOO_LARGE",
+        `Integration ingest row in "${source.sourcePath}" exceeds the ${MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES}-byte journal limit.`,
+        { lineNumber, relativePath: source.sourcePath, rowPayloadBytes: lineBytes },
+      );
+    }
     let raw: unknown;
     try {
       raw = JSON.parse(line);
@@ -503,7 +512,7 @@ async function openIntegrationIngestLineStream(
     return createReadStream(absolutePath, { encoding: "utf8" });
   }
   if (source.kind === "gzip") {
-    return createReadStream(absolutePath).pipe(createGunzip()).setEncoding("utf8");
+    return Readable.from([await readGzippedIntegrationIngestJsonlText(absolutePath, source.sourcePath)]);
   }
   return Readable.from([await readZippedIntegrationIngestJsonlText(vaultRoot, source)]);
 }
@@ -581,6 +590,60 @@ function integrationIngestSourceKindOrder(kind: IntegrationIngestRowSourceKind):
   return 2;
 }
 
+async function readGzippedIntegrationIngestJsonlText(
+  absolutePath: string,
+  relativePath: string,
+): Promise<string> {
+  const archiveStat = await stat(absolutePath);
+  if (archiveStat.size > MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE",
+      `Integration ingest archive "${relativePath}" exceeds the ${MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES}-byte compressed size limit.`,
+      { byteSize: archiveStat.size, relativePath },
+    );
+  }
+  return readBoundedIntegrationIngestArchiveText(
+    createReadStream(absolutePath).pipe(createGunzip()),
+    relativePath,
+    "gzip",
+  );
+}
+
+async function readBoundedIntegrationIngestArchiveText(
+  chunks: AsyncIterable<Buffer | string>,
+  relativePath: string,
+  archiveKind: "gzip" | "zip",
+): Promise<string> {
+  const buffers: Buffer[] = [];
+  let byteSize = 0;
+
+  try {
+    for await (const chunk of chunks) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8");
+      byteSize += buffer.byteLength;
+      if (byteSize > MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES) {
+        throw new VaultError(
+          "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE",
+          `Integration ingest archive "${relativePath}" exceeds the ${MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES}-byte uncompressed size limit.`,
+          { byteSize, relativePath },
+        );
+      }
+      buffers.push(buffer);
+    }
+  } catch (error) {
+    if (error instanceof VaultError) {
+      throw error;
+    }
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_INVALID",
+      `Integration ingest archive "${relativePath}" contains invalid ${archiveKind} data.`,
+      { relativePath },
+    );
+  }
+
+  return Buffer.concat(buffers, byteSize).toString("utf8");
+}
+
 async function readZippedIntegrationIngestJsonlText(
   vaultRoot: string,
   source: IntegrationIngestRowSource,
@@ -624,6 +687,13 @@ async function readZippedIntegrationIngestJsonlText(
     throw new VaultError(
       "INTEGRATION_INGEST_ARCHIVE_INVALID",
       `Integration ingest archive "${source.sourcePath}" has an invalid uncompressed size.`,
+      { relativePath: source.sourcePath },
+    );
+  }
+  if ((crc32(content) >>> 0) !== entry.crc32) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_ARCHIVE_INVALID",
+      `Integration ingest archive "${source.sourcePath}" failed CRC-32 verification.`,
       { relativePath: source.sourcePath },
     );
   }
@@ -709,6 +779,7 @@ function readZipCentralDirectory(
     }
     const flags = archive.readUInt16LE(offset + 8);
     const compressionMethod = archive.readUInt16LE(offset + 10);
+    const entryCrc32 = archive.readUInt32LE(offset + 16);
     const compressedSize = archive.readUInt32LE(offset + 20);
     const uncompressedSize = archive.readUInt32LE(offset + 24);
     const fileNameLength = archive.readUInt16LE(offset + 28);
@@ -733,6 +804,7 @@ function readZipCentralDirectory(
     entries.push({
       compressedSize,
       compressionMethod,
+      crc32: entryCrc32,
       flags,
       localHeaderOffset,
       name: archive.subarray(nameStart, nameEnd).toString("utf8").replaceAll("\\", "/"),

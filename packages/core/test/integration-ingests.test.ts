@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { deflateRawSync, gzipSync } from "node:zlib";
+import { crc32, deflateRawSync, gzipSync } from "node:zlib";
 import { test } from "vitest";
 
 import type { IntegrationIngestRecord } from "@murphai/contracts";
@@ -13,9 +13,11 @@ import {
   buildIntegrationIngestRecord,
   initializeVault,
   listIntegrationIngestsForEvent,
+  MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES,
   MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES,
   readIntegrationIngestById,
   readIntegrationIngestEntries,
+  validateVault,
   VaultError,
 } from "../src/index.ts";
 
@@ -105,13 +107,14 @@ function createSingleEntryZip(
   const fileNameBytes = Buffer.from(fileName, "utf8");
   const uncompressed = Buffer.from(content, "utf8");
   const compressed = compressionMethod === 0 ? uncompressed : deflateRawSync(uncompressed);
+  const checksum = crc32(uncompressed) >>> 0;
   const localHeader = Buffer.alloc(30 + fileNameBytes.byteLength);
   localHeader.writeUInt32LE(0x04034b50, 0);
   localHeader.writeUInt16LE(20, 4);
   localHeader.writeUInt16LE(0, 6);
   localHeader.writeUInt16LE(compressionMethod, 8);
   localHeader.writeUInt32LE(0, 10);
-  localHeader.writeUInt32LE(0, 14);
+  localHeader.writeUInt32LE(checksum, 14);
   localHeader.writeUInt32LE(compressed.byteLength, 18);
   localHeader.writeUInt32LE(uncompressed.byteLength, 22);
   localHeader.writeUInt16LE(fileNameBytes.byteLength, 26);
@@ -126,7 +129,7 @@ function createSingleEntryZip(
   centralDirectory.writeUInt16LE(0, 8);
   centralDirectory.writeUInt16LE(compressionMethod, 10);
   centralDirectory.writeUInt32LE(0, 12);
-  centralDirectory.writeUInt32LE(0, 16);
+  centralDirectory.writeUInt32LE(checksum, 16);
   centralDirectory.writeUInt32LE(compressed.byteLength, 20);
   centralDirectory.writeUInt32LE(uncompressed.byteLength, 24);
   centralDirectory.writeUInt16LE(fileNameBytes.byteLength, 28);
@@ -325,6 +328,57 @@ test("integration ingest zip archive reader rejects mismatched central directory
   );
 });
 
+test("integration ingest zip archive reader rejects CRC mismatches", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-invalid-zip-crc");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-06.jsonl";
+  const record = makeIntegrationIngestRecord({
+    id: "xfm_InvalidZipCrc1",
+    eventId: "evt_InvalidZipCrc1",
+    importedAt: "2025-06-12T09:00:00.000Z",
+  });
+  const content = `${JSON.stringify(record)}\n`;
+  const zip = createSingleEntryZip(path.basename(logicalPath), content);
+  const centralDirectoryOffset = findZipSignature(zip, 0x02014b50);
+  zip.writeUInt32LE((zip.readUInt32LE(centralDirectoryOffset + 16) ^ 1) >>> 0, centralDirectoryOffset + 16);
+
+  await fs.mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, `${logicalPath}.zip`), zip);
+
+  await assert.rejects(
+    readIntegrationIngestEntries(vaultRoot),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ARCHIVE_INVALID");
+      return true;
+    },
+  );
+});
+
+test("integration ingest gzip archive reader rejects oversized compressed files", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-oversized-gzip");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-05.jsonl";
+  const archivePath = path.join(vaultRoot, `${logicalPath}.gz`);
+  await fs.mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+  await fs.writeFile(archivePath, "");
+  await fs.truncate(
+    archivePath,
+    MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES + 1,
+  );
+
+  await assert.rejects(
+    readIntegrationIngestEntries(vaultRoot),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ARCHIVE_TOO_LARGE");
+      return true;
+    },
+  );
+});
+
 test("integration ingest append plans refuse new rows for archived months", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-archive-append");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
@@ -371,5 +425,68 @@ test("integration ingest append plans refuse new rows for archived months", asyn
       assert.equal((error as VaultError).code, "INTEGRATION_INGEST_SHARD_ARCHIVED");
       return true;
     },
+  );
+});
+
+test("validateVault validates archived integration ingest shards", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-validate-archive");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-04.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_ValidateArchive1",
+    eventId: "evt_ValidateArchive1",
+    importedAt: "2025-04-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [archivedRecord]);
+
+  const validation = await validateVault({ vaultRoot });
+  assert.equal(validation.valid, true);
+});
+
+test("validateVault reports integration ingest archive conflicts and invalid archives", async () => {
+  const conflictVaultRoot = await makeTempDirectory("murph-integration-ingest-validate-conflict");
+  await initializeVault({ vaultRoot: conflictVaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const conflictPath = "ledger/integration-ingests/2025/2025-03.jsonl";
+  const conflictRecord = makeIntegrationIngestRecord({
+    id: "xfm_ValidateConflict1",
+    eventId: "evt_ValidateConflict1",
+    importedAt: "2025-03-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestJsonl(conflictVaultRoot, conflictPath, [conflictRecord]);
+  await writeIntegrationIngestZipArchive(conflictVaultRoot, conflictPath, [conflictRecord]);
+
+  const conflictValidation = await validateVault({ vaultRoot: conflictVaultRoot });
+  assert.equal(conflictValidation.valid, false);
+  assert.ok(
+    conflictValidation.issues.some((issue) =>
+      issue.code === "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT"
+      && issue.path === conflictPath,
+    ),
+  );
+
+  const invalidVaultRoot = await makeTempDirectory("murph-integration-ingest-validate-invalid");
+  await initializeVault({ vaultRoot: invalidVaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const invalidPath = "ledger/integration-ingests/2025/2025-02.jsonl";
+  const invalidRecord = makeIntegrationIngestRecord({
+    id: "xfm_ValidateInvalidArchive1",
+    eventId: "evt_ValidateInvalidArchive1",
+    importedAt: "2025-02-12T09:00:00.000Z",
+  });
+  const zip = createSingleEntryZip(path.basename(invalidPath), `${JSON.stringify(invalidRecord)}\n`);
+  const centralDirectoryOffset = findZipSignature(zip, 0x02014b50);
+  zip.writeUInt32LE((zip.readUInt32LE(centralDirectoryOffset + 16) ^ 1) >>> 0, centralDirectoryOffset + 16);
+  await fs.mkdir(path.dirname(path.join(invalidVaultRoot, invalidPath)), { recursive: true });
+  await fs.writeFile(path.join(invalidVaultRoot, `${invalidPath}.zip`), zip);
+
+  const invalidValidation = await validateVault({ vaultRoot: invalidVaultRoot });
+  assert.equal(invalidValidation.valid, false);
+  assert.ok(
+    invalidValidation.issues.some((issue) =>
+      issue.code === "INTEGRATION_INGEST_ARCHIVE_INVALID"
+      && issue.path === `${invalidPath}.zip`,
+    ),
   );
 });

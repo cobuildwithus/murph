@@ -38,6 +38,7 @@ import {
 import { VaultError } from "./errors.ts";
 import { parseFrontmatterDocument } from "./frontmatter.ts";
 import { generateVaultId } from "./ids.ts";
+import { readIntegrationIngestEntries } from "./integration-ingests.ts";
 import { readJsonlRecords } from "./jsonl.ts";
 import { stageMarkdownDocumentWrite } from "./markdown-documents.ts";
 import { isRawManifestFileName } from "./operations/raw-manifests.ts";
@@ -519,6 +520,9 @@ async function validateJsonlValidationFamily(
   vaultRoot: string,
   family: VaultJsonlValidationFamilyDescriptor,
 ): Promise<ValidationIssue[]> {
+  if (family.id === "integrationIngests") {
+    return validateIntegrationIngestValidationFamily(vaultRoot, family);
+  }
   const postValidateRecord = resolveJsonlFamilyPostValidator(vaultRoot, family.id);
   return validateJsonlFamily({
     vaultRoot,
@@ -527,6 +531,27 @@ async function validateJsonlValidationFamily(
     code: family.validation.issueCode,
     postValidateRecord,
   });
+}
+
+async function validateIntegrationIngestValidationFamily(
+  vaultRoot: string,
+  family: VaultJsonlValidationFamilyDescriptor,
+): Promise<ValidationIssue[]> {
+  try {
+    await readIntegrationIngestEntries(vaultRoot);
+    return [];
+  } catch (error) {
+    const relativePath = error instanceof VaultError && typeof error.details.relativePath === "string"
+      ? error.details.relativePath
+      : family.directory;
+    return [
+      validationIssue(
+        error instanceof VaultError ? error.code : family.validation.issueCode,
+        error instanceof Error ? error.message : String(error),
+        relativePath,
+      ),
+    ];
+  }
 }
 
 export async function validateJsonlRecordAgainstVault(input: {
