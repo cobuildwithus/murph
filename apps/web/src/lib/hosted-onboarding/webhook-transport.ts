@@ -6,6 +6,7 @@ import type {
 import {
   buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
+  hasFreshHostedAiUsageLimitNoticeClaim,
   markHostedAiUsageLimitNoticeSent,
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";
@@ -13,7 +14,7 @@ import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
-  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
+  hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   recordHostedLinqDeliveryAttemptTx,
@@ -1077,15 +1078,27 @@ async function claimHostedLinqNoticeForSideEffect(
         return true;
       }
       const target = readHostedLinqSideEffectDeliveryTarget(effect.payload);
-      const legacyDeliveryAlreadySent =
-        await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+      const attemptedAt = new Date(effect.payload.claimToken.sentAt);
+      const legacyDeliveryOwnsNotice =
+        await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
+          attemptedAt,
           idempotencyKeys: buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
             memberId: effect.payload.memberId,
             periodStart: effect.payload.claimToken.periodStart,
           }),
           prisma,
         });
-      if (legacyDeliveryAlreadySent) {
+      if (legacyDeliveryOwnsNotice) {
+        return false;
+      }
+      const legacyPeriodClaimOwnsNotice =
+        await hasFreshHostedAiUsageLimitNoticeClaim({
+          memberId: effect.payload.memberId,
+          now: attemptedAt,
+          periodStart: effect.payload.claimToken.periodStart,
+          prisma,
+        });
+      if (legacyPeriodClaimOwnsNotice) {
         return false;
       }
       const claim = await claimHostedLinqDeliveryProviderDispatchTx({

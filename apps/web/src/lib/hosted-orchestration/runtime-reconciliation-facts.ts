@@ -36,6 +36,7 @@ import {
 import {
   buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
+  hasFreshHostedAiUsageLimitNoticeClaim,
   markHostedAiUsageLimitNoticeSent,
 } from "../hosted-execution/usage-allowance";
 import {
@@ -43,7 +44,7 @@ import {
 } from "../hosted-execution/usage-limit-notice";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
-  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
+  hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
 } from "../hosted-onboarding/linq-delivery-store";
@@ -425,15 +426,26 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       memberId: input.userId,
       periodStart: decision.periodStart,
     });
-    const legacyDeliveryAlreadySent =
-      await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+    const legacyDeliveryOwnsNotice =
+      await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
+        attemptedAt: sentAt,
         idempotencyKeys: buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
           memberId: input.userId,
           periodStart: decision.periodStart,
         }),
         prisma: input.prisma,
       });
-    if (legacyDeliveryAlreadySent) {
+    if (legacyDeliveryOwnsNotice) {
+      return;
+    }
+    const legacyPeriodClaimOwnsNotice =
+      await hasFreshHostedAiUsageLimitNoticeClaim({
+        memberId: input.userId,
+        now: sentAt,
+        periodStart: decision.periodStart,
+        prisma: input.prisma,
+      });
+    if (legacyPeriodClaimOwnsNotice) {
       return;
     }
     const claimed = await claimHostedLinqDeliveryProviderDispatchTx({

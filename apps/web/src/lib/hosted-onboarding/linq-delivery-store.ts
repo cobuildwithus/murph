@@ -340,6 +340,50 @@ export async function hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysT
   return deliveries.some(isHostedLinqDeliveryProviderCorrelated);
 }
 
+export async function hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx(
+  input: {
+    attemptedAt?: Date;
+    idempotencyKeys: readonly string[];
+    prisma: HostedLinqDeliveryClient;
+  },
+): Promise<boolean> {
+  const attemptedAt = input.attemptedAt ?? new Date();
+  const staleAttemptBefore = new Date(
+    attemptedAt.getTime() - HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS,
+  );
+  const idempotencyKeys = [
+    ...new Set(input.idempotencyKeys
+      .map((key) => createHostedLinqDeliveryIdempotencyLookupKey(key))
+      .filter((key): key is string => Boolean(key))),
+  ];
+  if (idempotencyKeys.length === 0) {
+    return false;
+  }
+
+  const deliveries = await input.prisma.hostedLinqDelivery.findMany({
+    where: {
+      idempotencyKey: {
+        in: idempotencyKeys,
+      },
+    },
+    select: hostedLinqDeliveryLifecycleSelect,
+  });
+
+  return deliveries.some((delivery) =>
+    isHostedLinqDeliveryProviderCorrelated(delivery)
+    || (
+      delivery.acceptedAt === null
+      && delivery.deliveredAt === null
+      && delivery.failedAt === null
+      && delivery.lastReceiptAt === null
+      && delivery.messageLookupKey === null
+      && delivery.skippedAt === null
+      && delivery.status === "attempted"
+      && delivery.attemptedAt > staleAttemptBefore
+    )
+  );
+}
+
 async function updateHostedLinqDeliveryAttemptIfPreProvider(input: {
   data: Prisma.HostedLinqDeliveryUpdateInput;
   delivery: {

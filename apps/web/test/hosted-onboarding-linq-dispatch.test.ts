@@ -60,6 +60,8 @@ function buildTrialConversionPendingMessage(input: {
 const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
+    hasFreshHostedAiUsageLimitNoticeClaim: vi.fn(),
+    hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx: vi.fn(),
     markHostedAiUsageLimitNoticeSent: vi.fn(),
     claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
@@ -250,6 +252,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   return {
     ...actual,
     claimHostedLinqDeliveryProviderDispatchTx: mocks.claimHostedLinqDeliveryProviderDispatchTx,
+    hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx:
+      mocks.hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   };
 });
 
@@ -270,6 +274,7 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   return {
     ...actual,
     checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
+    hasFreshHostedAiUsageLimitNoticeClaim: mocks.hasFreshHostedAiUsageLimitNoticeClaim,
     markHostedAiUsageLimitNoticeSent: mocks.markHostedAiUsageLimitNoticeSent,
   };
 });
@@ -552,6 +557,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       claimed: true,
       id: "hld_claimed",
     });
+    mocks.hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx
+      .mockResolvedValue(false);
+    mocks.hasFreshHostedAiUsageLimitNoticeClaim.mockResolvedValue(false);
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);

@@ -6,6 +6,7 @@ import {
   applyHostedLinqDeliveryReceiptTx,
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
+  hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
@@ -1386,6 +1387,60 @@ describe("hosted Linq observability stores", () => {
         },
       },
     });
+  });
+
+  it("detects fresh pre-provider deliveries for legacy idempotency keys", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:20:00.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        id: "hld_fresh_legacy_usage_notice",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        skippedAt: null,
+        source: "hosted_webhook_side_effect",
+        status: "attempted",
+      },
+    ]);
+
+    await expect(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      idempotencyKeys: [
+        "ai-usage-gate:legacy_key",
+      ],
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(true);
+  });
+
+  it("ignores stale pre-provider deliveries for legacy idempotency keys", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:14:59.999Z"),
+        deliveredAt: null,
+        failedAt: null,
+        id: "hld_stale_legacy_usage_notice",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        skippedAt: null,
+        source: "hosted_webhook_side_effect",
+        status: "attempted",
+      },
+    ]);
+
+    await expect(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      idempotencyKeys: [
+        "ai-usage-gate:legacy_key",
+      ],
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(false);
   });
 
   it("reclaims stale pre-provider delivery rows for a later provider dispatch retry", async () => {

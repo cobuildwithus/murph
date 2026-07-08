@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   accountHostedAiUsageForAllowanceTx,
   checkHostedAiUsageGate,
+  hasFreshHostedAiUsageLimitNoticeClaim,
   markHostedAiUsageLimitNoticeSent,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
@@ -2145,6 +2146,48 @@ describe("markHostedAiUsageLimitNoticeSent", () => {
         },
         memberId: "member_123",
         periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      },
+    });
+  });
+});
+
+describe("hasFreshHostedAiUsageLimitNoticeClaim", () => {
+  it("treats only recent usage-period sent markers as rollout claims", async () => {
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce({
+        limitNoticeSentAt: new Date("2026-03-29T11:50:01.000Z"),
+      })
+      .mockResolvedValueOnce({
+        limitNoticeSentAt: new Date("2026-03-29T11:44:59.999Z"),
+      });
+    const prisma = {
+      hostedAiUsagePeriod: {
+        findUnique,
+      },
+    };
+
+    await expect(hasFreshHostedAiUsageLimitNoticeClaim({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toBe(true);
+    await expect(hasFreshHostedAiUsageLimitNoticeClaim({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toBe(false);
+
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        limitNoticeSentAt: true,
+      },
+      where: {
+        memberId_periodStart: {
+          memberId: "member_123",
+          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        },
       },
     });
   });

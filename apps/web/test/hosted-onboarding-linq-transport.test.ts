@@ -63,6 +63,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
     }),
     hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx:
       vi.fn().mockResolvedValue(false),
+    hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx:
+      vi.fn().mockResolvedValue(false),
     resolveHostedLinqInviteSignupDispatchEffectIdTx: vi.fn(
       async (input: { effectId: string }) => input.effectId,
     ),
@@ -75,12 +77,14 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   >("@/src/lib/hosted-execution/usage-allowance");
   return {
     ...actual,
+    hasFreshHostedAiUsageLimitNoticeClaim: vi.fn().mockResolvedValue(false),
     markHostedAiUsageLimitNoticeSent: vi.fn().mockResolvedValue(true),
   };
 });
 
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
+  hasFreshHostedAiUsageLimitNoticeClaim,
   markHostedAiUsageLimitNoticeSent,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import {
@@ -106,7 +110,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
-  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
+  hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
@@ -132,8 +136,9 @@ describe("hosted Linq webhook transport", () => {
       claimed: true,
       id: "hld_claimed",
     });
-    vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
+    vi.mocked(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx)
       .mockResolvedValue(false);
+    vi.mocked(hasFreshHostedAiUsageLimitNoticeClaim).mockResolvedValue(false);
     vi.mocked(markHostedAiUsageLimitNoticeSent).mockResolvedValue(true);
   });
 
@@ -656,7 +661,7 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("skips AI usage quota replies already delivered under a legacy notice-code key", async () => {
-    vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
+    vi.mocked(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx)
       .mockResolvedValueOnce(true);
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -691,11 +696,58 @@ describe("hosted Linq webhook transport", () => {
       ],
     });
 
-    expect(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
+    expect(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx)
       .toHaveBeenCalledWith({
+        attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
         idempotencyKeys: expect.any(Array),
         prisma: {},
       });
+    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
+  });
+
+  it("skips AI usage quota replies while an old period notice claim is fresh", async () => {
+    vi.mocked(hasFreshHostedAiUsageLimitNoticeClaim).mockResolvedValueOnce(true);
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage",
+      template: "ai_usage_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        collectResult: true,
+        currentInboundReply,
+        prisma: {} as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toEqual({
+      sentCount: 0,
+      skipped: [
+        {
+          effectId: effect.effectId,
+          reason: "notice_already_claimed",
+          template: "ai_usage_quota",
+        },
+      ],
+    });
+
+    expect(hasFreshHostedAiUsageLimitNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member-1",
+      now: new Date("2026-03-26T12:00:01.000Z"),
+      periodStart: "2026-03-01T00:00:00.000Z",
+      prisma: {},
+    });
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
