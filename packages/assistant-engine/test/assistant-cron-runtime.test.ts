@@ -4075,6 +4075,54 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('keeps hosted control-plane 5xx delivery failures retryable for scheduled canonical reminders', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-transient-delivery-failure-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'transient delivery reminder',
+    )
+    const error = Object.assign(
+      new Error('Hosted Linq egress engagement failed with HTTP 500. Internal error.'),
+      {
+        code: 'INTERNAL_ERROR',
+        details: {
+          assistantNotificationStage: 'delivery',
+        },
+        statusCode: 500,
+      },
+    )
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeRecord = runtimeStore.jobs.find((record) =>
+      record.jobId === canonicalJob.jobId
+    )
+    expect(runtimeRecord?.state.pendingOccurrenceAt).toBe(
+      '2026-04-08T10:00:00.000Z',
+    )
+    expect(runtimeRecord?.state.retryAfterAt).toBe('2026-04-08T10:00:30.000Z')
+    expect(runtimeRecord?.state.lastFailedAt).toBe('2026-04-08T10:00:00.000Z')
+    expect(runtimeRecord?.state.lastError).toBe(
+      'Hosted Linq egress engagement failed with HTTP 500. Internal error.',
+    )
+    expect(runtimeRecord?.state.consecutiveFailures).toBe(1)
+  })
+
   it('skips stale recurring canonical notification cron jobs and advances the schedule', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))

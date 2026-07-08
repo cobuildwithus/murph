@@ -1593,6 +1593,9 @@ async function resolveHostedManagedAutomationDefaultRouteBestEffort(input: {
     identityId: route.identityId ?? null,
     participantId: route.participantId ?? null,
     threadId: route.threadId ?? null,
+    ...(typeof route.threadIsDirect === "boolean"
+      ? { threadIsDirect: route.threadIsDirect }
+      : {}),
   };
 }
 

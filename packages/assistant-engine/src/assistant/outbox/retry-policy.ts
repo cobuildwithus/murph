@@ -96,6 +96,13 @@ export function isAssistantOutboxRetryableError(error: unknown): boolean {
   if (assistantOutboxErrorCodeLooksPermanent(code)) {
     return false
   }
+  const statusRetryable = readAssistantOutboxRetryableHttpStatus(error)
+  if (statusRetryable !== null) {
+    return statusRetryable
+  }
+  if (assistantOutboxErrorLooksHostedControlPlaneFetchFailure(error)) {
+    return true
+  }
   if (assistantOutboxErrorCodeIsInternal(code)) {
     return false
   }
@@ -281,6 +288,79 @@ function assistantOutboxErrorCodeIsInternal(code: string): boolean {
 
 function assistantOutboxErrorMessageLooksRetryable(message: string): boolean {
   return includesAny(message, RETRYABLE_OUTBOX_ERROR_MESSAGE_MARKERS)
+}
+
+function readAssistantOutboxRetryableHttpStatus(error: unknown): boolean | null {
+  const status = readAssistantOutboxHttpStatus(error)
+  if (status === null) {
+    return null
+  }
+  return status === 408 || status === 429 || (status >= 500 && status <= 599)
+}
+
+function readAssistantOutboxHttpStatus(error: unknown): number | null {
+  const queue: unknown[] = [error]
+  const seen = new Set<unknown>()
+  while (queue.length > 0) {
+    const current = queue.shift()
+    if (!current || seen.has(current)) {
+      continue
+    }
+    seen.add(current)
+
+    const record = readRecord(current)
+    if (!record) {
+      continue
+    }
+
+    for (
+      const key of [
+        'status',
+        'statusCode',
+        'responseStatus',
+        'errorStatus',
+        'httpStatus',
+      ] as const
+    ) {
+      const value = record[key]
+      if (
+        typeof value === 'number' &&
+        Number.isSafeInteger(value) &&
+        value >= 100 &&
+        value <= 599
+      ) {
+        return value
+      }
+    }
+
+    queue.push(record.context, record.details, record.diagnosticContext, record.cause)
+  }
+
+  return null
+}
+
+function assistantOutboxErrorLooksHostedControlPlaneFetchFailure(error: unknown): boolean {
+  const queue: unknown[] = [error]
+  const seen = new Set<unknown>()
+  while (queue.length > 0) {
+    const current = queue.shift()
+    if (!current || seen.has(current)) {
+      continue
+    }
+    seen.add(current)
+
+    const record = readRecord(current)
+    if (!record) {
+      continue
+    }
+    if (record.hostedRuntimeControlPlaneFetchFailure === true) {
+      return true
+    }
+
+    queue.push(record.context, record.details, record.diagnosticContext, record.cause)
+  }
+
+  return false
 }
 
 function includesAny(value: string, fragments: readonly string[]): boolean {

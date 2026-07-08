@@ -932,6 +932,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       deliveryTarget: "chat_synthetic_seed_route",
       identityId: "identity_synthetic_seed_route",
       participantId: "participant_synthetic_seed_route",
+      threadIsDirect: true,
       threadId: "thread_synthetic_seed_route",
     };
     mocks.readAssistantInputEvent.mockResolvedValueOnce({
@@ -2403,6 +2404,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       deliveryTarget: "chat_synthetic_seed_route",
       identityId: "identity_synthetic_seed_route",
       participantId: "participant_synthetic_seed_route",
+      threadIsDirect: true,
       threadId: "thread_synthetic_seed_route",
     };
     mocks.readAssistantInputEvent.mockResolvedValueOnce({
