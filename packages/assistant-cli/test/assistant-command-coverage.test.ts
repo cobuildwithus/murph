@@ -32,6 +32,7 @@ const commandMocks = vi.hoisted(() => ({
   getAssistantSession: vi.fn(),
   getAssistantStatus: vi.fn(),
   listAssistantSelfDeliveryTargets: vi.fn(),
+  listRecentAssistantSessions: vi.fn(),
   listAssistantSessions: vi.fn(),
   readAssistantOnboardingState: vi.fn(),
   redactAssistantDisplayPath: vi.fn((value: string) => `redacted:${value}`),
@@ -113,6 +114,7 @@ vi.mock('@murphai/assistant-engine/assistant-state', () => ({
   readAssistantOnboardingState: commandMocks.readAssistantOnboardingState,
   redactAssistantDisplayPath: commandMocks.redactAssistantDisplayPath,
   getAssistantSession: commandMocks.getAssistantSession,
+  listRecentAssistantSessions: commandMocks.listRecentAssistantSessions,
   listAssistantSessions: commandMocks.listAssistantSessions,
   reopenAssistantOnboarding: commandMocks.reopenAssistantOnboarding,
   resolveAssistantOnboardingStatePath:
@@ -1087,6 +1089,7 @@ test('assistant status and session commands reject uninitialized vault roots bef
 
   assert.equal(commandMocks.getAssistantStatus.mock.calls.length, 0)
   assert.equal(commandMocks.getAssistantSession.mock.calls.length, 0)
+  assert.equal(commandMocks.listRecentAssistantSessions.mock.calls.length, 0)
   assert.equal(commandMocks.listAssistantSessions.mock.calls.length, 0)
 })
 
@@ -1315,7 +1318,7 @@ test('session commands return redacted state paths and session payloads', async 
   const assistant = readCommandGroup(commands, 'assistant')
   const session = readCommandGroup(assistant.commands, 'session')
 
-  commandMocks.listAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
+  commandMocks.listRecentAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
   commandMocks.getAssistantSession.mockResolvedValueOnce(TEST_SESSION)
   commandMocks.redactAssistantSessionForDisplay
     .mockReturnValueOnce({
@@ -1373,8 +1376,8 @@ test('session commands return redacted state paths and session payloads', async 
     stateRoot: 'redacted:/tmp/vault/.runtime/operations/assistant',
     vault: 'redacted:/tmp/vault',
   })
-  assert.deepEqual(commandMocks.listAssistantSessions.mock.calls, [
-    ['/tmp/vault'],
+  assert.deepEqual(commandMocks.listRecentAssistantSessions.mock.calls, [
+    ['/tmp/vault', { limit: 5, repairMissingProjection: true }],
   ])
   assert.deepEqual(showResult, {
     session: {
@@ -1386,22 +1389,12 @@ test('session commands return redacted state paths and session payloads', async 
   })
 })
 
-test('session list slices durable sessions by requested limit', async () => {
+test('session list requests a bounded repaired recent-session page', async () => {
   const commands = createAssistantCli()
   const assistant = readCommandGroup(commands, 'assistant')
   const session = readCommandGroup(assistant.commands, 'session')
-  const olderSession: AssistantSession = {
-    ...TEST_SESSION,
-    conversationId: 'older-session-command-coverage',
-    sessionId: 'older-session-command-coverage',
-    alias: 'chat:older',
-    updatedAt: '2026-03-27T00:00:00.000Z',
-  }
 
-  commandMocks.listAssistantSessions.mockResolvedValueOnce([
-    TEST_SESSION,
-    olderSession,
-  ])
+  commandMocks.listRecentAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
 
   const listResult = assistantSessionListResultSchema.parse(
     await readCommand(session.commands, 'list').run({
@@ -1415,7 +1408,7 @@ test('session list slices durable sessions by requested limit', async () => {
   assert.equal(listResult.count, 1)
   assert.equal(listResult.filters.limit, 1)
   assert.equal(listResult.sessions[0]?.sessionId, TEST_SESSION.sessionId)
-  assert.deepEqual(commandMocks.listAssistantSessions.mock.calls, [
-    ['/tmp/vault'],
+  assert.deepEqual(commandMocks.listRecentAssistantSessions.mock.calls, [
+    ['/tmp/vault', { limit: 1, repairMissingProjection: true }],
   ])
 })

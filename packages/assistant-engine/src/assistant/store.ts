@@ -358,12 +358,17 @@ export async function listAssistantSessionsLocal(
 // parses only the newest `limit` sessions by durable last-activity timestamp.
 export async function listRecentAssistantSessions(
   vault: string,
-  options: { limit: number },
+  options: {
+    limit: number
+    repairMissingProjection?: boolean
+  },
 ): Promise<AssistantSession[]> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
 
-    const recentSessions = await ensureAssistantRecentSessionsProjection(paths)
+    const recentSessions = await ensureAssistantRecentSessionsProjection(paths, {
+      repairMissingProjection: options.repairMissingProjection,
+    })
     return readAssistantSessionsSorted(
       paths,
       Object.entries(recentSessions)

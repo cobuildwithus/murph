@@ -16,6 +16,7 @@ import { listAssistantRuntimeEventsAtPath } from '../src/assistant/runtime-event
 import {
   appendAssistantTranscriptEntriesWithRefs,
   listAssistantSessionsLocal,
+  listRecentAssistantSessions,
   updateAssistantAutomationState,
 } from '../src/assistant/store.ts'
 import {
@@ -641,6 +642,90 @@ describe('assistant store persistence seams', () => {
         }),
       ]),
     )
+  })
+
+  it('repairs legacy recent-session projections for bounded user-facing reads', async () => {
+    const context = await createTempVaultContext('assistant-store-persistence-recent-repair-')
+    tempRoots.push(context.parentRoot)
+    const paths = resolveAssistantStatePaths(context.vaultRoot)
+    await ensureAssistantState(paths)
+
+    const older = createSession({
+      alias: 'older-alias',
+      conversationKey: 'local:older',
+      sessionId: 'session-older',
+      updatedAt: '2026-04-08T00:01:00.000Z',
+    })
+    const newer = createSession({
+      alias: 'newer-alias',
+      conversationKey: 'local:newer',
+      sessionId: 'session-newer',
+      updatedAt: '2026-04-08T00:02:00.000Z',
+    })
+    await writeAssistantSession(paths, older)
+    await writeAssistantSession(paths, newer)
+    await writeFile(paths.indexesPath, JSON.stringify({
+      version: 1,
+      aliases: {},
+      conversationKeys: {},
+    }), 'utf8')
+
+    await expect(listRecentAssistantSessions(context.vaultRoot, {
+      limit: 1,
+      repairMissingProjection: true,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        sessionId: 'session-newer',
+      }),
+    ])
+
+    const rebuilt = JSON.parse(await readFile(paths.indexesPath, 'utf8')) as {
+      recentSessions?: Record<string, string>
+    }
+    expect(rebuilt.recentSessions).toEqual({
+      'session-newer': '2026-04-08T00:02:00.000Z',
+      'session-older': '2026-04-08T00:01:00.000Z',
+    })
+  })
+
+  it('applies recent-session limits before reading durable session files', async () => {
+    const context = await createTempVaultContext('assistant-store-persistence-recent-bounded-')
+    tempRoots.push(context.parentRoot)
+    const paths = resolveAssistantStatePaths(context.vaultRoot)
+    await ensureAssistantState(paths)
+
+    const newest = createSession({
+      alias: 'newest-alias',
+      conversationKey: 'local:newest',
+      sessionId: 'session-newest',
+      updatedAt: '2026-04-08T00:03:00.000Z',
+    })
+    const olderSessionId = 'session-older-corrupt'
+    await writeAssistantSession(paths, newest)
+    await writeFile(
+      resolveAssistantSessionPath(paths, olderSessionId),
+      '{bad-json',
+      'utf8',
+    )
+    await writeFile(paths.indexesPath, JSON.stringify({
+      version: 1,
+      aliases: {},
+      conversationKeys: {},
+      recentSessions: {
+        'session-newest': '2026-04-08T00:03:00.000Z',
+        [olderSessionId]: '2026-04-08T00:01:00.000Z',
+      },
+    }), 'utf8')
+
+    await expect(listRecentAssistantSessions(context.vaultRoot, {
+      limit: 1,
+      repairMissingProjection: true,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        sessionId: 'session-newest',
+      }),
+    ])
+    await expect(listAssistantQuarantineEntriesAtPaths(paths)).resolves.toEqual([])
   })
 
   it('orders sessions and duplicate index rebuilds by instant when offsets differ', async () => {

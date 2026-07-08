@@ -664,7 +664,7 @@ export async function synchronizeAssistantIndexes(
   await writeJsonFileAtomic(paths.indexesPath, updated)
 }
 
-const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 32
+const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
 
 // Recurring-maintenance projection reader. Deliberately does NOT go through
 // readAssistantIndexStore: that reader's missing/corrupt fallbacks rebuild
@@ -674,7 +674,18 @@ const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 32
 // it up, and a missing or corrupt index just yields no evidence this wake.
 export async function ensureAssistantRecentSessionsProjection(
   paths: AssistantStatePaths,
+  options?: {
+    repairMissingProjection?: boolean
+  },
 ): Promise<Record<string, string>> {
+  if (options?.repairMissingProjection === true) {
+    const store = await readAssistantIndexStore(paths, { fresh: true })
+    if (store.recentSessions !== undefined) {
+      return store.recentSessions
+    }
+    return (await rebuildAssistantIndexStore(paths)).recentSessions ?? {}
+  }
+
   let raw: string
   try {
     raw = await readFile(paths.indexesPath, 'utf8')
