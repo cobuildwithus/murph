@@ -1,6 +1,6 @@
 # Call Circle
 
-Last verified: 2026-07-07
+Last verified: 2026-07-08
 
 Status: decisions locked 2026-07-06 (revised twice same day: founder review,
 then a three-lens Codex stress test against the codebase); implementation is
@@ -66,10 +66,13 @@ cannot provide.
   setup notification when a member belongs to multiple Call Circle groups.
 - Availability preferences are stated conversationally to the member's own
   Murph ("weekday lunches", "Sunday mornings"). The member's Murph submits
-  them as coarse structured windows to web, where they are stored on the
-  member's participant row. Full-fidelity context stays in the member's
-  vault; web holds only the coarse windows the member chose to give the
-  coordinator. Members update preferences the same way, any time.
+  them as coarse structured windows plus the member-thread runtime's current
+  IANA timezone to web, where they are stored on the member's participant
+  row. Call Circle scheduling and recipient-local formatting read that
+  timezone from the participant preferences, not from signup activation
+  state. Full-fidelity context stays in the member's vault; web holds only
+  the coarse windows and timezone the member chose to give the coordinator.
+  Members update preferences the same way, any time.
 - Web matches pairs weekly (fixed cadence in v1) under deterministic,
   DB-enforced caps: at most one proposal per member per week, no repeat
   pair back to back, rotation so no member is starved. Members are skipped
@@ -259,6 +262,6 @@ and Retell webhooks.
   policy (verify during build; fall back to plain asks if reads prove
   unreliable).
 - Retell transfer-failure semantics (week-one prototype gates the bridge).
-- Recipient-local quiet-hour clamps use the signup timezone on
-  `HostedMember`; acceptable staleness for v1, revisit if wrong-timezone
-  sends appear.
+- Recipient-local quiet-hour clamps use the IANA timezone stored with Call
+  Circle participant preferences. This keeps the coordinator's local-time
+  contract on the same owned row as the member's availability windows.

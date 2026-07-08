@@ -8,6 +8,7 @@ import {
   canUseActiveCallCircleParticipantPair,
   type CallCircleEligibleParticipant,
   listCallCircleEligibleParticipants,
+  readCallCircleMatchParticipantTimeZones,
 } from "./participant-store";
 import {
   createCallCircleMatchProposal,
@@ -43,7 +44,6 @@ import {
   CALL_CIRCLE_FINAL_ASK_LEAD_MS,
   isSameCallCircleLocalDate,
   isWithinCallCircleQuietHours,
-  normalizeCallCircleTimeZone,
 } from "./time";
 import {
   startCallCircleConnectorCall,
@@ -105,12 +105,6 @@ export async function runCallCircleScheduler(input: {
   while (true) {
     const dueMatches: SchedulerMatch[] = await prisma.hostedCallCircleMatch.findMany({
       include: {
-        memberA: {
-          select: { pendingActivationTimeZone: true },
-        },
-        memberB: {
-          select: { pendingActivationTimeZone: true },
-        },
         phoneCall: {
           select: {
             analyzedAt: true,
@@ -131,12 +125,14 @@ export async function runCallCircleScheduler(input: {
     });
 
     for (const match of dueMatches) {
-      const memberATimeZone = normalizeCallCircleTimeZone(
-        match.memberA.pendingActivationTimeZone,
-      );
-      const memberBTimeZone = normalizeCallCircleTimeZone(
-        match.memberB.pendingActivationTimeZone,
-      );
+      const timeZones = await readCallCircleMatchParticipantTimeZones({
+        groupId: match.groupId,
+        memberAId: match.memberAId,
+        memberBId: match.memberBId,
+        prisma,
+      });
+      if (!timeZones) continue;
+      const { memberATimeZone, memberBTimeZone } = timeZones;
       if (
         (match.status === "proposed" || match.status === "asking")
         && match.amAskedAt === null
@@ -455,22 +451,16 @@ async function appendMissedCallCircleBridgeHandoffs(input: {
 }): Promise<number> {
   const matches = await input.prisma.hostedCallCircleMatch.findMany({
     include: {
-      memberA: {
-        select: { pendingActivationTimeZone: true },
-      },
-      memberB: {
-        select: { pendingActivationTimeZone: true },
-      },
       phoneCall: {
         select: {
           analyzedAt: true,
-            endedAt: true,
-            id: true,
-            providerCallId: true,
-            providerStartAttemptedAt: true,
-            status: true,
-          },
+          endedAt: true,
+          id: true,
+          providerCallId: true,
+          providerStartAttemptedAt: true,
+          status: true,
         },
+      },
     },
     orderBy: { windowEndAt: "asc" },
     take: 100,
@@ -507,14 +497,6 @@ async function appendTerminalCallCircleResultNotifications(input: {
   while (true) {
     const matches: TerminalNotificationMatch[] =
       await input.prisma.hostedCallCircleMatch.findMany({
-        include: {
-          memberA: {
-            select: { pendingActivationTimeZone: true },
-          },
-          memberB: {
-            select: { pendingActivationTimeZone: true },
-          },
-        },
         orderBy: [
           { endedAt: "desc" },
           { windowEndAt: "desc" },
@@ -594,6 +576,13 @@ async function appendTerminalCallCircleResultNotificationIfMissing(input: {
 }): Promise<boolean> {
   const kind = readTerminalCallCircleNotificationKind(input.match);
   if (!kind) return false;
+  const timeZones = await readCallCircleMatchParticipantTimeZones({
+    groupId: input.match.groupId,
+    memberAId: input.match.memberAId,
+    memberBId: input.match.memberBId,
+    prisma: input.prisma,
+  });
+  if (!timeZones) return false;
   const memberNotifications = [
     {
       dedupeKey: buildTerminalCallCircleNotificationEventId({
@@ -602,6 +591,7 @@ async function appendTerminalCallCircleResultNotificationIfMissing(input: {
         memberId: input.match.memberAId,
       }),
       memberId: input.match.memberAId,
+      timeZone: timeZones.memberATimeZone,
     },
     {
       dedupeKey: buildTerminalCallCircleNotificationEventId({
@@ -610,6 +600,7 @@ async function appendTerminalCallCircleResultNotificationIfMissing(input: {
         memberId: input.match.memberBId,
       }),
       memberId: input.match.memberBId,
+      timeZone: timeZones.memberBTimeZone,
     },
   ];
 
@@ -641,6 +632,7 @@ async function appendTerminalCallCircleResultNotificationIfMissing(input: {
         matchId: input.match.id,
         memberId: notification.memberId,
         now: input.now,
+        timeZone: notification.timeZone,
         tx,
       });
     }));
@@ -697,11 +689,13 @@ async function appendTerminalCallCircleNotificationIfReachableTx(input: {
   matchId: string;
   memberId: string;
   now: Date;
+  timeZone: string;
   tx: Prisma.TransactionClient;
 }): Promise<Awaited<ReturnType<typeof appendCallCircleHandoffNotificationTx>> | null> {
   const preflight = await readCallCircleNotificationPreflightTx({
     memberId: input.memberId,
     now: input.now,
+    timeZone: input.timeZone,
     tx: input.tx,
   });
   if (preflight.status !== "ok") return null;
@@ -859,6 +853,7 @@ async function listCallCircleReachableParticipants(input: {
       readCallCircleNotificationPreflightTx({
         memberId: participant.memberId,
         now: input.now,
+        timeZone: participant.timeZone,
         tx,
       })
     ));
@@ -1010,6 +1005,7 @@ async function preflightCallCircleMorningNotificationsTx(input: {
     readCallCircleNotificationPreflightTx({
       memberId: recipient.memberId,
       now: input.now,
+      timeZone: recipient.timeZone,
       tx: input.tx,
     })
   ));
@@ -1059,11 +1055,13 @@ async function askCallCircleFinalConfirmations(input: {
       readCallCircleNotificationPreflightTx({
         memberId: input.match.memberAId,
         now: input.now,
+        timeZone: input.memberATimeZone,
         tx,
       }),
       readCallCircleNotificationPreflightTx({
         memberId: input.match.memberBId,
         now: input.now,
+        timeZone: input.memberBTimeZone,
         tx,
       }),
     ]);
@@ -1136,6 +1134,13 @@ async function appendCallCircleBridgeHandoffs(input: {
   now: Date;
   prisma: PrismaClient;
 }): Promise<boolean> {
+  const timeZones = await readCallCircleMatchParticipantTimeZones({
+    groupId: input.match.groupId,
+    memberAId: input.match.memberAId,
+    memberBId: input.match.memberBId,
+    prisma: input.prisma,
+  });
+  if (!timeZones) return false;
   const transaction = await input.prisma.$transaction(async (tx): Promise<{
     handedOff: boolean;
     signals: CallCircleNotificationSignal[];
@@ -1162,6 +1167,7 @@ async function appendCallCircleBridgeHandoffs(input: {
         matchId: input.match.id,
         memberId: input.match.memberAId,
         now: input.now,
+        timeZone: timeZones.memberATimeZone,
         tx,
       }),
       appendTerminalCallCircleNotificationIfReachableTx({
@@ -1169,6 +1175,7 @@ async function appendCallCircleBridgeHandoffs(input: {
         matchId: input.match.id,
         memberId: input.match.memberBId,
         now: input.now,
+        timeZone: timeZones.memberBTimeZone,
         tx,
       }),
     ]);
@@ -1242,9 +1249,7 @@ interface SchedulerMatch {
   finalAskedAt: Date | null;
   groupId: string;
   id: string;
-  memberA: { pendingActivationTimeZone: string | null };
   memberAId: string;
-  memberB: { pendingActivationTimeZone: string | null };
   memberBId: string;
   phoneCall: {
     analyzedAt: Date | null;
@@ -1263,6 +1268,7 @@ interface SchedulerMatch {
 
 interface TerminalNotificationMatch {
   endedAt: Date | null;
+  groupId: string;
   id: string;
   memberAId: string;
   memberBId: string;

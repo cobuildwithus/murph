@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   readCallCircleNotificationSignal: vi.fn(),
   readCallCircleCalendarAvailability: vi.fn(),
   readCallCircleNotificationPreflightTx: vi.fn(),
+  readCallCircleMatchParticipantTimeZones: vi.fn(),
   signalCallCircleNotificationRuntimesBestEffort: vi.fn(),
   startCallCircleConnectorCall: vi.fn(),
 }));
@@ -32,6 +33,7 @@ vi.mock("@/src/lib/call-circle/participant-store", () => ({
   canUseActiveCallCircleParticipant: mocks.canUseActiveCallCircleParticipant,
   canUseActiveCallCircleParticipantPair: mocks.canUseActiveCallCircleParticipantPair,
   listCallCircleEligibleParticipants: mocks.listCallCircleEligibleParticipants,
+  readCallCircleMatchParticipantTimeZones: mocks.readCallCircleMatchParticipantTimeZones,
 }));
 
 vi.mock("@/src/lib/call-circle/match-store", () => ({
@@ -164,6 +166,10 @@ describe("runCallCircleScheduler", () => {
     });
     mocks.readCallCircleCalendarAvailability.mockResolvedValue("unknown");
     mocks.readCallCircleNotificationPreflightTx.mockResolvedValue({ status: "ok" });
+    mocks.readCallCircleMatchParticipantTimeZones.mockResolvedValue({
+      memberATimeZone: "UTC",
+      memberBTimeZone: "UTC",
+    });
     mocks.signalCallCircleNotificationRuntimesBestEffort.mockResolvedValue(undefined);
     mocks.startCallCircleConnectorCall.mockResolvedValue({
       phoneCallId: "hpc_123",
@@ -183,25 +189,25 @@ describe("runCallCircleScheduler", () => {
       groupId: "hgrp_123",
       lastMatchedAt: null,
       memberId: "member_a",
-      preferences: { excludeMemberIds: [], windows: [] },
+      preferences: { excludeMemberIds: [], timeZone: "UTC", windows: [] },
       timeZone: "UTC",
     }, {
       groupId: "hgrp_123",
       lastMatchedAt: null,
       memberId: "member_b",
-      preferences: { excludeMemberIds: [], windows: [] },
+      preferences: { excludeMemberIds: [], timeZone: "UTC", windows: [] },
       timeZone: "UTC",
     }, {
       groupId: "hgrp_123",
       lastMatchedAt: null,
       memberId: "member_c",
-      preferences: { excludeMemberIds: [], windows: [] },
+      preferences: { excludeMemberIds: [], timeZone: "UTC", windows: [] },
       timeZone: "UTC",
     }, {
       groupId: "hgrp_123",
       lastMatchedAt: null,
       memberId: "member_d",
-      preferences: { excludeMemberIds: [], windows: [] },
+      preferences: { excludeMemberIds: [], timeZone: "UTC", windows: [] },
       timeZone: "UTC",
     }]);
     mocks.proposeCallCircleMatches.mockReturnValue([
@@ -626,11 +632,13 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.readCallCircleNotificationPreflightTx).toHaveBeenNthCalledWith(1, {
       memberId: "member_b",
       now,
+      timeZone: "UTC",
       tx,
     });
     expect(mocks.readCallCircleNotificationPreflightTx).toHaveBeenNthCalledWith(2, {
       memberId: "member_b",
       now,
+      timeZone: "UTC",
       tx,
     });
     expect(mocks.appendCallCircleConfirmNotificationTx).toHaveBeenCalledTimes(1);
@@ -1627,6 +1635,7 @@ function createSchedulerPrisma(input: {
   missedHandoffMatches?: unknown[];
   pendingSetupParticipants?: unknown[];
   pendingSetupParticipantPages?: unknown[][];
+  participantTimeZones?: Record<string, string>;
   recentWeeklyMatchCount?: number;
   terminalNotificationMatchPages?: unknown[][];
   terminalNotificationMatches?: unknown[];
@@ -1674,7 +1683,25 @@ function createSchedulerPrisma(input: {
     ?? [input.pendingSetupParticipants ?? []];
   let groupPageIndex = 0;
   let setupPageIndex = 0;
-  const participantFindMany = vi.fn(async (args: { distinct?: unknown }) => {
+  const participantFindMany = vi.fn(async (args: {
+    distinct?: unknown;
+    where?: { memberId?: { in?: string[] } };
+  }) => {
+    const memberIds = args.where?.memberId?.in;
+    if (memberIds) {
+      return memberIds.map((memberId) => ({
+        memberId,
+        preferencesJson: {
+          excludeMemberIds: [],
+          timeZone: input.participantTimeZones?.[memberId] ?? "UTC",
+          windows: [{
+            dayOfWeek: 1,
+            endLocalTime: "17:30",
+            startLocalTime: "17:00",
+          }],
+        },
+      }));
+    }
     if (args.distinct) {
       return groupPages[groupPageIndex++] ?? [];
     }
@@ -1704,6 +1731,7 @@ function callCircleEligibleParticipant(input: {
     memberId: input.memberId,
     preferences: {
       excludeMemberIds: [],
+      timeZone: "UTC",
       windows: [{
         dayOfWeek: 1,
         endLocalTime: "15:30",

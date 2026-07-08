@@ -29,6 +29,7 @@ import {
   canUseActiveCallCircleParticipant,
   canUseActiveCallCircleParticipantPair,
   enrollCallCircleParticipant,
+  listCallCircleEligibleParticipants,
   pauseCallCircleParticipant,
   resumeCallCircleParticipant,
   writeCallCirclePreferences,
@@ -625,6 +626,7 @@ describe("Call Circle conditional mutations", () => {
       memberId: "member_123",
       preferencesJson: {
         excludeMemberIds: [],
+        timeZone: "UTC",
         windows: [{
           dayOfWeek: 1,
           endLocalTime: "17:30",
@@ -674,6 +676,7 @@ describe("Call Circle conditional mutations", () => {
     };
     const preferences = {
       excludeMemberIds: ["member_skip"],
+      timeZone: "UTC",
       windows: [{
         dayOfWeek: 1,
         endLocalTime: "17:30",
@@ -705,6 +708,48 @@ describe("Call Circle conditional mutations", () => {
       preferences,
       prisma: prisma as never,
     })).resolves.toBe(false);
+  });
+
+  it("reads Call Circle scheduling timezone from preferences for active members", async () => {
+    const findMany = vi.fn(async () => [{
+      groupId: "hgrp_123",
+      lastMatchedAt: null,
+      member: {
+        pendingActivationTimeZone: null,
+      },
+      memberId: "member_123",
+      preferencesJson: {
+        excludeMemberIds: [],
+        timeZone: "America/New_York",
+        windows: [{
+          dayOfWeek: 1,
+          endLocalTime: "20:00",
+          startLocalTime: "19:00",
+        }],
+      },
+    }]);
+    const prisma = {
+      hostedCallCircleParticipant: { findMany },
+    };
+
+    await expect(listCallCircleEligibleParticipants({
+      groupId: "hgrp_123",
+      prisma: prisma as never,
+    })).resolves.toEqual([{
+      groupId: "hgrp_123",
+      lastMatchedAt: null,
+      memberId: "member_123",
+      preferences: {
+        excludeMemberIds: [],
+        timeZone: "America/New_York",
+        windows: [{
+          dayOfWeek: 1,
+          endLocalTime: "20:00",
+          startLocalTime: "19:00",
+        }],
+      },
+      timeZone: "America/New_York",
+    }]);
   });
 
   it("requires access, membership, and enrolled rows for an active participant pair", async () => {

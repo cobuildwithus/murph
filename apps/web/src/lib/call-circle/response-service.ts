@@ -21,6 +21,7 @@ import {
 import {
   canUseActiveCallCircleParticipantPair,
   pauseCallCircleParticipant,
+  readCallCircleMatchParticipantTimeZones,
   resumeCallCircleParticipant,
   writeCallCirclePreferences,
 } from "./participant-store";
@@ -34,7 +35,6 @@ import {
 import {
   canScheduleCallCircleConfirmationFlow,
   isWithinCallCircleQuietHours,
-  normalizeCallCircleTimeZone,
 } from "./time";
 import {
   readActiveHostedMemberAccess,
@@ -89,12 +89,16 @@ export async function handleCallCircleRespond(input: {
         if (authority.participantStatus === null) {
           return { status: "unavailable", unavailableReason: "call_circle_not_enrolled" };
         }
+        if (!input.request.timeZone) {
+          return { status: "unavailable", unavailableReason: "call_circle_timezone_required" };
+        }
         const windows = input.request.windows ?? [];
         const changed = await writeCallCirclePreferences({
           groupId: target.groupId,
           memberId: input.memberId,
           preferences: {
             excludeMemberIds: input.request.excludeMemberIds ?? [],
+            timeZone: input.request.timeZone,
             windows,
           },
           prisma: tx,
@@ -264,6 +268,7 @@ export async function handleCallCircleRespond(input: {
           const reaskPreflight = await readCallCircleNotificationPreflightTx({
             memberId: reaskMemberId,
             now,
+            timeZone: reaskTimeZone,
             tx,
           });
           if (reaskPreflight.status !== "ok") {
@@ -521,6 +526,13 @@ async function resolveCallCircleResponseMatch(input: {
   })) {
     return null;
   }
+  const timeZones = await readCallCircleMatchParticipantTimeZones({
+    groupId: match.groupId,
+    memberAId: match.memberAId,
+    memberBId: match.memberBId,
+    prisma: input.prisma,
+  });
+  if (!timeZones) return null;
   return {
     amAskedAt: match.amAskedAt,
     expired: match.windowEndAt.getTime() <= input.now.getTime(),
@@ -528,13 +540,9 @@ async function resolveCallCircleResponseMatch(input: {
     groupId: match.groupId,
     id: match.id,
     memberAId: match.memberAId,
-    memberATimeZone: normalizeCallCircleTimeZone(
-      match.memberA.pendingActivationTimeZone,
-    ),
+    memberATimeZone: timeZones.memberATimeZone,
     memberBId: match.memberBId,
-    memberBTimeZone: normalizeCallCircleTimeZone(
-      match.memberB.pendingActivationTimeZone,
-    ),
+    memberBTimeZone: timeZones.memberBTimeZone,
     side,
     status: match.status,
   };
@@ -607,9 +615,7 @@ const callCircleResponseMatchSelect = {
   finalAskedAt: true,
   groupId: true,
   id: true,
-  memberA: { select: { pendingActivationTimeZone: true } },
   memberAId: true,
-  memberB: { select: { pendingActivationTimeZone: true } },
   memberBId: true,
   status: true,
   windowEndAt: true,
@@ -781,10 +787,6 @@ async function appendCounterReaskTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<CallCircleNotificationSignal | null> {
   const match = await input.tx.hostedCallCircleMatch.findUnique({
-    include: {
-      memberA: { select: { pendingActivationTimeZone: true } },
-      memberB: { select: { pendingActivationTimeZone: true } },
-    },
     where: { id: input.matchId },
   });
   if (!match) return null;
@@ -804,11 +806,16 @@ async function appendCounterReaskTx(input: {
     return null;
   }
   const reaskMemberId = input.side === "A" ? match.memberBId : match.memberAId;
-  const reaskTimeZone = normalizeCallCircleTimeZone(
-    input.side === "A"
-      ? match.memberB.pendingActivationTimeZone
-      : match.memberA.pendingActivationTimeZone,
-  );
+  const timeZones = await readCallCircleMatchParticipantTimeZones({
+    groupId: match.groupId,
+    memberAId: match.memberAId,
+    memberBId: match.memberBId,
+    prisma: input.tx,
+  });
+  if (!timeZones) return null;
+  const reaskTimeZone = input.side === "A"
+    ? timeZones.memberBTimeZone
+    : timeZones.memberATimeZone;
   const marked = await markCallCircleMatchAmAsked({
     matchId: match.id,
     now: input.now,

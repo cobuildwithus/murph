@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   markCallCircleMatchOutcome: vi.fn(),
   readCallCircleNotificationSignal: vi.fn(),
   readCallCircleNotificationPreflightTx: vi.fn(),
+  readCallCircleMatchParticipantTimeZones: vi.fn(),
   resolveVerifiedMemberTransferNumber: vi.fn(),
   signalCallCircleNotificationRuntimesBestEffort: vi.fn(),
 }));
@@ -28,6 +29,7 @@ vi.mock("@/src/lib/call-circle/match-store", () => ({
 
 vi.mock("@/src/lib/call-circle/participant-store", () => ({
   canUseActiveCallCircleParticipantPair: mocks.canUseActiveCallCircleParticipantPair,
+  readCallCircleMatchParticipantTimeZones: mocks.readCallCircleMatchParticipantTimeZones,
 }));
 
 vi.mock("@/src/lib/call-circle/notifications", () => ({
@@ -83,6 +85,10 @@ describe("startCallCircleConnectorCall", () => {
     mocks.readCallCircleNotificationPreflightTx.mockResolvedValue({
       route: { channel: "linq" },
       status: "ok",
+    });
+    mocks.readCallCircleMatchParticipantTimeZones.mockResolvedValue({
+      memberATimeZone: "UTC",
+      memberBTimeZone: "UTC",
     });
     mocks.signalCallCircleNotificationRuntimesBestEffort.mockResolvedValue(undefined);
     mocks.resolveVerifiedMemberTransferNumber
@@ -436,9 +442,7 @@ function createPrisma(input: {
         finalAskedAt: input.finalAskedAt,
         groupId: "hgrp_123",
         id: "hccm_123",
-        memberA: { pendingActivationTimeZone: "UTC" },
         memberAId: "member_a",
-        memberB: { pendingActivationTimeZone: "UTC" },
         memberBId: "member_b",
         phoneCall: input.phoneCall
           ? {
@@ -451,6 +455,21 @@ function createPrisma(input: {
         windowEndAt: input.windowEndAt,
         windowStartAt: input.windowStartAt,
       })),
+    },
+    hostedCallCircleParticipant: {
+      findMany: vi.fn(async (args: { where?: { memberId?: { in?: string[] } } }) =>
+        (args.where?.memberId?.in ?? []).map((memberId) => ({
+          memberId,
+          preferencesJson: {
+            excludeMemberIds: [],
+            timeZone: "UTC",
+            windows: [{
+              dayOfWeek: 1,
+              endLocalTime: "17:30",
+              startLocalTime: "17:00",
+            }],
+          },
+        }))),
     },
   };
 }

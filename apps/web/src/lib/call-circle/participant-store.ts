@@ -17,6 +17,9 @@ import type {
   CallCircleParticipantRow,
   CallCirclePrismaClient,
 } from "./types";
+import {
+  normalizeCallCircleTimeZone,
+} from "./time";
 
 export interface CallCircleParticipantPreferences
   extends HostedCallCirclePreferences {}
@@ -28,8 +31,6 @@ export interface CallCircleEligibleParticipant {
   preferences: CallCircleParticipantPreferences;
   timeZone: string;
 }
-
-const DEFAULT_CALL_CIRCLE_TIME_ZONE = "UTC";
 
 export async function enrollCallCircleParticipant(input: {
   groupId: string;
@@ -130,11 +131,6 @@ export async function listCallCircleEligibleParticipants(input: {
     select: {
       groupId: true,
       lastMatchedAt: true,
-      member: {
-        select: {
-          pendingActivationTimeZone: true,
-        },
-      },
       memberId: true,
       preferencesJson: true,
     },
@@ -153,10 +149,59 @@ export async function listCallCircleEligibleParticipants(input: {
       lastMatchedAt: participant.lastMatchedAt,
       memberId: participant.memberId,
       preferences,
-      timeZone: participant.member.pendingActivationTimeZone
-        ?? DEFAULT_CALL_CIRCLE_TIME_ZONE,
+      timeZone: normalizeCallCircleTimeZone(preferences.timeZone),
     }];
   });
+}
+
+export async function readCallCircleParticipantTimeZones(input: {
+  groupId: string;
+  memberIds: readonly string[];
+  prisma?: CallCirclePrismaClient;
+}): Promise<Map<string, string>> {
+  const prisma = input.prisma ?? getPrisma();
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) return new Map();
+  const participants = await prisma.hostedCallCircleParticipant.findMany({
+    select: {
+      memberId: true,
+      preferencesJson: true,
+    },
+    where: {
+      groupId: input.groupId,
+      memberId: { in: memberIds },
+      preferencesJson: { not: Prisma.DbNull },
+    },
+  });
+  const timeZones = new Map<string, string>();
+  for (const participant of participants) {
+    const preferences = parseCallCirclePreferencesOrNull(participant.preferencesJson);
+    if (preferences) {
+      timeZones.set(participant.memberId, normalizeCallCircleTimeZone(preferences.timeZone));
+    }
+  }
+  return timeZones;
+}
+
+export async function readCallCircleMatchParticipantTimeZones(input: {
+  groupId: string;
+  memberAId: string;
+  memberBId: string;
+  prisma?: CallCirclePrismaClient;
+}): Promise<{
+  memberATimeZone: string;
+  memberBTimeZone: string;
+} | null> {
+  const timeZones = await readCallCircleParticipantTimeZones({
+    groupId: input.groupId,
+    memberIds: [input.memberAId, input.memberBId],
+    prisma: input.prisma,
+  });
+  const memberATimeZone = timeZones.get(input.memberAId);
+  const memberBTimeZone = timeZones.get(input.memberBId);
+  return memberATimeZone && memberBTimeZone
+    ? { memberATimeZone, memberBTimeZone }
+    : null;
 }
 
 export async function canUseActiveCallCircleParticipantPair(input: {

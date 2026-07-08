@@ -307,6 +307,7 @@ function participant(
     memberId,
     preferences: {
       excludeMemberIds,
+      timeZone: "UTC",
       windows: [window],
     },
     timeZone: "UTC",

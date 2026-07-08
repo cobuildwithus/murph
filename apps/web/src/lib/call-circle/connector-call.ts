@@ -16,10 +16,8 @@ import {
   signalCallCircleNotificationRuntimesBestEffort,
 } from "./notifications";
 import {
-  normalizeCallCircleTimeZone,
-} from "./time";
-import {
   canUseActiveCallCircleParticipantPair,
+  readCallCircleMatchParticipantTimeZones,
 } from "./participant-store";
 import {
   createHostedPhoneCall,
@@ -53,8 +51,6 @@ export async function startCallCircleConnectorCall(input: {
   const now = input.now ?? new Date();
   const match = await prisma.hostedCallCircleMatch.findUnique({
     include: {
-      memberA: { select: { pendingActivationTimeZone: true } },
-      memberB: { select: { pendingActivationTimeZone: true } },
       phoneCall: {
         select: {
           analyzedAt: true,
@@ -174,13 +170,22 @@ export async function startCallCircleConnectorCall(input: {
     });
     return { status: handedOff ? "handoff" : "ignored" };
   }
+  const timeZones = await readCallCircleMatchParticipantTimeZones({
+    groupId: match.groupId,
+    memberAId: match.memberAId,
+    memberBId: match.memberBId,
+    prisma,
+  });
+  if (!timeZones) {
+    return { status: "ignored" };
+  }
 
   try {
     const phoneCall = await createHostedPhoneCall({
       brief: buildCallCircleConnectorBrief({
         memberAPhone,
         matchId: match.id,
-        timeZone: normalizeCallCircleTimeZone(match.memberA.pendingActivationTimeZone),
+        timeZone: timeZones.memberATimeZone,
       }),
       beforeStart: async ({ phoneCallId }) => {
         if (!await canUseActiveCallCircleParticipantPair({
@@ -331,6 +336,13 @@ async function markCallCircleConnectorHandoff(input: {
   outcome: string;
   prisma: PrismaClient;
 }): Promise<boolean> {
+  const timeZones = await readCallCircleMatchParticipantTimeZones({
+    groupId: input.match.groupId,
+    memberAId: input.match.memberAId,
+    memberBId: input.match.memberBId,
+    prisma: input.prisma,
+  });
+  if (!timeZones) return false;
   const transaction = await input.prisma.$transaction(async (tx): Promise<{
     handedOff: boolean;
     signals: CallCircleNotificationSignal[];
@@ -363,12 +375,14 @@ async function markCallCircleConnectorHandoff(input: {
         matchId: input.match.id,
         memberId: input.match.memberAId,
         now: input.now,
+        timeZone: timeZones.memberATimeZone,
         tx,
       }),
       appendConnectorHandoffNotificationIfReachableTx({
         matchId: input.match.id,
         memberId: input.match.memberBId,
         now: input.now,
+        timeZone: timeZones.memberBTimeZone,
         tx,
       }),
     ]);
@@ -393,11 +407,13 @@ async function appendConnectorHandoffNotificationIfReachableTx(input: {
   matchId: string;
   memberId: string;
   now: Date;
+  timeZone: string;
   tx: Prisma.TransactionClient;
 }) {
   const preflight = await readCallCircleNotificationPreflightTx({
     memberId: input.memberId,
     now: input.now,
+    timeZone: input.timeZone,
     tx: input.tx,
   });
   if (preflight.status !== "ok") return null;

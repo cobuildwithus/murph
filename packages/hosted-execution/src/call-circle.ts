@@ -9,6 +9,12 @@ const hostedCallCircleLocalTimeSchema = z
   .trim()
   .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u);
 const hostedCallCircleIsoDateTimeSchema = z.string().trim().datetime({ offset: true });
+const hostedCallCircleTimeZoneSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .refine(isHostedCallCircleTimeZone, "Call Circle timeZone must be a valid IANA time zone.");
 
 export const hostedCallCircleAvailabilityWindowSchema = z
   .object({
@@ -25,6 +31,7 @@ export const hostedCallCircleAvailabilityWindowSchema = z
 export const hostedCallCirclePreferencesSchema = z
   .object({
     excludeMemberIds: z.array(hostedCallCircleMemberIdSchema).max(100).default([]),
+    timeZone: hostedCallCircleTimeZoneSchema,
     windows: z.array(hostedCallCircleAvailabilityWindowSchema).max(28).default([]),
   })
   .strict();
@@ -48,6 +55,7 @@ export const hostedCallCircleRespondRequestSchema = z
     kind: z.enum(["preferences", "confirm", "counter", "decline", "pause", "resume"]),
     matchId: hostedCallCircleMatchIdSchema.optional(),
     side: z.enum(["A", "B"]).optional(),
+    timeZone: hostedCallCircleTimeZoneSchema.optional(),
     windows: z.array(hostedCallCircleAvailabilityWindowSchema).max(28).optional(),
   })
   .strict()
@@ -57,6 +65,13 @@ export const hostedCallCircleRespondRequestSchema = z
         code: "custom",
         message: "Call Circle preferences require availability windows.",
         path: ["windows"],
+      });
+    }
+    if (request.kind === "preferences" && request.timeZone === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Call Circle preferences require a timeZone.",
+        path: ["timeZone"],
       });
     }
     if (request.kind === "counter" && request.counterWindow === undefined) {
@@ -132,4 +147,13 @@ export function parseHostedCallCircleRespondResponse(
   value: unknown,
 ): HostedCallCircleRespondResponse {
   return hostedCallCircleRespondResponseSchema.parse(value);
+}
+
+function isHostedCallCircleTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date(0));
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -152,11 +152,13 @@ call (text-handoff fallback when the connector agent env is unset).
 
 ### 6. Timezone
 
-- Member local time comes from the timezone stored on `HostedMember`
-  (signup `pendingActivationTimeZone` lineage). Add one small helper in the
-  call-circle module that returns a member's IANA timezone with a UTC
-  fallback; use it for window conversion, morning scheduling, and quiet
-  hours. Do not add new timezone state.
+- Member local time comes from the IANA timezone stored inside Call Circle
+  participant preferences, next to that member's coarse availability
+  windows. The member-thread response tool must submit the current runtime
+  timezone with `kind: "preferences"`. Scheduler, confirmation, counter,
+  connector, and notification formatting paths read this participant
+  preference timezone and do not fall back to `HostedMember`
+  `pendingActivationTimeZone` for Call Circle scheduling.
 
 ### 7. Cloudflare port + dynamic tool
 
@@ -513,6 +515,26 @@ Focused follow-up verification:
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/phone-calls-service.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/hosted-group-tool.test.ts`
 - `pnpm exec vitest run --config vitest.config.ts --no-coverage test/parsers.test.ts test/call-circle.test.ts` from `packages/hosted-execution`
 - `pnpm exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-group-tool.test.ts test/assistant-call-circle.test.ts` from `packages/assistant-engine`
+- `pnpm --filter @murphai/hosted-web typecheck`
+- `pnpm --filter @murphai/hosted-execution typecheck`
+- `pnpm --filter @murphai/assistant-engine typecheck`
+
+## ReviewGPT Follow-Up 14 2026-07-08
+
+Accepted finding from the fourteenth PR ReviewGPT pass:
+
+- Call Circle local-time scheduling must not use signup activation timezone
+  after a member is active. Participant preferences now require and store an
+  IANA `timeZone`, the assistant response tool submits it for preference
+  updates, and scheduler/response/connector paths read member-local time
+  from participant preferences. Missing preference timezones fail closed
+  instead of falling back to UTC or `HostedMember.pendingActivationTimeZone`.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-route.test.ts apps/web/test/call-circle-notifications.test.ts`
+- `pnpm exec vitest run --config vitest.config.ts --no-coverage test/call-circle.test.ts` from `packages/hosted-execution`
+- `pnpm exec vitest run --config vitest.config.ts --no-coverage test/assistant-call-circle.test.ts` from `packages/assistant-engine`
 - `pnpm --filter @murphai/hosted-web typecheck`
 - `pnpm --filter @murphai/hosted-execution typecheck`
 - `pnpm --filter @murphai/assistant-engine typecheck`

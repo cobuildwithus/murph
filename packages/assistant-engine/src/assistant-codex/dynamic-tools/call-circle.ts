@@ -16,6 +16,7 @@ const CALL_CIRCLE_RESPOND_ROOT_KEYS = [
   'kind',
   'matchId',
   'side',
+  'timeZone',
   'windows',
 ] as const
 
@@ -29,7 +30,7 @@ export const MURPH_CALL_CIRCLE_RESPOND_TOOL = {
     'Never record an answer for another person, never invent availability, never include phone numbers, and never start calls.',
     'For confirm, decline, and counter, omit matchId and side unless the pending ask explicitly supplied them; the server resolves the current member\'s active ask when it is unambiguous.',
     'For preferences, omit groupId unless the reply names a specific group; the server resolves the member\'s active Call Circle enrollment when it is unambiguous.',
-    'For preferences, record only days and times the member provided. If they say no or pause, use kind="pause".',
+    'For preferences, record only days and times the member provided, and set timeZone to the current IANA timezone from this runtime context so those local windows are interpreted correctly. If they say no or pause, use kind="pause".',
   ].join(' '),
   inputSchema: z.toJSONSchema(hostedCallCircleRespondRequestSchema, { io: 'input' }),
 } as const

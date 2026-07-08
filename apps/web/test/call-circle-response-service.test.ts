@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   readCallCircleNotificationSignal: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readCallCircleNotificationPreflightTx: vi.fn(),
+  readCallCircleMatchParticipantTimeZones: vi.fn(),
   resumeCallCircleParticipant: vi.fn(),
   signalCallCircleNotificationRuntimesBestEffort: vi.fn(),
   writeCallCirclePreferences: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock("@/src/lib/call-circle/notifications", () => ({
 vi.mock("@/src/lib/call-circle/participant-store", () => ({
   canUseActiveCallCircleParticipantPair: mocks.canUseActiveCallCircleParticipantPair,
   pauseCallCircleParticipant: mocks.pauseCallCircleParticipant,
+  readCallCircleMatchParticipantTimeZones: mocks.readCallCircleMatchParticipantTimeZones,
   resumeCallCircleParticipant: mocks.resumeCallCircleParticipant,
   writeCallCirclePreferences: mocks.writeCallCirclePreferences,
 }));
@@ -81,6 +83,10 @@ describe("handleCallCircleRespond", () => {
       route: { channel: "linq" },
       status: "ok",
     });
+    mocks.readCallCircleMatchParticipantTimeZones.mockResolvedValue({
+      memberATimeZone: "UTC",
+      memberBTimeZone: "UTC",
+    });
     mocks.resumeCallCircleParticipant.mockResolvedValue(true);
     mocks.signalCallCircleNotificationRuntimesBestEffort.mockResolvedValue(undefined);
     mocks.writeCallCirclePreferences.mockResolvedValue(true);
@@ -109,6 +115,29 @@ describe("handleCallCircleRespond", () => {
     expect(mocks.writeCallCirclePreferences).not.toHaveBeenCalled();
   });
 
+  it("rejects opted-in preferences without a Call Circle timezone", async () => {
+    const prisma = createResponsePrisma({ participantStatus: "enrolled" });
+
+    await expect(handleCallCircleRespond({
+      memberId: "member_123",
+      prisma: prisma as never,
+      request: {
+        groupId: "hgrp_123",
+        kind: "preferences",
+        windows: [{
+          dayOfWeek: 1,
+          endLocalTime: "17:30",
+          startLocalTime: "17:00",
+        }],
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_timezone_required",
+    });
+
+    expect(mocks.writeCallCirclePreferences).not.toHaveBeenCalled();
+  });
+
   it("records preferences for a paused opted-in participant without resuming", async () => {
     const prisma = createResponsePrisma({ participantStatus: "paused" });
 
@@ -119,6 +148,7 @@ describe("handleCallCircleRespond", () => {
         excludeMemberIds: ["member_skip"],
         groupId: "hgrp_123",
         kind: "preferences",
+        timeZone: "America/New_York",
         windows: [{
           dayOfWeek: 2,
           endLocalTime: "12:30",
@@ -132,6 +162,7 @@ describe("handleCallCircleRespond", () => {
       memberId: "member_123",
       preferences: {
         excludeMemberIds: ["member_skip"],
+        timeZone: "America/New_York",
         windows: [{
           dayOfWeek: 2,
           endLocalTime: "12:30",
@@ -155,6 +186,7 @@ describe("handleCallCircleRespond", () => {
       prisma: prisma as never,
       request: {
         kind: "preferences",
+        timeZone: "America/Chicago",
         windows: [{
           dayOfWeek: 4,
           endLocalTime: "12:30",
@@ -180,6 +212,7 @@ describe("handleCallCircleRespond", () => {
       memberId: "member_123",
       preferences: {
         excludeMemberIds: [],
+        timeZone: "America/Chicago",
         windows: [{
           dayOfWeek: 4,
           endLocalTime: "12:30",
@@ -201,6 +234,7 @@ describe("handleCallCircleRespond", () => {
       prisma: prisma as never,
       request: {
         kind: "preferences",
+        timeZone: "America/Los_Angeles",
         windows: [{
           dayOfWeek: 4,
           endLocalTime: "12:30",
@@ -231,6 +265,7 @@ describe("handleCallCircleRespond", () => {
       prisma: prisma as never,
       request: {
         kind: "preferences",
+        timeZone: "America/Los_Angeles",
         windows: [{
           dayOfWeek: 4,
           endLocalTime: "12:30",
@@ -244,6 +279,7 @@ describe("handleCallCircleRespond", () => {
       memberId: "member_123",
       preferences: {
         excludeMemberIds: [],
+        timeZone: "America/Los_Angeles",
         windows: [{
           dayOfWeek: 4,
           endLocalTime: "12:30",
@@ -1064,6 +1100,21 @@ function createResponsePrisma(input: {
     }];
   });
   const matches = input.matches ?? [match];
+  const participantTimeZoneRows = (memberIds: readonly string[]) =>
+    memberIds.map((memberId) => ({
+      memberId,
+      preferencesJson: {
+        excludeMemberIds: [],
+        timeZone: memberId === match.memberAId
+          ? match.memberA.pendingActivationTimeZone ?? "UTC"
+          : match.memberB.pendingActivationTimeZone ?? "UTC",
+        windows: [{
+          dayOfWeek: 1,
+          endLocalTime: "17:30",
+          startLocalTime: "17:00",
+        }],
+      },
+    }));
   const tx = {
     hostedCallCircleMatch: {
       findMany: vi.fn(async () => matches),
@@ -1074,9 +1125,15 @@ function createResponsePrisma(input: {
       findMany: hostedMailboxItemFindMany,
     },
     hostedCallCircleParticipant: {
-      findMany: vi.fn(async () => input.participantStatus === null
-        ? []
-        : participantGroups.map((groupId) => ({ groupId }))),
+      findMany: vi.fn(async (args?: { where?: { memberId?: { in?: string[] } } }) => {
+        const memberIds = args?.where?.memberId?.in;
+        if (memberIds) {
+          return participantTimeZoneRows(memberIds);
+        }
+        return input.participantStatus === null
+          ? []
+          : participantGroups.map((groupId) => ({ groupId }));
+      }),
       findUnique: vi.fn(async () => input.participantStatus === null
         ? null
         : { status: input.participantStatus }),

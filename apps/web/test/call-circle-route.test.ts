@@ -67,6 +67,7 @@ describe("Call Circle internal response route", () => {
       },
       request: {
         kind: "preferences",
+        timeZone: "America/New_York",
         windows: [{
           dayOfWeek: 1,
           endLocalTime: "12:30",

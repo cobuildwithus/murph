@@ -232,6 +232,7 @@ export function buildCallCircleOutcomeNotificationEventId(input: {
 export async function readCallCircleNotificationPreflightTx(input: {
   memberId: string;
   now: Date;
+  timeZone?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<
   | { route: HostedExecutionAssistantNotificationRoute; status: "ok" }
@@ -244,13 +245,16 @@ export async function readCallCircleNotificationPreflightTx(input: {
   if (!route) {
     return { reason: "missing_route", status: "blocked" };
   }
-  const member = await input.tx.hostedMember.findUnique({
-    select: { pendingActivationTimeZone: true },
-    where: { id: input.memberId },
-  });
-  const timeZone = normalizeCallCircleTimeZone(
-    member?.pendingActivationTimeZone ?? null,
-  );
+  let timeZone = normalizeCallCircleTimeZone(input.timeZone);
+  if (!input.timeZone) {
+    const member = await input.tx.hostedMember.findUnique({
+      select: { pendingActivationTimeZone: true },
+      where: { id: input.memberId },
+    });
+    timeZone = normalizeCallCircleTimeZone(
+      member?.pendingActivationTimeZone ?? null,
+    );
+  }
   if (!isWithinCallCircleQuietHours({ now: input.now, timeZone })) {
     return { reason: "quiet_hours", status: "blocked" };
   }

@@ -11,6 +11,7 @@ describe("hosted Call Circle contracts", () => {
       excludeMemberIds: ["member_2"],
       groupId: "hgrp_123",
       kind: "preferences",
+      timeZone: "America/New_York",
       windows: [
         {
           dayOfWeek: 2,
@@ -22,6 +23,7 @@ describe("hosted Call Circle contracts", () => {
       excludeMemberIds: ["member_2"],
       groupId: "hgrp_123",
       kind: "preferences",
+      timeZone: "America/New_York",
       windows: [
         {
           dayOfWeek: 2,
@@ -30,6 +32,20 @@ describe("hosted Call Circle contracts", () => {
         },
       ],
     });
+  });
+
+  it("requires a timezone for preference responses", () => {
+    expect(() => hostedCallCircleRespondRequestSchema.parse({
+      groupId: "hgrp_123",
+      kind: "preferences",
+      windows: [
+        {
+          dayOfWeek: 2,
+          endLocalTime: "18:00",
+          startLocalTime: "17:00",
+        },
+      ],
+    })).toThrow(/timeZone/u);
   });
 
   it("allows lifecycle replies without explicit match identity", () => {
