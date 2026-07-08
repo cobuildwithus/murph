@@ -1008,6 +1008,7 @@ export async function sendAssistantMessageLocal(
               return
             }
             return currentInput.onProviderRequestStarted({
+              ...event,
               acceptedInputIds: providerRequestAcceptedInputIds,
               admissionMs,
               preProviderSetupMs,
@@ -1015,7 +1016,6 @@ export async function sendAssistantMessageLocal(
               providerRequestOrdinal:
                 event.providerRequestOrdinal ?? providerRequestOrdinal,
               sessionResolveMs,
-              startedAt: event.startedAt,
               turnLockWaitMs,
             })
           },

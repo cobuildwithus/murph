@@ -1252,6 +1252,12 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     stagedAtEpochMs?: number;
   };
   provider?: {
+    codexAppServerInitializeMs?: number;
+    codexAppServerPreProviderMs?: number;
+    codexAppServerSpawnReadyMs?: number;
+    codexAppServerThreadResumeMs?: number;
+    codexAppServerThreadStartMs?: number;
+    codexAppServerWarmReuseMs?: number;
     turnLockWaitMs?: number;
     sessionResolveMs?: number;
     promptBuildMs?: number;
@@ -1342,6 +1348,12 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "stagedAtEpochMs",
   ],
   provider: [
+    "codexAppServerInitializeMs",
+    "codexAppServerPreProviderMs",
+    "codexAppServerSpawnReadyMs",
+    "codexAppServerThreadResumeMs",
+    "codexAppServerThreadStartMs",
+    "codexAppServerWarmReuseMs",
     "turnLockWaitMs",
     "sessionResolveMs",
     "promptBuildMs",

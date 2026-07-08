@@ -20,6 +20,7 @@ import {
   isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError,
 } from '../provider-failure-diagnostics.js'
+import type { AssistantProviderRequestStartTiming } from '../providers/types.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type {
   AssistantHostedDeliveryIdempotencyContext,
@@ -1560,6 +1561,24 @@ async function executeAssistantAutoReply(input: {
         ? (event) => input.onProviderRequestStarted?.({
             ...(event.admissionMs === undefined ? {} : { admissionMs: event.admissionMs }),
             assistantInputIds: event.acceptedInputIds,
+            ...(event.codexAppServerInitializeMs === undefined
+              ? {}
+              : { codexAppServerInitializeMs: event.codexAppServerInitializeMs }),
+            ...(event.codexAppServerPreProviderMs === undefined
+              ? {}
+              : { codexAppServerPreProviderMs: event.codexAppServerPreProviderMs }),
+            ...(event.codexAppServerSpawnReadyMs === undefined
+              ? {}
+              : { codexAppServerSpawnReadyMs: event.codexAppServerSpawnReadyMs }),
+            ...(event.codexAppServerWarmReuseMs === undefined
+              ? {}
+              : { codexAppServerWarmReuseMs: event.codexAppServerWarmReuseMs }),
+            ...(event.codexAppServerThreadResumeMs === undefined
+              ? {}
+              : { codexAppServerThreadResumeMs: event.codexAppServerThreadResumeMs }),
+            ...(event.codexAppServerThreadStartMs === undefined
+              ? {}
+              : { codexAppServerThreadStartMs: event.codexAppServerThreadStartMs }),
             ...(event.preProviderSetupMs === undefined
               ? {}
               : { preProviderSetupMs: event.preProviderSetupMs }),
@@ -1601,7 +1620,7 @@ export type AssistantAutoReplyProviderRequestStartHook = (event: {
   source: string
   startedAt: string
   turnLockWaitMs?: number
-}) => Promise<void> | void
+} & AssistantProviderRequestStartTiming) => Promise<void> | void
 
 function shouldUseAssistantAutoReplyReceiptFallback(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode

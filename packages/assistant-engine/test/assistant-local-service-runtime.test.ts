@@ -1317,6 +1317,11 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.onProviderRequestStarted?.({
+      codexAppServerInitializeMs: 7,
+      codexAppServerPreProviderMs: 17,
+      codexAppServerSpawnReadyMs: 1,
+      codexAppServerThreadResumeMs: 9,
+      codexAppServerWarmReuseMs: 0,
       providerRequestOrdinal: 0,
       startedAt: '2026-06-09T00:00:00.000Z',
     })
@@ -1342,12 +1347,22 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
   expect(providerRequestStarted).toHaveBeenCalledTimes(1)
   const event = providerRequestStarted.mock.calls[0]?.[0] as {
     admissionMs: number
+    codexAppServerInitializeMs: number
+    codexAppServerPreProviderMs: number
+    codexAppServerSpawnReadyMs: number
+    codexAppServerThreadResumeMs: number
+    codexAppServerWarmReuseMs: number
     preProviderSetupMs: number
     promptBuildMs: number
     sessionResolveMs: number
     turnLockWaitMs: number
   }
   expect(typeof event.turnLockWaitMs).toBe('number')
+  expect(event.codexAppServerInitializeMs).toBe(7)
+  expect(event.codexAppServerPreProviderMs).toBe(17)
+  expect(event.codexAppServerSpawnReadyMs).toBe(1)
+  expect(event.codexAppServerThreadResumeMs).toBe(9)
+  expect(event.codexAppServerWarmReuseMs).toBe(0)
   expect(typeof event.sessionResolveMs).toBe('number')
   expect(typeof event.promptBuildMs).toBe('number')
   expect(typeof event.admissionMs).toBe('number')

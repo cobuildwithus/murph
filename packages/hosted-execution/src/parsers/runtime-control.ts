@@ -2594,6 +2594,12 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       providerLabel,
     );
     breakdown.provider = {
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerInitializeMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerPreProviderMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerSpawnReadyMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadResumeMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadStartMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerWarmReuseMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "turnLockWaitMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "sessionResolveMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "promptBuildMs", providerLabel),
