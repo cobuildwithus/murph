@@ -861,6 +861,7 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "read_current" }
   | {
       action: "update_display_name";
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
       updateDisplayName: HostedRuntimeGroupUpdateDisplayNameRequest;
     }
   | { action: "create_join_link"; joinLink?: HostedRuntimeGroupCreateJoinLinkRequest | null }

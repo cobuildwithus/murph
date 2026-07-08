@@ -224,6 +224,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       }
       if (
         request.action !== "read_chat_participants"
+        && request.action !== "update_display_name"
         && request.action !== "post_join_offer"
         && request.action !== "preflight_set_chat_avatar"
         && request.action !== "set_chat_avatar"

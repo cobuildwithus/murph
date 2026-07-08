@@ -12,6 +12,7 @@ import {
   sendHostedLinqReadReceipt,
   shareHostedLinqContactCard,
   updateHostedLinqChatAvatar,
+  updateHostedLinqChatDisplayName,
 } from "@/src/lib/hosted-onboarding/linq";
 
 const originalFetch = globalThis.fetch;
@@ -288,6 +289,55 @@ describe("updateHostedLinqChatAvatar", () => {
       chatId: "chat_123",
       groupChatIconUrl: "https://example.com/avatar.png",
     })).rejects.toThrow(/hosted Cloudflare Images URL/u);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("updateHostedLinqChatDisplayName", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("updates a chat with the SDK-backed display name field", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({ status: "pending" }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateHostedLinqChatDisplayName({
+      chatId: "chat_123",
+      displayName: "  Weekly   Health Crew  ",
+    })).resolves.toBeUndefined();
+
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (!firstCall) {
+      throw new Error("Expected fetch to be called");
+    }
+    const [url, init] = firstCall as [RequestInfo | URL, RequestInit?];
+    expect(url).toEqual(new URL("chats/chat_123", "https://linq.example.test/api/partner/v3/"));
+    expect(expectRequestInit(init).method).toBe("PUT");
+    expect(readJsonRequestBody(init)).toEqual({
+      display_name: "Weekly Health Crew",
+    });
+  });
+
+  it("rejects blank display names before calling Linq", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateHostedLinqChatDisplayName({
+      chatId: "chat_123",
+      displayName: " ",
+    })).rejects.toThrow(/display name is required/u);
 
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
 } from "@murphai/hosted-execution/runtime-control";
 import type { TextPart } from "@linqapp/sdk/resources";
 import type {
@@ -123,6 +124,35 @@ export async function updateHostedLinqChatAvatar(input: {
   if (!response.ok) {
     throw buildHostedLinqRequestFailedError({
       operation: "chat avatar update",
+      retryable: isRetryableHostedLinqStatus(response.status),
+      status: response.status,
+    });
+  }
+}
+
+export async function updateHostedLinqChatDisplayName(input: {
+  chatId: string;
+  displayName: string;
+  signal?: AbortSignal;
+}): Promise<void> {
+  // Mirrors @linqapp/sdk Chats.update / ChatUpdateParams.display_name while
+  // preserving this wrapper's shared auth, timeout, and redacted-error behavior.
+  const body: ChatUpdateParams = {
+    display_name: normalizeHostedLinqChatDisplayName(input.displayName),
+  };
+
+  const response = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify(body),
+    method: "PUT",
+    operation: "chat display name update",
+    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}`,
+    signal: input.signal,
+    timeoutMessage: "Linq chat display name update timed out.",
+  });
+
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "chat display name update",
       retryable: isRetryableHostedLinqStatus(response.status),
       status: response.status,
     });
@@ -471,6 +501,15 @@ function normalizeHostedLinqGroupChatIconUrl(value: unknown): string {
     || pathSegments.length < 3
   ) {
     throw new TypeError("group chat icon url must be a hosted Cloudflare Images URL.");
+  }
+  return normalized;
+}
+
+function normalizeHostedLinqChatDisplayName(value: unknown): string {
+  const normalized = normalizeRequiredString(value, "chat display name")
+    .replace(/\s+/gu, " ");
+  if (normalized.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
+    throw new TypeError("chat display name is too long.");
   }
   return normalized;
 }

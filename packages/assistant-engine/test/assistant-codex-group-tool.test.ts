@@ -257,6 +257,12 @@ describe("murph.group dynamic tool", () => {
       displayName: "Valid name",
       groupId: "hgrp_hijack",
     }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "update_display_name",
+      displayName: "Valid name",
+      linqThread: { chatId: "chat_hijack" },
+    }))?.kind).toBe("invalid-group-arguments");
   });
 
   it("parses create_join_link arguments into a bounded joinLink request", () => {
