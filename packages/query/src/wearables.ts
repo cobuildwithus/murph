@@ -505,11 +505,7 @@ function collectInvalidZeroSleepSummaryWindows(
     if (
       !hasZeroMetricValue(windowCandidates, "totalSleepMinutes") ||
       awakeMinutes === null ||
-      window.durationMinutes <= awakeMinutes + 1 ||
-      !isMissingOrZeroMetric(windowCandidates, "sleepEfficiency") ||
-      !isMissingOrZeroMetric(windowCandidates, "deepMinutes") ||
-      !isMissingOrZeroMetric(windowCandidates, "lightMinutes") ||
-      !isMissingOrZeroMetric(windowCandidates, "remMinutes")
+      window.durationMinutes <= awakeMinutes + 1
     ) {
       continue;
     }
@@ -558,13 +554,6 @@ function hasZeroMetricValue(
   metric: WearableMetricKey,
 ): boolean {
   return candidates.some((candidate) => candidate.metric === metric && candidate.value === 0);
-}
-
-function isMissingOrZeroMetric(
-  candidates: readonly WearableMetricCandidate[],
-  metric: WearableMetricKey,
-): boolean {
-  return !candidates.some((candidate) => candidate.metric === metric && candidate.value > 0);
 }
 
 function isAppleHealthKitSleepCandidate(

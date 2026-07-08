@@ -867,7 +867,7 @@ export function canNormalizeJunctionSleepCycleRecordToCompactStages(
 ): boolean {
   const entries = resourceEntries(record, "sleep_cycle");
   return entries.length > 0 && entries.every(({ entry }) => {
-    if (!hasSleepCycleCompactParentIdentity(entry)) {
+    if (!hasSleepCycleCompactParentIdentity(entry, sourceProviderSlug)) {
       return false;
     }
 
@@ -2836,15 +2836,18 @@ function resolveSleepCycleParentResourceId(
   parentTimestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string | undefined {
   const explicitParentId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
-  if ((parentTimestamp.observedAtRaw || explicitParentId) && !isDirectSleepStageIntervalEntry(entry)) {
+  if (
+    (parentTimestamp.observedAtRaw || explicitParentId) &&
+    !isDirectSleepStageIntervalEntry(entry, resourceContext.sourceProviderSlug)
+  ) {
     return buildStableResourceId(resourceContext, entry, parentTimestamp);
   }
 
   return undefined;
 }
 
-function hasSleepCycleCompactParentIdentity(entry: PlainObject): boolean {
-  return !isDirectSleepStageIntervalEntry(entry) &&
+function hasSleepCycleCompactParentIdentity(entry: PlainObject, sourceProviderSlug: string | undefined): boolean {
+  return !isDirectSleepStageIntervalEntry(entry, sourceProviderSlug) &&
     Boolean(
       firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS) ||
         firstStringFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS),
@@ -4745,6 +4748,10 @@ function expandResourceEntry(value: unknown, resource?: string): JunctionResourc
 }
 
 function readNestedResourceEntries(envelope: PlainObject, resource?: string): PlainObject[] | null {
+  const sourceProviderSlug = resource === "sleep_cycle"
+    ? readJunctionSourceProviderSlug(envelope, undefined)
+    : undefined;
+
   for (const key of nestedResourceEntryKeys(resource)) {
     const directEntry = asPlainObject(envelope[key]);
     const entries = directEntry
@@ -4754,7 +4761,15 @@ function readNestedResourceEntries(envelope: PlainObject, resource?: string): Pl
           return normalized ? [normalized] : [];
         });
     if (entries.length > 0) {
-      if (resource === "sleep_cycle" && entries.some(isDirectSleepStageIntervalEntry)) {
+      if (
+        resource === "sleep_cycle" &&
+        entries.some((entry) =>
+          isDirectSleepStageIntervalEntry(
+            entry,
+            readJunctionSourceProviderSlug(entry, envelope) ?? sourceProviderSlug,
+          )
+        )
+      ) {
         return null;
       }
 
@@ -4765,8 +4780,11 @@ function readNestedResourceEntries(envelope: PlainObject, resource?: string): Pl
   return null;
 }
 
-function isDirectSleepStageIntervalEntry(entry: PlainObject): boolean {
-  return firstSleepStageFromPaths(entry, JUNCTION_SLEEP_STAGE_VALUE_PATHS) !== undefined;
+function isDirectSleepStageIntervalEntry(
+  entry: PlainObject,
+  sourceProviderSlug: string | undefined,
+): boolean {
+  return firstSleepStageFromPaths(entry, JUNCTION_SLEEP_STAGE_VALUE_PATHS, sourceProviderSlug) !== undefined;
 }
 
 function nestedResourceEntryKeys(resource: string | undefined): readonly string[] {

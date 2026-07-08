@@ -4928,6 +4928,75 @@ test("Junction sleep_cycle numeric unknown stage does not create generic total f
   assert.equal(metrics.includes("sleep-rem-minutes"), false);
 });
 
+test("Junction Apple sleep_cycle parentless generic asleep fragments stay raw-only", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-07-08T12:00:00.000Z",
+      summaries: {
+        sleep_cycle: [{
+          source_provider: "apple_health_kit",
+          source_type: "unknown",
+          time_zone: "UTC",
+          data: [{
+            start: "2026-07-08T00:00:00.000Z",
+            end: "2026-07-08T01:00:00.000Z",
+            stage_type: -1,
+          }],
+        }],
+      },
+    },
+    { defaultTimeZone: "UTC" },
+  );
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  const metrics = observations.map((event) => event.fields?.metric);
+
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(
+    payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"),
+    true,
+  );
+  assert.equal(metrics.includes("sleep-total-minutes"), false);
+  assert.equal(metrics.includes("sleep-awake-minutes"), false);
+  assert.equal(metrics.includes("sleep-light-minutes"), false);
+  assert.equal(metrics.includes("sleep-deep-minutes"), false);
+  assert.equal(metrics.includes("sleep-rem-minutes"), false);
+});
+
+test("Junction Apple sleep_cycle parented generic asleep envelope emits total", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-07-08T12:00:00.000Z",
+      summaries: {
+        sleep_cycle: [{
+          id: "apple-healthkit-parented-generic-cycle",
+          source_provider: "apple_health_kit",
+          source_type: "unknown",
+          start: "2026-07-08T00:00:00.000Z",
+          end: "2026-07-08T01:00:00.000Z",
+          time_zone: "UTC",
+          data: [{
+            start: "2026-07-08T00:00:00.000Z",
+            end: "2026-07-08T01:00:00.000Z",
+            stage_type: -1,
+          }],
+        }],
+      },
+    },
+    { defaultTimeZone: "UTC" },
+  );
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  const totalObservations = observations.filter((event) => event.fields?.metric === "sleep-total-minutes");
+
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(totalObservations.length, 1);
+  assert.equal(totalObservations[0]?.fields?.value, 60);
+  assert.equal(totalObservations[0]?.dataOrigin?.sourceProviderSlug, "apple-health-kit");
+  assert.equal(
+    totalObservations[0]?.dataOrigin?.normalizerVersion,
+    "junction-sleep-unspecified-total.v1",
+  );
+});
+
 test("Junction sleep_cycle direct intervals use timezone for local sleep-stage day", () => {
   const payload = normalizeJunctionSnapshot(
     {
