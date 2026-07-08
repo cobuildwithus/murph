@@ -5276,6 +5276,7 @@ test("listMetricPointsRuntime suppresses invalid Apple HealthKit zero sleep tota
   const appleOrigin = {
     version: 1,
     aggregatorProvider: "junction",
+    normalizerVersion: "junction-sleep-stage-summary.v1",
     sourceProviderSlug: "apple-health-kit",
     sourceType: "unknown",
   };
@@ -5407,6 +5408,9 @@ test("listMetricPointsRuntime suppresses invalid Apple HealthKit zero totals bes
   const origin = (sourceProviderSlug: string) => ({
     version: 1,
     aggregatorProvider: "junction",
+    normalizerVersion: sourceProviderSlug === "apple-health-kit"
+      ? "junction-sleep-stage-summary.v1"
+      : undefined,
     sourceProviderSlug,
     sourceType: "unknown",
   });
@@ -5545,6 +5549,193 @@ test("listMetricPointsRuntime suppresses invalid Apple HealthKit zero totals bes
     assert.equal(
       totalSleep.some((point) => point.source.recordId === "evt_apple_projection_duplicate_zero_total"),
       false,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("listMetricPointsRuntime preserves valid Apple HealthKit cycle fallback zero stages beside stale zero summaries", async () => {
+  const date = "2026-07-07";
+  const startAt = "2026-07-07T08:17:04.000Z";
+  const endAt = "2026-07-07T14:02:56.000Z";
+  const appleOrigin = (normalizerVersion?: string) => ({
+    version: 1,
+    aggregatorProvider: "junction",
+    normalizerVersion,
+    sourceProviderSlug: "apple-health-kit",
+    sourceType: "unknown",
+  });
+  const appleRef = (resourceId: string, facet?: string) => ({
+    facet,
+    resourceId,
+    resourceType: "junction-apple-health-kit-sleep",
+    system: "junction",
+  });
+  const appleMetric = (input: {
+    id: string;
+    metric: string;
+    normalizerVersion?: string;
+    resourceId: string;
+    unit: string;
+    value: number;
+  }) => ({
+    id: input.id,
+    kind: "observation",
+    occurredAt: endAt,
+    recordedAt: input.normalizerVersion === "junction-sleep-stage-cycle-fallback.v1"
+      ? "2026-07-07T18:54:32.000Z"
+      : "2026-07-07T18:53:32.000Z",
+    dayKey: date,
+    source: "device",
+    title: `Apple ${input.metric}`,
+    metric: input.metric,
+    value: input.value,
+    unit: input.unit,
+    dataOrigin: appleOrigin(input.normalizerVersion),
+    externalRef: appleRef(input.resourceId, input.metric),
+  });
+  const staleSummaryRecordIds = [
+    "evt_apple_cycle_stale_zero_total",
+    "evt_apple_cycle_stale_zero_efficiency",
+    "evt_apple_cycle_stale_zero_deep",
+    "evt_apple_cycle_stale_zero_rem",
+    "evt_apple_cycle_stale_zero_light",
+  ];
+  const staleSummaryNormalizer = "junction-sleep-stage-summary.v1";
+  const cycleFallbackNormalizer = "junction-sleep-stage-cycle-fallback.v1";
+  const vaultRoot = await createEventLedgerVault([
+    {
+      id: "evt_apple_cycle_sleep_window",
+      kind: "sleep_session",
+      occurredAt: endAt,
+      recordedAt: "2026-07-07T18:53:32.000Z",
+      dayKey: date,
+      source: "device",
+      title: "Apple overnight sleep",
+      startAt,
+      endAt,
+      durationMinutes: 346,
+      dataOrigin: appleOrigin(),
+      externalRef: appleRef("sleep-apple-cycle-window"),
+    },
+    appleMetric({
+      id: "evt_apple_cycle_stale_zero_total",
+      metric: "sleep-total-minutes",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-apple-cycle-window",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_stale_zero_efficiency",
+      metric: "sleep-efficiency",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-apple-cycle-window",
+      unit: "%",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_stale_zero_deep",
+      metric: "sleep-deep-minutes",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_stale_zero_rem",
+      metric: "sleep-rem-minutes",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_stale_zero_light",
+      metric: "sleep-light-minutes",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_awake",
+      metric: "sleep-awake-minutes",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 18.5,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_deep",
+      metric: "sleep-deep-minutes",
+      normalizerVersion: cycleFallbackNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 120,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_rem_zero",
+      metric: "sleep-rem-minutes",
+      normalizerVersion: cycleFallbackNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_light",
+      metric: "sleep-light-minutes",
+      normalizerVersion: cycleFallbackNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 300,
+    }),
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const sleep = await summarizeWearableSleepRuntime(vaultRoot, {
+      from: date,
+      to: date,
+    });
+    const night = sleep.find((candidate) => candidate.date === date);
+    const totalSleep = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      metricKey: "total-sleep-minutes",
+      to: date,
+    });
+    const remSleep = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      metricKey: "rem-sleep-minutes",
+      to: date,
+    });
+    const allDayPoints = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      to: date,
+    });
+
+    assert.equal(night?.remMinutes.selection.value, 0);
+    assert.equal(night?.totalSleepMinutes.selection.value, 420);
+    assert.equal(night?.totalSleepMinutes.selection.sourceFamily, "derived");
+    assert.equal(night?.totalSleepMinutes.selection.sourceKind, "sleep-stage-total");
+    assert.equal(totalSleep.length, 1);
+    assert.equal(totalSleep[0]?.value, 420);
+    assert.equal(
+      remSleep.some((point) => point.source.recordId === "evt_apple_cycle_rem_zero" && point.value === 0),
+      true,
+    );
+    assert.equal(
+      allDayPoints.some((point) => staleSummaryRecordIds.includes(point.source.recordId)),
+      false,
+    );
+    assert.equal(
+      allDayPoints.some((point) => point.source.recordId === "evt_apple_cycle_rem_zero"),
+      true,
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

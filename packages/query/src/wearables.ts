@@ -303,6 +303,8 @@ const ASLEEP_STAGE_TOTAL_METRICS: readonly WearableMetricKey[] = [
   "remMinutes",
 ];
 const APPLE_HEALTH_KIT_PROVIDER = "apple-health-kit";
+const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
+const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
 const INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS = new Map<WearableMetricKey, string>([
   ["totalSleepMinutes", "total-sleep-minutes"],
   ["sleepEfficiency", "sleep-efficiency"],
@@ -313,6 +315,7 @@ const INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS = new Map<WearableMetricKey, st
 const INVALID_ZERO_SLEEP_METRICS = new Set<string>(INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS.keys());
 
 interface InvalidZeroSleepWindow {
+  candidateIds: ReadonlySet<string>;
   window: WearableSleepWindowCandidate;
 }
 
@@ -473,7 +476,7 @@ function isInvalidZeroSleepMetricCandidate(
 ): boolean {
   return INVALID_ZERO_SLEEP_METRICS.has(metric) &&
     candidate.value === 0 &&
-    invalidZeroWindows.some((entry) => sleepMetricAssociatedWithWindow(candidate, entry.window));
+    invalidZeroWindows.some((entry) => entry.candidateIds.has(candidate.candidateId));
 }
 
 function preferDirectSleepMetricCandidates(
@@ -543,18 +546,81 @@ function collectInvalidZeroSleepSummaryWindows(
 
     const windowCandidates = candidates.filter((candidate) => sleepMetricAssociatedWithWindow(candidate, window));
     const awakeMinutes = firstPositiveMetricValue(windowCandidates, "awakeMinutes");
+    const invalidZeroTotalCandidates = collectInvalidZeroSleepTotalCandidates(windowCandidates, window);
+    const invalidZeroCandidates = collectInvalidZeroSleepMetricCandidates(
+      windowCandidates,
+      window,
+      invalidZeroTotalCandidates,
+    );
     if (
-      !hasZeroMetricValue(windowCandidates, "totalSleepMinutes") ||
+      invalidZeroTotalCandidates.length === 0 ||
       awakeMinutes === null ||
       window.durationMinutes <= awakeMinutes + 1
     ) {
       continue;
     }
 
-    invalidWindows.push({ window });
+    invalidWindows.push({
+      candidateIds: new Set(invalidZeroCandidates.map((candidate) => candidate.candidateId)),
+      window,
+    });
   }
 
   return invalidWindows;
+}
+
+function collectInvalidZeroSleepTotalCandidates(
+  candidates: readonly WearableMetricCandidate[],
+  window: WearableSleepWindowCandidate,
+): WearableMetricCandidate[] {
+  return candidates.filter((candidate) =>
+    candidate.metric === "totalSleepMinutes" &&
+    candidate.value === 0 &&
+    isInvalidZeroSleepSummaryOwnedCandidate(candidate, window)
+  );
+}
+
+function collectInvalidZeroSleepMetricCandidates(
+  candidates: readonly WearableMetricCandidate[],
+  window: WearableSleepWindowCandidate,
+  invalidZeroTotalCandidates: readonly WearableMetricCandidate[],
+): WearableMetricCandidate[] {
+  return candidates.filter((candidate) =>
+    INVALID_ZERO_SLEEP_METRICS.has(candidate.metric) &&
+    candidate.value === 0 &&
+    (
+      isInvalidZeroSleepSummaryOwnedCandidate(candidate, window) ||
+      isLegacyInvalidZeroSleepSummaryCompanion(candidate, invalidZeroTotalCandidates)
+    )
+  );
+}
+
+function isInvalidZeroSleepSummaryOwnedCandidate(
+  candidate: WearableMetricCandidate,
+  window: WearableSleepWindowCandidate,
+): boolean {
+  const normalizerVersion = normalizeResourceToken(candidate.dataOrigin?.normalizerVersion);
+  if (normalizerVersion === JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION) {
+    return false;
+  }
+
+  return sleepMetricMatchesWindow(candidate, window) ||
+    normalizerVersion === JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION;
+}
+
+function isLegacyInvalidZeroSleepSummaryCompanion(
+  candidate: WearableMetricCandidate,
+  invalidZeroTotalCandidates: readonly WearableMetricCandidate[],
+): boolean {
+  if (normalizeResourceToken(candidate.dataOrigin?.normalizerVersion)) {
+    return false;
+  }
+
+  return invalidZeroTotalCandidates.some((totalCandidate) =>
+    candidate.provider === totalCandidate.provider &&
+    wearableDataOriginKey(candidate.dataOrigin) === wearableDataOriginKey(totalCandidate.dataOrigin) &&
+    candidate.recordedAt === totalCandidate.recordedAt
+  );
 }
 
 function sleepMetricAssociatedWithWindow(
@@ -588,13 +654,6 @@ function firstPositiveMetricValue(
   metric: WearableMetricKey,
 ): number | null {
   return candidates.find((candidate) => candidate.metric === metric && candidate.value > 0)?.value ?? null;
-}
-
-function hasZeroMetricValue(
-  candidates: readonly WearableMetricCandidate[],
-  metric: WearableMetricKey,
-): boolean {
-  return candidates.some((candidate) => candidate.metric === metric && candidate.value === 0);
 }
 
 function isAppleHealthKitSleepCandidate(
