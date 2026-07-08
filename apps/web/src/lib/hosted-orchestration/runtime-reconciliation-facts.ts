@@ -483,7 +483,6 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       attemptedAt: sentAt,
       idempotencyKey,
       prisma: input.prisma,
-      reclaimStalePreProviderAttempt: true,
       source: "hosted_runtime_ai_usage_limit_notice",
       sourceRef: wake.eventId,
       targetKind: "telegram_thread",
@@ -507,10 +506,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         replyToMessageId: wake.message.telegramMessage.messageId,
       });
     } catch (error) {
-      if (
-        error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError
-        || error instanceof HostedRuntimeTelegramUsageLimitNoticeUnknownError
-      ) {
+      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError) {
         await markHostedLinqDeliverySendFailedTx({
           failedAt: sentAt,
           failureCode: error.name,

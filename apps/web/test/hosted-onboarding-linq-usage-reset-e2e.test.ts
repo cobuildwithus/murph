@@ -336,6 +336,7 @@ type UsageResetPrismaFixture = {
   };
   hostedLinqProviderEvent: {
     createMany: MockedFunction;
+    findMany: MockedFunction;
   };
   hostedMember: {
     findUnique: MockedFunction;
@@ -842,6 +843,7 @@ function createUsageResetPrismaFixture(input: {
     },
     hostedLinqProviderEvent: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findMany: vi.fn().mockResolvedValue([]),
     },
     hostedMember: {
       findUnique: vi.fn(async () => ({

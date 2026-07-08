@@ -64,6 +64,7 @@ const mocks = vi.hoisted(() => {
     hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx: vi.fn(),
     hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx: vi.fn(),
     markHostedAiUsageLimitNoticeSent: vi.fn(),
+    markHostedLinqDeliveryAcceptedTx: vi.fn(),
     claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
@@ -257,6 +258,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
       mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
     hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx:
       mocks.hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
+    markHostedLinqDeliveryAcceptedTx: mocks.markHostedLinqDeliveryAcceptedTx,
   };
 });
 
@@ -565,6 +567,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx
       .mockResolvedValue(false);
     mocks.hasFreshHostedAiUsageLimitNoticeClaim.mockResolvedValue(false);
+    mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValue({
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: null,
+    });
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
@@ -6815,11 +6821,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       linqChatId: "chat_123",
       phoneNumber: undefined,
       prisma,
-      reclaimFreshPreProviderAttempt: true,
       source: "hosted_webhook_side_effect",
       sourceRef: expectedIdempotencyKey,
       targetKind: "thread",
       template: "ai_usage_quota",
+    });
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+      linqChatId: "chat_123",
+      messageId: "provider_msg_123",
+      prisma: expect.anything(),
     });
     expect(mocks.markHostedAiUsageLimitNoticeSent).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -6827,6 +6838,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
       sentAt: expect.any(String),
     });
+    const [acceptedOrder] =
+      mocks.markHostedLinqDeliveryAcceptedTx.mock.invocationCallOrder;
+    const [periodOrder] =
+      mocks.markHostedAiUsageLimitNoticeSent.mock.invocationCallOrder;
+    expect(acceptedOrder).toBeLessThan(periodOrder);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 

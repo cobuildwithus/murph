@@ -459,6 +459,7 @@ async function sendHostedLinqSideEffect(
     prisma: options.prisma,
     startedAtMs,
   });
+  let providerSendCompleted = false;
 
   try {
     if (effect.payload.template === "invite_signup_fallback") {
@@ -492,6 +493,7 @@ async function sendHostedLinqSideEffect(
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
+    providerSendCompleted = true;
     if (effect.payload.template === "invite_signup") {
       queueHostedLinqContactCardSideEffectShare({
         effect: {
@@ -502,16 +504,23 @@ async function sendHostedLinqSideEffect(
         signal: options.signal,
       });
     }
-    scheduleHostedLinqDeliveryMilestoneAfterAttempt({
-      attemptTask: deliveryAttemptTask,
-      milestoneTask: () => markHostedLinqDeliveryAcceptedBestEffort({
-        chatId: result.chatId ?? effect.payload.chatId,
-        effect,
-        messageId: result.messageId,
-        prisma: options.prisma,
-      }),
-      scheduleAfterResponse: options.scheduleAfterResponse,
+    const acceptedMilestone = () => markHostedLinqDeliveryAcceptedBestEffort({
+      chatId: result.chatId ?? effect.payload.chatId,
+      effect,
+      messageId: result.messageId,
+      prisma: options.prisma,
+      throwOnError: effect.payload.template === "ai_usage_quota",
     });
+    if (effect.payload.template === "ai_usage_quota") {
+      await deliveryAttemptTask;
+      await acceptedMilestone();
+    } else {
+      scheduleHostedLinqDeliveryMilestoneAfterAttempt({
+        attemptTask: deliveryAttemptTask,
+        milestoneTask: acceptedMilestone,
+        scheduleAfterResponse: options.scheduleAfterResponse,
+      });
+    }
   } catch (error) {
     if (
       effect.payload.template === "invite_signup"
@@ -523,6 +532,11 @@ async function sendHostedLinqSideEffect(
         error,
         prisma: options.prisma,
       });
+    } else if (
+      effect.payload.template === "ai_usage_quota"
+      && providerSendCompleted
+    ) {
+      throw error;
     } else {
       scheduleHostedLinqDeliveryMilestoneAfterAttempt({
         attemptTask: deliveryAttemptTask,
@@ -669,6 +683,7 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
   effect: HostedLinqMessageSideEffect;
   messageId: string | null;
   prisma: HostedLinqTransportPersistenceClient;
+  throwOnError?: boolean;
 }): Promise<void> {
   const template = input.effect.payload.template;
   try {
@@ -705,6 +720,9 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
       errorName: error instanceof Error ? error.name : "UnknownError",
       template,
     });
+    if (input.throwOnError === true) {
+      throw error;
+    }
   }
 }
 
@@ -1132,7 +1150,6 @@ async function claimHostedLinqNoticeForSideEffect(
         linqChatId: target.linqChatId,
         phoneNumber: target.phoneNumber,
         prisma,
-        reclaimFreshPreProviderAttempt: true,
         source: "hosted_webhook_side_effect",
         sourceRef: effect.effectId,
         targetKind: target.targetKind,
