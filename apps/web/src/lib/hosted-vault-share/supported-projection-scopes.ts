@@ -1,7 +1,5 @@
 import {
   buildHostedVaultShareProjectionScopeKey,
-  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
-  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   parseHostedVaultShareProjectionScopeKey,
   type HostedVaultShareFixedProjectionKind,
   type HostedVaultShareProjectionScope,
@@ -34,17 +32,48 @@ const LEGACY_OMITTED_CAPABILITY_FIXED_PROJECTION_KINDS = [
   "hrv-days.v0",
 ] as const satisfies readonly HostedVaultShareFixedProjectionKind[];
 
+const LEGACY_OMITTED_CAPABILITY_ACTIVITY_MINUTES_ACTIVITY_KINDS = [
+  "bike",
+  "biking",
+  "cycle",
+  "cycling",
+  "dance",
+  "dancing",
+  "hike",
+  "hiking",
+  "ride",
+  "row",
+  "rowing",
+  "run",
+  "running",
+  "sauna",
+  "sleep",
+  "sleep-cycle",
+  "sleep-session",
+  "sleep-summary",
+  "strength",
+  "strength-training",
+  "surf",
+  "surfing",
+  "swim",
+  "swimming",
+  "walk",
+  "walking",
+  "weightlifting",
+  "weights",
+] as const;
+
 const DEFAULT_SUPPORTED_PROJECTION_SCOPE_KEYS =
   new Set([
     ...LEGACY_OMITTED_CAPABILITY_FIXED_PROJECTION_KINDS
       .map((projectionKind) => buildHostedVaultShareProjectionScopeKey({
         projectionKind,
       })),
-    ...HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES
-      .filter((scope) =>
-        scope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND
-      )
-      .map((scope) => buildHostedVaultShareProjectionScopeKey(scope)),
+    ...LEGACY_OMITTED_CAPABILITY_ACTIVITY_MINUTES_ACTIVITY_KINDS
+      .map((activityKind) => buildHostedVaultShareProjectionScopeKey({
+        projectionKind: "activity-minutes-days.v1",
+        selector: { activityKind },
+      })),
   ]);
 
 export function readHostedVaultShareSupportedProjectionScopeKeysFromRequest(
