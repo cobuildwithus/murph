@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { buildWearableSummaryBundleFromDataset } from "../src/wearables.ts";
+import { buildWearableSummaryBundleFromDataset, summarizeWearableMetricTrendFromBundle } from "../src/wearables.ts";
 import type {
   WearableActivitySessionAggregate,
   WearableDataset,
@@ -318,6 +318,62 @@ test("compose preserves stored activity aggregate-owned types and heart-rate zon
     label: "Zone 2",
     zone: 2,
   }]);
+});
+
+test("compose rebuilt stored sleep rows drops zeroed Apple HealthKit summary in favor of WHOOP", () => {
+  const date = "2026-07-07";
+  const startAt = "2026-07-07T08:17:04.000Z";
+  const endAt = "2026-07-07T14:02:56.000Z";
+  const dataset: WearableDataset = {
+    activitySessionAggregates: [],
+    metricCandidates: [
+      candidate({ date, facet: "whoop-asleep", metric: "totalSleepMinutes", provider: "whoop", unit: "minutes", value: 327.3667 }),
+      candidate({ date, facet: "whoop-efficiency", metric: "sleepEfficiency", provider: "whoop", unit: "%", value: 94.6511 }),
+      candidate({ date, facet: "whoop-deep", metric: "deepMinutes", provider: "whoop", unit: "minutes", value: 141.6167 }),
+      candidate({ date, facet: "whoop-rem", metric: "remMinutes", provider: "whoop", unit: "minutes", value: 91 }),
+      candidate({ date, facet: "whoop-light", metric: "lightMinutes", provider: "whoop", unit: "minutes", value: 94.75 }),
+      candidate({ date, facet: "whoop-awake", metric: "awakeMinutes", provider: "whoop", unit: "minutes", value: 18.5 }),
+      candidate({ date, facet: "apple-asleep-zero", metric: "totalSleepMinutes", provider: "apple-health-kit", unit: "minutes", value: 0 }),
+      candidate({ date, facet: "apple-efficiency-zero", metric: "sleepEfficiency", provider: "apple-health-kit", unit: "%", value: 0 }),
+      candidate({ date, facet: "apple-deep-zero", metric: "deepMinutes", provider: "apple-health-kit", unit: "minutes", value: 0 }),
+      candidate({ date, facet: "apple-rem-zero", metric: "remMinutes", provider: "apple-health-kit", unit: "minutes", value: 0 }),
+      candidate({ date, facet: "apple-light-zero", metric: "lightMinutes", provider: "apple-health-kit", unit: "minutes", value: 0 }),
+      candidate({ date, facet: "apple-awake", metric: "awakeMinutes", provider: "apple-health-kit", unit: "minutes", value: 18.5 }),
+    ],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [
+      sleepWindow("whoop", date, {
+        durationMinutes: 346,
+        endAt,
+        startAt,
+      }),
+      sleepWindow("apple-health-kit", date, {
+        durationMinutes: 346,
+        endAt,
+        startAt,
+      }),
+    ],
+  };
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const composed = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows,
+  }, {});
+  const sleep = composed.sleepNights.find((summary) => summary.date === date);
+  const trend = summarizeWearableMetricTrendFromBundle(composed, "totalSleepMinutes", { windowDays: 1 });
+
+  assert.ok(sleep);
+  assert.equal(sleep.sleepWindowProvider, "whoop");
+  assert.equal(sleep.totalSleepMinutes.selection.provider, "whoop");
+  assert.equal(sleep.totalSleepMinutes.selection.value, 327.3667);
+  assert.equal(sleep.sleepEfficiency.selection.provider, "whoop");
+  assert.equal(sleep.deepMinutes.selection.provider, "whoop");
+  assert.equal(sleep.remMinutes.selection.provider, "whoop");
+  assert.equal(sleep.lightMinutes.selection.provider, "whoop");
+  assert.equal(trend?.provider, "whoop");
+  assert.equal(trend?.points[0]?.value, 327.3667);
 });
 
 test("compose preserves non-selected provider same-public conflict evidence", () => {

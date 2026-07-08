@@ -4753,6 +4753,110 @@ test("Junction sleep_cycle normalizer vectorizes parallel offset stage arrays", 
   ]);
 });
 
+test("Junction Apple HealthKit zeroed sleep summary preserves awake and derives generic asleep total", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-07-07T18:53:32.000Z",
+      summaries: {
+        sleep: [{
+          id: "apple-healthkit-zeroed-sleep",
+          sourceProviderSlug: "apple_health_kit",
+          sourceType: "unknown",
+          bedtime_start: "2026-07-07T08:17:04+00:00",
+          bedtime_stop: "2026-07-07T14:02:56+00:00",
+          duration: 20752,
+          total: 0,
+          deep: 0,
+          rem: 0,
+          light: 0,
+          awake: 1110,
+          efficiency: 0,
+          created_at: "2026-07-07T18:53:32+00:00",
+        }],
+        sleep_cycle: [{
+          id: "apple-healthkit-generic-asleep-cycle",
+          sleep_id: "apple-healthkit-zeroed-sleep",
+          sourceProviderSlug: "apple_health_kit",
+          sourceType: "unknown",
+          session_start: "2026-07-07T08:17:04+00:00",
+          session_end: "2026-07-07T14:02:56+00:00",
+          stage_start_offset_second: [
+            0,
+            5148,
+            5358,
+            6259,
+            6319,
+            6439,
+            6529,
+            9230,
+            9320,
+            9890,
+            10100,
+            14061,
+            14091,
+            14421,
+            14451,
+            16161,
+            16221,
+            16401,
+            16431,
+            19552,
+            19792,
+            19912,
+            19972,
+          ],
+          stage_end_offset_second: [
+            5148,
+            5358,
+            6259,
+            6319,
+            6439,
+            6529,
+            9230,
+            9320,
+            9890,
+            10100,
+            14061,
+            14091,
+            14421,
+            14451,
+            16161,
+            16221,
+            16401,
+            16431,
+            19552,
+            19792,
+            19912,
+            19972,
+            20752,
+          ],
+          stage_type: [-1, 4, -1, 4, -1, 4, -1, 4, -1, 4, -1, 4, -1, 4, -1, 4, -1, 4, -1, 4, -1, 4, -1],
+          created_at: "2026-07-07T18:53:32+00:00",
+        }],
+      },
+    },
+    { defaultTimeZone: "America/New_York" },
+  );
+
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  const metricValues = (metric: string) =>
+    observations.filter((event) => event.fields?.metric === metric).map((event) => event.fields?.value);
+  const metrics = observations.map((event) => event.fields?.metric);
+
+  assert.equal(payload.events?.some((event) => event.kind === "sleep_session"), true);
+  assert.deepEqual(metricValues("sleep-total-minutes"), [327.3667]);
+  assert.deepEqual(metricValues("sleep-awake-minutes"), [18.5]);
+  assert.equal(metrics.includes("sleep-efficiency"), false);
+  assert.equal(metrics.includes("sleep-deep-minutes"), false);
+  assert.equal(metrics.includes("sleep-rem-minutes"), false);
+  assert.equal(metrics.includes("sleep-light-minutes"), false);
+  assert.ok(
+    observations
+      .filter((event) => event.fields?.metric === "sleep-total-minutes")
+      .every((event) => event.dataOrigin?.normalizerVersion === "junction-sleep-unspecified-total.v1"),
+  );
+});
+
 test("Junction sleep_cycle direct intervals use timezone for local sleep-stage day", () => {
   const payload = normalizeJunctionSnapshot(
     {
