@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinOfferTx: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -27,6 +28,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
 }));
 
 import {
@@ -61,6 +66,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       core: { id: "member_reactor", suspendedAt: null },
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -93,6 +99,31 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      userId: "member_reactor",
+    });
+  });
+
+  it("accepts the reaction when the best-effort runtime wake fails", async () => {
+    mocks.signalHostedRuntimeMaintenanceRuntime.mockRejectedValueOnce(
+      new Error("runtime unavailable"),
+    );
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
+    });
+
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      userId: "member_reactor",
+    });
   });
 
   it("uses read candidates for rotated offer lookup", async () => {
@@ -170,6 +201,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
   it("records revoked offers as a distinct skip reason", async () => {

@@ -41,6 +41,9 @@ const DAY_MAX_MINUTES = 24 * 60;
 const DAY_MAX_DISTANCE_METERS = 1_000_000;
 const DAY_MAX_SESSIONS = 100;
 const ACTIVITY_SESSION_DUPLICATE_MIN_OVERLAP_RATIO = 0.8;
+// Above the source cap, fail closed instead of emitting partial daily counts.
+const ACTIVITY_SESSION_SOURCE_ROW_LIMIT = 500;
+const ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT = ACTIVITY_SESSION_SOURCE_ROW_LIMIT + 1;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEY_PATTERN = /^heart-rate-zone-(\d+)-minutes$/u;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEYS = Array.from(
   { length: 21 },
@@ -908,8 +911,12 @@ async function readProjectableActivitySessionRows(
     family: "event",
     from: cutoffDate,
     kinds: ["activity_session", "intervention_session"],
-    limit: null,
+    limit: ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT,
   });
+  if (entities.length > ACTIVITY_SESSION_SOURCE_ROW_LIMIT) {
+    return [];
+  }
+
   const rows: ActivitySessionProjectionRow[] = [];
 
   for (const entity of entities) {

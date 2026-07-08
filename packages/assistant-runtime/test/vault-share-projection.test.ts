@@ -806,9 +806,51 @@ describe("selectProjectableActivityMinutesDays", () => {
     expect(activitySessionReader).toContain("listCanonicalEntities");
     expect(activitySessionReader).toContain('family: "event"');
     expect(activitySessionReader).toContain('from: cutoffDate');
+    expect(activitySessionReader).toContain("ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT");
+    expect(activitySessionReader).toContain("entities.length > ACTIVITY_SESSION_SOURCE_ROW_LIMIT");
     expect(activitySessionReader).toContain('"activity_session"');
     expect(activitySessionReader).toContain('"intervention_session"');
+    expect(activitySessionReader).not.toContain("limit: null");
     expect(activitySessionReader).not.toContain("readVault(");
+  });
+
+  it("fails closed when activity-session source rows exceed the read cap", async () => {
+    const startMs = Date.parse("2026-07-03T07:00:00.000Z");
+    const vaultRoot = await createActivitySessionVault(Array.from(
+      { length: 501 },
+      (_, index) => ({
+        schemaVersion: "murph.event.v1",
+        id: `evt_run_overflow_${index}`,
+        kind: "activity_session",
+        occurredAt: new Date(startMs + index * 60_000).toISOString(),
+        dayKey: ACTIVITY_DAY.date,
+        recordedAt: "2026-07-03T20:00:00.000Z",
+        startAt: new Date(startMs + index * 60_000).toISOString(),
+        endAt: new Date(startMs + index * 60_000 + 30 * 60_000).toISOString(),
+        activityType: "running",
+        distanceKm: 5,
+        durationMinutes: 30,
+      }),
+    ));
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await expect(readProjectableActivityMinutesDays(
+        vaultRoot,
+        runningSpec,
+      )).resolves.toEqual([]);
+      await expect(readProjectableActivityDistanceDays(
+        vaultRoot,
+        requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE),
+      )).resolves.toEqual([]);
+      await expect(readProjectableActivitySessionCountDays(
+        vaultRoot,
+        requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE),
+      )).resolves.toEqual([]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
   });
 
   it("shares one cached session read across activity selector scopes in an offer", async () => {

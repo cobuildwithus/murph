@@ -12,6 +12,9 @@ import {
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import {
+  signalHostedRuntimeMaintenanceRuntime,
+} from "../hosted-orchestration/signal-runtime";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { acceptHostedGroupJoinOfferTx } from "./group-store";
 
@@ -88,8 +91,9 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     threadId: input.event.linqChatId,
   });
 
+  let accepted: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
   try {
-    await input.prisma.$transaction(async (tx) =>
+    accepted = await input.prisma.$transaction(async (tx) =>
       acceptHostedGroupJoinOfferTx({
         memberId: member.id,
         messageLookupKeyReadCandidates,
@@ -105,6 +109,14 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     return skipHostedGroupJoinOfferReaction({
       reason,
     });
+  }
+
+  if (accepted.grantedVaultShareProjectionKinds.length > 0) {
+    try {
+      await signalHostedRuntimeMaintenanceRuntime({ userId: member.id });
+    } catch {
+      // The join/grants are durable; the runtime can offer projections on its next wake.
+    }
   }
 
   return { status: "accepted", reason: "accepted" };
