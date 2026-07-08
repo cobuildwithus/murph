@@ -507,13 +507,12 @@ export async function reserveHostedGroupJoinOfferAttemptTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedGroupJoinOfferAttemptTxResult> {
   const offerScope = normalizeHostedGroupOfferScopeInput(input.offerScope);
-  const id = createHostedGroupJoinOfferAttemptId({
+  const fingerprint = createHostedGroupJoinOfferAttemptFingerprint({
     groupId: input.groupId,
     message: input.message,
     offerKind: input.offerKind,
     offerScope,
   });
-  const attemptLookupKey = createHostedGroupJoinOfferAttemptLookupKey(id);
 
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
@@ -529,11 +528,19 @@ export async function reserveHostedGroupJoinOfferAttemptTx(input: {
     });
   }
 
-  const existing = await readHostedGroupJoinOfferAttemptByIdTx(input.tx, id);
+  const existing = await readUnboundHostedGroupJoinOfferAttemptTx(input.tx, {
+    fingerprint,
+    groupId: input.groupId,
+  });
   if (existing) {
     return existing;
   }
 
+  const id = generateHostedGroupJoinOfferId();
+  const attemptLookupKey = createHostedGroupJoinOfferAttemptLookupKey({
+    fingerprint,
+    id,
+  });
   try {
     await input.tx.hostedGroupJoinOffer.create({
       data: {
@@ -549,7 +556,10 @@ export async function reserveHostedGroupJoinOfferAttemptTx(input: {
     if (!isUniqueConstraintError(error)) {
       throw error;
     }
-    const raced = await readHostedGroupJoinOfferAttemptByIdTx(input.tx, id);
+    const raced = await readUnboundHostedGroupJoinOfferAttemptTx(input.tx, {
+      fingerprint,
+      groupId: input.groupId,
+    });
     if (raced) {
       return raced;
     }
@@ -700,23 +710,64 @@ async function readHostedGroupJoinOfferAttemptByIdTx(
   };
 }
 
-function createHostedGroupJoinOfferAttemptId(input: {
+async function readUnboundHostedGroupJoinOfferAttemptTx(
+  tx: Prisma.TransactionClient,
+  input: { fingerprint: string; groupId: string },
+): Promise<HostedGroupJoinOfferAttemptTxResult | null> {
+  const offer = await tx.hostedGroupJoinOffer.findFirst({
+    where: {
+      groupId: input.groupId,
+      messageLookupKey: {
+        startsWith: createHostedGroupJoinOfferAttemptLookupKeyPrefix(input.fingerprint),
+      },
+      revokedAt: null,
+    },
+    orderBy: { postedAt: "asc" },
+    select: {
+      groupId: true,
+      id: true,
+      messageIdSuffix: true,
+      messageLookupKey: true,
+      offerScopeJson: true,
+    },
+  });
+  if (!offer) {
+    return null;
+  }
+  return {
+    groupId: offer.groupId,
+    id: offer.id,
+    messageIdSuffix: offer.messageIdSuffix,
+    messageLookupKey: offer.messageLookupKey,
+    offerScope: normalizeHostedGroupOfferScope(offer.offerScopeJson),
+    providerMessageBound: false,
+  };
+}
+
+function createHostedGroupJoinOfferAttemptFingerprint(input: {
   groupId: string;
   message: string;
   offerKind: "post_call_circle_offer" | "post_join_offer";
   offerScope: HostedGroupOfferScope;
 }): string {
-  return `hgrpjo_${sha256Hex(JSON.stringify({
+  return sha256Hex(JSON.stringify({
     groupId: input.groupId,
     message: input.message,
     offerKind: input.offerKind,
     offerScope: input.offerScope,
     schema: "murph.hosted-group.join-offer-attempt.v1",
-  })).slice(0, 32)}`;
+  })).slice(0, 32);
 }
 
-function createHostedGroupJoinOfferAttemptLookupKey(id: string): string {
-  return `hosted-group-join-offer-attempt:${id}`;
+function createHostedGroupJoinOfferAttemptLookupKey(input: {
+  fingerprint: string;
+  id: string;
+}): string {
+  return `${createHostedGroupJoinOfferAttemptLookupKeyPrefix(input.fingerprint)}${input.id}`;
+}
+
+function createHostedGroupJoinOfferAttemptLookupKeyPrefix(fingerprint: string): string {
+  return `hosted-group-join-offer-attempt:${fingerprint}:`;
 }
 
 function isHostedGroupJoinOfferAttemptLookupKey(value: string): boolean {

@@ -519,9 +519,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     expect(reserved).toMatchObject({
       groupId: "group_1",
-      id: expect.stringMatching(/^hgrpjo_[a-f0-9]{32}$/u),
+      id: expect.stringMatching(/^hgrpjo_/u),
       messageIdSuffix: null,
-      messageLookupKey: expect.stringMatching(/^hosted-group-join-offer-attempt:hgrpjo_/u),
+      messageLookupKey: expect.stringMatching(
+        /^hosted-group-join-offer-attempt:[a-f0-9]{32}:hgrpjo_/u,
+      ),
       providerMessageBound: false,
       offerScope: {
         featureActivations: [],
@@ -564,6 +566,17 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       postedAt: new Date("2026-07-01T00:05:00.000Z"),
       tx,
     });
+    const repeatAfterBound = await reserveHostedGroupJoinOfferAttemptTx({
+      groupId: "group_1",
+      message,
+      offerKind: "post_join_offer",
+      offerScope: {
+        featureActivations: ["call-circle.enroll.v0"],
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+      postedAt: new Date("2026-07-01T00:10:00.000Z"),
+      tx,
+    });
 
     expect(bound).toMatchObject({
       groupId: "group_1",
@@ -575,11 +588,15 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
     });
+    expect(reread.id).not.toBe(reserved.id);
     expect(reread).toMatchObject({
-      id: reserved.id,
-      messageLookupKey: createHostedLinqMessageLookupKey("msg_offer_123"),
-      providerMessageBound: true,
+      messageLookupKey: expect.stringMatching(
+        /^hosted-group-join-offer-attempt:[a-f0-9]{32}:hgrpjo_/u,
+      ),
+      providerMessageBound: false,
     });
+    expect(repeatAfterBound.id).toBe(reread.id);
+    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(2);
     expect(tx.hostedGroupJoinOffer.update).toHaveBeenCalledWith({
       where: { id: reserved.id },
       data: {
@@ -1133,13 +1150,22 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
           : null;
       }),
       findFirst: vi.fn(async (args: {
-        where: { messageLookupKey?: string | { in?: string[] }; revokedAt?: null };
+        where: {
+          groupId?: string;
+          messageLookupKey?: string | { in?: string[]; startsWith?: string };
+          revokedAt?: null;
+        };
       }) => {
         const lookup = args.where.messageLookupKey;
         const offer = offers.find((entry) =>
-          typeof lookup === "string"
-            ? entry.messageLookupKey === lookup
-            : lookup?.in?.includes(entry.messageLookupKey));
+          (args.where.groupId === undefined || entry.groupId === args.where.groupId)
+          && (
+            typeof lookup === "string"
+              ? entry.messageLookupKey === lookup
+              : lookup?.startsWith
+                ? entry.messageLookupKey.startsWith(lookup.startsWith)
+                : lookup?.in?.includes(entry.messageLookupKey)
+          ));
         if (!offer || ("revokedAt" in args.where && offer.revokedAt !== null)) {
           return null;
         }

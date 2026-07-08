@@ -565,11 +565,11 @@ Accepted finding from the Phlebas confirmation rerun:
 
 - Like-to-consent group offers must make the visible provider message a
   durable consent anchor even if binding needs a retry. Group offers now
-  reserve a stable `HostedGroupJoinOffer` attempt before sending, use the
-  attempt id as the provider idempotency identity, and bind the same row to
-  the provider message lookup key after send. A retry of a send-succeeded /
-  bind-failed offer reuses the same provider idempotency key instead of
-  posting a second dead offer.
+  reserve a `HostedGroupJoinOffer` attempt before sending, use the attempt
+  id as the provider idempotency identity, and bind the same row to the
+  provider message lookup key after send. Retries reuse only an unbound
+  matching attempt; once an offer is bound, a later identical offer creates
+  a fresh attempt instead of silently suppressing the new post.
 
 Focused follow-up verification:
 
