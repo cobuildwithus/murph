@@ -286,6 +286,7 @@ export const AUDIT_ACTIONS = Object.freeze([
   "family_upsert",
   "genetics_upsert",
   "goal_upsert",
+  "habitat_upsert",
   "food_delete",
   "food_upsert",
   "history_add",

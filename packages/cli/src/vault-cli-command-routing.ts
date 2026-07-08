@@ -180,6 +180,11 @@ export async function registerScopedVaultCliCommand(input: {
       registerMeasurementCommands(input.cli)
       return
     }
+    case 'habitat': {
+      const { registerHabitatCommands } = await import('./commands/habitat.js')
+      registerHabitatCommands(input.cli)
+      return
+    }
     case 'memory': {
       const { registerMemoryCommands } = await import('./commands/memory.js')
       registerMemoryCommands(input.cli)

@@ -2987,6 +2987,7 @@ export type ExperimentProgressSnapshot = z.infer<typeof experimentProgressSnapsh
 export type ExperimentOutcome = z.infer<typeof experimentOutcomeSchema>;
 export type ExperimentFrontmatter = z.infer<typeof experimentFrontmatterSchema>;
 export type ProviderFrontmatter = z.infer<typeof providerFrontmatterSchema>;
+export type HabitatFrontmatter = z.infer<typeof habitatFrontmatterSchema>;
 export type FoodFrontmatter = z.infer<typeof foodFrontmatterSchema>;
 export type RecipeFrontmatter = z.infer<typeof recipeFrontmatterSchema>;
 export type WorkoutFormatFrontmatter = z.infer<typeof workoutFormatFrontmatterSchema>;

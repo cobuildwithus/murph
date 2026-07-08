@@ -23,6 +23,7 @@ const lazyRootCommands = [
   'experiment',
   'exercise',
   'goal',
+  'habitat',
   'immunization',
   'init',
   'list',

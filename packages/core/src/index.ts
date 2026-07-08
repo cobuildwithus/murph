@@ -134,12 +134,22 @@ export {
   upsertFamilyMember,
   upsertGeneticVariant,
   upsertGoal,
+  upsertHabitatAspect,
   upsertProtocol,
   upsertRegimen,
   upsertRecipe,
   upsertWorkoutFormat,
   validateVault,
 } from "./public-mutations.ts";
+export {
+  listHabitatAspects,
+  readHabitatAspect,
+} from "./bank/habitat.ts";
+export type {
+  HabitatRecord,
+  UpsertHabitatAspectInput,
+  UpsertHabitatAspectResult,
+} from "./bank/habitat.ts";
 export {
   listWorkoutFormats,
   readWorkoutFormat,

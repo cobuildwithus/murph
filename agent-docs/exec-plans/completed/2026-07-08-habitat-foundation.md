@@ -14,7 +14,7 @@ Key decisions:
 - Coverage is a pure function over (catalog, entities); no stored state.
 
 State:
-- In progress; data foundation landed, CLI write surface remaining.
+- Complete. Data foundation landed in commit `18f0239a4`; CLI write/read surface (`vault-cli habitat save/show/list/coverage/catalog`) implemented over a new `core/bank/habitat` registry module with merge semantics for indicators (`null` clears, `declined` respected, per-indicator recordedAt).
 
 Done:
 - Product spec landed (`agent-docs/product-specs/habitat.md`, PR #357).
@@ -22,11 +22,13 @@ Done:
 - Query: canonical family + collector + read-model view `habitatAspects` + browser-replica inclusion + `listHabitatAspects/readHabitatAspect/showHabitatAspect` (query 386 pass; assistant-runtime replica test pass).
 - Downstream fixtures patched; typechecks clean in contracts/query/vault-usecases/cli/assistant-engine/assistant-runtime/apps-web; e2e smoke: markdown aspect file → readVault → coverage.
 
+- CLI: `core/bank/habitat.ts` (upsert with catalog validation + audit action `habitat_upsert`), public-mutations lock wrapper, `packages/cli/src/commands/habitat.ts` (bindingMode "none", memory-command pattern), manifest/routing/lazy-root registration; live smoke on an initialized vault: save → merge → clear-with-null → show/list → coverage (top gaps correct) → catalog. Core suite 518 + 2 habitat tests; cli suite 1027; contracts artifacts regenerated (audit-record).
+
 Now:
-- CLI write surface: `vault-cli habitat save/show/list` + vault-usecases service (provider-command pattern).
+- Ready for scoped commit.
 
 Next:
-- Phase 2 per spec: coverage snapshot in assistant prompt + opportunistic collection guidance.
+- Phase 2 per spec: coverage snapshot in assistant prompt + opportunistic collection guidance + onboarding hook.
 
 Open questions (UNCONFIRMED if needed):
 - None blocking.
@@ -36,5 +38,6 @@ Working set (files/ids/commands):
 - packages/query/src/{canonical-entities.ts,browser-replica/shared.ts,...}
 - packages/cli/src/commands/*, packages/vault-usecases/src/usecases/*
 - pnpm --dir packages/contracts test; packages/query + assistant-runtime replica tests
-Status: active
+Status: completed
 Updated: 2026-07-08
+Completed: 2026-07-08
