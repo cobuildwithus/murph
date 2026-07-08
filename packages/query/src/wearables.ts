@@ -419,8 +419,9 @@ function selectValidSleepMetricCandidates(
   sleepWindows: readonly WearableSleepWindowCandidate[],
   invalidZeroWindows: readonly InvalidZeroSleepWindow[],
 ): WearableMetricCandidate[] {
-  const selectedCandidates = selectSleepMetricCandidates(candidates, metric, selectedWindow, sleepWindows)
+  const validMetricCandidates = selectMetricCandidates(candidates, metric)
     .filter((candidate) => !isInvalidZeroSleepMetricCandidate(candidate, metric, invalidZeroWindows));
+  const selectedCandidates = selectSleepWindowMetricCandidates(validMetricCandidates, selectedWindow, sleepWindows);
   return preferDirectSleepMetricCandidates(selectedCandidates);
 }
 
@@ -500,11 +501,10 @@ function collectInvalidZeroSleepSummaryWindows(
     }
 
     const windowCandidates = candidates.filter((candidate) => sleepMetricAssociatedWithWindow(candidate, window));
-    const awakeMinutes = firstMetricValue(windowCandidates, "awakeMinutes");
+    const awakeMinutes = firstPositiveMetricValue(windowCandidates, "awakeMinutes");
     if (
-      firstMetricValue(windowCandidates, "totalSleepMinutes") !== 0 ||
+      !hasZeroMetricValue(windowCandidates, "totalSleepMinutes") ||
       awakeMinutes === null ||
-      awakeMinutes <= 0 ||
       window.durationMinutes <= awakeMinutes + 1 ||
       !isMissingOrZeroMetric(windowCandidates, "sleepEfficiency") ||
       !isMissingOrZeroMetric(windowCandidates, "deepMinutes") ||
@@ -546,19 +546,25 @@ function sleepMetricOccursInsideWindow(
   return occurredAtMs >= startAtMs - toleranceMs && occurredAtMs <= endAtMs + toleranceMs;
 }
 
-function firstMetricValue(
+function firstPositiveMetricValue(
   candidates: readonly WearableMetricCandidate[],
   metric: WearableMetricKey,
 ): number | null {
-  return candidates.find((candidate) => candidate.metric === metric)?.value ?? null;
+  return candidates.find((candidate) => candidate.metric === metric && candidate.value > 0)?.value ?? null;
+}
+
+function hasZeroMetricValue(
+  candidates: readonly WearableMetricCandidate[],
+  metric: WearableMetricKey,
+): boolean {
+  return candidates.some((candidate) => candidate.metric === metric && candidate.value === 0);
 }
 
 function isMissingOrZeroMetric(
   candidates: readonly WearableMetricCandidate[],
   metric: WearableMetricKey,
 ): boolean {
-  const value = firstMetricValue(candidates, metric);
-  return value === null || value === 0;
+  return !candidates.some((candidate) => candidate.metric === metric && candidate.value > 0);
 }
 
 function isAppleHealthKitSleepCandidate(

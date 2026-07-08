@@ -349,8 +349,6 @@ export type JunctionSleepStageValue = "awake" | "light" | "deep" | "rem" | "asle
 export function normalizeJunctionSleepStageValue(value: unknown): JunctionSleepStageValue | null {
   if (typeof value === "number" && Number.isInteger(value)) {
     switch (value) {
-      case -1:
-        return "asleep_unspecified";
       case 1:
         return "deep";
       case 2:
@@ -366,10 +364,6 @@ export function normalizeJunctionSleepStageValue(value: unknown): JunctionSleepS
 
   if (typeof value !== "string") {
     return null;
-  }
-
-  if (value.trim() === "-1") {
-    return "asleep_unspecified";
   }
 
   const normalized = value

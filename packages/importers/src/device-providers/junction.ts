@@ -2633,8 +2633,8 @@ function collectSleepStageCoverageIntervals(
   entry: PlainObject,
   sourceProviderSlug: string,
 ): Array<Pick<JunctionSleepStageInterval, "endAt" | "startAt">> {
-  return sleepStageIntervalEntries(entry).flatMap((intervalEntry) => {
-    const stage = firstSleepStageFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_VALUE_PATHS);
+  return sleepStageIntervalEntries(entry, sourceProviderSlug).flatMap((intervalEntry) => {
+    const stage = firstSleepStageFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_VALUE_PATHS, sourceProviderSlug);
     if (!stage) {
       return [];
     }
@@ -2773,8 +2773,12 @@ function collectJunctionSleepStageIntervals(
 ): JunctionSleepStageInterval[] {
   const intervals: JunctionSleepStageInterval[] = [];
 
-  for (const intervalEntry of sleepStageIntervalEntries(entry)) {
-    const stage = firstSleepStageFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_VALUE_PATHS);
+  for (const intervalEntry of sleepStageIntervalEntries(entry, resourceContext.sourceProviderSlug)) {
+    const stage = firstSleepStageFromPaths(
+      intervalEntry,
+      JUNCTION_SLEEP_STAGE_VALUE_PATHS,
+      resourceContext.sourceProviderSlug,
+    );
     if (!stage) {
       continue;
     }
@@ -4630,18 +4634,25 @@ function groupedTimeseriesResourceEntries(payload: unknown): JunctionResourceEnt
   );
 }
 
-function sleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
+function sleepStageIntervalEntries(
+  entry: PlainObject,
+  sourceProviderSlug: string | undefined,
+): PlainObject[] {
   const seen = new Set<PlainObject>();
 
   return [
-    ...collectSleepStageIntervalEntries(entry, seen),
-    ...parallelSleepStageIntervalEntries(entry),
+    ...collectSleepStageIntervalEntries(entry, seen, sourceProviderSlug),
+    ...parallelSleepStageIntervalEntries(entry, sourceProviderSlug),
   ];
 }
 
-function collectSleepStageIntervalEntries(value: unknown, seen: Set<PlainObject>): PlainObject[] {
+function collectSleepStageIntervalEntries(
+  value: unknown,
+  seen: Set<PlainObject>,
+  sourceProviderSlug: string | undefined,
+): PlainObject[] {
   if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectSleepStageIntervalEntries(entry, seen));
+    return value.flatMap((entry) => collectSleepStageIntervalEntries(entry, seen, sourceProviderSlug));
   }
 
   const entry = asPlainObject(value);
@@ -4653,7 +4664,7 @@ function collectSleepStageIntervalEntries(value: unknown, seen: Set<PlainObject>
   }
   seen.add(entry);
 
-  if (firstSleepStageFromPaths(entry, JUNCTION_SLEEP_STAGE_VALUE_PATHS)) {
+  if (firstSleepStageFromPaths(entry, JUNCTION_SLEEP_STAGE_VALUE_PATHS, sourceProviderSlug)) {
     return [entry];
   }
 
@@ -4663,11 +4674,14 @@ function collectSleepStageIntervalEntries(value: unknown, seen: Set<PlainObject>
       return [];
     }
 
-    return collectSleepStageIntervalEntries(nested, seen);
+    return collectSleepStageIntervalEntries(nested, seen, sourceProviderSlug);
   });
 }
 
-function parallelSleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
+function parallelSleepStageIntervalEntries(
+  entry: PlainObject,
+  sourceProviderSlug: string | undefined,
+): PlainObject[] {
   const sessionStartRaw = firstValueFromPaths(entry, [
     "sessionStart",
     "session_start",
@@ -4688,7 +4702,7 @@ function parallelSleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
   const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
 
   return stageValues.flatMap((stageValue, index) => {
-    const stage = normalizeJunctionSleepStageValue(stageValue);
+    const stage = normalizeJunctionSleepStageValueForSource(stageValue, sourceProviderSlug);
     const startOffsetSeconds = startOffsets[index];
     const endOffsetSeconds = endOffsets[index];
     if (!stage || startOffsetSeconds === undefined || endOffsetSeconds === undefined) {
@@ -4785,15 +4799,38 @@ function listAllowedResourceKeys(
 function firstSleepStageFromPaths(
   source: PlainObject | undefined,
   paths: readonly string[],
+  sourceProviderSlug?: string,
 ): JunctionSleepStageValue | undefined {
   for (const path of paths) {
-    const stage = normalizeJunctionSleepStageValue(readPath(source, path));
+    const stage = normalizeJunctionSleepStageValueForSource(readPath(source, path), sourceProviderSlug);
     if (stage) {
       return stage;
     }
   }
 
   return undefined;
+}
+
+function normalizeJunctionSleepStageValueForSource(
+  value: unknown,
+  sourceProviderSlug: string | undefined,
+): JunctionSleepStageValue | null {
+  const normalized = normalizeJunctionSleepStageValue(value);
+  if (normalized) {
+    return normalized;
+  }
+
+  return isAppleHealthKitSourceProvider(sourceProviderSlug) && isJunctionAppleGenericAsleepStageValue(value)
+    ? "asleep_unspecified"
+    : null;
+}
+
+function isAppleHealthKitSourceProvider(sourceProviderSlug: string | undefined): boolean {
+  return normalizeJunctionSourceProviderSlug(sourceProviderSlug) === APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG;
+}
+
+function isJunctionAppleGenericAsleepStageValue(value: unknown): boolean {
+  return value === -1 || (typeof value === "string" && value.trim() === "-1");
 }
 
 function normalizeTimestamp(value: unknown): string | undefined {
