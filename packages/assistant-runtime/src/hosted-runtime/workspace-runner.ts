@@ -1272,13 +1272,44 @@ function accumulateHostedAssistantInputMailboxImport(input: {
     return input.current;
   }
 
+  const mergedLinqDeliveryContexts = [
+    ...readHostedMailboxImportLinqDeliveryContexts(input.current.importResult),
+    ...readHostedMailboxImportLinqDeliveryContexts(input.result.importResult),
+  ];
+  const mergedEmailDeliveryContexts = [
+    ...(input.current.importResult.emailDeliveryContexts ?? []),
+    ...(input.result.importResult.emailDeliveryContexts ?? []),
+  ];
+  const latestLinqDeliveryContext =
+    input.result.importResult.latestLinqDeliveryContext
+    ?? mergedLinqDeliveryContexts.at(-1)
+    ?? null;
+
   return {
     ...input.result,
     importResult: {
       ...input.result.importResult,
       assistantInputIds: mergedAssistantInputIds,
+      ...(mergedEmailDeliveryContexts.length > 0
+        ? { emailDeliveryContexts: mergedEmailDeliveryContexts }
+        : {}),
+      ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
+      ...(mergedLinqDeliveryContexts.length > 0
+        ? { linqDeliveryContexts: mergedLinqDeliveryContexts }
+        : {}),
     },
   };
+}
+
+function readHostedMailboxImportLinqDeliveryContexts(
+  result: HostedMailboxImportCheckpointResult["importResult"],
+): NonNullable<HostedMailboxImportCheckpointResult["importResult"]["linqDeliveryContexts"]> {
+  if (result.linqDeliveryContexts && result.linqDeliveryContexts.length > 0) {
+    return result.linqDeliveryContexts;
+  }
+  return result.latestLinqDeliveryContext
+    ? [result.latestLinqDeliveryContext]
+    : [];
 }
 
 async function notifyHostedActiveTurnInputForMailboxImport(input: {

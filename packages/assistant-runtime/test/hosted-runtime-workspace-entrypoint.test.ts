@@ -11993,6 +11993,8 @@ describe("hosted workspace runtime entrypoint", () => {
     ];
     const importedInputIds: string[] = [];
     const assistantPhaseInputIds: string[][] = [];
+    const assistantPhaseLinqContextTargets: string[][] = [];
+    const assistantPhaseLinqContextInboundItemIds: string[][] = [];
     let assistantPhaseCalls = 0;
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -12032,8 +12034,31 @@ describe("hosted workspace runtime entrypoint", () => {
               vaultRoot,
             });
             importedInputIds.push(inputId);
+            const target = item.item.id.endsWith("_2") ? "thread_2" : "thread_1";
             return {
               assistantInputId: inputId,
+              linqDeliveryContext: {
+                currentInbound: {
+                  dedupeKey: item.item.dedupeKey,
+                  eventId: item.item.dedupeKey,
+                  mailboxItemId: item.item.id,
+                  occurredAt: item.item.occurredAt,
+                  replyToMessageId: `msg_${item.item.id}`,
+                  target,
+                },
+                directRecipientPhoneNumber: "+15550000001",
+                fromPhoneNumber: null,
+                replyToMessageId: `msg_${item.item.id}`,
+                routeAuthority: {
+                  accountLookupKey: `hbidx:${target}`,
+                  channel: "linq" as const,
+                  containerMemberId: `member_${target}`,
+                  threadId: target,
+                },
+                service: "iMessage",
+                target,
+                threadIsDirect: true,
+              },
               status: "imported",
             };
           },
@@ -12054,6 +12079,14 @@ describe("hosted workspace runtime entrypoint", () => {
             assistantPhaseCalls += 1;
             assistantPhaseInputIds.push([
               ...(phaseInput.initialMailboxImport.importResult.assistantInputIds ?? []),
+            ]);
+            assistantPhaseLinqContextTargets.push([
+              ...(phaseInput.initialMailboxImport.importResult.linqDeliveryContexts ?? [])
+                .map((context) => context.target ?? ""),
+            ]);
+            assistantPhaseLinqContextInboundItemIds.push([
+              ...(phaseInput.initialMailboxImport.importResult.linqDeliveryContexts ?? [])
+                .map((context) => context.currentInbound?.mailboxItemId ?? ""),
             ]);
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
@@ -12148,6 +12181,11 @@ describe("hosted workspace runtime entrypoint", () => {
       ));
       assert.equal(importedInputIds.length, 2);
       assert.deepEqual(assistantPhaseInputIds[1], importedInputIds);
+      assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1", "thread_2"]);
+      assert.deepEqual(assistantPhaseLinqContextInboundItemIds[1], [
+        "mailbox_item_entrypoint_foreground_preempt_conversation_1",
+        "mailbox_item_entrypoint_foreground_preempt_conversation_2",
+      ]);
       assert.ok(
         requireEventIndex(events, "assistant.phase:2")
           < requireEventIndex(events, "snapshot:idle_shutdown"),
