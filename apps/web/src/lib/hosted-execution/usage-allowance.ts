@@ -338,6 +338,8 @@ const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 // chat model in deploy preflight.
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICING_VERSION =
   "openai-image-api-pricing-2026-07-08-standard";
+const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_MALFORMED_PRICING_VERSION =
+  "openai-image-api-malformed-usage-block-2026-07-08";
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICING_SOURCE =
   "https://developers.openai.com/api/docs/pricing";
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_TEXT_INPUT_USD_MICROS_PER_MILLION_TOKENS =
@@ -566,7 +568,7 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
     return tokenPricingBasis;
   }
 
-  if (matchHostedAiUsageOpenAiImageRecord(record) !== null) {
+  if (isHostedAiUsageAllowanceOpenAiImageRecord(record)) {
     assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(tokenPricingBasis);
     return tokenPricingBasis;
   }
@@ -672,7 +674,22 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     return null;
   }
 
-  const priced = priceHostedAiUsageForAllowance(input.record);
+  let priced: HostedAiUsageAllowancePricingResult;
+  try {
+    priced = priceHostedAiUsageForAllowance(input.record);
+  } catch (error) {
+    if (!isHostedAiUsageAllowanceOpenAiImageUsageBasisError(input.record, error)) {
+      throw error;
+    }
+    return accountHostedAiUsageOpenAiImageMalformedForAllowanceTx({
+      error,
+      memberId: input.memberId,
+      now,
+      period,
+      record: input.record,
+      tx: input.tx,
+    });
+  }
 
   const accounted = await input.tx.hostedAiUsage.updateMany({
     where: {
@@ -699,6 +716,74 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
     memberId: input.memberId,
     now,
     period,
+    recordOccurredAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
+    sourceUsageId: input.record.usageId,
+    tx: input.tx,
+  });
+}
+
+async function accountHostedAiUsageOpenAiImageMalformedForAllowanceTx(input: {
+  error: unknown;
+  memberId: string;
+  now: Date;
+  period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>;
+  record: AssistantUsageRecord;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageLimitNoticeCandidate | null> {
+  const credentialSource =
+    normalizeAssistantUsageCredentialSource(input.record.credentialSource);
+  const counted = credentialSource !== "member";
+  const tokenPricingBasis =
+    normalizeAssistantUsageTokenPricingBasis(input.record.tokenPricingBasis);
+  assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(tokenPricingBasis);
+
+  const blockCostUsdMicros = counted
+    ? resolveHostedAiUsageAllowanceRemainingUsdMicros(input.period)
+    : 0n;
+  const modelResolution = resolveHostedAiUsageAllowanceOpenAiImageModel(input.record);
+  if (modelResolution.model === null || modelResolution.source === null) {
+    throw new TypeError("OpenAI image hosted AI usage pricing is missing for the model.");
+  }
+
+  const accounted = await input.tx.hostedAiUsage.updateMany({
+    where: {
+      allowanceAccountedAt: null,
+      id: input.record.usageId,
+    },
+    data: {
+      allowanceAccountedAt: input.now,
+      allowanceCostUsdMicros: blockCostUsdMicros,
+      allowanceCounted: counted,
+      allowancePeriodEnd: input.period.periodEnd,
+      allowancePeriodStart: input.period.periodStart,
+      allowancePricingSnapshotJson: {
+        blockCostUsdMicros: blockCostUsdMicros.toString(),
+        credentialSource,
+        model: modelResolution.model,
+        modelSource: modelResolution.source,
+        pricingSource: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICING_SOURCE,
+        reason: normalizeHostedAiUsageOpenAiImageUsageBasisErrorReason(input.error),
+        requestedModel: input.record.requestedModel ?? null,
+        schema: "murph.hosted-ai-usage-allowance-malformed.v1",
+        servedModel: input.record.servedModel ?? null,
+        tokenPricingBasis,
+        tokens: buildHostedAiUsageAllowanceTokenSnapshot(input.record),
+        usageExtractionSourcePath: input.record.usageExtractionSourcePath,
+      },
+      allowancePricingVersion:
+        HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_MALFORMED_PRICING_VERSION,
+    },
+  });
+
+  if (accounted.count !== 1 || !counted) {
+    return null;
+  }
+
+  return accountHostedAiUsageAllowancePeriodSpendTx({
+    costUsdMicros: blockCostUsdMicros,
+    memberId: input.memberId,
+    now: input.now,
+    period: input.period,
     recordOccurredAt: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
     sourceUsageId: input.record.usageId,
     tx: input.tx,
@@ -1438,6 +1523,14 @@ async function accountHostedAiUsageAllowancePeriodSpendTx(input: {
   };
 }
 
+function resolveHostedAiUsageAllowanceRemainingUsdMicros(
+  period: Extract<HostedAiUsageAllowancePeriodResult, { kind: "period" }>,
+): bigint {
+  return period.limitUsdMicros > period.spentUsdMicros
+    ? period.limitUsdMicros - period.spentUsdMicros
+    : 0n;
+}
+
 function resolveHostedAiUsageAllowancePeriod(input: {
   at: Date;
   billingRef: HostedAiUsageAllowanceBillingRef | null;
@@ -1862,8 +1955,50 @@ function matchHostedAiUsageOpenAiImageRecord(
   };
 }
 
+function isHostedAiUsageAllowanceOpenAiImageRecord(
+  record: AssistantUsageRecord,
+): boolean {
+  if (
+    record.provider !== "openai-images"
+    || !isHostedAiUsageOpenAiImageSourcePath(record.usageExtractionSourcePath)
+    || record.cacheWriteTokens !== null
+  ) {
+    return false;
+  }
+
+  const modelResolution = resolveHostedAiUsageAllowanceOpenAiImageModel(record);
+  return modelResolution.model !== null && modelResolution.source !== null;
+}
+
 function isHostedAiUsageOpenAiImageSourcePath(value: string | null): boolean {
   return value === "openai.images.generate" || value === "openai.images.edit";
+}
+
+function isHostedAiUsageAllowanceOpenAiImageUsageBasisError(
+  record: AssistantUsageRecord,
+  error: unknown,
+): boolean {
+  return isHostedAiUsageAllowanceOpenAiImageRecord(record)
+    && error instanceof TypeError
+    && (
+      error.message.startsWith(
+        "OpenAI image hosted AI usage requires provider usage tokens",
+      )
+      || error.message.startsWith(
+        "OpenAI image hosted AI usage has inconsistent provider usage tokens",
+      )
+    );
+}
+
+function normalizeHostedAiUsageOpenAiImageUsageBasisErrorReason(
+  error: unknown,
+): "inconsistent_provider_usage_tokens" | "missing_provider_usage_tokens" {
+  return error instanceof TypeError
+    && error.message.startsWith(
+      "OpenAI image hosted AI usage has inconsistent provider usage tokens",
+    )
+    ? "inconsistent_provider_usage_tokens"
+    : "missing_provider_usage_tokens";
 }
 
 function priceHostedAiUsageOpenAiImageForAllowance(input: {

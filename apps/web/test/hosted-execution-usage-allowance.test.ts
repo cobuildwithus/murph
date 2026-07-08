@@ -1106,7 +1106,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
-  it("fails image accounting before claiming rows when provider usage pricing basis is missing", async () => {
+  it("blocks the allowance period when image provider usage pricing basis is missing", async () => {
     for (const record of buildMalformedOpenAiImageUsageRecords()) {
       const updateMany = vi.fn(async () => ({ count: 1 }));
       const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
@@ -1115,18 +1115,34 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         hostedAiUsageUpdateMany: updateMany,
       });
 
-      await expect(accountHostedAiUsageForAllowanceTx({
+      const notice = await accountHostedAiUsageForAllowanceTx({
         memberId: "member_123",
         record,
         tx: tx as never,
-      })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+      });
 
-      expect(updateMany).not.toHaveBeenCalled();
-      expect(executeRaw).not.toHaveBeenCalled();
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          allowanceCostUsdMicros: 10_000_000n,
+          allowanceCounted: true,
+          allowancePricingSnapshotJson: expect.objectContaining({
+            blockCostUsdMicros: "10000000",
+            reason: "missing_provider_usage_tokens",
+            schema: "murph.hosted-ai-usage-allowance-malformed.v1",
+            tokenPricingBasis: "standard",
+          }),
+          allowancePricingVersion: "openai-image-api-malformed-usage-block-2026-07-08",
+        }),
+      }));
+      expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+      expect(notice).toMatchObject({
+        memberId: "member_123",
+        sourceUsageId: record.usageId,
+      });
     }
   });
 
-  it("fails image accounting before claiming rows when provider usage buckets are inconsistent", async () => {
+  it("blocks the allowance period when image provider usage buckets are inconsistent", async () => {
     for (const record of buildInconsistentOpenAiImageUsageRecords()) {
       const updateMany = vi.fn(async () => ({ count: 1 }));
       const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
@@ -1135,18 +1151,29 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         hostedAiUsageUpdateMany: updateMany,
       });
 
-      await expect(accountHostedAiUsageForAllowanceTx({
+      await accountHostedAiUsageForAllowanceTx({
         memberId: "member_123",
         record,
         tx: tx as never,
-      })).rejects.toThrow("OpenAI image hosted AI usage has inconsistent provider usage tokens");
+      });
 
-      expect(updateMany).not.toHaveBeenCalled();
-      expect(executeRaw).not.toHaveBeenCalled();
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          allowanceCostUsdMicros: 10_000_000n,
+          allowanceCounted: true,
+          allowancePricingSnapshotJson: expect.objectContaining({
+            blockCostUsdMicros: "10000000",
+            reason: "inconsistent_provider_usage_tokens",
+            schema: "murph.hosted-ai-usage-allowance-malformed.v1",
+          }),
+          allowancePricingVersion: "openai-image-api-malformed-usage-block-2026-07-08",
+        }),
+      }));
+      expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
     }
   });
 
-  it("fails image accounting before claiming rows when input detail buckets are missing", async () => {
+  it("blocks the allowance period when image input detail buckets are missing", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
@@ -1154,14 +1181,25 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       hostedAiUsageUpdateMany: updateMany,
     });
 
-    await expect(accountHostedAiUsageForAllowanceTx({
+    await accountHostedAiUsageForAllowanceTx({
       memberId: "member_123",
       record: buildAggregateOnlyOpenAiImageUsageRecord(),
       tx: tx as never,
-    })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+    });
 
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(executeRaw).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceCostUsdMicros: 10_000_000n,
+        allowanceCounted: true,
+        allowancePricingSnapshotJson: expect.objectContaining({
+          blockCostUsdMicros: "10000000",
+          reason: "missing_provider_usage_tokens",
+          schema: "murph.hosted-ai-usage-allowance-malformed.v1",
+        }),
+        allowancePricingVersion: "openai-image-api-malformed-usage-block-2026-07-08",
+      }),
+    }));
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
   it("does not update period metadata again when allowanceAccountedAt was already set", async () => {
@@ -1222,7 +1260,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
-  it("fails stale-trial image denial before claiming rows when provider usage pricing basis is missing", async () => {
+  it("marks stale-trial image usage denied when provider usage pricing basis is missing", async () => {
     for (const record of buildMalformedOpenAiImageUsageRecords({
       occurredAt: "2026-04-08T12:00:01.000Z",
     })) {
@@ -1238,14 +1276,26 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
       });
 
-      await expect(accountHostedAiUsageForAllowanceTx({
+      await accountHostedAiUsageForAllowanceTx({
         memberId: "member_123",
         now: new Date("2026-04-08T12:00:05.000Z"),
         record,
         tx: tx as never,
-      })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+      });
 
-      expect(updateMany).not.toHaveBeenCalled();
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          allowanceAccountedAt: new Date("2026-04-08T12:00:05.000Z"),
+          allowanceCostUsdMicros: 0n,
+          allowanceCounted: false,
+          allowancePricingSnapshotJson: expect.objectContaining({
+            reason: "trial_expired_pending_billing",
+            schema: "murph.hosted-ai-usage-allowance-denied.v1",
+            tokenPricingBasis: "standard",
+          }),
+          allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
+        }),
+      }));
       expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
     }
   });

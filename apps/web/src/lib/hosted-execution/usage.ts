@@ -316,7 +316,6 @@ function shouldPreserveHostedAiUsageRecordAfterAllowanceError(
 ): boolean {
   return (
     record.provider === "openai-images"
-    && record.providerRequestOutcome !== "succeeded"
     && (
       record.usageExtractionSourcePath === "openai.images.generate"
       || record.usageExtractionSourcePath === "openai.images.edit"
@@ -329,7 +328,14 @@ function isHostedAiUsageRecordPreservingAllowanceError(
   error: unknown,
 ): boolean {
   return error instanceof TypeError
-    && error.message.startsWith("OpenAI image hosted AI usage ");
+    && (
+      error.message.startsWith(
+        "OpenAI image hosted AI usage requires provider usage tokens",
+      )
+      || error.message.startsWith(
+        "OpenAI image hosted AI usage has inconsistent provider usage tokens",
+      )
+    );
 }
 
 async function runHostedAiUsageRecordTransaction<T>(

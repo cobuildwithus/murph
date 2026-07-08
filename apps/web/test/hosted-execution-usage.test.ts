@@ -363,7 +363,7 @@ describe("recordHostedAiUsageRecords", () => {
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
-  it("rolls back succeeded malformed image usage rows when allowance accounting fails", async () => {
+  it("keeps succeeded malformed image usage rows when allowance accounting rolls back", async () => {
     const prisma = makeRollbackAwareUsagePrismaClient();
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockRejectedValue(
       new TypeError("OpenAI image hosted AI usage requires provider usage tokens"),
@@ -394,8 +394,15 @@ describe("recordHostedAiUsageRecords", () => {
       }],
     })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
 
-    expect(prisma.$transaction).toHaveBeenCalledOnce();
-    expect(prisma.readHostedAiUsageRows()).toEqual([]);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.readHostedAiUsageRows()).toEqual([
+      expect.objectContaining({
+        allowanceAccountedAt: null,
+        id: "turn_123.attempt-1",
+        provider: "openai-images",
+        providerRequestOutcome: "succeeded",
+      }),
+    ]);
     expect(allowanceMocks.claimHostedAiUsageLimitNotice).not.toHaveBeenCalled();
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
