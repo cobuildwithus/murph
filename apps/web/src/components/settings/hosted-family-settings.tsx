@@ -14,10 +14,6 @@ const SEAT_PRICE_LABEL = `$${Math.round(
   HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat / 100,
 )}/mo`;
 
-const SEAT_PRICE_LABEL = `$${Math.round(
-  HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat / 100,
-)}/mo`;
-
 export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSnapshot }) {
   const snapshot = props.ownerSnapshot;
 
