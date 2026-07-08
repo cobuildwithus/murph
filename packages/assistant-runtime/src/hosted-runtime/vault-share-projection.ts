@@ -697,7 +697,11 @@ export function selectProjectableActivityDistanceDays(
   const projectableRows = input.rows.filter((row) =>
     isProjectableActivitySessionRow(row, input.spec.activityKind, cutoffMs)
   );
-  for (const row of dedupeActivitySessionRows(projectableRows, input.spec.activityKind)) {
+  for (const row of dedupeActivitySessionRows(
+    projectableRows,
+    input.spec.activityKind,
+    choosePreferredActivitySessionDistanceRow,
+  )) {
     const hasDistance = isProjectableActivitySessionDistanceRow(row);
     const distanceMeters = hasDistance ? row.distanceMeters ?? 0 : 0;
     const group = groups.get(row.date) ?? {
@@ -1096,6 +1100,10 @@ function isProjectableActivitySessionDistanceRow(
 function dedupeActivitySessionRows(
   rows: readonly ActivitySessionProjectionRow[],
   activityKind?: string,
+  choosePreferred: (
+    left: ActivitySessionProjectionRow,
+    right: ActivitySessionProjectionRow,
+  ) => ActivitySessionProjectionRow = choosePreferredActivitySessionRow,
 ): ActivitySessionProjectionRow[] {
   const deduped: ActivitySessionProjectionRow[] = [];
   const exactDedupeIndexes = new Map<string, number>();
@@ -1104,7 +1112,7 @@ function dedupeActivitySessionRows(
     const key = activitySessionRowDedupeKey(row, activityKind);
     const exactDuplicateIndex = exactDedupeIndexes.get(key);
     if (exactDuplicateIndex !== undefined) {
-      deduped[exactDuplicateIndex] = choosePreferredActivitySessionRow(
+      deduped[exactDuplicateIndex] = choosePreferred(
         deduped[exactDuplicateIndex],
         row,
       );
@@ -1115,7 +1123,7 @@ function dedupeActivitySessionRows(
       activitySessionRowsOverlap(existing, row, activityKind)
     );
     if (duplicateIndex >= 0) {
-      deduped[duplicateIndex] = choosePreferredActivitySessionRow(
+      deduped[duplicateIndex] = choosePreferred(
         deduped[duplicateIndex],
         row,
       );
@@ -1223,6 +1231,21 @@ function choosePreferredActivitySessionRow(
     (parseOptionalTimestampMs(right.observedAt) ?? 0)
     - (parseOptionalTimestampMs(left.observedAt) ?? 0);
   return observedDifference > 0 ? right : left;
+}
+
+function choosePreferredActivitySessionDistanceRow(
+  left: ActivitySessionProjectionRow,
+  right: ActivitySessionProjectionRow,
+): ActivitySessionProjectionRow {
+  const leftHasDistance = isProjectableActivitySessionDistanceRow(left);
+  const rightHasDistance = isProjectableActivitySessionDistanceRow(right);
+  if (leftHasDistance && !rightHasDistance) {
+    return left;
+  }
+  if (rightHasDistance && !leftHasDistance) {
+    return right;
+  }
+  return choosePreferredActivitySessionRow(left, right);
 }
 
 function activitySessionRowCompletenessScore(row: ActivitySessionProjectionRow): number {
