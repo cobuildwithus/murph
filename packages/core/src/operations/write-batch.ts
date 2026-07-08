@@ -25,10 +25,15 @@ import {
 import { toIsoTimestamp } from "../time.ts";
 import { isErrnoException, isPlainRecord } from "../types.ts";
 import {
+  buildIntegrationIngestAppendPlan,
+  parseIntegrationIngestAppendPayload,
+} from "../integration-ingests.ts";
+import {
   applyImmutableWriteTarget,
   applyJsonlAppendTarget,
   applyTextWriteTarget,
   assertJsonlAppendTargetCanAppend,
+  isIntegrationIngestJsonlAppendTarget,
   assertWriteTargetPolicy,
   assertWriteTargetPolicyForVault,
   prepareVerifiedDeleteTarget,
@@ -641,7 +646,19 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
     kind: "jsonl_append",
   });
-  await assertJsonlAppendTargetCanAppend(target);
+  try {
+    await assertJsonlAppendTargetCanAppend(target);
+  } catch (error) {
+    if (isArchivedIntegrationIngestAppendError(error, target)) {
+      await assertArchivedIntegrationIngestHostedAppendAlreadyApplied({
+        bytes: input.bytes,
+        targetRelativePath: target.relativePath,
+        vaultRoot: input.vaultRoot,
+      });
+      return;
+    }
+    throw error;
+  }
   const originalSize = input.originalSize ?? 0;
   if (input.baseByteLength !== originalSize) {
     throw new VaultError(
@@ -690,6 +707,33 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   }
 
   await fs.appendFile(target.absolutePath, input.bytes);
+}
+
+function isArchivedIntegrationIngestAppendError(
+  error: unknown,
+  target: ResolvedVaultPath,
+): boolean {
+  return error instanceof VaultError
+    && error.code === "INTEGRATION_INGEST_SHARD_ARCHIVED"
+    && isIntegrationIngestJsonlAppendTarget(target.relativePath);
+}
+
+async function assertArchivedIntegrationIngestHostedAppendAlreadyApplied(input: {
+  bytes: Uint8Array;
+  targetRelativePath: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const payload = Buffer.from(input.bytes).toString("utf8");
+  const records = await parseIntegrationIngestAppendPayload(payload, input.targetRelativePath);
+  const plan = await buildIntegrationIngestAppendPlan(input.vaultRoot, records);
+  if (plan.payloads.size === 0) {
+    return;
+  }
+  throw new VaultError(
+    "INTEGRATION_INGEST_SHARD_ARCHIVED",
+    `Integration ingest shard "${input.targetRelativePath}" is archived and cannot be appended.`,
+    { relativePath: input.targetRelativePath },
+  );
 }
 
 async function applyHostedCanonicalRawReceiptAction(input: {

@@ -382,6 +382,30 @@ export async function buildIntegrationIngestAppendPlan(
   return { appendedIds, payloads, targetShardPaths };
 }
 
+export async function parseIntegrationIngestAppendPayload(
+  payload: string,
+  logicalPath: string,
+): Promise<IntegrationIngestRecord[]> {
+  const records: IntegrationIngestRecord[] = [];
+  const lines = createInterface({
+    input: Readable.from([payload]),
+    crlfDelay: Infinity,
+  });
+  const source: IntegrationIngestRowSource = {
+    kind: "jsonl",
+    logicalPath,
+    sourcePath: logicalPath,
+  };
+
+  for await (const { raw, sourcePath } of parseIntegrationIngestJsonlLines(lines, source)) {
+    const record = parseIntegrationIngestRecord(raw, sourcePath);
+    assertIntegrationIngestShard(record.id, record.importedAt, logicalPath);
+    assertIntegrationIngestRecordIntegrity(record);
+    records.push(record);
+  }
+  return records;
+}
+
 export async function stageIntegrationIngestAppendPlan(
   batch: { stageJsonlAppend(relativePath: string, content: string): Promise<string> },
   plan: IntegrationIngestAppendPlan,
@@ -707,18 +731,13 @@ function selectZippedIntegrationIngestJsonlEntry(
   const entries = readZipCentralDirectory(archive, source.sourcePath)
     .filter((entry) => !entry.name.endsWith("/") && !entry.name.startsWith("__MACOSX/"));
   const expectedName = source.logicalPath.split("/").at(-1) ?? "";
-  const exactNameMatches = entries.filter((entry) => zipEntryBaseName(entry.name) === expectedName);
-  if (exactNameMatches.length === 1) {
-    return exactNameMatches[0] as ZipCentralDirectoryEntry;
-  }
-  const jsonlEntries = entries.filter((entry) => entry.name.endsWith(".jsonl"));
-  if (jsonlEntries.length === 1) {
-    return jsonlEntries[0] as ZipCentralDirectoryEntry;
+  if (entries.length === 1 && zipEntryBaseName(entries[0]?.name ?? "") === expectedName) {
+    return entries[0] as ZipCentralDirectoryEntry;
   }
   throw new VaultError(
     "INTEGRATION_INGEST_ARCHIVE_INVALID",
-    `Integration ingest archive "${source.sourcePath}" must contain exactly one matching JSONL entry.`,
-    { relativePath: source.sourcePath, entryCount: jsonlEntries.length },
+    `Integration ingest archive "${source.sourcePath}" must contain exactly one entry named "${expectedName}".`,
+    { relativePath: source.sourcePath, entryCount: entries.length },
   );
 }
 

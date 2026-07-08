@@ -107,55 +107,72 @@ function createSingleEntryZip(
   content: string,
   options: { compressionMethod?: 0 | 8 } = {},
 ): Buffer {
-  const compressionMethod = options.compressionMethod ?? 8;
-  const fileNameBytes = Buffer.from(fileName, "utf8");
-  const uncompressed = Buffer.from(content, "utf8");
-  const compressed = compressionMethod === 0 ? uncompressed : deflateRawSync(uncompressed);
-  const checksum = crc32(uncompressed) >>> 0;
-  const localHeader = Buffer.alloc(30 + fileNameBytes.byteLength);
-  localHeader.writeUInt32LE(0x04034b50, 0);
-  localHeader.writeUInt16LE(20, 4);
-  localHeader.writeUInt16LE(0, 6);
-  localHeader.writeUInt16LE(compressionMethod, 8);
-  localHeader.writeUInt32LE(0, 10);
-  localHeader.writeUInt32LE(checksum, 14);
-  localHeader.writeUInt32LE(compressed.byteLength, 18);
-  localHeader.writeUInt32LE(uncompressed.byteLength, 22);
-  localHeader.writeUInt16LE(fileNameBytes.byteLength, 26);
-  localHeader.writeUInt16LE(0, 28);
-  fileNameBytes.copy(localHeader, 30);
+  return createZip([{ fileName, content, compressionMethod: options.compressionMethod }]);
+}
 
-  const centralDirectoryOffset = localHeader.byteLength + compressed.byteLength;
-  const centralDirectory = Buffer.alloc(46 + fileNameBytes.byteLength);
-  centralDirectory.writeUInt32LE(0x02014b50, 0);
-  centralDirectory.writeUInt16LE(20, 4);
-  centralDirectory.writeUInt16LE(20, 6);
-  centralDirectory.writeUInt16LE(0, 8);
-  centralDirectory.writeUInt16LE(compressionMethod, 10);
-  centralDirectory.writeUInt32LE(0, 12);
-  centralDirectory.writeUInt32LE(checksum, 16);
-  centralDirectory.writeUInt32LE(compressed.byteLength, 20);
-  centralDirectory.writeUInt32LE(uncompressed.byteLength, 24);
-  centralDirectory.writeUInt16LE(fileNameBytes.byteLength, 28);
-  centralDirectory.writeUInt16LE(0, 30);
-  centralDirectory.writeUInt16LE(0, 32);
-  centralDirectory.writeUInt16LE(0, 34);
-  centralDirectory.writeUInt16LE(0, 36);
-  centralDirectory.writeUInt32LE(0, 38);
-  centralDirectory.writeUInt32LE(0, 42);
-  fileNameBytes.copy(centralDirectory, 46);
+function createZip(
+  entries: readonly { fileName: string; content: string; compressionMethod?: 0 | 8 }[],
+): Buffer {
+  const localParts: Buffer[] = [];
+  const centralDirectoryParts: Buffer[] = [];
+  let localHeaderOffset = 0;
 
+  for (const entry of entries) {
+    const compressionMethod = entry.compressionMethod ?? 8;
+    const fileNameBytes = Buffer.from(entry.fileName, "utf8");
+    const uncompressed = Buffer.from(entry.content, "utf8");
+    const compressed = compressionMethod === 0 ? uncompressed : deflateRawSync(uncompressed);
+    const checksum = crc32(uncompressed) >>> 0;
+    const localHeader = Buffer.alloc(30 + fileNameBytes.byteLength);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(compressionMethod, 8);
+    localHeader.writeUInt32LE(0, 10);
+    localHeader.writeUInt32LE(checksum, 14);
+    localHeader.writeUInt32LE(compressed.byteLength, 18);
+    localHeader.writeUInt32LE(uncompressed.byteLength, 22);
+    localHeader.writeUInt16LE(fileNameBytes.byteLength, 26);
+    localHeader.writeUInt16LE(0, 28);
+    fileNameBytes.copy(localHeader, 30);
+
+    const centralDirectory = Buffer.alloc(46 + fileNameBytes.byteLength);
+    centralDirectory.writeUInt32LE(0x02014b50, 0);
+    centralDirectory.writeUInt16LE(20, 4);
+    centralDirectory.writeUInt16LE(20, 6);
+    centralDirectory.writeUInt16LE(0, 8);
+    centralDirectory.writeUInt16LE(compressionMethod, 10);
+    centralDirectory.writeUInt32LE(0, 12);
+    centralDirectory.writeUInt32LE(checksum, 16);
+    centralDirectory.writeUInt32LE(compressed.byteLength, 20);
+    centralDirectory.writeUInt32LE(uncompressed.byteLength, 24);
+    centralDirectory.writeUInt16LE(fileNameBytes.byteLength, 28);
+    centralDirectory.writeUInt16LE(0, 30);
+    centralDirectory.writeUInt16LE(0, 32);
+    centralDirectory.writeUInt16LE(0, 34);
+    centralDirectory.writeUInt16LE(0, 36);
+    centralDirectory.writeUInt32LE(0, 38);
+    centralDirectory.writeUInt32LE(localHeaderOffset, 42);
+    fileNameBytes.copy(centralDirectory, 46);
+
+    localParts.push(localHeader, compressed);
+    centralDirectoryParts.push(centralDirectory);
+    localHeaderOffset += localHeader.byteLength + compressed.byteLength;
+  }
+
+  const centralDirectoryOffset = localHeaderOffset;
+  const centralDirectory = Buffer.concat(centralDirectoryParts);
   const eocd = Buffer.alloc(22);
   eocd.writeUInt32LE(0x06054b50, 0);
   eocd.writeUInt16LE(0, 4);
   eocd.writeUInt16LE(0, 6);
-  eocd.writeUInt16LE(1, 8);
-  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
   eocd.writeUInt32LE(centralDirectory.byteLength, 12);
   eocd.writeUInt32LE(centralDirectoryOffset, 16);
   eocd.writeUInt16LE(0, 20);
 
-  return Buffer.concat([localHeader, compressed, centralDirectory, eocd]);
+  return Buffer.concat([...localParts, centralDirectory, eocd]);
 }
 
 function findZipSignature(buffer: Buffer, signature: number): number {
@@ -246,6 +263,37 @@ test("integration ingest zip archive reader accepts nested stored entries", asyn
   const storedZipEntry = await readIntegrationIngestById(vaultRoot, "xfm_ArchivedStoredZip1");
   assert.equal(storedZipEntry?.relativePath, "ledger/integration-ingests/2025/2025-10.jsonl");
   assert.equal(storedZipEntry?.record.id, "xfm_ArchivedStoredZip1");
+});
+
+test("integration ingest zip archive reader rejects extra archive entries", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-extra-zip-entry");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-10.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_ArchivedZipExtra1",
+    eventId: "evt_ArchivedZipExtra1",
+    importedAt: "2025-10-12T09:00:00.000Z",
+  });
+  const content = `${JSON.stringify(archivedRecord)}\n`;
+  await fs.mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, `${logicalPath}.zip`),
+    createZip([
+      { fileName: path.basename(logicalPath), content },
+      { fileName: "raw-provider-payload.json", content: "{}\n" },
+    ]),
+  );
+
+  await assert.rejects(
+    readIntegrationIngestEntries(vaultRoot),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ARCHIVE_INVALID");
+      assert.equal((error as VaultError).details.entryCount, 2);
+      return true;
+    },
+  );
 });
 
 test("integration ingest readers reject live and archived copies of the same shard", async () => {
@@ -514,6 +562,53 @@ test("hosted JSONL receipt replay refuses archived integration ingest shards", a
     },
   );
   await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+});
+
+test("hosted JSONL receipt replay treats exact archived integration ingest duplicates as no-ops", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-hosted-replay-duplicate");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2024/2024-11.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_HostedArchivedReplayDuplicate1",
+    eventId: "evt_HostedArchivedReplayDuplicate1",
+    importedAt: "2024-11-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [archivedRecord]);
+
+  const appendPayload = `${JSON.stringify(archivedRecord)}\n`;
+  const appendSha256 = createHash("sha256").update(appendPayload).digest("hex");
+  await applyHostedCanonicalWriteReceipt({
+    vaultRoot,
+    readPayload: async () => Buffer.from(appendPayload, "utf8"),
+    receipt: {
+      schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+      operationId: "op_hosted_integration_archive_duplicate_replay",
+      operationType: "hosted_integration_archive_duplicate_replay",
+      summary: "no-op archived integration ingest replay",
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+      occurredAt: "2026-03-01T00:00:00.000Z",
+      committedAt: "2026-03-01T00:00:00.000Z",
+      actions: [{
+        kind: "jsonl_append",
+        targetRelativePath: logicalPath,
+        appendSha256,
+        appendByteLength: Buffer.byteLength(appendPayload),
+        baseSha256: createHash("sha256").update("").digest("hex"),
+        baseByteLength: 0,
+        originalSize: 0,
+        contentRef: {
+          sha256: appendSha256,
+          byteSize: Buffer.byteLength(appendPayload),
+        },
+      }],
+    },
+  });
+
+  await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+  const entries = await readIntegrationIngestEntries(vaultRoot);
+  assert.deepEqual(entries.map((entry) => entry.record.id), ["xfm_HostedArchivedReplayDuplicate1"]);
 });
 
 test("validateVault validates archived integration ingest shards", async () => {

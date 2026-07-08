@@ -83,7 +83,7 @@ async function pathExists(absolutePath: string): Promise<boolean> {
   }
 }
 
-function isIntegrationIngestJsonlAppendTarget(relativePath: string): boolean {
+export function isIntegrationIngestJsonlAppendTarget(relativePath: string): boolean {
   return relativePath.startsWith(`${VAULT_LAYOUT.integrationIngestLedgerDirectory}/`)
     && relativePath.endsWith(".jsonl");
 }
