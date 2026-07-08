@@ -37,7 +37,11 @@ import {
   type CallCircleNotificationSignal,
   readExistingCallCircleNotificationSignalTx,
   readCallCircleNotificationSignal,
+  readCallCircleNotificationPreflightTx,
 } from "../call-circle/notifications";
+import {
+  readCallCircleMatchParticipantTimeZones,
+} from "../call-circle/participant-store";
 import {
   readRetellMurphPhoneCallId,
   type RetellCallPayload,
@@ -404,54 +408,54 @@ async function appendPhoneCallResultNotificationTx(input: {
     }
     const match = await input.prisma.hostedCallCircleMatch.findUnique({
       select: {
+        groupId: true,
         memberAId: true,
         memberBId: true,
       },
       where: { id: callCircleMatchId },
     });
     if (match) {
+      const timeZones = await readCallCircleMatchParticipantTimeZones({
+        groupId: match.groupId,
+        memberAId: match.memberAId,
+        memberBId: match.memberBId,
+        prisma: input.prisma,
+      });
+      if (!timeZones) {
+        return { notificationSignals: [] };
+      }
       const [memberANotification, memberBNotification] = await Promise.all([
-        completed
-          ? appendCallCircleOutcomeNotificationTx({
-              matchId: callCircleMatchId,
-              memberId: match.memberAId,
-              now: outcomeAt,
-              tx: input.prisma,
-            })
-          : appendCallCircleHandoffNotificationTx({
-              matchId: callCircleMatchId,
-              memberId: match.memberAId,
-              now: outcomeAt,
-              tx: input.prisma,
-            }),
-        completed
-          ? appendCallCircleOutcomeNotificationTx({
-              matchId: callCircleMatchId,
-              memberId: match.memberBId,
-              now: outcomeAt,
-              tx: input.prisma,
-            })
-          : appendCallCircleHandoffNotificationTx({
-              matchId: callCircleMatchId,
-              memberId: match.memberBId,
-              now: outcomeAt,
-              tx: input.prisma,
-            }),
+        appendCallCircleResultNotificationIfReachableTx({
+          completed,
+          matchId: callCircleMatchId,
+          memberId: match.memberAId,
+          now: outcomeAt,
+          timeZone: timeZones.memberATimeZone,
+          tx: input.prisma,
+        }),
+        appendCallCircleResultNotificationIfReachableTx({
+          completed,
+          matchId: callCircleMatchId,
+          memberId: match.memberBId,
+          now: outcomeAt,
+          timeZone: timeZones.memberBTimeZone,
+          tx: input.prisma,
+        }),
       ]);
       return {
         notificationSignals: [
-          readHostedPhoneCallResultNotificationSignal(
+          memberANotification ? readHostedPhoneCallResultNotificationSignal(
             readCallCircleNotificationSignal({
               memberId: match.memberAId,
               notification: memberANotification,
             }),
-          ),
-          readHostedPhoneCallResultNotificationSignal(
+          ) : null,
+          memberBNotification ? readHostedPhoneCallResultNotificationSignal(
             readCallCircleNotificationSignal({
               memberId: match.memberBId,
               notification: memberBNotification,
             }),
-          ),
+          ) : null,
         ].filter((signal): signal is HostedPhoneCallResultNotificationSignal =>
           signal !== null
         ),
@@ -551,6 +555,40 @@ async function readExistingCallCircleResultNotificationSignalsTx(input: {
     return signal ? [signal] : [];
   });
   return notificationSignals.length > 0 ? { notificationSignals } : null;
+}
+
+async function appendCallCircleResultNotificationIfReachableTx(input: {
+  completed: boolean;
+  matchId: string;
+  memberId: string;
+  now: Date;
+  timeZone: string;
+  tx: Prisma.TransactionClient;
+}): Promise<Awaited<
+  ReturnType<typeof appendCallCircleOutcomeNotificationTx>
+> | null> {
+  const preflight = await readCallCircleNotificationPreflightTx({
+    memberId: input.memberId,
+    now: input.now,
+    timeZone: input.timeZone,
+    tx: input.tx,
+  });
+  if (preflight.status !== "ok") return null;
+  return input.completed
+    ? appendCallCircleOutcomeNotificationTx({
+        matchId: input.matchId,
+        memberId: input.memberId,
+        now: input.now,
+        preflight,
+        tx: input.tx,
+      })
+    : appendCallCircleHandoffNotificationTx({
+        matchId: input.matchId,
+        memberId: input.memberId,
+        now: input.now,
+        preflight,
+        tx: input.tx,
+      });
 }
 
 function buildCallCircleResultNotificationEventId(input: {

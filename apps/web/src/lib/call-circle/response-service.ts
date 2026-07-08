@@ -383,7 +383,14 @@ type CallCircleSetupContextResolution =
 type CallCircleConfirmContextResolution =
   | { status: "none" }
   | { status: "ambiguous" }
-  | { matchId: string; status: "exact" };
+  | { anchor: CallCircleConfirmAnchor; status: "exact" };
+
+type CallCircleConfirmAnchor = {
+  key: string;
+  matchId: string;
+  stage: "am" | "final";
+  windowStartAt: Date;
+};
 
 async function resolveCallCircleSetupGroupIdFromReplyContext(input: {
   memberId: string;
@@ -487,13 +494,13 @@ async function resolveCallCircleResponseMatch(input: {
   if (
     confirmContext.status === "exact"
     && input.request.matchId
-    && input.request.matchId !== confirmContext.matchId
+    && input.request.matchId !== confirmContext.anchor.matchId
   ) {
     return null;
   }
 
   const matchId = confirmContext.status === "exact"
-    ? confirmContext.matchId
+    ? confirmContext.anchor.matchId
     : input.request.matchId;
   const match = matchId
     ? await input.prisma.hostedCallCircleMatch.findUnique({
@@ -510,6 +517,15 @@ async function resolveCallCircleResponseMatch(input: {
       : null;
   if (!side) return null;
   if (input.request.side && input.request.side !== side) return null;
+  if (
+    confirmContext.status === "exact"
+    && !isCallCircleConfirmAnchorCurrentForMatch({
+      anchor: confirmContext.anchor,
+      match,
+    })
+  ) {
+    return null;
+  }
   if (
     match.status !== "both_confirmed"
     && match.amAskedAt === null
@@ -570,7 +586,7 @@ async function resolveCallCircleConfirmMatchIdFromReplyContext(input: {
     },
   });
 
-  const anchors: Array<{ key: string; matchId: string }> = [];
+  const anchors: CallCircleConfirmAnchor[] = [];
   for (const notification of confirmNotifications) {
     const anchor = readCallCircleConfirmAnchorFromDedupeKey({
       dedupeKey: notification.dedupeKey,
@@ -582,14 +598,14 @@ async function resolveCallCircleConfirmMatchIdFromReplyContext(input: {
   }
   if (anchors.length === 0) return { status: "none" };
   return anchors.length === 1
-    ? { matchId: anchors[0]!.matchId, status: "exact" }
+    ? { anchor: anchors[0]!, status: "exact" }
     : { status: "ambiguous" };
 }
 
 function readCallCircleConfirmAnchorFromDedupeKey(input: {
   dedupeKey: string;
   memberId: string;
-}): { key: string; matchId: string } | null {
+}): CallCircleConfirmAnchor | null {
   for (const stage of ["am", "final"] as const) {
     const prefix = `${CALL_CIRCLE_CONFIRM_NOTIFICATION_DEDUPE_PREFIX}${stage}:`;
     if (!input.dedupeKey.startsWith(prefix)) continue;
@@ -599,15 +615,31 @@ function readCallCircleConfirmAnchorFromDedupeKey(input: {
     if (memberIndex <= 0) return null;
     const matchId = remainder.slice(0, memberIndex).trim();
     const windowStartAt = remainder.slice(memberIndex + memberMarker.length).trim();
-    if (!matchId || Number.isNaN(new Date(windowStartAt).getTime())) {
+    const parsedWindowStartAt = new Date(windowStartAt);
+    if (!matchId || Number.isNaN(parsedWindowStartAt.getTime())) {
       return null;
     }
     return {
       key: `${stage}:${matchId}:${windowStartAt}`,
       matchId,
+      stage,
+      windowStartAt: parsedWindowStartAt,
     };
   }
   return null;
+}
+
+function isCallCircleConfirmAnchorCurrentForMatch(input: {
+  anchor: CallCircleConfirmAnchor;
+  match: {
+    amAskedAt: Date | null;
+    finalAskedAt: Date | null;
+    windowStartAt: Date;
+  };
+}): boolean {
+  const currentStage = input.match.finalAskedAt ? "final" : "am";
+  return input.anchor.stage === currentStage
+    && input.anchor.windowStartAt.getTime() === input.match.windowStartAt.getTime();
 }
 
 const callCircleResponseMatchSelect = {
@@ -619,6 +651,7 @@ const callCircleResponseMatchSelect = {
   memberBId: true,
   status: true,
   windowEndAt: true,
+  windowStartAt: true,
 } satisfies Prisma.HostedCallCircleMatchSelect;
 
 async function resolveSinglePendingCallCircleResponseMatch(input: {

@@ -615,6 +615,45 @@ describe("handleCallCircleRespond", () => {
     expect(mocks.confirmCallCircleMatchSide).not.toHaveBeenCalled();
   });
 
+  it("rejects old morning confirmation anchors after the final ask resets consent", async () => {
+    const match = callCircleMatch({
+      amAskedAt: new Date("2026-07-06T09:00:00.000Z"),
+      finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+      memberAId: "member_other",
+      memberBId: "member_123",
+      status: "asking",
+    });
+    const prisma = createResponsePrisma({
+      confirmNotificationItems: [{
+        id: "mailbox_confirm_old_am",
+        matchId: match.id,
+        memberId: "member_123",
+        stage: "am",
+        windowStartAt: match.windowStartAt,
+      }],
+      match,
+      participantStatus: "enrolled",
+      replyOccurredAt: new Date("2026-07-06T14:50:00.000Z"),
+    });
+
+    await expect(handleCallCircleRespond({
+      context: {
+        inboundMailboxItemIds: ["mailbox_reply", "mailbox_confirm_old_am"],
+      },
+      memberId: "member_123",
+      now: FRESH_CALL_CIRCLE_REPLY_OCCURRED_AT,
+      prisma: prisma as never,
+      request: {
+        kind: "confirm",
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    });
+
+    expect(mocks.confirmCallCircleMatchSide).not.toHaveBeenCalled();
+  });
+
   it("accepts confirmations that are newer than the final ask", async () => {
     const prisma = createResponsePrisma({
       match: callCircleMatch({
@@ -668,6 +707,46 @@ describe("handleCallCircleRespond", () => {
       request: {
         kind: "confirm",
         matchId: "hccm_123",
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    });
+
+    expect(mocks.confirmCallCircleMatchSide).not.toHaveBeenCalled();
+  });
+
+  it("rejects old window anchors after a counter reasks the member", async () => {
+    const oldWindowStartAt = new Date("2026-07-06T16:00:00.000Z");
+    const match = callCircleMatch({
+      amAskedAt: new Date("2026-07-06T15:05:00.000Z"),
+      memberAId: "member_other",
+      memberBId: "member_123",
+      windowEndAt: new Date("2026-07-06T17:30:00.000Z"),
+      windowStartAt: new Date("2026-07-06T17:00:00.000Z"),
+    });
+    const prisma = createResponsePrisma({
+      confirmNotificationItems: [{
+        id: "mailbox_confirm_old_window",
+        matchId: match.id,
+        memberId: "member_123",
+        stage: "am",
+        windowStartAt: oldWindowStartAt,
+      }],
+      match,
+      participantStatus: "enrolled",
+      replyOccurredAt: new Date("2026-07-06T15:10:00.000Z"),
+    });
+
+    await expect(handleCallCircleRespond({
+      context: {
+        inboundMailboxItemIds: ["mailbox_reply", "mailbox_confirm_old_window"],
+      },
+      memberId: "member_123",
+      now: new Date("2026-07-06T15:10:00.000Z"),
+      prisma: prisma as never,
+      request: {
+        kind: "confirm",
       },
     })).resolves.toEqual({
       status: "unavailable",

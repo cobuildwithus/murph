@@ -539,6 +539,26 @@ Focused follow-up verification:
 - `pnpm --filter @murphai/hosted-execution typecheck`
 - `pnpm --filter @murphai/assistant-engine typecheck`
 
+## ReviewGPT Follow-Up 15 2026-07-08
+
+Accepted findings from the Phlebas PR ReviewGPT pass:
+
+- Confirmation reply anchors must identify the current ask, not only the
+  match. Response handling now carries confirmation anchor stage and
+  `windowStartAt` through resolution and rejects an old AM anchor after a
+  final ask, or an old-window anchor after a counter reask.
+- Retell result webhooks must use the same participant-preference timezone
+  guard as the scheduler before appending Call Circle terminal
+  notifications. The phone-call result path now reads Call Circle
+  participant timezones and preflights each outcome/handoff notification
+  with that explicit timezone.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-response-service.test.ts apps/web/test/phone-calls-call-circle-result.test.ts`
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/phone-calls-service.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/phone-calls-retell-real-consult-route.test.ts apps/web/test/phone-calls-call-circle-result.test.ts apps/web/test/call-circle-cron-route.test.ts apps/web/test/hosted-retention-cleanup.test.ts apps/web/test/hosted-retention-cron-route.test.ts apps/web/test/production-migration-guard.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT
