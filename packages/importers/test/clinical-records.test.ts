@@ -408,16 +408,16 @@ describe("buildClinicalImportPlan", () => {
   it("leaves unsafe clinical resources unsupported instead of importing live candidates", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
-        {
-          resourceType: "Observation",
-          relativePath: "Observation/page-1.json",
-          count: 8,
-        },
-        {
-          resourceType: "DiagnosticReport",
-          relativePath: "DiagnosticReport/page-1.json",
-          count: 2,
-        },
+          {
+            resourceType: "Observation",
+            relativePath: "Observation/page-1.json",
+            count: 9,
+          },
+          {
+            resourceType: "DiagnosticReport",
+            relativePath: "DiagnosticReport/page-1.json",
+            count: 3,
+          },
         {
           resourceType: "DocumentReference",
           relativePath: "DocumentReference/page-1.json",
@@ -509,9 +509,33 @@ describe("buildClinicalImportPlan", () => {
           },
           {
             resourceType: "Observation",
+            id: "bp-duplicate-component-facet",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:03:00.000Z",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "85354-9", display: "Blood pressure panel" }],
+            },
+            component: [
+              {
+                code: {
+                  coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+                },
+                valueQuantity: { value: 128, unit: "mmHg" },
+              },
+              {
+                code: {
+                  coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+                },
+                valueQuantity: { value: 132, unit: "mmHg" },
+              },
+            ],
+          },
+          {
+            resourceType: "Observation",
             id: "lab-date-only",
             status: "final",
             effectiveDateTime: "2026-07-01",
+            issued: "2026-07-02T14:30:00.000Z",
             category: [{
               coding: [{
                 system: "http://terminology.hl7.org/CodeSystem/observation-category",
@@ -537,6 +561,15 @@ describe("buildClinicalImportPlan", () => {
             status: "final",
             issued: "2026-07-01T12:01:00.000Z",
             code: { text: "Metabolic panel" },
+          },
+          {
+            resourceType: "DiagnosticReport",
+            id: "report-date-only-effective",
+            status: "final",
+            effectiveDateTime: "2026-07-01",
+            issued: "2026-07-02T14:30:00.000Z",
+            code: { text: "Metabolic panel" },
+            conclusion: "Date-only effective report.",
           },
         ],
         "DocumentReference/page-1.json": [
@@ -695,7 +728,7 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toHaveLength(19);
+    expect(plan.unsupported).toHaveLength(21);
     expect(plan.unsupported).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -727,6 +760,10 @@ describe("buildClinicalImportPlan", () => {
           reason: "vital quantity unit is not importable",
         }),
         expect.objectContaining({
+          resourceId: "bp-duplicate-component-facet",
+          reason: "duplicate vital facet in FHIR observation",
+        }),
+        expect.objectContaining({
           resourceId: "lab-date-only",
           reason: "clinical timestamp is missing",
         }),
@@ -737,6 +774,10 @@ describe("buildClinicalImportPlan", () => {
         expect.objectContaining({
           resourceId: "report-no-summary",
           reason: "diagnostic report summary is not available in raw FHIR page",
+        }),
+        expect.objectContaining({
+          resourceId: "report-date-only-effective",
+          reason: "clinical timestamp is missing",
         }),
         expect.objectContaining({
           resourceId: "document-entered-in-error",

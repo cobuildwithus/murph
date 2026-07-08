@@ -353,6 +353,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   const candidates: ClinicalImportCandidate[] = [];
   const unsupported: ClinicalImportUnsupportedResource[] = [];
   const components = readFhirArray(context.resource.component);
+  const emittedVitalFacets = new Set<string>();
 
   for (const component of components) {
     const vital = vitalForCodeableConcept(component.code);
@@ -383,6 +384,10 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
       unsupported.push(unsupportedResource(context, "vital quantity unit is not importable"));
       continue;
     }
+    if (emittedVitalFacets.has(vital.facet)) {
+      return unsupportedOnly(context, "duplicate vital facet in FHIR observation");
+    }
+    emittedVitalFacets.add(vital.facet);
 
     candidates.push(buildVitalsCandidate(context, {
       occurredAt,
@@ -901,13 +906,28 @@ function resultStatusFromInterpretation(value: CodeableConcept[] | undefined): "
 function readClinicalOccurredAt(
   resource: AllergyIntolerance | DiagnosticReport | DocumentReference | Observation,
 ): string | undefined {
-  return (
-    readIsoDateTime("effectiveDateTime" in resource ? resource.effectiveDateTime : undefined)
-    ?? readIsoDateTime(readPeriodStart("effectivePeriod" in resource ? resource.effectivePeriod : undefined))
-    ?? readIsoDateTime("issued" in resource ? resource.issued : undefined)
+  if ("effectiveDateTime" in resource || "effectivePeriod" in resource) {
+    return readEffectiveOccurredAt(resource);
+  }
+  if (resource.resourceType === "Observation") {
+    return undefined;
+  }
+
+  return readIsoDateTime("issued" in resource ? resource.issued : undefined)
     ?? readIsoDateTime("date" in resource ? resource.date : undefined)
-    ?? readIsoDateTime("recordedDate" in resource ? resource.recordedDate : undefined)
-  );
+    ?? readIsoDateTime("recordedDate" in resource ? resource.recordedDate : undefined);
+}
+
+function readEffectiveOccurredAt(resource: DiagnosticReport | Observation): string | undefined {
+  const effectiveDateTime = readString(resource.effectiveDateTime);
+  if (effectiveDateTime) {
+    return readIsoDateTime(effectiveDateTime);
+  }
+  if (resource.effectivePeriod !== undefined) {
+    return readIsoDateTime(readPeriodStart(resource.effectivePeriod));
+  }
+
+  return undefined;
 }
 
 function readPeriodStart(period: Period | undefined): string | undefined {

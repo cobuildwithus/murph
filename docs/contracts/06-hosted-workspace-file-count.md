@@ -117,6 +117,24 @@ families introduced after this contract froze. The 00-invariants rule
 requires every new write family to document retention or compaction before
 landing; record the chosen posture here so the decision is reviewable.
 
+- `raw/clinical/fhir/<connectionId>/<retrievalJobId>/manifest.json` plus
+  `raw/clinical/fhir/<connectionId>/<retrievalJobId>/<resourceType>/...`
+  (`murph.clinical-raw-manifest.v1`) is immutable imported raw clinical
+  evidence. When written inside a hosted workspace it is included in hosted
+  snapshots, because candidates and unsupported-resource rows point back to
+  these raw refs for auditability. The v1 schema bounds one retrieval job to one
+  manifest plus at most `CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES` resource
+  files, at most `CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES` resources, at most
+  `CLINICAL_RAW_MANIFEST_MAX_BYTES` for the manifest, and at most
+  `CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES` per resource file, with at most
+  `CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES` across resource files. This PR
+  defines the contract and importer only; it does not add a production hosted
+  writer that can accumulate repeated retrieval-job directories. Before any
+  production writer enables repeated retrievals, it must keep the family bounded
+  over time by reusing/deduping retrieval identity, pruning superseded job
+  directories after canonical import, or documenting an explicit indefinite raw
+  evidence retention envelope with file-count tests.
+
 - `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl`
   (`murph.inbox-attachment-retention.v1`) is append-only and monthly-sharded,
   with no compaction. Each record is a small tombstone (~200 bytes) describing
