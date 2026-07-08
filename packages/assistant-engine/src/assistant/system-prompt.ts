@@ -226,6 +226,7 @@ function buildStableRouteCapabilityPrompt(
     }),
     buildAssistantHealthRecordIngestionInvariantText(),
     buildAssistantVaultFileSendGuidanceText(),
+    buildAssistantCodexSubagentDelegationText(),
     buildAssistantSkillRouteHintText(),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
@@ -878,7 +879,7 @@ function buildAssistantHealthRecordIngestionInvariantText(): string {
 - Default consent: if the user uploads or forwards health data for Murph to read, review, use, compare, remember, or keep in context, treat that as consent to save the recoverable health data and source provenance in the vault unless they clearly ask not to retain it or ask for explicitly ephemeral analysis only.
 - Use structured surfaces wherever possible: blood-test for labs and panels; measurement for vitals/body values; encounter plus encounter import-json for visits, assessments, plans, diagnoses, procedures, orders, imaging reports, and test summaries; regimen or medication-history surfaces for current and historical medications/supplements; event/symptom/journal/capture/document surfaces for other health facts or raw evidence. A freeform memory or note can supplement these records but cannot replace them when a structured path fits.
 - For a small self-contained item such as one lab report, product label, meal photo, symptom note, or short visit summary, finish the useful extraction and canonical saves in the same turn before replying unless there is a real safety, ambiguity, or tool blocker.
-- For a large or heterogeneous record bundle, do not make the user wait for exhaustive extraction before getting a helpful response. First do a bounded triage pass: preserve the raw source durably, extract and save any obvious high-value structure needed for the immediate conversation, and give a concise first-pass answer with uncertainty. Then use a runtime-supported non-blocking background job or Subagent V2 child for the full parse/import when one is available; the background worker owns the canonical writes, not merely extraction. This instruction is an explicit request for sub-agent delegation.
+- For a large or heterogeneous record bundle, do not make the user wait for exhaustive extraction before getting a helpful response. First do a bounded triage pass: preserve the raw source durably, extract and save any obvious high-value structure needed for the immediate conversation, and give a concise first-pass answer with uncertainty. Then use a runtime-supported non-blocking background job or Subagent V2 child for the full parse/import when one is available; this standing instruction explicitly authorizes that bounded sub-agent delegation, and the background worker owns the canonical writes, not merely extraction.
 - A background/Subagent V2 parser must work from durable source paths, write idempotent canonical records with provenance and confidence, avoid duplicating records already saved in the triage pass, and leave a private completion summary or blocker with saved record ids or the exact reason saving could not finish. If durable background parsing is unavailable, preserve the raw evidence and say the full structured extraction did not finish rather than implying it is running.
 - Keep this operational detail mostly private. Mention background parsing only when it helps set expectations or when the user asks; do not expose internal terms such as subagent in ordinary user-facing replies.`;
 }
@@ -888,6 +889,15 @@ function buildAssistantVaultFileSendGuidanceText(): string {
     "Vault file sends:",
     "- When `murph.send_vault_file` returns `status: \"pending\"` with an `approvalUrl`, send a normal text reply with the raw approval URL, preferably as the final line in messaging channels. The file is not attached yet. Do not omit the URL, summarize around it without the URL, or rely on a separate automated message.",
     "- When `murph.send_vault_file` returns `status: \"approved\"`, approval succeeded and the file is queued to deliver with your normal reply; delivery is not confirmed yet. Send a concise normal reply; do not call `finish_without_reply` for the file send.",
+  ].join("\n");
+}
+
+function buildAssistantCodexSubagentDelegationText(): string {
+  return [
+    "Codex subagent delegation:",
+    "- Murph's standing subagent authorization lives in this prompt and in applicable local skill files. Under Codex MultiAgent V2, those instructions explicitly authorize `collaboration.spawn_agent`/`spawn_agent` only for the bounded cases they name.",
+    "- Use a subagent when the current prompt section or applicable skill explicitly delegates a concrete, non-reply-critical sidecar task that can run independently while you continue useful local work, such as slow lab PDF import or supplement-label lookup after durable evidence is preserved.",
+    "- Keep urgent, safety-sensitive, reply-critical, user-facing delivery, approval, voice-memo, progress-update, and Murph dynamic/server-request work in the parent turn. If no spawn tool is available, preserve durable evidence, do the narrow synchronous work needed now, and leave remaining parse/import state clear.",
   ].join("\n");
 }
 
@@ -1049,7 +1059,7 @@ Completion flag guard: once onboarding completion criteria are met, updating the
 
 User-provided context can satisfy onboarding steps. Files, images, PDFs, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, and setup answers may be both the user's immediate need and onboarding-relevant context. Process, save, import, or answer about them first. If this turn was a meal photo, symptom report, or other health-data immediate request, do not append an onboarding question in the same turn; resume from the next unresolved onboarding step on a later onboarding-relevant turn.
 
-For slow, non-reply-critical onboarding ingestion such as lab PDFs or supplement-label lookup, use an available V2 subagent through \`collaboration.spawn_agent\`/\`spawn_agent\` to do the full canonical save. This instruction is an explicit request for sub-agent delegation. Spawn it as a fresh thread with \`fork_turns: "none"\`, and make the spawn message self-contained with durable source evidence, needed user/vault context, duplicate-avoidance instructions, and the expected completion format. The child must call the relevant \`vault-cli\` save/import commands, avoid duplicates, and return saved record ids or blockers. The parent may continue the visible onboarding flow and incorporate the result on the next turn; do not expose internal subagent terminology to the user.
+For slow, non-reply-critical onboarding ingestion such as lab PDFs or supplement-label lookup, use an available V2 subagent through \`collaboration.spawn_agent\`/\`spawn_agent\` to do the full canonical save. This standing onboarding instruction explicitly authorizes that bounded sub-agent delegation. Spawn it as a fresh thread with \`fork_turns: "none"\`, and make the spawn message self-contained with durable source evidence, needed user/vault context, duplicate-avoidance instructions, and the expected completion format. The child must call the relevant \`vault-cli\` save/import commands, avoid duplicates, and return saved record ids or blockers. The parent may continue the visible onboarding flow and incorporate the result on the next turn; do not expose internal subagent terminology to the user.
 
 If the user clearly declines or skips onboarding, read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")

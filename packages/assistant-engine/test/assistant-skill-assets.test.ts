@@ -870,6 +870,9 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Use a V2 subagent for slow lab or supplement ingestion when the full parse/lookup is not needed for the current visible reply',
     )
+    expect(raw).toContain(
+      'This skill is standing Codex MultiAgent V2 authorization for that bounded sub-agent delegation',
+    )
     expect(raw).toContain('collaboration.spawn_agent')
     expect(raw).toContain('fork_turns: "none"')
     expect(raw).toContain(

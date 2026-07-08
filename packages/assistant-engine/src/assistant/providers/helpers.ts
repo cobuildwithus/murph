@@ -255,11 +255,10 @@ export function mergeCodexConfigOverrides(input: {
       'false',
     )
   }
-  // Multi-agent V2 is enabled by the hosted config.toml's
-  // [features.multi_agent_v2] table (which also carries
-  // root_agent_usage_hint_text). A CLI `--config features.multi_agent_v2=true`
-  // boolean would take precedence over that table and silently reset the
-  // feature to defaults, dropping the configured usage hint — never emit it.
+  // Multi-agent V2 is enabled by hosted config.toml. Turn-level config
+  // overrides should not restate `features.multi_agent_v2`; CLI config has
+  // higher precedence and a scalar override could shadow hosted defaults or
+  // future table fields.
   if (!input.showThinkingTraces) {
     return overrides.length > 0 ? overrides : undefined
   }

@@ -35,9 +35,9 @@ describe('Codex provider config overrides', () => {
   })
 
   it('never emits a multi_agent_v2 CLI override that would shadow the hosted config table', () => {
-    // A CLI `--config features.multi_agent_v2=true` boolean takes precedence
-    // over the hosted config.toml [features.multi_agent_v2] table and resets
-    // the feature to defaults, dropping root_agent_usage_hint_text.
+    // A CLI `--config features.multi_agent_v2=true` override takes precedence
+    // over hosted config.toml and could shadow hosted defaults or future table
+    // fields.
     const overrides = mergeCodexConfigOverrides({
       modelProvider: 'openai-local-test',
       showThinkingTraces: true,
