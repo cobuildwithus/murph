@@ -262,6 +262,12 @@ describe("hosted web production migration guard", () => {
       "/api/internal/hosted-onboarding/stripe/cron",
     ]);
     assert.ok(!cronPaths.includes("/api/internal/device-sync/dirty-sweeper/cron"));
+
+    const callCircleCronRoute = await readFile(
+      path.join(appRoot, "app/api/internal/call-circle/cron/route.ts"),
+      "utf8",
+    );
+    assert.match(callCircleCronRoute, /HOSTED_CALL_CIRCLE_CRON_ENABLED/u);
   });
 
   test("Render worker startup ensures the Temporal device-sync schedule", async () => {

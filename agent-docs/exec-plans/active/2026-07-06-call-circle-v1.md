@@ -449,6 +449,34 @@ Focused follow-up verification:
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-response-service.test.ts apps/web/test/phone-calls-service.test.ts`
 - `pnpm --filter @murphai/hosted-web typecheck`
 
+## ReviewGPT Follow-Up 11 2026-07-08
+
+Accepted findings from the eleventh PR ReviewGPT pass:
+
+- Ambiguous Retell provider-start attempts must not remain `starting`
+  forever when no webhook arrives. The hosted retention cron now runs a
+  bounded sweep over old `HostedPhoneCall` rows with
+  `providerStartAttemptedAt`, no provider id, no ended/analyzed timestamps,
+  and `status = starting`; each row is failed and has its normal result
+  notification appended in the same transaction, then the notification wake
+  is signaled best-effort.
+- A Call Circle bridge must not wait forever when Retell sends `call_ended`
+  but never sends `call_analyzed`. The scheduler now hands off an attached
+  `bridging` match after the match window ends and the ended phone call has
+  waited through a short analysis grace period without `analyzedAt`.
+- The registered Call Circle Vercel cron must stay dormant until rollout.
+  The cron route now requires `HOSTED_CALL_CIRCLE_CRON_ENABLED=1`; otherwise
+  it returns a typed skipped result before scheduler work.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-cron-route.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/hosted-retention-cleanup.test.ts apps/web/test/hosted-retention-cron-route.test.ts apps/web/test/production-migration-guard.test.ts`
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/phone-calls-service.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/phone-calls-retell-real-consult-route.test.ts apps/web/test/phone-calls-call-circle-result.test.ts apps/web/test/call-circle-cron-route.test.ts apps/web/test/hosted-retention-cleanup.test.ts apps/web/test/hosted-retention-cron-route.test.ts apps/web/test/production-migration-guard.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+- `pnpm --filter @murphai/assistant-engine typecheck`
+- `pnpm docs:drift`
+- `git diff --check`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT

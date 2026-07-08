@@ -15,9 +15,11 @@ import {
 import { consultPhoneCall } from "@/src/lib/phone-calls/consult";
 import {
   buildPhoneCallResultNotificationInstructions,
+  HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS,
   handleRetellCallAnalyzed,
   handleRetellCallEnded,
   mapRetellCallAnalysis,
+  terminalizeStaleHostedPhoneCallProviderStarts,
 } from "@/src/lib/phone-calls/result";
 import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
 
@@ -30,6 +32,13 @@ type RetellWebhookTx = Parameters<RetellWebhookStore["$transaction"]>[0] extends
 type RetellWebhookFindUniqueInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["findUnique"]>[0];
 type RetellWebhookFindUniqueOrThrowInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["findUniqueOrThrow"]>[0];
 type RetellWebhookUpdateManyInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["updateMany"]>[0];
+type ProviderStartSweepStore =
+  NonNullable<NonNullable<Parameters<typeof terminalizeStaleHostedPhoneCallProviderStarts>[0]>["store"]>;
+type ProviderStartSweepTx = Parameters<ProviderStartSweepStore["$transaction"]>[0] extends (
+  tx: infer Tx,
+) => Promise<unknown>
+  ? Tx
+  : never;
 
 const VALID_BRIEF: HostedPhoneCallBrief = {
   allowTransferToUser: true,
@@ -885,6 +894,131 @@ describe("Retell phone-call result handling", () => {
       status: "starting",
     });
     expect(store.appendResultNotificationCalls).toHaveLength(1);
+  });
+
+  it("fails stale provider-start attempts and returns the result notification signal", async () => {
+    const now = new Date("2026-06-25T12:00:00.000Z");
+    const staleAt = new Date(
+      now.getTime() - HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS - 1_000,
+    );
+    let currentCall: HostedPhoneCall | null = buildHostedPhoneCall({
+      id: "hpc_stale",
+      providerCallId: null,
+      providerStartAttemptedAt: staleAt,
+      updatedAt: staleAt,
+    });
+    const findManyCalls: Array<Parameters<ProviderStartSweepStore["hostedPhoneCall"]["findMany"]>[0]> = [];
+    const updateManyCalls: Array<Parameters<ProviderStartSweepTx["hostedPhoneCall"]["updateMany"]>[0]> = [];
+    const appendResultNotificationCalls: HostedPhoneCall[] = [];
+    const tx: ProviderStartSweepTx = {
+      appendResultNotification: async (call) => {
+        appendResultNotificationCalls.push(call);
+        return {
+          notificationSignals: [{
+            notificationMailboxItemId: "mailbox_hpc_stale",
+            notificationUserId: call.memberId,
+          }],
+        };
+      },
+      hostedPhoneCall: {
+        findUniqueOrThrow: async (args) => {
+          if (!currentCall || currentCall.id !== args.where.id) {
+            throw new Error("HostedPhoneCall not found.");
+          }
+          return currentCall;
+        },
+        updateMany: async (args) => {
+          updateManyCalls.push(args);
+          if (
+            !currentCall
+            || currentCall.id !== args.where.id
+            || currentCall.provider !== args.where.provider
+            || currentCall.status !== args.where.status
+            || currentCall.providerCallId !== args.where.providerCallId
+            || currentCall.analyzedAt !== args.where.analyzedAt
+            || currentCall.endedAt !== args.where.endedAt
+            || !currentCall.providerStartAttemptedAt
+            || currentCall.providerStartAttemptedAt >= args.where.providerStartAttemptedAt.lt
+            || currentCall.updatedAt >= args.where.updatedAt.lt
+          ) {
+            return { count: 0 };
+          }
+          currentCall = {
+            ...currentCall,
+            resultJson: args.data.resultJson,
+            status: args.data.status,
+            updatedAt: now,
+          };
+          return { count: 1 };
+        },
+      },
+    };
+    const store: ProviderStartSweepStore = {
+      $transaction: async (callback) => callback(tx),
+      hostedPhoneCall: {
+        findMany: async (args) => {
+          findManyCalls.push(args);
+          return currentCall ? [currentCall] : [];
+        },
+      },
+    };
+
+    await expect(terminalizeStaleHostedPhoneCallProviderStarts({
+      now,
+      store,
+    })).resolves.toEqual({
+      failedPhoneCalls: 1,
+      notificationSignals: [{
+        notificationMailboxItemId: "mailbox_hpc_stale",
+        notificationUserId: "member_123",
+      }],
+    });
+
+    const cutoff = new Date(
+      now.getTime() - HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS,
+    );
+    expect(findManyCalls).toEqual([{
+      orderBy: [
+        { updatedAt: "asc" },
+        { id: "asc" },
+      ],
+      take: 100,
+      where: {
+        analyzedAt: null,
+        endedAt: null,
+        provider: "retell",
+        providerCallId: null,
+        providerStartAttemptedAt: { lt: cutoff },
+        status: "starting",
+        updatedAt: { lt: cutoff },
+      },
+    }]);
+    expect(updateManyCalls).toHaveLength(1);
+    expect(updateManyCalls[0]).toMatchObject({
+      data: {
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not confirm whether the phone call started, and no Retell result arrived.",
+        },
+        status: "failed",
+      },
+      where: {
+        id: "hpc_stale",
+        providerStartAttemptedAt: { lt: cutoff },
+        updatedAt: { lt: cutoff },
+      },
+    });
+    expect(currentCall).toMatchObject({
+      resultJson: {
+        outcome: "not_completed",
+      },
+      status: "failed",
+    });
+    expect(appendResultNotificationCalls).toHaveLength(1);
+    expect(appendResultNotificationCalls[0]).toMatchObject({
+      id: "hpc_stale",
+      status: "failed",
+    });
   });
 });
 

@@ -31,6 +31,9 @@ describe("hosted retention cron route", () => {
       inboxMediaRetentionRuntimeSignalFailures: 1,
       inboxMediaRetentionRuntimeSignalsSent: 3,
       oldRuntimeLogsDeleted: 6,
+      stalePhoneCallProviderStartsFailed: 2,
+      stalePhoneCallResultNotificationSignalFailures: 1,
+      stalePhoneCallResultNotificationSignalsSent: 1,
       staleWebSessionsDeleted: 5,
     });
   });
@@ -51,6 +54,9 @@ describe("hosted retention cron route", () => {
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 3,
         oldRuntimeLogsDeleted: 6,
+        stalePhoneCallProviderStartsFailed: 2,
+        stalePhoneCallResultNotificationSignalFailures: 1,
+        stalePhoneCallResultNotificationSignalsSent: 1,
         staleWebSessionsDeleted: 5,
       },
     });

@@ -1426,7 +1426,13 @@ describe("runCallCircleScheduler", () => {
     const now = new Date("2026-07-06T15:45:00.000Z");
     const prisma = createSchedulerPrisma({
       dueMatches: [schedulerMatch({
-        phoneCall: { analyzedAt: null, id: "hpc_123", status: "ended" },
+        phoneCall: {
+          analyzedAt: null,
+          endedAt: new Date("2026-07-06T15:40:00.000Z"),
+          id: "hpc_123",
+          providerCallId: "retell_123",
+          status: "ended",
+        },
         status: "bridging",
         windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
         windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
@@ -1445,11 +1451,55 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
   });
 
+  it("hands off an ended bridge when phone-call analysis never arrives", async () => {
+    const now = new Date("2026-07-06T15:45:00.000Z");
+    const tx = {};
+    const prisma = createSchedulerPrisma({
+      dueMatches: [schedulerMatch({
+        phoneCall: {
+          analyzedAt: null,
+          endedAt: new Date("2026-07-06T15:34:00.000Z"),
+          id: "hpc_123",
+          providerCallId: "retell_123",
+          status: "ended",
+        },
+        status: "bridging",
+        windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+      })],
+      groups: [],
+      tx,
+    });
+
+    await expect(runCallCircleScheduler({
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      handoffs: 1,
+    });
+
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      now,
+      outcome: "text_handoff",
+      phoneCallId: "hpc_123",
+      prisma: tx,
+      status: "dropped",
+    });
+    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
+  });
+
   it("does not hand off a failed bridge before phone-call analysis decides the outcome", async () => {
     const now = new Date("2026-07-06T15:45:00.000Z");
     const prisma = createSchedulerPrisma({
       dueMatches: [schedulerMatch({
-        phoneCall: { analyzedAt: null, id: "hpc_123", status: "failed" },
+        phoneCall: {
+          analyzedAt: null,
+          endedAt: new Date("2026-07-06T15:40:00.000Z"),
+          id: "hpc_123",
+          providerCallId: "retell_123",
+          status: "failed",
+        },
         status: "bridging",
         windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
         windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
@@ -1620,6 +1670,7 @@ function schedulerMatch(input: {
   memberBTimeZone?: string | null;
   phoneCall?: {
     analyzedAt: Date | null;
+    endedAt?: Date | null;
     id: string;
     providerCallId?: string | null;
     status: string;

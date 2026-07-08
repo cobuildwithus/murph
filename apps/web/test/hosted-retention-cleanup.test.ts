@@ -14,6 +14,7 @@ describe("hosted retention cleanup", () => {
   it("deletes expired mailbox items, runtime logs, and stale web sessions", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const executeRaw = vi.fn().mockResolvedValue(7);
+    const hostedPhoneCallFindMany = vi.fn().mockResolvedValue([]);
     const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 8 });
     const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 9 });
     const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
@@ -29,6 +30,9 @@ describe("hosted retention cleanup", () => {
       $queryRaw: queryRaw,
       hostedComputerRun: {
         findMany: hostedComputerRunFindMany,
+      },
+      hostedPhoneCall: {
+        findMany: hostedPhoneCallFindMany,
       },
       hostedRuntimeLog: {
         deleteMany: hostedRuntimeLogDeleteMany,
@@ -48,6 +52,9 @@ describe("hosted retention cleanup", () => {
       inboxMediaRetentionRuntimeSignalFailures: 1,
       inboxMediaRetentionRuntimeSignalsSent: 1,
       oldRuntimeLogsDeleted: 8,
+      stalePhoneCallProviderStartsFailed: 0,
+      stalePhoneCallResultNotificationSignalFailures: 0,
+      stalePhoneCallResultNotificationSignalsSent: 0,
       staleWebSessionsDeleted: 9,
     });
 
@@ -127,6 +134,26 @@ describe("hosted retention cleanup", () => {
     expect(hostedComputerRunFindMany.mock.invocationCallOrder[0]).toBeLessThan(
       queryRaw.mock.invocationCallOrder[0],
     );
+    expect(hostedPhoneCallFindMany).toHaveBeenCalledWith({
+      orderBy: [
+        { updatedAt: "asc" },
+        { id: "asc" },
+      ],
+      take: 100,
+      where: {
+        analyzedAt: null,
+        endedAt: null,
+        provider: "retell",
+        providerCallId: null,
+        providerStartAttemptedAt: {
+          lt: new Date("2026-04-25T10:00:00.000Z"),
+        },
+        status: "starting",
+        updatedAt: {
+          lt: new Date("2026-04-25T10:00:00.000Z"),
+        },
+      },
+    });
     expect(signalRuntimeRecheck).toHaveBeenCalledTimes(2);
     expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(1, {
       userId: "member_due_1",
@@ -159,6 +186,7 @@ describe("hosted retention cleanup", () => {
     try {
       const now = new Date("2026-04-25T12:00:00.000Z");
       const executeRaw = vi.fn().mockResolvedValue(1);
+      const hostedPhoneCallFindMany = vi.fn().mockResolvedValue([]);
       const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 2 });
       const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 3 });
       const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
@@ -169,6 +197,9 @@ describe("hosted retention cleanup", () => {
         $queryRaw: queryRaw,
         hostedComputerRun: {
           findMany: hostedComputerRunFindMany,
+        },
+        hostedPhoneCall: {
+          findMany: hostedPhoneCallFindMany,
         },
         hostedRuntimeLog: {
           deleteMany: hostedRuntimeLogDeleteMany,
@@ -195,6 +226,9 @@ describe("hosted retention cleanup", () => {
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 0,
         oldRuntimeLogsDeleted: 2,
+        stalePhoneCallProviderStartsFailed: 0,
+        stalePhoneCallResultNotificationSignalFailures: 0,
+        stalePhoneCallResultNotificationSignalsSent: 0,
         staleWebSessionsDeleted: 3,
       });
       expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
@@ -229,6 +263,7 @@ describe("hosted retention cleanup", () => {
       }),
     );
     const executeRaw = vi.fn().mockResolvedValue(0);
+    const hostedPhoneCallFindMany = vi.fn().mockResolvedValue([]);
     const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
     const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
     const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
@@ -265,6 +300,9 @@ describe("hosted retention cleanup", () => {
       $queryRaw: queryRaw,
       hostedComputerRun: {
         findMany: hostedComputerRunFindMany,
+      },
+      hostedPhoneCall: {
+        findMany: hostedPhoneCallFindMany,
       },
       hostedRuntimeLog: {
         deleteMany: hostedRuntimeLogDeleteMany,

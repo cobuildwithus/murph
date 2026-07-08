@@ -6,6 +6,13 @@ import { PrismaComputerUseStore } from "../computer-use/store";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
+import {
+  signalHostedMailboxAppendRuntime,
+} from "../hosted-orchestration/signal-runtime";
+import {
+  terminalizeStaleHostedPhoneCallProviderStarts,
+  type HostedPhoneCallResultNotificationSignal,
+} from "../phone-calls/result";
 
 const DAY_MS = 86_400_000;
 
@@ -21,18 +28,27 @@ type HostedRuntimeRecheckSignal = (input: {
   userId: string;
 }) => Promise<unknown>;
 
+type HostedMailboxAppendSignal = (input: {
+  expectedUserId: string;
+  mailboxItemId: string;
+}) => Promise<unknown>;
+
 export interface HostedRetentionCleanupResult {
   expiredComputerRunsCleanedUp: number;
   expiredMailboxItemsDeleted: number;
   inboxMediaRetentionRuntimeSignalFailures: number;
   inboxMediaRetentionRuntimeSignalsSent: number;
   oldRuntimeLogsDeleted: number;
+  stalePhoneCallProviderStartsFailed: number;
+  stalePhoneCallResultNotificationSignalFailures: number;
+  stalePhoneCallResultNotificationSignalsSent: number;
   staleWebSessionsDeleted: number;
 }
 
 export async function runHostedRetentionCleanup(input: {
   now?: Date | string;
   prisma?: PrismaClient;
+  signalMailboxAppend?: HostedMailboxAppendSignal;
   signalRuntimeRecheck?: HostedRuntimeRecheckSignal;
 } = {}): Promise<HostedRetentionCleanupResult> {
   const prisma = input.prisma ?? getPrisma();
@@ -53,6 +69,14 @@ export async function runHostedRetentionCleanup(input: {
     now: () => now,
     store: new PrismaComputerUseStore(prisma),
   }).cleanupExpiredRuns({ now }).then((result) => result.expiredRuns);
+  const stalePhoneCallStarts = await terminalizeStaleHostedPhoneCallProviderStarts({
+    now,
+    prisma,
+  });
+  const stalePhoneCallSignals = await signalHostedPhoneCallResultNotifications({
+    signalMailboxAppend: input.signalMailboxAppend,
+    signals: stalePhoneCallStarts.notificationSignals,
+  });
   const mediaRetentionSignals = await signalDueInboxMediaRetentionRuntimes({
     now,
     prisma,
@@ -65,8 +89,38 @@ export async function runHostedRetentionCleanup(input: {
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
     oldRuntimeLogsDeleted,
+    stalePhoneCallProviderStartsFailed: stalePhoneCallStarts.failedPhoneCalls,
+    stalePhoneCallResultNotificationSignalFailures: stalePhoneCallSignals.failures,
+    stalePhoneCallResultNotificationSignalsSent: stalePhoneCallSignals.sent,
     staleWebSessionsDeleted,
   };
+}
+
+async function signalHostedPhoneCallResultNotifications(input: {
+  signalMailboxAppend?: HostedMailboxAppendSignal;
+  signals: readonly HostedPhoneCallResultNotificationSignal[];
+}): Promise<{ failures: number; sent: number }> {
+  const signalMailboxAppend =
+    input.signalMailboxAppend ?? signalHostedMailboxAppendRuntime;
+  let failures = 0;
+  let sent = 0;
+  await Promise.all(input.signals.map(async (signal) => {
+    try {
+      await signalMailboxAppend({
+        expectedUserId: signal.notificationUserId,
+        mailboxItemId: signal.notificationMailboxItemId,
+      });
+      sent += 1;
+    } catch (error) {
+      failures += 1;
+      console.error("Hosted phone-call result notification signal failed.", {
+        ...formatHostedExecutionSafeLogErrorDetails(error, {
+          code: "hosted_phone_call_result_notification_signal_failed",
+        }),
+      });
+    }
+  }));
+  return { failures, sent };
 }
 
 async function signalDueInboxMediaRetentionRuntimes(input: {

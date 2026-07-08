@@ -136,14 +136,16 @@ Postgres schema, and Retell configuration. The safe rollout order is:
 
 1. Apply the additive Prisma migration and deploy the schema-compatible web,
    Cloudflare runner, and assistant bundle while
-   `HOSTED_CALL_CIRCLE_OFFERS_ENABLED` is off and the Call Circle cron is not
-   yet active.
+   `HOSTED_CALL_CIRCLE_OFFERS_ENABLED` is off and
+   `HOSTED_CALL_CIRCLE_CRON_ENABLED` is unset or not `1`. The Vercel cron may
+   be registered during this phase, but the route must return a typed skipped
+   no-op before running scheduler work.
 2. Ensure old warm Cloudflare runner containers are drained/restarted before
    enabling offers or cron. Use `container_rollout=immediate` or equivalent
    operational proof when gradual rollout could leave a warm old bundle that
    does not know the Call Circle port or `murph.call_circle_respond` tool.
 3. Configure the Retell connector env, verify connector smoke behavior, then
-   enable the offer gate and cron.
+   enable the offer gate and cron gate.
 
 With the offer gate off, no new Call Circle offer-scope rows should be
 created. Old bundles may safely ignore the feature because no user-visible
@@ -156,7 +158,7 @@ Rollback is safe before v1 rows or asks exist by disabling the gate/cron and
 rolling web/runner back to any schema-compatible version. After Call Circle
 participant, match, or pending notification rows exist, do not roll back
 below schema/tool support while those rows are active. First disable the
-gate and cron, let current pending matches terminalize or manually
+offer gate and cron gate, let current pending matches terminalize or manually
 terminalize them with the current code, then roll back only to a version that
 can still read the additive schema.
 

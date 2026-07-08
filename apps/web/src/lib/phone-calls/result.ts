@@ -2,6 +2,7 @@ import {
   Prisma,
   type HostedPhoneCall,
   type HostedPhoneCallStatus,
+  type PrismaClient,
 } from "@prisma/client";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
@@ -83,6 +84,53 @@ interface HostedPhoneCallWebhookStore {
   ): Promise<T>;
 }
 
+interface HostedPhoneCallProviderStartSweepTx {
+  appendResultNotification(call: HostedPhoneCall): Promise<HostedPhoneCallResultNotificationAppend | null>;
+  hostedPhoneCall: {
+    findUniqueOrThrow(input: {
+      where: { id: string };
+    }): Promise<HostedPhoneCall>;
+    updateMany(input: {
+      data: {
+        resultJson: HostedPhoneCallResult;
+        status: "failed";
+      };
+      where: HostedPhoneCallProviderStartSweepUpdateWhere;
+    }): Promise<{ count: number }>;
+  };
+}
+
+interface HostedPhoneCallProviderStartSweepStore {
+  $transaction<T>(
+    callback: (tx: HostedPhoneCallProviderStartSweepTx) => Promise<T>,
+  ): Promise<T>;
+  hostedPhoneCall: {
+    findMany(input: {
+      orderBy: Array<
+        | { id: "asc" }
+        | { updatedAt: "asc" }
+      >;
+      take: number;
+      where: HostedPhoneCallProviderStartSweepWhere;
+    }): Promise<HostedPhoneCall[]>;
+  };
+}
+
+interface HostedPhoneCallProviderStartSweepWhere {
+  analyzedAt: null;
+  endedAt: null;
+  provider: "retell";
+  providerCallId: null;
+  providerStartAttemptedAt: { lt: Date };
+  status: "starting";
+  updatedAt: { lt: Date };
+}
+
+interface HostedPhoneCallProviderStartSweepUpdateWhere
+  extends HostedPhoneCallProviderStartSweepWhere {
+  id: string;
+}
+
 interface RetellWebhookCallTarget {
   call: HostedPhoneCall;
   providerCallIdData: {
@@ -100,7 +148,7 @@ interface HostedPhoneCallResultNotificationAppend {
   notificationSignals: HostedPhoneCallResultNotificationSignal[];
 }
 
-interface HostedPhoneCallResultNotificationSignal {
+export interface HostedPhoneCallResultNotificationSignal {
   notificationMailboxItemId: string;
   notificationUserId: string;
 }
@@ -108,6 +156,13 @@ interface HostedPhoneCallResultNotificationSignal {
 const HOSTED_PHONE_CALL_RESULT_SUMMARY_MAX_LENGTH = 2_000;
 const HOSTED_PHONE_CALL_RESULT_FOLLOW_UP_MAX_LENGTH = 1_000;
 const HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER = " [truncated]";
+export const HOSTED_PHONE_CALL_PROVIDER_START_SWEEP_LIMIT = 100;
+export const HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS =
+  2 * 60 * 60 * 1_000;
+const HOSTED_PHONE_CALL_PROVIDER_START_TIMEOUT_RESULT: HostedPhoneCallResult = {
+  outcome: "not_completed",
+  summary: "Murph could not confirm whether the phone call started, and no Retell result arrived.",
+};
 const RETELL_CALL_ANALYZED_LIVE_STATUSES: HostedPhoneCallStatus[] = [
   "starting",
   "calling",
@@ -220,6 +275,87 @@ export async function handleRetellCallAnalyzed(input: {
       await tx.appendResultNotification(stored),
     );
   });
+}
+
+export interface StaleHostedPhoneCallProviderStartSweepResult {
+  failedPhoneCalls: number;
+  notificationSignals: HostedPhoneCallResultNotificationSignal[];
+}
+
+export async function terminalizeStaleHostedPhoneCallProviderStarts(input: {
+  limit?: number;
+  now?: Date | string;
+  prisma?: PrismaClient;
+  store?: HostedPhoneCallProviderStartSweepStore;
+} = {}): Promise<StaleHostedPhoneCallProviderStartSweepResult> {
+  const store = input.store
+    ?? resolveHostedPhoneCallProviderStartSweepStore(input.prisma);
+  const now = normalizePhoneCallSweepDate(input.now ?? new Date());
+  const cutoff = new Date(
+    now.getTime() - HOSTED_PHONE_CALL_PROVIDER_START_WEBHOOK_GRACE_MS,
+  );
+  const calls = await store.hostedPhoneCall.findMany({
+    orderBy: [
+      { updatedAt: "asc" },
+      { id: "asc" },
+    ],
+    take: input.limit ?? HOSTED_PHONE_CALL_PROVIDER_START_SWEEP_LIMIT,
+    where: {
+      analyzedAt: null,
+      endedAt: null,
+      provider: "retell",
+      providerCallId: null,
+      providerStartAttemptedAt: { lt: cutoff },
+      status: "starting",
+      updatedAt: { lt: cutoff },
+    },
+  });
+
+  let failedPhoneCalls = 0;
+  const notificationSignals: HostedPhoneCallResultNotificationSignal[] = [];
+  for (const call of calls) {
+    const transaction = await store.$transaction(async (tx): Promise<{
+      append: HostedPhoneCallResultNotificationAppend | null;
+      failed: boolean;
+    }> => {
+      const updated = await tx.hostedPhoneCall.updateMany({
+        data: {
+          resultJson: HOSTED_PHONE_CALL_PROVIDER_START_TIMEOUT_RESULT,
+          status: "failed",
+        },
+        where: {
+          analyzedAt: null,
+          endedAt: null,
+          id: call.id,
+          provider: "retell",
+          providerCallId: null,
+          providerStartAttemptedAt: { lt: cutoff },
+          status: "starting",
+          updatedAt: { lt: cutoff },
+        },
+      });
+      if (updated.count === 0) {
+        return { append: null, failed: false };
+      }
+
+      const stored = await tx.hostedPhoneCall.findUniqueOrThrow({
+        where: { id: call.id },
+      });
+      return {
+        append: await tx.appendResultNotification(stored),
+        failed: true,
+      };
+    });
+    if (transaction.failed) {
+      failedPhoneCalls += 1;
+      notificationSignals.push(...transaction.append?.notificationSignals ?? []);
+    }
+  }
+
+  return {
+    failedPhoneCalls,
+    notificationSignals,
+  };
 }
 
 async function appendPhoneCallResultNotificationTx(input: {
@@ -543,6 +679,32 @@ function resolveHostedPhoneCallWebhookStore(
   };
 }
 
+function resolveHostedPhoneCallProviderStartSweepStore(
+  prisma: PrismaClient | undefined,
+): HostedPhoneCallProviderStartSweepStore {
+  const client = prisma ?? getPrisma();
+  return {
+    $transaction: async (callback) => client.$transaction(async (tx) => callback({
+      appendResultNotification: async (call) => appendPhoneCallResultNotificationTx({
+        call,
+        prisma: tx,
+      }),
+      hostedPhoneCall: {
+        findUniqueOrThrow: async (args) => tx.hostedPhoneCall.findUniqueOrThrow({
+          where: { id: args.where.id },
+        }),
+        updateMany: async (args) => tx.hostedPhoneCall.updateMany({
+          data: args.data,
+          where: args.where,
+        }),
+      },
+    })),
+    hostedPhoneCall: {
+      findMany: async (args) => client.hostedPhoneCall.findMany(args),
+    },
+  };
+}
+
 export function mapRetellCallAnalysis(call: RetellCallPayload): HostedPhoneCallResult {
   const customAnalysis = readRecord(call.call_analysis?.custom_analysis_data);
   const outcome = readOutcome(customAnalysis?.outcome);
@@ -716,4 +878,12 @@ function assertRetellStorageMode(call: RetellCallPayload): void {
       : "Retell phone call storage mode is required.",
     retryable: true,
   });
+}
+
+function normalizePhoneCallSweepDate(value: Date | string): Date {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError("Hosted phone-call sweep date must be valid.");
+  }
+  return date;
 }
