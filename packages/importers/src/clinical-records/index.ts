@@ -77,6 +77,12 @@ const VITAL_LOINC_BY_CODE = new Map<string, VitalDefinition>([
 ]);
 
 const NO_KNOWN_ALLERGY_CODES = new Set(["716186003"]);
+const NO_KNOWN_ALLERGY_TEXTS = new Set([
+  "no known allergy",
+  "no known allergy situation",
+  "no known allergies",
+  "no known allergies situation",
+]);
 const FHIR_SYSTEM_ALLERGY_CLINICAL_STATUS = "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical";
 const FHIR_SYSTEM_ALLERGY_VERIFICATION_STATUS = "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification";
 const FHIR_SYSTEM_LOINC = "http://loinc.org";
@@ -696,6 +702,10 @@ function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>)
     return unsupportedOnly(context, "no-known allergy code system is not importable");
   }
 
+  if (hasTrustedNoKnownAllergyCode(context.resource) && !isNoKnownAllergy(context.resource)) {
+    return unsupportedOnly(context, "no-known allergy code is ambiguous");
+  }
+
   if (!isNoKnownAllergy(context.resource)) {
     return { candidates: [], unsupported: [unsupportedResource(context, "allergy registry import not implemented")] };
   }
@@ -946,11 +956,37 @@ function isLaboratoryObservation(resource: Observation): boolean {
 }
 
 function isNoKnownAllergy(resource: AllergyIntolerance): boolean {
+  return hasTrustedNoKnownAllergyCode(resource) && isUnambiguousNoKnownAllergy(resource);
+}
+
+function hasTrustedNoKnownAllergyCode(resource: AllergyIntolerance): boolean {
   return codeableConceptHasSystemCode(resource.code, FHIR_SYSTEM_SNOMED_CT, NO_KNOWN_ALLERGY_CODES);
 }
 
+function isUnambiguousNoKnownAllergy(resource: AllergyIntolerance): boolean {
+  for (const coding of codingsForCodeableConcept(resource.code)) {
+    const code = coding.code?.toLowerCase();
+    if (coding.system !== FHIR_SYSTEM_SNOMED_CT || code === undefined || !NO_KNOWN_ALLERGY_CODES.has(code)) {
+      return false;
+    }
+    if (!isNoKnownAllergyConceptText(coding.display)) {
+      return false;
+    }
+  }
+
+  return isNoKnownAllergyConceptText(resource.code?.text);
+}
+
 function isAllergyConflictEvidence(resource: Resource): boolean {
-  return isAllergyIntolerance(resource) && !isNoKnownAllergy(resource);
+  return isAllergyIntolerance(resource) && (!isNoKnownAllergy(resource) || !isUnambiguousNoKnownAllergy(resource));
+}
+
+function isNoKnownAllergyConceptText(value: string | undefined): boolean {
+  if (value === undefined) {
+    return true;
+  }
+
+  return NO_KNOWN_ALLERGY_TEXTS.has(value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim());
 }
 
 function hasImportableAllergyStatus(resource: AllergyIntolerance): boolean {
@@ -1153,12 +1189,13 @@ function readQuantityValue(
     return null;
   }
 
-  const code = readString(quantity.code);
+  const system = readString(quantity.system);
+  const code = system === FHIR_SYSTEM_UCUM ? readString(quantity.code) : undefined;
   const unit = readString(quantity.unit);
 
   return {
     comparator,
-    system: readString(quantity.system),
+    system,
     unit: code ?? unit,
     unitSource: code ? "code" : unit ? "unit" : undefined,
     value: numericValue,

@@ -324,6 +324,63 @@ describe("buildClinicalImportPlan", () => {
     expect(report?.payload.resultStatus).toBe("unknown");
   });
 
+  it("preserves lab display units when quantity codes are local", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            resourceType: "Observation",
+            id: "lab-local-unit-code",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:05:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: {
+              text: "Glucose",
+              coding: [{ system: "http://loinc.org", code: "2345-7", display: "Glucose" }],
+            },
+            interpretation: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                code: "N",
+                display: "Normal",
+              }],
+            }],
+            valueQuantity: { value: 91, unit: "mg/dL", system: "urn:vendor:units", code: "M" },
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    const glucose = plan.candidates.find(
+      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
+        candidate.kind === "diagnostic-test",
+    );
+    expect(glucose?.payload.results).toEqual([
+      {
+        analyte: "Glucose",
+        biomarkerSlug: "glucose",
+        flag: "normal",
+        slug: "glucose",
+        unit: "mg/dL",
+        value: 91,
+      },
+    ]);
+  });
+
   it("plans supported assertions and notes", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
@@ -1731,7 +1788,7 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "AllergyIntolerance",
           relativePath: "AllergyIntolerance/page-1.json",
-          count: 2,
+          count: 3,
         },
       ],
       pages: {
@@ -1766,6 +1823,27 @@ describe("buildClinicalImportPlan", () => {
               coding: [{ system: "http://snomed.info/sct", code: "91936005", display: "Penicillin allergy" }],
             },
           },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-mixed-no-known",
+            recordedDate: "2026-07-02T09:10:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
+            code: {
+              text: "Penicillin allergy",
+              coding: [
+                { system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" },
+                { system: "http://snomed.info/sct", code: "91936005", display: "Penicillin allergy" },
+              ],
+            },
+          },
         ],
       },
     });
@@ -1782,6 +1860,10 @@ describe("buildClinicalImportPlan", () => {
         expect.objectContaining({
           resourceId: "allergy-positive-conflict",
           reason: "allergy registry import not implemented",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-mixed-no-known",
+          reason: "no-known allergy code is ambiguous",
         }),
       ]),
     );
