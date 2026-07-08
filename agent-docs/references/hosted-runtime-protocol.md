@@ -176,19 +176,30 @@ to that declared exact set before serializing the response.
 
 Warm old runner bundles omit `supportedProjectionScope`; web must treat that as
 support for the pre-distance/count scope set: fixed projection scopes plus
-`activity-minutes-days.v1`. During gradual rollout, newly granted
-`activity-distance-days.v1` and `activity-session-count-days.v1` scopes are
-therefore hidden from old runners on the delivery callback rather than making
-active-scope parsing fail or suppressing existing vault-share offers. New
-runners receive those scopes as soon as their bundle is live and declares
-support.
+`activity-minutes-days.v1`. This protects the grantor-facing active-scope read:
+newly granted `activity-distance-days.v1` and
+`activity-session-count-days.v1` scopes are hidden from old grantor runners on
+that callback rather than making active-scope parsing fail or suppressing
+existing vault-share offers.
+
+That callback negotiation does not protect the destination mailbox importer.
+Vault-share delivery wakes are appended by web directly into the destination
+member mailbox, and the destination runner does not declare projection-scope
+capability while importing mailbox rows. Therefore the runner bundle that first
+exposes distance/count selector grants must be deployed with
+`container_rollout=immediate` before selector-scoped offers are created or
+accepted. Gradual Cloudflare container rollout is unsafe for this selector
+expansion: a warm old destination runner could import a selector delivery wake
+whose exact scope key it cannot preserve.
 
 Rollback floor: after web has accepted distance/count grants, rolling web behind
 the projection-scope parser that knows those rows can make old web code unable
 to read or serve the stored scope keys. Roll back web to a build with this
 parser and group-summary filtering or newer, or remove the new grants before
-rolling web behind it. Runner rollback is allowed only while web stays at this
-build or newer; old runners will not see or deliver unsupported selector scopes.
+rolling web behind it. Runner rollback behind the selector-scope bundle is not
+allowed while selector grants or pending selector delivery wakes exist; first
+disable/revert the selector-producing web paths and drain, revoke, or remove the
+new selector grants.
 
 ## Current Protocol
 
