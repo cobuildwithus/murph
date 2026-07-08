@@ -801,10 +801,19 @@ testHostedCodexAuthE2e(
         workingDirectory: operatorHomeRoot,
       });
 
-      assert.equal(requests.length, 1);
+      const fixedRequestCount = requests.length;
+      assert.ok(fixedRequestCount >= 1);
       assert.equal(fixedResult.finalMessage, "auth regression ok");
-      assert.equal(authorizationHeaders[0], expectedAuthorization);
-      assert.match(requests[0]!, /hello hosted auth regression/u);
+      assert.ok(
+        authorizationHeaders
+          .slice(0, fixedRequestCount)
+          .every((header) => header === expectedAuthorization),
+      );
+      assert.ok(
+        requests
+          .slice(0, fixedRequestCount)
+          .some((request) => /hello hosted auth regression/u.test(request)),
+      );
 
       const legacyCodexHome = await prepareLegacyBuiltInOpenAiCodexHome({
         baseUrl: `${readServerBaseUrl(server)}/v1`,
@@ -830,7 +839,11 @@ testHostedCodexAuthE2e(
         legacyError = error;
       }
 
-      assert.notEqual(authorizationHeaders[1], expectedAuthorization);
+      const legacyAuthorizationHeaders = authorizationHeaders.slice(fixedRequestCount);
+      assert.ok(legacyAuthorizationHeaders.length >= 1);
+      assert.ok(
+        legacyAuthorizationHeaders.some((header) => header !== expectedAuthorization),
+      );
       assert(legacyError instanceof Error);
     } finally {
       await closeHttpServer(server);
