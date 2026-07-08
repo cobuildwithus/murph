@@ -12,6 +12,7 @@ import {
   assistantStatusResultSchema,
   assistantStatusRunLockSchema,
   assistantTurnReceiptSchema,
+  assistantTurnReceiptSummarySchema,
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -293,7 +294,24 @@ describe('assistant status', () => {
         updatedAt: '2026-04-08T09:00:30.000Z',
         completedAt: '2026-04-08T09:00:30.000Z',
         lastError: null,
-        timeline: [],
+        timeline: [
+          {
+            at: '2026-04-08T09:00:01.000Z',
+            kind: 'turn.started',
+            detail: 'started',
+            metadata: {
+              retainedInReceiptOnly: 'yes',
+            },
+          },
+          {
+            at: '2026-04-08T09:00:30.000Z',
+            kind: 'turn.completed',
+            detail: `${'completed '.repeat(40)}done`,
+            metadata: {
+              omittedFromStatusSummary: 'large metadata stays in the receipt',
+            },
+          },
+        ],
       }),
     ])
 
@@ -315,6 +333,20 @@ describe('assistant status', () => {
     expect(status.generatedAt).toBe('2026-04-08T09:10:11.000Z')
     expect(status.warnings).toEqual(expectedWarnings)
     expect(status.recentTurns).toHaveLength(1)
+    expect(status.recentTurns[0]).toMatchObject({
+      schema: 'murph.assistant-turn-receipt-summary.v1',
+      turnId: 'turn-1',
+      sessionId: 'session-123',
+      status: 'completed',
+      timelineEventCount: 2,
+      latestTimelineEvent: {
+        at: '2026-04-08T09:00:30.000Z',
+        kind: 'turn.completed',
+      },
+    })
+    expect('timeline' in status.recentTurns[0]!).toBe(false)
+    expect(status.recentTurns[0]?.latestTimelineEvent?.detail?.length).toBeLessThanOrEqual(160)
+    expect(JSON.stringify(status.recentTurns[0])).not.toContain('omittedFromStatusSummary')
     expect(statusMocks.listRecentAssistantTurnReceiptsForSession).toHaveBeenCalledWith(
       vaultRoot,
       'session-123',
@@ -345,6 +377,55 @@ describe('assistant status', () => {
       10,
     )
     expect(statusMocks.listRecentAssistantTurnReceiptsForSession).not.toHaveBeenCalled()
+  })
+
+  it('keeps recent turn status output bounded when receipt timelines are large', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+
+    const { parentRoot, vaultRoot } = await createTempVaultContext('assistant-status-budget-')
+    tempRoots.push(parentRoot)
+    statusMocks.listRecentAssistantTurnReceipts.mockResolvedValue(
+      Array.from({ length: 5 }, (_unused, receiptIndex) =>
+        assistantTurnReceiptSchema.parse({
+          schema: 'murph.assistant-turn-receipt.v1',
+          turnId: `turn-${receiptIndex}`,
+          sessionId: `session-${receiptIndex}`,
+          provider: 'codex-cli',
+          providerModel: 'gpt-5.4',
+          promptPreview: `prompt ${receiptIndex}`,
+          responsePreview: `response ${receiptIndex}`,
+          status: 'completed',
+          deliveryRequested: false,
+          deliveryDisposition: 'not-requested',
+          deliveryIntentId: null,
+          startedAt: '2026-04-08T09:00:00.000Z',
+          updatedAt: '2026-04-08T09:00:30.000Z',
+          completedAt: '2026-04-08T09:00:30.000Z',
+          lastError: null,
+          timeline: Array.from({ length: 200 }, (_eventUnused, eventIndex) => ({
+            at: '2026-04-08T09:00:30.000Z',
+            kind: eventIndex === 199 ? 'turn.completed' : 'provider.attempt.started',
+            detail: `${'timeline detail '.repeat(80)}${receiptIndex}-${eventIndex}`,
+            metadata: {
+              largeMetadata: `${'metadata '.repeat(80)}${receiptIndex}-${eventIndex}`,
+            },
+          })),
+        }),
+      ),
+    )
+
+    const status = await getAssistantStatusLocal({
+      vault: vaultRoot,
+      limit: 5,
+    })
+    const encodedStatus = JSON.stringify(status)
+
+    expect(encodedStatus.length).toBeLessThanOrEqual(15_000)
+    expect(status.recentTurns).toHaveLength(5)
+    expect(status.recentTurns.every((turn) => turn.timelineEventCount === 200)).toBe(true)
+    expect(encodedStatus).not.toContain('largeMetadata')
+    expect(encodedStatus).not.toContain('provider.attempt.started')
   })
 
   it('refreshes the snapshot under the write lock and swallows runtime-event append failures', async () => {
@@ -635,8 +716,8 @@ function makeStatusSnapshot(paths: AssistantStatePaths) {
       },
     }),
     recentTurns: [
-      assistantTurnReceiptSchema.parse({
-        schema: 'murph.assistant-turn-receipt.v1',
+      assistantTurnReceiptSummarySchema.parse({
+        schema: 'murph.assistant-turn-receipt-summary.v1',
         turnId: 'turn-stored',
         sessionId: 'session-stored',
         provider: 'codex-cli',
@@ -651,7 +732,8 @@ function makeStatusSnapshot(paths: AssistantStatePaths) {
         updatedAt: '2026-04-08T06:00:01.000Z',
         completedAt: '2026-04-08T06:00:01.000Z',
         lastError: null,
-        timeline: [],
+        timelineEventCount: 0,
+        latestTimelineEvent: null,
       }),
     ],
     warnings: ['stored warning'],

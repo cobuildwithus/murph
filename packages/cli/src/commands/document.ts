@@ -15,6 +15,7 @@ import {
   rawImportManifestResultSchema,
 } from '@murphai/vault-usecases/records'
 import { registerArtifactBackedEntityGroup } from './entity-command-groups.js'
+import { commonListLimitOptionSchema } from './command-factory-primitives.js'
 import {
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,
@@ -81,12 +82,14 @@ export function registerDocumentCommands(
     },
     list: {
       description: 'List imported document events with optional date bounds.',
+      limitOption: commonListLimitOptionSchema,
       output: listResultSchema,
       async run(input) {
         return services.query.listDocuments({
           vault: input.vault,
           requestId: input.requestId,
           from: input.from,
+          limit: input.limit,
           to: input.to,
         })
       },

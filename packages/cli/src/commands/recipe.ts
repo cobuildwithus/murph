@@ -259,7 +259,7 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
           vault: input.vault,
           requestId: input.requestId,
           status: input.status,
-          limit: input.limit ?? 50,
+          limit: input.limit ?? 10,
         })
       },
     },

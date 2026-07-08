@@ -75,6 +75,17 @@ export const scheduledLogRecordSchema = z
   })
   .strict();
 
+export const scheduledLogListItemSchema = scheduledLogRecordSchema
+  .omit({
+    action: true,
+    body: true,
+    markdown: true,
+  })
+  .extend({
+    actionKind: z.enum(scheduledLogActionKindValues),
+  })
+  .strict();
+
 export const scheduledLogListResultSchema = z.object({
   vault: pathSchema,
   filters: z.object({
@@ -83,7 +94,7 @@ export const scheduledLogListResultSchema = z.object({
     limit: z.number().int().positive().max(200),
   }),
   count: z.number().int().nonnegative(),
-  items: z.array(scheduledLogRecordSchema),
+  items: z.array(scheduledLogListItemSchema),
 });
 
 export const scheduledLogShowResultSchema = z.object({
@@ -115,6 +126,24 @@ export const scheduledLogStatusResultSchema = z.object({
 
 export function createScheduledLogScaffoldPayload(): ScheduledLogScaffoldPayload {
   return scheduledLogScaffoldPayloadSchema.parse(scaffoldScheduledLogPayload());
+}
+
+function toScheduledLogListItem(
+  record: z.infer<typeof scheduledLogRecordSchema>,
+): z.infer<typeof scheduledLogListItemSchema> {
+  return {
+    scheduledLogId: record.scheduledLogId,
+    slug: record.slug,
+    title: record.title,
+    status: record.status,
+    summary: record.summary,
+    schedule: record.schedule,
+    tags: record.tags,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    relativePath: record.relativePath,
+    actionKind: record.action.kind,
+  };
 }
 
 function invalidScheduledLogOption(message: string): never {
@@ -1004,7 +1033,7 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
         .min(1)
         .optional()
         .describe("Optional lexical filter across title, action, schedule, and body."),
-      limit: z.number().int().positive().max(200).default(50),
+      limit: z.number().int().positive().max(200).default(10),
     }),
     output: scheduledLogListResultSchema,
     async run(context) {
@@ -1022,7 +1051,7 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
           limit: context.options.limit,
         },
         count: items.length,
-        items,
+        items: items.map(toScheduledLogListItem),
       };
     },
   });

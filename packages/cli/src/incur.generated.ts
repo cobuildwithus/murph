@@ -32,7 +32,7 @@ declare module 'incur' {
       'assistant self-target list': { args: {}; options: { requestId?: string } }
       'assistant self-target set': { args: { channel: string }; options: { requestId?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
       'assistant self-target show': { args: { channel: string }; options: { requestId?: string } }
-      'assistant session list': { args: {}; options: { requestId?: string } }
+      'assistant session list': { args: {}; options: { requestId?: string; limit: number } }
       'assistant session show': { args: { sessionId: string }; options: { requestId?: string } }
       'assistant status': { args: {}; options: { requestId?: string; session?: string; limit: number } }
       'assistant stop': { args: {}; options: { requestId?: string } }
@@ -89,7 +89,7 @@ declare module 'incur' {
       'document delete': { args: { id: string }; options: { requestId?: string } }
       'document edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string; timeZone?: string; dayKey?: string; source?: "manual" | "import" | "device" | "derived"; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearSource?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute" } }
       'document import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; note?: string; source?: "manual" | "import" | "device" | "derived" } }
-      'document list': { args: {}; options: { requestId?: string; from?: string; to?: string } }
+      'document list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'document manifest': { args: { id: string }; options: { requestId?: string } }
       'document show': { args: { id: string }; options: { requestId?: string } }
       'encounter import-json': { args: {}; options: { requestId?: string; input: string } }

@@ -197,7 +197,7 @@ test('supplement commands exercise typed save, read, compound, and stop paths in
     vaultRoot,
   ])
   assert.equal(listedDefault.exitCode, null)
-  assert.equal(requireData(listedDefault.envelope).filters.limit, 50)
+  assert.equal(requireData(listedDefault.envelope).filters.limit, 10)
 
   const stopped = await runInProcessJsonCli<{
     regimenId: string
@@ -282,7 +282,7 @@ test('supplement list handler exercises the default limit fallback directly', as
   const listSpy = vi.spyOn(services.query, 'listSupplements').mockResolvedValue({
     vault: vaultRoot,
     filters: {
-      limit: 50,
+      limit: 10,
       status: 'active',
     },
     items: [],
@@ -302,7 +302,7 @@ test('supplement list handler exercises the default limit fallback directly', as
   assert.equal(listSpy.mock.calls[0]?.[0].vault, vaultRoot)
   assert.equal(listSpy.mock.calls[0]?.[0].requestId, null)
   assert.equal(listSpy.mock.calls[0]?.[0].status, 'active')
-  assert.equal(listSpy.mock.calls[0]?.[0].limit, 50)
+  assert.equal(listSpy.mock.calls[0]?.[0].limit, 10)
 })
 
 test('supplement search-labels calls the hosted data API with the hosted provider credential', async () => {
