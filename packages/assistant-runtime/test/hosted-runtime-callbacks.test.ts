@@ -480,6 +480,71 @@ describe("hosted runtime callbacks", () => {
     }));
   });
 
+  it("selects the matching Linq delivery context when preparing from multiple candidates", async () => {
+    const otherRouteAuthority = {
+      accountLookupKey: "hbidx:phone:v1:other",
+      channel: "linq" as const,
+      containerMemberId: "member_other",
+      threadId: "linq_chat_other",
+    };
+    const matchingRouteAuthority = {
+      accountLookupKey: "hbidx:phone:v1:match",
+      channel: "linq" as const,
+      containerMemberId: "member_match",
+      threadId: "linq_chat_match",
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_match",
+      channel: "linq",
+      explicitTarget: "ain_hashed_thread",
+      replyToMessageId: "linq_message_match",
+      transportIdempotent: true,
+    });
+
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [effect],
+      linqDeliveryContexts: [
+        {
+          directRecipientPhoneNumber: "+15550001",
+          fromPhoneNumber: null,
+          replyToMessageId: "linq_message_other",
+          routeAuthority: otherRouteAuthority,
+          service: "iMessage",
+          target: "linq_chat_other",
+          threadIsDirect: true,
+        },
+        {
+          directRecipientPhoneNumber: "+15550002",
+          fromPhoneNumber: null,
+          replyToMessageId: "linq_message_match",
+          routeAuthority: matchingRouteAuthority,
+          service: "iMessage",
+          target: "linq_chat_match",
+          threadIsDirect: true,
+        },
+      ],
+      now: () => "2026-04-08T00:00:05.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: true,
+      externalThreadRouteAuthority: matchingRouteAuthority,
+      externalThreadService: "iMessage",
+      intentId: "intent_123",
+      startedAt: "2026-04-08T00:00:05.000Z",
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+    expect(preparation.preparedDispatches[0]).toEqual(expect.objectContaining({
+      linqDeliveryContext: expect.objectContaining({
+        routeAuthority: matchingRouteAuthority,
+        service: "iMessage",
+      }),
+    }));
+  });
+
   it("restores Linq route authority from a prepared retry intent", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",

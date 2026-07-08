@@ -529,7 +529,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, the file is queued to deliver with your normal reply but delivery is not yet confirmed. It does not reveal file bytes to the model and does not support arbitrary recipients.",
+    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.",
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1859,7 +1859,7 @@ export async function executeMurphDynamicToolRequest(input: {
                   deliveryStatus: 'queued_with_reply',
                   filename: result.filename,
                   note:
-                    'Approval succeeded. The file is queued to deliver with your normal reply; delivery is not confirmed yet.',
+                    'Approval succeeded. Attach this file through your normal reply path. Do not quote this note or claim final iMessage delivery unless later delivery evidence confirms it.',
                   status: result.status,
                 }),
               ),

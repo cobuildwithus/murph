@@ -410,12 +410,12 @@ export function ConnectSourcesGrid({
 
 function resolveDisconnectSuccessMessage(source: ConnectSource): string {
   return source.disconnectScope === "junction_account"
-    ? "Disconnected this Junction account. Your history is still saved."
+    ? "Disconnected this connection. Your history is still saved."
     : `Disconnected ${source.name}. Your history is still saved.`;
 }
 
 function resolveDisconnectFailureMessage(source: ConnectSource): string {
   return source.disconnectScope === "junction_account"
-    ? "We could not disconnect this Junction account right now."
+    ? "We could not disconnect this connection right now."
     : `We could not disconnect ${source.name} right now.`;
 }
