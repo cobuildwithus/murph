@@ -68,6 +68,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
 
 const TEST_CONTACT_PRIVACY_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
 const TEST_CONTACT_PRIVACY_ROTATED_KEY = Buffer.alloc(32, 1).toString("base64");
+const LEGACY_TELEGRAM_PRIVATE_STATE_SCHEMA = "murph.hosted-member-routing.telegram.v1";
 
 describe("hosted-member-store", () => {
   const previousHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
@@ -859,6 +860,52 @@ describe("hosted-member-store", () => {
           pendingLinqChatIdEncrypted: null,
           pendingLinqRecipientPhoneEncrypted: null,
           telegramUserIdEncrypted: telegramPrivateColumns.telegramUserIdEncrypted,
+          telegramUserLookupKey: "tg_user_456",
+        }),
+      },
+    } as never;
+
+    await expect(
+      readHostedMemberRoutingState({
+        memberId: "member_123",
+        prisma,
+      }),
+    ).resolves.toEqual({
+      hasPendingLinqRouteState: false,
+      linqChatId: null,
+      linqChatLookupKey: null,
+      linqRecipientPhone: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: "456",
+      telegramUserLookupKey: "tg_user_456",
+    });
+  });
+
+  it("preserves legacy Telegram user lookup while dropping legacy thread targets", async () => {
+    const telegramUserIdEncrypted = await encryptHostedWebNullableString({
+      field: "hosted-member-routing.telegram-user-id",
+      memberId: "member_123",
+      value: JSON.stringify({
+        schema: LEGACY_TELEGRAM_PRIVATE_STATE_SCHEMA,
+        telegramThreadId: "456:business:biz-42:dm-topic:9",
+        telegramUserId: "456",
+      }),
+    });
+    const prisma = {
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatIdEncrypted: null,
+          linqRecipientPhoneEncrypted: null,
+          memberId: "member_123",
+          pendingLinqChatIdEncrypted: null,
+          pendingLinqRecipientPhoneEncrypted: null,
+          telegramUserIdEncrypted,
           telegramUserLookupKey: "tg_user_456",
         }),
       },
@@ -2057,6 +2104,56 @@ describe("hosted-member-store", () => {
       }),
     ).resolves.toEqual({
       telegramThreadId: "456:business:biz-42:dm-topic:9",
+      telegramUserId: "456",
+    });
+  });
+
+  it("clears a legacy same-user Telegram thread target during a user-id-only resync", async () => {
+    const legacyTelegramUserIdEncrypted = await encryptHostedWebNullableString({
+      field: "hosted-member-routing.telegram-user-id",
+      memberId: "member_123",
+      value: JSON.stringify({
+        schema: LEGACY_TELEGRAM_PRIVATE_STATE_SCHEMA,
+        telegramThreadId: "456",
+        telegramUserId: "456",
+      }),
+    });
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        memberId: "member_123",
+      },
+    ]);
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedMemberRouting: {
+        findMany,
+        findUnique: vi.fn().mockResolvedValue({
+          memberId: "member_123",
+          telegramUserIdEncrypted: legacyTelegramUserIdEncrypted,
+        }),
+        upsert,
+      },
+    } as never;
+
+    await upsertHostedMemberTelegramRoutingBindingTx({
+      memberId: "member_123",
+      prisma,
+      telegramUserId: "456",
+    });
+
+    const upsertCall = upsert.mock.calls[0]?.[0] as {
+      update: {
+        telegramUserIdEncrypted: string;
+      };
+    };
+    await expect(
+      readHostedMemberRoutingTelegramPrivateState({
+        memberId: "member_123",
+        telegramUserIdEncrypted: upsertCall.update.telegramUserIdEncrypted,
+      }),
+    ).resolves.toEqual({
+      telegramThreadId: null,
       telegramUserId: "456",
     });
   });

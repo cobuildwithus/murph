@@ -67,7 +67,7 @@ export async function importHostedGroupNewsletterEmailNeededMailboxItem(input: {
   if (!route) {
     return {
       reasonCode: GROUP_NEWSLETTER_EMAIL_NEEDED_NO_ROUTE_REASON,
-      status: "skipped",
+      status: "deferred",
     };
   }
 

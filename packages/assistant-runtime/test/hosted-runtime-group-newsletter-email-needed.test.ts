@@ -207,7 +207,7 @@ describe("hosted group newsletter email-needed mailbox import", () => {
     ]);
   });
 
-  test("skips email-only direct sessions without spending assistant work", async () => {
+  test("defers email-only direct sessions without spending assistant work", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-email-only-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -222,16 +222,15 @@ describe("hosted group newsletter email-needed mailbox import", () => {
       wake: createGroupNewsletterEmailNeededWake(),
     });
 
-    assert.equal(outcome.status, "skipped");
+    assert.equal(outcome.status, "deferred");
     assert.equal(outcome.reasonCode, "group-newsletter.email-needed.no-direct-route");
-    assert.equal(outcome.assistantInputId, undefined);
     assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
 
     const listed = await listAssistantInputEvents({ vault: vaultRoot });
     assert.equal(listed.events.length, 0);
   });
 
-  test("skips without spending assistant work when there is no current direct route", async () => {
+  test("defers without spending assistant work when there is no current direct route", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-no-route-"));
     tempRoots.push(parentRoot);
     const vaultRoot = path.join(parentRoot, "vault");
@@ -242,9 +241,8 @@ describe("hosted group newsletter email-needed mailbox import", () => {
       wake: createGroupNewsletterEmailNeededWake(),
     });
 
-    assert.equal(outcome.status, "skipped");
+    assert.equal(outcome.status, "deferred");
     assert.equal(outcome.reasonCode, "group-newsletter.email-needed.no-direct-route");
-    assert.equal(outcome.assistantInputId, undefined);
     assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
 
     const listed = await listAssistantInputEvents({ vault: vaultRoot });
