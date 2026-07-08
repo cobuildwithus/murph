@@ -156,6 +156,13 @@ type HostedAiUsageAllowanceTokenPricingBasisResolution =
     basis: AssistantUsageTokenPricingBasis;
   };
 
+interface HostedAiUsageAllowanceModelPrice {
+  cachedInputUsdMicrosPerMillionTokens: bigint;
+  cacheWriteUsdMicrosPerMillionTokens?: bigint;
+  inputUsdMicrosPerMillionTokens: bigint;
+  outputUsdMicrosPerMillionTokens: bigint;
+}
+
 interface HostedAiUsageAllowancePeriod {
   allowanceSource: HostedAiUsageAllowanceSourceKind;
   billingPlanCode: HostedBillingPlanCode;
@@ -381,31 +388,36 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE = {
   outputUsdMicrosPerMillionTokens: 30_000_000n,
 } as const;
 
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
+  cachedInputUsdMicrosPerMillionTokens: 500_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 6_250_000n,
+  inputUsdMicrosPerMillionTokens: 5_000_000n,
+  outputUsdMicrosPerMillionTokens: 30_000_000n,
+} as const;
+
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 250_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 3_125_000n,
   inputUsdMicrosPerMillionTokens: 2_500_000n,
   outputUsdMicrosPerMillionTokens: 15_000_000n,
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 100_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 1_250_000n,
   inputUsdMicrosPerMillionTokens: 1_000_000n,
   outputUsdMicrosPerMillionTokens: 6_000_000n,
 } as const;
 
-const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES = {
+const HOSTED_AI_USAGE_ALLOWANCE_MODEL_PRICES: Record<
+  HostedAiUsageAllowancePricedModel,
+  HostedAiUsageAllowanceModelPrice
+> = {
   "gpt-5.5": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE,
-  "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE,
+  "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
-} as const satisfies Record<
-  HostedAiUsageAllowancePricedModel,
-  {
-    cachedInputUsdMicrosPerMillionTokens: bigint;
-    inputUsdMicrosPerMillionTokens: bigint;
-    outputUsdMicrosPerMillionTokens: bigint;
-  }
->;
+};
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_TOKEN_PRICING_BASES = {
   "openai-flex": {
@@ -521,10 +533,16 @@ export function priceHostedAiUsageForAllowance(
   const resolvedTokenPricing = tokenPricing
     ?? resolveHostedAiUsageAllowanceTokenPricingBasis({ model, record });
   const cachedInputTokens = normalizeTokenCount(record.cachedInputTokens);
+  const cacheWriteTokens = normalizeTokenCount(record.cacheWriteTokens);
+  const cacheWriteUsdMicrosPerMillionTokens =
+    prices.cacheWriteUsdMicrosPerMillionTokens ?? 0n;
   const inputTokens = normalizeTokenCount(record.inputTokens);
   const outputTokens = normalizeTokenCount(record.outputTokens);
-  const billableInputTokens = inputTokens > cachedInputTokens
-    ? inputTokens - cachedInputTokens
+  const inputTokenSubsetTokens = cachedInputTokens + (
+    cacheWriteUsdMicrosPerMillionTokens > 0n ? cacheWriteTokens : 0n
+  );
+  const billableInputTokens = inputTokens > inputTokenSubsetTokens
+    ? inputTokens - inputTokenSubsetTokens
     : 0n;
   const standardCostUsdMicros =
     priceTokenBucketUsdMicros(
@@ -534,6 +552,10 @@ export function priceHostedAiUsageForAllowance(
     + priceTokenBucketUsdMicros(
       cachedInputTokens,
       prices.cachedInputUsdMicrosPerMillionTokens,
+    )
+    + priceTokenBucketUsdMicros(
+      cacheWriteTokens,
+      cacheWriteUsdMicrosPerMillionTokens,
     )
     + priceTokenBucketUsdMicros(
       outputTokens,
@@ -553,6 +575,9 @@ export function priceHostedAiUsageForAllowance(
       pricingSource: resolvedTokenPricing.pricingSource,
       ratesUsdMicrosPerMillionTokens: {
         cachedInput: prices.cachedInputUsdMicrosPerMillionTokens.toString(),
+        ...(cacheWriteUsdMicrosPerMillionTokens > 0n
+          ? { cacheWrite: cacheWriteUsdMicrosPerMillionTokens.toString() }
+          : {}),
         input: prices.inputUsdMicrosPerMillionTokens.toString(),
         output: prices.outputUsdMicrosPerMillionTokens.toString(),
       },
