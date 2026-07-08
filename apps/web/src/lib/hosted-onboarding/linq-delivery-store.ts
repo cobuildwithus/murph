@@ -40,6 +40,10 @@ const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
   "provider_dispatch_started";
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_FAILURE_CODE =
   "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError";
+const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_UNKNOWN_FAILURE_CODE =
+  "HostedRuntimeTelegramUsageLimitNoticeUnknownError";
+const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_STALE_DISPATCH_FAILURE_REASON =
+  "Hosted Telegram usage-limit notice delivery could not be confirmed after dispatch started.";
 
 type HostedLinqDeliveryReceiptData = {
   deliveryStatus: "delivered" | "failed";
@@ -1459,6 +1463,41 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   const staleAttemptBefore = new Date(
     input.attemptedAt.getTime() - HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS,
   );
+  const canTerminalizeStaleTelegramDispatchStarted =
+    input.delivery.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
+    && input.delivery.status === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
+    && input.delivery.attemptedAt <= staleAttemptBefore;
+  if (canTerminalizeStaleTelegramDispatchStarted) {
+    await input.prisma.hostedLinqDelivery.updateMany({
+      where: {
+        acceptedAt: null,
+        attemptedAt: {
+          lte: staleAttemptBefore,
+        },
+        deliveredAt: null,
+        failedAt: null,
+        id: input.delivery.id,
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        skippedAt: null,
+        status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+      },
+      data: {
+        failedAt: input.attemptedAt,
+        failureCode: sanitizeHostedOnboardingPersistedErrorCode(
+          HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_UNKNOWN_FAILURE_CODE,
+        ),
+        failureReason: sanitizeHostedOnboardingPersistedErrorMessage(
+          HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_STALE_DISPATCH_FAILURE_REASON,
+        ),
+        status: "failed",
+      },
+    });
+    return {
+      claimed: false,
+      id: input.delivery.id,
+    };
+  }
   const canReclaimStalePreProviderAttempt =
     input.reclaimStalePreProviderAttempt
     ?? input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;

@@ -90,6 +90,9 @@ type HostedRuntimeReconciliationDecisionSource = "workflow" | "status";
 const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.v1";
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS = 15_000;
+const DEFAULT_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_SECONDS = Math.ceil(
+  HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS / 1000,
+);
 const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
   24 * 60 * 60 * 1000;
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
@@ -679,9 +682,10 @@ async function sendHostedRuntimeTelegramUsageLimitNotice(input: {
 
     const errorContext = readHostedRuntimeTelegramErrorContext(payload);
     const retryAfterSeconds = readHostedRuntimeTelegramRetryAfterSeconds(payload);
-    if (response.status === 429 && retryAfterSeconds !== null) {
+    if (response.status === 429) {
       throw new HostedRuntimeTelegramUsageLimitNoticeRetryAfterError(
-        retryAfterSeconds,
+        retryAfterSeconds
+        ?? DEFAULT_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_SECONDS,
       );
     }
     if (
