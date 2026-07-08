@@ -201,6 +201,86 @@ describe('executeGenerateImageTool', () => {
     })
   })
 
+  it('reuses the saved capture when a hosted upload retry uses the same operation key', async () => {
+    const vaultRoot = await createTempDir('assistant-image-tool-retry-vault-')
+    await initializeVault({ vaultRoot })
+    const uploadGeneratedImage = vi.fn()
+      .mockRejectedValueOnce(new Error('upload failed'))
+      .mockImplementationOnce(async (input) => {
+        expect(input.bytes).toEqual(webpBytes)
+        return {
+          alt: input.alt,
+          kind: 'image' as const,
+          source: input.source,
+          url: 'https://imagedelivery.net/account/retry/public',
+        }
+      })
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+        usage: {
+          input_tokens: 3,
+          output_tokens: 5,
+          total_tokens: 8,
+        },
+      }))
+
+    const args = {
+      alt: 'A retryable product photo',
+      outputFormat: 'webp' as const,
+      prompt: 'Render the retryable object.',
+      quality: 'high' as const,
+      size: '1536x1024' as const,
+    }
+    const first = await executeGenerateImageTool({
+      args,
+      captureIdempotencyKey: 'turn-1:tool-2',
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      hostedGeneratedImageUploader: { uploadGeneratedImage },
+      providerRequestOrdinal: 4,
+      requireHostedGeneratedImageUploader: true,
+      vaultRoot,
+    })
+
+    expect(first.rpcSuccess).toBe(false)
+    expect(first.rpcText).toBe('image generated but upload failed')
+    expect(first.usageDraft?.providerRequestOutcome).toBe('succeeded')
+    expect(fetchImpl).toHaveBeenCalledOnce()
+
+    const second = await executeGenerateImageTool({
+      args,
+      captureIdempotencyKey: 'turn-1:tool-2',
+      env: {
+        OPENAI_API_KEY: 'openai-test-key',
+      },
+      fetchImpl,
+      hostedGeneratedImageUploader: { uploadGeneratedImage },
+      providerRequestOrdinal: 5,
+      requireHostedGeneratedImageUploader: true,
+      vaultRoot,
+    })
+
+    expect(fetchImpl).toHaveBeenCalledOnce()
+    expect(uploadGeneratedImage).toHaveBeenCalledTimes(2)
+    expect(second.rpcSuccess).toBe(true)
+    expect(second.savedCaptureId).toMatch(/^evt_[A-Za-z0-9_-]+$/u)
+    expect(second.savedImageRef).toMatch(/^raw\/captures\/.+\.webp$/u)
+    await expect(readFile(path.join(vaultRoot, second.savedImageRef!)))
+      .resolves.toEqual(Buffer.from(webpBytes))
+    expect(second.responseMedia).toEqual([
+      {
+        alt: 'A retryable product photo',
+        kind: 'image',
+        source: 'gpt-image-2',
+        url: 'https://imagedelivery.net/account/retry/public',
+      },
+    ])
+    expect(second.usageDraft).toBeNull()
+  })
+
   it('emits a succeeded usage draft when a successful image response omits usage', async () => {
     const uploader = {
       uploadGeneratedImage: vi.fn(async (input) => ({

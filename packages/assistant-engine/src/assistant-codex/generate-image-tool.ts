@@ -1,10 +1,16 @@
 import { Buffer } from 'node:buffer'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { addCapture } from '@murphai/core'
+import { RAW_CAPTURES_DIRECTORY } from '@murphai/contracts'
+import {
+  addCapture,
+  deterministicContractId,
+  ID_PREFIXES,
+  walkVaultFiles,
+} from '@murphai/core'
 import type {
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -69,9 +75,16 @@ interface SavedGeneratedImageCapture {
   manifestPath: string | null
 }
 
+interface GeneratedImageCaptureIdentity {
+  captureId: string
+  filename: string
+  rawImportId: string
+}
+
 export async function executeGenerateImageTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateImageToolArgs
+  captureIdempotencyKey?: string | null
   codexHome?: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
@@ -128,80 +141,105 @@ export async function executeGenerateImageTool(input: {
   }
 
   const promptHash = hashGeneratedImagePrompt(input.args.prompt)
+  const captureIdentity = vaultRoot
+    ? buildGeneratedImageCaptureIdentity({
+        idempotencyKey: input.captureIdempotencyKey ?? null,
+        outputFormat: input.args.outputFormat,
+      })
+    : null
   const operation: GenerateImageOperation = referenceImages.length > 0
     ? 'image_generation_with_references'
     : 'image_generation'
   const usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath =
     referenceImages.length > 0 ? 'openai.images.edit' : 'openai.images.generate'
-  let openAiResult: Awaited<ReturnType<typeof generateOpenAiImage>>
-  try {
-    openAiResult = await generateOpenAiImage({
-      abortSignal: input.abortSignal ?? null,
-      apiKey,
-      fetchImpl: input.fetchImpl,
-      outputFormat: input.args.outputFormat,
-      prompt: buildGenerateImagePromptWithReferences({
-        prompt: input.args.prompt,
-        referenceImageCount: referenceImages.length,
-      }),
-      quality: input.args.quality,
-      referenceImages,
-      size: input.args.size,
-    })
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw error
-    }
-    return {
-      rpcSuccess: false,
-      rpcText: 'image generation failed',
-    }
-  }
 
-  const hasValidGeneratedImageBytes = isValidGeneratedImageBytes({
-    bytes: openAiResult.imageBytes,
-    outputFormat: input.args.outputFormat,
-  })
-  const usageDraft = buildGeneratedImageUsageDraft({
-    args: input.args,
-    operation,
-    providerRequestId: openAiResult.providerRequestId,
-    providerRequestOrdinal: input.providerRequestOrdinal,
-    providerRequestOutcome: hasValidGeneratedImageBytes ? 'succeeded' : 'partial',
-    rawUsageJson: openAiResult.rawUsageJson,
-    referenceImageCount: referenceImages.length,
-    referenceImageSha256s: referenceImages.map((reference) => reference.sha256),
-    referenceImageSourceRefSha256s: referenceImages.map(
-      (reference) => reference.sourceRefSha256,
-    ),
-    referenceImageTotalBytes: sumReferenceImageBytes(referenceImages),
-    usage: openAiResult.usage,
-    usageExtractionSourcePath,
-  })
-
-  if (!hasValidGeneratedImageBytes) {
-    return {
-      rpcSuccess: false,
-      rpcText: 'image generation returned invalid image data',
-      usageDraft,
-    }
-  }
-
+  let generatedImageBytes: Uint8Array
   let savedCapture: SavedGeneratedImageCapture | null = null
-  if (vaultRoot) {
-    try {
-      savedCapture = await saveGeneratedImageCapture({
-        args: input.args,
-        bytes: openAiResult.imageBytes,
-        promptHash,
-        referenceImages,
+  let usageDraft: AssistantProviderUsageDraft | null = null
+  const existingCapture = captureIdentity && vaultRoot
+    ? await findExistingGeneratedImageCapture({
+        captureIdentity,
+        outputFormat: input.args.outputFormat,
         vaultRoot,
       })
-    } catch {
+    : null
+
+  if (existingCapture) {
+    generatedImageBytes = existingCapture.bytes
+    savedCapture = existingCapture.capture
+  } else {
+    let openAiResult: Awaited<ReturnType<typeof generateOpenAiImage>>
+    try {
+      openAiResult = await generateOpenAiImage({
+        abortSignal: input.abortSignal ?? null,
+        apiKey,
+        fetchImpl: input.fetchImpl,
+        outputFormat: input.args.outputFormat,
+        prompt: buildGenerateImagePromptWithReferences({
+          prompt: input.args.prompt,
+          referenceImageCount: referenceImages.length,
+        }),
+        quality: input.args.quality,
+        referenceImages,
+        size: input.args.size,
+      })
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error
+      }
       return {
         rpcSuccess: false,
-        rpcText: 'image generated but vault save failed',
+        rpcText: 'image generation failed',
+      }
+    }
+
+    const hasValidGeneratedImageBytes = isValidGeneratedImageBytes({
+      bytes: openAiResult.imageBytes,
+      outputFormat: input.args.outputFormat,
+    })
+    usageDraft = buildGeneratedImageUsageDraft({
+      args: input.args,
+      operation,
+      providerRequestId: openAiResult.providerRequestId,
+      providerRequestOrdinal: input.providerRequestOrdinal,
+      providerRequestOutcome: hasValidGeneratedImageBytes ? 'succeeded' : 'partial',
+      rawUsageJson: openAiResult.rawUsageJson,
+      referenceImageCount: referenceImages.length,
+      referenceImageSha256s: referenceImages.map((reference) => reference.sha256),
+      referenceImageSourceRefSha256s: referenceImages.map(
+        (reference) => reference.sourceRefSha256,
+      ),
+      referenceImageTotalBytes: sumReferenceImageBytes(referenceImages),
+      usage: openAiResult.usage,
+      usageExtractionSourcePath,
+    })
+
+    if (!hasValidGeneratedImageBytes) {
+      return {
+        rpcSuccess: false,
+        rpcText: 'image generation returned invalid image data',
         usageDraft,
+      }
+    }
+
+    generatedImageBytes = openAiResult.imageBytes
+
+    if (vaultRoot) {
+      try {
+        savedCapture = await saveGeneratedImageCapture({
+          args: input.args,
+          bytes: generatedImageBytes,
+          captureIdentity,
+          promptHash,
+          referenceImages,
+          vaultRoot,
+        })
+      } catch {
+        return {
+          rpcSuccess: false,
+          rpcText: 'image generated but vault save failed',
+          usageDraft,
+        }
       }
     }
   }
@@ -210,7 +248,7 @@ export async function executeGenerateImageTool(input: {
     if (input.hostedGeneratedImageUploader) {
       const media = await input.hostedGeneratedImageUploader.uploadGeneratedImage({
         alt: input.args.alt ?? 'Generated image',
-        bytes: openAiResult.imageBytes,
+        bytes: generatedImageBytes,
         contentType: generatedImageContentType(input.args.outputFormat),
         filename: generatedImageFilename(input.args.outputFormat),
         metadata: {
@@ -239,7 +277,7 @@ export async function executeGenerateImageTool(input: {
     }
 
     const localPath = await writeLocalGeneratedImage({
-      bytes: openAiResult.imageBytes,
+      bytes: generatedImageBytes,
       codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
       outputFormat: input.args.outputFormat,
     })
@@ -266,13 +304,15 @@ export async function executeGenerateImageTool(input: {
 async function saveGeneratedImageCapture(input: {
   args: GenerateImageToolArgs
   bytes: Uint8Array
+  captureIdentity: GeneratedImageCaptureIdentity | null
   promptHash: string
   referenceImages: readonly ResolvedGenerateImageReference[]
   vaultRoot: string
 }): Promise<SavedGeneratedImageCapture> {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-generated-image-'))
   try {
-    const filename = generatedImageFilename(input.args.outputFormat)
+    const filename = input.captureIdentity?.filename ??
+      generatedImageFilename(input.args.outputFormat)
     const sourcePath = path.join(tempRoot, filename)
     await writeFile(sourcePath, Buffer.from(input.bytes))
 
@@ -280,6 +320,7 @@ async function saveGeneratedImageCapture(input: {
     const result = await addCapture({
       vaultRoot: input.vaultRoot,
       draft: {
+        ...(input.captureIdentity ? { id: input.captureIdentity.captureId } : {}),
         occurredAt,
         source: 'derived',
         tags: ['assistant-generated-image', 'generated-image'],
@@ -292,9 +333,11 @@ async function saveGeneratedImageCapture(input: {
           role: 'media_1',
           sourcePath,
           targetName: filename,
+          allowExistingMatch: input.captureIdentity !== null,
         },
       ],
       rawImport: {
+        ...(input.captureIdentity ? { importId: input.captureIdentity.rawImportId } : {}),
         importedAt: occurredAt,
         importKind: 'capture',
         source: GENERATED_IMAGE_CAPTURE_SOURCE,
@@ -438,8 +481,73 @@ function generatedImageBytesMatchFormat(
   }
 }
 
-function generatedImageFilename(outputFormat: OpenAiImageOutputFormat): string {
-  return `generated-${randomUUID()}.${outputFormat === 'jpeg' ? 'jpg' : outputFormat}`
+function buildGeneratedImageCaptureIdentity(input: {
+  idempotencyKey: string | null
+  outputFormat: OpenAiImageOutputFormat
+}): GeneratedImageCaptureIdentity | null {
+  const idempotencyKey = normalizeNullableString(input.idempotencyKey)
+  if (!idempotencyKey) {
+    return null
+  }
+
+  return {
+    captureId: deterministicContractId(
+      ID_PREFIXES.event,
+      `murph.generated-image.capture.v1:${idempotencyKey}`,
+    ),
+    filename: generatedImageFilename(input.outputFormat, idempotencyKey),
+    rawImportId: deterministicContractId(
+      ID_PREFIXES.event,
+      `murph.generated-image.raw-import.v1:${idempotencyKey}`,
+    ),
+  }
+}
+
+async function findExistingGeneratedImageCapture(input: {
+  captureIdentity: GeneratedImageCaptureIdentity
+  outputFormat: OpenAiImageOutputFormat
+  vaultRoot: string
+}): Promise<{ bytes: Uint8Array; capture: SavedGeneratedImageCapture } | null> {
+  const expectedSuffix = `/${input.captureIdentity.captureId}/media-1-${input.captureIdentity.filename}`
+  const extension = `.${generatedImageFileExtension(input.outputFormat)}`
+  const candidates = await walkVaultFiles(input.vaultRoot, RAW_CAPTURES_DIRECTORY, {
+    extension,
+  })
+  const imageRef = candidates.find((candidate) => candidate.endsWith(expectedSuffix))
+  if (!imageRef) {
+    return null
+  }
+
+  const bytes = new Uint8Array(await readFile(path.join(input.vaultRoot, imageRef)))
+  if (!isValidGeneratedImageBytes({ bytes, outputFormat: input.outputFormat })) {
+    return null
+  }
+
+  return {
+    bytes,
+    capture: {
+      captureId: input.captureIdentity.captureId,
+      imageRef,
+      manifestPath: null,
+    },
+  }
+}
+
+function generatedImageFilename(
+  outputFormat: OpenAiImageOutputFormat,
+  idempotencyKey?: string | null,
+): string {
+  const stableKey = normalizeNullableString(idempotencyKey)
+  const suffix = generatedImageFileExtension(outputFormat)
+  if (!stableKey) {
+    return `generated-${randomUUID()}.${suffix}`
+  }
+
+  return `generated-${hashGeneratedImageStableName(stableKey)}.${suffix}`
+}
+
+function generatedImageFileExtension(outputFormat: OpenAiImageOutputFormat): string {
+  return outputFormat === 'jpeg' ? 'jpg' : outputFormat
 }
 
 function generatedImageContentType(
@@ -461,6 +569,15 @@ function hashGeneratedImagePrompt(prompt: string): string {
     .update('\0')
     .update(prompt)
     .digest('base64url')
+    .slice(0, 32)
+}
+
+function hashGeneratedImageStableName(idempotencyKey: string): string {
+  return createHash('sha256')
+    .update('murph.generated-image.filename.v1')
+    .update('\0')
+    .update(idempotencyKey)
+    .digest('hex')
     .slice(0, 32)
 }
 
