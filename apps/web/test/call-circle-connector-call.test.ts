@@ -167,6 +167,7 @@ describe("startCallCircleConnectorCall", () => {
       matchId: "hccm_123",
       now,
       outcome: "connector_start_failed",
+      phoneCallId: null,
       prisma: expect.any(Object),
       status: "dropped",
     });
@@ -227,6 +228,7 @@ describe("startCallCircleConnectorCall", () => {
       matchId: "hccm_123",
       now,
       outcome: "participant_unavailable",
+      phoneCallId: null,
       prisma: tx,
       status: "canceled",
     });
@@ -375,9 +377,43 @@ describe("startCallCircleConnectorCall", () => {
       matchId: "hccm_123",
       now,
       outcome: "verified_phone_missing",
+      phoneCallId: null,
       prisma: expect.any(Object),
       status: "dropped",
     });
+    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+  });
+
+  it("does not hand off from a stale no-call view after another worker attaches a bridge call", async () => {
+    vi.stubEnv("RETELL_CONNECTOR_AGENT_ID", "");
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const tx = {
+      hostedCallCircleMatch: {
+        findUnique: vi.fn(async () => ({
+          phoneCallId: "hpc_attached",
+          status: "bridging",
+        })),
+      },
+    };
+    const prisma = createPrisma({
+      finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+      phoneCallId: null,
+      status: "both_confirmed",
+      windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+      windowStartAt: now,
+    }, tx);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(startCallCircleConnectorCall({
+      matchId: "hccm_123",
+      now,
+    })).resolves.toEqual({ status: "ignored" });
+
+    expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "connector_agent_unconfigured",
+      }),
+    );
     expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
   });
 
@@ -408,6 +444,7 @@ describe("startCallCircleConnectorCall", () => {
       matchId: "hccm_123",
       now,
       outcome: "verified_phone_missing",
+      phoneCallId: null,
       prisma: expect.any(Object),
       status: "dropped",
     });
@@ -434,27 +471,36 @@ function createPrisma(input: {
   windowEndAt: Date;
   windowStartAt: Date;
 }, tx: object = {}) {
+  const readMatch = () => ({
+    finalAskedAt: input.finalAskedAt,
+    groupId: "hgrp_123",
+    id: "hccm_123",
+    memberAId: "member_a",
+    memberBId: "member_b",
+    phoneCall: input.phoneCall
+      ? {
+          ...input.phoneCall,
+          providerStartAttemptedAt: input.phoneCall.providerStartAttemptedAt ?? null,
+        }
+      : null,
+    phoneCallId: input.phoneCallId,
+    status: input.status,
+    windowEndAt: input.windowEndAt,
+    windowStartAt: input.windowStartAt,
+  });
+  const transactionClient = tx as {
+    hostedCallCircleMatch?: {
+      findUnique?: ReturnType<typeof vi.fn>;
+    };
+  };
+  transactionClient.hostedCallCircleMatch ??= {
+    findUnique: vi.fn(async () => readMatch()),
+  };
   return {
     $transaction: vi.fn(async (run: (tx: object) => Promise<unknown>) => run(tx)),
     hostedCallCircleMatch: {
       count: vi.fn(async () => 1),
-      findUnique: vi.fn(async () => ({
-        finalAskedAt: input.finalAskedAt,
-        groupId: "hgrp_123",
-        id: "hccm_123",
-        memberAId: "member_a",
-        memberBId: "member_b",
-        phoneCall: input.phoneCall
-          ? {
-              ...input.phoneCall,
-              providerStartAttemptedAt: input.phoneCall.providerStartAttemptedAt ?? null,
-            }
-          : null,
-        phoneCallId: input.phoneCallId,
-        status: input.status,
-        windowEndAt: input.windowEndAt,
-        windowStartAt: input.windowStartAt,
-      })),
+      findUnique: vi.fn(async () => readMatch()),
     },
     hostedCallCircleParticipant: {
       findMany: vi.fn(async (args: { where?: { memberId?: { in?: string[] } } }) =>

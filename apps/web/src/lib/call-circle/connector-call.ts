@@ -347,6 +347,20 @@ async function markCallCircleConnectorHandoff(input: {
     handedOff: boolean;
     signals: CallCircleNotificationSignal[];
   }> => {
+    const current = await tx.hostedCallCircleMatch.findUnique({
+      select: {
+        phoneCallId: true,
+        status: true,
+      },
+      where: { id: input.match.id },
+    });
+    if (
+      !current
+      || current.phoneCallId !== null
+      || !["both_confirmed", "bridging"].includes(current.status)
+    ) {
+      return { handedOff: false, signals: [] };
+    }
     if (!await canUseActiveCallCircleParticipantPair({
       groupId: input.match.groupId,
       memberAId: input.match.memberAId,
@@ -357,6 +371,7 @@ async function markCallCircleConnectorHandoff(input: {
         matchId: input.match.id,
         now: input.now,
         outcome: "participant_unavailable",
+        phoneCallId: null,
         prisma: tx,
         status: "canceled",
       });
@@ -366,6 +381,7 @@ async function markCallCircleConnectorHandoff(input: {
       matchId: input.match.id,
       now: input.now,
       outcome: input.outcome,
+      phoneCallId: null,
       prisma: tx,
       status: "dropped",
     });

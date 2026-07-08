@@ -635,6 +635,25 @@ Focused follow-up verification:
 
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts apps/web/test/call-circle-scheduler.test.ts`
 
+## ReviewGPT Follow-Up 20 2026-07-08
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- Stable provider idempotency for group offers must not delete the provider
+  message after a post-send DB record failure. The record-failure path now
+  leaves the visible provider anchor in place so a retry with the same
+  fingerprint can bind the provider-bound `HostedGroupJoinOffer` row.
+- Connector handoff terminalization must not use a stale no-call match view
+  to drop a bridge after another worker attaches a phone call. The connector
+  handoff transaction now re-reads the current match state and terminalizes
+  only when the current `phoneCallId` is still `null`; no-call handoff
+  outcomes also pass `phoneCallId: null` into the existing conditional
+  outcome write.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/call-circle-scheduler.test.ts`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT

@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => ({
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
   createHostedGroupJoinOfferFingerprint: vi.fn(),
-  deleteHostedLinqMessage: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
@@ -55,7 +54,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
-  deleteHostedLinqMessage: mocks.deleteHostedLinqMessage,
   getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
     Boolean(
@@ -634,7 +632,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       chatId: "chat_group_1",
       messageId: "msg_1",
     });
-    mocks.deleteHostedLinqMessage.mockResolvedValue(undefined);
     mocks.sendHostedLinqChatMessage.mockResolvedValue({
       chatId: "chat_group_1",
       messageId: "msg_offer_1",
@@ -730,7 +727,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
-  it("uses the same provider idempotency key so retry can bind a recovered offer message", async () => {
+  it("leaves the visible provider offer in place so retry can bind the recovered message", async () => {
     mocks.sendHostedLinqChatMessage
       .mockResolvedValueOnce({
         chatId: "chat_group_1",
@@ -740,7 +737,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         chatId: "chat_group_1",
         messageId: "msg_offer_1",
       });
-    mocks.deleteHostedLinqMessage.mockRejectedValueOnce(new Error("linq delete failed"));
     mocks.recordHostedGroupJoinOfferTx
       .mockRejectedValueOnce(new Error("temporary db failure"))
       .mockResolvedValueOnce({
@@ -794,10 +790,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         "group-join-offer:offer_fingerprint_1",
         "group-join-offer:offer_fingerprint_1",
       ]);
-    expect(mocks.deleteHostedLinqMessage).toHaveBeenCalledTimes(1);
-    expect(mocks.deleteHostedLinqMessage).toHaveBeenCalledWith({
-      messageId: "msg_offer_1",
-    });
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledTimes(2);
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenLastCalledWith({
       groupId: GROUP_SUMMARY.id,

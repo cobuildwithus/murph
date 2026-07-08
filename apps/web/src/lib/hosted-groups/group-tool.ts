@@ -30,7 +30,6 @@ import {
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
   isHostedLinqAttachmentSendPrepareFailure,
-  deleteHostedLinqMessage,
   sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage,
 } from "../hosted-onboarding/linq-client";
@@ -528,9 +527,6 @@ async function postHostedRuntimeGroupOffer(input: {
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch {
-    await cleanupHostedGroupJoinOfferMessageAfterRecordFailure({
-      messageId: sent.messageId,
-    });
     return unavailable("offer_binding_failed");
   }
 
@@ -545,21 +541,6 @@ async function postHostedRuntimeGroupOffer(input: {
     action: input.action,
     result: { group: created.group, joinUrl, status: "sent" },
   };
-}
-
-async function cleanupHostedGroupJoinOfferMessageAfterRecordFailure(input: {
-  messageId: string;
-}): Promise<void> {
-  try {
-    await deleteHostedLinqMessage({ messageId: input.messageId });
-  } catch (error) {
-    console.warn("Hosted group join-offer provider-message cleanup failed.", {
-      ...sanitizeHostedOnboardingStructuredLogDetails({
-        errorName: deriveHostedOnboardingTimingErrorName(error),
-        messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
-      }),
-    });
-  }
 }
 
 function buildHostedGroupJoinOfferMessage(input: {
