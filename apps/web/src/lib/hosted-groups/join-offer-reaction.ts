@@ -14,6 +14,10 @@ import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import {
+  signalHostedMailboxAppendRuntime,
+  signalHostedRuntimeMaintenanceRuntime,
+} from "../hosted-orchestration/signal-runtime";
+import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
 import { acceptHostedGroupJoinOfferTx } from "./group-store";
@@ -91,8 +95,9 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     threadId: input.event.linqChatId,
   });
 
+  let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
   try {
-    const accepted = await input.prisma.$transaction(async (tx) =>
+    result = await input.prisma.$transaction(async (tx) =>
       acceptHostedGroupJoinOfferTx({
         memberId: member.id,
         messageLookupKeyReadCandidates,
@@ -100,13 +105,6 @@ export async function handleHostedGroupJoinOfferReaction(input: {
         threadIdentityLookupKeyReadCandidates,
         tx,
       }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-    if (accepted.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
-      await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
-        groupId: accepted.groupId,
-        memberId: member.id,
-        prisma: input.prisma,
-      });
-    }
   } catch (error) {
     const reason = readHostedGroupJoinOfferReactionSkipReason(error);
     if (!reason) {
@@ -117,7 +115,41 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
 
+  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
+    await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+      groupId: result.groupId,
+      memberId: member.id,
+      prisma: input.prisma,
+    });
+  }
+
+  if (result.grantedVaultShareProjectionKinds.length > 0) {
+    try {
+      await signalHostedRuntimeMaintenanceRuntime({ userId: member.id });
+    } catch {
+      // Durable join/grants already committed; the runtime will offer projections later.
+    }
+  }
+
+  await signalVaultShareCleanupRuntimesBestEffort(result.vaultShareCleanupSignals);
+
   return { status: "accepted", reason: "accepted" };
+}
+
+async function signalVaultShareCleanupRuntimesBestEffort(
+  signals: readonly { mailboxItemId: string; memberId: string }[],
+): Promise<void> {
+  await Promise.all(signals.map(async (signal) => {
+    try {
+      await signalHostedMailboxAppendRuntime({
+        expectedUserId: signal.memberId,
+        mailboxItemId: signal.mailboxItemId,
+      });
+    } catch {
+      // The revoke mailbox item is durable; the destination runtime will import it on a
+      // later wake if this best-effort signal fails.
+    }
+  }));
 }
 
 function normalizeLookupKeyCandidates(values: readonly (string | null | undefined)[]): string[] {

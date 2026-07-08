@@ -12,6 +12,9 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import type { AssistantHostedToolContext } from "../src/assistant/hosted-tool-context.ts";
+import type {
+  AssistantHostedGeneratedImageUploadInput,
+} from "../src/assistant/execution-context.ts";
 import {
   executeMurphDynamicToolRequest,
   MURPH_GROUP_TOOL,
@@ -42,6 +45,7 @@ function newsletterToolCall(argumentsValue: unknown): Record<string, unknown> {
 }
 
 type NewsletterToolRequest = NonNullable<AssistantHostedToolContext["newsletterTool"]>["request"];
+type GroupToolRequest = NonNullable<AssistantHostedToolContext["groupTool"]>["request"];
 
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
@@ -51,6 +55,7 @@ describe("murph.group dynamic tool", () => {
       "create_join_link",
       "post_join_offer",
       "read_chat_participants",
+      "set_chat_avatar",
       "share_contact_card",
       "revoke_own_email_share",
     ]);
@@ -70,10 +75,14 @@ describe("murph.group dynamic tool", () => {
         .activityKind
         .enum,
     ).toEqual([...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS]);
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
+      .toContain("the name the group chose");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("{{join_url}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("{{share_scope}}");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
+      .toContain("Include {{join_url}} exactly once");
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
@@ -93,6 +102,7 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
+      displayName: "Sunday Sleep Crew",
       messageTemplate:
         "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
@@ -101,6 +111,7 @@ describe("murph.group dynamic tool", () => {
       request: {
         action: "post_join_offer",
         joinOffer: {
+          displayName: "Sunday Sleep Crew",
           messageTemplate:
             "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
           projectionScopes: [{ projectionKind: "sleep-times.v0" }],
@@ -135,6 +146,72 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "revoke_own_email_share",
       selfOptOut: { senderHandle: "member@example.test", source: "email" },
+    }))?.kind).toBe("invalid-group-arguments");
+  });
+
+  it("parses set_chat_avatar arguments without accepting model-supplied URLs or targets", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "set_chat_avatar",
+      avatarSource: "generate",
+      prompt: "A clean square badge for our running group",
+      referenceImageRefs: ["raw/inbox/reference.png"],
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "set_chat_avatar",
+        avatar: {
+          source: "generate",
+          args: {
+            alt: null,
+            outputFormat: "webp",
+            prompt: "A clean square badge for our running group",
+            quality: "medium",
+            referenceImageRefs: ["raw/inbox/reference.png"],
+            size: "1024x1024",
+          },
+        },
+      },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "set_chat_avatar",
+      alt: "Group avatar",
+      avatarSource: "image_ref",
+      imageRef: "raw/inbox/avatar.png",
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "set_chat_avatar",
+        avatar: {
+          alt: "Group avatar",
+          imageRef: "raw/inbox/avatar.png",
+          source: "image_ref",
+        },
+      },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "set_chat_avatar",
+      avatarSource: "generate",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "set_chat_avatar",
+      avatarSource: "image_ref",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "set_chat_avatar",
+      avatarSource: "image_ref",
+      groupChatIconUrl: "https://example.com/avatar.png",
+      imageRef: "raw/inbox/avatar.png",
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "set_chat_avatar",
+      avatarSource: "image_ref",
+      chatId: "chat_hijack",
+      imageRef: "raw/inbox/avatar.png",
     }))?.kind).toBe("invalid-group-arguments");
   });
 
@@ -186,6 +263,12 @@ describe("murph.group dynamic tool", () => {
       displayName: "Valid name",
       groupId: "hgrp_hijack",
     }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "update_display_name",
+      displayName: "Valid name",
+      linqThread: { chatId: "chat_hijack" },
+    }))?.kind).toBe("invalid-group-arguments");
   });
 
   it("parses create_join_link arguments into a bounded joinLink request", () => {
@@ -232,6 +315,27 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
+  it("keeps displayName optional on post_join_offer", () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
+    }));
+
+    expect(request).toEqual({
+      kind: "group",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+          projectionScopes: [{ projectionKind: "sleep-times.v0" }],
+        },
+      },
+    });
+  });
+
   it("rejects unsupported group kinds and projection kinds", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "create_join_link",
@@ -257,6 +361,22 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
+      displayName: "   ",
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      displayName: "a".repeat(121),
+      messageTemplate:
+        "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
+      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
       messageTemplate:
         "React here to join. This shares {{share_scope}} with the group. Details: {{join_url}}.",
       projectionScopes: [{ projectionKind: "all-health-data" }],
@@ -267,6 +387,232 @@ describe("murph.group dynamic tool", () => {
       messageTemplate: "React here to join. Details: {{join_url}}.",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
     }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React to this message to join. This shares {{share_scope}} with the group.",
+      projectionScopes: [
+        { projectionKind: "group-email.v0" },
+        { projectionKind: "sleep-times.v0" },
+        { projectionKind: "activity-days.v0" },
+        { projectionKind: "workout-days.v0" },
+        { projectionKind: "resting-heart-rate-days.v0" },
+        { projectionKind: "hrv-days.v0" },
+      ],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "post_join_offer",
+      messageTemplate:
+        "React to join. This shares {{share_scope}}. Details: {{join_url}} and {{join_url}}.",
+      projectionScopes: [{ projectionKind: "sleep-times.v0" }],
+    }))?.kind).toBe("invalid-group-arguments");
+  });
+
+  it("uploads a user-sent image ref before setting the group avatar", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
+    try {
+      await mkdir(join(vaultRoot, "raw", "inbox"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "raw", "inbox", "avatar.png"),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      );
+
+      const groupRequest = vi.fn<GroupToolRequest>(async (request) =>
+        request.action === "preflight_set_chat_avatar"
+          ? {
+              action: "preflight_set_chat_avatar",
+              result: { status: "ok" },
+            }
+          : {
+              action: "set_chat_avatar",
+              result: { status: "requested" },
+            });
+      const uploadGeneratedImage = vi.fn(async (
+        input: AssistantHostedGeneratedImageUploadInput,
+      ) => ({
+        alt: input.alt,
+        kind: "image" as const,
+        source: input.source,
+        url: "https://imagedelivery.net/account/avatar/public",
+      }));
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "set_chat_avatar",
+        alt: "Our group avatar",
+        avatarSource: "image_ref",
+        imageRef: "raw/inbox/avatar.png",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedGeneratedImageUploader: { uploadGeneratedImage },
+        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(result.rpcResult.success).toBe(true);
+      expect(readGroupToolPayload(result)).toEqual({
+        action: "set_chat_avatar",
+        result: { status: "requested" },
+      });
+      expect(result.responseMediaPatch).toBeUndefined();
+      expect(groupRequest).toHaveBeenNthCalledWith(1, {
+        action: "preflight_set_chat_avatar",
+      });
+      expect(groupRequest).toHaveBeenNthCalledWith(2, {
+        action: "set_chat_avatar",
+        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      });
+      expect(uploadGeneratedImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          alt: "Our group avatar",
+          contentType: "image/png",
+          filename: "group-avatar.png",
+          metadata: expect.objectContaining({
+            imageSha256: expect.any(String),
+            schema: "murph.group-avatar.v1",
+            sourceRefSha256: expect.any(String),
+          }),
+          source: "murph.group-avatar",
+        }),
+      );
+      expect(uploadGeneratedImage.mock.calls[0]?.[0].metadata).not.toHaveProperty("sourceRef");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not upload a user-sent avatar image when group avatar preflight fails", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
+    try {
+      await mkdir(join(vaultRoot, "raw", "inbox"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "raw", "inbox", "avatar.png"),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      );
+
+      const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+        action: "preflight_set_chat_avatar",
+        result: {
+          status: "unavailable",
+          unavailableReason: "linq_thread_unavailable",
+        },
+      }));
+      const uploadGeneratedImage = vi.fn(async (
+        input: AssistantHostedGeneratedImageUploadInput,
+      ) => ({
+        alt: input.alt,
+        kind: "image" as const,
+        source: input.source,
+        url: "https://imagedelivery.net/account/avatar/public",
+      }));
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "set_chat_avatar",
+        avatarSource: "image_ref",
+        imageRef: "raw/inbox/avatar.png",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedGeneratedImageUploader: { uploadGeneratedImage },
+        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(result.rpcResult.success).toBe(true);
+      expect(readGroupToolPayload(result)).toEqual({
+        action: "set_chat_avatar",
+        result: {
+          status: "unavailable",
+          unavailableReason: "linq_thread_unavailable",
+        },
+      });
+      expect(groupRequest).toHaveBeenCalledOnce();
+      expect(groupRequest).toHaveBeenCalledWith({ action: "preflight_set_chat_avatar" });
+      expect(uploadGeneratedImage).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("reports structured avatar unavailability when preflight is rejected by the host", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
+    try {
+      await mkdir(join(vaultRoot, "raw", "inbox"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "raw", "inbox", "avatar.png"),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      );
+
+      const groupRequest = vi.fn<GroupToolRequest>(async () => {
+        throw new Error("unsupported group tool action");
+      });
+      const uploadGeneratedImage = vi.fn(async (
+        input: AssistantHostedGeneratedImageUploadInput,
+      ) => ({
+        alt: input.alt,
+        kind: "image" as const,
+        source: input.source,
+        url: "https://imagedelivery.net/account/avatar/public",
+      }));
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "set_chat_avatar",
+        avatarSource: "image_ref",
+        imageRef: "raw/inbox/avatar.png",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedGeneratedImageUploader: { uploadGeneratedImage },
+        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(result.rpcResult.success).toBe(true);
+      expect(readGroupToolPayload(result)).toEqual({
+        action: "set_chat_avatar",
+        result: {
+          status: "unavailable",
+          unavailableReason: "group_avatar_preflight_unavailable",
+        },
+      });
+      expect(groupRequest).toHaveBeenCalledOnce();
+      expect(groupRequest).toHaveBeenCalledWith({ action: "preflight_set_chat_avatar" });
+      expect(uploadGeneratedImage).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
   });
 });
 
@@ -692,7 +1038,44 @@ function createNewsletterHostedToolContext(input: {
   return context as AssistantHostedToolContext;
 }
 
+function createGroupHostedToolContext(input: {
+  groupRequest?: GroupToolRequest;
+} = {}): AssistantHostedToolContext {
+  const context = {
+    connectedApps: null,
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    currentPhoneCallToolRequestKeyScope: () => null,
+    currentScheduledAutomationAuthority: () => null,
+    familyPlanTool: null,
+    groupTool: {
+      request: input.groupRequest ?? (async () => ({
+        action: "read_current" as const,
+        result: { group: null, status: "none" as const },
+      })),
+    },
+    newsletterTool: null,
+    phoneCalls: null,
+    sendVaultFile: async () => {
+      throw new Error("Vault-file sending is unavailable for this test.");
+    },
+    vaultFileSendAvailable: false,
+  };
+  return context as AssistantHostedToolContext;
+}
+
 function readNewsletterToolPayload(
+  result: Awaited<ReturnType<typeof executeMurphDynamicToolRequest>>,
+): unknown {
+  const item = result.rpcResult.contentItems[0];
+  if (!item || item.type !== "inputText") {
+    throw new Error("Expected text tool payload.");
+  }
+  return JSON.parse(item.text);
+}
+
+function readGroupToolPayload(
   result: Awaited<ReturnType<typeof executeMurphDynamicToolRequest>>,
 ): unknown {
   const item = result.rpcResult.contentItems[0];

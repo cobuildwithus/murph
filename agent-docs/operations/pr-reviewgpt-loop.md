@@ -78,6 +78,14 @@ current-task user opt-out.
    the round does not count. Rerun it against the same pushed head after fixing
    the concrete tooling/profile problem.
 
+   Treat a suspiciously fast turnaround as the same kind of invalid round. A
+   genuine `pr-review` sweep on the intended reasoning model takes several
+   minutes; a round that comes back in roughly a minute or two almost always
+   means ReviewGPT answered on a different or downgraded model instead of
+   actually reviewing the diff. Do not triage or trust that output — discard the
+   round, confirm the Eragon profile is on the intended model, and rerun against
+   the same pushed head.
+
 4. Triage every finding locally before fixing:
    - **Accepted bug/edge case**: confirm the issue through a
      production-faithful path before fixing. Use the closest actual runtime

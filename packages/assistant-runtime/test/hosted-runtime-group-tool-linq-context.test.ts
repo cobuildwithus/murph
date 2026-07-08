@@ -64,9 +64,44 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       },
     });
 
+    await groupTool.request({
+      action: "update_display_name",
+      updateDisplayName: { displayName: "Weekly Health Crew" },
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "update_display_name",
+      updateDisplayName: { displayName: "Weekly Health Crew" },
+      linqThread: {
+        authority: ROUTE_AUTHORITY,
+        chatId: "chat_group_1",
+      },
+    });
+
     await groupTool.request({ action: "read_chat_participants" });
     expect(request).toHaveBeenLastCalledWith({
       action: "read_chat_participants",
+      linqThread: {
+        authority: ROUTE_AUTHORITY,
+        chatId: "chat_group_1",
+      },
+    });
+
+    await groupTool.request({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      linqThread: {
+        authority: ROUTE_AUTHORITY,
+        chatId: "chat_group_1",
+      },
+    });
+
+    await groupTool.request({ action: "preflight_set_chat_avatar" });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "preflight_set_chat_avatar",
       linqThread: {
         authority: ROUTE_AUTHORITY,
         chatId: "chat_group_1",
@@ -96,15 +131,6 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
-
-    await groupTool.request({
-      action: "update_display_name",
-      updateDisplayName: { displayName: "Weekly Health Crew" },
-    });
-    expect(request).toHaveBeenLastCalledWith({
-      action: "update_display_name",
-      updateDisplayName: { displayName: "Weekly Health Crew" },
-    });
   });
 
   it("fails closed when the turn carries two distinct route-authorized threads", async () => {
@@ -195,6 +221,27 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({ action: "read_chat_participants" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_chat_participants" });
+
+    await groupTool.request({
+      action: "update_display_name",
+      updateDisplayName: { displayName: "Weekly Health Crew" },
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "update_display_name",
+      updateDisplayName: { displayName: "Weekly Health Crew" },
+    });
+
+    await groupTool.request({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "set_chat_avatar",
+      groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+    });
+
+    await groupTool.request({ action: "preflight_set_chat_avatar" });
+    expect(request).toHaveBeenLastCalledWith({ action: "preflight_set_chat_avatar" });
 
     await groupTool.request({
       action: "post_join_offer",

@@ -45,6 +45,7 @@ export interface EmailRuntimeDependencies {
 export interface LinqRuntimeDependencies {
   env?: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
+  publicFetchImplementation?: LinqFetch
   loadVaultFile?: (
     media: AssistantVaultFileResponseMedia,
   ) => Promise<Uint8Array>

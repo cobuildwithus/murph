@@ -84,6 +84,7 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
@@ -712,11 +713,19 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "update_display_name") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "updateDisplayName"]),
+      new Set(["action", "updateDisplayName", "linqThread"]),
       "Hosted runtime group tool update_display_name request",
     );
     return {
       action,
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool update_display_name request linqThread",
+            ),
+          }),
       updateDisplayName: parseHostedRuntimeGroupUpdateDisplayNameRequest(
         record.updateDisplayName,
       ),
@@ -754,7 +763,43 @@ export function parseHostedRuntimeGroupToolRequest(
               record.linqThread,
               "Hosted runtime group tool post_join_offer request linqThread",
             ),
-          }),
+      }),
+    };
+  }
+  if (action === "set_chat_avatar") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "groupChatIconUrl", "linqThread"]),
+      "Hosted runtime group tool set_chat_avatar request",
+    );
+    return {
+      action,
+      groupChatIconUrl: parseHostedRuntimeGroupChatIconUrl(record.groupChatIconUrl),
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool set_chat_avatar request linqThread",
+            ),
+      }),
+    };
+  }
+  if (action === "preflight_set_chat_avatar") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqThread"]),
+      "Hosted runtime group tool preflight_set_chat_avatar request",
+    );
+    if (record.linqThread === undefined || record.linqThread === null) {
+      return { action };
+    }
+    return {
+      action,
+      linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+        record.linqThread,
+        "Hosted runtime group tool preflight_set_chat_avatar request linqThread",
+      ),
     };
   }
   if (action === "read_chat_participants" || action === "share_contact_card") {
@@ -819,6 +864,39 @@ function parseHostedRuntimeGroupUpdateDisplayNameRequest(
   return { displayName };
 }
 
+function parseHostedRuntimeGroupChatIconUrl(value: unknown): string {
+  const iconUrl = requireString(
+    value,
+    "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
+  ).trim();
+  if (
+    iconUrl.length === 0 ||
+    iconUrl.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH
+  ) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(iconUrl);
+  } catch {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl must be HTTPS.");
+  }
+  if (!isHostedRuntimeGroupChatIconDeliveryUrl(parsed)) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  return parsed.toString();
+}
+
+function isHostedRuntimeGroupChatIconDeliveryUrl(url: URL): boolean {
+  if (url.hostname !== "imagedelivery.net" || url.search || url.hash) {
+    return false;
+  }
+  return url.pathname.split("/").filter(Boolean).length >= 3;
+}
+
 function parseHostedRuntimeGroupToolLinqThreadContext(
   value: unknown,
   label: string,
@@ -840,13 +918,18 @@ function parseHostedRuntimeGroupPostJoinOfferRequest(
   const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
   assertAllowedObjectKeys(
     record,
-    new Set(["messageTemplate", "projectionKinds", "projectionScopes"]),
+    new Set(["displayName", "messageTemplate", "projectionKinds", "projectionScopes"]),
     "Hosted runtime group tool post_join_offer joinOffer",
+  );
+  const displayName = parseHostedRuntimeGroupDisplayName(
+    record.displayName,
+    "Hosted runtime group tool post_join_offer displayName",
   );
   const messageTemplate = record.messageTemplate === undefined || record.messageTemplate === null
     ? null
     : parseHostedRuntimeGroupJoinOfferMessageTemplate(record.messageTemplate);
   return {
+    displayName,
     ...(messageTemplate === null ? {} : { messageTemplate }),
     projectionKinds: parseHostedRuntimeGroupProjectionKindArray(
       record.projectionKinds,
@@ -907,16 +990,11 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
     ]),
     "Hosted runtime group tool create_join_link joinLink",
   );
-  const displayName = readNullableString(
+  const displayName = parseHostedRuntimeGroupDisplayName(
     record.displayName,
     "Hosted runtime group tool create_join_link displayName",
   );
-  if (displayName !== null && displayName.trim().length === 0) {
-    throw new TypeError("Hosted runtime group tool create_join_link displayName must not be blank.");
-  }
-  if (displayName !== null && displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
-    throw new TypeError("Hosted runtime group tool create_join_link displayName is too long.");
-  }
+
   return {
     displayName,
     kind: readHostedRuntimeGroupKind(record.kind),
@@ -934,6 +1012,20 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
       "Hosted runtime group tool create_join_link requestedVaultShareProjectionScopes",
     ),
   };
+}
+
+function parseHostedRuntimeGroupDisplayName(
+  value: unknown,
+  label: string,
+): string | null {
+  const displayName = readNullableString(value, label);
+  if (displayName !== null && displayName.trim().length === 0) {
+    throw new TypeError(`${label} must not be blank.`);
+  }
+  if (displayName !== null && displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
+    throw new TypeError(`${label} is too long.`);
+  }
+  return displayName;
 }
 
 function readHostedRuntimeGroupKind(value: unknown): HostedRuntimeGroupKind | null {
@@ -1070,6 +1162,44 @@ export function parseHostedRuntimeGroupToolResponse(
           status,
           unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
           participants: null,
+        },
+      };
+    }
+  }
+
+  if (action === "set_chat_avatar") {
+    const result = requireObject(record.result, "Hosted runtime group tool set_chat_avatar response result");
+    const status = requireString(result.status, "Hosted runtime group tool set_chat_avatar response status");
+    if (status === "ok" || status === "requested") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool set_chat_avatar accepted response result");
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool set_chat_avatar unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+        },
+      };
+    }
+  }
+
+  if (action === "preflight_set_chat_avatar") {
+    const result = requireObject(record.result, "Hosted runtime group tool preflight_set_chat_avatar response result");
+    const status = requireString(result.status, "Hosted runtime group tool preflight_set_chat_avatar response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool preflight_set_chat_avatar ok response result");
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool preflight_set_chat_avatar unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
         },
       };
     }
