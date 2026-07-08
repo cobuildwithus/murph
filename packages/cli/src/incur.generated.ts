@@ -163,6 +163,11 @@ declare module 'incur' {
       'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
+      'habitat catalog': { args: { aspect?: string }; options: {} }
+      'habitat coverage': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
+      'habitat list': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
+      'habitat save': { args: { aspect: string }; options: { indicator?: string[]; recordedAt?: string; note?: string; body?: string; status?: string } }
+      'habitat show': { args: { lookup: string }; options: {} }
       'immunization import-json': { args: {}; options: { requestId?: string; input: string } }
       'immunization list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'immunization save': { args: { vaccineName: string }; options: { requestId?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[]; rawRef?: string[]; manufacturer?: string; lotNumber?: string; route?: string; site?: string; series?: string; targetDisease?: string[] } }
