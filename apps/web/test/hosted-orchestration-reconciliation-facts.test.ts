@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberCoreState: vi.fn(),
   readHostedWorkspace: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx: vi.fn(),
   hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx: vi.fn(),
   markHostedAiUsageLimitNoticeSent: vi.fn(),
   markHostedLinqDeliveryAcceptedTx: vi.fn(),
@@ -69,6 +70,8 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async (importOriginal) => 
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   claimHostedLinqDeliveryProviderDispatchTx:
     mocks.claimHostedLinqDeliveryProviderDispatchTx,
+  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx:
+    mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx:
     mocks.hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx: mocks.markHostedLinqDeliveryAcceptedTx,
@@ -176,6 +179,8 @@ describe("hosted orchestration reconciliation facts", () => {
       claimed: true,
       id: "hld_usage_limit",
     });
+    mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx
+      .mockResolvedValue(false);
     mocks.hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx
       .mockResolvedValue(false);
     mocks.hasFreshHostedAiUsageLimitNoticeClaim.mockResolvedValue(false);
@@ -682,7 +687,7 @@ describe("hosted orchestration reconciliation facts", () => {
       mocks.claimHostedLinqDeliveryProviderDispatchTx.mock.invocationCallOrder;
     expect(rolloutClaimOrder).toBeDefined();
     expect(deliveryClaimOrder).toBeDefined();
-    expect(rolloutClaimOrder ?? 0).toBeLessThan(deliveryClaimOrder ?? 0);
+    expect(deliveryClaimOrder ?? 0).toBeLessThan(rolloutClaimOrder ?? 0);
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
     const [url, init] = mocks.fetch.mock.calls[0] ?? [];
     expect(url).toBe("https://telegram.example.test/bottelegram-token/sendMessage");
@@ -739,7 +744,7 @@ describe("hosted orchestration reconciliation facts", () => {
       buildPendingConversationItem(),
     );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
-    mocks.hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx
+    mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx
       .mockResolvedValueOnce(true);
 
     const response = await reconciliationRoute.GET(
@@ -752,9 +757,8 @@ describe("hosted orchestration reconciliation facts", () => {
       reason: "ai_usage_denied",
       retryAt: null,
     });
-    expect(mocks.hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx)
+    expect(mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
       .toHaveBeenCalledWith({
-        attemptedAt: new Date(FIXED_NOW),
         idempotencyKeys: expect.any(Array),
         prisma: expect.objectContaining({ kind: "prisma" }),
       });
@@ -810,7 +814,7 @@ describe("hosted orchestration reconciliation facts", () => {
       prisma: expect.objectContaining({ kind: "prisma" }),
     });
     expect(mocks.claimHostedAiUsageLimitNoticeForRollout).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalled();
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
     expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();

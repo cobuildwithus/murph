@@ -9,6 +9,7 @@ import {
   sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
+import { hostedOnboardingError } from "./errors";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedOnboardingLinqWebhook,
@@ -439,6 +440,19 @@ function resolveHostedLinqWebhookResponseAfterDrain(input: {
     || input.drainResult.sentCount > 0
   ) {
     return input.response;
+  }
+
+  const inFlightAiUsageNotice = input.drainResult.skipped.some((skip) =>
+    skip.reason === "notice_in_flight"
+    && skip.template === "ai_usage_quota"
+  );
+  if (inFlightAiUsageNotice) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_AI_USAGE_QUOTA_NOTICE_IN_FLIGHT",
+      httpStatus: 503,
+      message: "Hosted Linq AI usage-limit notice delivery is still in flight.",
+      retryable: true,
+    });
   }
 
   const alreadyClaimedAiUsageNotice = input.drainResult.skipped.some((skip) =>

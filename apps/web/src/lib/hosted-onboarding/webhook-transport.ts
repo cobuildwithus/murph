@@ -15,6 +15,7 @@ import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
@@ -314,7 +315,13 @@ type HostedLinqSideEffectDrainInput = {
 type HostedLinqSideEffectDrainSkipReason =
   | "delivery_skipped"
   | "effect_unresolved"
-  | "notice_already_claimed";
+  | "notice_already_claimed"
+  | "notice_in_flight";
+
+type HostedLinqNoticeClaimStatus =
+  | "already_claimed"
+  | "claimed"
+  | "in_flight";
 
 export type HostedLinqSideEffectDrainResult = {
   sentCount: number;
@@ -347,11 +354,13 @@ export async function drainHostedLinqSideEffectsDirect(
       });
       continue;
     }
-    const noticeClaimed = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
-    if (!noticeClaimed) {
+    const noticeClaim = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
+    if (noticeClaim.status !== "claimed") {
       skipped.push({
         effectId: effect.effectId,
-        reason: "notice_already_claimed",
+        reason: noticeClaim.status === "in_flight"
+          ? "notice_in_flight"
+          : "notice_already_claimed",
         template: effect.payload.template,
       });
       continue;
@@ -1055,7 +1064,7 @@ function buildHostedLinqAiUsageQuotaPayload(
 async function claimHostedLinqNoticeForSideEffect(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
-): Promise<boolean> {
+): Promise<{ status: HostedLinqNoticeClaimStatus }> {
   switch (effect.payload.template) {
     case "invite_signup_fallback":
     case "invite_signup": {
@@ -1070,47 +1079,27 @@ async function claimHostedLinqNoticeForSideEffect(
         targetKind: target.targetKind,
         template: effect.payload.template,
       });
-      return claim.claimed;
+      return claim.claimed ? { status: "claimed" } : { status: "already_claimed" };
     }
     case "invite_signin":
-      return true;
+      return { status: "claimed" };
     case "ai_usage_quota": {
       if (!effect.payload.claimToken) {
-        return true;
+        return { status: "claimed" };
       }
       const target = readHostedLinqSideEffectDeliveryTarget(effect.payload);
       const attemptedAt = new Date(effect.payload.claimToken.sentAt);
-      const legacyDeliveryOwnsNotice =
-        await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
-          attemptedAt,
-          idempotencyKeys: buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
-            memberId: effect.payload.memberId,
-            periodStart: effect.payload.claimToken.periodStart,
-          }),
+      const legacyIdempotencyKeys = buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
+        memberId: effect.payload.memberId,
+        periodStart: effect.payload.claimToken.periodStart,
+      });
+      const legacyDeliverySentNotice =
+        await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+          idempotencyKeys: legacyIdempotencyKeys,
           prisma,
         });
-      if (legacyDeliveryOwnsNotice) {
-        return false;
-      }
-      const legacyPeriodClaimOwnsNotice =
-        await hasFreshHostedAiUsageLimitNoticeClaim({
-          memberId: effect.payload.memberId,
-          now: attemptedAt,
-          periodStart: effect.payload.claimToken.periodStart,
-          prisma,
-        });
-      if (legacyPeriodClaimOwnsNotice) {
-        return false;
-      }
-      const rolloutClaimedNotice =
-        await claimHostedAiUsageLimitNoticeForRollout({
-          claimedAt: attemptedAt,
-          memberId: effect.payload.memberId,
-          periodStart: effect.payload.claimToken.periodStart,
-          prisma,
-        });
-      if (!rolloutClaimedNotice) {
-        return false;
+      if (legacyDeliverySentNotice) {
+        return { status: "already_claimed" };
       }
       const claim = await claimHostedLinqDeliveryProviderDispatchTx({
         idempotencyKey: effect.effectId,
@@ -1123,17 +1112,58 @@ async function claimHostedLinqNoticeForSideEffect(
         targetKind: target.targetKind,
         template: effect.payload.template,
       });
-      return claim.claimed;
+      if (!claim.claimed) {
+        const currentDeliverySentNotice =
+          await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+            idempotencyKeys: [effect.effectId],
+            prisma,
+          });
+        return currentDeliverySentNotice
+          ? { status: "already_claimed" }
+          : { status: "in_flight" };
+      }
+      const legacyDeliveryInFlight =
+        await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
+          attemptedAt,
+          idempotencyKeys: legacyIdempotencyKeys,
+          prisma,
+        });
+      if (legacyDeliveryInFlight) {
+        return { status: "in_flight" };
+      }
+      const legacyPeriodClaimOwnsNotice =
+        await hasFreshHostedAiUsageLimitNoticeClaim({
+          memberId: effect.payload.memberId,
+          now: attemptedAt,
+          periodStart: effect.payload.claimToken.periodStart,
+          prisma,
+        });
+      if (legacyPeriodClaimOwnsNotice) {
+        return { status: "in_flight" };
+      }
+      const rolloutClaimedNotice =
+        await claimHostedAiUsageLimitNoticeForRollout({
+          claimedAt: attemptedAt,
+          memberId: effect.payload.memberId,
+          periodStart: effect.payload.claimToken.periodStart,
+          prisma,
+        });
+      if (!rolloutClaimedNotice) {
+        return { status: "in_flight" };
+      }
+      return { status: "claimed" };
     }
     case "daily_quota":
-      return claimHostedLinqQuotaReplyNotice({
+      return (await claimHostedLinqQuotaReplyNotice({
         memberId: effect.payload.memberId,
         occurredAt: effect.payload.occurredAt,
         prisma,
-      });
+      }))
+        ? { status: "claimed" }
+        : { status: "already_claimed" };
     case "conversation_home_redirect":
     case "family_invite_reply":
-      return true;
+      return { status: "claimed" };
   }
 }
 

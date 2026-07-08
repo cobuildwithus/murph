@@ -112,6 +112,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -138,6 +139,8 @@ describe("hosted Linq webhook transport", () => {
       claimed: true,
       id: "hld_claimed",
     });
+    vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
+      .mockResolvedValue(false);
     vi.mocked(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx)
       .mockResolvedValue(false);
     vi.mocked(claimHostedAiUsageLimitNoticeForRollout).mockResolvedValue(true);
@@ -633,7 +636,7 @@ describe("hosted Linq webhook transport", () => {
       .mock.invocationCallOrder;
     expect(rolloutClaimOrder).toBeDefined();
     expect(deliveryClaimOrder).toBeDefined();
-    expect(rolloutClaimOrder ?? 0).toBeLessThan(deliveryClaimOrder ?? 0);
+    expect(deliveryClaimOrder ?? 0).toBeLessThan(rolloutClaimOrder ?? 0);
     expect(markHostedAiUsageLimitNoticeSent).toHaveBeenCalledWith({
       memberId: "member-1",
       periodStart: "2026-03-01T00:00:00.000Z",
@@ -649,6 +652,9 @@ describe("hosted Linq webhook transport", () => {
       claimed: false,
       id: "hld_existing",
     });
+    vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
@@ -677,7 +683,7 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("skips AI usage quota replies already delivered under a legacy notice-code key", async () => {
-    vi.mocked(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx)
+    vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
       .mockResolvedValueOnce(true);
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
@@ -712,9 +718,8 @@ describe("hosted Linq webhook transport", () => {
       ],
     });
 
-    expect(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx)
+    expect(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
       .toHaveBeenCalledWith({
-        attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
         idempotencyKeys: expect.any(Array),
         prisma: {},
       });
@@ -753,7 +758,7 @@ describe("hosted Linq webhook transport", () => {
       skipped: [
         {
           effectId: effect.effectId,
-          reason: "notice_already_claimed",
+          reason: "notice_in_flight",
           template: "ai_usage_quota",
         },
       ],
@@ -766,7 +771,7 @@ describe("hosted Linq webhook transport", () => {
       prisma: {},
     });
     expect(claimHostedAiUsageLimitNoticeForRollout).not.toHaveBeenCalled();
-    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });
@@ -800,13 +805,13 @@ describe("hosted Linq webhook transport", () => {
       skipped: [
         {
           effectId: effect.effectId,
-          reason: "notice_already_claimed",
+          reason: "notice_in_flight",
           template: "ai_usage_quota",
         },
       ],
     });
 
-    expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
   });

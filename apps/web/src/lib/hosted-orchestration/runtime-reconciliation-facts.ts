@@ -45,6 +45,7 @@ import {
 } from "../hosted-execution/usage-limit-notice";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
@@ -427,16 +428,38 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       memberId: input.userId,
       periodStart: decision.periodStart,
     });
-    const legacyDeliveryOwnsNotice =
-      await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
-        attemptedAt: sentAt,
-        idempotencyKeys: buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
-          memberId: input.userId,
-          periodStart: decision.periodStart,
-        }),
+    const legacyIdempotencyKeys = buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
+      memberId: input.userId,
+      periodStart: decision.periodStart,
+    });
+    const legacyDeliverySentNotice =
+      await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
+        idempotencyKeys: legacyIdempotencyKeys,
         prisma: input.prisma,
       });
-    if (legacyDeliveryOwnsNotice) {
+    if (legacyDeliverySentNotice) {
+      return;
+    }
+    const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: sentAt,
+      idempotencyKey,
+      prisma: input.prisma,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: wake.eventId,
+      targetKind: "telegram_thread",
+      template: "ai_usage_quota",
+    });
+    if (!claimed.claimed) {
+      return;
+    }
+    const legacyDeliveryInFlight =
+      await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
+        attemptedAt: sentAt,
+        idempotencyKeys: legacyIdempotencyKeys,
+        prisma: input.prisma,
+      });
+    if (legacyDeliveryInFlight) {
       return;
     }
     const legacyPeriodClaimOwnsNotice =
@@ -457,19 +480,6 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         prisma: input.prisma,
       });
     if (!rolloutClaimedNotice) {
-      return;
-    }
-    const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
-      attemptedAt: sentAt,
-      idempotencyKey,
-      prisma: input.prisma,
-      reclaimStalePreProviderAttempt: true,
-      source: "hosted_runtime_ai_usage_limit_notice",
-      sourceRef: wake.eventId,
-      targetKind: "telegram_thread",
-      template: "ai_usage_quota",
-    });
-    if (!claimed.claimed) {
       return;
     }
 
