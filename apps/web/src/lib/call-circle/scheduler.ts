@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
+import type { HostedPhoneCallResult } from "@murphai/hosted-execution";
 
 import {
   canAppendCallCircleSetupNotification,
@@ -75,6 +76,7 @@ const EMPTY_RESULT: RunCallCircleSchedulerResult = {
 
 const CALL_CIRCLE_STRANDED_BRIDGE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 const CALL_CIRCLE_BRIDGE_ANALYSIS_GRACE_MS = 10 * 60 * 1_000;
+const CALL_CIRCLE_BRIDGE_START_GRACE_MS = 10 * 60 * 1_000;
 const CALL_CIRCLE_SCHEDULER_PAGE_SIZE = 100;
 const CALL_CIRCLE_HANDOFF_OUTCOMES = [
   "connector_agent_unconfigured",
@@ -82,6 +84,10 @@ const CALL_CIRCLE_HANDOFF_OUTCOMES = [
   "text_handoff",
   "verified_phone_missing",
 ] as const;
+const CALL_CIRCLE_BRIDGE_START_TIMEOUT_RESULT = {
+  outcome: "not_completed",
+  summary: "Murph could not confirm whether the phone call started.",
+} satisfies HostedPhoneCallResult;
 
 type CallCircleNotificationPreflightOk = Extract<
   Awaited<ReturnType<typeof readCallCircleNotificationPreflightTx>>,
@@ -200,6 +206,19 @@ export async function runCallCircleScheduler(input: {
         match.status === "bridging"
         && isRecoverableCallCircleBridgePhoneCall(match.phoneCall)
         && now >= match.windowEndAt
+      ) {
+        const handedOff = await appendCallCircleBridgeHandoffs({
+          match,
+          now,
+          prisma,
+        });
+        if (handedOff) result.handoffs += 1;
+        continue;
+      }
+
+      if (
+        match.status === "bridging"
+        && hasTimedOutCallCircleBridgeStart({ match, now })
       ) {
         const handedOff = await appendCallCircleBridgeHandoffs({
           match,
@@ -1152,6 +1171,13 @@ async function appendCallCircleBridgeHandoffs(input: {
     })) {
       return { handedOff: false, signals: [] };
     }
+    if (!await failTimedOutCallCircleBridgeStartTx({
+      match: input.match,
+      now: input.now,
+      tx,
+    })) {
+      return { handedOff: false, signals: [] };
+    }
     const marked = await markCallCircleMatchOutcome({
       matchId: input.match.id,
       now: input.now,
@@ -1219,6 +1245,37 @@ async function cancelCallCircleMatchIfParticipantsInactive(input: {
   return false;
 }
 
+async function failTimedOutCallCircleBridgeStartTx(input: {
+  match: SchedulerMatch;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  if (!hasTimedOutCallCircleBridgeStart({
+    match: input.match,
+    now: input.now,
+  })) {
+    return true;
+  }
+  const phoneCall = input.match.phoneCall;
+  if (!phoneCall) return true;
+  const updated = await input.tx.hostedPhoneCall.updateMany({
+    data: {
+      resultJson: CALL_CIRCLE_BRIDGE_START_TIMEOUT_RESULT,
+      status: "failed",
+    },
+    where: {
+      analyzedAt: null,
+      endedAt: null,
+      id: phoneCall.id,
+      provider: "retell",
+      providerCallId: null,
+      providerStartAttemptedAt: { not: null },
+      status: "starting",
+    },
+  });
+  return updated.count > 0;
+}
+
 function isRecoverableCallCircleBridgePhoneCall(
   phoneCall: SchedulerMatch["phoneCall"],
 ): boolean {
@@ -1241,6 +1298,23 @@ function hasTimedOutCallCircleBridgeAnalysis(input: {
     && input.phoneCall.analyzedAt === null
     && input.now.getTime() - input.phoneCall.endedAt.getTime()
       >= CALL_CIRCLE_BRIDGE_ANALYSIS_GRACE_MS,
+  );
+}
+
+function hasTimedOutCallCircleBridgeStart(input: {
+  match: SchedulerMatch;
+  now: Date;
+}): boolean {
+  const phoneCall = input.match.phoneCall;
+  return Boolean(
+    phoneCall
+    && phoneCall.analyzedAt === null
+    && phoneCall.endedAt === null
+    && phoneCall.providerCallId === null
+    && phoneCall.providerStartAttemptedAt !== null
+    && phoneCall.status === "starting"
+    && input.now.getTime() - input.match.windowEndAt.getTime()
+      >= CALL_CIRCLE_BRIDGE_START_GRACE_MS,
   );
 }
 

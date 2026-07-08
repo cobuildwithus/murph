@@ -555,12 +555,6 @@ async function postHostedRuntimeGroupOffer(input: {
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch {
-    await revokeReservedHostedGroupJoinOfferBestEffort({
-      groupId: created.group.id,
-      now,
-      offerId: offerReservation.id,
-      prisma,
-    });
     return unavailable("offer_binding_failed");
   }
 

@@ -799,12 +799,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "offer_binding_failed",
       },
     });
-    expect(mocks.revokeUnboundHostedGroupJoinOfferTx).toHaveBeenCalledWith({
-      groupId: GROUP_SUMMARY.id,
-      now: expect.any(Date),
-      offerId: "hgrpjo_1",
-      tx: fakeTx,
-    });
+    expect(mocks.revokeUnboundHostedGroupJoinOfferTx).not.toHaveBeenCalled();
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request,
@@ -827,7 +822,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.reserveHostedGroupJoinOfferTx.mock.calls.map(([input]) => input.offerFingerprint))
       .toEqual(["offer_fingerprint_1", "offer_fingerprint_1"]);
     expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledTimes(2);
-    expect(mocks.revokeUnboundHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
+    expect(mocks.revokeUnboundHostedGroupJoinOfferTx).not.toHaveBeenCalled();
     expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenLastCalledWith({
       groupId: GROUP_SUMMARY.id,
       messageId: "msg_offer_1",

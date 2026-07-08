@@ -1312,8 +1312,14 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
   });
 
-  it("leaves an attached provider-attempted bridge for the phone-call owner after the grace elapses", async () => {
+  it("fails and hands off an attached provider-attempted bridge after the grace elapses", async () => {
     const now = new Date("2026-07-06T15:45:00.000Z");
+    const phoneCallUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = {
+      hostedPhoneCall: {
+        updateMany: phoneCallUpdateMany,
+      },
+    };
     const prisma = createSchedulerPrisma({
       dueMatches: [schedulerMatch({
         finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
@@ -1329,18 +1335,43 @@ describe("runCallCircleScheduler", () => {
         windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
       })],
       groups: [],
+      tx,
     });
 
     await expect(runCallCircleScheduler({
       now,
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      handoffs: 0,
+      handoffs: 1,
     });
 
-    expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
-    expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
+    expect(phoneCallUpdateMany).toHaveBeenCalledWith({
+      data: {
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not confirm whether the phone call started.",
+        },
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        endedAt: null,
+        id: "hpc_starting",
+        provider: "retell",
+        providerCallId: null,
+        providerStartAttemptedAt: { not: null },
+        status: "starting",
+      },
+    });
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      now,
+      outcome: "text_handoff",
+      phoneCallId: "hpc_starting",
+      prisma: tx,
+      status: "dropped",
+    });
+    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
   });
 
   it("retries terminal Call Circle outcome notifications that were not appended yet", async () => {
@@ -1820,6 +1851,7 @@ function schedulerMatch(input: {
     phoneCall: input.phoneCall
       ? {
           ...input.phoneCall,
+          endedAt: input.phoneCall.endedAt ?? null,
           providerCallId: input.phoneCall.providerCallId ?? null,
           providerStartAttemptedAt: input.phoneCall.providerStartAttemptedAt ?? null,
         }
