@@ -90,21 +90,54 @@ export type HostedVaultShareActivitySelectorProjectionKind =
   | HostedVaultShareActivityMinutesProjectionKind
   | HostedVaultShareActivitySessionCountProjectionKind;
 
-export const HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS =
-  Object.freeze(
-    [...new Set(activityKindAliasGroups
+const HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ALIAS_GROUPS = [
+  ["walk", "walking"],
+  ["run", "running"],
+  ["bike", "biking", "cycle", "cycling", "ride"],
+  ["surf", "surfing"],
+  ["swim", "swimming"],
+  ["hike", "hiking"],
+  ["row", "rowing"],
+] as const;
+
+const HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ALIAS_GROUPS = [
+  ["walk", "walking"],
+  ["run", "running"],
+  ["bike", "biking", "cycle", "cycling", "ride"],
+  ["dance", "dancing"],
+  ["surf", "surfing"],
+  ["swim", "swimming"],
+  ["hike", "hiking"],
+  ["row", "rowing"],
+  ["sauna"],
+  ["strength", "strength-training", "weightlifting", "weights"],
+] as const;
+
+function buildHostedVaultShareActivitySelectorKinds(
+  groups: readonly (readonly string[])[],
+): readonly string[] {
+  return Object.freeze(
+    [...new Set(groups
       .flatMap((group) => [...group])
       .map((kind) => normalizeActivityKindToken(kind))
       .filter((kind): kind is string => kind !== null))]
       .sort((left, right) => left.localeCompare(right)),
   );
+}
+
+export const HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS =
+  buildHostedVaultShareActivitySelectorKinds(activityKindAliasGroups);
 
 export const HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS =
   HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS;
 export const HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS =
-  HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS;
+  buildHostedVaultShareActivitySelectorKinds(
+    HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ALIAS_GROUPS,
+  );
 export const HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS =
-  HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS;
+  buildHostedVaultShareActivitySelectorKinds(
+    HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ALIAS_GROUPS,
+  );
 
 export type HostedVaultShareActivitySelectorActivityKind = string;
 export type HostedVaultShareActivityMinutesSelectorActivityKind =
@@ -262,21 +295,43 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES =
 export function isHostedVaultShareActivitySelectorActivityKind(
   value: unknown,
 ): value is HostedVaultShareActivitySelectorActivityKind {
+  return isHostedVaultShareActivitySelectorActivityKindInSet(
+    value,
+    HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS,
+  );
+}
+
+function isHostedVaultShareActivitySelectorActivityKindInSet(
+  value: unknown,
+  activityKinds: readonly string[],
+): value is HostedVaultShareActivitySelectorActivityKind {
   if (typeof value !== "string") {
     return false;
   }
   const normalized = normalizeActivityKindToken(value);
   return normalized !== null
     && normalized === value
-    && HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS.includes(normalized);
+    && activityKinds.includes(normalized);
 }
 
 export const isHostedVaultShareActivityMinutesSelectorActivityKind =
   isHostedVaultShareActivitySelectorActivityKind;
-export const isHostedVaultShareActivityDistanceSelectorActivityKind =
-  isHostedVaultShareActivitySelectorActivityKind;
-export const isHostedVaultShareActivitySessionCountSelectorActivityKind =
-  isHostedVaultShareActivitySelectorActivityKind;
+export function isHostedVaultShareActivityDistanceSelectorActivityKind(
+  value: unknown,
+): value is HostedVaultShareActivityDistanceSelectorActivityKind {
+  return isHostedVaultShareActivitySelectorActivityKindInSet(
+    value,
+    HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
+  );
+}
+export function isHostedVaultShareActivitySessionCountSelectorActivityKind(
+  value: unknown,
+): value is HostedVaultShareActivitySessionCountSelectorActivityKind {
+  return isHostedVaultShareActivitySelectorActivityKindInSet(
+    value,
+    HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
+  );
+}
 
 export const HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA =
   "murph.vault-share.delivery.v1";
@@ -476,7 +531,7 @@ export function buildHostedVaultShareActivityMinutesProjectionScope(input: {
 export function buildHostedVaultShareActivityDistanceProjectionScope(input: {
   activityKind: string;
 }): HostedVaultShareActivityDistanceProjectionScope {
-  const activityKind = parseHostedVaultShareActivitySelectorActivityKind(
+  const activityKind = parseHostedVaultShareActivityDistanceSelectorActivityKind(
     input.activityKind,
     "Vault share activity-distance selector activityKind",
   );
@@ -489,7 +544,7 @@ export function buildHostedVaultShareActivityDistanceProjectionScope(input: {
 export function buildHostedVaultShareActivitySessionCountProjectionScope(input: {
   activityKind: string;
 }): HostedVaultShareActivitySessionCountProjectionScope {
-  const activityKind = parseHostedVaultShareActivitySelectorActivityKind(
+  const activityKind = parseHostedVaultShareActivitySessionCountSelectorActivityKind(
     input.activityKind,
     "Vault share activity-session-count selector activityKind",
   );
@@ -555,7 +610,7 @@ export function parseHostedVaultShareProjectionScope(
     return {
       projectionKind,
       selector: {
-        activityKind: parseHostedVaultShareActivitySelectorActivityKind(
+        activityKind: parseHostedVaultShareActivityDistanceSelectorActivityKind(
           selector.activityKind,
           `${label} selector activityKind`,
         ),
@@ -572,7 +627,7 @@ export function parseHostedVaultShareProjectionScope(
     return {
       projectionKind,
       selector: {
-        activityKind: parseHostedVaultShareActivitySelectorActivityKind(
+        activityKind: parseHostedVaultShareActivitySessionCountSelectorActivityKind(
           selector.activityKind,
           `${label} selector activityKind`,
         ),
@@ -603,6 +658,32 @@ function parseHostedVaultShareActivitySelectorActivityKind(
   if (!isHostedVaultShareActivitySelectorActivityKind(activityKind)) {
     throw new TypeError(
       `${label} must be a recognized normalized activity alias.`,
+    );
+  }
+  return activityKind;
+}
+
+function parseHostedVaultShareActivityDistanceSelectorActivityKind(
+  value: unknown,
+  label: string,
+): HostedVaultShareActivityDistanceSelectorActivityKind {
+  const activityKind = requireString(value, label);
+  if (!isHostedVaultShareActivityDistanceSelectorActivityKind(activityKind)) {
+    throw new TypeError(
+      `${label} must be a recognized normalized distance activity alias.`,
+    );
+  }
+  return activityKind;
+}
+
+function parseHostedVaultShareActivitySessionCountSelectorActivityKind(
+  value: unknown,
+  label: string,
+): HostedVaultShareActivitySessionCountSelectorActivityKind {
+  const activityKind = requireString(value, label);
+  if (!isHostedVaultShareActivitySessionCountSelectorActivityKind(activityKind)) {
+    throw new TypeError(
+      `${label} must be a recognized normalized activity-session alias.`,
     );
   }
   return activityKind;

@@ -1118,7 +1118,6 @@ function activitySessionRowDedupeKey(
     return JSON.stringify({
       activityKind: dedupeActivityKind,
       date: row.date,
-      durationMinutes: row.durationMinutes,
       endedAt: row.endedAt ?? null,
       startedAt: row.startedAt ?? null,
     });
@@ -1128,7 +1127,6 @@ function activitySessionRowDedupeKey(
     ?? JSON.stringify({
       activityKind: dedupeActivityKind,
       date: row.date,
-      durationMinutes: row.durationMinutes,
       pointIds: sortedStrings(row.pointIds ?? []),
     });
 }

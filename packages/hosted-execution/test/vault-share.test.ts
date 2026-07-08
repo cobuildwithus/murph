@@ -9,7 +9,9 @@ import {
   buildHostedVaultShareDeliveryDedupeKey,
   buildHostedVaultShareProjectionScopeKey,
   buildHostedVaultShareRevokeDedupeKey,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
@@ -182,10 +184,10 @@ describe("vault-share contracts", () => {
       ...HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS.map((activityKind) =>
         `activity-minutes-days.v1.activityKind.${activityKind}`
       ),
-      ...HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS.map((activityKind) =>
+      ...HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS.map((activityKind) =>
         `activity-distance-days.v1.activityKind.${activityKind}`
       ),
-      ...HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS.map((activityKind) =>
+      ...HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS.map((activityKind) =>
         `activity-session-count-days.v1.activityKind.${activityKind}`
       ),
     ]);
@@ -490,6 +492,14 @@ describe("vault-share contracts", () => {
       {
         projectionKind: "activity-session-count-days.v1",
         selector: { activityKind: "running+walking" },
+      },
+      {
+        projectionKind: "activity-distance-days.v1",
+        selector: { activityKind: "sleep" },
+      },
+      {
+        projectionKind: "activity-session-count-days.v1",
+        selector: { activityKind: "sleep" },
       },
       {
         projectionKind: "activity-session-count-days.v1",

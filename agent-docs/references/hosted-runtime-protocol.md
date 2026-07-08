@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-03
+Last verified: 2026-07-07
 
 ## Decision
 
@@ -147,6 +147,29 @@ Legacy active-invocation heartbeat and container-stopped methods are inert
 compatibility shims, not lifecycle policy, and must be deleted after
 2026-05-25. Live lifecycle control is the runtime write fence plus explicit
 execution cleanup.
+
+### Vault-Share Active-Scope Deploy Skew
+
+The runner reads active vault-share projection scopes through web's signed
+`/api/internal/hosted-runtime/vault-share/active-kinds` callback. New runner
+bundles must send repeated `supportedProjectionKind` query params for every
+projection kind they can parse. Web filters returned active scopes to that
+declared set before serializing the response.
+
+Warm old runner bundles omit `supportedProjectionKind`; web must treat that as
+support for the pre-distance/count scope set: fixed projection kinds plus
+`activity-minutes-days.v1`. During gradual rollout, newly granted
+`activity-distance-days.v1` and `activity-session-count-days.v1` scopes are
+therefore hidden from old runners rather than making active-scope parsing fail
+or suppressing existing vault-share offers. New runners receive those scopes as
+soon as their bundle is live and declares support.
+
+Safe deploy order is either web first or Cloudflare runner first. Immediate
+container rollout is not required for this capability-negotiated path. Rollback
+floor: after web has accepted distance/count grants, rolling web behind the
+projection-scope parser that knows those rows can make old web code unable to
+read or serve the stored scope keys. Roll back to a build with this parser or
+newer, or remove the new grants before rolling web behind it.
 
 ## Current Protocol
 

@@ -20,9 +20,11 @@ import {
 } from '@murphai/hosted-execution/runtime-control'
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
-  HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
@@ -335,19 +337,26 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
-const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
+const GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: ['projectionKind'],
   properties: {
     projectionKind: {
       type: 'string',
-      enum: [
-        ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
-        HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
-        HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
-        HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
-      ],
+      enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
+    },
+  },
+} as const
+
+const GROUP_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind', 'selector'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND],
     },
     selector: {
       type: 'object',
@@ -356,13 +365,72 @@ const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
       properties: {
         activityKind: {
           type: 'string',
-          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS],
+          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS],
         },
       },
       description:
-        'Required only for activity-minutes-days.v1, activity-distance-days.v1, and activity-session-count-days.v1; omit selector for fixed projection kinds.',
+        'Required for activity-minutes-days.v1.',
     },
   },
+} as const
+
+const GROUP_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind', 'selector'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND],
+    },
+    selector: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['activityKind'],
+      properties: {
+        activityKind: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS],
+        },
+      },
+      description:
+        'Required for activity-distance-days.v1.',
+    },
+  },
+} as const
+
+const GROUP_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind', 'selector'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND],
+    },
+    selector: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['activityKind'],
+      properties: {
+        activityKind: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS],
+        },
+      },
+      description:
+        'Required for activity-session-count-days.v1.',
+    },
+  },
+} as const
+
+const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
+  oneOf: [
+    GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA,
+    GROUP_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_SCOPE_SCHEMA,
+    GROUP_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_SCOPE_SCHEMA,
+    GROUP_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_SCOPE_SCHEMA,
+  ],
 } as const
 
 export const MURPH_GROUP_TOOL = {
@@ -403,7 +471,7 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projection scopes the join page may offer joining members. Joining never shares them automatically; each member approves their own selection. Use activity-minutes-days.v1, activity-distance-days.v1, or activity-session-count-days.v1 with selector.activityKind for running, walking, swimming, sauna, or any other recognized activity alias.',
+          'Optional bounded health projection scopes the join page may offer joining members. Joining never shares them automatically; each member approves their own selection. Use activity-minutes-days.v1 with a recognized activity alias, activity-distance-days.v1 with a distance-capable movement alias, or activity-session-count-days.v1 with a recognized activity/intervention alias.',
       },
       projectionScopes: {
         type: 'array',

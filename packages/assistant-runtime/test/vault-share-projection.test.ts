@@ -1048,6 +1048,41 @@ describe("selectProjectableActivitySessionCountDays", () => {
     ).toEqual(selected);
   });
 
+  it("deduplicates count rows when one copy omits duration", () => {
+    const selected = selectProjectableActivitySessionCountDays({
+      nowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 40,
+          recordIds: ["evt_run_duration"],
+          startedAt: "2026-07-03T07:00:00.000Z",
+        }),
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          recordIds: ["evt_run_no_duration"],
+          startedAt: "2026-07-03T07:00:00.000Z",
+        }),
+      ],
+      spec: runningSessionCountSpec,
+    });
+
+    expect(selected).toEqual([
+      {
+        data: {
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          sessionCount: 1,
+        },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
+      },
+    ]);
+  });
+
   it("counts canonical intervention sessions without requiring duration", async () => {
     const saunaSessionCountSpec = requireActivitySessionCountSpec(
       buildHostedVaultShareActivitySessionCountProjectionScope({

@@ -4,8 +4,13 @@ import { join } from "node:path";
 
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
-  HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA,
 } from "@murphai/hosted-execution/vault-share";
@@ -58,18 +63,30 @@ describe("murph.group dynamic tool", () => {
       .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.maxItems)
       .toBe(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length);
-    expect(
-      MURPH_GROUP_TOOL
-        .inputSchema
-        .properties
-        .projectionScopes
-        .items
-        .properties
-        .selector
-        .properties
-        .activityKind
-        .enum,
-    ).toEqual([...HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS]);
+    const [
+      fixedScopeSchema,
+      minutesScopeSchema,
+      distanceScopeSchema,
+      sessionCountScopeSchema,
+    ] = MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.items.oneOf;
+    expect(fixedScopeSchema.properties.projectionKind.enum)
+      .toEqual(expect.arrayContaining(["sleep-times.v0", "steps-days.v0"]));
+    expect(minutesScopeSchema.properties.projectionKind.enum)
+      .toEqual([HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND]);
+    expect(distanceScopeSchema.properties.projectionKind.enum)
+      .toEqual([HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND]);
+    expect(sessionCountScopeSchema.properties.projectionKind.enum)
+      .toEqual([HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND]);
+    expect(minutesScopeSchema.properties.selector.properties.activityKind.enum)
+      .toEqual([...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS]);
+    expect(distanceScopeSchema.properties.selector.properties.activityKind.enum)
+      .toEqual([...HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS]);
+    expect(sessionCountScopeSchema.properties.selector.properties.activityKind.enum)
+      .toEqual([...HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS]);
+    expect(distanceScopeSchema.properties.selector.properties.activityKind.enum)
+      .not.toContain("sleep");
+    expect(sessionCountScopeSchema.properties.selector.properties.activityKind.enum)
+      .not.toContain("sleep");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
       .toContain("{{join_url}}");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.messageTemplate.description)
@@ -274,6 +291,22 @@ describe("murph.group dynamic tool", () => {
       requestedVaultShareProjectionScopes: [{
         projectionKind: "activity-session-count-days.v1",
         selector: { activityKind: "running+walking" },
+      }],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "create_join_link",
+      requestedVaultShareProjectionScopes: [{
+        projectionKind: "activity-distance-days.v1",
+        selector: { activityKind: "sleep" },
+      }],
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "create_join_link",
+      requestedVaultShareProjectionScopes: [{
+        projectionKind: "activity-session-count-days.v1",
+        selector: { activityKind: "sleep" },
       }],
     }))?.kind).toBe("invalid-group-arguments");
 
