@@ -828,7 +828,7 @@ describe("buildClinicalImportPlan", () => {
         {
           resourceType: "Observation",
           relativePath: "Observation/page-1.json",
-          count: 6,
+          count: 7,
         },
       ],
       pages: {
@@ -1009,13 +1009,39 @@ describe("buildClinicalImportPlan", () => {
               },
             ],
           },
+          {
+            resourceType: "Observation",
+            id: "parent-value-normal-component-panel",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:05:00.000Z",
+            category: [{
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/observation-category",
+                code: "laboratory",
+              }],
+            }],
+            code: { text: "Metabolic panel" },
+            valueQuantity: { value: 999, unit: "mg/dL" },
+            component: [
+              {
+                code: { text: "Albumin" },
+                interpretation: [{
+                  coding: [{
+                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+                    code: "N",
+                  }],
+                }],
+                valueString: "Normal",
+              },
+            ],
+          },
         ],
       },
     });
 
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
-    expect(plan.candidates).toHaveLength(4);
+    expect(plan.candidates).toHaveLength(5);
     const abnormalPanel = plan.candidates.find(
       (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
         candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "component-abnormal-panel",
@@ -1088,6 +1114,28 @@ describe("buildClinicalImportPlan", () => {
         slug: "potassium",
         unit: "mmol/L",
         value: 4.2,
+      },
+    ]);
+
+    const parentValueNormalComponentPanel = plan.candidates.find(
+      (candidate): candidate is ClinicalImportCandidateOfKind<"diagnostic-test"> =>
+        candidate.kind === "diagnostic-test" && candidate.resource.resourceId === "parent-value-normal-component-panel",
+    );
+    expect(parentValueNormalComponentPanel?.payload.resultStatus).toBe("unknown");
+    expect(parentValueNormalComponentPanel?.payload.results).toEqual([
+      {
+        analyte: "Metabolic panel",
+        biomarkerSlug: "metabolic-panel",
+        slug: "metabolic-panel",
+        unit: "mg/dL",
+        value: 999,
+      },
+      {
+        analyte: "Albumin",
+        biomarkerSlug: "albumin",
+        flag: "normal",
+        slug: "albumin",
+        textValue: "Normal",
       },
     ]);
 

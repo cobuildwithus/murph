@@ -499,7 +499,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     return unsupportedOnly(context, "observation code is not importable");
   }
 
-  const componentResults: BloodTestResultRecord[] = [];
+  const results: BloodTestResultRecord[] = [];
   for (const component of components) {
     const componentInterpretation = resultInterpretationFromInterpretation(component.interpretation);
     if (componentInterpretation.status === "ambiguous") {
@@ -510,14 +510,13 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     if (!componentResult) {
       return unsupportedOnly(context, "laboratory observation component result is not importable");
     }
-    componentResults.push(componentResult);
+    results.push(componentResult);
   }
   const topLevelInterpretation = resultInterpretationFromInterpretation(context.resource.interpretation);
   if (topLevelInterpretation.status === "ambiguous") {
     return unsupportedOnly(context, "clinical result interpretation is ambiguous");
   }
 
-  const results = [...componentResults];
   const singleResult = buildBloodTestResult(context.resource, topLevelInterpretation.flag);
   if (singleResult) {
     results.unshift(singleResult);
@@ -535,22 +534,17 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   }
 
   const testName = textForCodeableConcept(context.resource.code) ?? "FHIR laboratory observation";
-  const componentResultStatus = resultStatusFromBloodTestResults(
-    componentResults.length > 0 ? componentResults : results,
-  );
+  const emittedResultStatus = resultStatusFromBloodTestResults(results);
   if (
     topLevelInterpretation.status !== "unknown"
-    && componentResultStatus !== "unknown"
-    && topLevelInterpretation.status !== componentResultStatus
+    && emittedResultStatus !== "unknown"
+    && topLevelInterpretation.status !== emittedResultStatus
   ) {
     return unsupportedOnly(context, "clinical result interpretation is ambiguous");
   }
-  let resultStatus = componentResultStatus;
-  if (
-    topLevelInterpretation.status !== "unknown"
-    && (componentResults.length === 0 || topLevelInterpretation.status === "abnormal")
-  ) {
-    resultStatus = topLevelInterpretation.status;
+  let resultStatus = emittedResultStatus;
+  if (topLevelInterpretation.status === "abnormal" && emittedResultStatus === "unknown") {
+    resultStatus = "abnormal";
   }
 
   return candidateOnly(
