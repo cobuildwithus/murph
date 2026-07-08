@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { initializeVault } from '@murphai/core'
+import { deleteEvent, initializeVault } from '@murphai/core'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -244,6 +244,61 @@ describe('executeGenerateImageTool reference images', () => {
       expect(second.rpcSuccess).toBe(true)
       expect(second.savedImageRef).toBe(first.savedImageRef)
       expect(second.usageDraft).toBeNull()
+      expect(fetchCalls).toBe(1)
+    })
+  })
+
+  it('does not reuse or regenerate a deleted generated capture replay', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      const codexHome = path.join(root, 'codex-home')
+      await initializeVault({ vaultRoot })
+
+      let fetchCalls = 0
+      const fetchImpl: typeof fetch = async () => {
+        fetchCalls += 1
+        return openAiPngResponse()
+      }
+      const args = {
+        alt: null,
+        outputFormat: 'png' as const,
+        prompt: 'Draw a replay-sensitive generated image.',
+        quality: 'medium' as const,
+        size: '1024x1024' as const,
+      }
+
+      const first = await executeGenerateImageTool({
+        args,
+        captureIdempotencyKey: 'turn-1:deleted-tool-replay',
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl,
+        providerRequestOrdinal: 1,
+        vaultRoot,
+      })
+      expect(first.rpcSuccess).toBe(true)
+      expect(first.savedCaptureId).toMatch(/^evt_/u)
+      expect(fetchCalls).toBe(1)
+
+      await deleteEvent({
+        vaultRoot,
+        eventId: first.savedCaptureId!,
+      })
+
+      const replay = await executeGenerateImageTool({
+        args,
+        captureIdempotencyKey: 'turn-1:deleted-tool-replay',
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl,
+        providerRequestOrdinal: 2,
+        vaultRoot,
+      })
+
+      expect(replay).toMatchObject({
+        rpcSuccess: false,
+        rpcText: 'saved generated image was deleted; make a new image request',
+      })
       expect(fetchCalls).toBe(1)
     })
   })

@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+
 import type { EventAttachment, EventRecord, RawImportKind } from "@murphai/contracts";
+import { eventRecordSchema } from "@murphai/contracts";
 
 import { emitAuditRecord } from "../../audit.ts";
 import { ID_PREFIXES } from "../../constants.ts";
@@ -8,14 +11,20 @@ import {
   stagePreparedEventAttachmentsInBatch,
   type EventAttachmentOwnerKind,
   type EventAttachmentSourceInput,
+  type StagedEventAttachments,
 } from "../../event-attachments.ts";
 import { VaultError } from "../../errors.ts";
 import {
   buildEventSpineLifecycle,
   eventSpineRevision,
+  isDeletedEventSpineRecord,
+  selectLatestEventSpineEntry,
 } from "../../history/event-spine.ts";
 import { generateRecordId } from "../../ids.ts";
-import { runCanonicalWrite } from "../../operations/write-batch.ts";
+import { readJsonlRecords } from "../../jsonl.ts";
+import { readJsonFile } from "../../fs.ts";
+import { runCanonicalWrite, type WriteBatch } from "../../operations/write-batch.ts";
+import { normalizeRelativeVaultPath } from "../../path-safety.ts";
 import type { DateInput } from "../../types.ts";
 import { loadVault } from "../../vault.ts";
 import {
@@ -74,6 +83,11 @@ export interface AddCaptureInput {
   rawImport?: RawImportOptions;
 }
 
+export interface AddCaptureWithLookupInput extends AddCaptureInput {
+  lookupAttachmentRole: string;
+  lookupKey: string;
+}
+
 export interface AddMeasurementInput {
   vaultRoot: string;
   draft: AttachmentBackedEventDraft<"measurement">;
@@ -96,9 +110,46 @@ export interface AddCaptureResult extends UpsertEventResult {
   manifestPath: string | null;
 }
 
+export interface AddCaptureWithLookupResult extends AddCaptureResult {
+  lookupPath: string;
+}
+
 export interface AddMeasurementResult extends UpsertEventResult {
   event: EventRecordByKind<"measurement">;
   manifestPath: string | null;
+}
+
+export type FindCaptureByLookupResult =
+  | {
+      status: "missing";
+      lookupPath: string;
+    }
+  | {
+      eventId: string;
+      ledgerFile: string;
+      lookupPath: string;
+      status: "deleted";
+    }
+  | {
+      attachmentRef: string;
+      event: EventRecordByKind<"note">;
+      eventId: string;
+      ledgerFile: string;
+      lookupPath: string;
+      manifestPath: string | null;
+      status: "live";
+    };
+
+const CAPTURE_LOOKUP_SCHEMA = "murph.capture-lookup.v1";
+const CAPTURE_LOOKUP_ROOT = "derived/captures/lookups";
+
+interface StoredCaptureLookup {
+  attachmentRef: string;
+  eventId: string;
+  ledgerFile: string;
+  lookupKeyHash: string;
+  manifestPath: string | null;
+  schema: typeof CAPTURE_LOOKUP_SCHEMA;
 }
 
 function mergeByRelativePath<T extends { relativePath: string }>(
@@ -222,6 +273,208 @@ function normalizeCaptureDraft(
   return {
     ...draft,
     tags: uniqueTrimmedStringList([...(draft.tags ?? []), "capture"]) ?? ["capture"],
+  };
+}
+
+function hashCaptureLookupKey(lookupKey: string): string {
+  const normalized = normalizeOptionalText(lookupKey);
+  if (!normalized) {
+    throw new VaultError("INVALID_INPUT", "Capture lookup key is required.");
+  }
+
+  return createHash("sha256")
+    .update("murph.capture-lookup.v1")
+    .update("\0")
+    .update(normalized)
+    .digest("hex");
+}
+
+function captureLookupPathForKey(lookupKey: string): { lookupKeyHash: string; lookupPath: string } {
+  const lookupKeyHash = hashCaptureLookupKey(lookupKey);
+  return {
+    lookupKeyHash,
+    lookupPath: `${CAPTURE_LOOKUP_ROOT}/${lookupKeyHash.slice(0, 2)}/${lookupKeyHash}.json`,
+  };
+}
+
+function readStringField(record: Record<string, unknown>, field: string): string | null {
+  const value = record[field];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function readNullableStringField(record: Record<string, unknown>, field: string): string | null | undefined {
+  const value = record[field];
+  if (value === null) {
+    return null;
+  }
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function parseStoredCaptureLookup(input: {
+  expectedLookupKeyHash: string;
+  lookupPath: string;
+  value: unknown;
+}): StoredCaptureLookup {
+  if (input.value === null || typeof input.value !== "object" || Array.isArray(input.value)) {
+    throw new VaultError("CAPTURE_LOOKUP_INVALID", "Capture lookup record is invalid.", {
+      relativePath: input.lookupPath,
+    });
+  }
+
+  const record = input.value as Record<string, unknown>;
+  const schema = readStringField(record, "schema");
+  const lookupKeyHash = readStringField(record, "lookupKeyHash");
+  const eventId = readStringField(record, "eventId");
+  const ledgerFile = readStringField(record, "ledgerFile");
+  const attachmentRef = readStringField(record, "attachmentRef");
+  const manifestPath = readNullableStringField(record, "manifestPath");
+
+  if (
+    schema !== CAPTURE_LOOKUP_SCHEMA ||
+    lookupKeyHash !== input.expectedLookupKeyHash ||
+    !eventId ||
+    !ledgerFile ||
+    !attachmentRef ||
+    manifestPath === undefined
+  ) {
+    throw new VaultError("CAPTURE_LOOKUP_INVALID", "Capture lookup record is invalid.", {
+      relativePath: input.lookupPath,
+    });
+  }
+
+  const normalizedLedgerFile = normalizeRelativeVaultPath(ledgerFile);
+  if (!normalizedLedgerFile.startsWith("ledger/events/") || !normalizedLedgerFile.endsWith(".jsonl")) {
+    throw new VaultError("CAPTURE_LOOKUP_INVALID", "Capture lookup ledger file is invalid.", {
+      relativePath: input.lookupPath,
+    });
+  }
+
+  return {
+    attachmentRef: normalizeRelativeVaultPath(attachmentRef),
+    eventId,
+    ledgerFile: normalizedLedgerFile,
+    lookupKeyHash,
+    manifestPath: manifestPath === null ? null : normalizeRelativeVaultPath(manifestPath),
+    schema: CAPTURE_LOOKUP_SCHEMA,
+  };
+}
+
+async function readStoredCaptureLookup(input: {
+  lookupKey: string;
+  vaultRoot: string;
+}): Promise<{ lookup: StoredCaptureLookup; lookupPath: string } | null> {
+  const { lookupKeyHash, lookupPath } = captureLookupPathForKey(input.lookupKey);
+
+  let value: unknown;
+  try {
+    value = await readJsonFile(input.vaultRoot, lookupPath);
+  } catch (error) {
+    if (error instanceof VaultError && error.code === "VAULT_FILE_MISSING") {
+      return null;
+    }
+    throw error;
+  }
+
+  return {
+    lookup: parseStoredCaptureLookup({
+      expectedLookupKeyHash: lookupKeyHash,
+      lookupPath,
+      value,
+    }),
+    lookupPath,
+  };
+}
+
+function parseStoredCaptureEvent(record: unknown, lookupPath: string): EventRecord | null {
+  if (record === null || typeof record !== "object" || Array.isArray(record)) {
+    return null;
+  }
+  const parsed = eventRecordSchema.safeParse(record);
+  if (!parsed.success) {
+    throw new VaultError("CAPTURE_LOOKUP_EVENT_INVALID", "Capture lookup event record is invalid.", {
+      relativePath: lookupPath,
+    });
+  }
+  return parsed.data;
+}
+
+function assertLiveCaptureLookupEvent(input: {
+  attachmentRef: string;
+  event: EventRecord;
+  lookupPath: string;
+}): EventRecordByKind<"note"> {
+  if (input.event.kind !== "note" || !input.event.tags?.includes("capture")) {
+    throw new VaultError("CAPTURE_LOOKUP_EVENT_INVALID", "Capture lookup target is not a capture event.", {
+      relativePath: input.lookupPath,
+    });
+  }
+
+  const hasAttachment = input.event.attachments?.some((attachment) =>
+    attachment.relativePath === input.attachmentRef
+  ) ?? false;
+  if (!hasAttachment) {
+    throw new VaultError("CAPTURE_LOOKUP_EVENT_STALE", "Capture lookup attachment is no longer present.", {
+      relativePath: input.lookupPath,
+    });
+  }
+
+  return input.event as EventRecordByKind<"note">;
+}
+
+export async function findCaptureByLookup(input: {
+  lookupKey: string;
+  vaultRoot: string;
+}): Promise<FindCaptureByLookupResult> {
+  const { lookupPath } = captureLookupPathForKey(input.lookupKey);
+  const stored = await readStoredCaptureLookup(input);
+  if (!stored) {
+    return {
+      lookupPath,
+      status: "missing",
+    };
+  }
+
+  const records = await readJsonlRecords({
+    vaultRoot: input.vaultRoot,
+    relativePath: stored.lookup.ledgerFile,
+  });
+  const matches = records
+    .map((record) => parseStoredCaptureEvent(record, stored.lookupPath))
+    .filter((record): record is EventRecord => record?.id === stored.lookup.eventId)
+    .map((record) => ({
+      relativePath: stored.lookup.ledgerFile,
+      record,
+    }));
+  const latest = selectLatestEventSpineEntry(matches);
+  if (!latest) {
+    throw new VaultError("CAPTURE_LOOKUP_EVENT_MISSING", "Capture lookup target event is missing.", {
+      relativePath: stored.lookupPath,
+    });
+  }
+
+  if (isDeletedEventSpineRecord(latest.record)) {
+    return {
+      eventId: stored.lookup.eventId,
+      ledgerFile: stored.lookup.ledgerFile,
+      lookupPath: stored.lookupPath,
+      status: "deleted",
+    };
+  }
+
+  const event = assertLiveCaptureLookupEvent({
+    attachmentRef: stored.lookup.attachmentRef,
+    event: latest.record,
+    lookupPath: stored.lookupPath,
+  });
+
+  return {
+    attachmentRef: stored.lookup.attachmentRef,
+    event,
+    eventId: stored.lookup.eventId,
+    ledgerFile: stored.lookup.ledgerFile,
+    lookupPath: stored.lookupPath,
+    manifestPath: stored.lookup.manifestPath,
+    status: "live",
   };
 }
 
@@ -361,6 +614,10 @@ type AttachmentBackedWriteResult<TStoredKind extends EventRecord["kind"]> = Upse
   manifestPath: string | null;
 };
 
+interface AttachmentBackedAdditionalStageResult {
+  auditFiles?: readonly string[];
+}
+
 interface WriteAttachmentBackedEventInput<
   K extends AttachmentBackedPublicEventKind,
   TStoredKind extends EventRecord["kind"],
@@ -397,6 +654,13 @@ interface WriteAttachmentBackedEventInput<
     code: string;
     message: string;
   };
+  stageAdditionalResult?: (input: {
+    batch: WriteBatch;
+    eventRecord: EventRecordByKind<TStoredKind>;
+    ledgerFile: string;
+    manifestPath: string | null;
+    stagedAttachments: StagedEventAttachments | null;
+  }) => Promise<AttachmentBackedAdditionalStageResult>;
 }
 
 export async function writeAttachmentBackedEvent<
@@ -406,12 +670,15 @@ export async function writeAttachmentBackedEvent<
   input: WriteAttachmentBackedEventInput<K, TStoredKind>,
 ): Promise<AttachmentBackedWriteResult<TStoredKind>> {
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
-  const eventId = normalizeDraftEventId(input.draft.id) ?? generateRecordId(ID_PREFIXES.event);
+  const suppliedEventId = normalizeDraftEventId(input.draft.id);
+  const eventId = suppliedEventId ?? generateRecordId(ID_PREFIXES.event);
   const draft: AttachmentBackedEventDraft<K> = {
     ...input.draft,
     id: eventId,
   };
-  const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, eventId);
+  const matchedShards = suppliedEventId
+    ? await loadEventLedgerShardsById(input.vaultRoot, eventId)
+    : [];
   ensureSpecializedEventKind(input.specializedKind, eventId, matchedShards);
   const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
   let rehydratedDraft = rehydrateDraftFromLatest(
@@ -476,6 +743,15 @@ export async function writeAttachmentBackedEvent<
         : rehydratedDraft;
       const eventRecord = input.buildRecord(projectedDraft, vault.metadata.timezone, lifecycle);
       const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
+      const additional = input.stageAdditionalResult
+        ? await input.stageAdditionalResult({
+            batch,
+            eventRecord,
+            ledgerFile,
+            manifestPath: stagedAttachments?.manifestPath ?? null,
+            stagedAttachments,
+          })
+        : null;
 
       await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
       await emitAuditRecord({
@@ -485,7 +761,7 @@ export async function writeAttachmentBackedEvent<
         commandName: input.commandName,
         summary: `Wrote ${input.writeLabel} ${eventId}.`,
         occurredAt: eventRecord.occurredAt,
-        files: [ledgerFile],
+        files: [ledgerFile, ...(additional?.auditFiles ?? [])],
         targetIds: [eventId],
       });
 
@@ -593,6 +869,95 @@ export async function addCapture(
         lifecycle,
       ) as EventRecordByKind<"note">,
   });
+}
+
+export async function addCaptureWithLookup(
+  input: AddCaptureWithLookupInput,
+): Promise<AddCaptureWithLookupResult> {
+  if (normalizeDraftEventId(input.draft.id)) {
+    throw new VaultError("INVALID_INPUT", "Capture lookup writes generate their own event id.");
+  }
+
+  const existing = await findCaptureByLookup({
+    lookupKey: input.lookupKey,
+    vaultRoot: input.vaultRoot,
+  });
+  if (existing.status === "live") {
+    throw new VaultError("CAPTURE_LOOKUP_EXISTS", "Capture lookup already points at a live capture.", {
+      eventId: existing.eventId,
+      relativePath: existing.lookupPath,
+    });
+  }
+  if (existing.status === "deleted") {
+    throw new VaultError("CAPTURE_LOOKUP_DELETED", "Capture lookup points at a deleted capture.", {
+      eventId: existing.eventId,
+      relativePath: existing.lookupPath,
+    });
+  }
+
+  const { lookupKeyHash, lookupPath } = captureLookupPathForKey(input.lookupKey);
+  const result = await writeAttachmentBackedEvent<"capture", "note">({
+    vaultRoot: input.vaultRoot,
+    draft: input.draft,
+    attachments: input.attachments,
+    rawImport: input.rawImport,
+    specializedKind: "capture",
+    writeLabel: "capture",
+    operationType: "capture_write",
+    commandName: "core.addCaptureWithLookup",
+    ownerKind: "capture",
+    defaultImportKind: "capture",
+    rawImportFamily: "capture",
+    toLatestDraft: toCaptureDraft,
+    mergeDrafts: mergeCaptureDrafts,
+    applyAttachmentProjections: applyCaptureAttachmentProjections,
+    normalizeDraft: normalizeCaptureDraft,
+    requireAttachments: {
+      code: "CAPTURE_MEDIA_MISSING",
+      message: "Capture writes require at least one media attachment.",
+    },
+    stageAdditionalResult: async ({ batch, eventRecord, ledgerFile, manifestPath }) => {
+      const attachmentRef = eventRecord.attachments?.find((attachment) =>
+        attachment.role === input.lookupAttachmentRole
+      )?.relativePath ?? null;
+      if (!attachmentRef) {
+        throw new VaultError(
+          "CAPTURE_LOOKUP_ATTACHMENT_MISSING",
+          "Capture lookup attachment role was not written.",
+        );
+      }
+
+      const lookup: StoredCaptureLookup = {
+        attachmentRef,
+        eventId: eventRecord.id,
+        ledgerFile,
+        lookupKeyHash,
+        manifestPath,
+        schema: CAPTURE_LOOKUP_SCHEMA,
+      };
+      await batch.stageTextWrite(lookupPath, `${JSON.stringify(lookup, null, 2)}\n`, {
+        overwrite: false,
+      });
+
+      return {
+        auditFiles: [lookupPath],
+      };
+    },
+    buildRecord: (draft, fallbackTimeZone, lifecycle) =>
+      buildTypedEventRecord(
+        {
+          kind: "note",
+          ...draft,
+        },
+        fallbackTimeZone,
+        lifecycle,
+      ) as EventRecordByKind<"note">,
+  });
+
+  return {
+    ...result,
+    lookupPath,
+  };
 }
 
 export async function addMeasurement(

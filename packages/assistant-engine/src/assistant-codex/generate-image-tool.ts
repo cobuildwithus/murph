@@ -4,13 +4,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { RAW_CAPTURES_DIRECTORY } from '@murphai/contracts'
 import {
   addCapture,
+  addCaptureWithLookup,
   deterministicContractId,
+  findCaptureByLookup,
   ID_PREFIXES,
-  loadEventLedgerShardsById,
-  selectLatestMatchedEvent,
 } from '@murphai/core'
 import type {
   AssistantResponseMedia,
@@ -77,10 +76,23 @@ interface SavedGeneratedImageCapture {
 }
 
 interface GeneratedImageCaptureIdentity {
-  captureId: string
   filename: string
+  lookupKey: string
   rawImportId: string
 }
+
+type ExistingGeneratedImageCapture =
+  | {
+      status: 'deleted'
+    }
+  | {
+      status: 'live'
+      bytes: Uint8Array
+      capture: SavedGeneratedImageCapture
+    }
+  | {
+      status: 'missing'
+    }
 
 export async function executeGenerateImageTool(input: {
   abortSignal?: AbortSignal | null
@@ -129,19 +141,34 @@ export async function executeGenerateImageTool(input: {
         outputFormat: input.args.outputFormat,
       })
     : null
-  const existingCapture = captureIdentity && vaultRoot
-    ? await findExistingGeneratedImageCapture({
+  let existingCapture: ExistingGeneratedImageCapture = { status: 'missing' }
+  if (captureIdentity && vaultRoot) {
+    try {
+      existingCapture = await findExistingGeneratedImageCapture({
         captureIdentity,
         outputFormat: input.args.outputFormat,
         vaultRoot,
       })
-    : null
+    } catch {
+      return {
+        rpcSuccess: false,
+        rpcText: 'saved generated image lookup could not be loaded',
+      }
+    }
+  }
   let generatedImageBytes: Uint8Array
   let referenceImages: ResolvedGenerateImageReference[] = []
   let savedCapture: SavedGeneratedImageCapture | null = null
   let usageDraft: AssistantProviderUsageDraft | null = null
 
-  if (existingCapture) {
+  if (existingCapture.status === 'deleted') {
+    return {
+      rpcSuccess: false,
+      rpcText: 'saved generated image was deleted; make a new image request',
+    }
+  }
+
+  if (existingCapture.status === 'live') {
     generatedImageBytes = existingCapture.bytes
     savedCapture = existingCapture.capture
   } else {
@@ -318,48 +345,88 @@ async function saveGeneratedImageCapture(input: {
     await writeFile(sourcePath, Buffer.from(input.bytes))
 
     const occurredAt = new Date().toISOString()
-    const result = await addCapture({
-      vaultRoot: input.vaultRoot,
-      draft: {
-        ...(input.captureIdentity ? { id: input.captureIdentity.captureId } : {}),
-        occurredAt,
-        source: 'derived',
-        tags: ['assistant-generated-image', 'generated-image'],
-        title: 'Generated image',
-        note: 'Assistant-generated image saved for later visual reuse.',
-      },
-      attachments: [
-        {
-          kind: 'photo',
-          role: 'media_1',
-          sourcePath,
-          targetName: filename,
-          allowExistingMatch: input.captureIdentity !== null,
-        },
-      ],
-      rawImport: {
-        ...(input.captureIdentity ? { importId: input.captureIdentity.rawImportId } : {}),
-        importedAt: occurredAt,
-        importKind: 'capture',
-        source: GENERATED_IMAGE_CAPTURE_SOURCE,
-        provenance: {
-          family: 'capture',
-          generatedImage: {
-            model: OPENAI_IMAGE_GENERATION_MODEL,
-            outputFormat: input.args.outputFormat,
-            promptHash: input.promptHash,
-            quality: input.args.quality,
-            referenceImageCount: input.referenceImages.length,
-            ...(input.referenceImages.length > 0
-              ? { referenceImageSetHash: hashReferenceImageSet(input.referenceImages) }
-              : {}),
-            schema: 'murph.generated-image.v1',
-            size: input.args.size,
+    const result = input.captureIdentity
+      ? await addCaptureWithLookup({
+          vaultRoot: input.vaultRoot,
+          lookupAttachmentRole: 'media_1',
+          lookupKey: input.captureIdentity.lookupKey,
+          draft: {
+            occurredAt,
+            source: 'derived',
+            tags: ['assistant-generated-image', 'generated-image'],
+            title: 'Generated image',
+            note: 'Assistant-generated image saved for later visual reuse.',
           },
-          mediaCount: 1,
-        },
-      },
-    })
+          attachments: [
+            {
+              kind: 'photo',
+              role: 'media_1',
+              sourcePath,
+              targetName: filename,
+            },
+          ],
+          rawImport: {
+            importId: input.captureIdentity.rawImportId,
+            importedAt: occurredAt,
+            importKind: 'capture',
+            source: GENERATED_IMAGE_CAPTURE_SOURCE,
+            provenance: {
+              family: 'capture',
+              generatedImage: {
+                model: OPENAI_IMAGE_GENERATION_MODEL,
+                outputFormat: input.args.outputFormat,
+                promptHash: input.promptHash,
+                quality: input.args.quality,
+                referenceImageCount: input.referenceImages.length,
+                ...(input.referenceImages.length > 0
+                  ? { referenceImageSetHash: hashReferenceImageSet(input.referenceImages) }
+                  : {}),
+                schema: 'murph.generated-image.v1',
+                size: input.args.size,
+              },
+              mediaCount: 1,
+            },
+          },
+        })
+      : await addCapture({
+          vaultRoot: input.vaultRoot,
+          draft: {
+            occurredAt,
+            source: 'derived',
+            tags: ['assistant-generated-image', 'generated-image'],
+            title: 'Generated image',
+            note: 'Assistant-generated image saved for later visual reuse.',
+          },
+          attachments: [
+            {
+              kind: 'photo',
+              role: 'media_1',
+              sourcePath,
+              targetName: filename,
+            },
+          ],
+          rawImport: {
+            importedAt: occurredAt,
+            importKind: 'capture',
+            source: GENERATED_IMAGE_CAPTURE_SOURCE,
+            provenance: {
+              family: 'capture',
+              generatedImage: {
+                model: OPENAI_IMAGE_GENERATION_MODEL,
+                outputFormat: input.args.outputFormat,
+                promptHash: input.promptHash,
+                quality: input.args.quality,
+                referenceImageCount: input.referenceImages.length,
+                ...(input.referenceImages.length > 0
+                  ? { referenceImageSetHash: hashReferenceImageSet(input.referenceImages) }
+                  : {}),
+                schema: 'murph.generated-image.v1',
+                size: input.args.size,
+              },
+              mediaCount: 1,
+            },
+          },
+        })
 
     const imageRef = result.event.attachments?.find((attachment) =>
       attachment.role === 'media_1'
@@ -492,11 +559,8 @@ function buildGeneratedImageCaptureIdentity(input: {
   }
 
   return {
-    captureId: deterministicContractId(
-      ID_PREFIXES.event,
-      `murph.generated-image.capture.v1:${idempotencyKey}`,
-    ),
     filename: generatedImageFilename(input.outputFormat, idempotencyKey),
+    lookupKey: `murph.generated-image.capture.v1:${idempotencyKey}`,
     rawImportId: deterministicContractId(
       ID_PREFIXES.event,
       `murph.generated-image.raw-import.v1:${idempotencyKey}`,
@@ -508,73 +572,33 @@ async function findExistingGeneratedImageCapture(input: {
   captureIdentity: GeneratedImageCaptureIdentity
   outputFormat: OpenAiImageOutputFormat
   vaultRoot: string
-}): Promise<{ bytes: Uint8Array; capture: SavedGeneratedImageCapture } | null> {
-  const matched = selectLatestMatchedEvent(
-    await loadEventLedgerShardsById(input.vaultRoot, input.captureIdentity.captureId),
-  )
-  const imageRef = readGeneratedImageCaptureAttachmentRef({
-    captureIdentity: input.captureIdentity,
-    record: matched?.record ?? null,
+}): Promise<ExistingGeneratedImageCapture> {
+  const found = await findCaptureByLookup({
+    lookupKey: input.captureIdentity.lookupKey,
+    vaultRoot: input.vaultRoot,
   })
-  if (!imageRef) {
-    return null
+  if (found.status === 'missing') {
+    return { status: 'missing' }
+  }
+  if (found.status === 'deleted') {
+    return { status: 'deleted' }
   }
 
+  const imageRef = found.attachmentRef
   const bytes = new Uint8Array(await readFile(path.join(input.vaultRoot, imageRef)))
   if (!isValidGeneratedImageBytes({ bytes, outputFormat: input.outputFormat })) {
-    return null
+    throw new Error('Saved generated image bytes are invalid.')
   }
 
   return {
+    status: 'live',
     bytes,
     capture: {
-      captureId: input.captureIdentity.captureId,
+      captureId: found.eventId,
       imageRef,
-      manifestPath: null,
+      manifestPath: found.manifestPath,
     },
   }
-}
-
-function readGeneratedImageCaptureAttachmentRef(input: {
-  captureIdentity: GeneratedImageCaptureIdentity
-  record: unknown
-}): string | null {
-  const record = asUnknownRecord(input.record)
-  if (record?.kind !== 'note') {
-    return null
-  }
-
-  const attachments = Array.isArray(record.attachments) ? record.attachments : []
-  const expectedSuffix =
-    `/${input.captureIdentity.captureId}/media-1-${input.captureIdentity.filename}`
-
-  for (const attachmentValue of attachments) {
-    const attachment = asUnknownRecord(attachmentValue)
-    if (attachment?.role !== 'media_1') {
-      continue
-    }
-
-    const relativePath = normalizeUnknownNullableString(attachment.relativePath)
-    if (
-      relativePath &&
-      relativePath.startsWith(`${RAW_CAPTURES_DIRECTORY}/`) &&
-      relativePath.endsWith(expectedSuffix)
-    ) {
-      return relativePath
-    }
-  }
-
-  return null
-}
-
-function asUnknownRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object'
-    ? value as Record<string, unknown>
-    : null
-}
-
-function normalizeUnknownNullableString(value: unknown): string | null {
-  return typeof value === 'string' ? normalizeNullableString(value) : null
 }
 
 function generatedImageFilename(

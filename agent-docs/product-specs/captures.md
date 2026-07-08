@@ -1,6 +1,6 @@
 # Captures
 
-Last verified: 2026-04-21
+Last verified: 2026-07-08
 
 ## Current State
 
@@ -16,6 +16,7 @@ Captures are private canonical vault truth.
 
 - Durable capture records live in the canonical event ledger as `note` events tagged with `capture`.
 - Immutable media files and manifests live under `raw/captures/**`.
+- Generated-image retry lookups live under `derived/captures/lookups/**` as hashed pointers to the capture event and primary media ref. They are a bounded lookup materialization only; the latest event revision decides whether the capture is live or deleted.
 - `capture` is the user/operator-facing primitive; the durable record shape stays composed from existing event, attachment, tag, and raw-import primitives.
 - Labels, body sites, collections, and tags are lightweight context. They are not a medical ontology and should not require a body-map schema.
 - Medical interpretation belongs with the user and their clinician. Murph can organize the evidence, but it should not infer malignancy, diagnosis, or urgency from photos.

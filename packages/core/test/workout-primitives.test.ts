@@ -8,8 +8,10 @@ import {
   addActivitySession,
   addBodyMeasurement,
   addCapture,
+  addCaptureWithLookup,
   addMeasurement,
   deleteEvent,
+  findCaptureByLookup,
   initializeVault,
   readJsonlRecords,
 } from '@murphai/core'
@@ -339,6 +341,58 @@ describe('workout primitive core mutations', () => {
         }),
       ]),
     )
+  })
+
+  it('resolves capture lookup records through the live event spine', async () => {
+    const vaultRoot = await createTempVault('murph-core-capture-lookup-')
+    const sourcePath = await createSourceFile(vaultRoot, 'lookup-photo.jpg', 'lookup-photo')
+
+    const result = await addCaptureWithLookup({
+      vaultRoot,
+      lookupAttachmentRole: 'media_1',
+      lookupKey: 'test.capture.lookup:one',
+      draft: {
+        occurredAt: '2026-04-08T08:30:00.000Z',
+        source: 'manual',
+        title: 'Lookup-backed capture',
+        note: 'Reference photo with a stable lookup.',
+      },
+      attachments: [{
+        role: 'media_1',
+        sourcePath,
+      }],
+    })
+
+    expect(result.created).toBe(true)
+    expect(result.lookupPath).toMatch(
+      /^derived\/captures\/lookups\/[0-9a-f]{2}\/[0-9a-f]{64}\.json$/u,
+    )
+
+    const live = await findCaptureByLookup({
+      vaultRoot,
+      lookupKey: 'test.capture.lookup:one',
+    })
+    expect(live).toMatchObject({
+      status: 'live',
+      eventId: result.eventId,
+      ledgerFile: result.ledgerFile,
+      attachmentRef: result.event.attachments?.[0]?.relativePath,
+    })
+
+    await deleteEvent({
+      vaultRoot,
+      eventId: result.eventId,
+    })
+
+    const deleted = await findCaptureByLookup({
+      vaultRoot,
+      lookupKey: 'test.capture.lookup:one',
+    })
+    expect(deleted).toMatchObject({
+      status: 'deleted',
+      eventId: result.eventId,
+      ledgerFile: result.ledgerFile,
+    })
   })
 
   it('adds canonical measurements through the open core seam and preserves qualifiers', async () => {
