@@ -667,11 +667,11 @@ export async function synchronizeAssistantIndexes(
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
 
 // Recurring-maintenance projection reader. Deliberately does NOT go through
-// readAssistantIndexStore: that reader's missing/corrupt fallbacks rebuild
-// the index by scanning every session file, which is only acceptable on
-// explicit repair/routing paths. Here a parseable legacy index gets an
-// empty projection persisted once (O(1)) so bounded foreground saves warm
-// it up, and a missing or corrupt index just yields no evidence this wake.
+// readAssistantIndexStore by default: that reader's missing/corrupt fallbacks
+// rebuild the index by scanning every session file, which is only acceptable on
+// explicit repair/routing paths. A parseable legacy index returns an in-memory
+// empty projection so bounded maintenance stays cheap while a later repair
+// owner can still distinguish "projection missing" from "projection built empty".
 export async function ensureAssistantRecentSessionsProjection(
   paths: AssistantStatePaths,
   options?: {
@@ -708,13 +708,6 @@ export async function ensureAssistantRecentSessionsProjection(
     return store.recentSessions
   }
 
-  const updated = assistantAliasStoreSchema.parse({
-    version: ASSISTANT_INDEX_STORE_VERSION,
-    aliases: store.aliases,
-    conversationKeys: store.conversationKeys,
-    recentSessions: {},
-  })
-  await writeJsonFileAtomic(paths.indexesPath, updated)
   return {}
 }
 

@@ -672,6 +672,15 @@ describe('assistant store persistence seams', () => {
 
     await expect(listRecentAssistantSessions(context.vaultRoot, {
       limit: 1,
+    })).resolves.toEqual([])
+    await expect(JSON.parse(await readFile(paths.indexesPath, 'utf8'))).toEqual({
+      version: 1,
+      aliases: {},
+      conversationKeys: {},
+    })
+
+    await expect(listRecentAssistantSessions(context.vaultRoot, {
+      limit: 1,
       repairMissingProjection: true,
     })).resolves.toEqual([
       expect.objectContaining({
