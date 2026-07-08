@@ -62,8 +62,8 @@ export async function importHostedGroupNewsletterEmailNeededMailboxItem(input: {
   }
 
   const route =
-    await readCurrentDirectAssistantSessionRoute(input.vaultRoot)
-    ?? readGroupNewsletterWakeDirectAssistantRoute(input.wake);
+    readGroupNewsletterWakeDirectAssistantRoute(input.wake)
+    ?? await readCurrentDirectAssistantSessionRoute(input.vaultRoot);
   if (!route) {
     return {
       reasonCode: GROUP_NEWSLETTER_EMAIL_NEEDED_NO_ROUTE_REASON,

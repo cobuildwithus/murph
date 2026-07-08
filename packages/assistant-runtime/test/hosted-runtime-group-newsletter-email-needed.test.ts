@@ -207,6 +207,48 @@ describe("hosted group newsletter email-needed mailbox import", () => {
     ]);
   });
 
+  test("uses the wake direct route instead of a stale current direct assistant session", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-wake-route-stale-session-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const staleRoute = await seedCurrentDirectSessionRoute(vaultRoot, {
+      channel: "telegram",
+      threadId: "telegram_stale_thread",
+    });
+
+    const outcome = await importHostedGroupNewsletterEmailNeededMailboxItem({
+      item: createResolvedGroupNewsletterEmailNeededMailboxItem(),
+      vaultRoot,
+      wake: createGroupNewsletterEmailNeededWake({
+        directRoute: { channel: "linq", threadId: "linq_fresh_thread" },
+      }),
+    });
+
+    assert.equal(outcome.status, "imported");
+    assert.equal(outcome.reasonCode, "group-newsletter.email-needed.staged");
+    assert.ok(outcome.assistantInputId);
+
+    const staged = await readAssistantInputEvent({
+      inputId: outcome.assistantInputId,
+      vault: vaultRoot,
+    });
+    assert.ok(staged);
+    assert.deepEqual(staged.conversation, {
+      accountId: null,
+      actorId: null,
+      actorIsSelf: false,
+      source: "linq",
+      threadId: "linq_fresh_thread",
+      threadIsDirect: true,
+    });
+    assert.deepEqual(staged.replyTarget, {
+      channel: "linq",
+      messageId: null,
+      threadId: "linq_fresh_thread",
+    });
+    assert.notDeepEqual(staged.replyTarget, staleRoute.replyTarget);
+  });
+
   test("defers email-only direct sessions without spending assistant work", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-group-newsletter-email-needed-email-only-"));
     tempRoots.push(parentRoot);
