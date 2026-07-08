@@ -538,6 +538,44 @@ describe("handleCallCircleRespond", () => {
     });
   });
 
+  it("does not treat confirmation notification anchors as fresh user replies", async () => {
+    const match = callCircleMatch({
+      amAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+      memberAId: "member_other",
+      memberBId: "member_123",
+    });
+    const prisma = createResponsePrisma({
+      confirmNotificationItems: [{
+        id: "mailbox_confirm_anchor",
+        matchId: match.id,
+        memberId: "member_123",
+        occurredAt: new Date("2026-07-06T15:00:00.000Z"),
+        stage: "am",
+        windowStartAt: match.windowStartAt,
+      }],
+      match,
+      participantStatus: "enrolled",
+      replyOccurredAt: new Date("2026-07-06T14:30:00.000Z"),
+    });
+
+    await expect(handleCallCircleRespond({
+      context: {
+        inboundMailboxItemIds: ["mailbox_reply", "mailbox_confirm_anchor"],
+      },
+      memberId: "member_123",
+      now: FRESH_CALL_CIRCLE_REPLY_OCCURRED_AT,
+      prisma: prisma as never,
+      request: {
+        kind: "confirm",
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    });
+
+    expect(mocks.confirmCallCircleMatchSide).not.toHaveBeenCalled();
+  });
+
   it("fails closed when reply context contains multiple confirmation anchors", async () => {
     const prisma = createResponsePrisma({
       confirmNotificationItems: [
@@ -1113,6 +1151,7 @@ function createResponsePrisma(input: {
     id: string;
     matchId: string;
     memberId: string;
+    occurredAt?: Date;
     stage: "am" | "final";
     windowStartAt: Date;
   }>;
@@ -1139,44 +1178,57 @@ function createResponsePrisma(input: {
       kind?: string;
     };
   }) => {
+    const requestedIds = new Set(args.where?.id?.in ?? []);
+    const setupNotificationItems = input.setupNotificationItems
+      ?? (input.setupNotificationGroupIds
+        ? input.setupNotificationGroupIds.map((groupId, index) => ({
+            groupId,
+            id: `mailbox_setup_${index}`,
+          }))
+        : input.setupNotificationGroupId
+          ? [{ groupId: input.setupNotificationGroupId, id: "mailbox_setup" }]
+          : []);
+    const setupNotifications = setupNotificationItems
+      .filter((item) => requestedIds.has(item.id))
+      .map((item) => ({
+        dedupeKey:
+          `assistant.notification.requested:call-circle:setup:${item.groupId}:member_123`,
+        occurredAt: input.setupNotificationOccurredAt
+          ?? new Date("2026-07-06T14:00:00.000Z"),
+      }));
+    const confirmNotifications = (input.confirmNotificationItems ?? [])
+      .filter((item) => requestedIds.has(item.id))
+      .map((item) => ({
+        dedupeKey: [
+          "assistant.notification.requested",
+          "call-circle",
+          item.stage,
+          item.matchId,
+          item.memberId,
+          item.windowStartAt.toISOString(),
+        ].join(":"),
+        occurredAt: item.occurredAt
+          ?? input.setupNotificationOccurredAt
+          ?? new Date("2026-07-06T14:00:00.000Z"),
+      }));
+    const conversationMessages = requestedIds.has("mailbox_reply")
+      ? [{
+          occurredAt: input.replyOccurredAt ?? FRESH_CALL_CIRCLE_REPLY_OCCURRED_AT,
+        }]
+      : [];
     if (args.where?.kind === "assistant.notification.requested") {
-      const requestedIds = new Set(args.where.id?.in ?? []);
-      const setupNotificationItems = input.setupNotificationItems
-        ?? (input.setupNotificationGroupIds
-          ? input.setupNotificationGroupIds.map((groupId, index) => ({
-              groupId,
-              id: `mailbox_setup_${index}`,
-            }))
-          : input.setupNotificationGroupId
-            ? [{ groupId: input.setupNotificationGroupId, id: "mailbox_setup" }]
-            : []);
-      const setupNotifications = setupNotificationItems
-        .filter((item) => requestedIds.has(item.id))
-        .map((item) => ({
-            dedupeKey:
-              `assistant.notification.requested:call-circle:setup:${item.groupId}:member_123`,
-            occurredAt: input.setupNotificationOccurredAt
-              ?? new Date("2026-07-06T14:00:00.000Z"),
-          }));
-      const confirmNotifications = (input.confirmNotificationItems ?? [])
-        .filter((item) => requestedIds.has(item.id))
-        .map((item) => ({
-          dedupeKey: [
-            "assistant.notification.requested",
-            "call-circle",
-            item.stage,
-            item.matchId,
-            item.memberId,
-            item.windowStartAt.toISOString(),
-          ].join(":"),
-          occurredAt: input.setupNotificationOccurredAt
-            ?? new Date("2026-07-06T14:00:00.000Z"),
-        }));
       return [...setupNotifications, ...confirmNotifications];
     }
-    return [{
-      occurredAt: input.replyOccurredAt ?? FRESH_CALL_CIRCLE_REPLY_OCCURRED_AT,
-    }];
+    if (args.where?.kind === "conversation.message") {
+      return conversationMessages;
+    }
+    return [
+      ...conversationMessages,
+      ...setupNotifications,
+      ...confirmNotifications,
+    ].sort((left, right) =>
+      right.occurredAt.getTime() - left.occurredAt.getTime()
+    );
   });
   const matches = input.matches ?? [match];
   const participantTimeZoneRows = (memberIds: readonly string[]) =>

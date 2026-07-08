@@ -724,6 +724,7 @@ async function readLatestCallCircleReplyOccurredAt(input: {
     take: 1,
     where: {
       id: { in: mailboxItemIds },
+      kind: "conversation.message",
       userId: input.memberId,
     },
   });

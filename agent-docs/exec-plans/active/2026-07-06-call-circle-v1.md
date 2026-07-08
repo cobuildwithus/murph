@@ -583,6 +583,20 @@ Focused follow-up verification:
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts`
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/phone-calls-call-circle-result.test.ts`
 
+## ReviewGPT Follow-Up 17 2026-07-08
+
+Accepted finding from the Phlebas PR-head rerun:
+
+- Confirmation notification mailbox items can resolve the current Call
+  Circle match anchor, but they must not count as a fresh user reply. The
+  response freshness query now reads only `conversation.message` mailbox
+  items, with a regression covering an old reply plus newer notification
+  anchor in the same context.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-response-service.test.ts`
+
 ## Local Deep-Review Follow-Up 5 2026-07-07
 
 Accepted finding from the local Feynman pass while the fourth ReviewGPT
