@@ -2506,7 +2506,8 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
       intentId: input.intentId ?? null,
       linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
-      replyToMessageId: deliveryContext?.replyToMessageId ?? null,
+      replyToMessageId:
+        request.replyToMessageId ?? deliveryContext?.replyToMessageId ?? null,
       signal: signal ?? null,
       target: request.target,
       targetKind: "thread",

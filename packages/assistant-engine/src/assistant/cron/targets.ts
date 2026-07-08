@@ -236,9 +236,21 @@ export function resolveAssistantCronNotificationDeliveryRoute(
     deliveryTarget: linqCurrentRouteTarget
       ? null
       : normalizeNullableString(target.deliveryTarget),
-    threadIsDirect:
-      typeof target.threadIsDirect === 'boolean' ? target.threadIsDirect : null,
+    threadIsDirect: resolveAssistantCronNotificationThreadIsDirect({
+      linqCurrentRouteTarget,
+      target,
+    }),
   }
+}
+
+function resolveAssistantCronNotificationThreadIsDirect(input: {
+  linqCurrentRouteTarget: string | null
+  target: AssistantCronTarget
+}): boolean | null {
+  if (typeof input.target.threadIsDirect === 'boolean') {
+    return input.target.threadIsDirect
+  }
+  return input.linqCurrentRouteTarget ? true : null
 }
 
 function resolveAssistantCronLinqCurrentRouteBindingTarget(
