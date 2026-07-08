@@ -39,6 +39,7 @@ import {
 } from "../hosted-execution/usage-allowance";
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
+  sendHostedAiUsageNoticeToLinqChat,
 } from "../hosted-execution/usage-limit-notice";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
@@ -78,6 +79,7 @@ type HostedRuntimeReconciliationDecisionSource = "workflow" | "status";
 const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.v1";
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS = 15_000;
+const HOSTED_RUNTIME_USAGE_NOTICE_PENDING_SCAN_LIMIT = 10;
 const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
   24 * 60 * 60 * 1000;
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
@@ -225,7 +227,7 @@ export async function readHostedRuntimeReconciliationFacts(
         mailboxLag,
         reason: "ai_usage_denied",
         retryAt: resolveHostedRuntimeAiBlockedRetryAt({
-          aiRetryAt: null,
+          aiRetryAt: gate.decision.retryAfter.toISOString(),
           now,
           workspace: projectedWorkspace,
         }),
@@ -375,7 +377,6 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
 }): Promise<void> {
   const decision = input.gate.decision;
   if (
-    decision.reason !== "ai_usage_limit_exceeded" ||
     !decision.userNotice ||
     !hasHostedFreshConversationMailboxLag({
       consumedSeqByLane: input.consumedSeqByLane,
@@ -385,27 +386,21 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     return;
   }
 
-  const pendingItem = await readHostedMailboxFirstPendingConversationItem({
-    afterSeq: readHostedConversationFreshWorkFloor({
-      consumedSeqByLane: input.consumedSeqByLane,
-      mailboxLag: input.mailboxLag,
-    }).toString(),
+  const wake = await readHostedRuntimePendingUsageNoticeWake({
+    consumedSeqByLane: input.consumedSeqByLane,
+    decision,
+    mailboxLag: input.mailboxLag,
     prisma: input.prisma,
     userId: input.userId,
-  });
-  if (!pendingItem) {
-    return;
-  }
-
-  const wake = await readHostedRuntimePendingConversationWake({
-    item: pendingItem,
-    prisma: input.prisma,
   });
   if (!wake) {
     return;
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {
+    if (decision.reason !== "ai_usage_limit_exceeded") {
+      return;
+    }
     const noticeDelivery = prepareHostedRuntimeTelegramUsageLimitNotice({
       target: wake.message.telegramMessage.threadId,
     });
@@ -446,6 +441,21 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     return;
   }
   if (decision.userNotice.code === "trial_conversion_pending") {
+    await sendHostedAiUsageNoticeToLinqChat({
+      chatId: wake.message.linqMessage.chatId,
+      claimToken: null,
+      memberId: input.userId,
+      message: decision.userNotice.message,
+      noticeCode: decision.userNotice.code,
+      occurredAt: wake.occurredAt,
+      prisma: input.prisma,
+      replyToMessageId: wake.message.linqMessage.messageId,
+      routeAuthority: wake.message.routeAuthority ?? null,
+      sourceEventId: wake.eventId,
+    });
+    return;
+  }
+  if (decision.reason !== "ai_usage_limit_exceeded") {
     return;
   }
 
@@ -475,6 +485,62 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     routeAuthority: wake.message.routeAuthority ?? null,
     sourceEventId: wake.eventId,
   });
+}
+
+async function readHostedRuntimePendingUsageNoticeWake(input: {
+  consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
+  decision: Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>["decision"];
+  mailboxLag: readonly HostedMailboxLaneLag[];
+  prisma: NonNullable<Parameters<typeof readHostedMailboxPayload>[0]["prisma"]>;
+  userId: string;
+}): Promise<HostedExecutionWake | null> {
+  let afterSeq = readHostedConversationFreshWorkFloor({
+    consumedSeqByLane: input.consumedSeqByLane,
+    mailboxLag: input.mailboxLag,
+  }).toString();
+
+  for (let scanned = 0; scanned < HOSTED_RUNTIME_USAGE_NOTICE_PENDING_SCAN_LIMIT; scanned += 1) {
+    const pendingItem = await readHostedMailboxFirstPendingConversationItem({
+      afterSeq,
+      prisma: input.prisma,
+      userId: input.userId,
+    });
+    if (!pendingItem) {
+      return null;
+    }
+
+    const wake = await readHostedRuntimePendingConversationWake({
+      item: pendingItem,
+      prisma: input.prisma,
+    });
+    if (
+      wake
+      && canSendHostedRuntimeUsageNoticeForConversationWake({
+        decision: input.decision,
+        wake,
+      })
+    ) {
+      return wake;
+    }
+
+    afterSeq = pendingItem.laneSeq;
+  }
+
+  return null;
+}
+
+function canSendHostedRuntimeUsageNoticeForConversationWake(input: {
+  decision: Extract<HostedRuntimeUsageGateCheck, { status: "denied" }>["decision"];
+  wake: HostedExecutionWake;
+}): boolean {
+  if (isHostedLinqConversationMessageWake(input.wake)) {
+    return true;
+  }
+
+  return (
+    input.decision.reason === "ai_usage_limit_exceeded"
+    && isHostedTelegramConversationMessageWake(input.wake)
+  );
 }
 
 async function sendHostedRuntimeTelegramUsageLimitNotice(input: {
