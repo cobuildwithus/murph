@@ -125,6 +125,9 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'When `murph.send_vault_file` returns `status: "approved"`',
     )
+    expect(prompt).toContain(
+      'approval succeeded and the file is queued to deliver with your normal reply; delivery is not confirmed yet.',
+    )
   })
 
   it('routes accepted habit plans through canonical health surfaces', () => {
