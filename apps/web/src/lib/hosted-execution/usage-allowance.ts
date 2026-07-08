@@ -1849,12 +1849,19 @@ function matchHostedAiUsageOpenAiImageRecord(
     return null;
   }
 
+  const tokenBuckets = buildHostedAiUsageAllowanceOpenAiImageTokenBuckets(record);
+  if (!hasHostedAiUsageAllowanceOpenAiImageProviderUsageTokens(tokenBuckets)) {
+    throw new TypeError(
+      "OpenAI image hosted AI usage requires provider usage tokens.",
+    );
+  }
+
   return {
     modelResolution: {
       model: modelResolution.model,
       source: modelResolution.source,
     },
-    tokenBuckets: buildHostedAiUsageAllowanceOpenAiImageTokenBuckets(record),
+    tokenBuckets,
   };
 }
 
@@ -2008,6 +2015,15 @@ function buildHostedAiUsageAllowanceOpenAiImageTokenBuckets(
     textInputTokens,
     unclassifiedInputTokens,
   };
+}
+
+function hasHostedAiUsageAllowanceOpenAiImageProviderUsageTokens(
+  tokenBuckets: HostedAiUsageAllowanceOpenAiImageTokenBuckets,
+): boolean {
+  return tokenBuckets.textInputTokens > 0n
+    || tokenBuckets.imageInputTokens > 0n
+    || tokenBuckets.unclassifiedInputTokens > 0n
+    || tokenBuckets.outputTokens > 0n;
 }
 
 function readHostedAiUsageOpenAiImageOutputTokens(

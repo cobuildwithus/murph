@@ -206,6 +206,25 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it("rejects OpenAI image usage when provider usage tokens are missing", () => {
+    for (const rawUsageJson of [null, {}]) {
+      expect(() => priceHostedAiUsageForAllowance({
+        ...BASE_USAGE_RECORD,
+        cachedInputTokens: null,
+        inputTokens: null,
+        outputTokens: null,
+        provider: "openai-images",
+        providerName: "OpenAI Images",
+        rawUsageJson,
+        requestedModel: "gpt-image-2",
+        servedModel: null,
+        totalTokens: null,
+        usageExtractionSourcePath: "openai.images.generate",
+        usageExtractionVersion: "openai-images-v1",
+      })).toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+    }
+  });
+
   it("rejects OpenAI image usage with OpenAI flex token pricing", () => {
     expect(() => priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
@@ -802,6 +821,37 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       },
     }));
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+  });
+
+  it("fails image accounting before claiming rows when provider usage tokens are missing", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      record: {
+        ...BASE_USAGE_RECORD,
+        cachedInputTokens: null,
+        inputTokens: null,
+        outputTokens: null,
+        provider: "openai-images",
+        providerName: "OpenAI Images",
+        rawUsageJson: {},
+        requestedModel: "gpt-image-2",
+        servedModel: null,
+        totalTokens: null,
+        usageExtractionSourcePath: "openai.images.generate",
+        usageExtractionVersion: "openai-images-v1",
+      },
+      tx: tx as never,
+    })).rejects.toThrow("OpenAI image hosted AI usage requires provider usage tokens");
+
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(executeRaw).not.toHaveBeenCalled();
   });
 
   it("does not update period metadata again when allowanceAccountedAt was already set", async () => {
