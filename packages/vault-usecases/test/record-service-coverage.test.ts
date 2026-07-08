@@ -1483,6 +1483,7 @@ describe("record service seams", () => {
         familyMembers: [],
         geneticVariants: [],
         foods: [],
+        habitatAspects: [],
         recipes: [],
         providers: [],
         workoutFormats: [],

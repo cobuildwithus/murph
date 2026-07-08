@@ -2,6 +2,12 @@ import * as z from "zod";
 
 import { withContractMetadata } from "./schema-metadata.ts";
 import {
+  getHabitatAspectDefinition,
+  getHabitatIndicatorDefinition,
+  validateHabitatIndicatorValue,
+  HABITAT_DOMAIN_IDS,
+} from "./habitat-catalog.ts";
+import {
   ADVERSE_EFFECT_SEVERITIES,
   ALLERGY_CRITICALITIES,
   ALLERGY_STATUSES,
@@ -2517,6 +2523,82 @@ export const workoutFormatFrontmatterSchema = withContractMetadata(
     .strict(),
   "@murphai/contracts/frontmatter-workout-format.schema.json",
   "Murph Workout Format Frontmatter",
+);
+
+const HABITAT_INDICATOR_ID_PATTERN = "^[a-z0-9]+(?:_[a-z0-9]+)*$";
+
+const habitatIndicatorValueSchema = z.union([
+  z.string().max(400),
+  z.number(),
+  z.boolean(),
+  z.null(),
+]);
+
+export const habitatFrontmatterSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.habitatFrontmatter),
+      docType: z.literal(FRONTMATTER_DOC_TYPES.habitat),
+      habitatId: idSchema(ID_PREFIXES.habitat),
+      slug: patternedString(SLUG_PATTERN),
+      title: boundedString(1, 160),
+      status: z.enum(["active", "archived"]),
+      domain: z.enum(HABITAT_DOMAIN_IDS),
+      aspect: patternedString(SLUG_PATTERN),
+      indicators: z.record(
+        patternedString(HABITAT_INDICATOR_ID_PATTERN),
+        habitatIndicatorValueSchema,
+      ),
+      indicatorRecordedAt: z
+        .record(patternedString(HABITAT_INDICATOR_ID_PATTERN), isoDateString())
+        .optional(),
+      note: boundedString(1, 4000).optional(),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      const aspect = getHabitatAspectDefinition(value.aspect);
+
+      if (!aspect) {
+        context.addIssue({
+          code: "custom",
+          path: ["aspect"],
+          message: `Unknown habitat aspect "${value.aspect}".`,
+        });
+        return;
+      }
+
+      if (aspect.domain !== value.domain) {
+        context.addIssue({
+          code: "custom",
+          path: ["domain"],
+          message: `Habitat aspect "${value.aspect}" belongs to domain "${aspect.domain}".`,
+        });
+      }
+
+      for (const [indicatorId, indicatorValue] of Object.entries(value.indicators)) {
+        const definition = getHabitatIndicatorDefinition(value.aspect, indicatorId);
+
+        if (!definition) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicators", indicatorId],
+            message: `Indicator "${indicatorId}" is not part of habitat aspect "${value.aspect}".`,
+          });
+          continue;
+        }
+
+        const issue = validateHabitatIndicatorValue(definition, indicatorValue);
+        if (issue) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicators", indicatorId],
+            message: issue,
+          });
+        }
+      }
+    }),
+  "@murphai/contracts/frontmatter-habitat.schema.json",
+  "Murph Habitat Frontmatter",
 );
 
 export const assessmentResponseSchema = withContractMetadata(

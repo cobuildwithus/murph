@@ -550,6 +550,19 @@ export type ProviderQueryRecord = RegistryStoredDocument<ProviderQueryEntity>;
 export const providerRegistryDefinition: RegistryDefinition<ProviderQueryEntity> =
   createBankEntityRegistryDefinition("provider");
 
+export interface HabitatQueryEntity extends RegistryQueryEntity {
+  domain: string | null;
+  aspect: string | null;
+  indicators: Record<string, unknown> | null;
+  indicatorRecordedAt: Record<string, unknown> | null;
+  note: string | null;
+}
+
+export type HabitatQueryRecord = RegistryStoredDocument<HabitatQueryEntity>;
+
+export const habitatRegistryDefinition: RegistryDefinition<HabitatQueryEntity> =
+  createBankEntityRegistryDefinition("habitat");
+
 export interface WorkoutFormatQueryEntity extends RegistryQueryEntity {
   summary: string | null;
   activityType: string | null;
@@ -686,6 +699,10 @@ export function providerRecordFromEntity(
   entity: CanonicalEntity,
 ): ProviderQueryRecord | null {
   return projectRegistryRecordFromEntity(entity, "provider", providerRegistryDefinition);
+}
+
+export function habitatRecordFromEntity(entity: CanonicalEntity): HabitatQueryRecord | null {
+  return projectRegistryRecordFromEntity(entity, "habitat", habitatRegistryDefinition);
 }
 
 export function workoutFormatRecordFromEntity(

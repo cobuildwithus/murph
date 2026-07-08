@@ -27,6 +27,7 @@ import {
 } from "./registry-helpers.ts";
 import {
   foodFrontmatterSchema,
+  habitatFrontmatterSchema,
   providerFrontmatterSchema,
   recipeFrontmatterSchema,
   workoutFormatFrontmatterSchema,
@@ -39,6 +40,7 @@ export type BankEntityKind =
   | "food"
   | "genetics"
   | "goal"
+  | "habitat"
   | "provider"
   | "regimen"
   | "recipe"
@@ -314,6 +316,42 @@ const checkedBankEntityDefinitions = [
     },
   }),
   defineBankRegistryEntity({
+    kind: "habitat",
+    listKinds: ["habitat"],
+    noun: "habitat aspect",
+    plural: "habitat aspects",
+    prefixes: [`${ID_PREFIXES.habitat}_`],
+    scaffoldTemplate: {
+      title: "Bedroom & sleep",
+      status: "active",
+      domain: "environment",
+      aspect: "sleep-environment",
+      indicators: {
+        window_at_night: "open",
+        darkness: "blackout",
+      },
+    },
+    registry: {
+      frontmatterSchema: habitatFrontmatterSchema as ZodTypeAny,
+      directory: "bank/habitat",
+      idField: "habitatId",
+      projection: {
+        sortBehavior: "title",
+        transform({ attributes, helpers }) {
+          return {
+            domain: helpers.firstString(attributes, ["domain"]),
+            aspect: helpers.firstString(attributes, ["aspect"]),
+            indicators: helpers.firstObject(attributes, ["indicators"]),
+            indicatorRecordedAt: helpers.firstObject(attributes, ["indicatorRecordedAt"]),
+            note: helpers.firstString(attributes, ["note"]),
+          };
+        },
+      },
+      titleKeys: ["title"],
+      statusKeys: ["status"],
+    },
+  }),
+  defineBankRegistryEntity({
     kind: "workout_format",
     listKinds: ["workout_format"],
     noun: "workout format",
@@ -414,6 +452,7 @@ export const regimenBankEntityDefinition = requireBankEntityRegistryDefinition("
 export const familyBankEntityDefinition = requireBankEntityRegistryDefinition("family");
 export const geneticsBankEntityDefinition = requireBankEntityRegistryDefinition("genetics");
 export const foodBankEntityDefinition = requireBankEntityRegistryDefinition("food");
+export const habitatBankEntityDefinition = requireBankEntityRegistryDefinition("habitat");
 export const recipeBankEntityDefinition = requireBankEntityRegistryDefinition("recipe");
 export const providerBankEntityDefinition = requireBankEntityRegistryDefinition("provider");
 export const workoutFormatBankEntityDefinition = requireBankEntityRegistryDefinition("workout_format");

@@ -332,6 +332,7 @@ describe("vault layout exports", () => {
         "bank/recipes",
         "bank/providers",
         "bank/workout-formats",
+        "bank/habitat",
       ],
       jsonlRoots: [
         ASSESSMENT_LEDGER_DIRECTORY,
@@ -359,6 +360,7 @@ describe("vault layout exports", () => {
       foodsDirectory: "bank/foods",
       geneticsDirectory: "bank/genetics",
       goalsDirectory: "bank/goals",
+      habitatDirectory: "bank/habitat",
       healthLibraryDirectory: HEALTH_LIBRARY_DIRECTORY,
       providersDirectory: "bank/providers",
       recipesDirectory: "bank/recipes",

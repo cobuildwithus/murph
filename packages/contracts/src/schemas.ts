@@ -18,6 +18,7 @@ import {
   inboxCaptureRecordSchema as inboxCaptureRecordContract,
   inboxAttachmentRetentionRecordSchema as inboxAttachmentRetentionRecordContract,
   goalFrontmatterSchema as goalFrontmatterContract,
+  habitatFrontmatterSchema as habitatFrontmatterContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
   protocolFrontmatterSchema as protocolFrontmatterContract,
   regimenFrontmatterSchema as regimenFrontmatterContract,
@@ -97,6 +98,7 @@ export const scheduledLogFrontmatterSchema = toJsonSchema(scheduledLogFrontmatte
 export const workoutFormatFrontmatterSchema = toJsonSchema(workoutFormatFrontmatterContract);
 export const workoutImportPayloadSchema = toInputJsonSchema(workoutImportPayloadContract);
 export const goalFrontmatterSchema = toJsonSchema(goalFrontmatterContract);
+export const habitatFrontmatterSchema = toJsonSchema(habitatFrontmatterContract);
 export const conditionFrontmatterSchema = toJsonSchema(conditionFrontmatterContract);
 export const allergyFrontmatterSchema = toJsonSchema(allergyFrontmatterContract);
 export const protocolFrontmatterSchema = toJsonSchema(protocolFrontmatterContract);
@@ -123,6 +125,7 @@ export const schemaCatalog = Object.freeze({
   "frontmatter-food": foodFrontmatterSchema,
   "frontmatter-genetic-variant": geneticVariantFrontmatterSchema,
   "frontmatter-goal": goalFrontmatterSchema,
+  "frontmatter-habitat": habitatFrontmatterSchema,
   "frontmatter-journal-day": journalDayFrontmatterSchema,
   "frontmatter-memory": memoryDocumentFrontmatterSchema,
   "frontmatter-provider": providerFrontmatterSchema,
