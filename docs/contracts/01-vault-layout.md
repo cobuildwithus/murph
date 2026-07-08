@@ -85,7 +85,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Inbox-capture shards use `occurredAt`: `ledger/inbox-captures/YYYY/YYYY-MM.jsonl`.
 - Inbox attachment retention shards use `purgedAt`: `ledger/inbox-attachment-retention/YYYY/YYYY-MM.jsonl`.
 - Event shards use `occurredAt`: `ledger/events/YYYY/YYYY-MM.jsonl`.
-- Integration-ingest shards use `importedAt`: `ledger/integration-ingests/YYYY/YYYY-MM.jsonl`. Device/provider evidence is retained inline in these append-only records with exact UTF-8 bytes, byte counts, SHA-256 hashes, receipts, logical roles, and canonical output ids.
+- Integration-ingest shards use `importedAt`: `ledger/integration-ingests/YYYY/YYYY-MM.jsonl`. Device/provider evidence is retained inline in these append-only records with exact UTF-8 bytes, byte counts, SHA-256 hashes, receipts, logical roles, and canonical output ids. Closed months may replace that logical JSONL shard with `ledger/integration-ingests/YYYY/YYYY-MM.jsonl.gz` or `ledger/integration-ingests/YYYY/YYYY-MM.jsonl.zip`; readers treat the uncompressed `.jsonl` path as the logical shard path and write paths must not append new rows to archived months. Each logical month must have exactly one physical representation, so archiving is a replacement operation rather than copy-and-leave. ZIP archives are bounded before inflate and must contain one matching JSONL entry.
 - Metric-sample shards use `recordedAt`: `ledger/metric-samples/<metric>/YYYY/YYYY-MM.jsonl`.
 - Sample shards use `recordedAt`: `ledger/samples/<stream>/YYYY/YYYY-MM.jsonl`. These shards are explicit import/debug ledgers; default query/read/browser paths use sparse entities and compact metric rows instead.
 - Audit shards use `occurredAt`: `audit/YYYY/YYYY-MM.jsonl`.
@@ -115,7 +115,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Meal attachments use `raw/meals/YYYY/MM/<mealId>/<slot>-<filename>`.
 - Sample CSV imports use `raw/samples/<stream>/YYYY/MM/<transformId>/<filename>.csv`, where `transformId` is the returned import-batch id.
 - Workout attachments use `raw/workouts/YYYY/MM/<eventId>/<filename>`.
-- Device/provider API snapshot imports use `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` and do not create `raw/integrations` files or manifest sidecars.
+- Device/provider API snapshot imports use `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` for live months, may read closed months from `.jsonl.gz` or `.jsonl.zip` archives, and do not create `raw/integrations` files or manifest sidecars.
 - Each non-device raw import directory also reserves `manifest.json` for the immutable sidecar describing imported artifacts, checksums, and provenance.
 - `raw/inbox/**` instead reserves `envelope.json` as the immutable capture record and may include canonical attachment bytes without manifest sidecars. Image/audio/video bytes intentionally expired by retention leave the capture record intact and are represented by `ledger/inbox-attachment-retention/**` so readers can surface `retention_expired` instead of corruption.
 - File names are slug-safe ASCII and preserve the original extension.

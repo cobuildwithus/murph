@@ -27,6 +27,7 @@ import {
   isHostedMailboxKind,
   isHostedMailboxLane,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
+  normalizeHostedAiUsageAllowanceOpenAiImageModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
   parseHostedRunnerNudgeRequest,
   readHostedIngressLatencySource,
@@ -222,8 +223,20 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-sol")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-terra")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-luma-2026-07-08")).toBeNull();
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-image-2")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.4-mini")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
+  });
+
+  it("normalizes OpenAI image usage priced model aliases separately", () => {
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-image-2"))
+      .toBe("gpt-image-2");
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("openai/gpt-image-2"))
+      .toBe("gpt-image-2");
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-image-2-2026-07-01"))
+      .toBe("gpt-image-2");
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-5.5"))
+      .toBeNull();
   });
 
   it("uses OpenAI flex token pricing only for supported OpenAI flex models", () => {
