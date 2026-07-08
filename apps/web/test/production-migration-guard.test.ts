@@ -30,6 +30,7 @@ import {
   findHostedWebPrismaPredeployDestructiveMigrations,
   hostedWebPrismaMigrateDeployCommand,
   hostedWebPrismaPredeployDestructiveMigrationBaseline,
+  normalizeHostedWebMigrationDatabaseUrl,
   runHostedWebPrismaMigrateDeploy,
   resolveHostedWebMigrationDatabaseUrl,
 } from "../scripts/run-prisma-migrate-deploy";
@@ -342,6 +343,34 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("normalizes Prisma system SSL file markers for raw migration clients", () => {
+    assert.equal(
+      normalizeHostedWebMigrationDatabaseUrl(
+        "postgresql://direct.example.com:5432/app?sslmode=require&sslrootcert=system&sslcert=system&sslkey=system",
+      ),
+      "postgresql://direct.example.com:5432/app?sslmode=require",
+    );
+    assert.equal(
+      normalizeHostedWebMigrationDatabaseUrl(
+        "postgresql://direct.example.com:5432/app?sslrootcert=/etc/ssl/root.pem",
+      ),
+      "postgresql://direct.example.com:5432/app?sslrootcert=/etc/ssl/root.pem",
+    );
+  });
+
+  test("uses normalized DIRECT_DATABASE_URL for migration clients", () => {
+    assert.deepEqual(
+      resolveHostedWebMigrationDatabaseUrl({
+        DIRECT_DATABASE_URL:
+          "postgresql://direct.example.com:5432/app?sslmode=require&sslrootcert=system",
+      }),
+      {
+        source: "DIRECT_DATABASE_URL",
+        url: "postgresql://direct.example.com:5432/app?sslmode=require",
+      },
+    );
+  });
+
   test("requires DIRECT_DATABASE_URL for Vercel production migrations", () => {
     assert.throws(
       () =>
@@ -385,7 +414,8 @@ describe("hosted web production migration guard", () => {
     await runHostedWebPrismaMigrateDeploy(
       {
         DATABASE_URL: "postgresql://runtime.example.com:5432/app",
-        DIRECT_DATABASE_URL: "postgresql://direct.example.com:5432/app",
+        DIRECT_DATABASE_URL:
+          "postgresql://direct.example.com:5432/app?sslmode=require&sslrootcert=system",
       },
       async (command, args, environment) => {
         calls.push({
@@ -401,8 +431,8 @@ describe("hosted web production migration guard", () => {
       {
         command: hostedWebPrismaMigrateDeployCommand.command,
         args: hostedWebPrismaMigrateDeployCommand.args,
-        databaseUrl: "postgresql://direct.example.com:5432/app",
-        directDatabaseUrl: "postgresql://direct.example.com:5432/app",
+        databaseUrl: "postgresql://direct.example.com:5432/app?sslmode=require",
+        directDatabaseUrl: "postgresql://direct.example.com:5432/app?sslmode=require",
       },
     ]);
   });
@@ -667,7 +697,14 @@ describe("hosted web production migration guard", () => {
     );
 
     assert.match(workflow, /deployment_status/u);
+    assert.match(workflow, /workflow_dispatch/u);
+    assert.match(workflow, /deployed_sha/u);
+    assert.match(workflow, /github\.event_name == 'workflow_dispatch'/u);
     assert.match(workflow, /github\.event\.deployment_status\.state == 'success'/u);
+    assert.match(
+      workflow,
+      /github\.event\.deployment_status\.description == 'Deployment has completed'/u,
+    );
     assert.match(workflow, /deployment_status\.creator\.login == 'vercel\[bot\]'/u);
     assert.match(workflow, /deployment\.creator\.login == 'vercel\[bot\]'/u);
     assert.match(workflow, /environment: production/u);
@@ -675,7 +712,7 @@ describe("hosted web production migration guard", () => {
     assert.doesNotMatch(workflow, /concurrency:/u);
     assert.doesNotMatch(workflow, /cancel-in-progress/u);
     assert.doesNotMatch(workflow, /hosted-web-contract-migrations-production/u);
-    assert.match(workflow, /github\.event\.deployment\.sha/u);
+    assert.match(workflow, /github\.event\.deployment\.sha \|\| inputs\.deployed_sha/u);
     assert.match(workflow, /fetch-depth: 0/u);
     assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOYED_SHA\}" origin\/main/u);
     assert.match(

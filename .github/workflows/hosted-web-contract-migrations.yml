@@ -2,6 +2,12 @@ name: Hosted Web Contract Migrations
 
 on:
   deployment_status:
+  workflow_dispatch:
+    inputs:
+      deployed_sha:
+        description: Current Vercel production commit SHA to prove before applying contract migrations.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -9,14 +15,14 @@ permissions:
 jobs:
   production-contract-migrations:
     name: Run post-deploy contract migrations
-    if: ${{ github.event.deployment_status.state == 'success' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]') }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment_status.description == 'Deployment has completed' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]')) }}
     runs-on: ubuntu-24.04
     environment: production
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          ref: ${{ github.event.deployment.sha }}
+          ref: ${{ github.event.deployment.sha || inputs.deployed_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -24,7 +30,7 @@ jobs:
         id: production-branch
         shell: bash
         env:
-          DEPLOYED_SHA: ${{ github.event.deployment.sha }}
+          DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
         run: |
           set -euo pipefail
 
@@ -58,7 +64,7 @@ jobs:
         if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         shell: bash
         env:
-          DEPLOYED_SHA: ${{ github.event.deployment.sha }}
+          DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
@@ -113,7 +119,7 @@ jobs:
         if: ${{ steps.production-branch.outputs.should_run == 'true' && steps.current-production.outputs.should_apply == 'true' }}
         shell: bash
         env:
-          DEPLOYED_SHA: ${{ github.event.deployment.sha }}
+          DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
