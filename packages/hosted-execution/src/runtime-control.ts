@@ -816,8 +816,9 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 }
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
+  displayName?: string | null;
   // Model-authored natural group-chat message with server-filled
-  // {{join_url}} and {{share_scope}} placeholders.
+  // {{share_scope}} and {{join_url}} placeholders.
   messageTemplate?: string | null;
   // Compatibility for old fixed-kind callers. Selector-only projections must
   // use projectionScopes.

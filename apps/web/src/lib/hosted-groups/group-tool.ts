@@ -490,6 +490,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
       containerMemberId: input.memberId,
+      displayName: input.joinOffer?.displayName ?? null,
       now,
       requestedVaultShareProjectionScopes: projectionScopes,
       tx,
@@ -706,13 +707,19 @@ function isHostedGroupChatIconDeliveryUrl(url: URL): boolean {
 }
 
 function isHostedGroupJoinOfferMessageTemplateUsable(messageTemplate: string): boolean {
+  return hasPlaceholderExactlyOnce(
+    messageTemplate,
+    HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+  ) && hasPlaceholderExactlyOnce(
+    messageTemplate,
+    HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
+  );
+}
+
+function hasPlaceholderExactlyOnce(messageTemplate: string, placeholder: string): boolean {
   return (
-    messageTemplate.includes(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-    && messageTemplate.indexOf(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-    && messageTemplate.includes(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-    && messageTemplate.indexOf(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
+    messageTemplate.includes(placeholder)
+    && messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
   );
 }
 
@@ -720,10 +727,16 @@ function renderHostedGroupJoinOfferScopeSentence(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): string {
   const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
-    .map((display) => display.label.toLowerCase());
-  return labels.length > 0
-    ? `your Murph profile name and ${formatHumanList(labels)}`
-    : "your Murph profile name";
+    .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
+  return `your ${formatHumanList(["Murph profile name", ...labels])}`;
+}
+
+function formatHostedGroupJoinOfferShareScopeLabel(label: string): string {
+  const first = label[0];
+  const second = label[1];
+  return first && second && second >= "a" && second <= "z"
+    ? `${first.toLowerCase()}${label.slice(1)}`
+    : label;
 }
 
 function formatHumanList(values: readonly string[]): string {

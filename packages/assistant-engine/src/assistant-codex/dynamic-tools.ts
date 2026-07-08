@@ -371,7 +371,7 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-join offer into the current group chat with action="post_join_offer". update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL. A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate, with server-filled {{join_url}} and {{share_scope}} placeholders, to tell people that liking or reacting to that offer message grants membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL. A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -394,7 +394,7 @@ export const MURPH_GROUP_TOOL = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
         description:
-          'Group display name. Required for action="update_display_name", which requests the iMessage group chat title update and stores the same hosted group label; optional for action="create_join_link" to name the join page.',
+          'Group display name. Required for action="update_display_name", which requests the iMessage group chat title update and stores the same hosted group label; optional for action="create_join_link" or action="post_join_offer" only when it is the name the group chose.',
       },
       avatarSource: {
         type: 'string',
@@ -469,14 +469,14 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Optional bounded health projection scopes that liking the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that profile display name is shared too.',
+          'Optional bounded health projections that reacting to the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that profile display name is shared too.',
       },
       messageTemplate: {
         type: 'string',
         minLength: 1,
         maxLength: HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
         description:
-          'Required for action="post_join_offer". Write one short natural group-chat message, not a fixed script. Mention that liking or reacting to this message joins the group. Include {{join_url}} exactly once where the server should insert the exact join URL, and {{share_scope}} exactly once where the server should insert the exact shared-scope phrase. Do not include any other URL.',
+          'Required for action="post_join_offer". Write one short natural group-chat message, not a fixed script. Lead with reacting to this message to join. Include {{share_scope}} exactly once where the server inserts the exact shared-scope phrase. Include {{join_url}} exactly once as the customize link so members can share more or less. Do not include any other URL.',
       },
     },
     required: ['action'],
@@ -529,7 +529,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, this attaches the exact approved file to your normal reply. It does not reveal file bytes to the model, does not queue a separate delivery, and does not support arbitrary recipients.",
+    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, the file is queued to deliver with your normal reply but delivery is not yet confirmed. It does not reveal file bytes to the model and does not support arbitrary recipients.",
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -854,13 +854,19 @@ const GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = '{{join_url}}'
 const GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = '{{share_scope}}'
 
 function hasUsableGroupJoinOfferPlaceholders(messageTemplate: string): boolean {
+  return hasPlaceholderExactlyOnce(
+    messageTemplate,
+    GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+  ) && hasPlaceholderExactlyOnce(
+    messageTemplate,
+    GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
+  )
+}
+
+function hasPlaceholderExactlyOnce(messageTemplate: string, placeholder: string): boolean {
   return (
-    messageTemplate.includes(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-    && messageTemplate.indexOf(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER)
-    && messageTemplate.includes(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-    && messageTemplate.indexOf(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
-      === messageTemplate.lastIndexOf(GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER)
+    messageTemplate.includes(placeholder)
+    && messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
   )
 }
 
@@ -946,6 +952,12 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('post_join_offer'),
+      displayName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
+        .optional(),
       messageTemplate: z
         .string()
         .trim()
@@ -953,7 +965,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         .max(HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH)
         .refine(hasUsableGroupJoinOfferPlaceholders, {
           message:
-            'post_join_offer messageTemplate must contain {{join_url}} exactly once and {{share_scope}} exactly once',
+            'post_join_offer messageTemplate must contain {{share_scope}} exactly once and {{join_url}} exactly once',
         }),
       projectionScopes: z
         .array(groupVaultShareProjectionScopeSchema)
@@ -1844,7 +1856,10 @@ export async function executeMurphDynamicToolRequest(input: {
               ...toolTextResult(
                 true,
                 JSON.stringify({
+                  deliveryStatus: 'queued_with_reply',
                   filename: result.filename,
+                  note:
+                    'Approval succeeded. The file is queued to deliver with your normal reply; delivery is not confirmed yet.',
                   status: result.status,
                 }),
               ),
@@ -3381,6 +3396,9 @@ function parseGroupArguments(
   }
   if (parsed.data.action === 'post_join_offer') {
     const joinOffer = {
+      ...(parsed.data.displayName !== undefined
+        ? { displayName: parsed.data.displayName }
+        : {}),
       messageTemplate: parsed.data.messageTemplate,
       ...(parsed.data.projectionScopes !== undefined
         ? { projectionScopes: parsed.data.projectionScopes }

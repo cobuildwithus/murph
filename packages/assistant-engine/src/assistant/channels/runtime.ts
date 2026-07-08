@@ -9,7 +9,6 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
-  createLinqAttachmentUpload,
   createLinqChat,
   resolveLinqApiToken,
   sendLinqChatMessage,
@@ -17,7 +16,7 @@ import {
   sendLinqVoiceMemo,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
-  uploadLinqAttachmentBytes,
+  uploadLinqAttachment,
 } from '@murphai/operator-config/linq-runtime'
 import {
   generateElevenLabsVoiceMemoAudio,
@@ -566,26 +565,16 @@ async function prepareLinqMessageMedia(
     }
 
     const bytes = await dependencies.loadVaultFile(item)
-    const upload = await createLinqAttachmentUpload(
+    const upload = await uploadLinqAttachment(
       {
+        bytes,
         contentType: item.contentType,
         filename: item.filename,
-        sizeBytes: item.sizeBytes,
       },
       {
         env: dependencies.env,
         fetchImplementation: dependencies.fetchImplementation,
-        ...(dependencies.signal ? { signal: dependencies.signal } : {}),
-      },
-    )
-    await uploadLinqAttachmentBytes(
-      {
-        bytes,
-        requiredHeaders: upload.requiredHeaders,
-        uploadUrl: upload.uploadUrl,
-      },
-      {
-        fetchImplementation: dependencies.fetchImplementation,
+        publicFetchImplementation: dependencies.publicFetchImplementation,
         ...(dependencies.signal ? { signal: dependencies.signal } : {}),
       },
     )

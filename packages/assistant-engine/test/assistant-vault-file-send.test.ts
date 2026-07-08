@@ -414,7 +414,10 @@ describe('assistant vault-file send', () => {
     })
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
+      deliveryStatus: 'queued_with_reply',
       filename: 'report.pdf',
+      note:
+        'Approval succeeded. The file is queued to deliver with your normal reply; delivery is not confirmed yet.',
       status: 'approved',
     }))
   })

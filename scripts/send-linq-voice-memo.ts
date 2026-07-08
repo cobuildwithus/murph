@@ -4,9 +4,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  createLinqAttachmentUpload,
   sendLinqVoiceMemo,
-  uploadLinqAttachmentBytes,
+  uploadLinqAttachment,
   type LinqFetch,
 } from "@murphai/operator-config/linq-runtime";
 
@@ -39,9 +38,6 @@ export interface LinqVoiceMemoSendReport {
   fingerprintScope: "env-secret" | "ephemeral";
   upload: {
     attachment: RedactedIdentifier;
-    downloadUrlPresent: boolean;
-    expiresAtPresent: boolean;
-    requiredHeaderCount: number;
   };
   voiceMemo: {
     providerMessage: RedactedIdentifier;
@@ -139,25 +135,14 @@ export async function runLinqVoiceMemoSend(
   } catch {
     throw new Error("Voice memo file bytes could not be read.");
   }
-  const upload = await createLinqAttachmentUpload(
+  const upload = await uploadLinqAttachment(
     {
+      bytes,
       contentType,
       filename: uploadFilename,
-      sizeBytes: bytes.byteLength,
     },
     {
       env: requestEnv,
-      fetchImplementation: dependencies.fetchImplementation,
-    },
-  );
-
-  await uploadLinqAttachmentBytes(
-    {
-      bytes,
-      requiredHeaders: upload.requiredHeaders,
-      uploadUrl: upload.uploadUrl,
-    },
-    {
       fetchImplementation: dependencies.fetchImplementation,
     },
   );
@@ -188,9 +173,6 @@ export async function runLinqVoiceMemoSend(
     fingerprintScope: context.scope,
     upload: {
       attachment: redactIdentifier(upload.attachmentId, context),
-      downloadUrlPresent: upload.downloadUrl !== null,
-      expiresAtPresent: upload.expiresAt.length > 0,
-      requiredHeaderCount: Object.keys(upload.requiredHeaders).length,
     },
     voiceMemo: {
       providerMessage: redactIdentifier(voiceMemo.providerMessageId, context),
