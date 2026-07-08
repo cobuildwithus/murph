@@ -27,6 +27,11 @@ import {
   validateVault,
   VaultError,
 } from "../src/index.ts";
+import { resolveVaultPath } from "../src/path-safety.ts";
+import {
+  assertJsonlAppendTargetCanAppend,
+  assertWriteTargetPolicy,
+} from "../src/write-policy.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -816,6 +821,46 @@ test("generic canonical writes cannot overwrite or delete integration ingest arc
   assert.equal(gzipEntry?.record.id, "xfm_ArchiveWritePolicy2");
   await assert.rejects(fs.access(path.join(vaultRoot, zipLogicalPath)));
   await assert.rejects(fs.access(path.join(vaultRoot, gzipLogicalPath)));
+});
+
+test("integration ingest archive write policy honors case-insensitive path comparisons", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-archive-case-policy");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2024/2024-08.jsonl";
+  await fs.mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+  await fs.writeFile(path.join(vaultRoot, `${logicalPath}.zip`), "");
+
+  const uppercaseArchivePath = "ledger/integration-ingests/2024/2024-08.JSONL.ZIP";
+  for (const kind of ["text", "delete"] as const) {
+    assert.doesNotThrow(() =>
+      assertWriteTargetPolicy(uppercaseArchivePath, { kind }, { caseInsensitive: false })
+    );
+    assert.throws(
+      () => assertWriteTargetPolicy(uppercaseArchivePath, { kind }, { caseInsensitive: true }),
+      (error) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, "VAULT_APPEND_ONLY_PATH");
+        return true;
+      },
+    );
+  }
+
+  const uppercaseJsonlTarget = {
+    ...resolveVaultPath(vaultRoot, logicalPath),
+    relativePath: "ledger/integration-ingests/2024/2024-08.JSONL",
+  };
+  await assert.doesNotReject(
+    assertJsonlAppendTargetCanAppend(uppercaseJsonlTarget, { caseInsensitive: false }),
+  );
+  await assert.rejects(
+    assertJsonlAppendTargetCanAppend(uppercaseJsonlTarget, { caseInsensitive: true }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_SHARD_ARCHIVED");
+      return true;
+    },
+  );
 });
 
 test("hosted JSONL receipt replay treats exact archived integration ingest duplicates as no-ops", async () => {

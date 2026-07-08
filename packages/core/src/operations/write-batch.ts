@@ -657,10 +657,13 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
   const target = await prepareVerifiedWriteTarget(input.vaultRoot, input.targetRelativePath, {
     kind: "jsonl_append",
   });
+  const comparisonOptions: VaultPathComparisonOptions = {
+    caseInsensitive: await isVaultFilesystemCaseInsensitive(input.vaultRoot),
+  };
   try {
-    await assertJsonlAppendTargetCanAppend(target);
+    await assertJsonlAppendTargetCanAppend(target, comparisonOptions);
   } catch (error) {
-    if (isArchivedIntegrationIngestAppendError(error, target)) {
+    if (isArchivedIntegrationIngestAppendError(error, target, comparisonOptions)) {
       if (input.allowArchivedIntegrationIngestAmendment) {
         await appendArchivedIntegrationIngestShard({
           expectedBaseByteLength: input.baseByteLength,
@@ -733,10 +736,11 @@ async function applyHostedCanonicalJsonlAppendReceiptAction(input: {
 function isArchivedIntegrationIngestAppendError(
   error: unknown,
   target: ResolvedVaultPath,
+  options: VaultPathComparisonOptions = {},
 ): boolean {
   return error instanceof VaultError
     && error.code === "INTEGRATION_INGEST_SHARD_ARCHIVED"
-    && isIntegrationIngestJsonlAppendTarget(target.relativePath);
+    && isIntegrationIngestJsonlAppendTarget(target.relativePath, options);
 }
 
 async function assertArchivedIntegrationIngestHostedAppendAlreadyApplied(input: {
@@ -2442,6 +2446,9 @@ export class WriteBatch {
     const payload = await readText(stageAbsolutePath);
     const payloadBytes = Buffer.from(payload, "utf8");
     const payloadReceipt = action.committedPayloadReceipt ?? createCommittedPayloadReceipt(payloadBytes);
+    const comparisonOptions: VaultPathComparisonOptions = {
+      caseInsensitive: await isVaultFilesystemCaseInsensitive(this.vaultRoot),
+    };
     await this.applyPreparedAction({
       action,
       finalize: (result: Awaited<ReturnType<typeof applyJsonlAppendTarget>>) => {
@@ -2566,7 +2573,7 @@ export class WriteBatch {
         } catch (error) {
           if (
             action.allowArchivedIntegrationIngestAmendment &&
-            isArchivedIntegrationIngestAppendError(error, target)
+            isArchivedIntegrationIngestAppendError(error, target, comparisonOptions)
           ) {
             const result = await appendArchivedIntegrationIngestShard({
               expectedBaseByteLength: action.baseContentReceipt?.byteLength,

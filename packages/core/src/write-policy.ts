@@ -9,6 +9,7 @@ import {
   isJsonlRelativePath,
   isRawRelativePath,
   isVaultFilesystemCaseInsensitive,
+  normalizeRelativeVaultPathForComparison,
   resolveVaultPath,
   type VaultPathComparisonOptions,
 } from "./path-safety.ts";
@@ -83,18 +84,39 @@ async function pathExists(absolutePath: string): Promise<boolean> {
   }
 }
 
-export function isIntegrationIngestJsonlAppendTarget(relativePath: string): boolean {
-  return relativePath.startsWith(`${VAULT_LAYOUT.integrationIngestLedgerDirectory}/`)
-    && relativePath.endsWith(".jsonl");
+export function isIntegrationIngestJsonlAppendTarget(
+  relativePath: string,
+  options: VaultPathComparisonOptions = {},
+): boolean {
+  const normalized = normalizeRelativeVaultPathForComparison(relativePath, options);
+  const ingestDirectory = normalizeRelativeVaultPathForComparison(
+    VAULT_LAYOUT.integrationIngestLedgerDirectory,
+    options,
+  );
+  return normalized.startsWith(`${ingestDirectory}/`) && normalized.endsWith(".jsonl");
 }
 
-export function isIntegrationIngestArchiveTarget(relativePath: string): boolean {
-  return relativePath.startsWith(`${VAULT_LAYOUT.integrationIngestLedgerDirectory}/`)
-    && INTEGRATION_INGEST_ARCHIVE_SUFFIXES.some((suffix) => relativePath.endsWith(`.jsonl${suffix}`));
+export function isIntegrationIngestArchiveTarget(
+  relativePath: string,
+  options: VaultPathComparisonOptions = {},
+): boolean {
+  const normalized = normalizeRelativeVaultPathForComparison(relativePath, options);
+  const ingestDirectory = normalizeRelativeVaultPathForComparison(
+    VAULT_LAYOUT.integrationIngestLedgerDirectory,
+    options,
+  );
+  return normalized.startsWith(`${ingestDirectory}/`)
+    && INTEGRATION_INGEST_ARCHIVE_SUFFIXES.some((suffix) => normalized.endsWith(`.jsonl${suffix}`));
 }
 
-export async function assertJsonlAppendTargetCanAppend(target: ResolvedVaultPath): Promise<void> {
-  if (!isIntegrationIngestJsonlAppendTarget(target.relativePath)) {
+export async function assertJsonlAppendTargetCanAppend(
+  target: ResolvedVaultPath,
+  options?: VaultPathComparisonOptions,
+): Promise<void> {
+  const comparisonOptions = options ?? {
+    caseInsensitive: await isVaultFilesystemCaseInsensitive(target.vaultRoot),
+  };
+  if (!isIntegrationIngestJsonlAppendTarget(target.relativePath, comparisonOptions)) {
     return;
   }
   for (const suffix of INTEGRATION_INGEST_ARCHIVE_SUFFIXES) {
@@ -147,7 +169,7 @@ export function assertWriteTargetPolicy(
     return;
   }
 
-  if (isIntegrationIngestArchiveTarget(relativePath)) {
+  if (isIntegrationIngestArchiveTarget(relativePath, options)) {
     throw new VaultError(
       "VAULT_APPEND_ONLY_PATH",
       "Integration ingest archives are immutable append-only shard representations.",
