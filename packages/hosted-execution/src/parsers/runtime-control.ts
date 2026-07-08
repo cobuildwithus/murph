@@ -84,6 +84,7 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
@@ -754,7 +755,43 @@ export function parseHostedRuntimeGroupToolRequest(
               record.linqThread,
               "Hosted runtime group tool post_join_offer request linqThread",
             ),
-          }),
+      }),
+    };
+  }
+  if (action === "set_chat_avatar") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "groupChatIconUrl", "linqThread"]),
+      "Hosted runtime group tool set_chat_avatar request",
+    );
+    return {
+      action,
+      groupChatIconUrl: parseHostedRuntimeGroupChatIconUrl(record.groupChatIconUrl),
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool set_chat_avatar request linqThread",
+            ),
+      }),
+    };
+  }
+  if (action === "preflight_set_chat_avatar") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqThread"]),
+      "Hosted runtime group tool preflight_set_chat_avatar request",
+    );
+    if (record.linqThread === undefined || record.linqThread === null) {
+      return { action };
+    }
+    return {
+      action,
+      linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+        record.linqThread,
+        "Hosted runtime group tool preflight_set_chat_avatar request linqThread",
+      ),
     };
   }
   if (action === "read_chat_participants" || action === "share_contact_card") {
@@ -817,6 +854,39 @@ function parseHostedRuntimeGroupUpdateDisplayNameRequest(
     throw new TypeError("Hosted runtime group tool update_display_name displayName is too long.");
   }
   return { displayName };
+}
+
+function parseHostedRuntimeGroupChatIconUrl(value: unknown): string {
+  const iconUrl = requireString(
+    value,
+    "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
+  ).trim();
+  if (
+    iconUrl.length === 0 ||
+    iconUrl.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH
+  ) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(iconUrl);
+  } catch {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl must be HTTPS.");
+  }
+  if (!isHostedRuntimeGroupChatIconDeliveryUrl(parsed)) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  return parsed.toString();
+}
+
+function isHostedRuntimeGroupChatIconDeliveryUrl(url: URL): boolean {
+  if (url.hostname !== "imagedelivery.net" || url.search || url.hash) {
+    return false;
+  }
+  return url.pathname.split("/").filter(Boolean).length >= 3;
 }
 
 function parseHostedRuntimeGroupToolLinqThreadContext(
@@ -1070,6 +1140,44 @@ export function parseHostedRuntimeGroupToolResponse(
           status,
           unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
           participants: null,
+        },
+      };
+    }
+  }
+
+  if (action === "set_chat_avatar") {
+    const result = requireObject(record.result, "Hosted runtime group tool set_chat_avatar response result");
+    const status = requireString(result.status, "Hosted runtime group tool set_chat_avatar response status");
+    if (status === "ok" || status === "requested") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool set_chat_avatar accepted response result");
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool set_chat_avatar unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+        },
+      };
+    }
+  }
+
+  if (action === "preflight_set_chat_avatar") {
+    const result = requireObject(record.result, "Hosted runtime group tool preflight_set_chat_avatar response result");
+    const status = requireString(result.status, "Hosted runtime group tool preflight_set_chat_avatar response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool preflight_set_chat_avatar ok response result");
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool preflight_set_chat_avatar unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
         },
       };
     }
