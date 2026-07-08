@@ -509,7 +509,10 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         replyToMessageId: wake.message.telegramMessage.messageId,
       });
     } catch (error) {
-      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError) {
+      if (
+        error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError
+        || error instanceof HostedRuntimeTelegramUsageLimitNoticeUnknownError
+      ) {
         await markHostedLinqDeliverySendFailedTx({
           failedAt: sentAt,
           failureCode: error.name,
