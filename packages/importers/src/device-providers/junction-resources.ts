@@ -366,8 +366,12 @@ export function normalizeJunctionSleepStageValue(value: unknown): JunctionSleepS
     return null;
   }
 
-  const normalized = value
-    .trim()
+  const trimmed = value.trim();
+  if (/^[+-]\d+$/u.test(trimmed)) {
+    return null;
+  }
+
+  const normalized = trimmed
     .toLowerCase()
     .replace(/[^a-z0-9]+/gu, "_")
     .replace(/^_+|_+$/gu, "");

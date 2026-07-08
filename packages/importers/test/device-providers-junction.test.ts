@@ -4857,6 +4857,62 @@ test("Junction Apple HealthKit zeroed sleep summary preserves awake and derives 
   );
 });
 
+test("Junction Apple HealthKit string negative-one stages derive generic asleep total", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-07-08T12:00:00.000Z",
+      summaries: {
+        sleep: [{
+          id: "apple-healthkit-zeroed-string-stage-sleep",
+          sourceProviderSlug: "apple_health_kit",
+          sourceType: "unknown",
+          bedtime_start: "2026-07-08T00:00:00+00:00",
+          bedtime_stop: "2026-07-08T02:00:00+00:00",
+          duration: 7200,
+          total: 0,
+          deep: 0,
+          rem: 0,
+          light: 0,
+          awake: 900,
+          efficiency: 0,
+          created_at: "2026-07-08T12:00:00+00:00",
+        }],
+        sleep_cycle: [{
+          id: "apple-healthkit-string-generic-asleep-cycle",
+          sleep_id: "apple-healthkit-zeroed-string-stage-sleep",
+          sourceProviderSlug: "apple_health_kit",
+          sourceType: "unknown",
+          session_start: "2026-07-08T00:00:00+00:00",
+          session_end: "2026-07-08T02:00:00+00:00",
+          stage_start_offset_second: [0, 3600, 4500],
+          stage_end_offset_second: [3600, 4500, 7200],
+          stage_type: ["-1", "4", "-1"],
+          time_zone: "UTC",
+          created_at: "2026-07-08T12:00:00+00:00",
+        }],
+      },
+    },
+    { defaultTimeZone: "UTC" },
+  );
+
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  const metricValues = (metric: string) =>
+    observations.filter((event) => event.fields?.metric === metric).map((event) => event.fields?.value);
+  const metrics = observations.map((event) => event.fields?.metric);
+
+  assert.deepEqual(metricValues("sleep-total-minutes"), [105]);
+  assert.deepEqual(metricValues("sleep-awake-minutes"), [15]);
+  assert.equal(metrics.includes("sleep-efficiency"), false);
+  assert.equal(metrics.includes("sleep-deep-minutes"), false);
+  assert.equal(metrics.includes("sleep-rem-minutes"), false);
+  assert.equal(metrics.includes("sleep-light-minutes"), false);
+  assert.ok(
+    observations
+      .filter((event) => event.fields?.metric === "sleep-total-minutes")
+      .every((event) => event.dataOrigin?.normalizerVersion === "junction-sleep-unspecified-total.v1"),
+  );
+});
+
 test("Junction sleep_cycle generic asleep total includes explicit detailed asleep intervals", () => {
   const payload = normalizeJunctionSnapshot(
     {
@@ -4911,6 +4967,37 @@ test("Junction sleep_cycle numeric unknown stage does not create generic total f
           stage_start_offset_second: [0, 3600],
           stage_end_offset_second: [3600, 7200],
           stage_type: [-1, 4],
+          time_zone: "UTC",
+          created_at: "2026-07-08T12:00:00+00:00",
+        }],
+      },
+    },
+    { defaultTimeZone: "UTC" },
+  );
+
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  const metrics = observations.map((event) => event.fields?.metric);
+
+  assert.equal(metrics.includes("sleep-total-minutes"), false);
+  assert.equal(metrics.includes("sleep-deep-minutes"), false);
+  assert.equal(metrics.includes("sleep-light-minutes"), false);
+  assert.equal(metrics.includes("sleep-rem-minutes"), false);
+});
+
+test("Junction sleep_cycle string negative-one stage does not create stage facts for non-Apple sources", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-07-08T12:00:00.000Z",
+      summaries: {
+        sleep_cycle: [{
+          id: "garmin-string-unknown-stage-cycle",
+          sourceProviderSlug: "garmin",
+          sourceType: "unknown",
+          session_start: "2026-07-08T00:00:00+00:00",
+          session_end: "2026-07-08T02:00:00+00:00",
+          stage_start_offset_second: [0, 3600],
+          stage_end_offset_second: [3600, 7200],
+          stage_type: ["-1", "4"],
           time_zone: "UTC",
           created_at: "2026-07-08T12:00:00+00:00",
         }],
