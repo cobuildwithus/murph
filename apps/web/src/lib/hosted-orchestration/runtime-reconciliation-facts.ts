@@ -625,11 +625,22 @@ async function sendHostedRuntimeTelegramUsageLimitNotice(input: {
       );
     }
 
-    throw new HostedRuntimeTelegramUsageLimitNoticeRejectedError(
-      formatHostedRuntimeTelegramFailureMessage({
-        errorContext: readHostedRuntimeTelegramErrorContext(payload),
-        status: response.status,
-      }),
+    const errorContext = readHostedRuntimeTelegramErrorContext(payload);
+    if (
+      response.status >= 400
+      && response.status < 500
+      && (errorContext.errorCode !== null || errorContext.description !== null)
+    ) {
+      throw new HostedRuntimeTelegramUsageLimitNoticeRejectedError(
+        formatHostedRuntimeTelegramFailureMessage({
+          errorContext,
+          status: response.status,
+        }),
+      );
+    }
+
+    throw new HostedRuntimeTelegramUsageLimitNoticeUnknownError(
+      `Hosted Telegram usage-limit notice delivery returned ambiguous HTTP ${response.status}.`,
     );
   } finally {
     clearTimeout(timeoutId);
