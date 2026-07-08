@@ -5,10 +5,11 @@ import {
   buildHostedExecutionVaultShareRevokeWake,
 } from "@murphai/hosted-execution";
 import {
+  buildHostedVaultShareProjectionScopeKey,
   buildHostedVaultShareRevokeDedupeKey,
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
-  isHostedVaultShareProjectionKind,
-  type HostedVaultShareProjectionKind,
+  parseHostedVaultShareProjectionScope,
+  type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
@@ -32,7 +33,9 @@ interface RevocableHostedVaultShare {
   destinationMemberId: string;
   grantorMemberId: string;
   id: string;
-  projectionKind: HostedVaultShareProjectionKind;
+  projectionKind: HostedVaultShareProjectionScope["projectionKind"];
+  projectionScope: HostedVaultShareProjectionScope;
+  projectionScopeKey: string;
 }
 
 interface RevokedHostedVaultShare extends RevocableHostedVaultShare {
@@ -43,10 +46,12 @@ export async function grantHostedVaultShareTx(input: {
   tx: Prisma.TransactionClient;
   grantorMemberId: string;
   destinationMemberId: string;
-  projectionKind: HostedVaultShareProjectionKind;
+  projectionScope: HostedVaultShareProjectionScope;
   now: Date;
 }): Promise<void> {
-  assertSupportedProjectionKind(input.projectionKind);
+  const projectionScope = assertSupportedProjectionScope(input.projectionScope);
+  const projectionKind = projectionScope.projectionKind;
+  const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
   if (input.grantorMemberId === input.destinationMemberId) {
     throw hostedOnboardingError({
       code: "HOSTED_VAULT_SHARE_SELF_GRANT_UNSUPPORTED",
@@ -58,10 +63,10 @@ export async function grantHostedVaultShareTx(input: {
 
   let existing = await input.tx.hostedVaultShare.findUnique({
     where: {
-      grantorMemberId_projectionKind_destinationMemberId: {
+      grantorMemberId_projectionScopeKey_destinationMemberId: {
         destinationMemberId: input.destinationMemberId,
         grantorMemberId: input.grantorMemberId,
-        projectionKind: input.projectionKind,
+        projectionScopeKey,
       },
     },
     select: { id: true, status: true },
@@ -75,7 +80,9 @@ export async function grantHostedVaultShareTx(input: {
           destinationMemberId: input.destinationMemberId,
           grantedAt: input.now,
           grantorMemberId: input.grantorMemberId,
-          projectionKind: input.projectionKind,
+          projectionKind,
+          projectionScopeJson: toPrismaJsonValue(projectionScope),
+          projectionScopeKey,
           revokedAt: null,
           status: "granted",
         },
@@ -87,10 +94,10 @@ export async function grantHostedVaultShareTx(input: {
       }
       existing = await input.tx.hostedVaultShare.findUnique({
         where: {
-          grantorMemberId_projectionKind_destinationMemberId: {
+          grantorMemberId_projectionScopeKey_destinationMemberId: {
             destinationMemberId: input.destinationMemberId,
             grantorMemberId: input.grantorMemberId,
-            projectionKind: input.projectionKind,
+            projectionScopeKey,
           },
         },
         select: { id: true, status: true },
@@ -107,15 +114,18 @@ export async function grantHostedVaultShareTx(input: {
 
   await input.tx.hostedVaultShare.update({
     where: {
-      grantorMemberId_projectionKind_destinationMemberId: {
+      grantorMemberId_projectionScopeKey_destinationMemberId: {
         destinationMemberId: input.destinationMemberId,
         grantorMemberId: input.grantorMemberId,
-        projectionKind: input.projectionKind,
+        projectionScopeKey,
       },
     },
     data: {
       id: generateHostedVaultShareId(),
       grantedAt: input.now,
+      projectionKind,
+      projectionScopeJson: toPrismaJsonValue(projectionScope),
+      projectionScopeKey,
       revokedAt: null,
       status: "granted",
     },
@@ -126,7 +136,7 @@ export async function revokeHostedVaultSharesTx(input: {
   tx: Prisma.TransactionClient;
   destinationMemberId: string;
   grantorMemberId?: string | null;
-  projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
+  projectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   now: Date;
 }): Promise<number> {
   return (await revokeHostedVaultSharesWithCleanupTx(input)).revokedCount;
@@ -136,14 +146,14 @@ export async function revokeHostedVaultSharesWithCleanupTx(input: {
   tx: Prisma.TransactionClient;
   destinationMemberId: string;
   grantorMemberId?: string | null;
-  projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
+  projectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
   now: Date;
 }): Promise<HostedVaultShareRevocationResult> {
-  const projectionKinds = input.projectionKinds?.map((kind) => {
-    assertSupportedProjectionKind(kind);
-    return kind;
+  const projectionScopeKeys = input.projectionScopes?.map((scope) => {
+    const supported = assertSupportedProjectionScope(scope);
+    return buildHostedVaultShareProjectionScopeKey(supported);
   }) ?? null;
-  if (projectionKinds && projectionKinds.length === 0) {
+  if (projectionScopeKeys && projectionScopeKeys.length === 0) {
     return { cleanupSignals: [], revokedCount: 0 };
   }
 
@@ -154,12 +164,14 @@ export async function revokeHostedVaultSharesWithCleanupTx(input: {
       grantorMemberId: true,
       id: true,
       projectionKind: true,
+      projectionScopeJson: true,
+      projectionScopeKey: true,
     },
     where: {
       destinationMemberId: input.destinationMemberId,
       ...(input.grantorMemberId ? { grantorMemberId: input.grantorMemberId } : {}),
-      ...(projectionKinds && projectionKinds.length > 0
-        ? { projectionKind: { in: [...projectionKinds] } }
+      ...(projectionScopeKeys && projectionScopeKeys.length > 0
+        ? { projectionScopeKey: { in: [...projectionScopeKeys] } }
         : {}),
       status: "granted",
     },
@@ -196,6 +208,8 @@ export async function revokeOutgoingHostedVaultSharesForMemberDeletionTx(input: 
       grantorMemberId: true,
       id: true,
       projectionKind: true,
+      projectionScopeJson: true,
+      projectionScopeKey: true,
     },
     where: {
       destinationMemberId: { notIn: grantorMemberIds },
@@ -228,6 +242,8 @@ async function revokeHostedVaultShareRowsTx(input: {
     grantorMemberId: string;
     id: string;
     projectionKind: string;
+    projectionScopeJson: unknown;
+    projectionScopeKey: string;
     revokedAt: Date;
   }>>`
     UPDATE hosted_vault_share
@@ -242,6 +258,8 @@ async function revokeHostedVaultShareRowsTx(input: {
       grantor_member_id AS "grantorMemberId",
       id,
       projection_kind AS "projectionKind",
+      projection_scope_json AS "projectionScopeJson",
+      projection_scope_key AS "projectionScopeKey",
       revoked_at AS "revokedAt"
   `;
   const revokedShares = normalizeRevokedHostedVaultShareRows(rows);
@@ -261,6 +279,7 @@ async function revokeHostedVaultShareRowsTx(input: {
       revoke: {
         grantorMemberId: share.grantorMemberId,
         projectionKind: share.projectionKind,
+        projectionScope: share.projectionScope,
         revokedAt,
         schema: HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
         shareId: share.id,
@@ -289,17 +308,23 @@ function normalizeRevocableHostedVaultShareRows(rows: readonly {
   grantorMemberId: string;
   id: string;
   projectionKind: string;
+  projectionScopeJson: unknown;
+  projectionScopeKey: string;
 }[]): RevocableHostedVaultShare[] {
   return rows.flatMap((row) => {
-    if (!isHostedVaultShareProjectionKind(row.projectionKind)) {
+    const projectionScope = parseHostedVaultShareRowProjectionScope(row);
+    if (!projectionScope) {
       return [];
     }
+    const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
 
     return [{
       destinationMemberId: row.destinationMemberId,
       grantorMemberId: row.grantorMemberId,
       id: row.id,
-      projectionKind: row.projectionKind,
+      projectionKind: projectionScope.projectionKind,
+      projectionScope,
+      projectionScopeKey,
     }];
   });
 }
@@ -309,55 +334,73 @@ function normalizeRevokedHostedVaultShareRows(rows: readonly {
   grantorMemberId: string;
   id: string;
   projectionKind: string;
+  projectionScopeJson: unknown;
+  projectionScopeKey: string;
   revokedAt: Date;
 }[]): RevokedHostedVaultShare[] {
   return rows.flatMap((row) => {
-    if (!isHostedVaultShareProjectionKind(row.projectionKind)) {
+    const projectionScope = parseHostedVaultShareRowProjectionScope(row);
+    if (!projectionScope) {
       return [];
     }
+    const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
 
     return [{
       destinationMemberId: row.destinationMemberId,
       grantorMemberId: row.grantorMemberId,
       id: row.id,
-      projectionKind: row.projectionKind,
+      projectionKind: projectionScope.projectionKind,
+      projectionScope,
+      projectionScopeKey,
       revokedAt: row.revokedAt,
     }];
   });
 }
 
-export async function readActiveHostedVaultShareProjectionKinds(input: {
+export async function readActiveHostedVaultShareProjectionScopes(input: {
   prisma?: HostedVaultShareGrantClient;
   grantorMemberId: string;
   destinationMemberId: string;
-  projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
-}): Promise<HostedVaultShareProjectionKind[]> {
+  projectionScopes?: readonly HostedVaultShareProjectionScope[] | null;
+}): Promise<HostedVaultShareProjectionScope[]> {
   const prisma = input.prisma ?? getPrisma();
-  const projectionKinds = input.projectionKinds?.map((kind) => {
-    assertSupportedProjectionKind(kind);
-    return kind;
+  const projectionScopeKeys = input.projectionScopes?.map((scope) => {
+    const supported = assertSupportedProjectionScope(scope);
+    return buildHostedVaultShareProjectionScopeKey(supported);
   }) ?? null;
-  if (projectionKinds && projectionKinds.length === 0) {
+  if (projectionScopeKeys && projectionScopeKeys.length === 0) {
     return [];
   }
   const rows = await prisma.hostedVaultShare.findMany({
     where: {
       destinationMemberId: input.destinationMemberId,
       grantorMemberId: input.grantorMemberId,
-      ...(projectionKinds && projectionKinds.length > 0
-        ? { projectionKind: { in: [...projectionKinds] } }
+      ...(projectionScopeKeys && projectionScopeKeys.length > 0
+        ? { projectionScopeKey: { in: [...projectionScopeKeys] } }
         : {}),
       status: "granted",
     },
-    select: { projectionKind: true },
+    select: {
+      projectionKind: true,
+      projectionScopeJson: true,
+      projectionScopeKey: true,
+    },
   });
   return rows
-    .map((row) => row.projectionKind)
-    .filter(isHostedVaultShareProjectionKind);
+    .map(parseHostedVaultShareRowProjectionScope)
+    .filter((scope): scope is HostedVaultShareProjectionScope => scope !== null);
 }
 
-function assertSupportedProjectionKind(value: unknown): asserts value is HostedVaultShareProjectionKind {
-  if (!isHostedVaultShareProjectionKind(value)) {
+function assertSupportedProjectionScope(
+  value: unknown,
+): HostedVaultShareProjectionScope {
+  let scope: HostedVaultShareProjectionScope;
+  try {
+    scope = parseHostedVaultShareProjectionScope(
+      value,
+      "Vault-share projection scope",
+    );
+  } catch {
     throw hostedOnboardingError({
       code: "HOSTED_VAULT_SHARE_PROJECTION_UNSUPPORTED",
       httpStatus: 400,
@@ -365,6 +408,33 @@ function assertSupportedProjectionKind(value: unknown): asserts value is HostedV
       retryable: false,
     });
   }
+  return scope;
+}
+
+function parseHostedVaultShareRowProjectionScope(row: {
+  projectionKind: string;
+  projectionScopeJson: unknown;
+  projectionScopeKey: string;
+}): HostedVaultShareProjectionScope | null {
+  try {
+    const scope = parseHostedVaultShareProjectionScope(
+      row.projectionScopeJson ?? row.projectionKind,
+      "Hosted vault-share row projection scope",
+    );
+    if (
+      scope.projectionKind !== row.projectionKind
+      || buildHostedVaultShareProjectionScopeKey(scope) !== row.projectionScopeKey
+    ) {
+      return null;
+    }
+    return scope;
+  } catch {
+    return null;
+  }
+}
+
+function toPrismaJsonValue(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 function isPrismaUniqueConstraintError(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && (error as { code?: unknown }).code === "P2002");

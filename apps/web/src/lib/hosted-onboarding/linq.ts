@@ -19,6 +19,7 @@ export {
   shareHostedLinqContactCard,
   sendHostedLinqReadReceipt,
   sendHostedLinqChatMessage,
+  updateHostedLinqChatAvatar,
 } from "./linq-client";
 
 export {

@@ -28,10 +28,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 
 // Byte budgets over the esbuild metafile so import-graph creep in the boot
 // surface fails the assembly instead of silently regressing cold start.
-// Latest measured from the real assembled bundle on 2026-07-07: total
-// 7,884,530B across 40 chunks, entry container-entrypoint.js 1,270,050B,
-// static boot closure 6,382,690B across 30 chunks. The entry ratchet baseline
-// remains 1,267,937B because the latest entry did not beat the prior baseline.
+// Latest measured from the real assembled bundle on 2026-07-07 after adding
+// selector-scoped vault-share runtime parsing: local macOS total 8,018,521B,
+// entry container-entrypoint.js 1,319,436B, static boot closure 6,515,312B.
+// CI Linux measured the static boot closure at 6,487,522B, so the static
+// baseline below keeps the tighter CI value while the tolerance covers local
+// emit jitter.
 //
 // The entry chunk gates cold-start parse, so it is ratcheted, not given
 // headroom: the guard holds it to the measured baseline plus a tight noise
@@ -54,8 +56,8 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // too if total creep becomes the concern. Investigate the listed largest
 // inputs before raising either.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_300_000;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_267_937;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_382_690;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_319_436;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 6_487_522;
 // Noise band above the baseline before the ratchet trips (~2%): absorbs
 // content-hash and minifier jitter without letting real boot-path weight land
 // silently. Keep it tight; it is a tolerance for noise, not feature headroom.

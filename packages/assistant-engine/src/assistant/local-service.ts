@@ -135,6 +135,10 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
+import {
+  assistantChannelSupportsReplyBubbles,
+  stripAssistantReplyBubbleDelimiters,
+} from './reply-bubbles.js'
 import type {
   AssistantMessageInput,
   AssistantDeliveryOutcome,
@@ -169,7 +173,6 @@ function hasHostedTextDeliveryForChannel(input: {
   if (!dependencies) {
     return false
   }
-
   switch (input.channel) {
     case 'telegram':
       return typeof dependencies.sendTelegram === 'function'
@@ -181,6 +184,22 @@ function hasHostedTextDeliveryForChannel(input: {
     default:
       return false
   }
+}
+
+function resolveAssistantPersistedReplyText(input: {
+  messageInput: AssistantMessageInput
+  rawResponse: string
+  session: AssistantSession
+  sharedPlan: AssistantTurnSharedPlan
+}): string {
+  const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
+    input: input.messageInput,
+    session: input.session,
+    sharedPlan: input.sharedPlan,
+  })
+  return assistantChannelSupportsReplyBubbles(deliveryFields.channel)
+    ? stripAssistantReplyBubbleDelimiters(input.rawResponse)
+    : input.rawResponse
 }
 
 function isHostedOptionalProgressDeliveryAvailable(input: {
@@ -1286,7 +1305,12 @@ export async function sendAssistantMessageLocal(
           progressDeliveredSession: progressDeliveredSessionRef.value,
           session: providerResult.session,
         })
-        responseText = providerResult.response
+        responseText = resolveAssistantPersistedReplyText({
+          messageInput: currentInput,
+          rawResponse: providerResult.response,
+          session: currentSession,
+          sharedPlan,
+        })
         const usageRecordStartedAt = Date.now()
         await recordAssistantUsageEvent({
           executionContext,
@@ -1359,8 +1383,16 @@ export async function sendAssistantMessageLocal(
             media: segment.media ?? [],
           })
         }
-        const precedingResponses = precedingResponseSegments.map(
-          (segment) => segment.response,
+        const precedingResponses = precedingResponseSegments.map((segment) =>
+          resolveAssistantPersistedReplyText({
+            messageInput: applyAssistantReplyDeliveryContext({
+              context: segment.deliveryContext ?? null,
+              input: currentInput,
+            }),
+            rawResponse: segment.response,
+            session: currentSession,
+            sharedPlan,
+          })
         )
         const providerResumeStateAction = resolveProviderResumeStateAction({
           codexThreadHistoryUnsafe:
@@ -1377,9 +1409,18 @@ export async function sendAssistantMessageLocal(
           })
         }
         const noReplySelected = providerResult.finalAction?.kind === 'none'
-        const finalResponseText = noReplySelected
+        const rawFinalResponseText = noReplySelected
           ? null
           : resolveAssistantProviderFinalResponseText(providerResult)
+        const finalResponseText =
+          rawFinalResponseText === null
+            ? null
+            : resolveAssistantPersistedReplyText({
+                messageInput: currentInput,
+                rawResponse: rawFinalResponseText,
+                session: currentSession,
+                sharedPlan,
+              })
         const assistantTranscriptText = resolveAssistantProviderTranscriptText({
           media: providerResult.responseMedia,
           response: finalResponseText,
@@ -1495,7 +1536,7 @@ export async function sendAssistantMessageLocal(
             ? await dispatchAssistantReply({
                 input: currentInput,
                 media: providerResult.responseMedia ?? [],
-                response: finalResponseText,
+                response: rawFinalResponseText ?? '',
                 session: deliverySession,
                 sharedPlan,
                 turnId: currentUserTurn.turnId,

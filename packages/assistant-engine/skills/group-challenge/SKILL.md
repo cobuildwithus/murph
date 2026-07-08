@@ -23,6 +23,50 @@ Full standings, callouts, and leaderboards are in-bounds because joining the
 challenge is the opt-in — but only for the challenge metric, only for the
 challenge window. Score the challenge, never the body.
 
+## Challenge share scopes
+
+Choose the narrowest Vault Share projection scope that matches the agreed
+score. Use daily aggregate records only; never ask for routes, raw workouts,
+provider traces, or private 1:1 data for a group challenge.
+
+- Activity minutes for a specific recognized activity alias:
+  `{ "projectionKind": "activity-minutes-days.v1", "selector": { "activityKind": "<alias>" } }`
+  - Running minutes: `activityKind: "running"`
+  - Walking minutes or walking minutes per day: `activityKind: "walking"`
+  - Swimming minutes: `activityKind: "swimming"`
+  - Sauna minutes or sauna minutes per week: `activityKind: "sauna"`
+- Steps: `steps-days.v0`
+- Distance: `distance-days.v0`
+- Elevation gain: `elevation-gain-days.v0`
+- Floors climbed: `floors-climbed-days.v0`
+- Active calories: `active-calories-days.v0`
+- Broad workout count/minutes: `workout-days.v0`
+- Broad active minutes: `activity-days.v0`
+- Broad workout heart-rate zones: `heart-rate-zones-days.v0`
+- Workout strain: `workout-strain-days.v0`
+- Day strain: `day-strain-days.v0`
+- Activity score: `activity-score-days.v0`
+- Max heart rate: `max-heart-rate-days.v0`
+- Sleep timing: `sleep-times.v0`
+- VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
+  `resting-heart-rate-days.v0`, or `hrv-days.v0`
+
+Running zone-specific challenges are not selector-scoped yet. If the group
+explicitly wants zone minutes for all workouts, use `heart-rate-zones-days.v0`;
+if they require running-only zone minutes, say that exact share is unsupported
+instead of widening consent.
+
+Do not default to biomarker or body-score leaderboards. Use those only when the
+group explicitly chose that metric, and frame the result as a light challenge
+signal rather than a body ranking. If a group names a metric not listed here,
+check the join-page selectable Vault Share projection scopes and choose the
+narrowest matching scope; if none exists, say it is unsupported instead of
+inventing a share kind.
+
+For weekly or two-week challenges, read fresh rolling shared records during
+the daily loop and append standings snapshots to the challenge page. The share
+itself is a short current window; the challenge page is the durable scoreboard.
+
 ## The challenge page (your durable state)
 
 Your context does not survive between days; the vault does. Every challenge
@@ -70,7 +114,7 @@ with `vault-cli memory forget <memory-id>`.
    with a ruling, and converge the group on one metric and window. Record
    the ruling on the page.
 2. **Collect consent.** Mint the join link with `murph.group`
-   `action="create_join_link"` and the challenge's share kinds; members pick
+   `action="create_join_link"` and the challenge's share scopes; members pick
    what they share on the join page. Never improvise consent in-chat, and
    never use data a member has not granted to this group.
 3. **Ask for introductions and photos.** One short intro and a photo of
@@ -105,7 +149,11 @@ Schedule one dispatch a day with `vault-cli automation save` (dailyLocal
 schedule, `continuityPolicy: preserve`). Each run:
 
 1. Read the challenge page.
-2. Read fresh standings: `vault-cli group shared --kind <metric kind>`.
+2. Read fresh standings with the same scope shape used for the challenge
+   share: fixed projections use `vault-cli group shared --kind steps-days.v0`;
+   selector activity-minute projections use
+   `vault-cli group shared --scope activity-minutes-days.v1.activityKind.<alias>`.
+   Never pass selector scopes through `--kind`.
    Never reuse remembered numbers — wrong scores turn jokes into noise. If
    the data is empty or missing for a member, say so plainly; never invent
    figures.

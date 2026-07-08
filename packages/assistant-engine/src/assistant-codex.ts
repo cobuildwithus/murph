@@ -2133,6 +2133,8 @@ function buildCodexTransportDiagnosticsTraceEvent(input: {
       : retryProgress
         ? 'stream-retry'
         : 'stream-disconnected'
+  const terminalStreamFailure =
+    source.willRetry === false && (idleTimeout || streamDisconnected)
 
   return {
     schema: CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
@@ -2146,8 +2148,11 @@ function buildCodexTransportDiagnosticsTraceEvent(input: {
     codexTransportProviderActionCount: input.providerActionCount,
     codexTransportRetryCount: retryProgress?.retryCount ?? null,
     codexTransportRetryMax: retryProgress?.retryMax ?? null,
+    codexTransportRetryExhausted: terminalStreamFailure,
     codexTransportSourceMethod: source.sourceMethod,
     codexTransportStreamDisconnected: streamDisconnected,
+    codexTransportTerminalAfterProviderAction:
+      terminalStreamFailure && input.providerActionCount > 0,
     codexTransportThreadIdPresent:
       source.threadIdPresent || input.codexThreadId !== null,
     codexTransportTransport: transport,

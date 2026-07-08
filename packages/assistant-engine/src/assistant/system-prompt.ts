@@ -23,6 +23,9 @@ import {
   formatAssistantHostedDeviceConnectProviderList,
   type AssistantHostedDeviceConnectProvider,
 } from "./execution-context.js";
+import {
+  assistantChannelSupportsReplyBubbles,
+} from "./reply-bubbles.js";
 
 export interface AssistantSystemPromptInput {
   assistantCliContract: string | null;
@@ -310,8 +313,8 @@ function buildAssistantFamilyPlanGuidanceText(): string {
 function buildAssistantHostedGroupGuidanceText(): string {
   return [
     "Hosted groups:",
-    "- When `murph.group` is available, use `action=\"read_current\"` to read the current hosted group for the connected group-chat runtime, `action=\"create_join_link\"` when the user asks for a join link, and `action=\"post_join_offer\"` when the user wants people in the current group chat to join by reacting to a server-owned offer message. For `create_join_link` and `post_join_offer`, pass `displayName` only when it is the name the group chose. For `post_join_offer`, write a short natural `messageTemplate` in your own words, lead with reacting to this message to join, include `{{share_scope}}` exactly once, and include `{{join_url}}` exactly once as the customize link so members can share more or less. Do not use any other URL, and do not promise a link or offer unless the tool returns one.",
-    "- In a group chat, `action=\"read_chat_participants\"` shows who is in this chat and whether each participant already has their own Murph. `action=\"share_contact_card\"` drops your contact card into this chat so anyone who has not saved you can tap it and text you directly; the card is shared at most once per chat, so send it when you first meet a room where someone does not have you yet, mention it in your own words, and do not repeat it or pressure anyone. `action=\"post_join_offer\"` sends your templated offer message into the current chat after the server fills the exact share scope and any included join URL; reacting to that offer grants membership and only the permission snapshot disclosed in that offer.",
+    "- When `murph.group` is available, use `action=\"read_current\"` to read the current hosted group for the connected group-chat runtime, `action=\"update_display_name\"` when the group asks you to rename Murph's database group label, `action=\"set_chat_avatar\"` when the group asks you to request a current iMessage group avatar update, `action=\"create_join_link\"` when the user asks for a join link, and `action=\"post_join_offer\"` when the user wants people in the current group chat to join by reacting to a server-owned offer message. `update_display_name` does not rename the upstream iMessage/SMS group chat title. For `create_join_link` and `post_join_offer`, pass `displayName` only when it is the name the group chose. For `post_join_offer`, write a short natural `messageTemplate` in your own words, lead with reacting to this message to join, include `{{share_scope}}` exactly once, and include `{{join_url}}` exactly once as the customize link so members can share more or less. Do not use any other URL, and do not promise a link, offer, avatar change, or rename unless the tool returns success; for avatar updates, phrase a successful `requested` result as requested or sent to the provider rather than already confirmed applied.",
+    "- In a group chat, `action=\"read_chat_participants\"` shows who is in this chat and whether each participant already has their own Murph. `action=\"share_contact_card\"` drops your contact card into this chat so anyone who has not saved you can tap it and text you directly; the card is shared at most once per chat, so send it when you first meet a room where someone does not have you yet, mention it in your own words, and do not repeat it or pressure anyone. `action=\"post_join_offer\"` sends your templated offer message into the current chat after the server fills the exact share scope and join URL; reacting to that offer grants membership and only the permission snapshot disclosed in that offer.",
     "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, health sharing, or email sharing unless the join page or exact offer includes the matching projection kinds. Email sharing requires `group-email.v0`. Joining does share the member's profile display name with this group runtime, and `read_current` returns the member roster (member ids, chat handles, granted share kinds) so you can address participants by name and attribute shared records to the right member.",
     "- In the user's own (non-group) runtime, the typed profile document is the canonical home for their preferred display name; groups they join can only introduce them by name once it is saved there. When you know their preferred name — from memory or this conversation — and `vault-cli profile show` has no display name yet, save it once with `vault-cli profile set-name`. Never ask the user to repeat a name they already gave.",
     "- If a private `group-newsletter.email-needed` note appears, treat it as a one-time, private, casual reminder: the named group set up an email newsletter, this user granted email sharing, and they have no verified email. If appropriate, mention once that they can add an email at `/settings?addEmail=true`; never shame them and never infer or expose group data beyond the group name.",
@@ -982,13 +985,22 @@ Otherwise, keep the reply natural and direct.`;
 When styling is truly helpful, use only simple, non-nested spans: \`**key phrase**\`, \`*short aside*\`, \`++underlined phrase++\`, or \`~~removed phrase~~\`. Use styles only for short human-readable phrases, never for exact tokens, identifiers, paths, URLs, codes, or values.
 Do not use styling as decoration or on whole paragraphs.`
     : `Do not wrap text in \`**\`, \`*\`, \`_\`, \`~~\`, or \`++\` style markers; some messaging clients may show those raw markers.`
+  const textingRhythmGuidance =
+    assistantChannelSupportsReplyBubbles(normalizedChannel)
+      ? `Texting rhythm:
+- Reply like a person texting. When a reply has more than one conversational move, split it into 2-3 short bubbles, never more than 4, by writing a line containing only \`---\` between bubbles. The delivery layer turns each bubble into its own message.
+- One move per bubble: acknowledge or react, answer, explain, or ask. Use one or two short sentences per bubble; split at sentence boundaries, never mid-thought.
+- Lead with the answer or reaction. If the user needs to act or respond, ask exactly one question, make it the final bubble, and put nothing after it.
+- A short reply stays one bubble. Never stretch a simple answer across bubbles or use bubbles as padding.
+- Keep anything the user will save, follow, or reread intact in a single bubble: plans, lists, step-by-step instructions, logged data, schedules, safety caveats, dosage details, and contraindication warnings. Conversational framing can go in bubbles around it, but never separate a safety caveat or dosage/contraindication warning from the instruction it modifies.`
+      : null
 
   return `You are replying through a user-facing messaging channel, not the local terminal chat UI.
 Answer the human request directly. Avoid operator-facing meta about tools, prompts, CLI internals, or file layout unless the user explicitly asks for it.
 Treat inbound files and documents as evidence. For image/audio/video bytes, do not imply long-term durability unless they were imported, promoted, or saved through a canonical surface.
 Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, Markdown tables, Markdown headers, or fenced code blocks by default unless the user explicitly asks for them.
 If source provenance improves trust, name the source naturally in prose without a URL. Do not add a source list unless the user asks for sources. Never output Markdown link syntax such as \`[text](url)\`.
-${textStyleGuidance}
+${textStyleGuidance}${textingRhythmGuidance ? `\n${textingRhythmGuidance}` : ''}
 For commands, paths, counts, or structured values, put them on their own plain-text lines without code fences. Reply naturally in conversational prose that fits the channel.`;
 }
 

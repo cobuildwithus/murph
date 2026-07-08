@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   findHostedPrivyPasskeyCredentialIds,
   hasOnlyHostedPrivyPasskeyMfa,
+  readHostedPrivyWalletMfaStatus,
   selectHostedPrivyEmbeddedEthereumWallet,
 } from "@/src/lib/hosted-onboarding/privy-wallet-mfa";
 
@@ -107,5 +108,50 @@ describe("Privy wallet MFA selectors", () => {
         { type: "passkey", credentialId: "credential-b" },
       ],
     })).toEqual(["credential-a", "credential-b"]);
+  });
+
+  it("classifies secure approval setup from the server-side Privy user shape", () => {
+    expect(readHostedPrivyWalletMfaStatus({
+      linked_accounts: [
+        {
+          address: PRIMARY_ADDRESS,
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          type: "wallet",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+        {
+          credential_id: "credential-a",
+          type: "passkey",
+        },
+      ],
+      mfa_methods: [{ type: "passkey" }],
+    })).toEqual({ status: "configured" });
+
+    expect(readHostedPrivyWalletMfaStatus({
+      linked_accounts: [],
+      mfa_methods: [],
+    })).toEqual({ status: "not_configured" });
+
+    expect(readHostedPrivyWalletMfaStatus({
+      linked_accounts: [
+        {
+          address: PRIMARY_ADDRESS,
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          type: "wallet",
+          wallet_client_type: "privy",
+        },
+        {
+          address: SECONDARY_ADDRESS,
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          type: "wallet",
+          wallet_client_type: "privy",
+        },
+      ],
+      mfa_methods: [{ type: "passkey" }],
+    })).toEqual({ status: "needs_support" });
   });
 });

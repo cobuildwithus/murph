@@ -5877,10 +5877,12 @@ describe('assistant codex runtime', () => {
       codexTransportEventKind: 'stream-idle-timeout',
       codexTransportFallbackActivated: false,
       codexTransportIdleTimeout: true,
+      codexTransportRetryExhausted: false,
       codexTransportRetryCount: 2,
       codexTransportRetryMax: 5,
       codexTransportSourceMethod: 'error',
       codexTransportStreamDisconnected: true,
+      codexTransportTerminalAfterProviderAction: false,
       codexTransportThreadIdPresent: true,
       codexTransportTransport: 'websocket',
       codexTransportTurnIdPresent: true,
@@ -5893,12 +5895,146 @@ describe('assistant codex runtime', () => {
       type: 'assistant.codex.transport_diagnostics',
       codexTransportEventKind: 'transport-fallback',
       codexTransportFallbackActivated: true,
+      codexTransportRetryExhausted: false,
       codexTransportSourceMethod: 'warning',
+      codexTransportTerminalAfterProviderAction: false,
       codexTransportTransport: 'websocket',
       codexTransportWillRetry: null,
     })
 
     expect(JSON.stringify(diagnosticEvents)).not.toContain('api.openai.com')
+  })
+
+  it('emits terminal Codex transport diagnostics after provider actions', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-transport-terminal-')
+    const onTraceEvent = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-transport-terminal',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-transport-terminal',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/started',
+              params: {
+                turn: {
+                  id: 'turn-transport-terminal',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'cmd-transport-terminal',
+                  type: 'commandExecution',
+                  status: 'completed',
+                  exitCode: 0,
+                  aggregatedOutput: 'command raw output must not appear',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'error',
+              params: {
+                error: {
+                  message: 'stream disconnected before completion',
+                  codexErrorInfo: {
+                    responseStreamDisconnected: {
+                      httpStatusCode: null,
+                    },
+                  },
+                  additionalDetails:
+                    'stream disconnected before completion at https://api.openai.com/v1/responses',
+                },
+                threadId: 'thread-transport-terminal',
+                turnId: 'turn-transport-terminal',
+                willRetry: false,
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-transport-terminal',
+                  status: 'failed',
+                },
+              },
+            }),
+          )
+        })()
+      })
+
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        onTraceEvent,
+        prompt: 'diagnose terminal transport',
+        workingDirectory,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_CONNECTION_LOST',
+    })
+
+    const diagnosticEvents = onTraceEvent.mock.calls
+      .map(([event]) => event)
+      .filter((event) => {
+        const rawEvent = asRecord(event.rawEvent)
+        return rawEvent.schema === CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA
+      })
+    expect(diagnosticEvents).toHaveLength(1)
+
+    const terminalDiagnostic = asRecord(diagnosticEvents[0]?.rawEvent)
+    expect(terminalDiagnostic).toMatchObject({
+      schema: CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
+      type: 'assistant.codex.transport_diagnostics',
+      codexTransportAdditionalDetailsPresent: true,
+      codexTransportEventKind: 'stream-disconnected',
+      codexTransportProviderActionCount: 1,
+      codexTransportRetryExhausted: true,
+      codexTransportSourceMethod: 'error',
+      codexTransportStreamDisconnected: true,
+      codexTransportTerminalAfterProviderAction: true,
+      codexTransportThreadIdPresent: true,
+      codexTransportTransport: 'http',
+      codexTransportTurnIdPresent: true,
+      codexTransportWillRetry: false,
+    })
+    expect(JSON.stringify(diagnosticEvents)).not.toContain('api.openai.com')
+    expect(JSON.stringify(diagnosticEvents)).not.toContain('command raw output')
   })
 
   it('keeps Codex action diagnostics scoped and deduped per active turn', () => {
