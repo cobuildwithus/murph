@@ -2,7 +2,9 @@ import "server-only";
 
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   parseHostedVaultShareProjectionScope,
@@ -247,6 +249,26 @@ function hostedVaultShareProjectionScopeDisplay(
     return {
       label: `${capitalizeHostedVaultShareLabel(label)} minutes`,
       description: `Shares your last 7 days of ${label} minutes.`,
+    };
+  }
+  if (projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND) {
+    const label = formatHostedVaultShareActivityKindLabel(
+      projectionScope.selector.activityKind,
+    );
+    return {
+      label: `Recent ${label} distance and session count`,
+      description:
+        `Shares daily total distance and session count for ${label} activities. Does not share routes, GPS, pace, timestamps, heart rate, calories, or individual workouts.`,
+    };
+  }
+  if (projectionScope.projectionKind === HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND) {
+    const label = formatHostedVaultShareActivityKindLabel(
+      projectionScope.selector.activityKind,
+    );
+    return {
+      label: `Recent ${label} session count`,
+      description:
+        `Shares daily count of ${label} activity sessions. Does not share duration, distance, routes, GPS, timestamps, heart rate, calories, or individual workouts.`,
     };
   }
   if (!isHostedVaultShareSelectableProjectionKind(projectionScope.projectionKind)) {

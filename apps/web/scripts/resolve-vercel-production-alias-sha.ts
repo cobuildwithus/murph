@@ -13,7 +13,7 @@ interface FetchResponse {
 
 type FetchLike = (
   input: string,
-  init?: { headers?: Record<string, string> },
+  init?: { headers?: HeadersInit },
 ) => Promise<FetchResponse>;
 
 // Keep this workflow helper on direct REST calls: the GitHub deployment_status job
@@ -120,10 +120,11 @@ async function fetchVercelJson(
   fetchImpl: FetchLike,
   label: string,
 ): Promise<unknown> {
+  const headers = new Headers();
+  headers.set("authorization", ["Bearer", token].join(" "));
+
   const response = await fetchImpl(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
   });
 
   if (!response.ok) {
