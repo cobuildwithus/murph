@@ -14,9 +14,6 @@ import {
   classifyAssistantOpenAiImageUsageBasis,
   createAssistantUsageId,
   createAssistantUsageReportingUserId,
-  formatAssistantOpenAiImageUsageBasisErrorMessage,
-  isAssistantOpenAiImageUsageBasisError,
-  normalizeAssistantOpenAiImageUsageBasisErrorReason,
   parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
 } from "../src/assistant-usage.ts";
@@ -232,14 +229,6 @@ test("OpenAI image usage basis classifier explains unpriceable usage", () => {
     },
   );
 
-  const error = new TypeError(formatAssistantOpenAiImageUsageBasisErrorMessage(
-    "inconsistent_provider_usage_tokens",
-  ));
-  assert.equal(isAssistantOpenAiImageUsageBasisError(error), true);
-  assert.equal(
-    normalizeAssistantOpenAiImageUsageBasisErrorReason(error),
-    "inconsistent_provider_usage_tokens",
-  );
 });
 
 test("transcription usage records carry the audio cost basis and dedupe like turn usage", () => {

@@ -3,7 +3,6 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
-  isAssistantOpenAiImageUsageBasisError,
   parseAssistantUsageRecord,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
@@ -130,37 +129,23 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
 
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
-    let limitNoticeCandidate: HostedAiUsageLimitNoticeCandidate | null;
-    try {
-      limitNoticeCandidate = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
-        await persistHostedAiUsageRecordTx({
+    const limitNoticeCandidate = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
+      await persistHostedAiUsageRecordTx({
+        memberId,
+        record,
+        tx,
+      });
+
+      if (input.accountAllowance === true) {
+        return accountHostedAiUsageForAllowanceTx({
           memberId,
           record,
           tx,
         });
-
-        if (input.accountAllowance === true) {
-          return accountHostedAiUsageForAllowanceTx({
-            memberId,
-            record,
-            tx,
-          });
-        }
-
-        return null;
-      });
-    } catch (error) {
-      if (shouldPreserveHostedAiUsageRecordAfterAllowanceError(record, error)) {
-        await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
-          await persistHostedAiUsageRecordTx({
-            memberId,
-            record,
-            tx,
-          });
-        });
       }
-      throw error;
-    }
+
+      return null;
+    });
 
     if (limitNoticeCandidate) {
       limitNoticeCandidates.push(limitNoticeCandidate);
@@ -309,26 +294,6 @@ async function persistHostedAiUsageRecordTx(input: {
     id: storedRecord.id,
     tx: input.tx,
   });
-}
-
-function shouldPreserveHostedAiUsageRecordAfterAllowanceError(
-  record: AssistantUsageRecord,
-  error: unknown,
-): boolean {
-  return (
-    record.provider === "openai-images"
-    && (
-      record.usageExtractionSourcePath === "openai.images.generate"
-      || record.usageExtractionSourcePath === "openai.images.edit"
-    )
-    && isHostedAiUsageRecordPreservingAllowanceError(error)
-  );
-}
-
-function isHostedAiUsageRecordPreservingAllowanceError(
-  error: unknown,
-): boolean {
-  return isAssistantOpenAiImageUsageBasisError(error);
 }
 
 async function runHostedAiUsageRecordTransaction<T>(

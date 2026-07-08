@@ -265,44 +265,6 @@ export function classifyAssistantOpenAiImageUsageBasis(
     : missingOpenAiImageUsageBasis();
 }
 
-export function formatAssistantOpenAiImageUsageBasisErrorMessage(
-  reason: AssistantOpenAiImageUsageUnpriceableReason,
-): string {
-  return reason === "inconsistent_provider_usage_tokens"
-    ? "OpenAI image hosted AI usage has inconsistent provider usage tokens."
-    : "OpenAI image hosted AI usage requires provider usage tokens.";
-}
-
-export function isAssistantOpenAiImageUsageBasisError(
-  error: unknown,
-): boolean {
-  return error instanceof TypeError
-    && normalizeAssistantOpenAiImageUsageBasisErrorReason(error) !== null;
-}
-
-export function normalizeAssistantOpenAiImageUsageBasisErrorReason(
-  error: unknown,
-): AssistantOpenAiImageUsageUnpriceableReason | null {
-  if (!(error instanceof TypeError)) {
-    return null;
-  }
-  if (
-    error.message.startsWith(
-      "OpenAI image hosted AI usage has inconsistent provider usage tokens",
-    )
-  ) {
-    return "inconsistent_provider_usage_tokens";
-  }
-  if (
-    error.message.startsWith(
-      "OpenAI image hosted AI usage requires provider usage tokens",
-    )
-  ) {
-    return "missing_provider_usage_tokens";
-  }
-  return null;
-}
-
 type AssistantOpenAiImageTokenReadResult =
   | {
     kind: "valid";

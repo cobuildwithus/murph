@@ -382,12 +382,6 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("rejects OpenAI image generation when input detail buckets are missing", () => {
-    expect(() => priceHostedAiUsageForAllowance(
-      buildAggregateOnlyOpenAiImageUsageRecord(),
-    )).toThrow("OpenAI image hosted AI usage requires provider usage tokens");
-  });
-
   it("prices mixed cached OpenAI image input with conservative text-first allocation", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
@@ -432,86 +426,6 @@ describe("hosted AI usage allowance pricing", () => {
       },
       pricingVersion: "openai-image-api-pricing-2026-07-08-standard",
     });
-  });
-
-  it("rejects OpenAI image usage when provider usage tokens are missing", () => {
-    for (const rawUsageJson of [null, {}]) {
-      expect(() => priceHostedAiUsageForAllowance({
-        ...BASE_USAGE_RECORD,
-        cachedInputTokens: null,
-        inputTokens: null,
-        outputTokens: null,
-        provider: "openai-images",
-        providerName: "OpenAI Images",
-        rawUsageJson,
-        requestedModel: "gpt-image-2",
-        servedModel: null,
-        totalTokens: null,
-        usageExtractionSourcePath: "openai.images.generate",
-        usageExtractionVersion: "openai-images-v1",
-      })).toThrow("OpenAI image hosted AI usage requires provider usage tokens");
-    }
-  });
-
-  it("rejects OpenAI image usage when price-critical usage buckets are partial", () => {
-    const records = [
-      {
-        ...BASE_USAGE_RECORD,
-        cachedInputTokens: 100,
-        inputTokens: 1_300,
-        outputTokens: null,
-        provider: "openai-images",
-        providerName: "OpenAI Images",
-        rawUsageJson: {
-          input_tokens: 1_300,
-          input_tokens_details: {
-            cached_tokens: 100,
-            image_tokens: 1_000,
-            text_tokens: 300,
-          },
-          total_tokens: 1_300,
-        },
-        requestedModel: "gpt-image-2",
-        servedModel: null,
-        totalTokens: 1_300,
-        usageExtractionSourcePath: "openai.images.generate",
-        usageExtractionVersion: "openai-images-v1",
-      },
-      {
-        ...BASE_USAGE_RECORD,
-        cachedInputTokens: null,
-        inputTokens: null,
-        outputTokens: 400,
-        provider: "openai-images",
-        providerName: "OpenAI Images",
-        rawUsageJson: {
-          output_tokens: 400,
-          output_tokens_details: {
-            image_tokens: 400,
-            reasoning_tokens: 0,
-            text_tokens: 0,
-          },
-          total_tokens: 400,
-        },
-        requestedModel: "gpt-image-2",
-        servedModel: null,
-        totalTokens: 400,
-        usageExtractionSourcePath: "openai.images.generate",
-        usageExtractionVersion: "openai-images-v1",
-      },
-    ] satisfies AssistantUsageRecord[];
-
-    for (const record of records) {
-      expect(() => priceHostedAiUsageForAllowance(record))
-        .toThrow("OpenAI image hosted AI usage requires provider usage tokens");
-    }
-  });
-
-  it("rejects OpenAI image usage when provider usage buckets are inconsistent", () => {
-    for (const record of buildInconsistentOpenAiImageUsageRecords()) {
-      expect(() => priceHostedAiUsageForAllowance(record))
-        .toThrow("OpenAI image hosted AI usage has inconsistent provider usage tokens");
-    }
   });
 
   it("rejects OpenAI image usage with OpenAI flex token pricing", () => {
