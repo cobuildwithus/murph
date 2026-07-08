@@ -43,10 +43,9 @@ import {
   redactAssistantDisplayPath,
   getAssistantSession,
   readAssistantOnboardingState,
-  repairAssistantSessionIndexes,
   reopenAssistantOnboarding,
   resolveAssistantOnboardingStatePath,
-  listRecentAssistantSessions,
+  listAssistantSessions,
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
 import {
@@ -1404,28 +1403,13 @@ export function registerAssistantCommands(
           .max(50)
           .default(assistantSessionListDefaultLimit)
           .describe('Maximum number of recent assistant sessions to return. Defaults to 5.'),
-        repair: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe(
-            'Rebuild assistant session indexes from durable session files before listing. This is an explicit repair path for legacy or recovered vaults and may scan all assistant session records.',
-          ),
       }),
       output: assistantSessionListResultSchema,
       async run(context) {
         await assertAssistantInitializedVaultRoot(context.options.vault)
         const limit = normalizeAssistantSessionListLimit(context.options.limit)
-        if (context.options.repair) {
-          await repairAssistantSessionIndexes(context.options.vault)
-        }
-        const sessions = await listRecentAssistantSessions(
-          context.options.vault,
-          {
-            limit,
-            requireProjection: true,
-          },
-        )
+        const sessions = (await listAssistantSessions(context.options.vault))
+          .slice(0, limit)
         return assistantSessionListResultSchema.parse({
           ...buildAssistantStateResultPaths(context.options.vault),
           filters: { limit },

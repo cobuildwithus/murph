@@ -5,7 +5,7 @@ import {
 import { compareAssistantTimestampsAscending } from './shared.js'
 import {
   listAssistantTranscriptTailEntries,
-  listRecentAssistantSessions,
+  listAssistantSessions,
 } from './store.js'
 
 export const ASSISTANT_MAINTENANCE_EVIDENCE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
@@ -71,9 +71,8 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
   until: number
   vault: string
 }): Promise<AssistantMaintenanceEvidenceMessage[]> {
-  const sessions = await listRecentAssistantSessions(input.vault, {
-    limit: ASSISTANT_MAINTENANCE_EVIDENCE_MAX_SESSIONS,
-  })
+  const sessions = (await listAssistantSessions(input.vault))
+    .slice(0, ASSISTANT_MAINTENANCE_EVIDENCE_MAX_SESSIONS)
   const messages: AssistantMaintenanceEvidenceMessage[] = []
 
   for (const session of sessions) {

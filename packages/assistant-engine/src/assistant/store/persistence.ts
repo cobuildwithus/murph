@@ -1,7 +1,6 @@
 import {
   access,
   open,
-  opendir,
   readdir,
   readFile,
   type FileHandle,
@@ -651,181 +650,12 @@ export async function synchronizeAssistantIndexes(
     conversationKeys[session.binding.conversationKey] = session.sessionId
   }
 
-  const canUpdateRecentSessions =
-    store.recentSessions !== undefined ||
-    await assistantSessionDirectoryOnlyContains(paths, session.sessionId)
-
   const updated = assistantAliasStoreSchema.parse({
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
-    // Foreground saves own the bounded recent-session projection in O(1).
-    // Legacy indexes without the field are updated only when the session
-    // directory is known to contain no older records; otherwise explicit
-    // repair owns the one-time full rebuild.
-    ...(canUpdateRecentSessions
-      ? {
-          recentSessions: pruneAssistantRecentSessions({
-            ...(store.recentSessions ?? {}),
-            [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
-          }),
-        }
-      : {}),
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
-}
-
-const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
-
-type AssistantRecentSessionsProjectionRead = {
-  recentSessions: Record<string, string>
-  state: 'ready' | 'missing' | 'unreadable'
-}
-
-// Bounded projection reader. Deliberately does NOT go through
-// readAssistantIndexStore: that reader's missing/corrupt fallbacks
-// rebuild the index by scanning every session file, which is only acceptable on
-// explicit routing/repair paths. A parseable legacy index returns an in-memory
-// empty projection so recurring maintenance stays cheap until normal assistant
-// saves warm the bounded projection. User-visible compact list reads can reject
-// this state and point the operator at the explicit repair path instead.
-export async function readAssistantRecentSessionsProjection(
-  paths: AssistantStatePaths,
-): Promise<AssistantRecentSessionsProjectionRead> {
-  let raw: string
-  try {
-    raw = await readFile(paths.indexesPath, 'utf8')
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      if (!(await assistantSessionDirectoryHasSessionFile(paths))) {
-        return {
-          recentSessions: {},
-          state: 'ready',
-        }
-      }
-      return {
-        recentSessions: {},
-        state: 'missing',
-      }
-    }
-    throw error
-  }
-
-  let store: AssistantAliasStore
-  try {
-    store = assistantAliasStoreSchema.parse(JSON.parse(raw))
-  } catch {
-    // Corrupt index: quarantine/rebuild belongs to the routing read path.
-    return {
-      recentSessions: {},
-      state: 'unreadable',
-    }
-  }
-
-  if (store.recentSessions !== undefined) {
-    return {
-      recentSessions: store.recentSessions,
-      state: 'ready',
-    }
-  }
-
-  if (
-    Object.keys(store.aliases).length === 0 &&
-    Object.keys(store.conversationKeys).length === 0 &&
-    !(await assistantSessionDirectoryHasSessionFile(paths))
-  ) {
-    return {
-      recentSessions: {},
-      state: 'ready',
-    }
-  }
-
-  return {
-    recentSessions: {},
-    state: 'missing',
-  }
-}
-
-export async function repairAssistantIndexStore(
-  paths: AssistantStatePaths,
-): Promise<AssistantAliasStore> {
-  return rebuildAssistantIndexStore(paths)
-}
-
-function pruneAssistantRecentSessions(
-  recentSessions: Record<string, string>,
-): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(recentSessions)
-      .sort(([, left], [, right]) =>
-        compareAssistantTimestampsAscending(right, left),
-      )
-      .slice(0, ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT),
-  )
-}
-
-async function assistantSessionDirectoryHasSessionFile(
-  paths: AssistantStatePaths,
-): Promise<boolean> {
-  let directory: Awaited<ReturnType<typeof opendir>>
-  try {
-    directory = await opendir(paths.sessionsDirectory)
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return false
-    }
-    throw error
-  }
-
-  try {
-    for (let checked = 0; checked < 16; checked += 1) {
-      const entry = await directory.read()
-      if (!entry) {
-        return false
-      }
-      if (entry.isFile() && entry.name.endsWith('.json')) {
-        return true
-      }
-    }
-    return true
-  } finally {
-    await directory.close()
-  }
-}
-
-async function assistantSessionDirectoryOnlyContains(
-  paths: AssistantStatePaths,
-  sessionId: string,
-): Promise<boolean> {
-  let directory: Awaited<ReturnType<typeof opendir>>
-  try {
-    directory = await opendir(paths.sessionsDirectory)
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return true
-    }
-    throw error
-  }
-
-  let matched = false
-  try {
-    for (let checked = 0; checked < 2; checked += 1) {
-      const entry = await directory.read()
-      if (!entry) {
-        return matched
-      }
-      if (!entry.isFile() || !entry.name.endsWith('.json')) {
-        return false
-      }
-      if (entry.name.replace(/\.json$/u, '') !== sessionId) {
-        return false
-      }
-      matched = true
-    }
-    return false
-  } finally {
-    await directory.close()
-  }
 }
 
 export async function writeAutomationState(
@@ -900,7 +730,6 @@ function createInitialAssistantIndexStore(): AssistantAliasStore {
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases: {},
     conversationKeys: {},
-    recentSessions: {},
   })
 }
 
@@ -934,7 +763,6 @@ async function rebuildAssistantIndexStore(
 
   const aliases: Record<string, string> = {}
   const conversationKeys: Record<string, string> = {}
-  const recentSessions: Record<string, string> = {}
   for (const session of sortSessionsForIndexRebuild(sessions)) {
     if (session.alias) {
       aliases[session.alias] = session.sessionId
@@ -942,14 +770,12 @@ async function rebuildAssistantIndexStore(
     if (session.binding.conversationKey) {
       conversationKeys[session.binding.conversationKey] = session.sessionId
     }
-    recentSessions[session.sessionId] = session.lastTurnAt ?? session.updatedAt
   }
 
   const rebuilt = assistantAliasStoreSchema.parse({
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
-    recentSessions: pruneAssistantRecentSessions(recentSessions),
   })
   await writeJsonFileAtomic(paths.indexesPath, rebuilt)
   await appendAssistantRuntimeEventAtPaths(paths, {

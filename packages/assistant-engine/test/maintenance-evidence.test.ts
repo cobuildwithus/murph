@@ -1,4 +1,4 @@
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { afterEach, expect, test } from 'vitest'
 
 import {
@@ -12,9 +12,8 @@ import {
 } from '../src/assistant/maintenance-evidence.ts'
 import {
   appendAssistantTranscriptEntries,
+  listAssistantSessions,
   listAssistantTranscriptTailEntries,
-  listRecentAssistantSessions,
-  repairAssistantSessionIndexes,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -135,7 +134,7 @@ test('builds bounded committed conversation evidence across recent sessions', as
   expect(evidence).not.toContain('internal status entry')
 })
 
-test('does not auto-repair legacy recent-session projections during maintenance evidence', async () => {
+test('uses legacy assistant session files for maintenance evidence', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-maintenance-evidence-legacy-repair-',
   )
@@ -159,7 +158,7 @@ test('does not auto-repair legacy recent-session projections during maintenance 
     {
       createdAt: '2026-06-29T22:00:00.000Z',
       kind: 'user',
-      text: 'Legacy projection repair should still surface this message.',
+      text: 'Legacy assistant session files should still surface this message.',
     },
   ])
 
@@ -175,12 +174,10 @@ test('does not auto-repair legacy recent-session projections during maintenance 
     vault: vaultRoot,
   })
 
-  expect(evidence).toContain('No committed user or assistant conversation messages')
-  expect(evidence).not.toContain('Legacy projection repair should still surface this message.')
-  const repaired = JSON.parse(await readFile(paths.indexesPath, 'utf8')) as {
-    recentSessions?: Record<string, string>
-  }
-  expect(repaired.recentSessions).toBeUndefined()
+  expect(evidence).not.toContain('No committed user or assistant conversation messages')
+  expect(evidence).toContain(
+    '- [2026-06-29T22:00:00.000Z] user: Legacy assistant session files should still surface this message.',
+  )
 })
 
 test('bounds transcript evidence reads to the tail byte cap', async () => {
@@ -250,33 +247,25 @@ test('bounds session reads to the newest sessions by durable activity', async ()
     }),
   )
 
-  const limited = await listRecentAssistantSessions(vaultRoot, { limit: 1 })
+  const limited = (await listAssistantSessions(vaultRoot)).slice(0, 1)
   expect(limited.map((session) => session.sessionId)).toEqual([
     'session-newer-activity',
   ])
 
-  const unlimited = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
+  const unlimited = await listAssistantSessions(vaultRoot)
   expect(unlimited.map((session) => session.sessionId).sort()).toEqual([
     'session-newer-activity',
     'session-older-activity',
   ])
 
-  // Legacy index without the projection: the recurring path never rebuilds
-  // from session files (that would scan all sessions under the runtime write
-  // lock). It returns an in-memory empty projection until explicit repair
-  // builds the bounded recent-session projection.
   const paths = resolveAssistantStatePaths(vaultRoot)
   await writeFile(
     paths.indexesPath,
     JSON.stringify({ version: 1, aliases: {}, conversationKeys: {} }),
     'utf8',
   )
-  const initialized = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
-  expect(initialized).toEqual([])
-
-  await repairAssistantSessionIndexes(vaultRoot)
-  const repaired = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
-  expect(repaired.map((session) => session.sessionId).sort()).toEqual([
+  const legacyIndexed = await listAssistantSessions(vaultRoot)
+  expect(legacyIndexed.map((session) => session.sessionId).sort()).toEqual([
     'session-newer-activity',
     'session-older-activity',
   ])
@@ -288,24 +277,12 @@ test('bounds session reads to the newest sessions by durable activity', async ()
       sessionId: 'session-post-deploy',
     }),
   )
-  const warmed = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
+  const warmed = await listAssistantSessions(vaultRoot)
   expect(warmed.map((session) => session.sessionId)).toEqual([
     'session-post-deploy',
     'session-newer-activity',
     'session-older-activity',
   ])
-
-  // Missing or corrupt index files must not trigger the repair-path rebuild
-  // (an all-session scan) from this recurring read: the wake just sees no
-  // evidence and the routing path owns repair.
-  await rm(paths.indexesPath, { force: true })
-  await expect(
-    listRecentAssistantSessions(vaultRoot, { limit: 10 }),
-  ).resolves.toEqual([])
-  await writeFile(paths.indexesPath, '{corrupt-index', 'utf8')
-  await expect(
-    listRecentAssistantSessions(vaultRoot, { limit: 10 }),
-  ).resolves.toEqual([])
 })
 
 test('returns an explicit empty evidence section when the window has no messages', async () => {

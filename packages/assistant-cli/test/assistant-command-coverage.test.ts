@@ -32,10 +32,8 @@ const commandMocks = vi.hoisted(() => ({
   getAssistantSession: vi.fn(),
   getAssistantStatus: vi.fn(),
   listAssistantSelfDeliveryTargets: vi.fn(),
-  listRecentAssistantSessions: vi.fn(),
   listAssistantSessions: vi.fn(),
   readAssistantOnboardingState: vi.fn(),
-  repairAssistantSessionIndexes: vi.fn(),
   redactAssistantDisplayPath: vi.fn((value: string) => `redacted:${value}`),
   redactAssistantSessionForDisplay: vi.fn((value) => value),
   redactAssistantSessionsForDisplay: vi.fn((value) => value),
@@ -115,9 +113,7 @@ vi.mock('@murphai/assistant-engine/assistant-state', () => ({
   readAssistantOnboardingState: commandMocks.readAssistantOnboardingState,
   redactAssistantDisplayPath: commandMocks.redactAssistantDisplayPath,
   getAssistantSession: commandMocks.getAssistantSession,
-  listRecentAssistantSessions: commandMocks.listRecentAssistantSessions,
   listAssistantSessions: commandMocks.listAssistantSessions,
-  repairAssistantSessionIndexes: commandMocks.repairAssistantSessionIndexes,
   reopenAssistantOnboarding: commandMocks.reopenAssistantOnboarding,
   resolveAssistantOnboardingStatePath:
     commandMocks.resolveAssistantOnboardingStatePath,
@@ -1091,7 +1087,6 @@ test('assistant status and session commands reject uninitialized vault roots bef
 
   assert.equal(commandMocks.getAssistantStatus.mock.calls.length, 0)
   assert.equal(commandMocks.getAssistantSession.mock.calls.length, 0)
-  assert.equal(commandMocks.listRecentAssistantSessions.mock.calls.length, 0)
   assert.equal(commandMocks.listAssistantSessions.mock.calls.length, 0)
 })
 
@@ -1320,7 +1315,7 @@ test('session commands return redacted state paths and session payloads', async 
   const assistant = readCommandGroup(commands, 'assistant')
   const session = readCommandGroup(assistant.commands, 'session')
 
-  commandMocks.listRecentAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
+  commandMocks.listAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
   commandMocks.getAssistantSession.mockResolvedValueOnce(TEST_SESSION)
   commandMocks.redactAssistantSessionForDisplay
     .mockReturnValueOnce({
@@ -1378,8 +1373,8 @@ test('session commands return redacted state paths and session payloads', async 
     stateRoot: 'redacted:/tmp/vault/.runtime/operations/assistant',
     vault: 'redacted:/tmp/vault',
   })
-  assert.deepEqual(commandMocks.listRecentAssistantSessions.mock.calls, [
-    ['/tmp/vault', { limit: 5, requireProjection: true }],
+  assert.deepEqual(commandMocks.listAssistantSessions.mock.calls, [
+    ['/tmp/vault'],
   ])
   assert.deepEqual(showResult, {
     session: {
@@ -1391,12 +1386,18 @@ test('session commands return redacted state paths and session payloads', async 
   })
 })
 
-test('session list requests a bounded recent-session page', async () => {
+test('session list slices source-of-truth sessions to the bounded page', async () => {
   const commands = createAssistantCli()
   const assistant = readCommandGroup(commands, 'assistant')
   const session = readCommandGroup(assistant.commands, 'session')
 
-  commandMocks.listRecentAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
+  commandMocks.listAssistantSessions.mockResolvedValueOnce([
+    TEST_SESSION,
+    {
+      ...TEST_SESSION,
+      sessionId: 'session-outside-limit',
+    },
+  ])
 
   const listResult = assistantSessionListResultSchema.parse(
     await readCommand(session.commands, 'list').run({
@@ -1410,34 +1411,7 @@ test('session list requests a bounded recent-session page', async () => {
   assert.equal(listResult.count, 1)
   assert.equal(listResult.filters.limit, 1)
   assert.equal(listResult.sessions[0]?.sessionId, TEST_SESSION.sessionId)
-  assert.deepEqual(commandMocks.listRecentAssistantSessions.mock.calls, [
-    ['/tmp/vault', { limit: 1, requireProjection: true }],
-  ])
-})
-
-test('session list repair explicitly rebuilds indexes before reading the bounded page', async () => {
-  const commands = createAssistantCli()
-  const assistant = readCommandGroup(commands, 'assistant')
-  const session = readCommandGroup(assistant.commands, 'session')
-
-  commandMocks.repairAssistantSessionIndexes.mockResolvedValueOnce(undefined)
-  commandMocks.listRecentAssistantSessions.mockResolvedValueOnce([TEST_SESSION])
-
-  const listResult = assistantSessionListResultSchema.parse(
-    await readCommand(session.commands, 'list').run({
-      options: {
-        vault: '/tmp/vault',
-        limit: 1,
-        repair: true,
-      },
-    }),
-  )
-
-  assert.equal(listResult.count, 1)
-  assert.deepEqual(commandMocks.repairAssistantSessionIndexes.mock.calls, [
+  assert.deepEqual(commandMocks.listAssistantSessions.mock.calls, [
     ['/tmp/vault'],
-  ])
-  assert.deepEqual(commandMocks.listRecentAssistantSessions.mock.calls, [
-    ['/tmp/vault', { limit: 1, requireProjection: true }],
   ])
 })

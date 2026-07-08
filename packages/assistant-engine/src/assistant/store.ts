@@ -36,9 +36,7 @@ import {
   readAssistantSession,
   readAssistantTranscriptEntries,
   readAssistantTranscriptTailEntries,
-  readAssistantRecentSessionsProjection,
   readAutomationState,
-  repairAssistantIndexStore,
   writeAutomationState,
   replaceTranscriptEntries,
   synchronizeAssistantIndexes,
@@ -350,50 +348,6 @@ export async function listAssistantSessionsLocal(
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
     return readAssistantSessionsSorted(paths, await listAssistantSessionFileIds(paths))
-  })
-}
-
-// Bounded variant for recurring maintenance and compact CLI list work: reads
-// the bounded recent-session projection maintained on every session save, then
-// parses only the newest `limit` sessions by durable last-activity timestamp.
-export async function listRecentAssistantSessions(
-  vault: string,
-  options: {
-    limit: number
-    requireProjection?: boolean
-  },
-): Promise<AssistantSession[]> {
-  return withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
-
-    const projection = await readAssistantRecentSessionsProjection(paths)
-    if (options.requireProjection === true && projection.state !== 'ready') {
-      throw new VaultCliError(
-        'ASSISTANT_SESSION_INDEX_REPAIR_REQUIRED',
-        'Assistant session list needs a recent-session index before it can return compact bounded results. Run `vault-cli assistant session list --repair` once for this vault, then retry.',
-        {
-          projectionState: projection.state,
-        },
-      )
-    }
-    return readAssistantSessionsSorted(
-      paths,
-      Object.entries(projection.recentSessions)
-        .sort(([, left], [, right]) =>
-          compareAssistantTimestampsAscending(right, left),
-        )
-        .slice(0, Math.max(0, options.limit))
-        .map(([sessionId]) => sessionId),
-    )
-  })
-}
-
-export async function repairAssistantSessionIndexes(
-  vault: string,
-): Promise<void> {
-  await withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
-    await repairAssistantIndexStore(paths)
   })
 }
 

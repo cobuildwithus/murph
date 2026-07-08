@@ -870,11 +870,6 @@
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 50
-                                },
-                                "repair": {
-                                  "default": false,
-                                  "description": "Rebuild assistant session indexes from durable session files before listing. This is an explicit repair path for legacy or recovered vaults and may scan all assistant session records.",
-                                  "type": "boolean"
                                 }
                               }
                             }

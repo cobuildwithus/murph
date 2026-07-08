@@ -373,6 +373,58 @@ test.sequential(
 )
 
 test.sequential(
+  'assistant session list reads legacy session files without repair',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cli-legacy-'))
+    const homeRoot = path.join(parent, 'home')
+    const vaultRoot = path.join(parent, 'vault')
+    cleanupPaths.push(parent)
+    await mkdir(homeRoot, { recursive: true })
+    await initializeVault({ vaultRoot })
+
+    await resolveAssistantSession({
+      vault: vaultRoot,
+      alias: 'legacy:older',
+      now: new Date('2026-06-29T21:00:00.000Z'),
+    })
+    const newer = await resolveAssistantSession({
+      vault: vaultRoot,
+      alias: 'legacy:newer',
+      now: new Date('2026-06-29T22:00:00.000Z'),
+    })
+    const statePaths = resolveAssistantStatePaths(vaultRoot)
+    await writeFile(
+      statePaths.indexesPath,
+      JSON.stringify({ version: 1, aliases: {}, conversationKeys: {} }),
+      'utf8',
+    )
+
+    const listed = requireData(
+      await runIsolatedCli<{
+        count: number
+        filters: {
+          limit: number
+        }
+        sessions: Array<{
+          sessionId: string
+          target?: unknown
+        }>
+      }>(['assistant', 'session', 'list', '--limit', '1', '--vault', vaultRoot], {
+        env: {
+          HOME: homeRoot,
+        },
+      }),
+    )
+
+    assert.equal(listed.count, 1)
+    assert.equal(listed.filters.limit, 1)
+    assert.equal(listed.sessions[0]?.sessionId, newer.session.sessionId)
+    assert.equal('target' in (listed.sessions[0] ?? {}), false)
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
   'assistant session list and show redact HOME-based vault and runtime paths',
   async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cli-home-'))
