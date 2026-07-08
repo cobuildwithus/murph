@@ -36,6 +36,7 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(prompt).toContain('For a large or heterogeneous record bundle')
     expect(prompt).toContain('do not make the user wait for exhaustive extraction')
     expect(prompt).toContain('runtime-supported non-blocking background job or Subagent V2 child')
+    expect(prompt).toContain('this standing instruction explicitly authorizes that bounded sub-agent delegation')
     expect(prompt).toContain('the background worker owns the canonical writes, not merely extraction')
     expect(prompt).toContain('saved record ids or the exact reason saving could not finish')
     expect(prompt).toContain('say the full structured extraction did not finish rather than implying it is running')

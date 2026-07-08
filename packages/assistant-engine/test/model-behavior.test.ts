@@ -1526,6 +1526,19 @@ describe('assistant experiment onboarding guidance', () => {
       onboardingGuidance: false,
     }))
 
+    expect(prompt).toContain('Codex subagent delegation:')
+    expect(prompt).toContain(
+      "Murph's standing subagent authorization lives in this prompt and in applicable local skill files.",
+    )
+    expect(prompt).toContain(
+      'Under Codex MultiAgent V2, those instructions explicitly authorize `collaboration.spawn_agent`/`spawn_agent` only for the bounded cases they name.',
+    )
+    expect(prompt).toContain(
+      'Use a subagent when the current prompt section or applicable skill explicitly delegates a concrete, non-reply-critical sidecar task',
+    )
+    expect(prompt).toContain(
+      'Keep urgent, safety-sensitive, reply-critical, user-facing delivery, approval, voice-memo, progress-update, and Murph dynamic/server-request work in the parent turn.',
+    )
     expect(prompt).toContain('Murph skill files:')
     expect(prompt).toContain('murph-onboarding')
     expect(prompt).toContain(
@@ -1779,6 +1792,9 @@ describe('assistant Murph onboarding guidance', () => {
       'For slow, non-reply-critical onboarding ingestion such as lab PDFs or supplement-label lookup',
     )
     expect(prompt).toContain('collaboration.spawn_agent')
+    expect(prompt).toContain(
+      'This standing onboarding instruction explicitly authorizes that bounded sub-agent delegation.',
+    )
     expect(prompt).toContain(
       'Spawn it as a fresh thread with `fork_turns: "none"`',
     )
