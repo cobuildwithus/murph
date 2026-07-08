@@ -58,6 +58,18 @@ import {
 } from "@/src/lib/hosted-execution/user-data-delete";
 import { maybeHandoffHostedExecutionWebhookWake } from "@/src/lib/hosted-onboarding/webhook-service-wake";
 
+function buildWakeHandoff(
+  overrides: Partial<NonNullable<Parameters<typeof maybeHandoffHostedExecutionWebhookWake>[0]["wakeHandoff"]>> = {},
+) {
+  return {
+    eventId: "evt_inline_gap",
+    mailboxItemId: "mailbox_123",
+    source: "linq" as const,
+    userId: "user-123",
+    ...overrides,
+  };
+}
+
 describe("hosted webhook Temporal handoff", () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -87,15 +99,12 @@ describe("hosted webhook Temporal handoff", () => {
 
   it("signals Temporal for Linq mailbox handoff without a direct runner nudge", async () => {
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
       response: {
         ok: true,
         reason: "wake-appended-active-member",
       },
       scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-      source: "linq",
-      userId: "user-123",
+      wakeHandoff: buildWakeHandoff(),
     })).resolves.toMatchObject({
       reason: "temporal-signaled",
       signalAccepted: true,
@@ -117,15 +126,12 @@ describe("hosted webhook Temporal handoff", () => {
 
     await expect(
       maybeHandoffHostedExecutionWebhookWake({
-        eventId: "evt_inline_gap",
-        mailboxItemId: "mailbox_123",
         response: {
           ok: true,
           reason: "wake-appended-active-member",
         },
         scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-        source: "linq",
-        userId: "user-123",
+        wakeHandoff: buildWakeHandoff(),
       }),
     ).rejects.toThrow("Temporal unavailable");
 
@@ -138,15 +144,12 @@ describe("hosted webhook Temporal handoff", () => {
 
   it("does not await Linq latency-trace writes before returning a successful handoff", async () => {
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
       response: {
         ok: true,
         reason: "wake-appended-active-member",
       },
       scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-      source: "linq",
-      userId: "user-123",
+      wakeHandoff: buildWakeHandoff(),
     })).resolves.toMatchObject({
       reason: "temporal-signaled",
       workflowId: "hosted-user-runtime:user-123",
@@ -174,15 +177,12 @@ describe("hosted webhook Temporal handoff", () => {
 
     await expect(
       maybeHandoffHostedExecutionWebhookWake({
-        eventId: "evt_inline_gap",
-        mailboxItemId: "mailbox_123",
         response: {
           ok: true,
           reason: "wake-appended-active-member",
         },
         scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-        source: "linq",
-        userId: "user-123",
+        wakeHandoff: buildWakeHandoff(),
       }),
     ).rejects.toThrow("Temporal unavailable");
 
@@ -208,15 +208,16 @@ describe("hosted webhook Temporal handoff", () => {
 
     await expect(
       maybeHandoffHostedExecutionWebhookWake({
-        eventId: "evt_telegram_signal_failure",
-        mailboxItemId: "mailbox_telegram_123",
         response: {
           ok: true,
           reason: "wake-appended-active-member",
         },
         scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-        source: "telegram",
-        userId: "user-123",
+        wakeHandoff: buildWakeHandoff({
+          eventId: "evt_telegram_signal_failure",
+          mailboxItemId: "mailbox_telegram_123",
+          source: "telegram",
+        }),
       }),
     ).rejects.toThrow("Temporal unavailable");
 
@@ -245,15 +246,14 @@ describe("hosted webhook Temporal handoff", () => {
 
     await expect(
       maybeHandoffHostedExecutionWebhookWake({
-        eventId: "evt_after_throws_on_failure",
-        mailboxItemId: "mailbox_123",
         response: {
           ok: true,
           reason: "wake-appended-active-member",
         },
         scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-        source: "linq",
-        userId: "user-123",
+        wakeHandoff: buildWakeHandoff({
+          eventId: "evt_after_throws_on_failure",
+        }),
       }),
     ).rejects.toThrow("Temporal unavailable");
 
@@ -286,15 +286,12 @@ describe("hosted webhook Temporal handoff", () => {
     });
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
       response: {
         ok: true,
         reason: "wake-appended-active-member",
       },
       scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-      source: "linq",
-      userId: "user-123",
+      wakeHandoff: buildWakeHandoff(),
     })).resolves.toMatchObject({
       reason: "temporal-signaled",
       workflowId: "hosted-user-runtime:user-123",
@@ -324,15 +321,12 @@ describe("hosted webhook Temporal handoff", () => {
     });
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
       response: {
         ok: true,
         reason: "wake-appended-active-member",
       },
       scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-      source: "linq",
-      userId: "user-123",
+      wakeHandoff: buildWakeHandoff(),
     })).resolves.toMatchObject({
       reason: "temporal-signaled",
       workflowId: "hosted-user-runtime:user-123",
@@ -358,14 +352,11 @@ describe("hosted webhook Temporal handoff", () => {
   it("skips webhook handoff when no mailbox pointer exists", async () => {
     await expect(
       maybeHandoffHostedExecutionWebhookWake({
-        eventId: "evt_inline_gap",
         response: {
           ok: true,
           reason: "wake-appended-active-member",
         },
         scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-        source: "linq",
-        userId: "user-123",
       }),
     ).resolves.toBeNull();
 
@@ -375,8 +366,6 @@ describe("hosted webhook Temporal handoff", () => {
 
   it("signals Temporal for duplicate webhook handoff with an existing mailbox item", async () => {
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_duplicate",
-      mailboxItemId: "mailbox_existing",
       response: {
         duplicate: true,
         ignored: true,
@@ -384,8 +373,10 @@ describe("hosted webhook Temporal handoff", () => {
         reason: "duplicate-webhook-event",
       },
       scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-      source: "linq",
-      userId: "user-123",
+      wakeHandoff: buildWakeHandoff({
+        eventId: "evt_duplicate",
+        mailboxItemId: "mailbox_existing",
+      }),
     })).resolves.toMatchObject({
       reason: "temporal-signaled",
       signalAccepted: true,
@@ -402,14 +393,11 @@ describe("hosted webhook Temporal handoff", () => {
 
   it("signals Temporal and records latency traces for Telegram handoff", async () => {
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_inline_gap",
-      mailboxItemId: "mailbox_123",
       response: {
         ok: true,
         reason: "wake-appended-active-member",
       },
-      source: "telegram",
-      userId: "user-123",
+      wakeHandoff: buildWakeHandoff({ source: "telegram" }),
     })).resolves.toMatchObject({
       reason: "temporal-signaled",
       signalAccepted: true,
@@ -437,15 +425,16 @@ describe("hosted webhook Temporal handoff", () => {
 
   it("does not record ingress latency traces for WhatsApp handoff", async () => {
     await expect(maybeHandoffHostedExecutionWebhookWake({
-      eventId: "evt_whatsapp_handoff",
-      mailboxItemId: "mailbox_whatsapp_123",
       response: {
         ok: true,
         reason: "wake-appended-active-member",
       },
       scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
-      source: "whatsapp",
-      userId: "user-123",
+      wakeHandoff: buildWakeHandoff({
+        eventId: "evt_whatsapp_handoff",
+        mailboxItemId: "mailbox_whatsapp_123",
+        source: "whatsapp",
+      }),
     })).resolves.toMatchObject({
       reason: "temporal-signaled",
       workflowId: "hosted-user-runtime:user-123",
@@ -495,6 +484,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
       deleteUserData,
+      ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 
@@ -524,6 +514,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultSession: vi.fn(),
       deleteUserData,
+      ensureRuntimeProcessing: vi.fn(),
       getRunnerStatus: vi.fn(),
     } as ReturnType<typeof readHostedExecutionControlClientIfConfigured>);
 

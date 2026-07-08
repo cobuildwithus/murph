@@ -11,7 +11,7 @@ import {
   calculateMurphAgePublicReportFromVaultInputBundle,
   getMurphAgeResearchPreviewForSubmittedInputs,
   loadMurphAgeLocalModelCardArtifacts,
-} from '@murphai/query'
+} from '@murphai/query/murph-age'
 import {
   assessMurphAgeOrdinaryLabWearableAggregateEvidenceCard,
   buildMurphAgeWearableIncrementEvaluationCardFromAggregateReceipt,
@@ -23,10 +23,7 @@ import {
   isMurphAgePublicMetricKey,
   isMurphAgeModelCardProductAuthorized,
   isMurphAgeModelCardRiskToAgeDisplayAuthorized,
-  listMurphAgeNsrrDatasetRequests,
   listMurphAgeOrdinaryLabWearableAggregateEvidenceTemplates,
-  listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
-  listMurphAgeOrdinaryLabWearableSourceRoutes,
   listMurphAgeModelCardPolicies,
   listMurphAgeModelCardProductPromotionBlockers,
   listMurphAgeWearableActivityBenchmarkCards,
@@ -39,7 +36,6 @@ import {
   MURPH_AGE_PUBLIC_VALIDATION_GATE_SUMMARY_TEXT,
   MURPH_AGE_SUBMITTED_CALCULATOR_CAPABILITY_SCHEMA_VERSION,
   MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
-  MURPH_AGE_NSRR_DATASET_REQUEST_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_LAB_AGGREGATE_RECEIPT_TEMPLATE_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_PARAMETER_PACK_CONTRACT_SCHEMA_VERSION,
@@ -48,14 +44,20 @@ import {
   MURPH_AGE_WEARABLE_SCORE_BEARING_STRATEGY_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_RESIDUAL_LAYER_CONTRACT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_SHADOW_INCREMENT_SCHEMA_VERSION,
-  resolveMurphAgeSourceRoute,
   summarizeMurphAgeWearableLabAggregateReceipt,
   summarizeMurphAgeWearableResidualLayerContractForFamily,
   type MurphAgeFunctionResidualParameterPack,
-  type MurphAgeSourceRouteId,
   type MurphAgeSubmittedCalculatorViewBundle,
   type MurphAgeWearableResidualParameterPack,
-} from '@murphai/health-metrics'
+} from '@murphai/health-metrics/murph-age'
+import {
+  MURPH_AGE_NSRR_DATASET_REQUEST_SCHEMA_VERSION,
+  listMurphAgeNsrrDatasetRequests,
+  listMurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
+  listMurphAgeOrdinaryLabWearableSourceRoutes,
+  resolveMurphAgeSourceRoute,
+  type MurphAgeSourceRouteId,
+} from '@murphai/health-metrics/murph-age-source-routes'
 import type { VaultServices } from '@murphai/vault-usecases'
 import {
   inputFileOptionSchema,

@@ -126,7 +126,7 @@ describe("health CLI descriptors", () => {
     expect(healthListFiltersSchema.parse({ from: "2026-03-01", kind: "goal" })).toEqual({
       from: "2026-03-01",
       kind: "goal",
-      limit: 50,
+      limit: 10,
     });
 
     expect(

@@ -414,7 +414,10 @@ describe('assistant vault-file send', () => {
     })
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
+      deliveryStatus: 'queued_with_reply',
       filename: 'report.pdf',
+      note:
+        'Approval succeeded. Attach this file through your normal reply path. Do not quote this note or claim final iMessage delivery unless later delivery evidence confirms it.',
       status: 'approved',
     }))
   })
@@ -500,6 +503,7 @@ function createApprovedVaultFileResponseMedia() {
 function createVaultFileIntent() {
   return {
     actorId: null,
+    answeredMailboxItemIds: [],
     attemptCount: 0,
     bindingDelivery: { kind: 'thread' as const, target: 'chat_123' },
     channel: 'linq',

@@ -274,8 +274,8 @@ test("keeps chart rows from becoming private current values without a selector r
     createElement(BiomarkerPrivateTrendCard, { biomarker }),
   );
 
-  assert.match(markup, /No current private value selected/u);
-  assert.match(markup, /did not include a selected current value/u);
+  assert.match(markup, /No current value yet/u);
+  assert.match(markup, /no current value is available yet/u);
   assert.doesNotMatch(markup, />57</u);
   assert.doesNotMatch(markup, /Connect a device/u);
 });
@@ -391,7 +391,7 @@ test("renders secondary private biomarker metrics from Health Commons bindings",
   assert.match(markup, />97\.1</u);
   assert.match(markup, /Lowest blood oxygen/u);
   assert.match(markup, />91\.2</u);
-  assert.match(markup, /Stale/u);
+  assert.match(markup, /Out of date/u);
   assert.match(markup, />%<\/span>/u);
   assert.doesNotMatch(markup, /Biomarker unavailable/u);
 });
@@ -476,7 +476,7 @@ test("renders a no-data state when the browser-vault replica has no matching row
   );
 
   assert.match(markup, /No private values yet/u);
-  assert.match(markup, /No RHR values were found in the current browser-vault snapshot/u);
+  assert.match(markup, /No RHR values saved on this device yet/u);
   assert.match(markup, /Connect a device/u);
   assert.doesNotMatch(markup, /demo wearable/iu);
 });

@@ -17,6 +17,7 @@ import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
+import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
@@ -29,11 +30,16 @@ import { Separator } from "@/src/components/ui/separator";
 import { Input } from "@/src/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/src/components/ui/input-otp";
 import { Label } from "@/src/components/ui/label";
+import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
 import { Alert, AlertTitle, AlertDescription } from "@/src/components/ui/alert";
 import { Toggle } from "@/src/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/src/components/ui/toggle-group";
+import {
+  SegmentedControl,
+  type SegmentedControlOption,
+} from "@/src/components/ui/segmented-control";
 import { ScrollArea } from "@/src/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/src/components/ui/tooltip";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/src/components/ui/dialog";
@@ -44,6 +50,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/src/compo
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/src/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
+import {
+  MURPH_CONTACT_AVATAR_OPTIONS,
+  MurphContactAvatarArt,
+  MurphContactAvatarGrid,
+  MurphContactCardPicker,
+  type MurphContactAvatarOption,
+} from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
@@ -71,6 +84,17 @@ function DialogPreviewFrame({ label, children }: { label: string; children: Reac
       </div>
     </div>
   );
+}
+
+function resolveDesignPhoneCountryOption(value: string) {
+  const option =
+    HOSTED_PHONE_COUNTRY_OPTIONS.find((candidate) => candidate.code === value)
+    ?? HOSTED_PHONE_COUNTRY_OPTIONS.find((candidate) => candidate.code === "US")
+    ?? HOSTED_PHONE_COUNTRY_OPTIONS[0];
+  if (!option) {
+    throw new Error("Phone country options are empty.");
+  }
+  return option;
 }
 
 
@@ -101,9 +125,30 @@ const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   },
 ];
 
+type SegmentedControlDemoValue = "phone" | "email" | "telegram";
+
+const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
+  SegmentedControlOption<SegmentedControlDemoValue>
+> = [
+  { label: "Phone", value: "phone" },
+  { label: "Email", value: "email" },
+  { label: "Telegram", value: "telegram" },
+];
+
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
+  const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
+  const [segmentedControlValue, setSegmentedControlValue] =
+    useState<SegmentedControlDemoValue>("phone");
+  const [warmSegmentedControlValue, setWarmSegmentedControlValue] =
+    useState<SegmentedControlDemoValue>("email");
+  const [addedContactAvatar, setAddedContactAvatar] =
+    useState<MurphContactAvatarOption | null>(null);
+  const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
+  const [phoneInputCountryCode, setPhoneInputCountryCode] = useState("US");
+  const [phoneInputValue, setPhoneInputValue] = useState("");
+  const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(phoneInputCountryCode);
 
   return (
     <TooltipProvider>
@@ -173,6 +218,17 @@ export function ComponentsContent() {
             <div className="grid gap-2">
               <Label htmlFor="disabled-ds">Disabled</Label>
               <Input id="disabled-ds" placeholder="Can't edit this" disabled />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="phone-number-ds">Phone number</Label>
+              <PhoneNumberInput
+                id="phone-number-ds"
+                options={HOSTED_PHONE_COUNTRY_OPTIONS}
+                selectedCountry={selectedPhoneInputCountry}
+                value={phoneInputValue}
+                onCountryChange={setPhoneInputCountryCode}
+                onPhoneNumberChange={setPhoneInputValue}
+              />
             </div>
           </div>
         </Section>
@@ -244,6 +300,37 @@ export function ComponentsContent() {
               <ToggleGroupItem value="21d">21d</ToggleGroupItem>
               <ToggleGroupItem value="all">All</ToggleGroupItem>
             </ToggleGroup>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Segmented Control">
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="flex flex-col gap-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Default tokens
+              </p>
+              <SegmentedControl
+                aria-label="Contact method"
+                options={SEGMENTED_CONTROL_OPTIONS}
+                value={segmentedControlValue}
+                onValueChange={setSegmentedControlValue}
+              />
+            </div>
+            <div className="flex flex-col gap-3">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Family invite palette
+              </p>
+              <SegmentedControl
+                aria-label="Invite by"
+                options={SEGMENTED_CONTROL_OPTIONS}
+                value={warmSegmentedControlValue}
+                onValueChange={setWarmSegmentedControlValue}
+                className="border-[#c4a882]/25 bg-[#f5f0e8]"
+                itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
+              />
+            </div>
           </div>
         </Section>
 
@@ -422,6 +509,63 @@ export function ComponentsContent() {
                 />
               </div>
             ))}
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Contact Card Picker">
+          <p className="text-sm text-muted-foreground">
+            Post-signup drawer/dialog where a new member picks the photo on
+            Murph&apos;s contact card, then adds Murph as a contact. Drawer under
+            768px, dialog above. The chosen avatar only changes the picture on
+            the vCard the member saves; Murph stays the same everywhere else.
+          </p>
+          <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
+                Add Murph to your contacts
+              </p>
+              <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
+                {addedContactAvatar
+                  ? `Last add used the ${addedContactAvatar.label} avatar.`
+                  : "No contact added yet in this preview."}
+              </p>
+            </div>
+            <Button onClick={() => setContactCardPickerOpen(true)}>
+              Preview picker
+            </Button>
+          </div>
+          <MurphContactCardPicker
+            onAddToContacts={(option) => {
+              setAddedContactAvatar(option);
+              setContactCardPickerOpen(false);
+            }}
+            onOpenChange={setContactCardPickerOpen}
+            open={contactCardPickerOpen}
+          />
+          <div className="flex flex-wrap items-center gap-4 rounded-xl border border-border bg-card px-4 py-3">
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Avatar set
+            </span>
+            <div className="flex flex-wrap items-center gap-3">
+              {MURPH_CONTACT_AVATAR_OPTIONS.map((option) => (
+                <MurphContactAvatarArt
+                  className="size-8 text-[32px] ring-1 ring-border"
+                  key={option.id}
+                  option={option}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="max-w-sm rounded-xl border border-border bg-card p-5">
+            <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Standalone grid
+            </p>
+            <MurphContactAvatarGrid
+              onChange={setInlineContactAvatarId}
+              value={inlineContactAvatarId}
+            />
           </div>
         </Section>
 

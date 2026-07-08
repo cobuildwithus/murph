@@ -5,7 +5,6 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
-  assertHostedThreadRouteEgressAuthority: vi.fn(),
   getPrisma: vi.fn(),
   recordHostedLinqRuntimeDeliveryOutcomeTx: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -17,10 +16,6 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   recordHostedLinqRuntimeDeliveryOutcomeTx: mocks.recordHostedLinqRuntimeDeliveryOutcomeTx,
-}));
-
-vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
-  assertHostedThreadRouteEgressAuthority: mocks.assertHostedThreadRouteEgressAuthority,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -63,6 +58,11 @@ describe("hosted runtime Linq delivery route", () => {
   it("records an accepted runtime delivery outcome without raw recipient fallback for participant sends", async () => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds: [
+        "mailbox_item_accepted_1",
+        "mailbox_item_accepted_1",
+        " mailbox_item_accepted_2 ",
+      ],
       attemptedAt: "2026-04-26T00:00:03.000Z",
       fromPhoneNumber: "+15550100099",
       idempotencyKey: "assistant-outbox:intent_123",
@@ -72,6 +72,7 @@ describe("hosted runtime Linq delivery route", () => {
       providerThreadId: "linq_chat_123",
       target: "+15550100001",
       targetKind: "participant",
+      threadIsDirect: true,
     }));
 
     expect(response.status).toBe(200);
@@ -82,6 +83,10 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: new Date("2026-04-26T00:00:04.000Z"),
+        answeredMailboxItemIds: [
+          "mailbox_item_accepted_1",
+          "mailbox_item_accepted_2",
+        ],
         attemptedAt: new Date("2026-04-26T00:00:03.000Z"),
         failedAt: null,
         idempotencyKey: "assistant-outbox:intent_123",
@@ -91,12 +96,30 @@ describe("hosted runtime Linq delivery route", () => {
         phoneNumberLookupKey: null,
         sourceRef: "intent_123",
         targetKind: "participant",
+        threadIsDirect: true,
+        userId: "member_123",
       }),
     );
     await expect(response.json()).resolves.toEqual({
       ok: true,
       recorded: true,
     });
+  });
+
+  it("rejects malformed thread directness flags", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+      threadIsDirect: "false",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
   });
 
   it("derives the active member Linq line from durable home routing for chat sends without route authority", async () => {
@@ -141,16 +164,13 @@ describe("hosted runtime Linq delivery route", () => {
     );
   });
 
-  it("uses route authority for routed sends and rejects authority for a different user", async () => {
+  it("uses route authority line attribution and rejects authority for a different user", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
       channel: "linq",
       containerMemberId: "member_123",
       threadId: "linq_chat_123",
     };
-    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValueOnce({
-      accountLookupKey: "hbidx:phone:v1:account",
-    });
 
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
@@ -161,17 +181,16 @@ describe("hosted runtime Linq delivery route", () => {
       routeAuthority,
       target: "linq_chat_123",
       targetKind: "thread",
+      threadIsDirect: false,
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
-      authority: routeAuthority,
-      prisma,
-    });
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         phoneNumber: null,
         phoneNumberLookupKey: "hbidx:phone:v1:account",
+        threadIsDirect: false,
       }),
     );
 
@@ -202,6 +221,105 @@ describe("hosted runtime Linq delivery route", () => {
 
     expect(targetMismatch.status).toBe(403);
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts routed delivery authority without a line account lookup key", async () => {
+    const routeAuthority = {
+      channel: "linq",
+      containerMemberId: "member_123",
+      threadId: "linq_chat_123",
+    };
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      routeAuthority,
+      target: "linq_chat_123",
+      targetKind: "thread",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phoneNumber: null,
+        phoneNumberLookupKey: null,
+      }),
+    );
+  });
+
+  it("rejects accepted delivery outcomes with too many answered mailbox item ids", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds: Array.from(
+        { length: 101 },
+        (_, index) => `mailbox_item_${index}`,
+      ),
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerTarget: "+15550100001",
+      providerThreadId: "linq_chat_123",
+      target: "+15550100001",
+      targetKind: "participant",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
+  });
+
+  it("accepts grouped delivery outcomes with more than forty answered mailbox item ids", async () => {
+    const answeredMailboxItemIds = Array.from(
+      { length: 45 },
+      (_, index) => `mailbox_item_grouped_${index}`,
+    );
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds,
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerTarget: "+15550100001",
+      providerThreadId: "linq_chat_123",
+      target: "+15550100001",
+      targetKind: "participant",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds,
+      }),
+    );
+  });
+
+  it("does not carry answered mailbox item ids for failed delivery outcomes", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      answeredMailboxItemIds: ["mailbox_item_should_not_consume"],
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      failedAt: "2026-04-26T00:00:05.000Z",
+      failureCode: "synthetic_failure",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerTarget: "+15550100001",
+      providerThreadId: "linq_chat_123",
+      target: "+15550100001",
+      targetKind: "participant",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: null,
+        answeredMailboxItemIds: [],
+        failedAt: new Date("2026-04-26T00:00:05.000Z"),
+        failureCode: "synthetic_failure",
+        userId: "member_123",
+      }),
+    );
   });
 });
 

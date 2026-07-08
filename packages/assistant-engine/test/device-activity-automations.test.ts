@@ -156,6 +156,234 @@ describe('device activity triggered automations', () => {
     )
   })
 
+  it('matches device activity from any provider when source is omitted', async () => {
+    const automation = createDeviceActivityAutomation({
+      activityKind: 'run',
+      after: '2026-06-07T11:00:00.000Z',
+      automationId: 'auto_run_any_provider',
+      instructions: 'Ask how the run felt.',
+    })
+    deviceActivityMocks.automations = [automation]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_garmin_run',
+          externalRefResourceType: 'garmin/activity_session',
+          externalRefSystem: 'garmin',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          sourceProviderSlug: 'garmin',
+          title: 'Morning run',
+          workoutType: 'running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:01:00.000Z',
+      scheduled: 1,
+    })
+
+    expect(await readQueuedCronJobs(vaultRoot)).toHaveLength(1)
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: '2026-06-07T12:00:00.000Z',
+        afterEntityId: 'evt_garmin_run',
+        afterOccurredAt: '2026-06-07T12:00:00.000Z',
+        expectedActivityKind: 'run',
+        expectedSource: undefined,
+        lookup: 'auto_run_any_provider',
+        vaultRoot,
+      }),
+    )
+  })
+
+  it('matches activity kind from sportName-only device sessions', async () => {
+    const automation = createDeviceActivityAutomation({
+      activityKind: 'running',
+      after: '2026-06-07T11:00:00.000Z',
+      automationId: 'auto_run_sport_name',
+      instructions: 'Ask how the run felt.',
+    })
+    deviceActivityMocks.automations = [automation]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_sport_name_run',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          sportName: 'Run',
+          title: 'Imported workout',
+          workoutType: null,
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:01:00.000Z',
+      scheduled: 1,
+    })
+
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]?.prompt).toContain('Kind: running')
+    expect(jobs[0]?.prompt).toContain('Imported workout')
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: '2026-06-07T12:00:00.000Z',
+        afterEntityId: 'evt_sport_name_run',
+        afterOccurredAt: '2026-06-07T12:00:00.000Z',
+        expectedActivityKind: 'running',
+        expectedSource: undefined,
+        lookup: 'auto_run_sport_name',
+        vaultRoot,
+      }),
+    )
+  })
+
+  it('matches cardio automations to cycling activity but not strength sessions', async () => {
+    const automation = createDeviceActivityAutomation({
+      activityKind: 'cardio',
+      after: '2026-06-07T11:00:00.000Z',
+      automationId: 'auto_cardio',
+      instructions: 'Ask how the cardio session felt.',
+    })
+    deviceActivityMocks.automations = [automation]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_cardio_strength',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Bike strength warmup',
+          workoutType: 'strength',
+        }),
+        createActivityEntity({
+          entityId: 'evt_cardio_cycling',
+          occurredAt: '2026-06-07T12:30:00.000Z',
+          title: 'Lunch ride',
+          workoutType: 'cycling',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:31:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:31:00.000Z',
+      scheduled: 1,
+    })
+
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]?.prompt).toContain('Kind: cardio')
+    expect(jobs[0]?.prompt).toContain('Lunch ride')
+    expect(jobs[0]?.prompt).not.toContain('Bike strength warmup')
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: '2026-06-07T12:30:00.000Z',
+        afterEntityId: 'evt_cardio_cycling',
+        afterOccurredAt: '2026-06-07T12:30:00.000Z',
+        expectedActivityKind: 'cardio',
+        expectedSource: undefined,
+        lookup: 'auto_cardio',
+        vaultRoot,
+      }),
+    )
+  })
+
+  it('uses activity titles as a fallback only when structured kind is absent', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'running',
+        after: '2026-06-07T11:00:00.000Z',
+        automationId: 'auto_run_title_fallback',
+        instructions: 'Ask how the run felt.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_title_only_run',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          title: 'Morning run',
+          workoutType: null,
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:01:00.000Z',
+      scheduled: 1,
+    })
+
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]?.prompt).toContain('Morning run')
+    expect(jobs[0]?.prompt).toContain('Kind: running')
+  })
+
+  it('keeps explicit whoop device activity automations scoped to whoop providers', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T11:00:00.000Z',
+        source: 'whoop',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_garmin_run',
+          externalRefResourceType: 'garmin/activity_session',
+          externalRefSystem: 'garmin',
+          occurredAt: '2026-06-07T12:00:00.000Z',
+          sourceProviderSlug: 'garmin',
+          title: 'Morning run',
+          workoutType: 'running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 0,
+      nextWakeAt: null,
+      scheduled: 0,
+    })
+
+    expect(await readQueuedCronJobs(vaultRoot)).toEqual([])
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).not.toHaveBeenCalled()
+  })
+
   it('schedules arbitrary sport activity kinds from device sessions', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({
@@ -317,6 +545,79 @@ describe('device activity triggered automations', () => {
         lookup: 'auto_sleep',
       }),
     )
+  })
+
+  it('suppresses a backfilled sleep session that ended more than a day before the sync', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'sleep',
+        after: '2026-06-05T00:00:00.000Z',
+        automationId: 'auto_sleep',
+        instructions: 'Ask about sleep consistency.',
+        source: 'whoop_v2',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createSleepEntity({
+          endAt: '2026-06-05T14:00:00.000Z',
+          entityId: 'evt_sleep_stale',
+          occurredAt: '2026-06-05T06:00:00.000Z',
+          startAt: '2026-06-05T06:00:00.000Z',
+          title: 'Backfilled sleep',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:01:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 0,
+      nextWakeAt: null,
+      scheduled: 0,
+    })
+
+    expect(await readQueuedCronJobs(vaultRoot)).toHaveLength(0)
+  })
+
+  it('suppresses a backfilled workout that occurred more than a day before the sync', async () => {
+    deviceActivityMocks.automations = [
+      createDeviceActivityAutomation({
+        activityKind: 'workout',
+        after: '2026-06-05T00:00:00.000Z',
+        automationId: 'auto_workout',
+        instructions: 'Ask about the imported workout.',
+      }),
+    ]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_workout_stale',
+          occurredAt: '2026-06-05T06:00:00.000Z',
+          recordedAt: '2026-06-07T12:05:00.000Z',
+          title: 'Backfilled ride',
+          workoutType: 'Cycling',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:06:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 0,
+      nextWakeAt: null,
+      scheduled: 0,
+    })
+
+    expect(await readQueuedCronJobs(vaultRoot)).toHaveLength(0)
   })
 
   it('uses the recorded import time for trigger windows and accepts workout selectors', async () => {
@@ -1373,26 +1674,33 @@ function buildLegacyDeviceActivityAuthorityKey(
 
 function createActivityEntity(input: {
   entityId: string
+  externalRefResourceType?: string
+  externalRefSystem?: string
   occurredAt: string
   recordedAt?: string
+  sourceProviderSlug?: string
+  sportName?: string
   title: string
   workoutSport?: Record<string, string>
-  workoutType?: string
+  workoutType?: string | null
 }): CanonicalEntity {
   return {
     attributes: {
       dataOrigin: {
-        sourceProviderSlug: 'junction',
+        sourceProviderSlug: input.sourceProviderSlug ?? 'junction',
       },
       durationMinutes: 32,
       externalRef: {
-        resourceType: 'whoop_v2/activity_session',
-        system: 'junction',
+        resourceType: input.externalRefResourceType ?? 'whoop_v2/activity_session',
+        system: input.externalRefSystem ?? 'junction',
       },
       ...(input.recordedAt ? { recordedAt: input.recordedAt } : {}),
-      workout: input.workoutSport
-        ? { sport: input.workoutSport }
-        : { type: input.workoutType ?? 'activity' },
+      ...(input.sportName ? { sportName: input.sportName } : {}),
+      ...(input.workoutSport
+        ? { workout: { sport: input.workoutSport } }
+        : input.workoutType === null
+          ? {}
+          : { workout: { type: input.workoutType ?? 'activity' } }),
     },
     body: null,
     date: '2026-06-07',
@@ -1416,8 +1724,10 @@ function createActivityEntity(input: {
 }
 
 function createSleepEntity(input: {
+  endAt?: string
   entityId: string
   occurredAt: string
+  startAt?: string
   title: string
 }): CanonicalEntity {
   return {
@@ -1426,12 +1736,13 @@ function createSleepEntity(input: {
         sourceProviderSlug: 'junction',
       },
       durationMinutes: 420,
+      endAt: input.endAt ?? input.occurredAt,
       externalRef: {
         resourceType: 'junction-whoop-v2-sleep',
         system: 'junction',
       },
       recordedAt: input.occurredAt,
-      startAt: '2026-06-07T04:00:00.000Z',
+      startAt: input.startAt ?? '2026-06-07T04:00:00.000Z',
     },
     body: null,
     date: '2026-06-07',

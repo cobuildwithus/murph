@@ -26,7 +26,7 @@ describe('assistant progress prompt contract', () => {
       'For work likely to finish in about a minute or less, send at most one progress update',
     )
     expect(prompt).toContain(
-      'never send a third',
+      'never send a fourth',
     )
     expect(prompt).toContain(
       'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
@@ -56,7 +56,7 @@ describe('assistant progress prompt contract', () => {
       'For work likely to finish in about a minute or less, send at most one progress update',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'never send a third',
+      'never send a fourth',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',

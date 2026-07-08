@@ -45,7 +45,7 @@ export const POST = withJsonError(async (
         message: "This family plan isn't active right now. Ask the plan owner to finish setting it up.",
       });
     }
-    if (!view.isPhoneBound && !view.isEmailBound) {
+    if (!view.isPhoneBound && !view.isEmailBound && view.isTelegramBound) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_WEB_ACCEPT_REQUIRES_CONTACT",
         httpStatus: 409,

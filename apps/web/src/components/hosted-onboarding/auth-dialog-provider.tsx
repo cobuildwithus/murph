@@ -20,6 +20,7 @@ const COMPUTER_HANDOFF_PATH_PATTERN = /^\/computer\/handoff\/[^/]+$/u;
 const ACTION_APPROVAL_PATH_PATTERN = /^\/approve\/haa_[A-Za-z0-9_-]{32}$/u;
 const INTEGRATIONS_CONNECT_PATH_PATTERN =
   /^\/integrations\/connect\/cai_[A-Za-z0-9_-]{32}$/u;
+const SETTINGS_DATA_PRIVACY_PATH = "/settings/data-privacy";
 
 interface AuthContextValue {
   authenticated: boolean;
@@ -49,6 +50,11 @@ export function AuthProvider({
   }, []);
 
   const handleAuthCompleted = useCallback((payload: HostedPrivyCompletionPayload) => {
+    if (authenticated) {
+      navigateHostedAuthRedirect(readCurrentBrowserPath());
+      return;
+    }
+
     if (shouldResumeCurrentAuthUrl(payload)) {
       navigateHostedAuthRedirect(readCurrentBrowserPath());
       return;
@@ -60,7 +66,7 @@ export function AuthProvider({
     }
 
     navigateHostedAuthRedirect(payload.joinUrl);
-  }, []);
+  }, [authenticated]);
 
   const value = useMemo(
     () => ({ authenticated, openAuthDialog }),
@@ -70,14 +76,14 @@ export function AuthProvider({
   return (
     <AuthContext.Provider value={value}>
       {children}
-      {!authenticated ? (
-        <AuthDialog
-          open={open}
-          onCompleted={handleAuthCompleted}
-          onOpenChange={setOpen}
-          requireLaunchConsentOnCompletion
-        />
-      ) : null}
+      <AuthDialog
+        open={open}
+        title={authenticated ? "Sign in again" : undefined}
+        description={authenticated ? "Verify this device to manage secure approvals." : undefined}
+        onCompleted={handleAuthCompleted}
+        onOpenChange={setOpen}
+        requireLaunchConsentOnCompletion={!authenticated}
+      />
     </AuthContext.Provider>
   );
 }
@@ -88,6 +94,7 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentDeviceConnectIntentUrl(payload)
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
+    || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
   );
 }
 
@@ -154,6 +161,20 @@ function shouldResumeCurrentIntegrationsConnectUrl(
   }
 
   return INTEGRATIONS_CONNECT_PATH_PATTERN.test(window.location.pathname);
+}
+
+function shouldResumeCurrentSettingsDataPrivacyUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.location.pathname === SETTINGS_DATA_PRIVACY_PATH;
 }
 
 function readDeviceConnectIntentHashParams(hash: string | undefined): URLSearchParams | null {

@@ -92,7 +92,9 @@ describe("hosted local Codex long-thread prompt growth e2e", () => {
           privateSummary: `local long-thread turn ${turnNumber}`,
           text: `ok ${turnNumber}`,
         }),
-      ]);
+      ], {
+        matchInputContains: `hello ${turnNumber}`,
+      });
       const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
         userId,
         linqChatId,

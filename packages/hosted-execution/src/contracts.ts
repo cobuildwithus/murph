@@ -53,6 +53,7 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  "group-newsletter.email-needed",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -61,6 +62,7 @@ export type HostedExecutionEventKind =
 
 import type {
   HostedVaultShareDeliveryPayload,
+  HostedVaultShareRevokePayload,
 } from "./vault-share.ts";
 
 export const HOSTED_EXECUTION_WAKE_KINDS = [
@@ -69,7 +71,9 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  "group-newsletter.email-needed",
   "vault-share.delivery",
+  "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -95,7 +99,7 @@ export type HostedExecutionExternalThreadRouteChannel = Extract<
 >;
 
 export interface HostedExecutionExternalThreadRouteAuthority {
-  accountLookupKey: string;
+  accountLookupKey?: string | null;
   channel: HostedExecutionExternalThreadRouteChannel;
   containerMemberId: string;
   threadId: string;
@@ -220,6 +224,22 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
     | "reconcile_due";
 }
 
+export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
+  | "linq"
+  | "telegram";
+
+export interface HostedExecutionGroupNewsletterEmailNeededDirectRoute {
+  channel: HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel;
+  threadId: string;
+}
+
+export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
+  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
+  groupDisplayName: string | null;
+  groupId: string;
+  kind: "group-newsletter.email-needed";
+}
+
 export interface HostedExecutionPlainRuntimeControlRequestedEvent
   extends HostedExecutionBaseEvent {
   kind: HostedExecutionPlainRuntimeControlWakeKind;
@@ -241,6 +261,7 @@ export type HostedExecutionEvent =
   | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionAssistantNotificationRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
+  | HostedExecutionGroupNewsletterEmailNeededEvent
   | HostedExecutionRuntimeControlRequestedEvent;
 
 export interface HostedExecutionBaseWake {
@@ -429,12 +450,24 @@ export interface HostedExecutionVaultShareDeliveryWake extends HostedExecutionBa
   kind: "vault-share.delivery";
 }
 
+export interface HostedExecutionVaultShareRevokeWake extends HostedExecutionBaseWake {
+  kind: "vault-share.revoke";
+  revoke: HostedVaultShareRevokePayload;
+}
+
 export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
   connectionId?: string | null;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
   kind: "device-sync.wake";
   provider?: string | null;
   reason: HostedExecutionDeviceSyncWakeEvent["reason"];
+}
+
+export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
+  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
+  groupDisplayName: string | null;
+  groupId: string;
+  kind: "group-newsletter.email-needed";
 }
 
 export interface HostedExecutionPlainRuntimeControlWake extends HostedExecutionBaseWake {
@@ -462,7 +495,9 @@ export type HostedExecutionWake =
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionDeviceSyncWake
+  | HostedExecutionGroupNewsletterEmailNeededWake
   | HostedExecutionVaultShareDeliveryWake
+  | HostedExecutionVaultShareRevokeWake
   | HostedExecutionRuntimeControlWake;
 
 export type HostedRuntimeEvent =
@@ -533,6 +568,12 @@ export const HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER =
   "x-hosted-runtime-ensure-processing-activity-started-at-ms";
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER =
   "x-hosted-runtime-ensure-processing-request-started-at-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-token-acquire-started-at-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-token-acquired-at-ms";
+export const HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER =
+  "x-hosted-runtime-ensure-processing-direct-request-started-at-ms";
 
 export function assertHostedRuntimeProcessingTimeoutMs(
   value: number,

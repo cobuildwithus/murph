@@ -11,10 +11,13 @@ export type ConnectSource = {
   connected?: boolean;
   description: string;
   disconnectConnectionId?: string;
+  disconnectScope?: "junction_account";
   id: string;
   logo: LogoAsset;
   name: string;
   requiresReconnect?: boolean;
+  unavailableActionLabel?: string;
+  unavailableMessage?: string;
 };
 
 export type ConnectPageInitialLoadError = {

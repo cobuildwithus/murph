@@ -481,7 +481,7 @@ test("JoinInvitePageView renders active and activating account states", () => {
   assert.match(activeMarkup, /Text Murph/);
   assert.match(activeMarkup, /Add Murph to Contacts/);
   assert.match(activatingMarkup, /Finishing your setup/);
-  assert.match(activatingMarkup, /Setting up your vault and assistant/);
+  assert.match(activatingMarkup, /Setting up your account and assistant/);
 });
 
 function createModel(

@@ -111,7 +111,7 @@ export async function syncHostedEmailConnectionWithRetry(
     retryable: (error) => error instanceof HostedEmailSyncError && error.code === "PRIVY_EMAIL_NOT_READY",
     sleepImpl: input.sleepImpl,
     timeoutMessage:
-      "We verified your email, but the hosted assistant could not confirm it yet. Refresh and try again.",
+      "Your email is verified, but Murph couldn't confirm it yet. Refresh and try again.",
   });
 }
 
@@ -132,12 +132,12 @@ function formatHostedEmailSyncSuccessMessage(
   if (mode === "verify") {
     return syncResult.runTriggered
       ? `Email verified and connected: ${syncResult.emailAddress}`
-      : `Email verified and saved: ${syncResult.emailAddress}. Your hosted assistant will finish syncing it shortly.`;
+      : `Email verified and saved: ${syncResult.emailAddress}. Murph will finish connecting it shortly.`;
   }
 
   return syncResult.runTriggered
-    ? `Hosted email synced: ${syncResult.emailAddress}`
-    : `Verified email saved: ${syncResult.emailAddress}. Your hosted assistant will finish syncing it shortly.`;
+    ? `Email connected: ${syncResult.emailAddress}`
+    : `Email saved: ${syncResult.emailAddress}. Murph will finish connecting it shortly.`;
 }
 
 async function syncHostedEmailConnection(
@@ -189,7 +189,7 @@ async function syncHostedEmailConnection(
 
     throw new HostedEmailSyncError(
       errorDetails.code,
-      errorDetails.message ?? "We could not sync your verified email to the hosted assistant yet.",
+      errorDetails.message ?? "We couldn't finish connecting your email to Murph yet.",
     );
   }
 
@@ -201,7 +201,7 @@ async function syncHostedEmailConnection(
   ) {
     throw new HostedEmailSyncError(
       null,
-      "We verified your email, but the hosted assistant returned an unexpected sync response.",
+      "Your email is verified, but we couldn't confirm the connection. Refresh and try again.",
     );
   }
 
@@ -219,6 +219,6 @@ function toHostedEmailSyncErrorMessage(error: unknown): string {
 
   return toErrorMessage(
     error,
-    "We verified your email, but we could not sync it to the hosted assistant yet. Refresh and try again.",
+    "Your email is verified, but we couldn't finish connecting it to Murph. Refresh and try again.",
   );
 }

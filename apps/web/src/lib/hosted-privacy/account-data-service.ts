@@ -41,6 +41,13 @@ import {
   terminateHostedUserRuntimeWorkflowBestEffort,
 } from "../hosted-orchestration/workflow-termination";
 import {
+  signalHostedMailboxAppendRuntime,
+} from "../hosted-orchestration/signal-runtime";
+import {
+  revokeOutgoingHostedVaultSharesForMemberDeletionTx,
+  type HostedVaultShareCleanupSignal,
+} from "../hosted-vault-share/share-grant-store";
+import {
   HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
 } from "./account-data-shared";
@@ -124,6 +131,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted Family plan Stripe references",
     deletion: "local-reference-delete",
     note: "Deletes local Family Stripe references for groups owned by the member. Family billing cancellation runs before local deletion so sponsored access cannot keep billing after owner deletion.",
+  },
+  {
+    slug: "prisma.hosted_group",
+    label: "Generic hosted groups",
+    deletion: "live-delete",
+    note: "Deletes generic hosted groups owned by the member or backed by one of the member's runtimes. Export omits join codes and other members' private data.",
+  },
+  {
+    slug: "prisma.hosted_group_member",
+    label: "Generic hosted group memberships",
+    deletion: "live-delete",
+    note: "Deletes the member's generic group memberships and memberships in groups they own. Export reports role/status metadata only.",
   },
   {
     slug: "prisma.hosted_mailbox_item",
@@ -231,7 +250,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_vault_share",
     label: "Hosted vault share grants",
     deletion: "live-delete",
-    note: "Deleted in the same transaction by the hosted_member FK cascade when either the grantor or destination member row is removed; export includes share rows where the member is grantor or destination.",
+    note: "Outgoing active grants are revoked with destination cleanup wakes before account rows are removed; share rows are then deleted in the same transaction by the hosted_member FK cascade when either the grantor or destination member row is removed.",
   },
   {
     slug: "prisma.hosted_thread_container",
@@ -441,6 +460,7 @@ type DeviceConnectionIdentity = {
 type HostedAccountDeletionDatabaseResult = {
   deletedCounts: HostedAccountDataCounts;
   deletedRuntimeMemberIds: readonly string[];
+  vaultShareCleanupSignals: readonly HostedVaultShareCleanupSignal[];
 };
 
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
@@ -597,6 +617,11 @@ export async function deleteHostedAccountData(input: {
       connectionIdentities: deviceConnectionIdentities,
       prisma: tx,
     });
+    const vaultShareCleanup = await revokeOutgoingHostedVaultSharesForMemberDeletionTx({
+      grantorMemberIds: transactionDeletionMemberIds,
+      now: deletionStartedAt,
+      tx,
+    });
     const deletedCounts = await deleteHostedAccountPrismaRows({
       connectionIdentities: deviceConnectionIdentities,
       memberIds: transactionDeletionMemberIds,
@@ -606,12 +631,16 @@ export async function deleteHostedAccountData(input: {
     return {
       deletedCounts,
       deletedRuntimeMemberIds: transactionDeletionMemberIds,
+      vaultShareCleanupSignals: vaultShareCleanup.cleanupSignals,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const deletedCounts = databaseDeletion.deletedCounts;
   const deletedRuntimeMemberIds = databaseDeletion.deletedRuntimeMemberIds.length > 0
     ? databaseDeletion.deletedRuntimeMemberIds
     : deletionMemberIds;
+  await signalHostedVaultShareCleanupRuntimesBestEffort(
+    databaseDeletion.vaultShareCleanupSignals,
+  );
   await Promise.all(deletedRuntimeMemberIds.map((memberId) =>
     terminateHostedUserRuntimeWorkflowBestEffort({
       reason: "account-deleted",
@@ -1057,6 +1086,8 @@ async function countHostedAccountData(input: {
     hostedAccountGroupMembership,
     hostedAccountGroupInvite,
     hostedAccountGroupBillingRef,
+    hostedGroup,
+    hostedGroupMember,
     hostedMemberEmailAuthorization,
     hostedConnectedAppsSession,
     hostedConnectedAppConnectIntent,
@@ -1118,6 +1149,23 @@ async function countHostedAccountData(input: {
         group: {
           ownerMemberId: memberIdFilter,
         },
+      },
+    }),
+    input.prisma.hostedGroup.count({
+      where: {
+        OR: [
+          { ownerMemberId: memberIdFilter },
+          { runtimeMemberId: memberIdFilter },
+        ],
+      },
+    }),
+    input.prisma.hostedGroupMember.count({
+      where: {
+        OR: [
+          { memberId: memberIdFilter },
+          { group: { ownerMemberId: memberIdFilter } },
+          { group: { runtimeMemberId: memberIdFilter } },
+        ],
       },
     }),
     input.prisma.hostedMemberEmailAuthorization.count({ where: { memberId: memberIdFilter } }),
@@ -1206,6 +1254,8 @@ async function countHostedAccountData(input: {
     "prisma.hosted_account_group_billing_ref": hostedAccountGroupBillingRef,
     "prisma.hosted_account_group_invite": hostedAccountGroupInvite,
     "prisma.hosted_account_group_membership": hostedAccountGroupMembership,
+    "prisma.hosted_group": hostedGroup,
+    "prisma.hosted_group_member": hostedGroupMember,
     "prisma.hosted_member_billing_ref": hostedMemberBillingRef,
     "prisma.hosted_member_email_authorization": hostedMemberEmailAuthorization,
     "prisma.hosted_member_identity": hostedMemberIdentity,
@@ -1230,6 +1280,17 @@ async function deleteHostedAccountPrismaRows(input: {
   const record = (key: string, result: { count: number }) => {
     counts[key] = result.count;
   };
+  const recordCount = (key: string, count: number) => {
+    counts[key] = count;
+  };
+  recordCount("prisma.hosted_vault_share", await input.prisma.hostedVaultShare.count({
+    where: {
+      OR: [
+        { grantorMemberId: memberIdFilter },
+        { destinationMemberId: memberIdFilter },
+      ],
+    },
+  }));
 
   record("prisma.hosted_mailbox_payload", await input.prisma.hostedMailboxPayload.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_ingress_latency_trace", await input.prisma.hostedIngressLatencyTrace.deleteMany({ where: { userId: memberIdFilter } }));
@@ -1276,6 +1337,23 @@ async function deleteHostedAccountPrismaRows(input: {
     },
   }));
   record("prisma.hosted_account_group", await input.prisma.hostedAccountGroup.deleteMany({ where: { ownerMemberId: memberIdFilter } }));
+  record("prisma.hosted_group_member", await input.prisma.hostedGroupMember.deleteMany({
+    where: {
+      OR: [
+        { memberId: memberIdFilter },
+        { group: { ownerMemberId: memberIdFilter } },
+        { group: { runtimeMemberId: memberIdFilter } },
+      ],
+    },
+  }));
+  record("prisma.hosted_group", await input.prisma.hostedGroup.deleteMany({
+    where: {
+      OR: [
+        { ownerMemberId: memberIdFilter },
+        { runtimeMemberId: memberIdFilter },
+      ],
+    },
+  }));
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_sensitive_action_challenge", await input.prisma.hostedSensitiveActionChallenge.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_web_session", await input.prisma.hostedWebSession.deleteMany({ where: { memberId: memberIdFilter } }));
@@ -1316,6 +1394,22 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_member", await input.prisma.hostedMember.deleteMany({ where: { id: memberIdFilter } }));
 
   return counts;
+}
+
+async function signalHostedVaultShareCleanupRuntimesBestEffort(
+  signals: readonly HostedVaultShareCleanupSignal[],
+): Promise<void> {
+  await Promise.all(signals.map(async (signal) => {
+    try {
+      await signalHostedMailboxAppendRuntime({
+        expectedUserId: signal.memberId,
+        mailboxItemId: signal.mailboxItemId,
+      });
+    } catch {
+      // The revoke mailbox item is durable; the destination runtime will observe it on
+      // its next mailbox poll if this best-effort wake signal fails.
+    }
+  }));
 }
 
 async function countHostedUserCryptoEnvelopeRows(

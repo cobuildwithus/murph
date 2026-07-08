@@ -82,6 +82,8 @@ const TEST_CRON_RUN = {
   jobId: TEST_CRON_JOB.jobId,
   trigger: 'scheduled',
   status: 'succeeded',
+  outcome: 'delivered',
+  reason: 'sent',
   startedAt: '2026-04-01T01:00:00.000Z',
   finishedAt: '2026-04-01T01:00:05.000Z',
   sessionId: null,

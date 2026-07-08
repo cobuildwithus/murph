@@ -117,6 +117,11 @@ export async function registerScopedVaultCliCommand(input: {
       registerGoalCommands(input.cli, services)
       return
     }
+    case 'group': {
+      const { registerGroupCommands } = await import('./commands/group.js')
+      registerGroupCommands(input.cli)
+      return
+    }
     case 'immunization': {
       const [
         { registerImmunizationCommands },
@@ -188,6 +193,11 @@ export async function registerScopedVaultCliCommand(input: {
     case 'memory': {
       const { registerMemoryCommands } = await import('./commands/memory.js')
       registerMemoryCommands(input.cli)
+      return
+    }
+    case 'profile': {
+      const { registerProfileCommands } = await import('./commands/profile.js')
+      registerProfileCommands(input.cli)
       return
     }
     case 'protocol':

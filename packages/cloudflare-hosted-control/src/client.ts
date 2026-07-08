@@ -8,12 +8,19 @@ import {
 } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 import {
+  parseHostedRuntimeEnsureProcessingResponse,
   parseHostedRunnerStatusResponse,
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
+import type {
+  HostedRuntimeEnsureProcessingResponse,
+} from "@murphai/hosted-execution/orchestration-control";
 import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -22,6 +29,7 @@ import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
@@ -70,7 +78,27 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
+  ensureRuntimeProcessing(input: {
+    onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
+    orchestrationAttemptId: string;
+    userId: string;
+  }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+}
+
+export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
+  accepted: true;
+}
+
+export type CloudflareHostedControlRuntimeEnsureProcessingResponse =
+  | HostedRuntimeEnsureProcessingResponse
+  | CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck;
+
+export interface CloudflareHostedControlRuntimeEnsureProcessingTiming {
+  directEnsureRequestStartedAtEpochMs: number;
+  directEnsureResponseReceivedAtEpochMs: number;
+  tokenAcquiredAtEpochMs: number;
+  tokenAcquireStartedAtEpochMs: number;
 }
 
 export interface CloudflareHostedControlClientOptions {
@@ -159,6 +187,30 @@ export function createCloudflareHostedControlClient(
         path: buildCloudflareHostedControlUserDataDeletionPath(expectedUserId),
         request: {
           body: "{}",
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    ensureRuntimeProcessing(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "runtime ensure-processing",
+        onRuntimeEnsureProcessingTiming: input.onTiming,
+        parse: parseCloudflareHostedControlRuntimeEnsureProcessingResponse,
+        path: buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId),
+        request: {
+          body: JSON.stringify({
+            orchestrationAttemptId: input.orchestrationAttemptId,
+          }),
           headers: {
             "content-type": "application/json; charset=utf-8",
           },
@@ -462,6 +514,19 @@ function parseHostedRunnerStatusForExpectedUser(
   return status;
 }
 
+function parseCloudflareHostedControlRuntimeEnsureProcessingResponse(
+  value: unknown,
+): CloudflareHostedControlRuntimeEnsureProcessingResponse {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    if (record.accepted === true) {
+      return { accepted: true };
+    }
+  }
+
+  return parseHostedRuntimeEnsureProcessingResponse(value);
+}
+
 function assertHostedBrowserVaultReplicaRefMatches(
   actual: HostedBrowserVaultReplicaRef,
   expected: HostedBrowserVaultReplicaRef,
@@ -637,6 +702,9 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   fetchImpl: typeof fetch;
   getAuthorizationHeader: () => Promise<string>;
   label: string;
+  onRuntimeEnsureProcessingTiming?: (
+    timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
+  ) => void;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -654,12 +722,40 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   }
 
   const headers = new Headers(input.request.headers);
+  const tokenAcquireStartedAtEpochMs = input.onRuntimeEnsureProcessingTiming
+    ? Date.now()
+    : null;
   headers.set("authorization", await input.getAuthorizationHeader());
+  const tokenAcquiredAtEpochMs = tokenAcquireStartedAtEpochMs === null
+    ? null
+    : Date.now();
 
   if (input.boundUserId !== undefined) {
     headers.set(
       HOSTED_EXECUTION_USER_ID_HEADER,
       requireCloudflareHostedControlUserId(input.boundUserId),
+    );
+  }
+
+  const directEnsureRequestStartedAtEpochMs = tokenAcquireStartedAtEpochMs === null
+    ? null
+    : Date.now();
+  if (
+    tokenAcquireStartedAtEpochMs !== null
+    && tokenAcquiredAtEpochMs !== null
+    && directEnsureRequestStartedAtEpochMs !== null
+  ) {
+    headers.set(
+      HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
+      String(tokenAcquireStartedAtEpochMs),
+    );
+    headers.set(
+      HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
+      String(tokenAcquiredAtEpochMs),
+    );
+    headers.set(
+      HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+      String(directEnsureRequestStartedAtEpochMs),
     );
   }
 
@@ -670,6 +766,26 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     redirect: "error",
     signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
   });
+  const directEnsureResponseReceivedAtEpochMs = directEnsureRequestStartedAtEpochMs === null
+    ? null
+    : Date.now();
+  if (
+    tokenAcquireStartedAtEpochMs !== null
+    && tokenAcquiredAtEpochMs !== null
+    && directEnsureRequestStartedAtEpochMs !== null
+    && directEnsureResponseReceivedAtEpochMs !== null
+  ) {
+    try {
+      input.onRuntimeEnsureProcessingTiming?.({
+        directEnsureRequestStartedAtEpochMs,
+        directEnsureResponseReceivedAtEpochMs,
+        tokenAcquiredAtEpochMs,
+        tokenAcquireStartedAtEpochMs,
+      });
+    } catch {
+      // Timing callbacks are diagnostics-only and must not affect control requests.
+    }
+  }
 
   if (!response.ok) {
     throw new HostedExecutionHttpResponseError({

@@ -238,12 +238,13 @@ function createSignalControlledChild(): SpawnedChildForTest & {
 }
 
 async function waitForSpawnCalls(count: number): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
     if (spawnMock.mock.calls.length >= count) {
       return;
     }
     await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
+      setTimeout(resolve, 10);
     });
   }
   expect(spawnMock).toHaveBeenCalledTimes(count);
@@ -256,7 +257,7 @@ function buildExpectedScenarioBatches(
   let currentBatch: HostedLocalE2eScenario[] = [];
 
   for (const scenario of scenarios) {
-    if (scenario.processIsolation || scenario.testControls === true) {
+    if (scenario.dedicatedVitestProcess || scenario.testControls === true) {
       if (currentBatch.length > 0) {
         batches.push(currentBatch);
         currentBatch = [];
@@ -382,7 +383,7 @@ function batchRequiresDedicatedEnv(
   scenarios: readonly HostedLocalE2eScenario[],
 ): boolean {
   return scenarios.some((scenario) =>
-    scenario.processIsolation || scenario.testControls === true
+    scenario.dedicatedVitestProcess || scenario.testControls === true
   );
 }
 

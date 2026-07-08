@@ -131,7 +131,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
       });
 
       if (result.state !== "ready") {
-        throw new Error("Your vault is not ready to export yet.");
+        throw new Error("Your data isn't ready to export yet.");
       }
 
       if (
@@ -140,7 +140,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
         || result.deviceSyncImportPending
       ) {
         throw new Error(
-          "Your vault is still being prepared. Try the export again in a moment.",
+          "Your data is still being prepared. Try the export again in a moment.",
         );
       }
 
@@ -153,7 +153,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
       );
 
       closeExportDialog();
-      setExportSuccess("Your vault export downloaded. Keep the file somewhere private and secure.");
+      setExportSuccess("Your data export downloaded. Keep the file somewhere private and secure.");
     } catch (requestError) {
       setExportDialogError(formatVaultExportError(requestError));
     } finally {
@@ -238,7 +238,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
           <AlertTitle>Account deleted</AlertTitle>
           <AlertDescription>
             {cleanupPending
-              ? "Your account was deleted. Some external cleanup is still finishing; we will complete it on our side, no action needed. Redirecting to the home page."
+              ? "Your account was deleted. We're finishing some cleanup on our side, no action needed. Redirecting to the home page."
               : "Your account and all your data have been deleted. Redirecting to the home page."}
           </AlertDescription>
         </Alert>
@@ -260,7 +260,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
         <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
           <Download className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
           <span className="font-serif text-base tracking-tight text-foreground">
-            Export vault
+            Export data
           </span>
           <Button disabled={exportPending || deletePending} onClick={openExportDialog} size="default" type="button" variant="ghost">
             {exportPending ? "Exporting..." : "Export"}
@@ -285,10 +285,10 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
         >
           <DialogHeader className="pr-10">
             <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
-              Export your vault
+              Export your data
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
-              Downloads your current dashboard data as a JSON file.
+              Downloads a file with all your current dashboard data.
             </DialogDescription>
           </DialogHeader>
           {exportDialogError ? (
@@ -310,7 +310,7 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
           <div className="flex flex-col gap-2">
             <Button type="button" size="xl" onClick={() => void handleExportConfirmed()} disabled={!exportReady} className="w-full">
               <Download data-icon="inline-start" />
-              {exportPending ? "Preparing..." : "Download vault JSON"}
+              {exportPending ? "Preparing..." : "Download my data"}
             </Button>
             <Button type="button" size="xl" variant="ghost" onClick={closeExportDialog} disabled={exportPending} className="w-full">
               Cancel
@@ -387,13 +387,13 @@ function HostedDataPrivacyUnavailable(props: { authenticated: boolean }) {
       <Alert role="status">
         <AlertTitle>Secure approval unavailable</AlertTitle>
         <AlertDescription>
-          Passkey-protected vault export and account deletion are temporarily unavailable.
+          Data export and account deletion are temporarily unavailable.
         </AlertDescription>
       </Alert>
       <div className="divide-y divide-[rgba(196,168,130,0.25)]">
         <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
           <Download className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
-          <span className="font-serif text-base tracking-tight text-muted-foreground">Export vault</span>
+          <span className="font-serif text-base tracking-tight text-muted-foreground">Export data</span>
           <Button disabled size="default" type="button" variant="ghost">Export</Button>
         </div>
         <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pt-4">
@@ -425,32 +425,32 @@ function buildVaultExportFilename(generatedAt: string): string {
 
 function formatVaultExportError(error: unknown): string {
   if (!(error instanceof Error)) {
-    return "Could not export your vault right now.";
+    return "Couldn't export your data right now.";
   }
 
-  if (error.message === "Your vault is not ready to export yet.") {
+  if (error.message === "Your data isn't ready to export yet.") {
     return error.message;
   }
 
   if (/BROWSER_VAULT_SESSION_NOT_FRESH/u.test(error.message)) {
-    return "Your vault is still being prepared. Try the export again in a moment.";
+    return "Your data is still being prepared. Try the export again in a moment.";
   }
 
   if (/HTTP 401/u.test(error.message)) {
-    return "Your session expired. Refresh and try again.";
+    return "You've been signed out. Refresh the page and sign in again.";
   }
 
   if (/HTTP 403/u.test(error.message) && /consent/iu.test(error.message)) {
-    return "Accept the current Murph legal consent before exporting your vault.";
+    return "Accept the latest Murph terms first, then try the export again.";
   }
 
   if (/HTTP 403/u.test(error.message)) {
-    return "Your session is not allowed to export your vault right now.";
+    return "You don't have permission to export this data right now.";
   }
 
   const normalizedMessage = normalizeBrowserVaultError(error);
   return normalizedMessage === "Your dashboard data is not available right now."
-    ? "Your vault export is not available right now. Try again after your dashboard finishes syncing."
+    ? "Your export isn't ready yet. Try again once your dashboard finishes loading."
     : normalizedMessage;
 }
 

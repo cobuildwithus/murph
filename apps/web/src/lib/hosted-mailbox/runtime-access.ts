@@ -3,14 +3,10 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 
-import {
-  hasHostedMemberEffectiveActiveAccessForMember,
-} from "../hosted-onboarding/family-plan";
-import {
-  hasHostedMemberActiveAccess,
-} from "../hosted-onboarding/entitlement";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   hostedOnboardingError,
+  isHostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 
@@ -23,45 +19,17 @@ interface HostedRuntimeActiveAccessOptions {
 }
 
 // Shared fail-closed gate for runtime surfaces: only members with active hosted
-// access and, for thread containers, active owner authority may wake or touch
-// runtime state.
+// access and, for thread containers, active owner or participant authority may
+// wake or touch runtime state.
 export async function requireHostedRuntimeActiveAccess(
   userId: string,
   options: HostedRuntimeActiveAccessOptions = {},
 ): Promise<void> {
   const prisma = options.prisma ?? getPrisma();
-  const member = await prisma.hostedMember.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      id: true,
-      billingStatus: true,
-      suspendedAt: true,
-      threadContainer: {
-        select: {
-          owner: {
-            select: {
-              billingStatus: true,
-              suspendedAt: true,
-            },
-          },
-        },
-      },
-    },
-  });
-
-  if (
-    member
-    && await hasHostedMemberEffectiveActiveAccessForMember({
-      member,
-      prisma,
-    })
-    && (
-      !member.threadContainer
-      || hasHostedMemberActiveAccess(member.threadContainer.owner)
-    )
-  ) {
+  if (await readActiveHostedMemberAccess({
+    memberId: userId,
+    prisma,
+  })) {
     return;
   }
 
@@ -72,9 +40,116 @@ export async function requireHostedRuntimeActiveAccess(
   });
 }
 
+export async function requireHostedRuntimeActiveAccessForUpdateTx(
+  userId: string,
+  options: Omit<HostedRuntimeActiveAccessOptions, "prisma"> & {
+    prisma: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  const ownerMemberId = await readHostedThreadContainerOwnerMemberIdTx({
+    prisma: options.prisma,
+    userId,
+  });
+  if (ownerMemberId) {
+    await lockHostedRuntimeMemberForUpdateTx({
+      memberId: ownerMemberId,
+      prisma: options.prisma,
+    });
+  }
+  await lockHostedRuntimeMemberForUpdateTx({
+    memberId: userId,
+    prisma: options.prisma,
+  });
+  const lockedOwnerMemberId = await lockHostedThreadContainerOwnerMemberIdTx({
+    prisma: options.prisma,
+    userId,
+  });
+  if (lockedOwnerMemberId !== ownerMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNTIME_ACCESS_AUTHORITY_CHANGED",
+      httpStatus: 409,
+      message: "Hosted runtime access changed while validating authority. Retry the request.",
+      retryable: true,
+    });
+  }
+
+  await requireHostedRuntimeActiveAccess(userId, options);
+}
+
+async function lockHostedRuntimeMemberForUpdateTx(input: {
+  prisma: Prisma.TransactionClient;
+  memberId: string;
+}): Promise<void> {
+  await input.prisma.$queryRaw`
+    SELECT id
+    FROM hosted_member
+    WHERE id = ${input.memberId}
+    FOR UPDATE
+  `;
+}
+
+async function readHostedThreadContainerOwnerMemberIdTx(input: {
+  prisma: Prisma.TransactionClient;
+  userId: string;
+}): Promise<string | null> {
+  const containers = await input.prisma.$queryRaw<Array<{ ownerMemberId: string }>>`
+    SELECT owner_member_id AS "ownerMemberId"
+    FROM hosted_thread_container
+    WHERE member_id = ${input.userId}
+  `;
+
+  return containers[0]?.ownerMemberId ?? null;
+}
+
+async function lockHostedThreadContainerOwnerMemberIdTx(input: {
+  prisma: Prisma.TransactionClient;
+  userId: string;
+}): Promise<string | null> {
+  const containers = await input.prisma.$queryRaw<Array<{ ownerMemberId: string }>>`
+    SELECT owner_member_id AS "ownerMemberId"
+    FROM hosted_thread_container
+    WHERE member_id = ${input.userId}
+    FOR UPDATE
+  `;
+
+  return containers[0]?.ownerMemberId ?? null;
+}
+
+export async function hasHostedRuntimeActiveAccessForUpdateTx(
+  userId: string,
+  options: Omit<HostedRuntimeActiveAccessOptions, "prisma"> & {
+    prisma: Prisma.TransactionClient;
+  },
+): Promise<boolean> {
+  try {
+    await requireHostedRuntimeActiveAccessForUpdateTx(userId, options);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isHostedRuntimeInactiveAccessError(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && error.code === "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE"
+    && !error.retryable;
+}
+
 export async function requireHostedRuntimeMailboxActiveAccess(
   userId: string,
   options: HostedRuntimeActiveAccessOptions = {},
 ): Promise<void> {
   await requireHostedRuntimeActiveAccess(userId, options);
+}
+
+export async function hasHostedRuntimeActiveAccess(
+  userId: string,
+  options: HostedRuntimeActiveAccessOptions = {},
+): Promise<boolean> {
+  try {
+    await requireHostedRuntimeActiveAccess(userId, options);
+    return true;
+  } catch {
+    return false;
+  }
 }

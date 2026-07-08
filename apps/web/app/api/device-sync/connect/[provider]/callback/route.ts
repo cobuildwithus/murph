@@ -2,6 +2,7 @@ import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
 } from "@murphai/device-syncd/hosted-runtime";
+import { buildDeviceSyncCallbackReturnLocation } from "@murphai/device-syncd/callback-redirect";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import {
@@ -9,6 +10,7 @@ import {
   callbackHtml,
   errorToCallbackRedirect,
   providerCallbackRedirect,
+  redirectTo,
   resolveDecodedRouteParam,
 } from "@/src/lib/device-sync/http";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
@@ -57,8 +59,21 @@ export async function GET(
       const connectTarget = typeof error.details?.connectTarget === "string"
         ? error.details.connectTarget
         : null;
+      const returnTo = typeof error.details?.returnTo === "string" ? error.details.returnTo : null;
+      // When the state is unknown there is no stored returnTo. The connect
+      // page can always render connection truth, so no callback error should
+      // dead-end the user on a bare HTML page.
+      const fallbackReturnTo = new URL("/connect", request.url).toString();
+
+      if (error.code === "OAUTH_STATE_REPLAYED") {
+        // An earlier delivery of this callback already owns the outcome; send
+        // the user back into the app without asserting a status the
+        // destination pages render from the store anyway.
+        return redirectTo(buildDeviceSyncCallbackReturnLocation(returnTo) ?? fallbackReturnTo);
+      }
+
       const redirect = errorToCallbackRedirect({
-        returnTo: typeof error.details?.returnTo === "string" ? error.details.returnTo : null,
+        returnTo: returnTo ?? fallbackReturnTo,
         provider: typeof error.details?.provider === "string" ? error.details.provider : (providerName ?? "unknown"),
         connectSourceId,
         connectTarget,

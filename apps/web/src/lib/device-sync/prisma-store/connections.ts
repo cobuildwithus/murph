@@ -798,8 +798,24 @@ export class PrismaHostedConnectionStore {
       where "connection"."status" = 'active'
         and "connection"."next_reconcile_at" is not null
         and "connection"."next_reconcile_at" <= ${input.dueAt}
-        and "member"."billing_status" = 'active'
         and "member"."suspended_at" is null
+        -- Set-based projection of the member-access resolver
+        -- (member-access.ts): own active billing OR an active membership in
+        -- an active, unsuspended account group. Device connections belong to
+        -- human members, never thread containers, so no owner branch here.
+        and (
+          "member"."billing_status" = 'active'
+          or exists (
+            select 1
+            from "hosted_account_group_membership" as "membership"
+            join "hosted_account_group" as "account_group"
+              on "account_group"."id" = "membership"."group_id"
+            where "membership"."member_id" = "member"."id"
+              and "membership"."status" = 'active'
+              and "account_group"."billing_status" = 'active'
+              and "account_group"."suspended_at" is null
+          )
+        )
         and not exists (
           select 1
           from "device_sync_signal" as "signal"

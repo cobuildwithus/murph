@@ -26,6 +26,7 @@ function createHostedAssistantDeliveryPayload(
 ): HostedAssistantDeliveryPayload {
   return {
     actorId: "actor-1",
+    answeredMailboxItemIds: [],
     bindingDeliveryKind: "participant",
     bindingDeliveryTarget: "chat-1",
     channel: "telegram",
@@ -466,7 +467,9 @@ describe("hosted assistant delivery contracts", () => {
     const effect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe-1",
       effectId: "intent-1",
-      payload: createHostedAssistantDeliveryPayload(),
+      payload: createHostedAssistantDeliveryPayload({
+        answeredMailboxItemIds: ["mailbox_item_1", "mailbox_item_2"],
+      }),
     });
 
     expect(parseHostedAssistantDeliverySideEffect(effect)).toEqual(effect);
@@ -478,6 +481,35 @@ describe("hosted assistant delivery contracts", () => {
         payload: createHostedAssistantDeliveryPayload(),
       }),
     ).toThrow("Unsupported hosted assistant delivery kind");
+  });
+
+  it("parses grouped assistant delivery payloads with more than forty answered mailbox item ids", () => {
+    const answeredMailboxItemIds = Array.from(
+      { length: 45 },
+      (_, index) => `mailbox_item_grouped_${index}`,
+    );
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe-1",
+      effectId: "intent-1",
+      payload: createHostedAssistantDeliveryPayload({
+        answeredMailboxItemIds,
+      }),
+    });
+
+    expect(parseHostedAssistantDeliverySideEffect(effect).payload.answeredMailboxItemIds)
+      .toEqual(answeredMailboxItemIds);
+    expect(() =>
+      parseHostedAssistantDeliverySideEffect({
+        ...effect,
+        payload: {
+          ...effect.payload,
+          answeredMailboxItemIds: Array.from(
+            { length: 101 },
+            (_, index) => `mailbox_item_too_many_${index}`,
+          ),
+        },
+      }),
+    ).toThrow("answeredMailboxItemIds must contain at most 100 entries");
   });
 
   it("compares hosted side-effect identities, attempts, failures, and receipts", () => {

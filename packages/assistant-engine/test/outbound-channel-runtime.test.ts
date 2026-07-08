@@ -766,6 +766,7 @@ describe('outbound channel runtime', () => {
     expect(send).toHaveBeenCalledWith(
       {
         actorId: 'actor-1',
+        answeredMailboxItemIds: [],
         bindingDelivery: {
           kind: 'thread',
           target: 'thread-1',

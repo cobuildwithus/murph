@@ -73,7 +73,7 @@ function ChatGptConnection(props: {
     } catch (caught) {
       setError(caught instanceof HostedOnboardingApiError
         ? caught.message
-        : "ChatGPT account request failed.");
+        : "We couldn't update your ChatGPT connection. Try again.");
     } finally {
       setPendingAction(null);
     }

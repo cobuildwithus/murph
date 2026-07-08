@@ -6,7 +6,7 @@ import {
   buildMurphAgeResearchCalculatorView,
   calculateMurphAgePublicReportFromSubmittedInputs,
   type MurphAgeRiskModel,
-} from "../src/index.ts";
+} from "@murphai/health-metrics/murph-age";
 
 const REFERENCE_RISK_CURVE = [
   { ageYears: 20, riskProbability: 0.01 },

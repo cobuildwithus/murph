@@ -1,16 +1,25 @@
+import type { HostedMailboxLane } from "@murphai/hosted-execution/runtime-control";
+
 import type { HostedOnboardingTelegramWebhookResponse } from "./webhook-provider-telegram";
 import type { HostedOnboardingLinqWebhookResponse } from "./webhook-provider-linq-types";
 import type { HostedOnboardingWhatsAppWebhookResponse } from "./webhook-provider-whatsapp";
 import type { HostedLinqThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+
+// Lane facts from the planner's own mailbox append/dedupe row. Presence means
+// the planning transaction already proved the active member, admission, and
+// workspace row for this wake, so Linq handoff can include them in its
+// Temporal signal and, after that signal is accepted, fire the direct runtime
+// ensure fast path.
+export type HostedWebhookWakeMailboxCheckpoint = {
+  lane: HostedMailboxLane;
+  laneSeq: string;
+};
 
 export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   desiredSideEffects: readonly TSideEffect[];
   linqReadReceiptRouteAuthority?: HostedLinqThreadRouteEgressAuthority;
   response: TResult;
   wakeHandoffs?: readonly HostedWebhookWakeHandoff[];
-  wakeLinqChatId?: string;
-  wakeMailboxItemId?: string;
-  wakeUserId?: string;
 };
 
 export type HostedWebhookWakeHandoff = {
@@ -19,6 +28,7 @@ export type HostedWebhookWakeHandoff = {
   mailboxItemId: string;
   source: "linq" | "telegram" | "whatsapp";
   userId: string;
+  wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;
 };
 
 export type HostedStripeWebhookResponse = {

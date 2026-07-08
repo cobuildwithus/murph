@@ -157,7 +157,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Start Family/);
   });
 
-  test("routes Family owners through Family billing before choosing individual plans", async () => {
+  test("routes family-plan owners through Family billing before choosing individual plans", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
@@ -169,8 +169,8 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Manage Family billing/);
-    assert.match(markup, /Switching away from Family ends sponsored access/);
-    assert.match(markup, /Move to an individual plan only after/);
+    assert.match(markup, /family members lose their included access/);
+    assert.match(markup, /End or change the Family plan first/);
     assert.doesNotMatch(markup, /Choose Pulse/);
     assert.doesNotMatch(markup, /Choose Edge/);
   });

@@ -83,7 +83,6 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 });
 
 import {
-  MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE,
   activateHostedMemberForFamilySponsorshipTx,
   activateHostedMemberForPositiveSourceTx,
   buildHostedMemberActivationWelcomeRoute,
@@ -290,7 +289,15 @@ describe("hosted onboarding member activation", () => {
     await expect(activateHostedMemberForFamilySponsorshipTx({
       memberId: member.core.id,
       occurredAt: new Date("2026-06-18T12:00:00.000Z"),
-      prisma: makeTransactionHarness() as never,
+      prisma: makeTransactionHarness({
+        accountGroupMemberships: [{
+          group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+          status: "active",
+        }],
+        billingStatus: HostedBillingStatus.canceled,
+        suspendedAt: null,
+        threadContainer: null,
+      }) as never,
       sourceEventId: "family-subscription:sub_family",
     })).resolves.toEqual({
       activated: true,
@@ -309,7 +316,11 @@ describe("hosted onboarding member activation", () => {
         notification: expect.objectContaining({
           responsePolicy: {
             kind: "require_send_exact_text",
-            text: MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE,
+            text: renderUserFacingMessage({
+              context: {},
+              key: "assistant.family_welcome",
+              seed: "member_123",
+            }).text,
           },
         }),
       }),
@@ -448,6 +459,7 @@ describe("hosted onboarding member activation", () => {
       },
       routing: {
         linqChatId: "chat_home_123",
+        linqHomeLineAssignedAt: null,
         linqRecipientPhone: null,
         memberId: "member_123",
         pendingLinqChatId: null,
@@ -539,6 +551,7 @@ describe("hosted onboarding member activation", () => {
       },
       routing: {
         linqChatId: null,
+        linqHomeLineAssignedAt: null,
         linqRecipientPhone: null,
         memberId: "member_123",
         pendingLinqChatId: null,
@@ -706,6 +719,7 @@ describe("hosted onboarding member activation", () => {
       },
       routing: {
         linqChatId: null,
+        linqHomeLineAssignedAt: null,
         linqRecipientPhone: null,
         memberId: "member_123",
         pendingLinqChatId: null,
@@ -750,6 +764,7 @@ describe("hosted onboarding member activation", () => {
       },
       routing: {
         linqChatId: null,
+        linqHomeLineAssignedAt: null,
         linqRecipientPhone: null,
         memberId: "member_123",
         pendingLinqChatId: null,
@@ -1012,6 +1027,18 @@ function setActivationMemberSnapshot(member: HostedMemberSnapshot | null): void 
   mocks.readHostedMemberRoutingState.mockResolvedValue(member?.routing ?? null);
 }
 
-function makeTransactionHarness() {
-  return {};
+function makeTransactionHarness(memberAccess?: {
+  accountGroupMemberships: Array<{
+    group: { billingStatus: HostedBillingStatus; suspendedAt: Date | null };
+    status: string;
+  }>;
+  billingStatus: HostedBillingStatus;
+  suspendedAt: Date | null;
+  threadContainer: null;
+}) {
+  return {
+    hostedMember: {
+      findUnique: vi.fn(async () => memberAccess ?? null),
+    },
+  };
 }

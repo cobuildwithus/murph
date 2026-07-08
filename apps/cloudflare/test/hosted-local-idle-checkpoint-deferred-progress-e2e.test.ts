@@ -92,7 +92,12 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     });
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
-    requireScenario().queueAssistantResponses([firstReplyText, secondReplyText]);
+    requireScenario().queueAssistantResponses([firstReplyText], {
+      matchInputContains: firstUserText,
+    });
+    requireScenario().queueAssistantResponses([secondReplyText], {
+      matchInputContains: secondUserText,
+    });
 
     const firstWake = await requireScenario().runWake(
       buildInboundLinqWake({

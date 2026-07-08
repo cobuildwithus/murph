@@ -154,6 +154,15 @@ function findProviderTraceRawEvent(
   return rawEvents[0]!
 }
 
+function findProviderTraceRawEvents(
+  events: readonly AssistantProviderTraceEvent[],
+  providerTraceKind: string,
+): Record<string, unknown>[] {
+  return events
+    .map((event) => readProviderTraceRawEvent(event))
+    .filter((event) => event.providerTraceKind === providerTraceKind)
+}
+
 function findProviderPromptSizeTraceRawEvent(
   events: readonly AssistantProviderTraceEvent[],
   providerPromptDiagnosticKind: string,
@@ -2413,12 +2422,14 @@ describe('Codex assistant registry helpers', () => {
         'model_providers.venice.env_key="VENICE_API_KEY"',
         'model_providers.venice.wire_api="responses"',
         'model_providers.venice.requires_openai_auth=false',
-        'shell_environment_policy.ignore_default_excludes=false',
       ]),
     )
   })
 
-  it('passes hosted MultiAgent V2 as a Codex app-server process override', async () => {
+  it('never passes a multi_agent_v2 CLI override on hosted turns', async () => {
+    // Hosted config.toml owns [features.multi_agent_v2] (including
+    // root_agent_usage_hint_text); a CLI boolean override would take
+    // precedence and silently reset that table to feature defaults.
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Completed hosted turn.',
       jsonEvents: [],
@@ -2448,11 +2459,51 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.ok).toBe(true)
     const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
       .calls[0]?.[0]
-    expect(appServerInput?.configOverrides).toEqual(
-      expect.arrayContaining([
-        'features.multi_agent_v2=true',
-      ]),
-    )
+    expect(
+      appServerInput?.configOverrides?.some(
+        (override: string) => override.includes('multi_agent'),
+      ) ?? false,
+    ).toBe(false)
+  })
+
+  it('appends turn-local Codex config overrides after provider overrides', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Completed turn-local override.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'turn-local-override-thread',
+      stderr: '',
+      stdout: '',
+      threadId: 'turn-local-override-thread',
+      turnId: 'turn-local-override',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      codexConfigOverrides: [
+        'memories.use_memories=false',
+        'memories.generate_memories=false',
+      ],
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'hosted-model',
+        modelProvider: 'venice',
+      }),
+      userPrompt: 'Run with turn-local overrides.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
+      .calls[0]?.[0]
+    expect(appServerInput?.configOverrides).toEqual([
+      'model_providers.venice.name="Venice.ai"',
+      'model_providers.venice.base_url="https://api.venice.ai/api/v1"',
+      'model_providers.venice.env_key="VENICE_API_KEY"',
+      'model_providers.venice.wire_api="responses"',
+      'model_providers.venice.requires_openai_auth=false',
+      'memories.use_memories=false',
+      'memories.generate_memories=false',
+    ])
   })
 
   it('replays committed conversation history only on stale native-resume fallback', async () => {
@@ -2658,6 +2709,38 @@ describe('Codex assistant registry helpers', () => {
     expect(String(resumeFailureTrace.codexResumeFailureErrorMessage)).toContain(
       'stream disconnected before completion',
     )
+    const fallbackTraces = findProviderTraceRawEvents(
+      traceEvents,
+      'codex.fresh_thread_fallback',
+    )
+    expect(fallbackTraces).toHaveLength(2)
+    expect(fallbackTraces[0]).toMatchObject({
+      codexFreshThreadFallbackErrorCode: 'ASSISTANT_CODEX_FAILED',
+      codexFreshThreadFallbackErrorKind: 'turn-failed',
+      codexFreshThreadFallbackFailureEventCount: 1,
+      codexFreshThreadFallbackFailureProviderActionCount: 0,
+      codexFreshThreadFallbackFailureSessionPresent: true,
+      codexFreshThreadFallbackFailureTurnPresent: true,
+      codexFreshThreadFallbackPhase: 'fallback-started',
+      codexFreshThreadFallbackReason: 'resume-transport-failure',
+      codexFreshThreadFallbackResult: 'started',
+      codexFreshThreadFallbackResumeMatchesFailureSession: true,
+      codexFreshThreadFallbackResumeSessionPresent: true,
+      codexFreshThreadFallbackSessionPresent: false,
+      codexFreshThreadFallbackTraceType: 'fallback',
+      codexFreshThreadFallbackTurnPresent: false,
+      providerTraceKind: 'codex.fresh_thread_fallback',
+    })
+    expect(fallbackTraces[1]).toMatchObject({
+      codexFreshThreadFallbackEventCount: 0,
+      codexFreshThreadFallbackPhase: 'fallback-succeeded',
+      codexFreshThreadFallbackProviderActionCount: 0,
+      codexFreshThreadFallbackResult: 'succeeded',
+      codexFreshThreadFallbackSessionChanged: true,
+      codexFreshThreadFallbackSessionPresent: true,
+      codexFreshThreadFallbackTurnPresent: true,
+      providerTraceKind: 'codex.fresh_thread_fallback',
+    })
     expect(JSON.stringify(traceEvents)).not.toContain('api.openai.com')
   })
 
@@ -2720,7 +2803,7 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.result.codexThreadId).toBe('fresh-thread-after-rpc-failure')
   })
 
-  it('does not fresh-thread retry resumed Codex transport failures after provider actions', async () => {
+  it('fresh-thread retries resumed Codex transport failures after provider actions', async () => {
     const expectedError = new VaultCliError(
       'ASSISTANT_CODEX_FAILED',
       'Codex app-server turn failed. status failed. stream disconnected before completion: error sending request for url (https://api.openai.com/v1/responses)',
@@ -2729,8 +2812,20 @@ describe('Codex assistant registry helpers', () => {
         codexTurnStatus: 'failed',
       },
     )
+    const traceEvents: AssistantProviderTraceEvent[] = []
 
-    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(expectedError)
+    codexAppServerMocks.executeCodexAppServerTurn
+      .mockRejectedValueOnce(expectedError)
+      .mockResolvedValueOnce({
+        finalMessage: 'final after transport fallback despite provider action',
+        jsonEvents: [],
+        providerActionCount: 0,
+        sessionId: 'fresh-thread-after-provider-action-transport-failure',
+        stderr: '',
+        stdout: '',
+        threadId: 'fresh-thread-after-provider-action-transport-failure',
+        turnId: 'turn-fallback-provider-action-transport',
+      })
     codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
       jsonEvents: [
         {
@@ -2748,6 +2843,9 @@ describe('Codex assistant registry helpers', () => {
     })
 
     const attempt = await executeCodexAssistantTurnAttempt({
+      onTraceEvent: (event) => {
+        traceEvents.push(event)
+      },
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
@@ -2756,13 +2854,48 @@ describe('Codex assistant registry helpers', () => {
       workingDirectory: '/tmp/provider-tests',
     })
 
-    expect(attempt.ok).toBe(false)
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
-    if (attempt.ok) {
-      throw new Error('expected failed provider attempt')
+    expect(attempt.ok).toBe(true)
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
+    ).toMatchObject({
+      resumeSessionId: 'resume-thread',
+    })
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[1]?.[0],
+    ).toMatchObject({
+      resumeSessionId: undefined,
+    })
+    if (!attempt.ok) {
+      throw new Error('expected successful provider attempt')
     }
-    expect(attempt.error).toBe(expectedError)
-    expect(attempt.metadata.providerActionCount).toBe(1)
+    expect(attempt.result.codexContinuation).toEqual({
+      kind: 'thread-start',
+    })
+    expect(attempt.result.codexThreadId).toBe(
+      'fresh-thread-after-provider-action-transport-failure',
+    )
+    const fallbackTraces = findProviderTraceRawEvents(
+      traceEvents,
+      'codex.fresh_thread_fallback',
+    )
+    expect(fallbackTraces).toHaveLength(2)
+    expect(fallbackTraces[0]).toMatchObject({
+      codexFreshThreadFallbackFailureProviderActionCount: 1,
+      codexFreshThreadFallbackPhase: 'fallback-started',
+      codexFreshThreadFallbackReason: 'resume-transport-failure',
+      codexFreshThreadFallbackResult: 'started',
+      codexFreshThreadFallbackResumeMatchesFailureSession: true,
+      providerTraceKind: 'codex.fresh_thread_fallback',
+    })
+    expect(fallbackTraces[1]).toMatchObject({
+      codexFreshThreadFallbackPhase: 'fallback-succeeded',
+      codexFreshThreadFallbackProviderActionCount: 0,
+      codexFreshThreadFallbackResult: 'succeeded',
+      codexFreshThreadFallbackSessionChanged: true,
+      providerTraceKind: 'codex.fresh_thread_fallback',
+    })
+    expect(JSON.stringify(traceEvents)).not.toContain('api.openai.com')
   })
 
   it('starts a fresh thread when resumed Codex history has invalid tool output', async () => {

@@ -109,7 +109,7 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
-  it('requires pending vault-file approvals to include the returned handoff link', () => {
+  it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Vault file sends:')
@@ -124,6 +124,18 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain(
       'When `murph.send_vault_file` returns `status: "approved"`',
+    )
+    expect(prompt).toContain(
+      'write a concise, natural reply using the returned filename when useful',
+    )
+    expect(prompt).toContain(
+      'such as "Here it is: report.pdf."',
+    )
+    expect(prompt).toContain(
+      'Do not quote or paraphrase `deliveryStatus`, approval metadata, queue mechanics, or "delivery is not confirmed" as stock user-facing copy.',
+    )
+    expect(prompt).toContain(
+      'Do not claim the file was delivered or sent successfully unless a later delivery result explicitly confirms `sent`.',
     )
   })
 
@@ -149,7 +161,7 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('Product feedback:')
     expect(prompt).toContain('`murph.submit_product_feedback`')
     expect(prompt).toContain(
-      'capture explicit Murph product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
+      'capture explicit Murph product frustration, feature requests, interest in shipped changelog or feature-catalog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
     )
     expect(prompt).toContain(
       'Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known',
@@ -189,7 +201,7 @@ describe('assistant execution prompt contract', () => {
       'For work likely to finish in about a minute or less, send at most one progress update',
     )
     expect(prompt).toContain(
-      'never send a third',
+      'never send a fourth',
     )
     expect(prompt).toContain(
       'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
@@ -202,7 +214,7 @@ describe('assistant execution prompt contract', () => {
     )
     expect(
       prompt.match(
-        /If the turn becomes unusually long-running after substantial tool work, you may send one more brief update so the user is not left hanging; never send a third\./g,
+        /If the turn becomes unusually long-running after substantial tool work, you may send up to two more brief updates so the user is not left hanging; never send a fourth\./g,
       ) ?? [],
     ).toHaveLength(1)
     expect(
@@ -582,7 +594,7 @@ describe('assistant local PDF evidence guidance', () => {
       'If the current task requires substantial non-audio content inspection or multiple parse/import steps, use the progress-update budget above',
     )
     expect(prompt).toContain(
-      'at most one for ordinary long work, one more only after a multi-minute delay, and none when the final reply should be available shortly',
+      'at most one for ordinary long work, up to two more only after multi-minute delays, and none when the final reply should be available shortly',
     )
     expect(prompt).toContain(
       'Do not use it for straightforward one-shot logging or capture writes',
@@ -1203,7 +1215,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'f19b8aa894d30b48c4b3ad5ee6aecc5dc0cf421ed035ad3bf672f5112bf73ab6',
+      '7ca6fd977943768f5c8e6ca40ca01c2418f2d751dcff9f7cbcac81fa9539e807',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

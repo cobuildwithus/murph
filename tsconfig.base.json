@@ -238,6 +238,9 @@
       "@murphai/query/browser-murph-age": [
         "packages/query/src/browser-murph-age.ts"
       ],
+      "@murphai/query/murph-age": [
+        "packages/query/src/murph-age.ts"
+      ],
       "@murphai/query/entity-families": [
         "packages/query/src/entity-families.ts"
       ],
@@ -389,7 +392,7 @@
         "packages/assistant-engine/src/assistant/*.ts"
       ],
       "@murphai/assistant-engine/*": [
-        "packages/assistant-engine/src/*"
+        "packages/assistant-engine/src/*.ts"
       ],
       "@murphai/inbox-services": [
         "packages/inbox-services/src/index.ts"

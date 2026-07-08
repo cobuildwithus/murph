@@ -168,7 +168,7 @@ function trackedExperimentToCard(entry: OverviewExperiment): ExperimentLibraryCa
     metadata,
     statusLabel,
     statusVariant: statusVariantForRunStatus(runStatus),
-    description: entry.summary ?? "This experiment has private data in your browser vault, but it does not currently match a public protocol page.",
+    description: entry.summary ?? "This experiment has private data saved on this device, but it doesn't match a public protocol page right now.",
     hasPrivateData: true,
     runStatus,
     startedOn,

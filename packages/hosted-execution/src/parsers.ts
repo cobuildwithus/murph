@@ -1,8 +1,10 @@
 import {
   parseHostedVaultShareDeliveryPayload,
+  parseHostedVaultShareRevokePayload,
 } from "./vault-share.ts";
 import {
   buildHostedExecutionVaultShareDeliveryWake,
+  buildHostedExecutionVaultShareRevokeWake,
 } from "./builders.ts";
 import {
   normalizeIanaTimeZone,
@@ -25,6 +27,8 @@ import type {
   HostedExecutionMemberChannels,
   HostedExecutionMemberChannelsUpdatedEvent,
   HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionGroupNewsletterEmailNeededDirectRoute,
+  HostedExecutionGroupNewsletterEmailNeededEvent,
   HostedExecutionWake,
   HostedExecutionWakeKind,
   HostedExecutionEvent,
@@ -53,6 +57,7 @@ import {
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionGroupNewsletterEmailNeededWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "./builders.ts";
@@ -109,8 +114,6 @@ export {
   parseHostedWorkspaceSnapshotV2Ref,
 } from "./parsers/workspace-snapshot-v2.ts";
 export {
-  parseHostedMailboxConsumeRequest,
-  parseHostedMailboxConsumeResponse,
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
   parseHostedMailboxItem,
@@ -136,9 +139,12 @@ export {
   parseHostedRuntimeLogEntry,
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
-  parseHostedRuntimeLinqContactCardShareAfterOutboundRequest,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
+  parseHostedRuntimeGroupToolRequest,
+  parseHostedRuntimeGroupToolResponse,
+  parseHostedRuntimeNewsletterToolRequest,
+  parseHostedRuntimeNewsletterToolResponse,
   parseHostedRuntimeFamilyPlanToolRequest,
   parseHostedRuntimeFamilyPlanToolResponse,
   parseHostedRuntimeProductFeedbackRecordRequest,
@@ -208,6 +214,12 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         eventId,
         memberId: wireUserId,
       });
+    case "vault-share.revoke":
+      return buildHostedExecutionVaultShareRevokeWake({
+        eventId,
+        memberId: wireUserId,
+        revoke: parseHostedVaultShareRevokePayload(record.revoke),
+      });
     case "member.channels.updated":
       return buildHostedExecutionMemberChannelsUpdatedWake({
         eventId,
@@ -253,6 +265,30 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
             }),
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId: wireUserId,
+      });
+    case "group-newsletter.email-needed":
+      return buildHostedExecutionGroupNewsletterEmailNeededWake({
+        ...(record.directRoute === undefined
+          ? {}
+          : {
+              directRoute: record.directRoute === null
+                ? null
+                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+                    record.directRoute,
+                    "Hosted execution wake group-newsletter.email-needed directRoute",
+                  ),
+            }),
+        eventId,
+        groupDisplayName: readNullableString(
+          record.groupDisplayName,
+          "Hosted execution wake group-newsletter.email-needed groupDisplayName",
+        ),
+        groupId: requireString(
+          record.groupId,
+          "Hosted execution wake group-newsletter.email-needed groupId",
+        ),
+        memberId: wireUserId,
+        occurredAt,
       });
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
@@ -547,8 +583,17 @@ export function parseHostedExecutionExternalThreadRouteAuthority(
   label = "Hosted execution external thread route authority",
 ): HostedExecutionExternalThreadRouteAuthority {
   const record = requireObject(value, label);
+  // Phase 1 deploy skew: readers tolerate missing accountLookupKey while
+  // emitters keep sending it until both web and runner readers are rolled out.
   return {
-    accountLookupKey: requireString(record.accountLookupKey, `${label} accountLookupKey`),
+    ...(record.accountLookupKey === undefined
+      ? {}
+      : {
+          accountLookupKey: readOptionalNullableString(
+            record.accountLookupKey,
+            `${label} accountLookupKey`,
+          ),
+        }),
     channel: parseHostedExecutionExternalThreadRouteChannel(record.channel, `${label} channel`),
     containerMemberId: requireString(record.containerMemberId, `${label} containerMemberId`),
     threadId: requireString(record.threadId, `${label} threadId`),
@@ -855,6 +900,29 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         reason: parseHostedExecutionDeviceSyncReason(record.reason),
         userId,
       } satisfies HostedExecutionDeviceSyncWakeEvent;
+    case "group-newsletter.email-needed":
+      return {
+        ...(record.directRoute === undefined
+          ? {}
+          : {
+              directRoute: record.directRoute === null
+                ? null
+                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+                    record.directRoute,
+                    "Hosted execution group-newsletter.email-needed directRoute",
+                  ),
+            }),
+        groupDisplayName: readNullableString(
+          record.groupDisplayName,
+          "Hosted execution group-newsletter.email-needed groupDisplayName",
+        ),
+        groupId: requireString(
+          record.groupId,
+          "Hosted execution group-newsletter.email-needed groupId",
+        ),
+        kind,
+        userId,
+      } satisfies HostedExecutionGroupNewsletterEmailNeededEvent;
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -1019,6 +1087,22 @@ function parseHostedExecutionAssistantNotificationRoute(
     threadIsDirect: record.threadIsDirect === null
       ? null
       : requireBoolean(record.threadIsDirect, `${label}.threadIsDirect`),
+  };
+}
+
+function parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+  value: unknown,
+  label: string,
+): HostedExecutionGroupNewsletterEmailNeededDirectRoute {
+  const record = requireObject(value, label);
+  const channel = requireString(record.channel, `${label}.channel`);
+  if (channel !== "linq" && channel !== "telegram") {
+    throw new TypeError(`${label}.channel is invalid.`);
+  }
+
+  return {
+    channel,
+    threadId: requireString(record.threadId, `${label}.threadId`),
   };
 }
 

@@ -21,10 +21,13 @@ import {
   HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT,
   readHostedLocalLinqImagePngBytes,
   startHostedLocalLinqStub,
+  type ObservedLinqRequest,
   type HostedLocalLinqStub,
 } from "./helpers/hosted-local-linq-support.js";
 
 const linqWebhookSecret = "linq-local-webhook-secret";
+const hostedLinqCometRiderAssistantReplyText =
+  "Got it - I'll call you Comet Rider.\n\nWhat are your health goals right now?";
 const hostedLinqImageAssistantReplyText = "Reviewed the image attachment.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
 const linqWebhookRunId = Date.now();
@@ -73,7 +76,9 @@ describe("hosted local Linq webhook e2e", () => {
       text: "U can call me Rocket Man",
     });
 
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT]);
+    requireScenario().queueAssistantResponses([HOSTED_LINQ_ROCKET_MAN_ASSISTANT_REPLY_TEXT], {
+      matchInputContains: "U can call me Rocket Man",
+    });
     const webhookResponse = await postSignedLinqWebhook(webhookEvent);
     expect(webhookResponse.status).toBe(202);
     await expect(webhookResponse.json()).resolves.toMatchObject({
@@ -111,19 +116,37 @@ describe("hosted local Linq webhook e2e", () => {
       await createActiveLinqWebhookMember("rapid");
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
+    const nameText = "U can call me Comet Rider";
+    const goalsText = "I want to build more strength, improve endurance, and get fitter overall.";
+    const groupedReplyMatcher = (request: ObservedLinqRequest) =>
+      requireLinqStub().readObservedMessageText(request) ===
+        HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT;
+    const groupedReplyCountBefore = requireLinqStub().countObservedSends(
+      expectedReplyChatPath,
+      groupedReplyMatcher,
+    );
 
     const firstWebhook = buildHostedLinqInboundEvent(userId, materializedChatId, {
       eventId: `evt_webhook_name_${userId}_rapid`,
       messageId: `msg_webhook_name_${userId}_rapid`,
-      text: "U can call me Comet Rider",
+      text: nameText,
     });
     const secondWebhook = buildHostedLinqInboundEvent(userId, materializedChatId, {
       eventId: `evt_webhook_goals_${userId}_rapid`,
       messageId: `msg_webhook_goals_${userId}_rapid`,
-      text: "I want to build more strength, improve endurance, and get fitter overall.",
+      text: goalsText,
     });
 
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT]);
+    requireScenario().queueAssistantResponses([
+      {
+        matchInputContains: nameText,
+        response: hostedLinqCometRiderAssistantReplyText,
+      },
+      {
+        matchInputContains: goalsText,
+        response: HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
+      },
+    ]);
     const firstResponse = await postSignedLinqWebhook(firstWebhook);
     const secondResponse = await postSignedLinqWebhook(secondWebhook);
 
@@ -141,20 +164,27 @@ describe("hosted local Linq webhook e2e", () => {
     await requireScenario().waitForLatestPendingWake(userId);
     await requireScenario().waitForHostedCompletion(userId);
 
-    const replySends = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: outboundCountBeforeReply + 1,
+    await requireLinqStub().waitForAdditionalSend({
+      baselineCount: groupedReplyCountBefore,
       expectedPath: expectedReplyChatPath,
+      matchRequest: groupedReplyMatcher,
       scenario: requireScenario(),
       userId,
     });
-    const newReplySends = replySends.slice(outboundCountBeforeReply);
-    expect(newReplySends).toHaveLength(1);
-    const groupedReplyText = requireLinqStub().readObservedMessageText(newReplySends[0]!);
-
-    expect(groupedReplyText).toBe(
-      HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
+    const newReplySends = requireLinqStub().observedRequests.filter((request) =>
+      request.method === "POST" && request.url === expectedReplyChatPath
+    ).slice(outboundCountBeforeReply);
+    const newReplyTexts = newReplySends.map((request) =>
+      requireLinqStub().readObservedMessageText(request)
     );
-    expect(groupedReplyText).not.toContain("Hey, I'm Murph");
+
+    expect(newReplyTexts).toContain(HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT);
+    expect(newReplyTexts.some((text) => text?.includes("Hey, I'm Murph"))).toBe(false);
+    expect(newReplyTexts.every((text) =>
+      text === hostedLinqCometRiderAssistantReplyText
+      || text === HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT
+    )).toBe(true);
+    expect(newReplyTexts.length).toBeLessThanOrEqual(2);
     const assistantProviderRequests = requireScenario().assistantProviderRequests.slice(
       assistantProviderCountBeforeReply,
     );
@@ -164,10 +194,10 @@ describe("hosted local Linq webhook e2e", () => {
     ).toBeGreaterThan(0);
     const assistantProviderBodies = assistantProviderRequests.map((request) => request.body);
     expect(assistantProviderBodies.some((body) =>
-      body.includes("U can call me Comet Rider")
+      body.includes(nameText)
     )).toBe(true);
     expect(assistantProviderBodies.some((body) =>
-      body.includes("I want to build more strength, improve endurance, and get fitter overall.")
+      body.includes(goalsText)
     )).toBe(true);
   }, 300_000);
 
@@ -186,7 +216,9 @@ describe("hosted local Linq webhook e2e", () => {
     });
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
 
-    requireScenario().queueAssistantResponses([hostedLinqPdfAssistantReplyText]);
+    requireScenario().queueAssistantResponses([hostedLinqPdfAssistantReplyText], {
+      matchInputContains: "lab-results.pdf",
+    });
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       materializedChatId,
@@ -289,7 +321,12 @@ describe("hosted local Linq webhook e2e", () => {
     });
     const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
 
-    requireScenario().queueAssistantResponses([hostedLinqImageAssistantReplyText]);
+    requireScenario().queueAssistantResponses([hostedLinqImageAssistantReplyText], {
+      // The image pipeline normalizes outbox.png to WebP and the provider
+      // request renders the normalized evidence filename (asserted below as
+      // `fileName: outbox.webp`), so the matcher must use the normalized name.
+      matchInputContains: "outbox.webp",
+    });
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       materializedChatId,

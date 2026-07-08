@@ -14,7 +14,6 @@ test("@murphai/query keeps browser-vault-only helpers on the browser subpath", (
     "parseBrowserVaultReplica",
     "selectBrowserVaultBiomarkerPanel",
     "selectBrowserVaultExperimentResults",
-    "selectBrowserVaultMurphAgeReadiness",
     "selectBrowserVaultOverview",
   ]) {
     assert.equal(exportName in queryRoot, false);
@@ -24,6 +23,7 @@ test("@murphai/query keeps browser-vault-only helpers on the browser subpath", (
 
 test("@murphai/query exposes Murph Age readiness through a narrow browser subpath", () => {
   assert.equal("selectBrowserVaultMurphAgeReadiness" in queryRoot, false);
+  assert.equal("selectBrowserVaultMurphAgeReadiness" in queryBrowser, false);
   assert.equal("selectBrowserVaultMurphAgeReadiness" in queryBrowserMurphAge, true);
   assert.equal("createBrowserVaultQueryClient" in queryBrowserMurphAge, false);
 });

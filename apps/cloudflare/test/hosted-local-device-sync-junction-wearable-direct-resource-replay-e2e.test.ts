@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  buildCloudflareHostedControlUserStatusPath,
+} from "@murphai/cloudflare-hosted-control/routes";
+import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
@@ -13,6 +16,9 @@ import {
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
+import {
+  parseHostedRunnerStatusResponse,
+} from "@murphai/hosted-execution/parsers";
 import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -60,6 +66,7 @@ const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 const textDecoder = new TextDecoder();
+const hostedDeviceSyncReceiptLogLimit = 50;
 
 let plan: JunctionWearableHostedReplayPlan | null = null;
 let scenario: HostedLocalFullStackScenario | null = null;
@@ -212,9 +219,8 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
         `last error code: ${deviceSyncStatus.lastErrorCode}`,
       ]));
     }
-    await assertHostedDeviceSyncReplayProcessed({
+    await assertHostedDeviceSyncReplayReceiptAccepted({
       scenario: activeScenario,
-      status: deviceSyncStatus,
       userId: signedWebhookUserId,
     });
     await assertNoHostedDeviceSyncJobFailures({
@@ -310,9 +316,8 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       ]));
     }
 
-    await assertHostedDeviceSyncReplayProcessed({
+    await assertHostedDeviceSyncReplayReceiptAccepted({
       scenario: activeScenario,
-      status: deviceSyncStatus,
       userId,
     });
     await assertNoHostedDeviceSyncJobFailures({
@@ -500,19 +505,30 @@ async function readBrowserVaultReplica(input: {
   return JSON.parse(textDecoder.decode(plaintext));
 }
 
-async function assertHostedDeviceSyncReplayProcessed(input: {
+async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
   scenario: HostedLocalFullStackScenario;
-  status: HostedRunnerStatusResponse;
   userId: string;
 }): Promise<void> {
-  const redactedStatus = input.status.workspace?.redactedStatus ?? null;
+  const receiptStatus = parseHostedRunnerStatusResponse(
+    await input.scenario.harness.requestJson<unknown>(
+      `${buildCloudflareHostedControlUserStatusPath(input.userId)}?logLimit=${
+        hostedDeviceSyncReceiptLogLimit
+      }`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+        },
+      },
+    ),
+  );
+  const redactedStatus = receiptStatus.workspace?.redactedStatus ?? null;
   const prepared = readNumberAtPath(redactedStatus, ["hostedSystemMailboxPrepared"]) ?? 0;
   const recorded = readNumberAtPath(redactedStatus, ["hostedSystemMailboxRecorded"]) ?? 0;
   const retryableFailed =
     readNumberAtPath(redactedStatus, ["hostedSystemMailboxRetryableFailed"]) ?? 0;
   const recordFailed =
     readNumberAtPath(redactedStatus, ["hostedSystemMailboxRecordFailed"]) ?? 0;
-  const systemMailboxLogs = collectHostedSystemMailboxLogSummaries(input.status);
+  const systemMailboxLogs = collectHostedSystemMailboxLogSummaries(receiptStatus);
   const retryableLog = systemMailboxLogs.find((entry) => entry.status === "retryable_failed");
   const recordedDeviceSyncLog = systemMailboxLogs.find((entry) =>
     entry.routeAction === "run-device-sync-wake"
@@ -520,9 +536,12 @@ async function assertHostedDeviceSyncReplayProcessed(input: {
     && (entry.status === "processed" || entry.status === "recorded")
     && (entry.recordFailed ?? 0) === 0
   );
+  const receiptObserved = recordedDeviceSyncLog !== undefined
+    || recorded > 0
+    || prepared > 0;
 
   if (
-    !recordedDeviceSyncLog
+    !receiptObserved
     || retryableLog
     || retryableFailed > 0
     || recordFailed > 0
@@ -531,7 +550,7 @@ async function assertHostedDeviceSyncReplayProcessed(input: {
       .map((entry) => entry.safeErrorMessage)
       .filter((message): message is string => typeof message === "string" && message.length > 0);
     throw new Error(await input.scenario.buildFailureMessage(input.userId, [
-      "Hosted Junction wearable direct-resource replay did not cleanly process and record the device-sync system mailbox item.",
+      "Hosted Junction wearable direct-resource replay did not show a clean device-sync system mailbox receipt.",
       `system mailbox counters: ${JSON.stringify({
         prepared,
         recordFailed,

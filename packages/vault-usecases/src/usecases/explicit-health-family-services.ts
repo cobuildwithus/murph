@@ -1052,7 +1052,7 @@ function createRegistryDocQueryServices(
       return asListEnvelope(
         input.vault,
         {
-          limit: input.limit ?? 50,
+          limit: input.limit ?? 10,
           status: input.status,
         },
         records.map((record) => toRegistryDocListEntity(config, record)),
@@ -1236,7 +1236,7 @@ export function createExplicitHealthQueryServices(
         {
           from: input.from,
           to: input.to,
-          limit: input.limit ?? 50,
+          limit: input.limit ?? 10,
         },
         records.map((record) => toAssessmentListEntity(record)),
       );
@@ -1262,7 +1262,7 @@ export function createExplicitHealthQueryServices(
       return asListEnvelope(
         input.vault,
         {
-          limit: input.limit ?? 50,
+          limit: input.limit ?? 10,
           status: input.status,
         },
         records.map((record) => toRegimenListEntity(record)),
@@ -1293,12 +1293,12 @@ export function createExplicitHealthQueryServices(
           !input.commonsProtocol ||
           privateProtocolMatchesCommonsProtocol(summary, input.commonsProtocol)
         )
-        .slice(0, input.limit ?? 50);
+        .slice(0, input.limit ?? 10);
 
       return {
         vault: input.vault,
         filters: {
-          limit: input.limit ?? 50,
+          limit: input.limit ?? 10,
           ...(input.status ? { status: input.status } : {}),
           ...(input.commonsProtocol ? { commonsProtocol: input.commonsProtocol } : {}),
         },
@@ -1332,7 +1332,7 @@ export function createExplicitHealthQueryServices(
           from: input.from,
           status: input.status,
           to: input.to,
-          limit: input.limit ?? 50,
+          limit: input.limit ?? 10,
         },
         records.map((record) => toBloodTestListEntity(record)),
       );
@@ -1360,7 +1360,7 @@ export function createExplicitHealthQueryServices(
         {
           from: input.from,
           to: input.to,
-          limit: input.limit ?? 50,
+          limit: input.limit ?? 10,
         },
         records.map((record) => toImmunizationListEntity(record)),
       );

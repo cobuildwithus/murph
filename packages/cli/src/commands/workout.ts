@@ -82,6 +82,13 @@ import {
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 
 const workoutSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
+const workoutListLimitOptionSchema = z
+  .number()
+  .int()
+  .positive()
+  .max(200)
+  .default(5)
+  .describe('Maximum number of results to return. Defaults to 5.')
 
 interface WorkoutAddExerciseDraft {
   groupId?: string
@@ -707,7 +714,7 @@ export function registerWorkoutCommands(
           description: commonDateRangeOptionDescriptions.to,
           name: 'to',
         },
-        limit: commonListLimitOptionSchema,
+        limit: workoutListLimitOptionSchema,
       },
       output: listResultSchema,
       run(input) {
@@ -1464,7 +1471,7 @@ export function registerWorkoutCommands(
     description: 'List saved workout formats.',
     args: z.object({}),
     options: withBaseOptions({
-      limit: z.number().int().positive().max(200).default(50),
+      limit: z.number().int().positive().max(200).default(10),
     }),
     output: workoutFormatListResultSchema,
     async run({ options }) {

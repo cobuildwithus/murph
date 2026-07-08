@@ -108,38 +108,17 @@ const temporalWorkflowBundlePatterns = [
   },
 ] as const;
 
-const hostedTemporalReplayGateChecks = [
+const hostedTemporalPatchRetirementChecks = [
   {
     filePath:
-      "packages/hosted-orchestrator-temporal/test/hosted-user-runtime-replay.test.ts",
-    label: "hosted Temporal replay test must call Temporal replay",
-    pattern: /\bWorker\.runReplayHistory\b/u,
-    token: "Worker.runReplayHistory",
-  },
-  {
-    filePath:
-      "packages/hosted-orchestrator-temporal/test/hosted-user-runtime-replay.test.ts",
-    label: "hosted Temporal replay test must load the legacy mailbox fixture",
-    pattern: /\bcreatePreReconcileMailboxReplayHistoryFixture\b/u,
-    token: "createPreReconcileMailboxReplayHistoryFixture",
-  },
-  {
-    filePath:
-      "packages/hosted-orchestrator-temporal/test/fixtures/replay/hosted-user-runtime-pre-reconcile-mailbox-history.ts",
-    label: "hosted Temporal replay fixture must preserve the old direct execution command",
-    pattern: /\bensureRuntimeProcessing\b/u,
-    token: "ensureRuntimeProcessing",
-  },
-  {
-    filePath:
-      "packages/hosted-orchestrator-temporal/test/fixtures/replay/hosted-user-runtime-pre-reconcile-mailbox-history.ts",
-    label: "hosted Temporal replay fixture must include an activity schedule event",
-    pattern: /\bActivityTaskScheduled\b/u,
-    token: "ActivityTaskScheduled",
+      "packages/hosted-orchestrator-temporal/src/workflows/hosted-user-runtime.ts",
+    label: "retired reconciliation-before-mailbox patch must keep its deprecatePatch marker",
+    pattern: /\bdeprecatePatch\s*\(\s*HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID\s*\)/u,
+    token: "deprecatePatch(HOSTED_USER_RUNTIME_RECONCILE_BEFORE_MAILBOX_PATCH_ID)",
   },
   {
     filePath: ".github/workflows/host-support.yml",
-    label: "CI package coverage must include hosted Temporal replay tests",
+    label: "CI package coverage must include hosted Temporal package tests",
     pattern: /\bpackages\/hosted-orchestrator-temporal\b/u,
     token: "packages/hosted-orchestrator-temporal",
   },
@@ -163,7 +142,7 @@ export async function collectHostedTemporalGuardFindings(): Promise<HostedTempor
   for (const root of scanRoots) {
     await scanDirectory(root, findings);
   }
-  findings.push(...await collectHostedTemporalReplayGateFindings());
+  findings.push(...await collectHostedTemporalPatchRetirementFindings());
 
   return findings;
 }
@@ -279,11 +258,11 @@ function selectGuardPatterns(relativePath: string): readonly GuardPattern[] {
   return patterns;
 }
 
-async function collectHostedTemporalReplayGateFindings():
+async function collectHostedTemporalPatchRetirementFindings():
   Promise<HostedTemporalGuardFinding[]> {
   const findings: HostedTemporalGuardFinding[] = [];
 
-  for (const check of hostedTemporalReplayGateChecks) {
+  for (const check of hostedTemporalPatchRetirementChecks) {
     const contents = await readOptionalRepoTextFile(check.filePath);
     if (contents === null) {
       findings.push({

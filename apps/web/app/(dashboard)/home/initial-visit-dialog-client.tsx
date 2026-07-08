@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { MessageCircleIcon } from "lucide-react";
 
+import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-card-picker";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
@@ -26,11 +27,32 @@ export function HomeInitialVisitDialogClient({
 }: {
   contactAction: HomeInitialVisitContactAction | null;
 }) {
+  // Members on a text line meet the add-to-contacts step first; everyone
+  // else (Telegram or email only, or no channel yet) goes straight to the
+  // welcome dialog since there is no phone contact card to save.
+  const [stage, setStage] = useState<"contact" | "welcome">(
+    contactAction?.kind === "text" ? "contact" : "welcome",
+  );
   const [open, setOpen] = useState(true);
 
   useEffect(() => {
     stripInitialVisitQueryParam();
   }, []);
+
+  if (stage === "contact") {
+    return (
+      <MurphContactCardPicker
+        onAddToContacts={() => setStage("welcome")}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setStage("welcome");
+          }
+        }}
+        onSkip={() => setStage("welcome")}
+        open
+      />
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

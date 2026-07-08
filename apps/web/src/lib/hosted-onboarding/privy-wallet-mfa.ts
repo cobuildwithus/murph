@@ -8,6 +8,12 @@ export type HostedPrivyEmbeddedEthereumWalletSelection =
   | { status: "ambiguous" }
   | { status: "ready"; wallet: HostedPrivyEmbeddedEthereumWallet };
 
+export type HostedPrivyWalletMfaStatus =
+  | { status: "configured" }
+  | { status: "needs_support" }
+  | { status: "not_configured" }
+  | { status: "unavailable" };
+
 const EVM_ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/u;
 
 export function selectHostedPrivyEmbeddedEthereumWallet(
@@ -60,6 +66,28 @@ export function readHostedPrivyMfaMethodTypes(input: unknown): string[] {
 export function hasOnlyHostedPrivyPasskeyMfa(input: unknown): boolean {
   const methods = readHostedPrivyMfaMethodTypes(input);
   return methods.length === 1 && methods[0] === "passkey";
+}
+
+export function readHostedPrivyWalletMfaStatus(
+  input: unknown,
+): HostedPrivyWalletMfaStatus {
+  const walletSelection = selectHostedPrivyEmbeddedEthereumWallet(input);
+  const mfaMethods = readHostedPrivyMfaMethodTypes(input);
+  const passkeyOnlyMfa = mfaMethods.length === 1 && mfaMethods[0] === "passkey";
+
+  if (walletSelection.status === "ambiguous") {
+    return { status: "needs_support" };
+  }
+
+  if (mfaMethods.length > 0 && !passkeyOnlyMfa) {
+    return { status: "needs_support" };
+  }
+
+  if (walletSelection.status === "ready" && passkeyOnlyMfa) {
+    return { status: "configured" };
+  }
+
+  return { status: "not_configured" };
 }
 
 function parseEmbeddedEthereumWallet(

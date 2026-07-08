@@ -685,11 +685,13 @@ describe("abortHostedInvitePhoneCode", () => {
 describe("upsertHostedMemberHomeLinqBinding", () => {
   it("stores the latest Linq home chat id in the routing table for future activation welcomes", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
+    const findFirst = vi.fn().mockResolvedValue(null);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = asRootPrisma({
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst,
         updateMany,
         upsert,
       },
@@ -702,19 +704,39 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
       recipientPhone: "+15550100001",
     });
 
-    expect(updateMany).toHaveBeenNthCalledWith(1, {
-      data: {
-        linqChatIdEncrypted: null,
-        linqChatLookupKey: null,
-        linqLastInboundAt: null,
-        linqRecipientPhoneEncrypted: null,
-        linqRecipientPhoneLookupKey: null,
+    expect(findFirst).toHaveBeenCalledWith({
+      select: {
+        memberId: true,
       },
       where: {
         NOT: {
           memberId: "member_123",
         },
         linqChatLookupKey: {
+          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
+        },
+      },
+    });
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      data: {
+        linqHomeLineAssignedAt: null,
+        linqRecipientPhoneEncrypted: null,
+        linqRecipientPhoneLookupKey: null,
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqParticipantContactEncrypted: null,
+        pendingLinqParticipantContactKind: null,
+        pendingLinqParticipantContactLookupKey: null,
+        pendingLinqParticipantContactObservedAt: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+      },
+      where: {
+        NOT: {
+          memberId: "member_123",
+        },
+        linqChatLookupKey: null,
+        pendingLinqChatLookupKey: {
           in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
         },
       },
@@ -729,11 +751,13 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         pendingLinqParticipantContactObservedAt: null,
         pendingLinqRecipientPhoneEncrypted: null,
         pendingLinqRecipientPhoneLookupKey: null,
-        pendingLinqLastInboundAt: null,
       },
       where: {
         NOT: {
           memberId: "member_123",
+        },
+        linqChatLookupKey: {
+          not: null,
         },
         pendingLinqChatLookupKey: {
           in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
@@ -769,6 +793,33 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         memberId: "member_123",
       },
     });
+  });
+
+  it("fails closed instead of clearing another member's home route for the same chat", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ memberId: "member_other" });
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = asRootPrisma({
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedMemberRouting: {
+        findFirst,
+        updateMany,
+        upsert,
+      },
+    });
+
+    await expect(
+      upsertHostedMemberHomeLinqBindingTx({
+        linqChatId: "chat_new",
+        memberId: "member_123",
+        prisma: prisma as never,
+        recipientPhone: "+15550100001",
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_CHAT_HOME_ROUTE_CONFLICT",
+    });
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it("rejects empty chat ids", async () => {

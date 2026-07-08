@@ -11,7 +11,7 @@ vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
   compactWarmCodexThread: (input: unknown) => compactWarmCodexThread(input),
 }));
 const runInboxMediaRetention = vi.fn();
-vi.mock("@murphai/inboxd", () => ({
+vi.mock("@murphai/inboxd/runtime", () => ({
   runInboxMediaRetention: (input: unknown) => runInboxMediaRetention(input),
 }));
 
@@ -29,6 +29,11 @@ beforeEach(() => {
 });
 
 describe("runHostedIdleCheckpointMaintenance", () => {
+  it("keeps idle-shutdown compaction below the hosted Codex auto-compact ceiling", () => {
+    expect(HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS).toBe(100_000);
+    expect(HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS).toBeLessThan(164_000);
+  });
+
   it("skips on shutdown, missing model, and missing provider without touching the engine", async () => {
     expect(
       await runHostedIdleCheckpointMaintenance({

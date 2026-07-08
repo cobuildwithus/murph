@@ -9,7 +9,6 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
-  createLinqAttachmentUpload,
   createLinqChat,
   resolveLinqApiToken,
   sendLinqChatMessage,
@@ -17,7 +16,7 @@ import {
   sendLinqVoiceMemo,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
-  uploadLinqAttachmentBytes,
+  uploadLinqAttachment,
 } from '@murphai/operator-config/linq-runtime'
 import {
   generateElevenLabsVoiceMemoAudio,
@@ -50,6 +49,7 @@ import {
 } from '@murphai/operator-config/message-formatting'
 import type {
   AssistantChannelActivityHandle,
+  AssistantChannelActivityStopOptions,
   AssistantDeliveryCandidate,
   EmailRuntimeDependencies,
   LinqRuntimeDependencies,
@@ -565,26 +565,16 @@ async function prepareLinqMessageMedia(
     }
 
     const bytes = await dependencies.loadVaultFile(item)
-    const upload = await createLinqAttachmentUpload(
+    const upload = await uploadLinqAttachment(
       {
+        bytes,
         contentType: item.contentType,
         filename: item.filename,
-        sizeBytes: item.sizeBytes,
       },
       {
         env: dependencies.env,
         fetchImplementation: dependencies.fetchImplementation,
-        ...(dependencies.signal ? { signal: dependencies.signal } : {}),
-      },
-    )
-    await uploadLinqAttachmentBytes(
-      {
-        bytes,
-        requiredHeaders: upload.requiredHeaders,
-        uploadUrl: upload.uploadUrl,
-      },
-      {
-        fetchImplementation: dependencies.fetchImplementation,
+        publicFetchImplementation: dependencies.publicFetchImplementation,
         ...(dependencies.signal ? { signal: dependencies.signal } : {}),
       },
     )
@@ -795,6 +785,7 @@ export async function startAssistantChannelActivitySession(input: {
 
   async function stopActivity(
     options: {
+      providerStop?: boolean
       retryableFailure?: boolean
     } = {},
   ): Promise<void> {
@@ -809,17 +800,18 @@ export async function startAssistantChannelActivitySession(input: {
         throw error
       }
 
-      startStopActivity()
+      startStopActivity(options)
       await stopPromise
     }
   }
 
   function startStopActivity(
     options: {
+      providerStop?: boolean
       retryableFailure?: boolean
     } = {},
   ): void {
-    const attempt = stopActivityOnce()
+    const attempt = stopActivityOnce(options)
     if (!options.retryableFailure) {
       stopPromise = attempt
       return
@@ -834,7 +826,9 @@ export async function startAssistantChannelActivitySession(input: {
     stopPromise = retryableAttempt
   }
 
-  async function stopActivityOnce(): Promise<void> {
+  async function stopActivityOnce(
+    options: AssistantChannelActivityStopOptions = {},
+  ): Promise<void> {
     stopped = true
     clearRefreshTimer()
     clearMaxSessionTimer()
@@ -844,10 +838,12 @@ export async function startAssistantChannelActivitySession(input: {
     await refreshTail
 
     let stopFailure: unknown = null
-    try {
-      await input.stop?.()
-    } catch (error) {
-      stopFailure = error
+    if (options.providerStop !== false) {
+      try {
+        await input.stop?.()
+      } catch (error) {
+        stopFailure = error
+      }
     }
 
     if (refreshFailure) {

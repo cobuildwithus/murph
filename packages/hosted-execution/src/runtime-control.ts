@@ -22,6 +22,13 @@ import {
   HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 } from "./contracts.ts";
 
+import type {
+  HostedVaultShareProjectionKind,
+  HostedVaultShareProjectionScope,
+  HostedVaultShareSelectableProjectionKind,
+  HostedVaultShareSelectableProjectionScope,
+} from "./vault-share.ts";
+
 export const HOSTED_MAILBOX_LANES = [
   "system",
   "conversation",
@@ -35,7 +42,9 @@ export const HOSTED_MAILBOX_KINDS = [
   "member.channels.updated",
   "assistant.notification.requested",
   "device-sync.wake",
+  "group-newsletter.email-needed",
   "vault-share.delivery",
+  "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -49,17 +58,30 @@ export type HostedRuntimeControlMailboxKind =
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
   "gpt-5.5",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
 ] as const;
 
 export type HostedAiUsageAllowancePricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS)[number];
 
-// Add models here only after the provider request path sends `service_tier: flex`.
 export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
-  ["gpt-5.5"] as readonly HostedAiUsageAllowancePricedModel[];
+  [
+    ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
+  ] as readonly HostedAiUsageAllowancePricedModel[];
 
 export type HostedAiUsageOpenAiFlexTokenPricingModel =
   (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];
+
+// Image models stay separate from HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS
+// because that list validates HOSTED_ASSISTANT_MODEL in deploy preflight.
+export const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS = [
+  "gpt-image-2",
+] as const;
+
+export type HostedAiUsageAllowanceOpenAiImagePricedModel =
+  (typeof HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS)[number];
 
 export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS = [
   "eleven_flash_v2",
@@ -191,6 +213,43 @@ export function isHostedAiUsageOpenAiFlexTokenPricingModelId(
     : false;
 }
 
+export function isHostedAiUsageAllowanceOpenAiImagePricedModelId(
+  value: string,
+): value is HostedAiUsageAllowanceOpenAiImagePricedModel {
+  return HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS.includes(
+    value as HostedAiUsageAllowanceOpenAiImagePricedModel,
+  );
+}
+
+export function normalizeHostedAiUsageAllowanceOpenAiImageModelId(
+  value: string | null | undefined,
+): HostedAiUsageAllowanceOpenAiImagePricedModel | null {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const exact = normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(
+    normalized,
+  );
+  if (exact) {
+    return exact;
+  }
+
+  const providerScoped = normalized.split("/").at(-1) ?? normalized;
+  const providerScopedExact =
+    normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(providerScoped);
+  if (providerScopedExact) {
+    return providerScopedExact;
+  }
+
+  const datedSnapshotBase = providerScoped.replace(/-\d{4}-\d{2}-\d{2}$/u, "");
+
+  return normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(
+    datedSnapshotBase,
+  );
+}
+
 export function isHostedAiUsageOpenAiTokenPricingProviderName(
   value: unknown,
 ): boolean {
@@ -313,6 +372,12 @@ function normalizeHostedAiUsageAllowancePricedModelCandidate(
   value: string,
 ): HostedAiUsageAllowancePricedModel | null {
   return isHostedAiUsageAllowancePricedModelId(value) ? value : null;
+}
+
+function normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(
+  value: string,
+): HostedAiUsageAllowanceOpenAiImagePricedModel | null {
+  return isHostedAiUsageAllowanceOpenAiImagePricedModelId(value) ? value : null;
 }
 
 function buildHostedAiUsageAllowDecisionSigningPayload(
@@ -559,6 +624,7 @@ function requireHostedMailboxPayloadAadString(value: string, label: string): str
 }
 
 export interface HostedMailboxItem {
+  consumedAt?: string | null;
   createdAt: string;
   dedupeKey: string;
   expiresAt?: string | null;
@@ -657,17 +723,6 @@ export interface HostedMailboxFetchResponse {
   userId: string;
 }
 
-export interface HostedMailboxConsumeRequest {
-  lanes: HostedMailboxLaneConsumed[];
-  requestId: string;
-}
-
-export interface HostedMailboxConsumeResponse {
-  acknowledgedAt: string;
-  consumedSeqByLane: HostedMailboxLaneConsumed[];
-  userId: string;
-}
-
 export const HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS = [
   "device-sync.wake",
   "device-sync.snapshot",
@@ -709,13 +764,6 @@ export interface HostedRuntimeUsageRecordRequest {
 export interface HostedRuntimeUsageRecordResponse {
   recorded: boolean;
   usageId: string;
-}
-
-export interface HostedRuntimeLinqContactCardShareAfterOutboundRequest {
-  authority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
-  chatId: string;
-  service: string | null;
-  threadIsDirect: boolean | null;
 }
 
 export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
@@ -766,6 +814,267 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
   feedbackId: string;
   recorded: boolean;
 }
+
+export type HostedRuntimeGroupToolAction =
+  | "read_current"
+  | "update_display_name"
+  | "create_join_link"
+  | "post_join_offer"
+  | "preflight_set_chat_avatar"
+  | "read_chat_participants"
+  | "set_chat_avatar"
+  | "share_contact_card"
+  | "revoke_own_email_share";
+
+export const HOSTED_RUNTIME_GROUP_KINDS = [
+  "couple",
+  "custom",
+  "family",
+  "friends",
+  "household",
+  "team",
+] as const;
+
+export type HostedRuntimeGroupKind = (typeof HOSTED_RUNTIME_GROUP_KINDS)[number];
+
+export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
+export const HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH = 2000;
+export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
+
+export interface HostedRuntimeGroupMemberSummary {
+  grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
+  handle: string | null;
+  memberId: string;
+  role: string;
+}
+
+export interface HostedRuntimeGroupSummary {
+  displayName: string | null;
+  id: string;
+  kind: string;
+  memberCount: number;
+  members: HostedRuntimeGroupMemberSummary[];
+  requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
+  status: string;
+}
+
+export interface HostedRuntimeGroupCreateJoinLinkRequest {
+  displayName?: string | null;
+  kind?: HostedRuntimeGroupKind | null;
+  // Compatibility for old fixed-kind callers. Selector-only projections must
+  // use requestedVaultShareProjectionScopes.
+  requestedVaultShareProjectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
+  // Closed over the individually selectable scopes: the membership-implied
+  // profile-name.v0 share is never requestable through a join link.
+  requestedVaultShareProjectionScopes?: HostedVaultShareSelectableProjectionScope[] | null;
+}
+
+export interface HostedRuntimeGroupPostJoinOfferRequest {
+  displayName?: string | null;
+  // Model-authored natural group-chat message with server-filled
+  // {{share_scope}} and {{join_url}} placeholders.
+  messageTemplate?: string | null;
+  // Compatibility for old fixed-kind callers. Selector-only projections must
+  // use projectionScopes.
+  projectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
+  // Closed over the individually selectable scopes; the offer always includes
+  // the membership-implied profile-name.v0 share in its deterministic copy.
+  projectionScopes?: HostedVaultShareSelectableProjectionScope[] | null;
+}
+
+export interface HostedRuntimeGroupUpdateDisplayNameRequest {
+  displayName: string;
+}
+
+export interface HostedRuntimeGroupSetChatAvatarRequest {
+  groupChatIconUrl: string;
+}
+
+/**
+ * Injected by the hosted runtime from the current wake's Linq delivery
+ * context; never supplied by the model. The web handler asserts the authority
+ * row before touching the chat.
+ */
+export interface HostedRuntimeGroupToolLinqThreadContext {
+  authority: HostedExecutionLinqExternalThreadRouteAuthority;
+  chatId: string;
+}
+
+export interface HostedRuntimeGroupToolSelfOptOutContext {
+  senderHandle: string;
+  source: "email" | "linq";
+}
+
+export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
+
+export interface HostedRuntimeGroupChatParticipant {
+  handle: string;
+  hasOwnMurph: boolean;
+}
+
+export type HostedRuntimeGroupToolRequest =
+  | { action: "read_current" }
+  | {
+      action: "update_display_name";
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+      updateDisplayName: HostedRuntimeGroupUpdateDisplayNameRequest;
+    }
+  | { action: "create_join_link"; joinLink?: HostedRuntimeGroupCreateJoinLinkRequest | null }
+  | {
+      action: "post_join_offer";
+      joinOffer?: HostedRuntimeGroupPostJoinOfferRequest | null;
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
+  | {
+      action: "preflight_set_chat_avatar";
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
+  | { action: "read_chat_participants"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
+  | {
+      action: "set_chat_avatar";
+      groupChatIconUrl: string;
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
+  | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
+  | {
+      action: "revoke_own_email_share";
+      selfOptOut?: HostedRuntimeGroupToolSelfOptOutContext | null;
+    };
+
+export type HostedRuntimeGroupToolResponse =
+  | {
+      action: "read_current";
+      result:
+        | { status: "ok"; group: HostedRuntimeGroupSummary }
+        | { status: "none"; group: null }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "create_join_link";
+      result:
+        | { status: "ok"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "update_display_name";
+      result:
+        | { status: "ok"; group: HostedRuntimeGroupSummary }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "post_join_offer";
+      result:
+        | { status: "sent"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "read_chat_participants";
+      result:
+        | { status: "ok"; participants: HostedRuntimeGroupChatParticipant[] }
+        | { status: "unavailable"; unavailableReason: string; participants: null };
+    }
+  | {
+      action: "set_chat_avatar";
+      result:
+        | { status: "requested" }
+        | { status: "ok" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "preflight_set_chat_avatar";
+      result:
+        | { status: "ok" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "share_contact_card";
+      result:
+        | { status: "sent" }
+        | { status: "already_shared" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "revoke_own_email_share";
+      result:
+        | { status: "revoked"; revokedCount: number }
+        | { status: "already_removed"; revokedCount: 0 }
+        | { status: "unavailable"; unavailableReason: string };
+    };
+
+export type HostedRuntimeNewsletterToolAction =
+  | "read_stats"
+  | "send";
+
+export const HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH = 160;
+export const HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH = 100_000;
+export const HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH = 500_000;
+export const HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX = 100;
+
+export interface HostedRuntimeNewsletterParticipantSummary {
+  displayName: string | null;
+  hasEmail: boolean;
+  memberId: string;
+}
+
+export interface HostedRuntimeNewsletterScheduledAuthority {
+  automationId: string;
+  occurrenceAt: string;
+}
+
+export interface HostedRuntimeNewsletterToolSendRequest {
+  groupId: string;
+  html: string;
+  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
+  subject: string;
+  text?: string | null;
+}
+
+export type HostedRuntimeNewsletterToolRequest =
+  | { action: "read_stats"; groupId: string }
+  | ({ action: "send" } & HostedRuntimeNewsletterToolSendRequest);
+
+export type HostedRuntimeNewsletterToolResponse =
+  | {
+      action: "read_stats";
+      result:
+        | {
+            groupId: string;
+            missingEmailParticipants: HostedRuntimeNewsletterParticipantSummary[];
+            participants: HostedRuntimeNewsletterParticipantSummary[];
+            status: "ok";
+          }
+        | {
+            status: "unavailable";
+            unavailableReason: string;
+          };
+    }
+  | {
+      action: "send";
+      result:
+        | {
+            participantCount: number;
+            skippedNoEmailMemberIds: string[];
+            status: "sent";
+          }
+        | {
+            failedRecipientCount: number;
+            participantCount: number;
+            sentRecipientCount: number;
+            skippedNoEmailMemberIds: string[];
+            status: "partial_failure";
+          }
+        | {
+            participantCount: 0;
+            skippedNoEmailMemberIds: string[];
+            status: "no_recipients";
+          }
+        | {
+            status: "unavailable";
+            unavailableReason: string;
+          };
+    };
 
 export type HostedRuntimeFamilyPlanToolAction =
   | "create_invite"
@@ -933,7 +1242,14 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   orchestration?: {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
+    tokenAcquireStartedAtEpochMs?: number;
+    tokenAcquiredAtEpochMs?: number;
+    directEnsureRequestStartedAtEpochMs?: number;
+    directEnsureResponseReceivedAtEpochMs?: number;
+    runtimeControlAuthStartedAtEpochMs?: number;
+    runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
+    triggeredByWebDirect?: boolean;
     userRunnerEnsureStartedAtEpochMs?: number;
     activeWakeStartedAtEpochMs?: number;
     activeWakeFinishedAtEpochMs?: number;
@@ -984,7 +1300,20 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     activeRuntimePassStartedAtEpochMs?: number;
     activeRuntimePassForeground?: boolean;
   };
+  import?: {
+    decodeStartedAtEpochMs?: number;
+    decodeDoneAtEpochMs?: number;
+    autoReplyPreparedAtEpochMs?: number;
+    pendingIndexEnsuredAtEpochMs?: number;
+    stagedAtEpochMs?: number;
+  };
   provider?: {
+    codexAppServerInitializeMs?: number;
+    codexAppServerPreProviderMs?: number;
+    codexAppServerSpawnReadyMs?: number;
+    codexAppServerThreadResumeMs?: number;
+    codexAppServerThreadStartMs?: number;
+    codexAppServerWarmReuseMs?: number;
     turnLockWaitMs?: number;
     sessionResolveMs?: number;
     promptBuildMs?: number;
@@ -1000,6 +1329,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS = [
   "restore",
   "boot",
   "wake",
+  "import",
   "provider",
 ] as const;
 
@@ -1018,7 +1348,14 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   orchestration: [
     "temporalActivityStartedAtEpochMs",
     "temporalActivityRequestStartedAtEpochMs",
+    "tokenAcquireStartedAtEpochMs",
+    "tokenAcquiredAtEpochMs",
+    "directEnsureRequestStartedAtEpochMs",
+    "directEnsureResponseReceivedAtEpochMs",
+    "runtimeControlAuthStartedAtEpochMs",
+    "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
+    "triggeredByWebDirect",
     "userRunnerEnsureStartedAtEpochMs",
     "activeWakeStartedAtEpochMs",
     "activeWakeFinishedAtEpochMs",
@@ -1059,7 +1396,20 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "activeRuntimePassStartedAtEpochMs",
     "activeRuntimePassForeground",
   ],
+  import: [
+    "decodeStartedAtEpochMs",
+    "decodeDoneAtEpochMs",
+    "autoReplyPreparedAtEpochMs",
+    "pendingIndexEnsuredAtEpochMs",
+    "stagedAtEpochMs",
+  ],
   provider: [
+    "codexAppServerInitializeMs",
+    "codexAppServerPreProviderMs",
+    "codexAppServerSpawnReadyMs",
+    "codexAppServerThreadResumeMs",
+    "codexAppServerThreadStartMs",
+    "codexAppServerWarmReuseMs",
     "turnLockWaitMs",
     "sessionResolveMs",
     "promptBuildMs",
@@ -1073,6 +1423,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
   [
     "orchestration.activeWakeAccepted",
     "orchestration.replacedStaleFence",
+    "orchestration.triggeredByWebDirect",
     "wake.activeRuntimePassForeground",
     "boot.restoreWasCold",
   ] as const;
@@ -1109,6 +1460,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   restore: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.restore),
   boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),
   wake: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.wake),
+  import: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.import),
   provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
 };
 
@@ -1407,10 +1759,20 @@ export const HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS = [
 export type HostedWorkspaceCheckpointConflictReason =
   (typeof HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS)[number];
 
+export const HOSTED_IDLE_CHECKPOINT_TRIGGERS = [
+  "idle_window",
+  "runtime_wake",
+  "shutdown_signal",
+] as const;
+
+export type HostedIdleCheckpointTrigger =
+  (typeof HOSTED_IDLE_CHECKPOINT_TRIGGERS)[number];
+
 export interface HostedWorkspaceCheckpointRequest {
   attemptId: string;
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   expectedWorkspaceVersion: string;
+  idleCheckpointTrigger?: HostedIdleCheckpointTrigger;
   inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;
   nextWakeAt?: string | null;
@@ -1503,14 +1865,13 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.dense_raw_retention",
   "device-sync.job_failed",
   "device-sync.legacy_platform_env_present",
+  "device-sync.module_load_failed",
   "device-sync.wake_projection_failed",
   // Legacy read compatibility only; reconnect notices are no longer produced.
   "device-sync.reconnect_notice_created",
   "device-sync.reconnect_notice_duplicate",
   "device-sync.reconnect_notice_skipped",
   "mailbox.appended",
-  "mailbox.consume_ack_advanced",
-  "mailbox.consume_ack_skipped",
   "mailbox.dedupe_conflict",
   "mailbox.imported",
   "mailbox.linq_attachment_download_finished",
@@ -1648,15 +2009,6 @@ export interface HostedWorkspaceInvocationResult {
   nextWakeReason?: string | null;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   status: HostedWorkspaceInvocationStatus;
-}
-
-export interface HostedExpectedCodexRootProcess {
-  commandLineDigest: string;
-  owner: "codex-app-server";
-  pid: number;
-  processGroupId: number | null;
-  startTimeTicksFromProcStat: string;
-  uid: number | null;
 }
 
 export function isHostedMailboxLane(value: string): value is HostedMailboxLane {

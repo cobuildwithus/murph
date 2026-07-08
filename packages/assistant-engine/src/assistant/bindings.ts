@@ -314,6 +314,16 @@ const assistantBindingIsolationFields = [
   'threadIsDirect',
 ] as const satisfies readonly AssistantBindingIsolationField[]
 
+// Isolation fields that may legitimately differ between two contexts that share
+// the same conversation key: the active speaker (`actorId`) in a group thread,
+// and the direct/group classification (`threadIsDirect`) as the roster changes.
+// `channel`, `identityId`, and the thread/actor scope are all encoded in the
+// conversation key, so a conversation-key match already proves those are equal —
+// a conflict on any of them signals upstream key-derivation drift and must still
+// fail closed rather than silently rebind across a routing boundary.
+export const assistantWithinConversationDriftFields: ReadonlySet<AssistantBindingIsolationField> =
+  new Set(['actorId', 'threadIsDirect'])
+
 function canUseActorScopedConversationKey(
   input: Pick<AssistantBindingInput, 'threadIsDirect'>,
 ): boolean {

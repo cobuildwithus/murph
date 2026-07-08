@@ -62,6 +62,212 @@ const BASE_USAGE_RECORD = {
 type AllowanceExecuteRaw = (sql: TemplateStringsArray, ...params: unknown[]) => Promise<number>;
 type AllowanceExecuteRawMock = ReturnType<typeof vi.fn<AllowanceExecuteRaw>>;
 
+function buildMalformedOpenAiImageUsageRecords(input: {
+  occurredAt?: AssistantUsageRecord["occurredAt"];
+} = {}): AssistantUsageRecord[] {
+  const occurredAt = input.occurredAt ?? BASE_USAGE_RECORD.occurredAt;
+
+  return [
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: null,
+      inputTokens: null,
+      occurredAt,
+      outputTokens: null,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: null,
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: null,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 100,
+      inputTokens: 1_300,
+      occurredAt,
+      outputTokens: null,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 100,
+          image_tokens: 1_000,
+          text_tokens: 300,
+        },
+        total_tokens: 1_300,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 1_300,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: null,
+      inputTokens: null,
+      occurredAt,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        output_tokens: 400,
+        output_tokens_details: {
+          image_tokens: 400,
+          reasoning_tokens: 0,
+          text_tokens: 0,
+        },
+        total_tokens: 400,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 400,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+  ] satisfies AssistantUsageRecord[];
+}
+
+function buildInconsistentOpenAiImageUsageRecords(): AssistantUsageRecord[] {
+  return [
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 101,
+        output_tokens: 400,
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 0,
+          text_tokens: 300,
+        },
+        output_tokens: 400,
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 150,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 150,
+          image_tokens: 0,
+          text_tokens: 100,
+        },
+        output_tokens: 400,
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 0,
+          text_tokens: 100,
+        },
+        output_tokens: 400,
+        output_tokens_details: {
+          image_tokens: 399,
+          reasoning_tokens: 0,
+          text_tokens: 0,
+        },
+        total_tokens: 500,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 500,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+    {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 100,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 100,
+        output_tokens: 400,
+        total_tokens: 999,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 999,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    },
+  ] satisfies AssistantUsageRecord[];
+}
+
+function buildAggregateOnlyOpenAiImageUsageRecord(): AssistantUsageRecord {
+  return {
+    ...BASE_USAGE_RECORD,
+    cachedInputTokens: 0,
+    inputTokens: 120,
+    outputTokens: 40,
+    provider: "openai-images",
+    providerName: "OpenAI Images",
+    rawUsageJson: {
+      input_tokens: 120,
+      output_tokens: 40,
+      total_tokens: 160,
+    },
+    requestedModel: "openai/gpt-image-2",
+    servedModel: null,
+    totalTokens: 160,
+    usageExtractionSourcePath: "openai.images.edit",
+    usageExtractionVersion: "openai-images-v1",
+  } satisfies AssistantUsageRecord;
+}
+
 describe("hosted AI usage allowance pricing", () => {
   it("prices platform usage from uncached input, cached input, and output tokens", () => {
     expect(priceHostedAiUsageForAllowance(BASE_USAGE_RECORD)).toMatchObject({
@@ -98,6 +304,94 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it("prices GPT-5.6 model slugs with official preview standard and flex accounting", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-5.6-terra",
+      servedModel: "openai/gpt-5.6-terra-2026-07-08",
+    })).toMatchObject({
+      costUsdMicros: 948n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-terra",
+        modelSource: "served",
+        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "250000",
+          cacheWrite: "3125000",
+          input: "2500000",
+          output: "15000000",
+        },
+        requestedModel: "gpt-5.6-terra",
+        servedModel: "openai/gpt-5.6-terra-2026-07-08",
+        tokenPricingBasis: "standard",
+      },
+      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-standard",
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      providerName: "hosted-openai",
+      requestedModel: "gpt-5.6-luna",
+      servedModel: "gpt-5.6-luna",
+      tokenPricingBasis: "openai-flex",
+    })).toMatchObject({
+      costUsdMicros: 190n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-luna",
+        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "100000",
+          cacheWrite: "1250000",
+          input: "1000000",
+          output: "6000000",
+        },
+        tokenPricingAdjustment: {
+          denominator: "2",
+          numerator: "1",
+        },
+        tokenPricingBasis: "openai-flex",
+      },
+      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-openai-flex",
+    });
+  });
+
+  it("prices GPT-5.6 cache-write tokens at the official preview write rate", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cacheWriteTokens: 1_000,
+      cachedInputTokens: 0,
+      inputTokens: 1_000,
+      outputTokens: 0,
+      requestedModel: "gpt-5.6-sol",
+      servedModel: "gpt-5.6-sol",
+      totalTokens: 1_000,
+    })).toMatchObject({
+      costUsdMicros: 6_250n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-sol",
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "500000",
+          cacheWrite: "6250000",
+          input: "5000000",
+          output: "30000000",
+        },
+        standardCostUsdMicros: "6250",
+        tokenPricingBasis: "standard",
+        tokens: {
+          billableInput: "0",
+          cacheWrite: "1000",
+          cachedInput: "0",
+          input: "1000",
+          output: "0",
+        },
+      },
+      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-standard",
+    });
+  });
+
   it("applies OpenAI flex adjustment once to the rounded standard token cost", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
@@ -118,6 +412,145 @@ describe("hosted AI usage allowance pricing", () => {
         tokenPricingBasis: "openai-flex",
       },
     });
+  });
+
+  it("prices OpenAI image generation with GPT Image 2 text, image, and output tokens", () => {
+    const generatedImage = {
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 1_300,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 1_000,
+          text_tokens: 300,
+        },
+        output_tokens: 400,
+        output_tokens_details: {
+          image_tokens: 400,
+          reasoning_tokens: 0,
+          text_tokens: 0,
+        },
+        total_tokens: 1_700,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 1_700,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    } satisfies AssistantUsageRecord;
+
+    expect(priceHostedAiUsageForAllowance(generatedImage)).toMatchObject({
+      costUsdMicros: 21_500n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-image-2",
+        modelSource: "requested",
+        pricingSource: "https://developers.openai.com/api/docs/pricing",
+        standardCostUsdMicros: "21500",
+        tokenPricingBasis: "standard",
+        tokens: {
+          openAiImage: {
+            billableImageInput: "1000",
+            billableTextInput: "300",
+            cachedInput: "0",
+            cachedInputAllocation: "single_modality_only",
+            cachedTextInput: "0",
+            imageInput: "1000",
+            output: "400",
+            textInput: "300",
+          },
+        },
+      },
+      pricingVersion: "openai-image-api-pricing-2026-07-08-standard",
+    });
+  });
+
+  it("prices mixed cached OpenAI image input with conservative text-first allocation", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 100,
+      inputTokens: 1_300,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 100,
+          image_tokens: 1_000,
+          text_tokens: 300,
+        },
+        output_tokens: 400,
+        total_tokens: 1_700,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      totalTokens: 1_700,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    })).toMatchObject({
+      costUsdMicros: 21_125n,
+      counted: true,
+      pricingSnapshot: {
+        standardCostUsdMicros: "21125",
+        tokens: {
+          openAiImage: {
+            billableImageInput: "1000",
+            billableTextInput: "200",
+            cachedImageInput: "0",
+            cachedInput: "100",
+            cachedInputAllocation: "text_first_conservative",
+            cachedTextInput: "100",
+            imageInput: "1000",
+            output: "400",
+            textInput: "300",
+          },
+        },
+      },
+      pricingVersion: "openai-image-api-pricing-2026-07-08-standard",
+    });
+  });
+
+  it("rejects OpenAI image usage with OpenAI flex token pricing", () => {
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      inputTokens: 1_300,
+      outputTokens: 400,
+      provider: "openai-images",
+      providerName: "OpenAI Images",
+      rawUsageJson: {
+        input_tokens: 1_300,
+        input_tokens_details: {
+          cached_tokens: 0,
+          image_tokens: 1_000,
+          text_tokens: 300,
+        },
+        output_tokens: 400,
+        total_tokens: 1_700,
+      },
+      requestedModel: "gpt-image-2",
+      servedModel: null,
+      tokenPricingBasis: "openai-flex",
+      totalTokens: 1_700,
+      usageExtractionSourcePath: "openai.images.generate",
+      usageExtractionVersion: "openai-images-v1",
+    })).toThrow("OpenAI image hosted AI usage must use standard token pricing basis");
+  });
+
+  it("does not treat GPT Image 2 as a generic token-priced chat model", () => {
+    expect(() => priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      provider: "codex-cli",
+      providerName: "openai",
+      requestedModel: "gpt-image-2",
+      servedModel: "gpt-image-2",
+    })).toThrow("pricing is missing");
   });
 
   it("accepts production OpenAI provider evidence for OpenAI flex token pricing", () => {
@@ -542,7 +975,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-03-29T12:00:05.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toBeNull();
 
     expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -586,7 +1019,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     ]);
   });
 
-  it("accounts usage against the record's allowance period without returning notice data", async () => {
+  it("accounts usage against the record's allowance period without returning notice data before crossing", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
@@ -597,15 +1030,43 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-04-01T00:00:00.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toBeNull();
 
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
-  it("accounts usage when the period was already blocked", async () => {
+  it("returns a limit-notice candidate when the spend update crosses the period limit", async () => {
     const tx = createAllowanceTx({
       executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
       hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      spentUsdMicros: 9_999_000n,
+    });
+    const now = new Date("2026-03-29T12:00:05.000Z");
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now,
+      record: BASE_USAGE_RECORD,
+      tx: tx as never,
+    })).resolves.toEqual({
+      crossedAt: now,
+      memberId: "member_123",
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      sourceUsageId: "turn_123.attempt-1",
+      userNotice: expect.objectContaining({
+        code: "pulse_upgrade_edge",
+        message: expect.any(String),
+      }),
+    });
+  });
+
+  it("does not return a limit-notice candidate when the period was already blocked", async () => {
+    const tx = createAllowanceTx({
+      blockedAt: new Date("2026-03-29T11:59:00.000Z"),
+      executeRaw: vi.fn<AllowanceExecuteRaw>(async () => 1),
+      hostedAiUsageUpdateMany: vi.fn(async () => ({ count: 1 })),
+      spentUsdMicros: 9_999_000n,
     });
 
     await expect(accountHostedAiUsageForAllowanceTx({
@@ -613,7 +1074,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       now: new Date("2026-03-29T12:00:05.000Z"),
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toBeNull();
   });
 
   it("accounts a worker-built transcription record with duration pricing", async () => {
@@ -667,6 +1128,102 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
   });
 
+  it("blocks the allowance period when image provider usage pricing basis is missing", async () => {
+    for (const record of buildMalformedOpenAiImageUsageRecords()) {
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+      const tx = createAllowanceTx({
+        executeRaw,
+        hostedAiUsageUpdateMany: updateMany,
+      });
+
+      const notice = await accountHostedAiUsageForAllowanceTx({
+        memberId: "member_123",
+        record,
+        tx: tx as never,
+      });
+
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          allowanceCostUsdMicros: 10_000_000n,
+          allowanceCounted: true,
+          allowancePricingSnapshotJson: expect.objectContaining({
+            blockCostUsdMicros: "10000000",
+            reason: "missing_provider_usage_tokens",
+            schema: "murph.hosted-ai-usage-allowance-malformed.v1",
+            tokenPricingBasis: "standard",
+          }),
+          allowancePricingVersion: "openai-image-api-malformed-usage-block-2026-07-08",
+        }),
+      }));
+      expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+      expect(notice).toMatchObject({
+        memberId: "member_123",
+        sourceUsageId: record.usageId,
+      });
+    }
+  });
+
+  it("blocks the allowance period when image provider usage buckets are inconsistent", async () => {
+    for (const record of buildInconsistentOpenAiImageUsageRecords()) {
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+      const tx = createAllowanceTx({
+        executeRaw,
+        hostedAiUsageUpdateMany: updateMany,
+      });
+
+      await accountHostedAiUsageForAllowanceTx({
+        memberId: "member_123",
+        record,
+        tx: tx as never,
+      });
+
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          allowanceCostUsdMicros: 10_000_000n,
+          allowanceCounted: true,
+          allowancePricingSnapshotJson: expect.objectContaining({
+            blockCostUsdMicros: "10000000",
+            reason: "inconsistent_provider_usage_tokens",
+            schema: "murph.hosted-ai-usage-allowance-malformed.v1",
+          }),
+          allowancePricingVersion: "openai-image-api-malformed-usage-block-2026-07-08",
+        }),
+      }));
+      expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+    }
+  });
+
+  it("blocks the allowance period when image input detail buckets are missing", async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+    });
+
+    await accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      record: buildAggregateOnlyOpenAiImageUsageRecord(),
+      tx: tx as never,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceCostUsdMicros: 10_000_000n,
+        allowanceCounted: true,
+        allowancePricingSnapshotJson: expect.objectContaining({
+          blockCostUsdMicros: "10000000",
+          reason: "missing_provider_usage_tokens",
+          schema: "murph.hosted-ai-usage-allowance-malformed.v1",
+        }),
+        allowancePricingVersion: "openai-image-api-malformed-usage-block-2026-07-08",
+      }),
+    }));
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+  });
+
   it("does not update period metadata again when allowanceAccountedAt was already set", async () => {
     const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
     const tx = createAllowanceTx({
@@ -678,7 +1235,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       memberId: "member_123",
       record: BASE_USAGE_RECORD,
       tx: tx as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toBeNull();
 
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
@@ -723,6 +1280,46 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
     }));
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
     expect(tx.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
+  it("marks stale-trial image usage denied when provider usage pricing basis is missing", async () => {
+    for (const record of buildMalformedOpenAiImageUsageRecords({
+      occurredAt: "2026-04-08T12:00:01.000Z",
+    })) {
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+      const tx = createAllowanceTx({
+        billingPhase: "trial",
+        checkoutOffer: "pulse_trial_7d",
+        executeRaw,
+        hostedAiUsageUpdateMany: updateMany,
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+        trialStartedAt: new Date("2026-04-01T12:00:00.000Z"),
+      });
+
+      await accountHostedAiUsageForAllowanceTx({
+        memberId: "member_123",
+        now: new Date("2026-04-08T12:00:05.000Z"),
+        record,
+        tx: tx as never,
+      });
+
+      expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          allowanceAccountedAt: new Date("2026-04-08T12:00:05.000Z"),
+          allowanceCostUsdMicros: 0n,
+          allowanceCounted: false,
+          allowancePricingSnapshotJson: expect.objectContaining({
+            reason: "trial_expired_pending_billing",
+            schema: "murph.hosted-ai-usage-allowance-denied.v1",
+            tokenPricingBasis: "standard",
+          }),
+          allowancePricingVersion: "hosted-ai-usage-allowance-denied-2026-05-05",
+        }),
+      }));
+      expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
+    }
   });
 
   it("uses Family-sponsored allowance instead of stale direct trial state", async () => {
@@ -843,7 +1440,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         credentialSource: "member",
       },
       tx: tx as never,
-    })).resolves.toBeUndefined();
+    })).resolves.toBeNull();
 
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
   });
@@ -1769,8 +2366,65 @@ describe("readHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
   });
 
+  it("allows a not_started container member through its active owner", async () => {
+    // Containers are created not_started; their own billing must never be an
+    // early denial — the container branch decides via the owner.
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      spentUsdMicros: 1_000_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 3_500_000n,
+    });
+  });
+
+  it("allows a not_started container member through a family-sponsored owner", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      spentUsdMicros: 0n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+      threadContainerOwnerFamilySponsored: true,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+    });
+  });
+
+  it("denies a suspended container member even with an active owner", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      spentUsdMicros: 0n,
+      suspendedAt: new Date("2026-03-20T00:00:00.000Z"),
+      threadContainerLimitUsdMicros: 4_500_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "hosted_access_inactive",
+    });
+  });
+
   it("denies thread-container usage when the owner authority is inactive", async () => {
     const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
       spentUsdMicros: 1_000_000n,
       threadContainerLimitUsdMicros: 4_500_000n,
       threadContainerOwnerBillingStatus: HostedBillingStatus.paused,
@@ -1790,6 +2444,37 @@ describe("readHostedAiUsageGate", () => {
 
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+  });
+
+  it("allows thread-container usage when an active participant has access", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      spentUsdMicros: 1_000_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+      threadContainerOwnerBillingStatus: HostedBillingStatus.paused,
+      threadContainerParticipantActive: true,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 3_500_000n,
+      spentUsdMicros: 1_000_000n,
+    });
+
+    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
+      select: {
+        participantMemberId: true,
+      },
+      where: expect.objectContaining({
+        containerMemberId: "member_123",
+        removedAt: null,
+      }),
+    });
   });
 
   it("uses usage-period spend for billing periods before allowing", async () => {
@@ -1917,7 +2602,9 @@ describe("checkHostedAiUsageGate", () => {
         scheduledBillingPlanCode: null,
       },
       billingStatus: HostedBillingStatus.active,
+      id: "member_123",
       suspendedAt: null,
+      threadContainer: null,
     }));
 
     await expect(checkHostedAiUsageGate({
@@ -1963,7 +2650,9 @@ describe("checkHostedAiUsageGate", () => {
         scheduledBillingPlanCode: null,
       },
       billingStatus: HostedBillingStatus.active,
+      id: "member_123",
       suspendedAt: null,
+      threadContainer: null,
     }));
     await expect(checkHostedAiUsageGate({
       memberId: "member_123",
@@ -2073,6 +2762,7 @@ describe("releaseHostedAiUsageLimitNotice", () => {
 function createAllowanceTx(input: {
   billingPhase?: string | null;
   billingPlanCode?: string;
+  blockedAt?: Date | null;
   checkoutOffer?: string | null;
   executeRaw: AllowanceExecuteRawMock;
   familyAccessActive?: boolean;
@@ -2084,6 +2774,7 @@ function createAllowanceTx(input: {
   periodStart?: Date;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
+  spentUsdMicros?: bigint;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
 }) {
@@ -2116,14 +2807,28 @@ function createAllowanceTx(input: {
       createMany: vi.fn(async () => ({ count: 1 })),
       findUniqueOrThrow: vi.fn(async () => ({
         billingPlanCode: input.billingPlanCode ?? "launch_monthly",
-        blockedAt: null,
+        blockedAt: input.blockedAt ?? null,
         lastUsageAt: null,
         limitUsdMicros: input.limitUsdMicros ?? 10_000_000n,
         periodEnd: input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
         periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
-        spentUsdMicros: 0n,
+        spentUsdMicros: input.spentUsdMicros ?? 0n,
       })),
-      update: vi.fn(async () => undefined),
+      update: vi.fn(async (args?: {
+        data?: {
+          billingPlanCode?: string;
+          blockedAt?: Date | null;
+          limitUsdMicros?: bigint;
+          periodEnd?: Date;
+        };
+      }) => ({
+        billingPlanCode: args?.data?.billingPlanCode ?? input.billingPlanCode ?? "launch_monthly",
+        blockedAt: args?.data?.blockedAt ?? input.blockedAt ?? null,
+        limitUsdMicros: args?.data?.limitUsdMicros ?? input.limitUsdMicros ?? 10_000_000n,
+        periodEnd: args?.data?.periodEnd ?? input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z"),
+        periodStart: input.periodStart ?? new Date("2026-03-01T00:00:00.000Z"),
+        spentUsdMicros: input.spentUsdMicros ?? 0n,
+      })),
     },
     hostedAccountGroupMembership: {
       count: vi.fn(async () => input.familyAccessActive ? 2 : 0),
@@ -2209,7 +2914,9 @@ function createGatePrisma(input: {
   spentUsdMicros: bigint;
   threadContainerLimitUsdMicros?: bigint | null;
   threadContainerOwnerBillingStatus?: HostedBillingStatus;
+  threadContainerOwnerFamilySponsored?: boolean;
   threadContainerOwnerSuspendedAt?: Date | null;
+  threadContainerParticipantActive?: boolean;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
   suspendedAt?: Date | null;
@@ -2228,7 +2935,18 @@ function createGatePrisma(input: {
     : {
         monthlyUsageLimitUsdMicros: input.threadContainerLimitUsdMicros,
         owner: {
-          billingStatus: input.threadContainerOwnerBillingStatus ?? HostedBillingStatus.active,
+          accountGroupMemberships: input.threadContainerOwnerFamilySponsored
+            ? [{
+                group: {
+                  billingStatus: HostedBillingStatus.active,
+                  suspendedAt: null,
+                },
+                status: "active",
+              }]
+            : [],
+          billingStatus: input.threadContainerOwnerFamilySponsored
+            ? HostedBillingStatus.not_started
+            : input.threadContainerOwnerBillingStatus ?? HostedBillingStatus.active,
           suspendedAt: input.threadContainerOwnerSuspendedAt ?? null,
         },
       };
@@ -2278,6 +2996,7 @@ function createGatePrisma(input: {
         };
       }) => ({
         billingPlanCode: args?.data?.billingPlanCode ?? defaultPeriod.billingPlanCode,
+        blockedAt: defaultPeriod.blockedAt,
         limitUsdMicros: args?.data?.limitUsdMicros ?? defaultPeriod.limitUsdMicros,
         periodEnd: args?.data?.periodEnd ?? defaultPeriod.periodEnd,
         periodStart: defaultPeriod.periodStart,
@@ -2316,44 +3035,30 @@ function createGatePrisma(input: {
         : null),
     },
     hostedMember: {
-      findUnique: vi.fn()
-        .mockResolvedValueOnce({
-          billingRef: {
-            currentBillingPhase: input.billingPhase ?? null,
-            currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
-            currentCheckoutOffer: input.checkoutOffer ?? null,
-            currentPeriodEnd: periodEnd,
-            currentPeriodStart: periodStart,
-            currentTrialEndsAt: input.trialEndsAt ?? null,
-            currentTrialStartedAt: input.trialStartedAt ?? null,
-            pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
-            pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
-            scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
-            scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
-          },
-          billingStatus: input.billingStatus ?? HostedBillingStatus.active,
-          suspendedAt: input.suspendedAt ?? null,
-          threadContainer,
-        })
-        .mockResolvedValueOnce({
-          billingRef: {
-            currentBillingPhase: input.billingPhase ?? null,
-            currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
-            currentCheckoutOffer: input.checkoutOffer ?? null,
-            currentPeriodEnd: periodEnd,
-            currentPeriodStart: periodStart,
-            currentTrialEndsAt: input.trialEndsAt ?? null,
-            currentTrialStartedAt: input.trialStartedAt ?? null,
-            pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
-            pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
-            scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
-            scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
-          },
-          billingStatus: input.billingStatus ?? HostedBillingStatus.active,
-          id: "member_123",
-          suspendedAt: input.suspendedAt ?? null,
-          threadContainer,
-        }),
+      findUnique: vi.fn(async () => ({
+        billingRef: {
+          currentBillingPhase: input.billingPhase ?? null,
+          currentBillingPlanCode: input.billingPlanCode ?? "launch_monthly",
+          currentCheckoutOffer: input.checkoutOffer ?? null,
+          currentPeriodEnd: periodEnd,
+          currentPeriodStart: periodStart,
+          currentTrialEndsAt: input.trialEndsAt ?? null,
+          currentTrialStartedAt: input.trialStartedAt ?? null,
+          pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
+          pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
+          scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
+          scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
+        },
+        billingStatus: input.billingStatus ?? HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: input.suspendedAt ?? null,
+        threadContainer,
+      })),
+    },
+    hostedThreadContainerParticipant: {
+      findFirst: vi.fn(async () => input.threadContainerParticipantActive
+        ? { participantMemberId: "member_participant" }
+        : null),
     },
   };
 }

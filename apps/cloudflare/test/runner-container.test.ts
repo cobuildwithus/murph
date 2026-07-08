@@ -381,6 +381,117 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("short-circuits a wake probe when platform truth says a pointerless shell is stopped", async () => {
+    const { container, containerFetch, getState, startAndWaitForPorts } =
+      createContainerDouble({
+        containerFetch: vi.fn(async (url: string) => {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }),
+        initialStatus: "running",
+        platformRunning: false,
+      });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer_stopped_shell",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "not-wakeable",
+      reason: "no-active-child",
+    });
+
+    expect(containerFetch).not.toHaveBeenCalled();
+    expect(getState).not.toHaveBeenCalled();
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("still probes a pointerless shell when platform truth says it is running", async () => {
+    const { container, containerFetch, startAndWaitForPorts } =
+      createContainerDouble({
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/internal/runtime-wake")) {
+            return new Response(null, {
+              headers: {
+                "x-runtime-wake-absent": "1",
+                "x-runtime-wake-accepted": "0",
+              },
+              status: 204,
+            });
+          }
+
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }),
+        initialStatus: "stopped",
+        platformRunning: true,
+      });
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_lost_pointer_running_shell",
+      leaseGeneration: "12",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "not-wakeable",
+      reason: "no-active-child",
+    });
+
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    )).toBe(true);
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+  });
+
+  it("keeps active-operation identity rejection ahead of the stopped-shell short-circuit", async () => {
+    const runnerRequestStarted = createDeferred<void>();
+    const runnerResponse = createDeferred<Response>();
+    const { container, containerFetch } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        runnerRequestStarted.resolve();
+        return await runnerResponse.promise;
+      }),
+      platformRunning: false,
+    });
+
+    const invocation = container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_active_op_platform_stopped"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    });
+    await runnerRequestStarted.promise;
+
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_stale",
+      leaseGeneration: "10",
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "unknown",
+      reason: "active-child-rejected",
+    });
+
+    expect(containerFetch.mock.calls.some(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    )).toBe(false);
+
+    runnerResponse.resolve(new Response(JSON.stringify(createRunnerResult()), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    await expect(invocation).resolves.toEqual(createRunnerResult());
+  });
+
   it("does not trust an identity-blind accepted wake when the outer active-operation pointer is missing", async () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
@@ -6071,14 +6182,23 @@ interface CreateContainerDoubleInput {
   env?: Record<string, unknown>;
   getState?: ReturnType<typeof vi.fn>;
   initialStatus?: "running" | "stopped" | "stopped_with_code";
+  platformRunning?: boolean;
   startAndWaitForPorts?: ReturnType<typeof vi.fn>;
   state?: Record<string, unknown>;
 }
 
 function createContainerDouble(input: CreateContainerDoubleInput = {}) {
   let currentStatus = input.initialStatus ?? "stopped";
+  const platformContainer = input.platformRunning === undefined
+    ? undefined
+    : {
+        get running(): boolean {
+          return input.platformRunning === true;
+        },
+      };
   const ContainerClass = input.containerClass ?? RunnerContainer;
   const container = new ContainerClass({
+    ...(platformContainer ? { container: platformContainer } : {}),
     storage: createContainerStorageDouble(),
     ...(input.state ?? {}),
   } as never, {

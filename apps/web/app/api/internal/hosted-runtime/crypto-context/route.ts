@@ -1,6 +1,6 @@
 import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { readHostedRuntimeCryptoContextForWorker } from "@/src/lib/hosted-crypto/domain-root-store";
-import { hasHostedMemberEffectiveActiveAccessForMember } from "@/src/lib/hosted-onboarding/family-plan";
+import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -11,14 +11,7 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_RUNTIME_CRYPTO_CONTEXT_CALLBACK_BODY_LIMIT_BYTES,
   });
   const prisma = getPrisma();
-  const member = await prisma.hostedMember.findUnique({
-    select: { billingStatus: true, id: true, suspendedAt: true },
-    where: { id: userId },
-  });
-  if (!member || !await hasHostedMemberEffectiveActiveAccessForMember({
-    member,
-    prisma,
-  })) {
+  if (!await readActiveHostedMemberAccess({ memberId: userId, prisma })) {
     return Response.json({ error: "hosted_member_not_active" }, { status: 403 });
   }
   const workspace = await prisma.hostedWorkspace.findUnique({

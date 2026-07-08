@@ -24,7 +24,10 @@ import {
   type HostedMailboxOutcome,
 } from "./events/mailbox-outcome.ts";
 import { executeHostedCodexAuthWake } from "./events/codex-auth.ts";
-import { runHostedDeviceSyncWakeLane } from "./maintenance.ts";
+import {
+  isHostedDeviceSyncMaintenanceModuleLoadError,
+  loadHostedDeviceSyncMaintenanceModule,
+} from "./device-sync-maintenance-import.ts";
 import type {
   HostedMailboxExecutionMetrics,
   NormalizedHostedAssistantRuntimeConfig,
@@ -181,6 +184,15 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
       });
     case "device-sync.wake":
+      const {
+        runHostedDeviceSyncWakeLane,
+      } = await loadHostedDeviceSyncMaintenanceModule().catch((error: unknown) => {
+        emitHostedDeviceSyncMaintenanceModuleLoadFailureLog({
+          error,
+          wake: input.wake,
+        });
+        throw error;
+      });
       const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
@@ -244,6 +256,18 @@ async function executeHostedSystemWake(input: {
       throw new TypeError(
         'Hosted vault-share delivery wakes are landed at mailbox import and must never reach system wake execution.',
       );
+    case "vault-share.revoke":
+      // Vault-share revokes are applied deterministically at mailbox import
+      // (vault-share-import.ts) and never enter the system wake execution path.
+      throw new TypeError(
+        'Hosted vault-share revoke wakes are applied at mailbox import and must never reach system wake execution.',
+      );
+    case "group-newsletter.email-needed":
+      // Group newsletter email-needed wakes stage a private system note at
+      // mailbox import and never enter the system wake execution path.
+      throw new TypeError(
+        'Hosted group newsletter email-needed wakes are staged at mailbox import and must never reach system wake execution.',
+      );
   }
 
   const exhaustiveWake: never = input.wake;
@@ -263,6 +287,24 @@ function emitHostedDeviceActivityAutomationFailureLog(input: {
     error: input.error,
     level: "warn",
     message: "Hosted device activity automation pass failed; continuing device-sync wake.",
+    phase: "wake.running",
+    wake: input.wake,
+  });
+}
+
+function emitHostedDeviceSyncMaintenanceModuleLoadFailureLog(input: {
+  error: unknown;
+  wake: HostedExecutionSystemWake;
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      eventCode: "device-sync.module_load_failed",
+      moduleLoadError: isHostedDeviceSyncMaintenanceModuleLoadError(input.error),
+    },
+    error: input.error,
+    level: "error",
+    message: "Hosted device-sync wake failed to load the maintenance module.",
     phase: "wake.running",
     wake: input.wake,
   });

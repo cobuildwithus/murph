@@ -2,50 +2,41 @@ import { HostedBillingStatus } from "@prisma/client";
 
 import { hostedOnboardingError } from "./errors";
 
-export type HostedEntitlementInput = {
+/**
+ * Own-billing predicates. `billingStatus` here is always the member's OWN
+ * Stripe relationship; sponsored access (family plan, thread containers) is
+ * deliberately invisible to this module. Access gates must use
+ * `member-access.ts` instead — these predicates exist for billing and
+ * onboarding surfaces that genuinely mean "this member's own subscription".
+ */
+
+export type HostedOwnBillingInput = {
   billingStatus: HostedBillingStatus;
-  familyAccessActive?: boolean;
   suspendedAt?: Date | null;
 };
 
-export type HostedEntitlement = {
-  accessAllowed: boolean;
-  activationReady: boolean;
-  billingStatus: HostedBillingStatus;
-  suspendedAt: Date | null;
-};
-
-export function deriveHostedEntitlement(input: HostedEntitlementInput): HostedEntitlement {
-  return {
-    accessAllowed: hasHostedMemberGeneralAccess(input),
-    activationReady: hasHostedMemberGeneralAccess(input),
-    billingStatus: input.billingStatus,
-    suspendedAt: input.suspendedAt ?? null,
-  };
-}
-
-export function hasHostedMemberActiveAccess(
-  input: Pick<HostedEntitlementInput, "billingStatus" | "suspendedAt">,
-): boolean {
-  return !isHostedMemberSuspended(input.suspendedAt) && input.billingStatus === HostedBillingStatus.active;
-}
-
-export function hasHostedMemberGeneralAccess(
-  input: Pick<HostedEntitlementInput, "billingStatus" | "familyAccessActive" | "suspendedAt">,
-): boolean {
+export function hasHostedMemberOwnActiveBilling(input: HostedOwnBillingInput): boolean {
   return !isHostedMemberSuspended(input.suspendedAt)
-    && (
-      !isHostedAccessBlockedBillingStatus(input.billingStatus) ||
-      input.familyAccessActive === true
-    );
+    && input.billingStatus === HostedBillingStatus.active;
 }
 
-export function assertHostedMemberActiveAccessAllowed(
-  input: Pick<HostedEntitlementInput, "billingStatus" | "suspendedAt">,
+/**
+ * Weaker onboarding-engagement gate: the member's own billing is not hard
+ * blocked. Passes for `not_started`/`incomplete`/`past_due` members who are
+ * still finishing signup. Sponsorship-blind by design; callers that need the
+ * sponsorship escape combine this with `member-access.ts`.
+ */
+export function hasHostedMemberGeneralAccess(input: HostedOwnBillingInput): boolean {
+  return !isHostedMemberSuspended(input.suspendedAt)
+    && !isHostedAccessBlockedBillingStatus(input.billingStatus);
+}
+
+export function assertHostedMemberOwnActiveBillingAllowed(
+  input: HostedOwnBillingInput,
 ): void {
   assertHostedMemberNotSuspended(input);
 
-  if (!hasHostedMemberActiveAccess(input)) {
+  if (!hasHostedMemberOwnActiveBilling(input)) {
     throw hostedOnboardingError({
       code: "HOSTED_ACCESS_REQUIRED",
       message: describeHostedMemberActiveAccessRequirement(input.billingStatus),
@@ -55,7 +46,7 @@ export function assertHostedMemberActiveAccessAllowed(
 }
 
 export function assertHostedMemberNotSuspended(
-  input: Pick<HostedEntitlementInput, "suspendedAt">,
+  input: Pick<HostedOwnBillingInput, "suspendedAt">,
 ): void {
   if (isHostedMemberSuspended(input.suspendedAt)) {
     throw hostedOnboardingError({
@@ -78,7 +69,7 @@ export function isHostedAccessBlockedBillingStatus(billingStatus: HostedBillingS
   );
 }
 
-function describeHostedMemberActiveAccessRequirement(
+export function describeHostedMemberActiveAccessRequirement(
   billingStatus: HostedBillingStatus,
 ): string {
   switch (billingStatus) {

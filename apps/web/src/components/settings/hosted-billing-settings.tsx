@@ -24,13 +24,13 @@ const PULSE_FEATURES = [
   "Sync your health data",
   "Private before/after outcomes",
   "Chat via iMessage, Telegram, or email",
-  "Access to frontier AI models",
+  "Access to the most capable AI models",
 ];
 
 const EDGE_FEATURES = [
   "Everything in Pulse",
   "More usage on the latest AI models",
-  "Longer experiment context",
+  "Murph remembers more of your history",
   "Deeper research and analysis",
 ];
 
@@ -121,7 +121,7 @@ export function HostedBillingSettings(props: {
       key: "launch_monthly",
       name: "Pulse",
       note: familyOwner
-        ? "Switching away from Family ends sponsored access for your family members when Family ends."
+        ? "If you switch away from Family, your family members lose their included access when the Family plan ends."
         : !pulseCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
         ? `Scheduled to start ${pendingPulseSwitchDate}`
         : null,
@@ -141,7 +141,7 @@ export function HostedBillingSettings(props: {
       key: "launch_edge_monthly",
       name: "Edge",
       note: familyOwner
-        ? "Move to an individual plan only after you have ended or changed the Family subscription."
+        ? "End or change the Family plan first, then switch to an individual plan."
         : edgeCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
         ? `Switching to Pulse on ${pendingPulseSwitchDate}. Want to keep Edge? Contact support.`
         : null,
@@ -210,7 +210,7 @@ function FamilyBillingChangeButton(props: {
         confirmLabel: "Open Family billing",
         title: `Switch from Family to ${props.targetPlanName}`,
         description:
-          "Family billing is shared. If you end or change it, sponsored members keep their private Murph accounts, but they lose Family-sponsored access when the Family subscription ends.",
+          "Family billing is shared. If you end or change it, your family members keep their own Murph accounts, but their included access ends when the Family plan ends.",
       }}
     />
   );

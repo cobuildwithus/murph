@@ -15,8 +15,10 @@ export const HOSTED_MAILBOX_IMPORT_ACTIONS = [
   "apply-member-channels-update",
   "dispatch-assistant-notification",
   "run-device-sync-wake",
+  "import-group-newsletter-email-needed",
   "apply-runtime-control-request",
   "import-vault-share-delivery",
+  "import-vault-share-revoke",
 ] as const;
 
 export type HostedMailboxImportAction =
@@ -60,6 +62,7 @@ const ACTION_BY_KIND = {
   "assistant.notification.requested": "dispatch-assistant-notification",
   "conversation.message": "import-conversation-message",
   "device-sync.wake": "run-device-sync-wake",
+  "group-newsletter.email-needed": "import-group-newsletter-email-needed",
   "member.activated": "apply-member-activation",
   "member.channels.updated": "apply-member-channels-update",
   "runtime.browser-vault-refresh-requested": "apply-runtime-control-request",
@@ -69,6 +72,7 @@ const ACTION_BY_KIND = {
   "runtime.maintenance-requested": "apply-runtime-control-request",
   "runtime.manual-requested": "apply-runtime-control-request",
   "vault-share.delivery": "import-vault-share-delivery",
+  "vault-share.revoke": "import-vault-share-revoke",
 } satisfies Record<HostedMailboxKind, HostedMailboxImportAction>;
 
 export function createHostedMailboxRoutingPlan(

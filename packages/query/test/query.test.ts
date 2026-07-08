@@ -18,6 +18,7 @@ import {
 import {
   ID_FAMILY_REGISTRY,
   buildWearableMetricEvidence,
+  buildMetricProjection,
   buildOverviewMetrics,
   buildOverviewWeeklyStats,
   buildExportPack,
@@ -3591,6 +3592,35 @@ async function createMetricObservationVault(
   return vaultRoot;
 }
 
+async function createEventLedgerVault(events: readonly Record<string, unknown>[]): Promise<string> {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-event-ledger-"));
+
+  await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+  await writeFile(
+    path.join(vaultRoot, "vault.json"),
+    `${JSON.stringify({
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      title: "Event ledger vault",
+      timezone: "UTC",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(vaultRoot, "ledger/events/2026/2026-07.jsonl"),
+    `${events.map((event) =>
+      JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        ...event,
+      })
+    ).join("\n")}\n`,
+    "utf8",
+  );
+
+  return vaultRoot;
+}
+
 interface MetricSampleInput {
   id: string;
   metric: string;
@@ -4532,7 +4562,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // Pin the literal version: a revert of the latest bump would keep every
       // constant-relative assertion green while legacy stores still carried old
       // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 13);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 15);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -5240,7 +5270,507 @@ test("importer sleep keys, canonical day keys, and losing providers all resolve 
   }
 });
 
-test("listMetricPointsRuntime rebuilds v11 full-payload projections before serving metric points", async () => {
+test("listMetricPointsRuntime suppresses invalid Apple HealthKit zero sleep totals without a direct provider", async () => {
+  const date = "2026-07-07";
+  const startAt = "2026-07-07T08:17:04.000Z";
+  const endAt = "2026-07-07T14:02:56.000Z";
+  const appleOrigin = {
+    version: 1,
+    aggregatorProvider: "junction",
+    normalizerVersion: "junction-sleep-stage-summary.v1",
+    sourceProviderSlug: "apple-health-kit",
+    sourceType: "unknown",
+  };
+  const appleRef = (resourceId: string, facet?: string) => ({
+    facet,
+    resourceId,
+    resourceType: "junction-apple-health-kit-sleep",
+    system: "junction",
+  });
+  const appleMetric = (input: {
+    id: string;
+    metric: string;
+    resourceId: string;
+    unit: string;
+    value: number;
+  }) => ({
+    id: input.id,
+    kind: "observation",
+    occurredAt: endAt,
+    recordedAt: "2026-07-07T18:53:32.000Z",
+    dayKey: date,
+    source: "device",
+    title: `Apple ${input.metric}`,
+    metric: input.metric,
+    value: input.value,
+    unit: input.unit,
+    dataOrigin: appleOrigin,
+    externalRef: appleRef(input.resourceId, input.metric),
+  });
+  const zeroRecordIds = [
+    "evt_apple_projection_zero_total",
+    "evt_apple_projection_zero_efficiency",
+    "evt_apple_projection_zero_deep",
+    "evt_apple_projection_zero_rem",
+    "evt_apple_projection_zero_light",
+  ];
+  const vaultRoot = await createEventLedgerVault([
+    {
+      id: "evt_apple_projection_sleep_window",
+      kind: "sleep_session",
+      occurredAt: endAt,
+      recordedAt: "2026-07-07T18:53:32.000Z",
+      dayKey: date,
+      source: "device",
+      title: "Apple overnight sleep",
+      startAt,
+      endAt,
+      durationMinutes: 346,
+      dataOrigin: appleOrigin,
+      externalRef: appleRef("sleep-apple-projection-zero"),
+    },
+    appleMetric({
+      id: "evt_apple_projection_zero_total",
+      metric: "sleep-total-minutes",
+      resourceId: "sleep-apple-projection-zero",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_projection_zero_efficiency",
+      metric: "sleep-efficiency",
+      resourceId: "sleep-apple-projection-zero",
+      unit: "%",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_projection_zero_deep",
+      metric: "sleep-deep-minutes",
+      resourceId: "sleep-stage-apple-projection-zero",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_projection_zero_rem",
+      metric: "sleep-rem-minutes",
+      resourceId: "sleep-stage-apple-projection-zero",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_projection_zero_light",
+      metric: "sleep-light-minutes",
+      resourceId: "sleep-stage-apple-projection-zero",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_projection_awake",
+      metric: "sleep-awake-minutes",
+      resourceId: "sleep-stage-apple-projection-zero",
+      unit: "minutes",
+      value: 18.5,
+    }),
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const totalSleep = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      metricKey: "total-sleep-minutes",
+      to: date,
+    });
+    const allDayPoints = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      to: date,
+    });
+
+    assert.equal(totalSleep.length, 0);
+    assert.equal(
+      allDayPoints.some((point) => zeroRecordIds.includes(point.source.recordId)),
+      false,
+    );
+    assert.equal(
+      allDayPoints.some((point) => point.source.recordId === "evt_apple_projection_awake"),
+      true,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("listMetricPointsRuntime suppresses invalid Apple HealthKit zero totals beside WHOOP sleep", async () => {
+  const date = "2026-07-07";
+  const startAt = "2026-07-07T08:17:04.000Z";
+  const endAt = "2026-07-07T14:02:56.000Z";
+  const origin = (sourceProviderSlug: string) => ({
+    version: 1,
+    aggregatorProvider: "junction",
+    normalizerVersion: sourceProviderSlug === "apple-health-kit"
+      ? "junction-sleep-stage-summary.v1"
+      : undefined,
+    sourceProviderSlug,
+    sourceType: "unknown",
+  });
+  const externalRef = (sourceProviderSlug: string, resourceId: string, facet?: string) => ({
+    facet,
+    resourceId,
+    resourceType: `junction-${sourceProviderSlug}-sleep`,
+    system: "junction",
+  });
+  const sleepWindow = (input: {
+    id: string;
+    resourceId: string;
+    sourceProviderSlug: string;
+  }) => ({
+    id: input.id,
+    kind: "sleep_session",
+    occurredAt: endAt,
+    recordedAt: input.sourceProviderSlug === "whoop-v2"
+      ? "2026-07-07T14:24:36.000Z"
+      : "2026-07-07T18:53:32.000Z",
+    dayKey: date,
+    source: "device",
+    title: `${input.sourceProviderSlug} overnight sleep`,
+    startAt,
+    endAt,
+    durationMinutes: 346,
+    dataOrigin: origin(input.sourceProviderSlug),
+    externalRef: externalRef(input.sourceProviderSlug, input.resourceId),
+  });
+  const sleepMetric = (input: {
+    id: string;
+    metric: string;
+    resourceId: string;
+    sourceProviderSlug: string;
+    unit: string;
+    value: number;
+  }) => ({
+    id: input.id,
+    kind: "observation",
+    occurredAt: endAt,
+    recordedAt: input.sourceProviderSlug === "whoop-v2"
+      ? "2026-07-07T14:24:36.000Z"
+      : "2026-07-07T18:53:32.000Z",
+    dayKey: date,
+    source: "device",
+    title: `${input.sourceProviderSlug} ${input.metric}`,
+    metric: input.metric,
+    value: input.value,
+    unit: input.unit,
+    dataOrigin: origin(input.sourceProviderSlug),
+    externalRef: externalRef(input.sourceProviderSlug, input.resourceId, input.metric),
+  });
+  const vaultRoot = await createEventLedgerVault([
+    sleepWindow({
+      id: "evt_whoop_projection_sleep_window",
+      resourceId: "sleep-whoop-projection-valid",
+      sourceProviderSlug: "whoop-v2",
+    }),
+    sleepWindow({
+      id: "evt_apple_projection_duplicate_sleep_window",
+      resourceId: "sleep-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+    }),
+    sleepMetric({
+      id: "evt_whoop_projection_total",
+      metric: "sleep-total-minutes",
+      resourceId: "sleep-whoop-projection-valid",
+      sourceProviderSlug: "whoop-v2",
+      unit: "minutes",
+      value: 327.3667,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_zero_total",
+      metric: "sleep-total-minutes",
+      resourceId: "sleep-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "minutes",
+      value: 0,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_zero_efficiency",
+      metric: "sleep-efficiency",
+      resourceId: "sleep-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "%",
+      value: 0,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_zero_deep",
+      metric: "sleep-deep-minutes",
+      resourceId: "sleep-stage-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "minutes",
+      value: 0,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_zero_rem",
+      metric: "sleep-rem-minutes",
+      resourceId: "sleep-stage-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "minutes",
+      value: 0,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_zero_light",
+      metric: "sleep-light-minutes",
+      resourceId: "sleep-stage-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "minutes",
+      value: 0,
+    }),
+    sleepMetric({
+      id: "evt_apple_projection_duplicate_awake",
+      metric: "sleep-awake-minutes",
+      resourceId: "sleep-stage-apple-projection-duplicate-zero",
+      sourceProviderSlug: "apple-health-kit",
+      unit: "minutes",
+      value: 18.5,
+    }),
+  ]);
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    const totalSleep = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      metricKey: "total-sleep-minutes",
+      to: date,
+    });
+
+    assert.equal(totalSleep.length, 1);
+    assert.equal(totalSleep[0]?.value, 327.3667);
+    assert.equal(totalSleep[0]?.source.family, "derived");
+    assert.notEqual(totalSleep[0]?.source.kind, "observation");
+    assert.equal(
+      totalSleep.some((point) => point.source.recordId === "evt_apple_projection_duplicate_zero_total"),
+      false,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("wearable projection preserves valid Apple HealthKit cycle fallback zero stages beside stale zero summaries", () => {
+  const date = "2026-07-07";
+  const startAt = "2026-07-07T08:17:04.000Z";
+  const endAt = "2026-07-07T14:02:56.000Z";
+  const appleOrigin = (normalizerVersion?: string) => ({
+    version: 1,
+    aggregatorProvider: "junction",
+    normalizerVersion,
+    sourceProviderSlug: "apple-health-kit",
+    sourceType: "unknown",
+  });
+  const appleRef = (resourceId: string, facet?: string) => ({
+    facet,
+    resourceId,
+    resourceType: "junction-apple-health-kit-sleep",
+    system: "junction",
+  });
+  const eventEntity = (input: {
+    attributes: Record<string, unknown>;
+    id: string;
+    kind: string;
+    occurredAt: string;
+    title: string;
+  }): CanonicalEntity => ({
+    attributes: input.attributes,
+    body: null,
+    date,
+    entityId: input.id,
+    experimentSlug: null,
+    family: "event",
+    frontmatter: null,
+    kind: input.kind,
+    links: [],
+    lookupIds: [input.id],
+    occurredAt: input.occurredAt,
+    path: `ledger/events/${input.id}.jsonl`,
+    primaryLookupId: input.id,
+    recordClass: "ledger",
+    relatedIds: [],
+    status: null,
+    stream: null,
+    tags: [],
+    title: input.title,
+  });
+  const appleMetric = (input: {
+    id: string;
+    metric: string;
+    normalizerVersion?: string;
+    resourceId: string;
+    unit: string;
+    value: number;
+  }): CanonicalEntity => eventEntity({
+    attributes: {
+      dayKey: date,
+      dataOrigin: appleOrigin(input.normalizerVersion),
+      externalRef: appleRef(input.resourceId, input.metric),
+      metric: input.metric,
+      recordedAt: input.normalizerVersion === "junction-sleep-stage-cycle-fallback.v1"
+        ? "2026-07-07T18:54:32.000Z"
+        : "2026-07-07T18:53:32.000Z",
+      unit: input.unit,
+      value: input.value,
+    },
+    id: input.id,
+    kind: "observation",
+    occurredAt: endAt,
+    title: `Apple ${input.metric}`,
+  });
+  const staleSummaryRecordIds = [
+    "evt_apple_cycle_stale_zero_total",
+    "evt_apple_cycle_stale_zero_efficiency",
+    "evt_apple_cycle_stale_zero_deep",
+    "evt_apple_cycle_stale_zero_rem",
+    "evt_apple_cycle_stale_zero_light",
+  ];
+  const staleSummaryNormalizer = "junction-sleep-stage-summary.v1";
+  const cycleFallbackNormalizer = "junction-sleep-stage-cycle-fallback.v1";
+  const sleepWindow = eventEntity({
+    attributes: {
+      dataOrigin: appleOrigin(),
+      dayKey: date,
+      durationMinutes: 346,
+      endAt,
+      externalRef: appleRef("sleep-apple-cycle-window"),
+      recordedAt: "2026-07-07T18:53:32.000Z",
+      startAt,
+    },
+    id: "evt_apple_cycle_sleep_window",
+    kind: "sleep_session",
+    occurredAt: endAt,
+    title: "Apple overnight sleep",
+  });
+  const staleSummaryEvents = [
+    appleMetric({
+      id: "evt_apple_cycle_stale_zero_total",
+      metric: "sleep-total-minutes",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-apple-cycle-window",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_stale_zero_efficiency",
+      metric: "sleep-efficiency",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-apple-cycle-window",
+      unit: "%",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_stale_zero_deep",
+      metric: "sleep-deep-minutes",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_stale_zero_rem",
+      metric: "sleep-rem-minutes",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_stale_zero_light",
+      metric: "sleep-light-minutes",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_awake",
+      metric: "sleep-awake-minutes",
+      normalizerVersion: staleSummaryNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 18.5,
+    }),
+  ];
+  const cycleFallbackEvents = [
+    appleMetric({
+      id: "evt_apple_cycle_deep",
+      metric: "sleep-deep-minutes",
+      normalizerVersion: cycleFallbackNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 120,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_rem_zero",
+      metric: "sleep-rem-minutes",
+      normalizerVersion: cycleFallbackNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 0,
+    }),
+    appleMetric({
+      id: "evt_apple_cycle_light",
+      metric: "sleep-light-minutes",
+      normalizerVersion: cycleFallbackNormalizer,
+      resourceId: "sleep-stage-apple-cycle",
+      unit: "minutes",
+      value: 300,
+    }),
+  ];
+
+  for (const eventOrder of ["stale-first", "cycle-first"] as const) {
+    const vault = createVaultReadModel({
+      entities: [
+        sleepWindow,
+        ...(eventOrder === "stale-first"
+          ? [...staleSummaryEvents, ...cycleFallbackEvents]
+          : [...cycleFallbackEvents, ...staleSummaryEvents]),
+      ],
+      metadata: null,
+      vaultRoot: "/tmp/wearables-junction-apple-cycle-fallback",
+    });
+    const [night] = summarizeWearableSleep(vault, { date });
+    const projection = buildMetricProjection(vault);
+    const totalSleep = projection.metricPoints.filter((point) =>
+      point.effectiveDate === date && point.metricKey === "total-sleep-minutes"
+    );
+    const remSleep = projection.metricPoints.filter((point) =>
+      point.effectiveDate === date && point.metricKey === "rem-sleep-minutes"
+    );
+    const allDayPoints = projection.metricPoints.filter((point) => point.effectiveDate === date);
+
+    assert.equal(night?.remMinutes.selection.value, 0, eventOrder);
+    assert.equal(night?.totalSleepMinutes.selection.value, 420, eventOrder);
+    assert.equal(night?.totalSleepMinutes.selection.sourceFamily, "derived", eventOrder);
+    assert.equal(night?.totalSleepMinutes.selection.sourceKind, "sleep-stage-total", eventOrder);
+    assert.equal(totalSleep.length, 1, eventOrder);
+    assert.equal(totalSleep[0]?.value, 420, eventOrder);
+    assert.equal(
+      remSleep.some((point) => point.source.recordId === "evt_apple_cycle_rem_zero" && point.value === 0),
+      true,
+      eventOrder,
+    );
+    assert.equal(
+      allDayPoints.some((point) => staleSummaryRecordIds.includes(point.source.recordId)),
+      false,
+      eventOrder,
+    );
+    assert.equal(
+      allDayPoints.some((point) => point.source.recordId === "evt_apple_cycle_rem_zero"),
+      true,
+      eventOrder,
+    );
+  }
+});
+
+test("listMetricPointsRuntime rebuilds v14 wearable-summary projections before serving metric points", async () => {
   const vaultRoot = await createMetricObservationVault([
     {
       id: "evt_metric_observation_caffeine_rebuild_01",
@@ -5260,7 +5790,7 @@ test("listMetricPointsRuntime rebuilds v11 full-payload projections before servi
     const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
     try {
       staleDatabase.exec(`
-        PRAGMA user_version = 11;
+        PRAGMA user_version = 14;
         DELETE FROM query_metric_points;
       `);
     } finally {

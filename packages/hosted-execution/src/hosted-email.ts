@@ -17,22 +17,37 @@ export const HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH =
   "/api/internal/hosted-execution/email/register-reply-alias";
 export const HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH =
   "/api/internal/hosted-execution/email/resolve-route";
+export const HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH =
+  "/api/internal/hosted-execution/email/group-recipients";
 
 const CURRENT_HOSTED_EMAIL_ROUTE_ALIAS_KEY_HEX_LENGTH = 32;
 const CURRENT_HOSTED_EMAIL_ROUTE_BASE36_LENGTH = 25;
+const CURRENT_HOSTED_EMAIL_GROUP_ID_RANDOM_HEX_LENGTH = 24;
+const CURRENT_HOSTED_EMAIL_GROUP_ID_BASE36_LENGTH = 19;
+const CURRENT_HOSTED_EMAIL_GROUP_ID_SUFFIX_BYTES = 12;
+const CURRENT_HOSTED_EMAIL_GROUP_ID_PREFIX = "hgrp_";
+const CURRENT_HOSTED_EMAIL_RAW_GROUP_ID_MAX_LENGTH = 23;
 const BASE36_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const CURRENT_HOSTED_EMAIL_ALIAS_KEY_PATTERN = new RegExp(
   `^[0-9a-f]{${CURRENT_HOSTED_EMAIL_ROUTE_ALIAS_KEY_HEX_LENGTH}}$`,
   "u",
 );
-const CURRENT_HOSTED_EMAIL_BASE36_SEGMENT_PATTERN = new RegExp(
-  `^[0-9a-z]{${CURRENT_HOSTED_EMAIL_ROUTE_BASE36_LENGTH}}$`,
-  "u",
-);
+const HOSTED_EMAIL_BASE36_SEGMENT_PATTERN = /^[0-9a-z]+$/u;
 const CURRENT_HOSTED_EMAIL_ROUTE_TOKEN_PATTERN = new RegExp(
   [
     "^u2-",
     `(?<aliasKey>[0-9a-z]{${CURRENT_HOSTED_EMAIL_ROUTE_BASE36_LENGTH}})`,
+    "-",
+    `(?<signature>[0-9a-z]{${CURRENT_HOSTED_EMAIL_ROUTE_BASE36_LENGTH}})`,
+    "$",
+  ].join(""),
+  "u",
+);
+const CURRENT_HOSTED_EMAIL_GROUP_ROUTE_TOKEN_PATTERN = new RegExp(
+  [
+    "^g2-",
+    `(?<groupToken>h[0-9a-z]{${CURRENT_HOSTED_EMAIL_GROUP_ID_BASE36_LENGTH}}|r[a-z0-9_]{1,${CURRENT_HOSTED_EMAIL_RAW_GROUP_ID_MAX_LENGTH}})`,
     "-",
     `(?<signature>[0-9a-z]{${CURRENT_HOSTED_EMAIL_ROUTE_BASE36_LENGTH}})`,
     "$",
@@ -48,12 +63,26 @@ export interface HostedEmailRouteResolutionCallbackRequest {
   aliasKey: string | null;
   authenticatedSender: HostedEmailAuthenticatedSenderVerdict | null;
   envelopeFrom: string | null;
+  groupId: string | null;
   hasRepeatedHeaderFrom: boolean;
   headerFrom: string | null;
 }
 
 export interface HostedEmailRouteResolutionCallbackResponse {
   userId: string | null;
+}
+
+export interface HostedEmailGroupRecipientsCallbackRequest {
+  groupId: string;
+}
+
+export interface HostedEmailGroupRecipient {
+  address: string;
+  memberId: string;
+}
+
+export interface HostedEmailGroupRecipientsCallbackResponse {
+  recipients: HostedEmailGroupRecipient[];
 }
 
 export interface HostedEmailAuthenticatedSenderVerdict {
@@ -65,6 +94,12 @@ export interface HostedEmailAuthenticatedSenderVerdict {
 export interface HostedEmailReplyAliasRoute {
   address: string;
   aliasKey: string;
+  token: string;
+}
+
+export interface HostedEmailGroupReplyAliasRoute {
+  address: string;
+  groupId: string;
   token: string;
 }
 
@@ -85,6 +120,29 @@ export async function createHostedEmailUserReplyAliasRoute(input: {
     localPart: input.localPart,
     signingSecret: input.signingSecret,
   });
+}
+
+export async function createHostedEmailGroupReplyAliasRoute(input: {
+  domain: string;
+  groupId: string;
+  localPart?: string | null;
+  signingSecret: string;
+}): Promise<HostedEmailGroupReplyAliasRoute> {
+  const groupId = requireHostedEmailGroupReplyAliasGroupId(input.groupId);
+  const token = await createHostedEmailGroupRouteToken({
+    groupId,
+    secret: input.signingSecret,
+  });
+
+  return {
+    address: formatHostedEmailReplyAliasAddress({
+      domain: input.domain,
+      localPart: input.localPart,
+      token,
+    }),
+    groupId,
+    token,
+  };
 }
 
 export async function createHostedEmailReplyAliasRoute(input: {
@@ -154,10 +212,30 @@ export async function createHostedEmailRouteToken(input: {
   return `u2-${encodedAliasKey}-${signature}`;
 }
 
+export async function createHostedEmailGroupRouteToken(input: {
+  groupId: string;
+  secret: string;
+}): Promise<string> {
+  const groupId = requireHostedEmailGroupReplyAliasGroupId(input.groupId);
+  const groupToken = encodeHostedEmailGroupIdForRouteToken(groupId);
+  if (!groupToken) {
+    throw new TypeError("Hosted email group reply alias group id is not encodable.");
+  }
+  const signature = await createHostedEmailGroupRouteSignature({
+    groupId,
+    secret: input.secret,
+  });
+  return `g2-${groupToken}-${signature}`;
+}
+
 export async function parseHostedEmailRouteToken(input: {
   secret: string;
   token: string;
-}): Promise<{ aliasKey: string } | null> {
+}): Promise<
+  | { aliasKey: string; groupId?: undefined }
+  | { aliasKey: null; groupId: string }
+  | null
+> {
   const token = input.token.trim().toLowerCase();
   const currentMatch = CURRENT_HOSTED_EMAIL_ROUTE_TOKEN_PATTERN.exec(token);
   if (currentMatch?.groups) {
@@ -180,6 +258,30 @@ export async function parseHostedEmailRouteToken(input: {
 
     return {
       aliasKey,
+    };
+  }
+
+  const groupMatch = CURRENT_HOSTED_EMAIL_GROUP_ROUTE_TOKEN_PATTERN.exec(token);
+  if (groupMatch?.groups) {
+    const groupId = decodeHostedEmailGroupIdFromRouteToken(groupMatch.groups.groupToken);
+    if (!groupId) {
+      return null;
+    }
+    const expected = await createHostedEmailGroupRouteSignature({
+      groupId,
+      secret: input.secret,
+    });
+    if (!constantTimeStringEqual(
+      expected,
+      groupMatch.groups.signature,
+      CURRENT_HOSTED_EMAIL_ROUTE_BASE36_LENGTH,
+    )) {
+      return null;
+    }
+
+    return {
+      aliasKey: null,
+      groupId,
     };
   }
   return null;
@@ -299,6 +401,7 @@ export function parseHostedEmailRouteResolutionCallbackRequest(
     aliasKey: normalizeHostedEmailCallbackString(record.aliasKey),
     authenticatedSender: parseHostedEmailAuthenticatedSenderVerdict(record.authenticatedSender),
     envelopeFrom: normalizeHostedEmailCallbackString(record.envelopeFrom),
+    groupId: normalizeHostedEmailCallbackString(record.groupId),
     hasRepeatedHeaderFrom: readHostedEmailCallbackBoolean(
       record.hasRepeatedHeaderFrom,
       "Hosted email route resolution callback request hasRepeatedHeaderFrom",
@@ -320,6 +423,42 @@ export function parseHostedEmailRouteResolutionCallbackResponse(
       record.userId,
       "Hosted email route resolution callback response userId",
     ),
+  };
+}
+
+export function parseHostedEmailGroupRecipientsCallbackRequest(
+  value: unknown,
+): HostedEmailGroupRecipientsCallbackRequest {
+  const record = requireObject(value, "Hosted email group recipients callback request");
+  const groupId = normalizeHostedEmailCallbackString(record.groupId);
+  if (!groupId) {
+    throw new TypeError("Hosted email group recipients callback request groupId must be present.");
+  }
+
+  return { groupId };
+}
+
+export function parseHostedEmailGroupRecipientsCallbackResponse(
+  value: unknown,
+): HostedEmailGroupRecipientsCallbackResponse {
+  const record = requireObject(value, "Hosted email group recipients callback response");
+  const entries = Array.isArray(record.recipients) ? record.recipients : null;
+  if (!entries) {
+    throw new TypeError("Hosted email group recipients callback response recipients must be an array.");
+  }
+
+  return {
+    recipients: entries.map((entry) => {
+      const recipient = requireObject(entry, "Hosted email group recipients callback response recipient");
+      const memberId = normalizeHostedEmailCallbackString(recipient.memberId);
+      const address = normalizeHostedEmailAddress(
+        normalizeHostedEmailCallbackString(recipient.address),
+      );
+      if (!memberId || !address) {
+        throw new TypeError("Hosted email group recipient must include a memberId and address.");
+      }
+      return { address, memberId };
+    }),
   };
 }
 
@@ -370,6 +509,26 @@ function requireHostedEmailReplyAliasLookupKey(value: string): string {
   return aliasKey;
 }
 
+function requireHostedEmailGroupReplyAliasGroupId(value: string): string {
+  const groupId = normalizeHostedEmailGroupReplyAliasGroupId(value);
+  if (!groupId) {
+    throw new TypeError(
+      "Hosted email group reply alias group id must be a supported hosted group id.",
+    );
+  }
+
+  return groupId;
+}
+
+function normalizeHostedEmailGroupReplyAliasGroupId(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeHostedExecutionString(value);
+  return normalized && encodeHostedEmailGroupIdForRouteToken(normalized)
+    ? normalized
+    : null;
+}
+
 async function createHostedEmailRouteHash(input: {
   payload: string;
   secret: string;
@@ -404,16 +563,113 @@ async function createHostedEmailRouteSignature(input: {
   return encodeFixedBase36Hex(signatureHex);
 }
 
+async function createHostedEmailGroupRouteSignature(input: {
+  groupId: string;
+  secret: string;
+}): Promise<string> {
+  const groupId = requireHostedEmailGroupReplyAliasGroupId(input.groupId);
+  const signatureHex = (await createHostedEmailRouteHash({
+    payload: `g2:${groupId}`,
+    secret: input.secret,
+  })).slice(0, CURRENT_HOSTED_EMAIL_ROUTE_ALIAS_KEY_HEX_LENGTH);
+
+  return encodeFixedBase36Hex(signatureHex);
+}
+
+function encodeHostedEmailGroupIdForRouteToken(groupId: string): string | null {
+  const productionSuffix = readHostedEmailProductionGroupIdSuffix(groupId);
+  if (productionSuffix) {
+    const bytes = decodeBase64UrlBytes(productionSuffix);
+    if (bytes?.length !== CURRENT_HOSTED_EMAIL_GROUP_ID_SUFFIX_BYTES) {
+      return null;
+    }
+    return `h${encodeFixedBase36HexSegment(
+      bytesToHex(bytes),
+      CURRENT_HOSTED_EMAIL_GROUP_ID_RANDOM_HEX_LENGTH,
+      CURRENT_HOSTED_EMAIL_GROUP_ID_BASE36_LENGTH,
+    )}`;
+  }
+
+  if (
+    groupId.length > 0
+    && groupId.length <= CURRENT_HOSTED_EMAIL_RAW_GROUP_ID_MAX_LENGTH
+    && /^[a-z0-9_]+$/u.test(groupId)
+  ) {
+    return `r${groupId}`;
+  }
+
+  return null;
+}
+
+function decodeHostedEmailGroupIdFromRouteToken(groupToken: string): string | null {
+  if (groupToken.startsWith("h")) {
+    const hex = decodeFixedBase36HexSegment(
+      groupToken.slice(1),
+      CURRENT_HOSTED_EMAIL_GROUP_ID_RANDOM_HEX_LENGTH,
+      CURRENT_HOSTED_EMAIL_GROUP_ID_BASE36_LENGTH,
+    );
+    if (!hex) {
+      return null;
+    }
+    return `${CURRENT_HOSTED_EMAIL_GROUP_ID_PREFIX}${encodeBase64UrlBytes(hexToBytes(hex))}`;
+  }
+
+  if (groupToken.startsWith("r")) {
+    const groupId = groupToken.slice(1);
+    return /^[a-z0-9_]+$/u.test(groupId) ? groupId : null;
+  }
+
+  return null;
+}
+
+function readHostedEmailProductionGroupIdSuffix(groupId: string): string | null {
+  if (!groupId.startsWith(CURRENT_HOSTED_EMAIL_GROUP_ID_PREFIX)) {
+    return null;
+  }
+  const suffix = groupId.slice(CURRENT_HOSTED_EMAIL_GROUP_ID_PREFIX.length);
+  return /^[A-Za-z0-9_-]{16}$/u.test(suffix) ? suffix : null;
+}
+
 function encodeFixedBase36Hex(hex: string): string {
-  const normalized = requireHostedEmailReplyAliasLookupKey(hex);
+  return encodeFixedBase36HexSegment(
+    hex,
+    CURRENT_HOSTED_EMAIL_ROUTE_ALIAS_KEY_HEX_LENGTH,
+    CURRENT_HOSTED_EMAIL_ROUTE_BASE36_LENGTH,
+  );
+}
+
+function encodeFixedBase36HexSegment(
+  hex: string,
+  hexLength: number,
+  base36Length: number,
+): string {
+  const normalized = normalizeFixedHexSegment(hex, hexLength);
+  if (!normalized) {
+    throw new TypeError("Hosted email fixed-width hex segment is invalid.");
+  }
 
   return BigInt(`0x${normalized}`)
     .toString(36)
-    .padStart(CURRENT_HOSTED_EMAIL_ROUTE_BASE36_LENGTH, "0");
+    .padStart(base36Length, "0");
 }
 
 function decodeFixedBase36Hex(value: string): string | null {
-  if (!CURRENT_HOSTED_EMAIL_BASE36_SEGMENT_PATTERN.test(value)) {
+  return decodeFixedBase36HexSegment(
+    value,
+    CURRENT_HOSTED_EMAIL_ROUTE_ALIAS_KEY_HEX_LENGTH,
+    CURRENT_HOSTED_EMAIL_ROUTE_BASE36_LENGTH,
+  );
+}
+
+function decodeFixedBase36HexSegment(
+  value: string,
+  hexLength: number,
+  base36Length: number,
+): string | null {
+  if (
+    value.length !== base36Length
+    || !HOSTED_EMAIL_BASE36_SEGMENT_PATTERN.test(value)
+  ) {
     return null;
   }
 
@@ -426,13 +682,82 @@ function decodeFixedBase36Hex(value: string): string | null {
     parsed = parsed * 36n + BigInt(digit);
   }
 
-  if (parsed >= 2n ** BigInt((CURRENT_HOSTED_EMAIL_ROUTE_ALIAS_KEY_HEX_LENGTH / 2) * 8)) {
+  if (parsed >= 2n ** BigInt((hexLength / 2) * 8)) {
     return null;
   }
 
   return parsed
     .toString(16)
-    .padStart(CURRENT_HOSTED_EMAIL_ROUTE_ALIAS_KEY_HEX_LENGTH, "0");
+    .padStart(hexLength, "0");
+}
+
+function normalizeFixedHexSegment(value: string, hexLength: number): string | null {
+  const normalized = value.trim().toLowerCase();
+  return normalized.length === hexLength && /^[0-9a-f]+$/u.test(normalized)
+    ? normalized
+    : null;
+}
+
+function decodeBase64UrlBytes(value: string): Uint8Array | null {
+  let buffer = 0;
+  let bitCount = 0;
+  const bytes: number[] = [];
+
+  for (const character of value) {
+    const digit = BASE64URL_ALPHABET.indexOf(character);
+    if (digit < 0) {
+      return null;
+    }
+    buffer = (buffer << 6) | digit;
+    bitCount += 6;
+    while (bitCount >= 8) {
+      bitCount -= 8;
+      bytes.push((buffer >> bitCount) & 0xff);
+      buffer &= (1 << bitCount) - 1;
+    }
+  }
+
+  if (bitCount > 0 && buffer !== 0) {
+    return null;
+  }
+
+  return new Uint8Array(bytes);
+}
+
+function encodeBase64UrlBytes(bytes: Uint8Array): string {
+  let buffer = 0;
+  let bitCount = 0;
+  let output = "";
+
+  for (const byte of bytes) {
+    buffer = (buffer << 8) | byte;
+    bitCount += 8;
+    while (bitCount >= 6) {
+      bitCount -= 6;
+      output += BASE64URL_ALPHABET[(buffer >> bitCount) & 0x3f];
+      buffer &= (1 << bitCount) - 1;
+    }
+  }
+
+  if (bitCount > 0) {
+    output += BASE64URL_ALPHABET[(buffer << (6 - bitCount)) & 0x3f];
+  }
+
+  return output;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes: number[] = [];
+  for (let index = 0; index < hex.length; index += 2) {
+    bytes.push(Number.parseInt(hex.slice(index, index + 2), 16));
+  }
+  return new Uint8Array(bytes);
 }
 
 function constantTimeStringEqual(left: string, right: string, expectedLength: number): boolean {

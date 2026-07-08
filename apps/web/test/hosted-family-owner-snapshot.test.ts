@@ -33,7 +33,11 @@ beforeEach(() => {
   process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://app.murph.test";
   process.env.HOSTED_CONTACT_PRIVACY_KEYS = "v1:MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
   process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
-  encryptionMocks.decryptHostedWebNullableString.mockResolvedValue(RAW_PHONE);
+  // Value-aware so a null encrypted field decrypts to null: a phone-only invite
+  // has no Telegram username, so it must not read as Telegram-bound.
+  encryptionMocks.decryptHostedWebNullableString.mockImplementation(
+    async (input: { value: string | null }) => (input.value ? RAW_PHONE : null),
+  );
 });
 
 afterEach(() => {
@@ -118,8 +122,52 @@ test("owner snapshot maps seats, member labels, masked phone, and share links", 
   expect(invite?.targetLabel).toBe("Dad");
   expect(invite?.targetPhoneHint).toBeTruthy();
   expect(invite?.targetPhoneHint).not.toBe(RAW_PHONE);
-  expect(invite?.telegramInviteUrl).toBe("https://t.me/withmurph_bot?start=family_CODEDAD");
+  // Dad is a phone-bound invite: no Telegram link, even though a bot is configured.
+  expect(invite?.telegramInviteUrl).toBeNull();
   expect(invite?.acceptUrl).toBe("https://app.murph.test/family/accept/CODEDAD");
+});
+
+test("owner snapshot exposes a Telegram link only for a Telegram-bound invite", async () => {
+  const prisma = {
+    hostedAccountGroup: { findUnique: vi.fn().mockResolvedValue(GROUP) },
+    hostedAccountGroupBillingRef: {
+      findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
+    },
+    hostedAccountGroupInvite: {
+      findMany: vi.fn(({ where }: { where: { status: string } }) =>
+        where.status === "accepted"
+          ? Promise.resolve([])
+          : Promise.resolve([
+              {
+                channel: "family",
+                expiresAt: FUTURE,
+                group: GROUP,
+                id: "inv_uncle",
+                inviteCode: "CODETG",
+                status: "pending",
+                targetLabel: "Uncle",
+                targetTelegramUsernameEncrypted: "enc:uncle",
+              },
+            ]),
+      ),
+    },
+    hostedAccountGroupMembership: {
+      findMany: vi.fn().mockResolvedValue([
+        { joinedAt: NOW, memberId: "m_owner", role: "owner", status: "active" },
+      ]),
+    },
+  };
+
+  const snapshot = await readHostedFamilyOwnerSnapshotForMember({
+    // @ts-expect-error: focused prisma double exposes only the methods under test
+    prisma,
+    memberId: "m_owner",
+    now: NOW,
+  });
+
+  expect(snapshot?.invites[0]?.telegramInviteUrl).toBe(
+    "https://t.me/withmurph_bot?start=family_CODETG",
+  );
 });
 
 test("active member identity falls back to the invited email when there is no label", async () => {
@@ -192,6 +240,7 @@ function acceptanceViewPrisma(input: {
   status: string;
   targetEmailLookupKey?: string | null;
   targetPhoneLookupKey: string | null;
+  targetTelegramUsernameLookupKey?: string | null;
 }) {
   return {
     hostedAccountGroupInvite: {
@@ -204,6 +253,8 @@ function acceptanceViewPrisma(input: {
         targetEmailLookupKey: input.targetEmailLookupKey ?? null,
         targetLabel: "Dad",
         targetPhoneLookupKey: input.targetPhoneLookupKey,
+        targetPhoneNumberEncrypted: input.targetPhoneLookupKey ? "enc:dad-phone" : null,
+        targetTelegramUsernameLookupKey: input.targetTelegramUsernameLookupKey ?? null,
       }),
     },
     hostedAccountGroupMembership: {
@@ -211,6 +262,12 @@ function acceptanceViewPrisma(input: {
     },
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
+    },
+    // No existing member matches the invited phone by default (findMany is the
+    // version-tolerant read the resolver uses), so the accept page falls back to
+    // a configured Murph line.
+    hostedMemberIdentity: {
+      findMany: vi.fn().mockResolvedValue([]),
     },
   };
 }
@@ -234,6 +291,9 @@ test("phone-bound invite to an active group is web-acceptable", async () => {
   expect(view).toMatchObject({
     groupActive: true,
     isPhoneBound: true,
+    isTelegramBound: false,
+    // No existing member matches, so the page falls back to a configured line.
+    messagesRecipientPhone: null,
     seatAvailable: true,
     status: "pending",
     webAcceptable: true,
@@ -266,7 +326,30 @@ test("email-bound invite to an active group is web-acceptable", async () => {
   });
 });
 
-test("Telegram/label-only invite is NOT web-acceptable (must use the chat link)", async () => {
+test("Telegram-bound invite exposes the Telegram link and is not web-acceptable", async () => {
+  const prisma = acceptanceViewPrisma({
+    activeMemberships: 2,
+    expiresAt: FUTURE,
+    pendingInvites: 1,
+    status: "pending",
+    targetPhoneLookupKey: null,
+    targetTelegramUsernameLookupKey: "lookup_telegram_dad",
+  });
+
+  const view = await readHostedFamilyInviteAcceptanceView({
+    // @ts-expect-error: focused prisma double
+    prisma,
+    inviteCode: "CODEDAD",
+    now: NOW,
+  });
+
+  expect(view?.isPhoneBound).toBe(false);
+  expect(view?.isTelegramBound).toBe(true);
+  expect(view?.webAcceptable).toBe(false);
+  expect(view?.telegramInviteUrl).toBe("https://t.me/withmurph_bot?start=family_CODEDAD");
+});
+
+test("label-only acceptance view offers unbound claim channels", async () => {
   const prisma = acceptanceViewPrisma({
     activeMemberships: 2,
     expiresAt: FUTURE,
@@ -283,8 +366,10 @@ test("Telegram/label-only invite is NOT web-acceptable (must use the chat link)"
   });
 
   expect(view?.isPhoneBound).toBe(false);
-  expect(view?.webAcceptable).toBe(false);
+  expect(view?.isTelegramBound).toBe(false);
+  expect(view?.webAcceptable).toBe(true);
   expect(view?.telegramInviteUrl).toBe("https://t.me/withmurph_bot?start=family_CODEDAD");
+  expect(view?.messagesRecipientPhone).toBeNull();
 });
 
 test("invite to an inactive (canceled) group is not web-acceptable", async () => {

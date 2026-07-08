@@ -27,10 +27,18 @@ const ASSISTANT_CODEX_RESUME_FAILURE_TRACE_SCHEMA =
   "murph.assistant-codex-resume-failure-diagnostics.v1";
 const ASSISTANT_CODEX_RESUME_FAILURE_TRACE_TYPE =
   "assistant.codex.resume_failure";
+const ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_TRACE_SCHEMA =
+  "murph.assistant-codex-fresh-thread-fallback-diagnostics.v1";
+const ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_TRACE_TYPE =
+  "assistant.codex.fresh_thread_fallback";
 const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   "murph.assistant-codex-app-server-timing.v1";
 const ASSISTANT_CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   "assistant.codex.app_server_timing";
+const ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
+  "murph.assistant-codex-transport-diagnostics.v1";
+const ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_TYPE =
+  "assistant.codex.transport_diagnostics";
 const ASSISTANT_CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA =
   "murph.assistant-codex-action-diagnostics.v1";
 const ASSISTANT_CODEX_ACTION_DIAGNOSTICS_TRACE_TYPE =
@@ -117,6 +125,19 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_PHRASE_VALUES = new Set([
   "timeout",
   "usage-limit",
 ]);
+const HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_PHASE_VALUES = new Set([
+  "fallback-failed",
+  "fallback-started",
+  "fallback-succeeded",
+]);
+const HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_REASON_VALUES = new Set([
+  "resume-transport-failure",
+]);
+const HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_RESULT_VALUES = new Set([
+  "failed",
+  "started",
+  "succeeded",
+]);
 const HOSTED_ASSISTANT_CODEX_PROCESS_SIGNAL_VALUES = new Set([
   "SIGINT",
   "SIGKILL",
@@ -150,6 +171,21 @@ const HOSTED_ASSISTANT_CODEX_APP_SERVER_TIMING_STAGE_VALUES = new Set([
   "warm-abort-poisoned",
   "warm-idle",
   "warm-reused",
+]);
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_EVENT_KIND_VALUES = new Set([
+  "stream-disconnected",
+  "stream-idle-timeout",
+  "stream-retry",
+  "transport-fallback",
+]);
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_METHOD_VALUES = new Set([
+  "error",
+  "warning",
+]);
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_VALUES = new Set([
+  "http",
+  "unknown",
+  "websocket",
 ]);
 const HOSTED_ASSISTANT_CODEX_ACTION_KIND_VALUES = new Set([
   "command.execution",
@@ -269,9 +305,46 @@ const HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_NUMBER_ARRAY_KEYS = [
   "codexResumeFailureOutputArrayLengths",
   "codexResumeFailureOutputStringLengths",
 ] as const;
+const HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_BOOLEAN_KEYS = [
+  "codexFreshThreadFallbackErrorMessagePresent",
+  "codexFreshThreadFallbackFailureSessionPresent",
+  "codexFreshThreadFallbackFailureTurnPresent",
+  "codexFreshThreadFallbackFallbackErrorMessagePresent",
+  "codexFreshThreadFallbackResumeMatchesFailureSession",
+  "codexFreshThreadFallbackResumeSessionPresent",
+  "codexFreshThreadFallbackSessionChanged",
+  "codexFreshThreadFallbackSessionPresent",
+  "codexFreshThreadFallbackTurnPresent",
+] as const;
+const HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_NUMBER_KEYS = [
+  "codexFreshThreadFallbackErrorMessageLength",
+  "codexFreshThreadFallbackEventCount",
+  "codexFreshThreadFallbackFailureEventCount",
+  "codexFreshThreadFallbackFailureProviderActionCount",
+  "codexFreshThreadFallbackFallbackErrorMessageLength",
+  "codexFreshThreadFallbackProviderActionCount",
+] as const;
 const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_BOOLEAN_KEYS = [
   "codexActionThreadIdPresent",
   "codexActionTurnIdPresent",
+] as const;
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_BOOLEAN_KEYS = [
+  "codexTransportAdditionalDetailsPresent",
+  "codexTransportErrorMessagePresent",
+  "codexTransportFallbackActivated",
+  "codexTransportIdleTimeout",
+  "codexTransportRetryExhausted",
+  "codexTransportStreamDisconnected",
+  "codexTransportTerminalAfterProviderAction",
+  "codexTransportThreadIdPresent",
+  "codexTransportTurnIdPresent",
+  "codexTransportWillRetry",
+] as const;
+const HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_NUMBER_KEYS = [
+  "codexTransportErrorMessageLength",
+  "codexTransportProviderActionCount",
+  "codexTransportRetryCount",
+  "codexTransportRetryMax",
 ] as const;
 const HOSTED_ASSISTANT_CODEX_ACTION_DIAGNOSTIC_NUMBER_KEYS = [
   "codexActionCachedInputUnitMax",
@@ -402,12 +475,30 @@ function readHostedAssistantProviderDiagnosticTrace(
     };
   }
 
+  const freshThreadFallbackDiagnostic =
+    readHostedAssistantCodexFreshThreadFallbackDiagnosticTrace(event);
+  if (freshThreadFallbackDiagnostic) {
+    return {
+      details: freshThreadFallbackDiagnostic,
+      message: "Hosted assistant Codex fresh-thread fallback diagnostics captured.",
+    };
+  }
+
   const appServerTimingDiagnostic =
     readHostedAssistantCodexAppServerTimingTrace(event);
   if (appServerTimingDiagnostic) {
     return {
       details: appServerTimingDiagnostic,
       message: "Hosted assistant Codex app-server timing captured.",
+    };
+  }
+
+  const transportDiagnostic =
+    readHostedAssistantCodexTransportDiagnosticTrace(event);
+  if (transportDiagnostic) {
+    return {
+      details: transportDiagnostic,
+      message: "Hosted assistant Codex transport diagnostics captured.",
     };
   }
 
@@ -932,6 +1023,111 @@ function readHostedAssistantCodexResumeFailureDiagnosticTrace(
   return details;
 }
 
+function readHostedAssistantCodexFreshThreadFallbackDiagnosticTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_TRACE_SCHEMA
+    || type !== ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {
+    codexFreshThreadFallbackTraceType: "fallback",
+    providerTraceKind: "codex.fresh_thread_fallback",
+    schema: ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_TRACE_SCHEMA,
+  };
+
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexFreshThreadFallbackPhase",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexFreshThreadFallbackPhase",
+      HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_PHASE_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexFreshThreadFallbackReason",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexFreshThreadFallbackReason",
+      HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_REASON_VALUES,
+    ),
+  );
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexFreshThreadFallbackResult",
+    readHostedAssistantProviderDiagnosticAllowedString(
+      record,
+      "codexFreshThreadFallbackResult",
+      HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_RESULT_VALUES,
+    ),
+  );
+  for (const key of [
+    "codexFreshThreadFallbackErrorCode",
+    "codexFreshThreadFallbackFallbackErrorCode",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticAllowedString(
+        record,
+        key,
+        HOSTED_ASSISTANT_CODEX_INVALID_OUTPUT_ERROR_CODES,
+      ),
+    );
+  }
+  for (const key of [
+    "codexFreshThreadFallbackErrorKind",
+    "codexFreshThreadFallbackFallbackErrorKind",
+  ] as const) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticAllowedString(
+        record,
+        key,
+        HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_KIND_VALUES,
+      ),
+    );
+  }
+  for (const key of HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_BOOLEAN_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticBoolean(record, key),
+    );
+  }
+  for (const key of HOSTED_ASSISTANT_CODEX_FRESH_THREAD_FALLBACK_NUMBER_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+    );
+  }
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
+    "codexFreshThreadFallbackErrorPhrases",
+    readHostedAssistantProviderDiagnosticAllowedStringArray(
+      record,
+      "codexFreshThreadFallbackErrorPhrases",
+      HOSTED_ASSISTANT_CODEX_RESUME_FAILURE_ERROR_PHRASE_VALUES,
+    ),
+  );
+
+  return details;
+}
+
 function readHostedAssistantCodexAppServerTimingTrace(
   event: unknown,
 ): HostedExecutionStructuredLogDetails | null {
@@ -991,6 +1187,68 @@ function readHostedAssistantCodexAppServerTimingTrace(
     readHostedAssistantProviderDiagnosticBoolean(record, "codexTimingTurnIdPresent"),
   );
 
+  return details;
+}
+
+function readHostedAssistantCodexTransportDiagnosticTrace(
+  event: unknown,
+): HostedExecutionStructuredLogDetails | null {
+  const record = readHostedAssistantProviderRawTraceRecord(event);
+  if (!record) {
+    return null;
+  }
+
+  const schema = readHostedAssistantProviderPlanString(record, "schema");
+  const type = readHostedAssistantProviderPlanString(record, "type");
+  if (
+    schema !== ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA
+    || type !== ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_TYPE
+  ) {
+    return null;
+  }
+
+  const eventKind = readHostedAssistantProviderDiagnosticAllowedString(
+    record,
+    "codexTransportEventKind",
+    HOSTED_ASSISTANT_CODEX_TRANSPORT_EVENT_KIND_VALUES,
+  );
+  const sourceMethod = readHostedAssistantProviderDiagnosticAllowedString(
+    record,
+    "codexTransportSourceMethod",
+    HOSTED_ASSISTANT_CODEX_TRANSPORT_METHOD_VALUES,
+  );
+  const transport = readHostedAssistantProviderDiagnosticAllowedString(
+    record,
+    "codexTransportTransport",
+    HOSTED_ASSISTANT_CODEX_TRANSPORT_VALUES,
+  );
+  if (!eventKind || !sourceMethod || !transport) {
+    return null;
+  }
+
+  const details: HostedExecutionStructuredLogDetails = {
+    codexTransportEventKind: eventKind,
+    codexTransportSourceMethod: sourceMethod,
+    codexTransportTraceType: "transport-diagnostics",
+    codexTransportTransport: transport,
+    providerTraceKind: "codex.transport_diagnostics",
+    schema: ASSISTANT_CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
+  };
+
+  for (const key of HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_BOOLEAN_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticBoolean(record, key),
+    );
+  }
+  for (const key of HOSTED_ASSISTANT_CODEX_TRANSPORT_DIAGNOSTIC_NUMBER_KEYS) {
+    maybeSetHostedAssistantProviderDiagnosticDetail(
+      details,
+      key,
+      readHostedAssistantProviderDiagnosticNonnegativeNumber(record, key),
+    );
+  }
   return details;
 }
 
@@ -1388,4 +1646,3 @@ function readHostedAssistantProviderDiagnosticNumberArray(
   );
   return output.length > 0 ? output : undefined;
 }
-

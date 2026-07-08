@@ -6,6 +6,17 @@ const vaultServicesMocks = vi.hoisted(() => ({
   writeExperimentOutcome: vi.fn(),
   showExperiment: vi.fn(),
 }))
+const coreMocks = vi.hoisted(() => ({
+  patchAutomation: vi.fn(),
+}))
+
+vi.mock('@murphai/core', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return {
+    ...actual,
+    patchAutomation: coreMocks.patchAutomation,
+  }
+})
 
 vi.mock('@murphai/vault-usecases/vault-services', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
@@ -22,7 +33,7 @@ vi.mock('@murphai/vault-usecases/vault-services', async (importOriginal) => {
   }
 })
 
-import { createExperiment, initializeVault, updateExperiment } from '@murphai/core'
+import { createExperiment, initializeVault, updateExperiment, VaultError } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
@@ -136,6 +147,9 @@ it('seeds stable day-four progress and final-results moments for an eligible act
   expect(finalResults?.instructions).not.toContain('outcome analyze')
   expect(finalResults?.instructions).not.toContain('vault-cli experiment outcome write')
   expect(finalResults?.instructions).toContain('persisted by the cron precondition')
+  expect(finalResults?.instructions).toContain(
+    'vault-cli automation set-status experiment-activity-nudge-sauna-rhr --status archived',
+  )
   expect(finalResults?.instructions).toContain('direct congratulations')
   expect(finalResults?.instructions).toContain('An inconclusive or sparse result is still a result')
   expect(finalResults?.instructions).toContain('voice memo may replace it')
@@ -262,6 +276,7 @@ function buildShowExperimentResult(frontmatter: Record<string, unknown>) {
 function resetPreconditionMocks() {
   vaultServicesMocks.writeExperimentOutcome.mockReset().mockResolvedValue({})
   vaultServicesMocks.showExperiment.mockReset()
+  coreMocks.patchAutomation.mockReset().mockResolvedValue({})
 }
 
 const FINAL_RESULTS_AUTOMATION_ID = 'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
@@ -276,6 +291,16 @@ const eligibleFrontmatter = {
   title: 'Sauna RHR',
   startedOn: '2026-04-01',
   runPlan: { interventionStart: '2026-04-08', interventionEnd: '2026-04-28' },
+}
+
+function eligibleFrontmatterInTimeZone(timeZone: string) {
+  return {
+    ...eligibleFrontmatter,
+    runPlan: {
+      ...eligibleFrontmatter.runPlan,
+      schedule: { kind: 'dailyLocal' as const, localTime: '09:00', timeZone },
+    },
+  }
 }
 
 it('persists the deterministic outcome with a pinned asOf for an eligible final-results run', async () => {
@@ -301,6 +326,159 @@ it('persists the deterministic outcome with a pinned asOf for an eligible final-
     // across cron retries crossing a UTC midnight boundary.
     asOf: '2026-04-28',
     requestId: null,
+  })
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
+  expect(
+    vaultServicesMocks.writeExperimentOutcome.mock.invocationCallOrder[0],
+  ).toBeLessThan(coreMocks.patchAutomation.mock.invocationCallOrder[0] ?? 0)
+})
+
+it('continues at the Auckland final-results fire instant using the experiment local day', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatterInTimeZone('Pacific/Auckland')),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    now: '2026-04-28T21:00:00.000Z',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith({
+    vault: '/tmp/lifecycle-precondition/vault',
+    lookup: FINAL_RESULTS_EXPERIMENT_ID,
+    asOf: '2026-04-28',
+    requestId: null,
+  })
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
+})
+
+it('keeps the still-running guard on the Auckland intervention-end local day', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatterInTimeZone('Pacific/Auckland')),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    now: '2026-04-27T21:00:00.000Z',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'skip', reason: 'experiment is still running' })
+  expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).not.toHaveBeenCalled()
+})
+
+it('continues at the New York final-results fire instant', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatterInTimeZone('America/New_York')),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    now: '2026-04-29T13:00:00.000Z',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({ asOf: '2026-04-28', lookup: FINAL_RESULTS_EXPERIMENT_ID }),
+  )
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
+})
+
+it('does not skip when the experiment timezone cannot be resolved at precondition time', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatter),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    now: '2026-04-28T12:00:00.000Z',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({ asOf: '2026-04-28', lookup: FINAL_RESULTS_EXPERIMENT_ID }),
+  )
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
+})
+
+it('treats a missing activity nudge automation as a successful final-results precondition cleanup', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatter),
+  )
+  coreMocks.patchAutomation
+    .mockReset()
+    .mockRejectedValue(new VaultError('VAULT_AUTOMATION_MISSING', 'Automation was not found.'))
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({ lookup: FINAL_RESULTS_EXPERIMENT_ID }),
+  )
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
+})
+
+it('does not block outcome persistence when activity nudge archive fails', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult(eligibleFrontmatter),
+  )
+  coreMocks.patchAutomation
+    .mockReset()
+    .mockRejectedValue(new Error('archive failed'))
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'continue' })
+  expect(vaultServicesMocks.writeExperimentOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({ lookup: FINAL_RESULTS_EXPERIMENT_ID }),
+  )
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
   })
 })
 
@@ -348,6 +526,11 @@ it('skips when the run was stopped early (endedOn before interventionEnd)', asyn
 
   expect(result.kind).toBe('skip')
   expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
 })
 
 it('skips when assistant support opts out of scheduled summaries', async () => {
@@ -367,6 +550,11 @@ it('skips when assistant support opts out of scheduled summaries', async () => {
 
   expect(result.kind).toBe('skip')
   expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
 })
 
 it('skips when the run is no longer in an active or completed state', async () => {
@@ -383,6 +571,66 @@ it('skips when the run is no longer in an active or completed state', async () =
 
   expect(result.kind).toBe('skip')
   expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
+})
+
+it('does not archive the activity nudge when final results are not due yet', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult({
+      ...eligibleFrontmatter,
+      runPlan: {
+        interventionStart: '2026-04-08',
+        interventionEnd: '2026-08-01',
+        schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' },
+      },
+    }),
+  )
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    now: '2026-07-07T12:00:00.000Z',
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({ kind: 'skip', reason: 'experiment is still running' })
+  expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).not.toHaveBeenCalled()
+})
+
+it('does not block a terminal skip verdict when activity nudge archive fails', async () => {
+  resetPreconditionMocks()
+  vaultServicesMocks.showExperiment.mockResolvedValue(
+    buildShowExperimentResult({
+      ...eligibleFrontmatter,
+      assistantSupport: { notificationStyle: 'skip_by_default' },
+    }),
+  )
+  coreMocks.patchAutomation
+    .mockReset()
+    .mockRejectedValue(new Error('archive failed'))
+
+  const result = await runExperimentLifecycleOutcomePrecondition({
+    automationId: FINAL_RESULTS_AUTOMATION_ID,
+    tags: ['experiment', 'final-results'],
+    vault: '/tmp/lifecycle-precondition/vault',
+  })
+
+  expect(result).toEqual({
+    kind: 'skip',
+    reason: 'assistant support opts out of scheduled summaries',
+  })
+  expect(vaultServicesMocks.writeExperimentOutcome).not.toHaveBeenCalled()
+  expect(coreMocks.patchAutomation).toHaveBeenCalledWith({
+    lookup: 'experiment-activity-nudge-sauna-rhr',
+    status: 'archived',
+    vaultRoot: '/tmp/lifecycle-precondition/vault',
+  })
 })
 
 it('skips when the authoritative lookup proves absence (not_found)', async () => {

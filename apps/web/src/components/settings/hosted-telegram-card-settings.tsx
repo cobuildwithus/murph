@@ -111,7 +111,7 @@ export function HostedTelegramCardSettings(props: {
           try {
             await onSynced?.(syncResult);
           } catch (error) {
-            setErrorMessage(toErrorMessage(error, "Telegram was linked, but we could not refresh the page state yet."));
+            setErrorMessage(toErrorMessage(error, "Telegram is linked, but the page didn't refresh. Reload to see it."));
           }
         }
       }

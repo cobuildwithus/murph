@@ -535,6 +535,7 @@ test('deliverAssistantMessage uses stored Linq thread bindings so one assistant 
     target: 'chat_123',
     targetKind: 'thread',
     message: 'Linq thread reply.',
+    answeredMailboxItemIds: [],
     replyToMessageId: null,
   })
   assert.equal(result.delivery.channel, 'linq')
@@ -586,6 +587,7 @@ test('deliverAssistantMessage forwards Linq reply anchors when one is available'
     target: 'chat_123',
     targetKind: 'thread',
     message: 'Anchored Linq reply.',
+    answeredMailboxItemIds: [],
     replyToMessageId: 'msg_parent_123',
   })
 })
@@ -1045,7 +1047,7 @@ test('sendLinqMessage posts Linq chat message payloads to the configured API bas
   })
 })
 
-test('sendLinqMessage includes reply_to when a parent Linq message id is provided', async () => {
+test('sendLinqMessage sends normal Linq chat messages when a parent message id is provided', async () => {
   const requests: Array<Record<string, unknown>> = []
 
   await sendLinqMessage(
@@ -1086,9 +1088,6 @@ test('sendLinqMessage includes reply_to when a parent Linq message id is provide
             value: 'Queued the Linq reply.',
           },
         ],
-        reply_to: {
-          message_id: 'msg_parent_123',
-        },
       },
     },
   ])

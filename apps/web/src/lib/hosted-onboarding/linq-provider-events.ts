@@ -26,6 +26,8 @@ export const HOSTED_LINQ_PROVIDER_EVENT_TYPES = [
   "message.delivered",
   "message.failed",
   "phone_number.status_updated",
+  "reaction.added",
+  "reaction.removed",
 ] as const;
 
 export type HostedLinqProviderEventType = typeof HOSTED_LINQ_PROVIDER_EVENT_TYPES[number];
@@ -44,6 +46,7 @@ export type ParsedHostedLinqProviderEvent = {
   failureCode: string | null;
   failureReason: string | null;
   linqChatId: string | null;
+  linqMessageId: string | null;
   linqChatLookupKey: string | null;
   messageIdSuffix: string | null;
   messageLookupKey: string | null;
@@ -58,6 +61,9 @@ export type ParsedHostedLinqProviderEvent = {
   providerCreatedAt: Date;
   providerReason: string | null;
   providerStatus: string | null;
+  reactionCustomEmoji: string | null;
+  reactionFromHandle: string | null;
+  reactionType: string | null;
   service: string | null;
   traceIdSuffix: string | null;
   webhookVersion: string | null;
@@ -102,6 +108,13 @@ export function parseHostedLinqProviderEvent(input: {
     });
   }
 
+  if (event.event_type === "reaction.added" || event.event_type === "reaction.removed") {
+    return parseHostedLinqReactionProviderEvent({
+      event,
+      rawBody: input.rawBody,
+    });
+  }
+
   return parseGenericHostedLinqProviderEvent({
     event,
     rawBody: input.rawBody,
@@ -110,6 +123,29 @@ export function parseHostedLinqProviderEvent(input: {
 
 export function isHostedLinqProviderEventType(value: string): value is HostedLinqProviderEventType {
   return (HOSTED_LINQ_PROVIDER_EVENT_TYPES as readonly string[]).includes(value);
+}
+
+export function normalizeHostedLinqGroupJoinOfferReaction(input: {
+  customEmoji?: string | null;
+  eventType: string;
+  reactionType?: string | null;
+}): "accept" | null {
+  if (input.eventType !== "reaction.added") {
+    return null;
+  }
+  const reactionType = normalizeReactionToken(input.reactionType);
+  if (
+    reactionType === "like"
+    || reactionType === "love"
+    || reactionType === "thumbs_up"
+    || reactionType === "thumbsup"
+    || reactionType === "heart"
+  ) {
+    return "accept";
+  }
+
+  const customEmoji = normalizeReactionEmoji(input.customEmoji);
+  return customEmoji === "👍" || customEmoji === "❤" ? "accept" : null;
 }
 
 function parseHostedLinqMessageReceivedProviderEvent(input: {
@@ -147,7 +183,100 @@ function parseHostedLinqMessageReceivedProviderEvent(input: {
     providerReason: null,
     providerStatus: null,
     rawBody: input.rawBody,
+    reactionCustomEmoji: null,
+    reactionFromHandle: null,
+    reactionType: null,
     service: normalizeNullableString(messageEvent.data.service),
+  });
+}
+
+function parseHostedLinqReactionProviderEvent(input: {
+  event: HostedLinqProviderWebhookEvent;
+  rawBody?: string | null;
+}): ParsedHostedLinqProviderEvent {
+  const data = readRecord(input.event.data);
+  const chatId = readFirstStringAtPaths(data, [
+    ["chat_id"],
+    ["chatId"],
+    ["chat", "id"],
+  ] as const);
+  const messageId = readFirstStringAtPaths(data, [
+    ["message_id"],
+    ["messageId"],
+    ["message", "id"],
+  ] as const);
+  const linePhoneNumber = normalizePhoneNumber(readFirstStringAtPaths(data, [
+    ["phone_number"],
+    ["phoneNumber"],
+    ["line", "phone_number"],
+    ["line", "phoneNumber"],
+    ["phone_line", "phone_number"],
+    ["phoneLine", "phoneNumber"],
+  ] as const));
+  const reactionType = readFirstStringAtPaths(data, [
+    ["reaction_type"],
+    ["reactionType"],
+    ["reaction", "type"],
+    ["type"],
+  ] as const);
+  const reactionCustomEmoji = readFirstStringAtPaths(data, [
+    ["custom_emoji"],
+    ["customEmoji"],
+    ["emoji"],
+    ["reaction", "custom_emoji"],
+    ["reaction", "customEmoji"],
+    ["reaction", "emoji"],
+  ] as const);
+  const reactionFromHandle = readFirstHandleAtPaths(data, [
+    ["from_handle"],
+    ["fromHandle"],
+    ["sender_handle"],
+    ["senderHandle"],
+    ["actor", "handle"],
+    ["reactor", "handle"],
+  ] as const);
+  const service = readFirstStringAtPaths(data, [
+    ["service"],
+    ["from_handle", "service"],
+    ["fromHandle", "service"],
+    ["sender_handle", "service"],
+    ["reaction", "service"],
+  ] as const);
+  const reactedAt = parseProviderDate(readFirstStringAtPaths(data, [
+    ["reacted_at"],
+    ["reactedAt"],
+    ["created_at"],
+    ["createdAt"],
+  ] as const));
+
+  return buildParsedProviderEvent({
+    chatId,
+    deliveryStatus: null,
+    direction: null,
+    event: input.event,
+    extraction: {
+      chatIdPresent: chatId !== null,
+      customEmojiPresent: reactionCustomEmoji !== null,
+      extractionStrategy: "reaction-event",
+      fromHandlePresent: reactionFromHandle !== null,
+      messageIdPresent: messageId !== null,
+      phoneNumberRole: linePhoneNumber ? "line" : "unknown",
+      reactionTypePresent: reactionType !== null,
+      servicePresent: service !== null,
+    },
+    failureCode: null,
+    failureReason: null,
+    messageId,
+    phoneNumber: linePhoneNumber,
+    phoneNumberRole: linePhoneNumber ? "line" : "unknown",
+    providerCreatedAt: reactedAt,
+    providerReason: null,
+    providerStatus: null,
+    rawBody: input.rawBody,
+    reactionCustomEmoji,
+    reactionFromHandle,
+    reactionType,
+    service,
   });
 }
 
@@ -290,6 +419,9 @@ function parseGenericHostedLinqProviderEvent(input: {
     providerReason,
     providerStatus,
     rawBody: input.rawBody,
+    reactionCustomEmoji: null,
+    reactionFromHandle: null,
+    reactionType: null,
     service,
   });
 }
@@ -309,6 +441,9 @@ function buildParsedProviderEvent(input: {
   providerReason: string | null;
   providerStatus: string | null;
   rawBody?: string | null;
+  reactionCustomEmoji: string | null;
+  reactionFromHandle: string | null;
+  reactionType: string | null;
   service: string | null;
 }): ParsedHostedLinqProviderEvent {
   const providerCreatedAt = input.providerCreatedAt ?? parseProviderCreatedAt(input.event.created_at);
@@ -334,6 +469,7 @@ function buildParsedProviderEvent(input: {
     failureCode: normalizeSafeProviderToken(input.failureCode),
     failureReason: normalizeProviderFreeText(input.failureReason),
     linqChatId,
+    linqMessageId: normalizeNullableString(input.messageId),
     linqChatLookupKey,
     messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
     messageLookupKey,
@@ -356,6 +492,9 @@ function buildParsedProviderEvent(input: {
     providerCreatedAt,
     providerReason: normalizeProviderFreeText(input.providerReason),
     providerStatus: normalizeSafeProviderToken(input.providerStatus),
+    reactionCustomEmoji: normalizeSafeProviderToken(input.reactionCustomEmoji),
+    reactionFromHandle: normalizeNullableString(input.reactionFromHandle),
+    reactionType: normalizeSafeProviderToken(input.reactionType),
     service: normalizeSafeProviderToken(input.service),
     traceIdSuffix: toHostedOnboardingLogIdSuffix(input.event.trace_id),
     webhookVersion: normalizeNullableString(input.event.webhook_version ?? null),
@@ -442,10 +581,54 @@ function readStringAtPath(record: Record<string, unknown> | null, path: readonly
   return typeof value === "string" ? normalizeNullableString(value) : null;
 }
 
+function readFirstHandleAtPaths(
+  record: Record<string, unknown> | null,
+  paths: ReadonlyArray<readonly string[]>,
+): string | null {
+  for (const path of paths) {
+    const value = readValueAtPath(record, path);
+    if (typeof value === "string") {
+      const normalized = normalizeNullableString(value);
+      if (normalized) {
+        return normalized;
+      }
+    }
+    const nested = readRecord(value);
+    const handle = nested ? readStringAtPath(nested, ["handle"]) : null;
+    if (handle) {
+      return handle;
+    }
+  }
+
+  return null;
+}
+
+function readValueAtPath(record: Record<string, unknown> | null, path: readonly string[]): unknown {
+  let value: unknown = record;
+  for (const key of path) {
+    const current = readRecord(value);
+    if (!current) {
+      return null;
+    }
+    value = current[key];
+  }
+  return value;
+}
+
 function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function normalizeReactionToken(value: string | null | undefined): string | null {
+  return normalizeNullableString(value)?.toLowerCase().replace(/[\s-]+/gu, "_") ?? null;
+}
+
+function normalizeReactionEmoji(value: string | null | undefined): string | null {
+  return normalizeNullableString(value)
+    ?.replace(/[\uFE0E\uFE0F]/gu, "")
+    .replace(/[\u{1F3FB}-\u{1F3FF}]/gu, "") ?? null;
 }
 
 function normalizeSafeProviderToken(value: string | null): string | null {

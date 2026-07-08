@@ -32,6 +32,10 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     const continued = await runUntilContinueAsNew(machine);
 
+    expect(runtime.deprecationMarkerCount).toBe(1);
+    expect(runtime.deprecationMarkerReadOrder[0]).toBeLessThan(
+      runtime.reconciliationReadOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(runtime.reconciliationRequests).toEqual([{ userId: "member_test" }]);
     expect(runtime.executionRequests).toEqual([
       {
@@ -65,32 +69,6 @@ describe("hostedUserRuntimeWorkflow loop", () => {
 
     expect(runtime.reconciliationRequests).toEqual([{ userId: "member_test" }]);
     expect(runtime.executionRequests).toHaveLength(1);
-  });
-
-  it("keeps legacy direct mailbox execution for histories without the reconciliation-first patch", async () => {
-    const runtime = new FakeWorkflowRuntime();
-    runtime.reconciliationBeforeMailboxProcessing = false;
-    runtime.executions.push(processingAccepted());
-
-    const machine = createMachine(runtime, {
-      options: { continueAsNewAfterIterations: 1 },
-      userId: "member_test",
-    });
-    machine.applySignal(mailboxSignal());
-
-    const continued = await runUntilContinueAsNew(machine);
-
-    expect(runtime.reconciliationRequests).toEqual([]);
-    expect(runtime.executionRequests).toEqual([
-      {
-        orchestrationAttemptId: "orchestration-attempt-1",
-        userId: "member_test",
-      },
-    ]);
-    expect(continued.state?.mailboxSignalCount).toBe(0);
-    expect(continued.state?.latestMailboxPointer).toBeNull();
-    expect(continued.state?.lastReconciliationStatus).toBe("work_pending");
-    expect(continued.state?.lastMailboxLagLaneCount).toBe(0);
   });
 
   it("does not sleep on failed runtime execution when a recheck signal arrives", async () => {
@@ -502,16 +480,19 @@ type ExecutionHandler = (
 ) => HostedRuntimeEnsureProcessingResponse | Promise<HostedRuntimeEnsureProcessingResponse>;
 class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
   continuedInput: HostedUserRuntimeWorkflowInput | null = null;
+  deprecationMarkerCount = 0;
+  readonly deprecationMarkerReadOrder: number[] = [];
   readonly reconciliationRequests: ReconciliationInput[] = [];
+  readonly reconciliationReadOrder: number[] = [];
   readonly facts: Array<ReconciliationHandler | HostedRuntimeReconciliationFacts> = [];
   readonly executionRequests: ExecutionInput[] = [];
   readonly executions: Array<ExecutionHandler | HostedRuntimeEnsureProcessingResponse> = [];
   now = BASE_TIME_MS;
   onWait: (() => void) | null = null;
-  reconciliationBeforeMailboxProcessing = true;
   suggestContinueAsNew = false;
   historyLength = 0;
   readonly waits: Array<number | null> = [];
+  private operationCounter = 0;
   private uuidCounter = 0;
 
   async continueAsNew(input: HostedUserRuntimeWorkflowInput): Promise<never> {
@@ -525,6 +506,11 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
 
   currentHistoryLength(): number {
     return this.historyLength;
+  }
+
+  deprecateReconciliationBeforeMailboxProcessingPatch(): void {
+    this.deprecationMarkerCount += 1;
+    this.deprecationMarkerReadOrder.push(this.readOrder());
   }
 
   async ensureRuntimeProcessing(
@@ -542,14 +528,11 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
     return this.now;
   }
 
-  reconciliationBeforeMailboxProcessingEnabled(): boolean {
-    return this.reconciliationBeforeMailboxProcessing;
-  }
-
   async readRuntimeReconciliationFacts(
     request: ReconciliationInput,
   ): Promise<HostedRuntimeReconciliationFacts> {
     this.reconciliationRequests.push(request);
+    this.reconciliationReadOrder.push(this.readOrder());
     const next = this.facts.shift();
     if (!next) {
       throw new Error("Unexpected readRuntimeReconciliationFacts call.");
@@ -571,6 +554,11 @@ class FakeWorkflowRuntime implements HostedUserRuntimeWorkflowRuntime {
     if (!predicate() && timeoutMs !== null) {
       this.now += timeoutMs;
     }
+  }
+
+  private readOrder(): number {
+    this.operationCounter += 1;
+    return this.operationCounter;
   }
 }
 

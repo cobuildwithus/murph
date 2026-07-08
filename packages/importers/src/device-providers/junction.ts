@@ -152,6 +152,11 @@ interface JunctionResourceEntry {
   originFallback?: JunctionOriginFallback;
 }
 
+interface JunctionResolvedResourceEntry {
+  entry: PlainObject;
+  resourceContext: ResourceContext;
+}
+
 interface MetricDescriptor {
   metric: string;
   unit: string;
@@ -254,6 +259,17 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "temperature", unit: "celsius", title: "Junction sleep skin temperature", paths: JUNCTION_SLEEP_TEMPERATURE_PATHS },
   { metric: "temperature-deviation", unit: "celsius", title: "Junction sleep temperature delta", paths: JUNCTION_SLEEP_TEMPERATURE_DEVIATION_PATHS },
 ];
+const SLEEP_STAGE_METRIC_NAMES = new Set([
+  "sleep-awake-minutes",
+  "sleep-light-minutes",
+  "sleep-deep-minutes",
+  "sleep-rem-minutes",
+]);
+const SLEEP_STAGE_METRICS = SLEEP_METRICS.filter((metric) => SLEEP_STAGE_METRIC_NAMES.has(metric.metric));
+const SLEEP_NON_STAGE_METRICS = SLEEP_METRICS.filter((metric) => !SLEEP_STAGE_METRIC_NAMES.has(metric.metric));
+const SLEEP_SUMMARY_OWNER_METRICS = SLEEP_METRICS.filter((metric) =>
+  metric.metric === "sleep-total-minutes" || SLEEP_STAGE_METRIC_NAMES.has(metric.metric)
+);
 
 type WorkoutSessionMetrics = NonNullable<WorkoutSession["metrics"]>;
 type WorkoutHeartRateZone = NonNullable<WorkoutSession["heartRateZones"]>[number];
@@ -299,6 +315,30 @@ const JUNCTION_GENERIC_SUMMARY_ID_PATHS = [
   "external_id",
   "providerId",
   "provider_id",
+] as const;
+const JUNCTION_RECORD_TIMESTAMP_PATHS = [
+  "observedAtRaw",
+  "observed_at_raw",
+  "observedAt",
+  "observed_at",
+  "timestamp",
+  "time",
+  "date",
+  "day",
+  "end",
+  "endAt",
+  "end_at",
+  "timeEnd",
+  "time_end",
+  "bedtimeStop",
+  "bedtime_stop",
+  "start",
+  "startAt",
+  "start_at",
+  "timeStart",
+  "time_start",
+  "bedtimeStart",
+  "bedtime_start",
 ] as const;
 const JUNCTION_MEAL_PROVIDER_ID_PATHS = [
   "mealId",
@@ -649,8 +689,36 @@ const JUNCTION_SLEEP_STAGE_TYPE_ARRAY_PATHS = [
   "sleepStageType",
   "sleep_stage_type",
 ] as const;
+const JUNCTION_SLEEP_COVERAGE_START_TIMESTAMP_PATHS = [
+  ...JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
+  "sessionStart",
+  "session_start",
+] as const;
+const JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS = [
+  ...JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
+  "sessionEnd",
+  "session_end",
+] as const;
+const SLEEP_STAGE_COVERAGE_TOLERANCE_MS = 1000;
+const JUNCTION_SLEEP_STAGES: readonly JunctionSleepStage[] = ["awake", "light", "deep", "rem"];
+const APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG = "apple-health-kit";
+const SLEEP_ZEROED_SUMMARY_SUPPRESSED_METRIC_NAMES = new Set([
+  "sleep-total-minutes",
+  "sleep-efficiency",
+  "sleep-light-minutes",
+  "sleep-deep-minutes",
+  "sleep-rem-minutes",
+]);
+const SLEEP_ASLEEP_STAGE_METRIC_NAMES = new Set([
+  "sleep-light-minutes",
+  "sleep-deep-minutes",
+  "sleep-rem-minutes",
+]);
+const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
+const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
+const JUNCTION_SLEEP_UNSPECIFIED_TOTAL_NORMALIZER_VERSION = "junction-sleep-unspecified-total.v1";
 
-type JunctionSleepStage = JunctionSleepStageValue;
+type JunctionSleepStage = Exclude<JunctionSleepStageValue, "asleep_unspecified">;
 
 interface JunctionDailyTimeseriesAggregate {
   dayKey: string;
@@ -667,6 +735,79 @@ interface JunctionDailyTimeseriesAggregate {
   sum: number;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
   timeZone?: string;
+}
+
+interface JunctionSleepStageAggregate {
+  coverageEndAt: string;
+  coverageStartAt: string;
+  dataOriginEntry: PlainObject;
+  durationMinutes: number;
+  endAt: string;
+  parentResourceId: string;
+  recordedAt?: string;
+  resourceContext: ResourceContext;
+  stage: JunctionSleepStage;
+  startAt: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  timeZone?: string;
+}
+
+interface JunctionSleepTotalAggregate {
+  coverageEndAt: string;
+  coverageStartAt: string;
+  dataOriginEntry: PlainObject;
+  durationMinutes: number;
+  endAt: string;
+  parentResourceId: string;
+  recordedAt?: string;
+  resourceContext: ResourceContext;
+  startAt: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  timeZone?: string;
+}
+
+interface JunctionSleepStageInterval {
+  dataOriginEntry: PlainObject;
+  durationMinutes: number;
+  endAt: string;
+  intervalEntry: PlainObject;
+  recordedAt?: string;
+  stage: JunctionSleepStageValue;
+  startAt: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  timeZone?: string;
+}
+
+interface JunctionSleepStageCoverageWindow {
+  endAt: string;
+  startAt: string;
+}
+
+interface JunctionCoveredSleepStageIntervals {
+  coverageWindow: JunctionSleepStageCoverageWindow;
+  intervals: JunctionSleepStageInterval[];
+}
+
+interface JunctionSleepStageAggregateBucket {
+  coverageEndAt: string;
+  coverageStartAt: string;
+  dataOriginEntry: PlainObject;
+  endAt: string;
+  parentResourceId: string;
+  recordedAt?: string;
+  resourceContext: ResourceContext;
+  startAt: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  timeZone?: string;
+}
+
+interface JunctionSleepSummaryStageMetricOwner {
+  endAt: string;
+  metric: string;
+  sourceInstanceId?: string;
+  sourceProviderSlug: string;
+  sourceType?: string;
+  startAt: string;
 }
 
 function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
@@ -720,11 +861,34 @@ export function normalizeJunctionSnapshot(
   });
 }
 
+export function canNormalizeJunctionSleepCycleRecordToCompactStages(
+  record: Record<string, unknown>,
+  sourceProviderSlug: string,
+): boolean {
+  const entries = resourceEntries(record, "sleep_cycle");
+  return entries.length > 0 && entries.every(({ entry }) => {
+    if (!hasSleepCycleCompactParentIdentity(entry, sourceProviderSlug)) {
+      return false;
+    }
+
+    const coverageWindow = resolveSleepStageCoverageWindow(entry, sourceProviderSlug);
+    return coverageWindow
+      ? sleepStageCoverageIntervalsCoverWindow(
+        collectSleepStageCoverageIntervals(entry, sourceProviderSlug),
+        coverageWindow,
+      )
+      : false;
+  });
+}
+
 function normalizeSummaries(
   summaries: Record<string, unknown> | undefined,
   context: NormalizationContext,
 ): void {
-  for (const [resource, payload] of allowedResourceEntries(summaries, SUMMARY_RESOURCE_ALLOWLIST)) {
+  const summaryEntries = allowedResourceEntries(summaries, SUMMARY_RESOURCE_ALLOWLIST);
+  const sleepSummaryMetricOwners = collectJunctionSleepSummaryMetricOwners(summaryEntries, context);
+
+  for (const [resource, payload] of summaryEntries) {
     const entries = resourceEntries(payload, resource);
     const resourceSlug = slugify(resource, "summary");
     const evidencePartRole = `junction-summary-${resourceSlug}`;
@@ -746,7 +910,7 @@ function normalizeSummaries(
       ),
     );
 
-    entries.forEach(({ entry, originFallback }, index) => {
+    const resolvedEntries = entries.flatMap(({ entry, originFallback }, index): JunctionResolvedResourceEntry[] => {
       const resourceContext = buildResourceContext({
         entry,
         originFallback,
@@ -760,9 +924,18 @@ function normalizeSummaries(
       });
 
       if (!resourceContext) {
-        return;
+        return [];
       }
 
+      return [{ entry, resourceContext }];
+    });
+
+    if (resource === "sleep_cycle") {
+      pushSleepCycleEntries(resolvedEntries, context, sleepSummaryMetricOwners);
+      continue;
+    }
+
+    resolvedEntries.forEach(({ entry, resourceContext }) => {
       switch (resource) {
         case "activity":
           pushObservationMetrics(entry, resourceContext, context, ACTIVITY_METRICS);
@@ -772,9 +945,6 @@ function normalizeSummaries(
           break;
         case "sleep":
           pushSleepSummary(entry, resourceContext, context);
-          break;
-        case "sleep_cycle":
-          pushSleepCycle(entry, resourceContext, context);
           break;
         case "workouts":
           pushWorkoutSummary(entry, resourceContext, context);
@@ -794,6 +964,71 @@ function normalizeSummaries(
       }
     });
   }
+}
+
+function collectJunctionSleepSummaryMetricOwners(
+  summaryEntries: readonly [string, unknown][],
+  context: NormalizationContext,
+): JunctionSleepSummaryStageMetricOwner[] {
+  const sleepEntry = summaryEntries.find(([resource]) => resource === "sleep");
+  if (!sleepEntry) {
+    return [];
+  }
+
+  const [resource, payload] = sleepEntry;
+  const resourceSlug = slugify(resource, "summary");
+  const evidencePartRole = `junction-summary-${resourceSlug}`;
+  const owners: JunctionSleepSummaryStageMetricOwner[] = [];
+
+  resourceEntries(payload, resource).forEach(({ entry, originFallback }, index) => {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource,
+      resourceSlug,
+      identityKind: "summary",
+      index,
+      fallbackArtifactRole: evidencePartRole,
+      context,
+    });
+    if (!resourceContext) {
+      return;
+    }
+
+    const startAt = resolveSafeTimestamp(
+      firstValueFromPaths(entry, JUNCTION_SLEEP_START_TIMESTAMP_PATHS),
+      resourceContext.sourceProviderSlug,
+    );
+    const endAt = resolveSafeTimestamp(
+      firstValueFromPaths(entry, JUNCTION_SLEEP_END_TIMESTAMP_PATHS),
+      resourceContext.sourceProviderSlug,
+    );
+    if (!startAt || !endAt) {
+      return;
+    }
+    const durationMinutes = resolveSleepSummaryDurationMinutes(entry, startAt, endAt);
+    const zeroedSummary = isZeroedAppleHealthKitSleepSummary(entry, resourceContext, durationMinutes);
+
+    for (const metric of SLEEP_SUMMARY_OWNER_METRICS) {
+      if (zeroedSummary && SLEEP_ZEROED_SUMMARY_SUPPRESSED_METRIC_NAMES.has(metric.metric)) {
+        continue;
+      }
+      if (!resolveMetricDescriptorValue(entry, metric)) {
+        continue;
+      }
+
+      owners.push(stripUndefined({
+        endAt,
+        metric: metric.metric,
+        sourceInstanceId: resourceContext.origin.sourceInstanceId ?? undefined,
+        sourceProviderSlug: resourceContext.sourceProviderSlug,
+        sourceType: resourceContext.origin.sourceType,
+        startAt,
+      }));
+    }
+  });
+
+  return owners;
 }
 
 function buildJunctionMealFallbackIdentityDisambiguators(input: {
@@ -1676,20 +1911,11 @@ function pushSleepSummary(
     firstValueFromPaths(entry, JUNCTION_SLEEP_END_TIMESTAMP_PATHS),
     resourceContext.sourceProviderSlug,
   );
-  const durationMinutes =
-    normalizePositiveIntegerMinutes(
-      firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_MINUTE_PATHS),
-    ) ??
-    normalizePositiveIntegerMinutes(
-      secondsToMinutes(firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_SECOND_PATHS)),
-    ) ??
-    normalizePositiveIntegerMinutes(
-      millisecondsToMinutes(firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_MILLISECOND_PATHS)),
-    ) ??
-    normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
+  const durationMinutes = resolveSleepSummaryDurationMinutes(entry, startAt, endAt);
   const sleepTimestamp = withTimestampOverride(timestamp, {
     occurredAt: endAt ?? startAt ?? timestamp.occurredAt,
   });
+  const zeroedSummary = isZeroedAppleHealthKitSleepSummary(entry, resourceContext, durationMinutes);
 
   if (startAt && endAt && durationMinutes !== undefined) {
     const occurredAt = sleepTimestamp.occurredAt ?? startAt;
@@ -1712,19 +1938,847 @@ function pushSleepSummary(
     }));
   }
 
-  pushObservationMetrics(entry, resourceContext, context, SLEEP_METRICS, sleepTimestamp);
+  pushObservationMetrics(
+    entry,
+    resourceContext,
+    context,
+    zeroedSummary
+      ? SLEEP_NON_STAGE_METRICS.filter((metric) => !SLEEP_ZEROED_SUMMARY_SUPPRESSED_METRIC_NAMES.has(metric.metric))
+      : SLEEP_NON_STAGE_METRICS,
+    sleepTimestamp,
+  );
+  pushSleepSummaryStageMetrics(entry, resourceContext, context, sleepTimestamp, startAt, endAt, zeroedSummary);
   pushJunctionRecoveryReadinessScore(entry, resourceContext, context, sleepTimestamp);
 }
 
-function pushSleepCycle(
+function resolveSleepSummaryDurationMinutes(
+  entry: PlainObject,
+  startAt: string | undefined,
+  endAt: string | undefined,
+): number | undefined {
+  return normalizePositiveIntegerMinutes(
+    firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_MINUTE_PATHS),
+  ) ??
+    normalizePositiveIntegerMinutes(
+      secondsToMinutes(firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_SECOND_PATHS)),
+    ) ??
+    normalizePositiveIntegerMinutes(
+      millisecondsToMinutes(firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_MILLISECOND_PATHS)),
+    ) ??
+    normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
+}
+
+function isZeroedAppleHealthKitSleepSummary(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  durationMinutes: number | undefined,
+): boolean {
+  if (normalizeJunctionSourceProviderSlug(resourceContext.sourceProviderSlug) !== APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG) {
+    return false;
+  }
+
+  const totalMinutes = resolveSleepSummaryMetricValue(entry, "sleep-total-minutes");
+  const awakeMinutes = resolveSleepSummaryMetricValue(entry, "sleep-awake-minutes");
+  if (
+    durationMinutes === undefined ||
+    totalMinutes !== 0 ||
+    awakeMinutes === undefined ||
+    awakeMinutes <= 0 ||
+    awakeMinutes >= durationMinutes - 1
+  ) {
+    return false;
+  }
+
+  return isSleepSummaryMetricMissingOrZero(entry, "sleep-efficiency") &&
+    isSleepSummaryMetricMissingOrZero(entry, "sleep-light-minutes") &&
+    isSleepSummaryMetricMissingOrZero(entry, "sleep-deep-minutes") &&
+    isSleepSummaryMetricMissingOrZero(entry, "sleep-rem-minutes");
+}
+
+function isSleepSummaryMetricMissingOrZero(entry: PlainObject, metricName: string): boolean {
+  const value = resolveSleepSummaryMetricValue(entry, metricName);
+  return value === undefined || value === 0;
+}
+
+function resolveSleepSummaryMetricValue(entry: PlainObject, metricName: string): number | undefined {
+  const metric = SLEEP_METRICS.find((candidate) => candidate.metric === metricName);
+  const resolved = metric ? resolveMetricDescriptorValue(entry, metric) : null;
+  return resolved?.value;
+}
+
+function pushSleepSummaryStageMetrics(
   entry: PlainObject,
   resourceContext: ResourceContext,
   context: NormalizationContext,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  startAt: string | undefined,
+  endAt: string | undefined,
+  zeroedSummary = false,
+): void {
+  const occurredAt = timestamp.occurredAt;
+  if (!occurredAt) {
+    return;
+  }
+
+  const timeZone = resolveSleepStageCanonicalTimeZone(entry);
+  const dayKey = startAt && endAt
+    ? resolveSleepStageAnchorDayKey(endAt, timeZone, timestamp)
+    : timestamp.dayKey ?? extractIsoDatePrefix(occurredAt) ?? undefined;
+  for (const metric of SLEEP_STAGE_METRICS) {
+    if (zeroedSummary && SLEEP_ASLEEP_STAGE_METRIC_NAMES.has(metric.metric)) {
+      continue;
+    }
+    const resolved = resolveMetricDescriptorValue(entry, metric);
+    if (!resolved) {
+      continue;
+    }
+    const externalRef = startAt && endAt
+      ? makeJunctionCanonicalSleepStageExternalRef(resourceContext, {
+          coverageEndAt: endAt,
+          coverageStartAt: startAt,
+          dayKey,
+          metric: metric.metric,
+          timeZone,
+        })
+      : makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric);
+    const legacyExternalRef = startAt && endAt
+      ? makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric)
+      : undefined;
+
+    context.events.push(stripUndefined({
+      kind: "observation",
+      occurredAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey,
+      timeZone,
+      source: "device",
+      title: metric.title,
+      evidenceRoles: resourceContext.evidenceRoles,
+      externalRef,
+      legacyExternalRefs: legacyExternalRef ? [legacyExternalRef] : undefined,
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp, {
+        normalizerVersion: JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION,
+      }),
+      fields: {
+        metric: metric.metric,
+        observationGrain: "summary",
+        value: resolved.value,
+        unit: resolved.unit,
+      },
+    }));
+  }
+}
+
+function resolveSleepStageCanonicalTimeZone(...entries: readonly PlainObject[]): string | undefined {
+  const explicitTimeZone = entries
+    .map((entry) => firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]))
+    .find((timeZone) => timeZone !== undefined);
+  if (explicitTimeZone) {
+    return explicitTimeZone;
+  }
+
+  const hasOffsetOnlyEvidence = entries.some((entry) => {
+    const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
+    return offsetSeconds !== null && offsetSeconds !== undefined;
+  });
+  if (hasOffsetOnlyEvidence) {
+    return undefined;
+  }
+
+  return entries.some(hasUtcSleepStageWindow)
+    ? "UTC"
+    : undefined;
+}
+
+function hasUtcSleepStageWindow(entry: PlainObject): boolean {
+  const rawStartAt = firstStringFromPaths(entry, JUNCTION_SLEEP_COVERAGE_START_TIMESTAMP_PATHS);
+  const rawEndAt = firstStringFromPaths(entry, JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS);
+  return inferTimestampSemantics(rawStartAt) === "utc" && inferTimestampSemantics(rawEndAt) === "utc";
+}
+
+function pushSleepCycleEntries(
+  entries: readonly JunctionResolvedResourceEntry[],
+  context: NormalizationContext,
+  sleepSummaryStageMetricOwners: readonly JunctionSleepSummaryStageMetricOwner[],
+): void {
+  const aggregates = new Map<string, JunctionSleepStageAggregate>();
+  const totalAggregates = new Map<string, JunctionSleepTotalAggregate>();
+
+  for (const { entry, resourceContext } of entries) {
+    collectJunctionSleepStageAggregates(entry, resourceContext, context, aggregates, totalAggregates);
+  }
+
+  for (const aggregate of totalAggregates.values()) {
+    if (isSleepMetricOwnedBySleepSummary(aggregate, "sleep-total-minutes", sleepSummaryStageMetricOwners)) {
+      continue;
+    }
+
+    context.events.push(stripUndefined({
+      kind: "observation",
+      occurredAt: aggregate.endAt,
+      recordedAt: aggregate.recordedAt,
+      dayKey: aggregate.timestamp.dayKey,
+      timeZone: aggregate.timeZone,
+      source: "device",
+      title: "Junction total sleep",
+      evidenceRoles: aggregate.resourceContext.evidenceRoles,
+      externalRef: makeJunctionSleepAggregateExternalRef(
+        aggregate.resourceContext,
+        aggregate,
+        "sleep-total-minutes",
+      ),
+      dataOrigin: buildDataOrigin(aggregate.dataOriginEntry, aggregate.resourceContext, aggregate.timestamp, {
+        normalizerVersion: JUNCTION_SLEEP_UNSPECIFIED_TOTAL_NORMALIZER_VERSION,
+      }),
+      fields: {
+        metric: "sleep-total-minutes",
+        observationGrain: "summary",
+        value: Number(aggregate.durationMinutes.toFixed(4)),
+        unit: "minutes",
+      },
+    }));
+  }
+
+  for (const aggregate of aggregates.values()) {
+    const metric = sleepStageMetricDescriptor(aggregate.stage);
+    if (isSleepMetricOwnedBySleepSummary(aggregate, metric.metric, sleepSummaryStageMetricOwners)) {
+      continue;
+    }
+
+    context.events.push(stripUndefined({
+      kind: "observation",
+      occurredAt: aggregate.endAt,
+      recordedAt: aggregate.recordedAt,
+      dayKey: aggregate.timestamp.dayKey,
+      timeZone: aggregate.timeZone,
+      source: "device",
+      title: metric.title,
+      evidenceRoles: aggregate.resourceContext.evidenceRoles,
+      externalRef: makeJunctionSleepAggregateExternalRef(
+        aggregate.resourceContext,
+        aggregate,
+        metric.metric,
+      ),
+      dataOrigin: buildDataOrigin(aggregate.dataOriginEntry, aggregate.resourceContext, aggregate.timestamp, {
+        normalizerVersion: JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION,
+      }),
+      fields: {
+        metric: metric.metric,
+        observationGrain: "summary",
+        value: Number(aggregate.durationMinutes.toFixed(4)),
+        unit: "minutes",
+      },
+    }));
+  }
+}
+
+function isSleepMetricOwnedBySleepSummary(
+  aggregate: JunctionSleepStageAggregate | JunctionSleepTotalAggregate,
+  metric: string,
+  sleepSummaryStageMetricOwners: readonly JunctionSleepSummaryStageMetricOwner[],
+): boolean {
+  return sleepSummaryStageMetricOwners.some((owner) =>
+    owner.metric === metric &&
+    sleepStageOwnerSourceMatchesAggregate(owner, aggregate) &&
+    sleepStageOwnerWindowMatchesAggregate(owner, aggregate)
+  );
+}
+
+function sleepStageOwnerSourceMatchesAggregate(
+  owner: JunctionSleepSummaryStageMetricOwner,
+  aggregate: JunctionSleepStageAggregate | JunctionSleepTotalAggregate,
+): boolean {
+  if (owner.sourceProviderSlug !== aggregate.resourceContext.sourceProviderSlug) {
+    return false;
+  }
+
+  const aggregateSourceType = aggregate.resourceContext.origin.sourceType;
+  if (owner.sourceType !== aggregateSourceType) {
+    return false;
+  }
+
+  const aggregateSourceInstanceId = aggregate.resourceContext.origin.sourceInstanceId;
+  return owner.sourceInstanceId === aggregateSourceInstanceId;
+}
+
+function sleepStageOwnerWindowMatchesAggregate(
+  owner: JunctionSleepSummaryStageMetricOwner,
+  aggregate: JunctionSleepStageAggregate | JunctionSleepTotalAggregate,
+): boolean {
+  return owner.startAt === aggregate.coverageStartAt &&
+    owner.endAt === aggregate.coverageEndAt;
+}
+
+function collectJunctionSleepStageAggregates(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+  aggregates: Map<string, JunctionSleepStageAggregate>,
+  totalAggregates: Map<string, JunctionSleepTotalAggregate>,
 ): void {
   const parentTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const intervals = collectJunctionSleepStageIntervals(entry, resourceContext, context, parentTimestamp);
+  const parentResourceId = resolveSleepCycleParentResourceId(resourceContext, entry, parentTimestamp);
+  const covered = collectCoveredSleepStageIntervals(entry, resourceContext, intervals);
+  if (!parentResourceId || !covered) {
+    return;
+  }
 
-  for (const [index, intervalEntry] of sleepStageIntervalEntries(entry).entries()) {
-    const stage = firstSleepStageFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_VALUE_PATHS);
+  const buckets = new Map<string, JunctionSleepStageAggregateBucket>();
+  const entryAggregates = new Map<string, JunctionSleepStageAggregate>();
+  const entryTotalAggregates = new Map<string, JunctionSleepTotalAggregate>();
+  const hasGenericAsleepStage = covered.intervals.some((interval) => interval.stage === "asleep_unspecified");
+  const hasDetailedAsleepStage = covered.intervals.some((interval) => isDetailedAsleepStage(interval.stage));
+  for (const interval of covered.intervals) {
+    const stageTimestamp = withTimestampOverride(interval.timestamp, {
+      occurredAt: covered.coverageWindow.endAt,
+      dayKey: resolveSleepStageAnchorDayKey(
+        covered.coverageWindow.endAt,
+        interval.timeZone,
+        interval.timestamp,
+        parentTimestamp,
+      ),
+    });
+    const bucketKey = sleepStageBucketKey(
+      resourceContext,
+      covered.coverageWindow.startAt,
+      covered.coverageWindow.endAt,
+    );
+    const totalAggregateKey = sleepTotalAggregateKey(
+      resourceContext,
+      covered.coverageWindow.startAt,
+      covered.coverageWindow.endAt,
+    );
+    if (hasGenericAsleepStage && isSleepTotalStage(interval.stage)) {
+      addSleepTotalAggregateDuration(entryTotalAggregates, totalAggregateKey, {
+        coverageEndAt: covered.coverageWindow.endAt,
+        coverageStartAt: covered.coverageWindow.startAt,
+        dataOriginEntry: interval.dataOriginEntry,
+        durationMinutes: interval.durationMinutes,
+        endAt: covered.coverageWindow.endAt,
+        parentResourceId,
+        recordedAt: stageTimestamp.recordedAt,
+        resourceContext,
+        startAt: covered.coverageWindow.startAt,
+        timestamp: stageTimestamp,
+        timeZone: interval.timeZone,
+      });
+    }
+
+    if (interval.stage === "asleep_unspecified") {
+      continue;
+    }
+
+    const aggregateKey = sleepStageAggregateKey(
+      resourceContext,
+      interval.stage,
+      covered.coverageWindow.startAt,
+      covered.coverageWindow.endAt,
+    );
+    if (hasDetailedAsleepStage) {
+      const bucketCandidate = {
+        coverageEndAt: covered.coverageWindow.endAt,
+        coverageStartAt: covered.coverageWindow.startAt,
+        dataOriginEntry: interval.dataOriginEntry,
+        endAt: covered.coverageWindow.endAt,
+        parentResourceId,
+        recordedAt: stageTimestamp.recordedAt,
+        resourceContext,
+        startAt: covered.coverageWindow.startAt,
+        timestamp: stageTimestamp,
+        timeZone: interval.timeZone,
+      };
+      const existingBucket = buckets.get(bucketKey);
+      if (existingBucket) {
+        existingBucket.recordedAt = laterOptionalIsoTimestamp(existingBucket.recordedAt, stageTimestamp.recordedAt);
+        const preferredBucket = compareSleepStageBucketPreference(bucketCandidate, existingBucket) > 0
+          ? { ...bucketCandidate, recordedAt: existingBucket.recordedAt }
+          : existingBucket;
+        buckets.set(bucketKey, {
+          ...preferredBucket,
+          recordedAt: existingBucket.recordedAt,
+          timestamp: withTimestampOverride(preferredBucket.timestamp, {
+            recordedAt: existingBucket.recordedAt,
+          }),
+        });
+      } else {
+        buckets.set(bucketKey, bucketCandidate);
+      }
+    }
+
+    addSleepStageAggregateDuration(entryAggregates, aggregateKey, {
+      coverageEndAt: covered.coverageWindow.endAt,
+      coverageStartAt: covered.coverageWindow.startAt,
+      dataOriginEntry: interval.dataOriginEntry,
+      durationMinutes: interval.durationMinutes,
+      endAt: covered.coverageWindow.endAt,
+      parentResourceId,
+      recordedAt: stageTimestamp.recordedAt,
+      resourceContext,
+      stage: interval.stage,
+      startAt: covered.coverageWindow.startAt,
+      timestamp: stageTimestamp,
+      timeZone: interval.timeZone,
+    });
+  }
+
+  for (const bucket of buckets.values()) {
+    for (const stage of JUNCTION_SLEEP_STAGES) {
+      const aggregateKey = sleepStageAggregateKey(
+        bucket.resourceContext,
+        stage,
+        bucket.coverageStartAt,
+        bucket.coverageEndAt,
+      );
+      if (entryAggregates.has(aggregateKey)) {
+        continue;
+      }
+
+      entryAggregates.set(aggregateKey, {
+        coverageEndAt: bucket.coverageEndAt,
+        coverageStartAt: bucket.coverageStartAt,
+        dataOriginEntry: bucket.dataOriginEntry,
+        durationMinutes: 0,
+        endAt: bucket.endAt,
+        parentResourceId: bucket.parentResourceId,
+        recordedAt: bucket.recordedAt,
+        resourceContext: bucket.resourceContext,
+        stage,
+        startAt: bucket.startAt,
+        timestamp: bucket.timestamp,
+        timeZone: bucket.timeZone,
+      });
+    }
+  }
+
+  for (const aggregate of entryAggregates.values()) {
+    mergeSleepStageAggregateCandidate(aggregates, aggregate);
+  }
+  for (const aggregate of entryTotalAggregates.values()) {
+    mergeSleepTotalAggregateCandidate(totalAggregates, aggregate);
+  }
+}
+
+function sleepStageBucketKey(
+  resourceContext: ResourceContext,
+  coverageStartAt: string,
+  coverageEndAt: string,
+): string {
+  return [
+    resourceContext.externalRefResourceType,
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType,
+    resourceContext.origin.sourceInstanceId,
+    coverageStartAt,
+    coverageEndAt,
+  ].join("|");
+}
+
+function sleepStageAggregateKey(
+  resourceContext: ResourceContext,
+  stage: JunctionSleepStage,
+  coverageStartAt: string,
+  coverageEndAt: string,
+): string {
+  return [
+    resourceContext.externalRefResourceType,
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType,
+    resourceContext.origin.sourceInstanceId,
+    coverageStartAt,
+    coverageEndAt,
+    stage,
+  ].join("|");
+}
+
+function sleepTotalAggregateKey(
+  resourceContext: ResourceContext,
+  coverageStartAt: string,
+  coverageEndAt: string,
+): string {
+  return [
+    resourceContext.externalRefResourceType,
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType,
+    resourceContext.origin.sourceInstanceId,
+    coverageStartAt,
+    coverageEndAt,
+    "sleep-total-minutes",
+  ].join("|");
+}
+
+function addSleepStageAggregateDuration(
+  aggregates: Map<string, JunctionSleepStageAggregate>,
+  aggregateKey: string,
+  candidate: JunctionSleepStageAggregate,
+): void {
+  const existing = aggregates.get(aggregateKey);
+  if (!existing) {
+    aggregates.set(aggregateKey, candidate);
+    return;
+  }
+
+  const recordedAt = laterOptionalIsoTimestamp(existing.recordedAt, candidate.recordedAt);
+  const preferred = compareSleepStageAggregatePreference(candidate, existing) > 0 ? candidate : existing;
+  aggregates.set(aggregateKey, {
+    ...preferred,
+    durationMinutes: existing.durationMinutes + candidate.durationMinutes,
+    recordedAt,
+    timestamp: withTimestampOverride(preferred.timestamp, { recordedAt }),
+  });
+}
+
+function addSleepTotalAggregateDuration(
+  aggregates: Map<string, JunctionSleepTotalAggregate>,
+  aggregateKey: string,
+  candidate: JunctionSleepTotalAggregate,
+): void {
+  const existing = aggregates.get(aggregateKey);
+  if (!existing) {
+    aggregates.set(aggregateKey, candidate);
+    return;
+  }
+
+  const recordedAt = laterOptionalIsoTimestamp(existing.recordedAt, candidate.recordedAt);
+  const preferred = compareSleepAggregatePreference(candidate, existing) > 0 ? candidate : existing;
+  aggregates.set(aggregateKey, {
+    ...preferred,
+    durationMinutes: existing.durationMinutes + candidate.durationMinutes,
+    recordedAt,
+    timestamp: withTimestampOverride(preferred.timestamp, { recordedAt }),
+  });
+}
+
+function mergeSleepStageAggregateCandidate(
+  aggregates: Map<string, JunctionSleepStageAggregate>,
+  candidate: JunctionSleepStageAggregate,
+): void {
+  const aggregateKey = sleepStageAggregateKey(
+    candidate.resourceContext,
+    candidate.stage,
+    candidate.coverageStartAt,
+    candidate.coverageEndAt,
+  );
+  const existing = aggregates.get(aggregateKey);
+  if (!existing) {
+    aggregates.set(aggregateKey, candidate);
+    return;
+  }
+
+  const recordedAt = laterOptionalIsoTimestamp(existing.recordedAt, candidate.recordedAt);
+  const preferred = compareSleepStageAggregatePreference(candidate, existing) > 0 ? candidate : existing;
+  aggregates.set(aggregateKey, {
+    ...preferred,
+    recordedAt,
+    timestamp: withTimestampOverride(preferred.timestamp, { recordedAt }),
+  });
+}
+
+function mergeSleepTotalAggregateCandidate(
+  aggregates: Map<string, JunctionSleepTotalAggregate>,
+  candidate: JunctionSleepTotalAggregate,
+): void {
+  const aggregateKey = sleepTotalAggregateKey(
+    candidate.resourceContext,
+    candidate.coverageStartAt,
+    candidate.coverageEndAt,
+  );
+  const existing = aggregates.get(aggregateKey);
+  if (!existing) {
+    aggregates.set(aggregateKey, candidate);
+    return;
+  }
+
+  const recordedAt = laterOptionalIsoTimestamp(existing.recordedAt, candidate.recordedAt);
+  const preferred = compareSleepAggregatePreference(candidate, existing) > 0 ? candidate : existing;
+  aggregates.set(aggregateKey, {
+    ...preferred,
+    recordedAt,
+    timestamp: withTimestampOverride(preferred.timestamp, { recordedAt }),
+  });
+}
+
+function compareSleepStageBucketPreference(
+  left: JunctionSleepStageAggregateBucket,
+  right: JunctionSleepStageAggregateBucket,
+): number {
+  return compareSleepStageDisplayPreference(
+    {
+      dayKey: left.timestamp.dayKey,
+      parentResourceId: left.parentResourceId,
+      timeZone: left.timeZone,
+    },
+    {
+      dayKey: right.timestamp.dayKey,
+      parentResourceId: right.parentResourceId,
+      timeZone: right.timeZone,
+    },
+  );
+}
+
+function compareSleepStageAggregatePreference(
+  left: JunctionSleepStageAggregate,
+  right: JunctionSleepStageAggregate,
+): number {
+  return compareSleepAggregatePreference(left, right);
+}
+
+function compareSleepAggregatePreference(
+  left: JunctionSleepStageAggregate | JunctionSleepTotalAggregate,
+  right: JunctionSleepStageAggregate | JunctionSleepTotalAggregate,
+): number {
+  const durationPreference = Number(left.durationMinutes > 0) - Number(right.durationMinutes > 0);
+  if (durationPreference !== 0) {
+    return durationPreference;
+  }
+
+  return compareSleepStageDisplayPreference(
+    {
+      dayKey: left.timestamp.dayKey,
+      parentResourceId: left.parentResourceId,
+      timeZone: left.timeZone,
+    },
+    {
+      dayKey: right.timestamp.dayKey,
+      parentResourceId: right.parentResourceId,
+      timeZone: right.timeZone,
+    },
+  );
+}
+
+function compareSleepStageDisplayPreference(
+  left: { dayKey?: string; parentResourceId: string; timeZone?: string },
+  right: { dayKey?: string; parentResourceId: string; timeZone?: string },
+): number {
+  const timeZonePreference = sleepStageTimeZonePreference(left.timeZone) -
+    sleepStageTimeZonePreference(right.timeZone);
+  if (timeZonePreference !== 0) {
+    return timeZonePreference;
+  }
+
+  const timeZoneOrder = compareOptionalSleepStageDisplayValue(left.timeZone, right.timeZone);
+  if (timeZoneOrder !== 0) {
+    return timeZoneOrder;
+  }
+
+  const dayKeyOrder = compareOptionalSleepStageDisplayValue(left.dayKey, right.dayKey);
+  if (dayKeyOrder !== 0) {
+    return dayKeyOrder;
+  }
+
+  return compareOptionalSleepStageDisplayValue(left.parentResourceId, right.parentResourceId);
+}
+
+function isDetailedAsleepStage(stage: JunctionSleepStageValue): stage is Exclude<JunctionSleepStage, "awake"> {
+  return stage === "light" || stage === "deep" || stage === "rem";
+}
+
+function isSleepTotalStage(stage: JunctionSleepStageValue): boolean {
+  return stage !== "awake";
+}
+
+function sleepStageTimeZonePreference(timeZone: string | undefined): number {
+  if (!timeZone) {
+    return 0;
+  }
+
+  return timeZone === "UTC" ? 1 : 2;
+}
+
+function compareOptionalSleepStageDisplayValue(left: string | undefined, right: string | undefined): number {
+  const leftValue = left ?? "";
+  const rightValue = right ?? "";
+  if (leftValue === rightValue) {
+    return 0;
+  }
+
+  return leftValue < rightValue ? 1 : -1;
+}
+
+function collectCoveredSleepStageIntervals(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  intervals: readonly JunctionSleepStageInterval[],
+): JunctionCoveredSleepStageIntervals | undefined {
+  const coverageWindow = resolveSleepStageCoverageWindow(entry, resourceContext.sourceProviderSlug);
+  if (!coverageWindow || intervals.length === 0) {
+    return undefined;
+  }
+
+  const coveredIntervals = clipSleepStageIntervalsToWindow(intervals, coverageWindow);
+  return coveredIntervals ? { coverageWindow, intervals: coveredIntervals } : undefined;
+}
+
+function resolveSleepStageCoverageWindow(
+  entry: PlainObject,
+  sourceProviderSlug: string | undefined,
+): JunctionSleepStageCoverageWindow | undefined {
+  const startAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, JUNCTION_SLEEP_COVERAGE_START_TIMESTAMP_PATHS),
+    sourceProviderSlug,
+  );
+  const endAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS),
+    sourceProviderSlug,
+  );
+
+  if (!startAt || !endAt || Date.parse(endAt) <= Date.parse(startAt)) {
+    return undefined;
+  }
+
+  return { endAt, startAt };
+}
+
+function collectSleepStageCoverageIntervals(
+  entry: PlainObject,
+  sourceProviderSlug: string,
+): Array<Pick<JunctionSleepStageInterval, "endAt" | "startAt">> {
+  return sleepStageIntervalEntries(entry, sourceProviderSlug).flatMap((intervalEntry) => {
+    const stage = firstSleepStageFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_VALUE_PATHS, sourceProviderSlug);
+    if (!stage) {
+      return [];
+    }
+
+    const startAt = resolveSafeTimestamp(
+      firstValueFromPaths(intervalEntry, JUNCTION_SLEEP_START_TIMESTAMP_PATHS),
+      sourceProviderSlug,
+    );
+    const endAt = resolveSafeTimestamp(
+      firstValueFromPaths(intervalEntry, JUNCTION_SLEEP_END_TIMESTAMP_PATHS),
+      sourceProviderSlug,
+    );
+    const durationMinutes =
+      normalizePositiveMinutes(
+        firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_MINUTE_PATHS),
+      ) ??
+      normalizePositiveMinutes(
+        secondsToMinutes(firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_SECOND_PATHS)),
+      ) ??
+      normalizePositiveMinutes(
+        millisecondsToMinutes(firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_MILLISECOND_PATHS)),
+      ) ??
+      exactPositiveMinutesBetween(startAt, endAt);
+    const resolvedStartAt = startAt ?? subtractMinutes(endAt, durationMinutes);
+    const resolvedEndAt = endAt ?? addMinutes(startAt, durationMinutes);
+
+    return resolvedStartAt && resolvedEndAt && durationMinutes !== undefined
+      ? [{ endAt: resolvedEndAt, startAt: resolvedStartAt }]
+      : [];
+  });
+}
+
+function sleepStageCoverageIntervalsCoverWindow(
+  intervals: ReadonlyArray<Pick<JunctionSleepStageInterval, "endAt" | "startAt">>,
+  coverageWindow: JunctionSleepStageCoverageWindow,
+): boolean {
+  const windowStartMs = Date.parse(coverageWindow.startAt);
+  const windowEndMs = Date.parse(coverageWindow.endAt);
+  if (!Number.isFinite(windowStartMs) || !Number.isFinite(windowEndMs) || windowEndMs <= windowStartMs) {
+    return false;
+  }
+
+  let coveredUntilMs = windowStartMs;
+  const orderedIntervals = [...intervals].sort((left, right) => Date.parse(left.startAt) - Date.parse(right.startAt));
+  for (const interval of orderedIntervals) {
+    const rawStartMs = Date.parse(interval.startAt);
+    const rawEndMs = Date.parse(interval.endAt);
+    if (!Number.isFinite(rawStartMs) || !Number.isFinite(rawEndMs)) {
+      continue;
+    }
+
+    const intervalStartMs = Math.max(rawStartMs, windowStartMs);
+    const intervalEndMs = Math.min(rawEndMs, windowEndMs);
+    if (intervalEndMs <= intervalStartMs) {
+      continue;
+    }
+
+    if (intervalStartMs - coveredUntilMs > SLEEP_STAGE_COVERAGE_TOLERANCE_MS) {
+      return false;
+    }
+
+    if (intervalStartMs < coveredUntilMs - SLEEP_STAGE_COVERAGE_TOLERANCE_MS) {
+      return false;
+    }
+
+    const clippedStartMs = Math.max(intervalStartMs, coveredUntilMs);
+    if (intervalEndMs <= clippedStartMs) {
+      continue;
+    }
+
+    coveredUntilMs = intervalEndMs;
+  }
+
+  return windowEndMs - coveredUntilMs <= SLEEP_STAGE_COVERAGE_TOLERANCE_MS;
+}
+
+function clipSleepStageIntervalsToWindow(
+  intervals: readonly JunctionSleepStageInterval[],
+  coverageWindow: JunctionSleepStageCoverageWindow,
+): JunctionSleepStageInterval[] | undefined {
+  const windowStartMs = Date.parse(coverageWindow.startAt);
+  const windowEndMs = Date.parse(coverageWindow.endAt);
+  if (!Number.isFinite(windowStartMs) || !Number.isFinite(windowEndMs) || windowEndMs <= windowStartMs) {
+    return undefined;
+  }
+
+  let coveredUntilMs = windowStartMs;
+  const coveredIntervals: JunctionSleepStageInterval[] = [];
+  const orderedIntervals = [...intervals].sort((left, right) => Date.parse(left.startAt) - Date.parse(right.startAt));
+  for (const interval of orderedIntervals) {
+    const rawStartMs = Date.parse(interval.startAt);
+    const rawEndMs = Date.parse(interval.endAt);
+    if (!Number.isFinite(rawStartMs) || !Number.isFinite(rawEndMs)) {
+      continue;
+    }
+
+    const intervalStartMs = Math.max(rawStartMs, windowStartMs);
+    const intervalEndMs = Math.min(rawEndMs, windowEndMs);
+    if (intervalEndMs <= intervalStartMs) {
+      continue;
+    }
+
+    if (intervalStartMs - coveredUntilMs > SLEEP_STAGE_COVERAGE_TOLERANCE_MS) {
+      return undefined;
+    }
+
+    if (intervalStartMs < coveredUntilMs - SLEEP_STAGE_COVERAGE_TOLERANCE_MS) {
+      return undefined;
+    }
+
+    const clippedStartMs = Math.max(intervalStartMs, coveredUntilMs);
+    const clippedEndMs = intervalEndMs;
+    if (clippedEndMs <= clippedStartMs) {
+      continue;
+    }
+
+    coveredIntervals.push({
+      ...interval,
+      durationMinutes: (clippedEndMs - clippedStartMs) / 60000,
+      endAt: new Date(clippedEndMs).toISOString(),
+      startAt: new Date(clippedStartMs).toISOString(),
+    });
+    coveredUntilMs = clippedEndMs;
+  }
+
+  return windowEndMs - coveredUntilMs <= SLEEP_STAGE_COVERAGE_TOLERANCE_MS
+    ? coveredIntervals
+    : undefined;
+}
+
+function collectJunctionSleepStageIntervals(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+  parentTimestamp: ReturnType<typeof resolveRecordTimestamp>,
+): JunctionSleepStageInterval[] {
+  const intervals: JunctionSleepStageInterval[] = [];
+
+  for (const intervalEntry of sleepStageIntervalEntries(entry, resourceContext.sourceProviderSlug)) {
+    const stage = firstSleepStageFromPaths(
+      intervalEntry,
+      JUNCTION_SLEEP_STAGE_VALUE_PATHS,
+      resourceContext.sourceProviderSlug,
+    );
     if (!stage) {
       continue;
     }
@@ -1734,16 +2788,16 @@ function pushSleepCycle(
     const startAt = resolveSafeTimestamp(startAtRaw, resourceContext.sourceProviderSlug);
     const endAt = resolveSafeTimestamp(endAtRaw, resourceContext.sourceProviderSlug);
     const durationMinutes =
-      normalizePositiveIntegerMinutes(
+      normalizePositiveMinutes(
         firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_MINUTE_PATHS),
       ) ??
-      normalizePositiveIntegerMinutes(
+      normalizePositiveMinutes(
         secondsToMinutes(firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_SECOND_PATHS)),
       ) ??
-      normalizePositiveIntegerMinutes(
+      normalizePositiveMinutes(
         millisecondsToMinutes(firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_MILLISECOND_PATHS)),
       ) ??
-      normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
+      exactPositiveMinutesBetween(startAt, endAt);
     const resolvedStartAt = startAt ?? subtractMinutes(endAt, durationMinutes);
     const resolvedEndAt = endAt ?? addMinutes(startAt, durationMinutes);
 
@@ -1753,59 +2807,159 @@ function pushSleepCycle(
 
     const intervalTimestamp = resolveRecordTimestamp(intervalEntry, context, resourceContext.sourceProviderSlug);
     const originEntry: PlainObject = { ...entry, ...intervalEntry };
+    const timeZone = resolveSleepStageCanonicalTimeZone(intervalEntry, entry);
     const stageTimestamp = withTimestampOverride(intervalTimestamp, {
-      occurredAt: resolvedStartAt,
       recordedAt: intervalTimestamp.recordedAt ?? parentTimestamp.recordedAt ?? resolvedStartAt,
-      dayKey: resolveSleepStageDayKey(intervalEntry, entry, resolvedStartAt, context.defaultTimeZone) ??
-        intervalTimestamp.dayKey ??
-        parentTimestamp.dayKey,
       observedAtRaw: stringId(startAtRaw) ?? intervalTimestamp.observedAtRaw ?? parentTimestamp.observedAtRaw ?? resolvedStartAt,
       timestampSemantics: intervalTimestamp.timestampSemantics ?? parentTimestamp.timestampSemantics,
     });
 
-    context.samples.push(stripUndefined({
-      stream: "sleep_stage",
-      unit: "stage",
+    intervals.push({
+      dataOriginEntry: originEntry,
+      durationMinutes,
+      endAt: resolvedEndAt,
       recordedAt: stageTimestamp.recordedAt,
-      dayKey: stageTimestamp.dayKey,
-      timeZone: firstStringFromPaths(intervalEntry, ["timeZone", "timezone", "time_zone"])
-        ?? firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
-      source: "device",
-      quality: "normalized",
-      externalRef: makeJunctionSleepStageExternalRef(resourceContext, originEntry, stageTimestamp, stage, index),
-      dataOrigin: buildDataOrigin(originEntry, resourceContext, stageTimestamp),
-      sample: {
-        recordedAt: stageTimestamp.recordedAt,
-        occurredAt: stageTimestamp.occurredAt,
-        stage,
-        startAt: resolvedStartAt,
-        endAt: resolvedEndAt,
-        durationMinutes,
-      },
-    }));
+      stage,
+      startAt: resolvedStartAt,
+      intervalEntry,
+      timestamp: stageTimestamp,
+      timeZone,
+    });
   }
+
+  return intervals;
 }
 
-function resolveSleepStageDayKey(
+function resolveSleepCycleParentResourceId(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+  parentTimestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string | undefined {
+  const explicitParentId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
+  if (
+    (parentTimestamp.observedAtRaw || explicitParentId) &&
+    !isDirectSleepStageIntervalEntry(entry, resourceContext.sourceProviderSlug)
+  ) {
+    return buildStableResourceId(resourceContext, entry, parentTimestamp);
+  }
+
+  return undefined;
+}
+
+function hasSleepCycleCompactParentIdentity(entry: PlainObject, sourceProviderSlug: string | undefined): boolean {
+  return !isDirectSleepStageIntervalEntry(entry, sourceProviderSlug) &&
+    Boolean(
+      firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS) ||
+        firstStringFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS),
+    );
+}
+
+function makeJunctionSleepAggregateExternalRef(
+  resourceContext: ResourceContext,
+  aggregate: JunctionSleepStageAggregate | JunctionSleepTotalAggregate,
+  metric: string,
+): DeviceExternalRefPayload {
+  return makeJunctionCanonicalSleepStageExternalRef(resourceContext, {
+    coverageEndAt: aggregate.coverageEndAt,
+    coverageStartAt: aggregate.coverageStartAt,
+    dayKey: aggregate.timestamp.dayKey,
+    metric,
+    timeZone: aggregate.timeZone,
+  });
+}
+
+function makeJunctionCanonicalSleepStageExternalRef(
+  resourceContext: ResourceContext,
+  input: {
+    coverageEndAt: string;
+    coverageStartAt: string;
+    dayKey?: string;
+    metric: string;
+    timeZone?: string;
+  },
+): DeviceExternalRefPayload {
+  return makeProviderExternalRef(
+    "junction",
+    buildJunctionResourceType(resourceContext.sourceProviderSlug, "sleep"),
+    `sleep-stage-${shortHash([
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType,
+      resourceContext.origin.sourceInstanceId,
+      input.coverageStartAt,
+      input.coverageEndAt,
+    ])}`,
+    undefined,
+    slugify(input.metric, "value"),
+  );
+}
+
+function sleepStageMetricDescriptor(stage: JunctionSleepStage): Pick<MetricDescriptor, "metric" | "title"> {
+  switch (stage) {
+    case "awake":
+      return { metric: "sleep-awake-minutes", title: "Junction awake time" };
+    case "light":
+      return { metric: "sleep-light-minutes", title: "Junction light sleep" };
+    case "deep":
+      return { metric: "sleep-deep-minutes", title: "Junction deep sleep" };
+    case "rem":
+      return { metric: "sleep-rem-minutes", title: "Junction REM sleep" };
+  }
+
+  const exhaustive: never = stage;
+  return exhaustive;
+}
+
+function earlierIsoTimestamp(left: string, right: string): string {
+  return Date.parse(right) < Date.parse(left) ? right : left;
+}
+
+function laterIsoTimestamp(left: string, right: string): string {
+  return Date.parse(right) > Date.parse(left) ? right : left;
+}
+
+function laterOptionalIsoTimestamp(left: string | undefined, right: string | undefined): string | undefined {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return laterIsoTimestamp(left, right);
+}
+
+function resolveSleepStageAnchorDayKey(
+  coverageEndAt: string,
+  timeZone: string | undefined,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  parentTimestamp?: ReturnType<typeof resolveRecordTimestamp>,
+): string | undefined {
+  const coverageEndMs = Date.parse(coverageEndAt);
+  const localDayKey = Number.isFinite(coverageEndMs) && timeZone
+    ? localDayKeyAtMs(coverageEndMs, timeZone)
+    : undefined;
+
+  return localDayKey ?? timestamp.dayKey ?? parentTimestamp?.dayKey ?? extractIsoDatePrefix(coverageEndAt) ?? undefined;
+}
+
+function resolveSleepStageBucketTimeZone(
   intervalEntry: PlainObject,
   parentEntry: PlainObject,
-  resolvedStartAt: string,
-  defaultTimeZone: string | undefined,
+  _defaultTimeZone: string | undefined,
 ): string | undefined {
-  const explicitTimeZone = firstStringFromPaths(intervalEntry, ["timeZone", "timezone", "time_zone"])
-    ?? firstStringFromPaths(parentEntry, ["timeZone", "timezone", "time_zone"]);
-  // Samples do not yet have event-style legacyExternalRefs, so offset-only
-  // sleep-stage rows keep their historic UTC-day identity for stable replay.
-  const hasOffsetOnlyEvidence = !explicitTimeZone && (
-    readJunctionTimeZoneOffsetSeconds(intervalEntry) !== undefined ||
-    readJunctionTimeZoneOffsetSeconds(parentEntry) !== undefined
-  );
-  const timeZone = explicitTimeZone ?? (hasOffsetOnlyEvidence ? undefined : defaultTimeZone);
+  // Only provider-supplied zones (or explicit UTC timestamps) can define
+  // durable stage buckets. The vault default timezone is mutable profile
+  // state, so missing/null provider zones keep stable UTC-day identity.
+  return resolveSleepStageCanonicalTimeZone(intervalEntry, parentEntry);
+}
 
-  return firstIsoDateFromPaths(intervalEntry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS) ??
-    resolveVaultLocalDayKey(resolvedStartAt, timeZone) ??
-    extractIsoDatePrefix(resolvedStartAt) ??
-    undefined;
+function localDayKeyAtMs(timestampMs: number, timeZone: string): string | undefined {
+  try {
+    return toLocalDayKey(new Date(timestampMs), timeZone);
+  } catch {
+    return undefined;
+  }
 }
 
 function pushWorkoutSummary(
@@ -3110,13 +4264,14 @@ function buildDataOrigin(
   entry: PlainObject,
   resourceContext: ResourceContext,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  options: { normalizerVersion?: string } = {},
 ): DeviceDataOrigin {
   return stripUndefined({
     ...resourceContext.origin,
     observedAtRaw: timestamp.observedAtRaw,
     timeZoneOffsetMinutes: readJunctionTimeZoneOffsetMinutes(entry),
     timestampSemantics: timestamp.timestampSemantics,
-    normalizerVersion: "junction-normalizer.v1",
+    normalizerVersion: options.normalizerVersion ?? "junction-normalizer.v1",
   });
 }
 
@@ -3145,22 +4300,6 @@ function makeJunctionExternalRef(
     buildStableResourceId(resourceContext, entry, timestamp),
     undefined,
     slugify(facet, "value"),
-  );
-}
-
-function makeJunctionSleepStageExternalRef(
-  resourceContext: ResourceContext,
-  entry: PlainObject,
-  timestamp: ReturnType<typeof resolveRecordTimestamp>,
-  stage: JunctionSleepStage,
-  index: number,
-): DeviceExternalRefPayload {
-  return makeProviderExternalRef(
-    "junction",
-    resourceContext.externalRefResourceType,
-    buildStableSleepStageResourceId(resourceContext, entry, timestamp, stage, index),
-    undefined,
-    `sleep-stage-${stage}`,
   );
 }
 
@@ -3226,35 +4365,6 @@ function buildStableTimeseriesResourceId(
   ])}`;
 }
 
-function buildStableSleepStageResourceId(
-  resourceContext: ResourceContext,
-  entry: PlainObject,
-  timestamp: ReturnType<typeof resolveRecordTimestamp>,
-  stage: JunctionSleepStage,
-  index: number,
-): string {
-  const explicitId = firstStringFromPaths(entry, [
-    "id",
-    "stageId",
-    "stage_id",
-    "resourceId",
-    "resource_id",
-    "externalId",
-    "external_id",
-  ]);
-
-  return `${resourceContext.resourceSlug}-stage-${shortHash([
-    resourceContext.resourceSlug,
-    resourceContext.sourceProviderSlug,
-    resourceContext.origin.sourceType,
-    resourceContext.origin.sourceInstanceId,
-    explicitId,
-    timestamp.observedAtRaw ?? timestamp.occurredAt,
-    stage,
-    index,
-  ])}`;
-}
-
 function shortHash(parts: readonly unknown[]): string {
   return createHash("sha256")
     .update(JSON.stringify(parts))
@@ -3273,30 +4383,7 @@ function resolveRecordTimestamp(
   observedAtRaw?: string;
   timestampSemantics?: TimestampSemantics;
 } {
-  const rawObservedAt = firstStringFromPaths(entry, [
-    "observedAtRaw",
-    "observed_at_raw",
-    "observedAt",
-    "observed_at",
-    "timestamp",
-    "time",
-    "date",
-    "day",
-    "end",
-    "endAt",
-    "end_at",
-    "timeEnd",
-    "time_end",
-    "bedtimeStop",
-    "bedtime_stop",
-    "start",
-    "startAt",
-    "start_at",
-    "timeStart",
-    "time_start",
-    "bedtimeStart",
-    "bedtime_start",
-  ]);
+  const rawObservedAt = firstStringFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS);
   const localCalendarDayKey = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS);
   const explicitSemantics = firstTimestampSemantics(entry);
   const hasSourceSpecificFloatingTime = hasFloatingTimestampSourceProvider(sourceProviderSlug);
@@ -3550,24 +4637,37 @@ function groupedTimeseriesResourceEntries(payload: unknown): JunctionResourceEnt
   );
 }
 
-function sleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
+function sleepStageIntervalEntries(
+  entry: PlainObject,
+  sourceProviderSlug: string | undefined,
+): PlainObject[] {
+  const seen = new Set<PlainObject>();
+
   return [
-    ...collectSleepStageIntervalEntries(entry),
-    ...parallelSleepStageIntervalEntries(entry),
+    ...collectSleepStageIntervalEntries(entry, seen, sourceProviderSlug),
+    ...parallelSleepStageIntervalEntries(entry, sourceProviderSlug),
   ];
 }
 
-function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
+function collectSleepStageIntervalEntries(
+  value: unknown,
+  seen: Set<PlainObject>,
+  sourceProviderSlug: string | undefined,
+): PlainObject[] {
   if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectSleepStageIntervalEntries(entry));
+    return value.flatMap((entry) => collectSleepStageIntervalEntries(entry, seen, sourceProviderSlug));
   }
 
   const entry = asPlainObject(value);
   if (!entry) {
     return [];
   }
+  if (seen.has(entry)) {
+    return [];
+  }
+  seen.add(entry);
 
-  if (firstSleepStageFromPaths(entry, JUNCTION_SLEEP_STAGE_VALUE_PATHS)) {
+  if (firstSleepStageFromPaths(entry, JUNCTION_SLEEP_STAGE_VALUE_PATHS, sourceProviderSlug)) {
     return [entry];
   }
 
@@ -3577,11 +4677,14 @@ function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
       return [];
     }
 
-    return collectSleepStageIntervalEntries(nested);
+    return collectSleepStageIntervalEntries(nested, seen, sourceProviderSlug);
   });
 }
 
-function parallelSleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
+function parallelSleepStageIntervalEntries(
+  entry: PlainObject,
+  sourceProviderSlug: string | undefined,
+): PlainObject[] {
   const sessionStartRaw = firstValueFromPaths(entry, [
     "sessionStart",
     "session_start",
@@ -3602,7 +4705,7 @@ function parallelSleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
   const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
 
   return stageValues.flatMap((stageValue, index) => {
-    const stage = normalizeJunctionSleepStageValue(stageValue);
+    const stage = normalizeJunctionSleepStageValueForSource(stageValue, sourceProviderSlug);
     const startOffsetSeconds = startOffsets[index];
     const endOffsetSeconds = endOffsets[index];
     if (!stage || startOffsetSeconds === undefined || endOffsetSeconds === undefined) {
@@ -3645,6 +4748,10 @@ function expandResourceEntry(value: unknown, resource?: string): JunctionResourc
 }
 
 function readNestedResourceEntries(envelope: PlainObject, resource?: string): PlainObject[] | null {
+  const sourceProviderSlug = resource === "sleep_cycle"
+    ? readJunctionSourceProviderSlug(envelope, undefined)
+    : undefined;
+
   for (const key of nestedResourceEntryKeys(resource)) {
     const directEntry = asPlainObject(envelope[key]);
     const entries = directEntry
@@ -3654,11 +4761,30 @@ function readNestedResourceEntries(envelope: PlainObject, resource?: string): Pl
           return normalized ? [normalized] : [];
         });
     if (entries.length > 0) {
+      if (
+        resource === "sleep_cycle" &&
+        entries.some((entry) =>
+          isDirectSleepStageIntervalEntry(
+            entry,
+            readJunctionSourceProviderSlug(entry, envelope) ?? sourceProviderSlug,
+          )
+        )
+      ) {
+        return null;
+      }
+
       return entries;
     }
   }
 
   return null;
+}
+
+function isDirectSleepStageIntervalEntry(
+  entry: PlainObject,
+  sourceProviderSlug: string | undefined,
+): boolean {
+  return firstSleepStageFromPaths(entry, JUNCTION_SLEEP_STAGE_VALUE_PATHS, sourceProviderSlug) !== undefined;
 }
 
 function nestedResourceEntryKeys(resource: string | undefined): readonly string[] {
@@ -3688,15 +4814,41 @@ function listAllowedResourceKeys(
   return allowedResourceEntries(resources, allowlist).map(([resource]) => resource);
 }
 
-function firstSleepStageFromPaths(source: PlainObject | undefined, paths: readonly string[]): JunctionSleepStage | undefined {
+function firstSleepStageFromPaths(
+  source: PlainObject | undefined,
+  paths: readonly string[],
+  sourceProviderSlug?: string,
+): JunctionSleepStageValue | undefined {
   for (const path of paths) {
-    const stage = normalizeJunctionSleepStageValue(readPath(source, path));
+    const stage = normalizeJunctionSleepStageValueForSource(readPath(source, path), sourceProviderSlug);
     if (stage) {
       return stage;
     }
   }
 
   return undefined;
+}
+
+function normalizeJunctionSleepStageValueForSource(
+  value: unknown,
+  sourceProviderSlug: string | undefined,
+): JunctionSleepStageValue | null {
+  const normalized = normalizeJunctionSleepStageValue(value);
+  if (normalized) {
+    return normalized;
+  }
+
+  return isAppleHealthKitSourceProvider(sourceProviderSlug) && isJunctionAppleGenericAsleepStageValue(value)
+    ? "asleep_unspecified"
+    : null;
+}
+
+function isAppleHealthKitSourceProvider(sourceProviderSlug: string | undefined): boolean {
+  return normalizeJunctionSourceProviderSlug(sourceProviderSlug) === APPLE_HEALTH_KIT_SOURCE_PROVIDER_SLUG;
+}
+
+function isJunctionAppleGenericAsleepStageValue(value: unknown): boolean {
+  return value === -1 || (typeof value === "string" && value.trim() === "-1");
 }
 
 function normalizeTimestamp(value: unknown): string | undefined {
@@ -4029,6 +5181,22 @@ function normalizePositiveIntegerMinutes(value: unknown): number | undefined {
   }
 
   return Math.max(1, Math.round(numeric));
+}
+
+function normalizePositiveMinutes(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  return numeric !== undefined && numeric > 0 ? numeric : undefined;
+}
+
+function exactPositiveMinutesBetween(startAt: string | undefined, endAt: string | undefined): number | undefined {
+  if (!startAt || !endAt) {
+    return undefined;
+  }
+
+  const durationMs = Date.parse(endAt) - Date.parse(startAt);
+
+  return Number.isFinite(durationMs) && durationMs > 0 ? durationMs / 60000 : undefined;
 }
 
 function secondsToMinutes(value: unknown): number | undefined {

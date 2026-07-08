@@ -105,6 +105,7 @@ describe("hosted onboarding WhatsApp webhook route", () => {
     expect(response.status).toBe(202);
     expect(mocks.handleHostedOnboardingWhatsAppWebhook).toHaveBeenCalledWith({
       rawBody,
+      scheduleAfterResponse: expect.any(Function),
       signature: "sha256=test",
       signal: request.signal,
     });

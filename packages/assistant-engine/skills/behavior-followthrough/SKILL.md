@@ -258,7 +258,7 @@ Three or more misses means do not continue by inertia. Offer pause, restart smal
 
 Repeated "later" usually means the window is wrong or the behavior is too large. Convert it into a tiny now, a specific later cue, or a pause.
 
-Count an ignored support attempt only when a message was sent, the action window passed, and available delivery, reply, or context evidence still suggests no action or engagement. Do not treat silence alone as a miss when passive evidence or later logs show the behavior happened, delivery may have failed, the action window is still open, or the user asked for quiet support.
+Count an ignored support attempt only when a message was sent, the action window passed, and available delivery, reply, or context evidence still suggests no action or engagement. Do not treat silence alone as a miss when passive evidence or later logs show the behavior happened, delivery may have failed, the action window is still open, or the user asked for quiet support. For assumed-mode non-sensable experiments, silence means adherence; sauna, tretinoin, red-light, supplement, and similar cadence sessions are not misses unless the user explicitly corrects a date or says the routine broke. Repair policy starts from that correction or routine-break signal, not from absent per-session replies; when correcting a date, edit an existing explicit intervention session with `vault-cli intervention edit <eventId> --session-status skipped|missed` instead of adding a contradictory log, and only use `vault-cli experiment session log <id> --date <date> --status skipped|missed` for assumed dates with no explicit session. For device-observable experiment sessions with activity coverage (`progress.adherence.evidence.eventKind` is `activity_session` and `progress.dataCoverage.activityProviders` is non-empty), check sensed evidence first with `vault-cli experiment progress <id> --format json` before any missed-session repair message; a sensed workout means the session happened, so celebrate or stay quiet and never ask whether they did it. If `progress.adherence.evidence.eventKind` is `activity_session` but `progress.dataCoverage.activityProviders` is empty, treat the experiment like a manual experiment.
 
 ## Support fit over time
 
@@ -267,6 +267,8 @@ When support is working, fade it instead of adding more. Stable adherence should
 Do not keep daily support running by inertia just because it helped at launch. Do not silently end clinical or safety-relevant support.
 
 For experiments, tiny or fallback versions may keep the behavior loop alive, but do not log them as full protocol adherence when the protocol was only partially completed or materially changed. Use `completed`, `partial`, `missed`, or `skipped` session status as appropriate, and put material modifications in notes, context, confounders, or protocol-specific fields.
+
+When the user reports a device-observable experiment session with wearable coverage, acknowledge it warmly but do not write a session log if the workout already synced or is expected to sync. Log manually only when they indicate the device missed it.
 
 ## Visual, voice, and social support
 
@@ -315,7 +317,9 @@ Playful accountability cannot become humiliation, even if the user jokes that th
 
 Use plain, grounded language.
 
-Good shapes:
+Vary the approach across reminders rather than settling into one repeated shape. A reminder that reads like the last one gets tuned out, so rotate the angle to fit this moment and this person: a plain cue, a curiosity hook, an identity nudge, the tiny version, a callback, a light challenge, a question, or a richer modality. The examples below are registers to draw from, not lines to reuse.
+
+Good shapes (registers, not scripts):
 - "Let's make this small enough to survive real life."
 - "The tiny version counts. That's not a loophole; it's the plan."
 - "This reminder is becoming noise. I would change the loop."

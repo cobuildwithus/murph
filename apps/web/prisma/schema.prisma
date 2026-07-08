@@ -98,13 +98,14 @@ model DeviceTokenAudit {
 }
 
 model DeviceOauthSession {
-  state        String   @id
-  userId       String?  @map("user_id")
+  state        String    @id
+  userId       String?   @map("user_id")
   provider     String
-  returnTo     String?  @map("return_to")
-  metadataJson Json?    @map("metadata_json")
-  createdAt    DateTime @map("created_at")
-  expiresAt    DateTime @map("expires_at")
+  returnTo     String?   @map("return_to")
+  metadataJson Json?     @map("metadata_json")
+  createdAt    DateTime  @map("created_at")
+  expiresAt    DateTime  @map("expires_at")
+  consumedAt   DateTime? @map("consumed_at")
 
   @@index([expiresAt])
   @@index([userId, provider])
@@ -360,6 +361,9 @@ model HostedMember {
   consentGrants                  HostedConsentGrant[]
   vaultSharesGranted             HostedVaultShare[]              @relation("VaultShareGrantor")
   vaultSharesReceived            HostedVaultShare[]              @relation("VaultShareDestination")
+  hostedGroupsOwned              HostedGroup[]                   @relation("HostedGroupOwner")
+  hostedGroupMemberships         HostedGroupMember[]             @relation("HostedGroupMember")
+  hostedGroupRuntime             HostedGroup?                    @relation("HostedGroupRuntimeMember")
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
@@ -373,6 +377,7 @@ model HostedMember {
   sensitiveActionChallenges      HostedSensitiveActionChallenge[]
   threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
   ownedThreadContainers          HostedThreadContainer[]         @relation("HostedThreadContainerOwner")
+  threadContainerParticipations  HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -592,13 +597,12 @@ model HostedMemberRouting {
   linqChatIdEncrypted                String?      @map("linq_chat_id_encrypted")
   linqRecipientPhoneLookupKey        String?      @map("linq_recipient_phone_lookup_key")
   linqRecipientPhoneEncrypted        String?      @map("linq_recipient_phone_encrypted")
-  linqLastInboundAt                  DateTime?    @map("linq_last_inbound_at")
+  linqHomeLineAssignedAt             DateTime?    @map("linq_home_line_assigned_at")
   /// Pre-activation Linq acquisition/referral thread before a home line is chosen.
   pendingLinqChatLookupKey           String?      @unique @map("pending_linq_chat_lookup_key")
   pendingLinqChatIdEncrypted         String?      @map("pending_linq_chat_id_encrypted")
   pendingLinqRecipientPhoneLookupKey String?      @map("pending_linq_recipient_phone_lookup_key")
   pendingLinqRecipientPhoneEncrypted String?      @map("pending_linq_recipient_phone_encrypted")
-  pendingLinqLastInboundAt           DateTime?    @map("pending_linq_last_inbound_at")
   pendingLinqParticipantContactKind       String?   @map("pending_linq_participant_contact_kind")
   pendingLinqParticipantContactLookupKey  String?   @unique @map("pending_linq_participant_contact_lookup_key")
   pendingLinqParticipantContactEncrypted  String?   @map("pending_linq_participant_contact_encrypted")
@@ -611,9 +615,8 @@ model HostedMemberRouting {
   member                             HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([linqRecipientPhoneLookupKey])
+  @@index([linqRecipientPhoneLookupKey, linqHomeLineAssignedAt])
   @@index([pendingLinqRecipientPhoneLookupKey])
-  @@index([linqLastInboundAt])
-  @@index([pendingLinqLastInboundAt])
   @@map("hosted_member_routing")
 }
 
@@ -674,6 +677,7 @@ model HostedMailboxItem {
   payloadRef              String?               @map("payload_ref")
   payloadBytes            Int?                  @map("payload_bytes")
   payloadHash             String?               @map("payload_hash")
+  consumedAt              DateTime?             @map("consumed_at")
   expiresAt               DateTime?             @map("expires_at")
   createdAt               DateTime              @default(now()) @map("created_at")
   updatedAt               DateTime              @updatedAt @map("updated_at")
@@ -943,6 +947,21 @@ model HostedAccountGroupBillingRef {
   @@map("hosted_account_group_billing_ref")
 }
 
+model HostedGrowthDailySnapshot {
+  snapshotDate       DateTime @id @map("snapshot_date") @db.Date
+  capturedAt         DateTime @map("captured_at")
+  totalMembers       Int      @map("total_members")
+  payingIndividuals  Int      @map("paying_individuals")
+  payingFamilyGroups Int      @map("paying_family_groups")
+  payingFamilySeats  Int      @map("paying_family_seats")
+  payingCustomers    Int      @map("paying_customers")
+  coveredMembers     Int      @map("covered_members")
+  trialingMembers    Int      @map("trialing_members")
+  mrrUsdCents        Int      @map("mrr_usd_cents")
+
+  @@map("hosted_growth_daily_snapshot")
+}
+
 model HostedLinqFirstContactAdmissionDecision {
   eventId             String   @id @map("event_id")
   decision            String
@@ -1023,13 +1042,67 @@ model HostedConsentGrant {
   @@map("hosted_consent_grant")
 }
 
+
+model HostedGroup {
+  id                String              @id
+  ownerMemberId     String              @map("owner_member_id")
+  runtimeMemberId   String?             @unique @map("runtime_member_id")
+  kind              String              @default("custom")
+  displayName       String?             @map("display_name")
+  joinCode          String?             @unique @map("join_code")
+  joinCodeCreatedAt DateTime?           @map("join_code_created_at")
+  joinPolicyJson    Json?               @map("join_policy_json")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  owner             HostedMember        @relation("HostedGroupOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
+  runtimeMember     HostedMember?       @relation("HostedGroupRuntimeMember", fields: [runtimeMemberId], references: [id], onDelete: SetNull)
+  members           HostedGroupMember[]
+  joinOffers        HostedGroupJoinOffer[]
+
+  @@index([ownerMemberId])
+  @@index([kind])
+  @@map("hosted_group")
+}
+
+model HostedGroupJoinOffer {
+  id                  String      @id
+  groupId             String      @map("group_id")
+  messageLookupKey    String      @unique @map("message_lookup_key")
+  messageIdSuffix     String?     @map("message_id_suffix")
+  projectionKindsJson Json        @map("projection_kinds_json")
+  postedAt            DateTime    @map("posted_at")
+  revokedAt           DateTime?   @map("revoked_at")
+  group               HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, revokedAt, postedAt])
+  @@map("hosted_group_join_offer")
+}
+
+model HostedGroupMember {
+  id        String       @id
+  groupId   String       @map("group_id")
+  memberId  String       @map("member_id")
+  role      String       @default("member")
+  joinedAt  DateTime?    @map("joined_at")
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  group     HostedGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  member    HostedMember @relation("HostedGroupMember", fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, memberId])
+  @@index([memberId])
+  @@index([groupId])
+  @@map("hosted_group_member")
+}
+
 model HostedVaultShare {
   id                  String       @id
   grantorMemberId     String       @map("grantor_member_id")
   projectionKind      String       @map("projection_kind")
+  projectionScopeKey   String       @map("projection_scope_key")
+  projectionScopeJson  Json?        @map("projection_scope_json")
   destinationMemberId String       @map("destination_member_id")
   status              String       @default("granted")
-  source              String
   grantedAt           DateTime     @map("granted_at")
   revokedAt           DateTime?    @map("revoked_at")
   createdAt           DateTime     @default(now()) @map("created_at")
@@ -1037,7 +1110,7 @@ model HostedVaultShare {
   grantor             HostedMember @relation("VaultShareGrantor", fields: [grantorMemberId], references: [id], onDelete: Cascade)
   destination         HostedMember @relation("VaultShareDestination", fields: [destinationMemberId], references: [id], onDelete: Cascade)
 
-  @@unique([grantorMemberId, projectionKind, destinationMemberId])
+  @@unique([grantorMemberId, projectionScopeKey, destinationMemberId])
   @@map("hosted_vault_share")
 }
 
@@ -1048,10 +1121,28 @@ model HostedThreadContainer {
   createdAt                  DateTime            @default(now()) @map("created_at")
   member                     HostedMember        @relation("HostedThreadContainerMember", fields: [memberId], references: [id], onDelete: Cascade)
   owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
+  participants               HostedThreadContainerParticipant[]
   routes                     HostedThreadRoute[]
 
   @@index([ownerMemberId])
   @@map("hosted_thread_container")
+}
+
+model HostedThreadContainerParticipant {
+  containerMemberId   String                @map("container_member_id")
+  participantMemberId String                @map("participant_member_id")
+  handleLookupKey     String                @map("handle_lookup_key")
+  firstSeenAt         DateTime              @map("first_seen_at")
+  lastSeenAt          DateTime              @map("last_seen_at")
+  removedAt           DateTime?             @map("removed_at")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
+  container           HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
+  participant         HostedMember          @relation("HostedThreadContainerParticipantMember", fields: [participantMemberId], references: [id], onDelete: Cascade)
+
+  @@id([containerMemberId, participantMemberId])
+  @@index([containerMemberId])
+  @@map("hosted_thread_container_participant")
 }
 
 model HostedThreadRoute {
@@ -1059,7 +1150,6 @@ model HostedThreadRoute {
   threadLookupKey         String                @map("thread_lookup_key")
   threadIdentityLookupKey String                @map("thread_identity_lookup_key")
   containerMemberId       String                @map("container_member_id")
-  lastInboundAt           DateTime?             @map("last_inbound_at")
   createdAt               DateTime              @default(now()) @map("created_at")
   updatedAt               DateTime              @default(now()) @updatedAt @map("updated_at")
   container               HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
@@ -1067,16 +1157,19 @@ model HostedThreadRoute {
   @@id([channel, threadIdentityLookupKey])
   @@index([channel, threadLookupKey])
   @@index([containerMemberId])
-  @@index([channel, lastInboundAt])
   @@map("hosted_thread_route")
 }
 
 model HostedLinqLine {
   phoneNumberLookupKey       String    @id @map("phone_number_lookup_key")
+  phoneNumberEncrypted       String?   @map("phone_number_encrypted")
   phoneNumberHint            String    @map("phone_number_hint")
   source                     String    @default("unknown")
   configuredAt               DateTime? @map("configured_at")
   providerSeenAt             DateTime? @map("provider_seen_at")
+  providerPhoneNumberId      String?   @unique @map("provider_phone_number_id")
+  providerFirstSeenAt        DateTime? @map("provider_first_seen_at")
+  providerLastSeenAt         DateTime? @map("provider_last_seen_at")
   healthStatus               String    @default("unknown") @map("health_status")
   egressPolicy               String    @default("enabled") @map("egress_policy")
   providerStatus             String?   @map("provider_status")
@@ -1110,7 +1203,9 @@ model HostedLinqLine {
   alerts                     HostedLinqAlert[]
 
   @@index([healthStatus, egressPolicy])
+  @@index([configuredAt, egressPolicy, healthStatus])
   @@index([providerStatus])
+  @@index([providerLastSeenAt])
   @@index([lastFailedAt])
   @@map("hosted_linq_line")
 }

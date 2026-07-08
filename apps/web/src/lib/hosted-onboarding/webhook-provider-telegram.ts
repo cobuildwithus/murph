@@ -10,12 +10,12 @@ import {
 } from "./errors";
 import {
   appendHostedFamilyChatNotificationTx,
-  buildHostedFamilyInviteAcceptedReplyText,
+  buildHostedFamilyInviteAcceptedNotification,
   acceptHostedFamilyInviteFromTelegramTx,
-  hasHostedMemberEffectiveActiveAccessForMember,
-  parseHostedFamilyInviteStartToken,
+  resolveHostedFamilyInviteTokenForInbound,
   resolveHostedFamilyChatNotificationRouteTx,
 } from "./family-plan";
+import { readActiveHostedMemberAccess } from "./member-access";
 import {
   buildHostedTelegramMessagePayload,
   buildHostedTelegramWebhookEventId,
@@ -46,6 +46,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   if (!summary) {
     return buildIgnoredTelegramWebhookPlan("unsupported-update");
   }
+  const eventId = buildHostedTelegramWebhookEventId(input.update);
 
   if (summary.isBotMessage) {
     return buildIgnoredTelegramWebhookPlan("own-message");
@@ -60,9 +61,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }
 
   const telegramMessage = buildHostedTelegramMessagePayload(input.update);
-  const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(
-    telegramMessage?.text ?? null,
-  ) !== null;
+  const familyInviteTokenPresent = await resolveHostedFamilyInviteTokenForInbound({
+    prisma: input.prisma,
+    text: telegramMessage?.text ?? null,
+  }) !== null;
   let familyInviteNotAccepted = false;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
   try {
@@ -89,10 +91,12 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     });
     const notification = await appendHostedFamilyChatNotificationTx({
       memberId: familyAcceptance.memberId,
-      message: buildHostedFamilyInviteAcceptedReplyText(),
+      notification: buildHostedFamilyInviteAcceptedNotification({
+        memberId: familyAcceptance.memberId,
+      }),
       occurredAt: summary.occurredAt,
       route,
-      sourceEventId: buildHostedTelegramWebhookEventId(input.update),
+      sourceEventId: eventId,
       tx: input.prisma,
     });
     return {
@@ -103,8 +107,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       },
       ...(notification.mailboxItemId
         ? {
-            wakeMailboxItemId: notification.mailboxItemId,
-            wakeUserId: familyAcceptance.memberId,
+            wakeHandoffs: [{ eventId, mailboxItemId: notification.mailboxItemId, source: "telegram", userId: familyAcceptance.memberId }],
           }
         : {}),
     };
@@ -135,8 +138,8 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("suspended-member");
   }
 
-  if (!await hasHostedMemberEffectiveActiveAccessForMember({
-    member: existingMember,
+  if (!await readActiveHostedMemberAccess({
+    memberId: existingMember.id,
     prisma: input.prisma,
   })) {
     return buildIgnoredTelegramWebhookPlan("inactive-member");
@@ -155,7 +158,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
 
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionTelegramConversationMessageWake({
-      eventId: buildHostedTelegramWebhookEventId(input.update),
+      eventId,
       occurredAt: summary.occurredAt,
       telegramMessage,
       userId: existingMember.id,
@@ -169,8 +172,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       ok: true,
       reason: "wake-appended-active-member",
     },
-    wakeMailboxItemId: mailboxAppend.item.id,
-    wakeUserId: existingMember.id,
+    wakeHandoffs: [{
+      eventId, mailboxItemId: mailboxAppend.item.id, source: "telegram", userId: existingMember.id,
+      wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
+    }],
   };
 }
 

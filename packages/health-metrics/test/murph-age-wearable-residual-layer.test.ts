@@ -4,6 +4,9 @@ import { test } from "vitest";
 
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  type MetricPoint,
+} from "../src/index.ts";
+import {
   MURPH_AGE_WEARABLE_RESIDUAL_LAYER_APPLICATION_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   applyMurphAgeWearableResidualLayer,
@@ -11,11 +14,10 @@ import {
   calculateMurphAgeFromInputBundle,
   summarizeMurphAgeWearableResidualLayerContracts,
   validateMurphAgeWearableResidualParameterPack,
-  type MetricPoint,
   type MurphAgeReferenceRiskPoint,
   type MurphAgeRiskModel,
   type MurphAgeWearableResidualParameterPack,
-} from "../src/index.ts";
+} from "@murphai/health-metrics/murph-age";
 
 test("maps research-only wearable residual deltas onto risk-age equivalents when a reference curve is available", () => {
   const asOf = "2026-05-10T00:00:00.000Z";

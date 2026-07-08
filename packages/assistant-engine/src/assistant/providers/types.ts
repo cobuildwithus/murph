@@ -75,6 +75,20 @@ export interface AssistantProviderConversationMessage {
   role: 'assistant' | 'user'
 }
 
+export interface AssistantProviderRequestStartTiming {
+  codexAppServerInitializeMs?: number
+  codexAppServerPreProviderMs?: number
+  codexAppServerSpawnReadyMs?: number
+  codexAppServerThreadResumeMs?: number
+  codexAppServerThreadStartMs?: number
+  codexAppServerWarmReuseMs?: number
+}
+
+export interface AssistantProviderRequestStartedEvent
+  extends AssistantProviderRequestStartTiming {
+  startedAt: string
+}
+
 /**
  * Per-turn OpenAI processing tier. This is turn execution policy only: it must
  * never enter `CodexThreadIdentity`/route fingerprints or persisted session
@@ -96,6 +110,7 @@ export interface AssistantProviderTurn {
   allowFinishWithoutReply?: boolean | null
   allowMessageReactions?: boolean | null
   abortSignal?: AbortSignal
+  codexConfigOverrides?: readonly string[] | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
@@ -108,7 +123,7 @@ export interface AssistantProviderTurn {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
-  onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
+  onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   providerFetch?: typeof fetch | null
   providerRequestOrdinal?: number | null
@@ -124,9 +139,6 @@ export interface AssistantProviderTurn {
   showThinkingTraces?: boolean
   systemPrompt?: string | null
   progressDelivery?: AssistantProgressDelivery | null
-  loadAuthorizedReferenceImageRefs?:
-    | (() => Promise<ReadonlyMap<string, { sha256: string }>>)
-    | null
   hostedToolContext?: AssistantHostedToolContext | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   turnContextPrompt?: string | null

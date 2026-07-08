@@ -1,11 +1,14 @@
 import {
   EXPERIMENT_OUTCOME_SCHEMA_VERSION,
   EXPERIMENT_PROGRESS_SCHEMA_VERSION,
+  deviceDataOriginSchema,
   experimentFrontmatterSchema,
   experimentOutcomeSchema,
   experimentProgressSnapshotSchema,
   safeParseContract,
   toLocalDayKey,
+  activityTextMatchesKind,
+  type DeviceDataOrigin,
   type ExperimentFrontmatter,
   type ExperimentOutcome,
   type ExperimentProgressMetricSignal,
@@ -15,7 +18,14 @@ import {
 import { getExperiment, type VaultReadModel } from "./read-model.ts";
 import {
   buildExperimentAdherenceCalendar,
+  countAdherenceConfidenceSessions,
+  countCompletedAdherenceSessions,
+  eventKindIsCandidateForEvidence,
+  experimentAdherenceTargetPlansDate,
+  resolveActivityEvidenceLocalDate,
+  resolveAdherenceObservationActivityKind,
   resolveExperimentAdherenceRollupTarget,
+  resolveInterventionSessionLocalDate,
   synthesizeLegacySessionAdherenceTargets,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
@@ -41,10 +51,19 @@ import {
 } from "./metrics/index.ts";
 import { buildMetricProjection } from "./metrics/projection.ts";
 import { summarizeWearableDay, type WearableDaySummary } from "./wearables.ts";
+import { readWearableExternalRef } from "./wearables/observation.ts";
+import {
+  inferJunctionWearableDataOriginFromExternalRef,
+  resolveWearablePublicSourceProvider,
+} from "./wearables/origin.ts";
+import type { WearableExternalRef } from "./wearables/types.ts";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
 
 const MAX_EXPERIMENT_ANALYSIS_WINDOW_DAYS = 366;
+const MAX_DATA_COVERAGE_PROVIDERS = 20;
+// Answers whether the vault is currently receiving workout events.
+const ACTIVITY_PROVIDER_COVERAGE_WINDOW_DAYS = 30;
 
 export type ExperimentProgressPhase =
   | "planned"
@@ -84,6 +103,7 @@ export type ExperimentFollowupReason =
   | "missed_log_followup_disabled"
   | "reminders_disabled"
   | "session_already_logged"
+  | "session_assumed"
   | "planned_session_log_missing"
   | "unsupported_session_schedule"
   | "weekly_digest_disabled"
@@ -119,14 +139,24 @@ export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
   asOf: string;
   adherence: {
     completedSessions: number;
+    assumedSessions?: number;
+    evidence?: {
+      eventKind: "activity_session" | "intervention_session";
+      activityKind?: string;
+    };
+    confirmedSessions?: number;
     expectedSessionsByNow: number | null;
+    loggedSessions?: number;
     minimumUsefulSessions: number | null;
+    partialSessions?: number;
+    sensedSessions?: number;
     sessionEventIds?: string[];
     status: ExperimentAdherenceStatus;
     targetSessions: number | null;
   };
   confounders: string[];
   dataCoverage: {
+    activityProviders: string[];
     baselineDaysAvailable: number;
     interventionDaysAvailable: number;
     primaryBiomarkerKey?: string | null;
@@ -226,9 +256,9 @@ export interface ExperimentFollowupDueDecision {
 }
 
 interface ExperimentSummaryContext {
+  adherenceEvents: CanonicalEntity[];
   asOf: string;
   baselineDates: string[];
-  completedSessions: number;
   confounders: string[];
   events: CanonicalEntity[];
   experiment: CanonicalEntity;
@@ -241,8 +271,10 @@ interface ExperimentSummaryContext {
 
 type ExperimentFollowupContext = Pick<
   ExperimentSummaryContext,
-  "events" | "frontmatter" | "progressPhase"
->;
+  "adherenceEvents" | "events" | "frontmatter" | "progressPhase"
+> & {
+  adherenceTargets: readonly QueryExperimentAdherenceTarget[];
+};
 
 interface ExperimentMetricPointOptions {
   metricPoints?: readonly MetricPoint[];
@@ -296,6 +328,7 @@ export function summarizeExperimentProgress(
     sessionEventIds: completedSessionEventIds,
   };
   const dataCoverage = buildCoverageSummary({
+    asOf: context.asOf,
     baselineDaysAvailable,
     interventionDaysAvailable,
     primarySignal,
@@ -303,6 +336,7 @@ export function summarizeExperimentProgress(
     frontmatter: context.frontmatter,
     signals,
     summariesByDate: context.summariesByDate,
+    vault,
   });
   const setupReadiness = buildSetupReadiness(context.frontmatter);
   const analysisReadiness = buildAnalysisReadiness(context.frontmatter);
@@ -439,8 +473,15 @@ function buildExperimentSummaryContext(
   const frontmatter = requireExperimentFrontmatter(experiment);
   const asOf = normalizeAsOfDate(options.asOf);
   const progressPhase = resolveProgressPhase(frontmatter, asOf);
+  const adherenceTargets = resolveAdherenceTargetsFromFrontmatter(frontmatter);
   const events = findExperimentEvents(vault, experiment, frontmatter, asOf);
-  const completedSessions = events.filter(isCompletedSessionEvent).length;
+  const adherenceEvents = findAdherenceEvidenceEvents({
+    asOf,
+    events,
+    frontmatter,
+    targets: adherenceTargets,
+    vault,
+  });
   const dateSet = new Set<string>([
     ...dateRange(frontmatter.runPlan?.baselineStart, frontmatter.runPlan?.baselineEnd),
     ...dateRange(
@@ -455,9 +496,9 @@ function buildExperimentSummaryContext(
   }
 
   return {
+    adherenceEvents,
     asOf,
     baselineDates: dateRange(frontmatter.runPlan?.baselineStart, frontmatter.runPlan?.baselineEnd),
-    completedSessions,
     confounders: summarizeConfounders(events),
     events,
     experiment,
@@ -483,8 +524,18 @@ function buildExperimentFollowupContext(
   }
 
   const frontmatter = requireExperimentFrontmatter(experiment);
+  const events = findExperimentEvents(vault, experiment, frontmatter, asOf);
+  const adherenceTargets = resolveAdherenceTargetsFromFrontmatter(frontmatter);
   return {
-    events: findExperimentEvents(vault, experiment, frontmatter, asOf),
+    adherenceEvents: findAdherenceEvidenceEvents({
+      asOf,
+      events,
+      frontmatter,
+      targets: adherenceTargets,
+      vault,
+    }),
+    adherenceTargets,
+    events,
     frontmatter,
     progressPhase: resolveProgressPhase(frontmatter, asOf),
   };
@@ -595,10 +646,16 @@ export function collectExperimentAdherenceCalendar(
 function resolveAdherenceTargets(
   context: ExperimentSummaryContext,
 ): QueryExperimentAdherenceTarget[] {
+  return resolveAdherenceTargetsFromFrontmatter(context.frontmatter);
+}
+
+function resolveAdherenceTargetsFromFrontmatter(
+  frontmatter: QueryExperimentFrontmatter,
+): QueryExperimentAdherenceTarget[] {
   return (
-    context.frontmatter.runPlan?.adherenceTargets ??
+    frontmatter.runPlan?.adherenceTargets ??
     synthesizeLegacySessionAdherenceTargets({
-      runPlan: context.frontmatter.runPlan,
+      runPlan: frontmatter.runPlan,
     })
   );
 }
@@ -629,52 +686,122 @@ function buildAdherenceSummary(context: ExperimentSummaryContext): ExperimentPro
   const minimumUsefulSessions =
     rollupTarget?.rollup?.minimumUsefulCompletions ??
     (hasAmbiguousTargets ? null : context.frontmatter.runPlan?.minimumUsefulSessions ?? null);
+  const progressTarget = hasAmbiguousTargets ? null : rollupTarget ?? targets[0] ?? null;
   const adherenceCalendar = buildAdherenceCalendarFromContext(context);
-  const rollupCells = rollupTarget && adherenceCalendar
+  const rollupCells = progressTarget?.calendar && rollupTarget && adherenceCalendar
     ? adherenceCalendar.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
     : null;
-  const completedSessions = hasAmbiguousTargets
-    ? 0
-    : rollupCells
-    ? rollupCells.filter((cell) => cell.status === "satisfied").length
-    : context.completedSessions;
+  const progressObservations = progressTarget
+    ? buildAdherenceObservations(context, [progressTarget])
+    : [];
+  const progressCounts = progressTarget && !progressTarget.calendar
+    ? countCompletedAdherenceSessions({
+        asOfDate: context.asOf,
+        observations: progressObservations,
+        target: progressTarget,
+        windows: buildWindowSummary(context.frontmatter),
+      })
+    : null;
+  const progressCells = progressTarget?.calendar
+    ? rollupCells ?? adherenceCalendar?.cells ?? []
+    : [];
+  const confidenceCounts = !hasAmbiguousTargets && progressTarget?.calendar
+    ? countAdherenceConfidenceSessions({
+        cells: progressCells,
+        observations: progressObservations,
+      })
+    : progressCounts ?? {
+        sensedSessions: 0,
+        confirmedSessions: 0,
+        assumedSessions: 0,
+      };
+  let completedSessions = 0;
+  let partialSessions = 0;
+  if (!hasAmbiguousTargets) {
+    if (progressTarget?.calendar) {
+      completedSessions = progressCells.filter(
+        (cell) => cell.status === "satisfied" || cell.status === "assumed",
+      ).length;
+      partialSessions = progressCells.filter((cell) => cell.status === "partial").length;
+    } else {
+      completedSessions = progressCounts?.completedSessions ?? 0;
+      partialSessions = progressCounts?.partialSessions ?? 0;
+    }
+  }
+  const loggedSessions = completedSessions + partialSessions;
   const expectedSessionsByNow = hasAmbiguousTargets
     ? null
-    : adherenceCalendar
+    : progressTarget?.calendar && adherenceCalendar
     ? (rollupCells ?? adherenceCalendar.cells).filter((cell) => cell.status !== "scheduled").length
     : computeExpectedSessionsByNow(
         context.frontmatter,
         context.asOf,
         targetSessions,
       );
+  const evidence = buildProgressAdherenceEvidence(progressTarget);
 
   let status: ExperimentAdherenceStatus = "unknown";
   if (hasAmbiguousTargets) {
     status = "unknown";
-  } else if (completedSessions === 0) {
+  } else if (loggedSessions === 0) {
     status = "not_started";
-  } else if (targetSessions !== null && completedSessions >= targetSessions) {
+  } else if (targetSessions !== null && loggedSessions >= targetSessions) {
     status = "met_target";
   } else if (
     minimumUsefulSessions !== null &&
-    completedSessions >= minimumUsefulSessions
+    loggedSessions >= minimumUsefulSessions
   ) {
     status = "met_minimum";
   } else if (
     expectedSessionsByNow !== null &&
-    completedSessions < expectedSessionsByNow
+    loggedSessions < expectedSessionsByNow
   ) {
     status = "behind";
-  } else if (completedSessions > 0) {
+  } else if (loggedSessions > 0) {
     status = "on_track";
   }
 
-  return {
+  const summary: ExperimentProgressSummary["adherence"] = {
     completedSessions,
+    ...(evidence ? { evidence } : {}),
     expectedSessionsByNow,
+    loggedSessions,
+    ...(partialSessions > 0 ? { partialSessions } : {}),
     minimumUsefulSessions,
     status,
     targetSessions,
+  };
+  if (confidenceCounts.sensedSessions > 0) {
+    summary.sensedSessions = confidenceCounts.sensedSessions;
+  }
+  if (confidenceCounts.confirmedSessions > 0) {
+    summary.confirmedSessions = confidenceCounts.confirmedSessions;
+  }
+  if (confidenceCounts.assumedSessions > 0) {
+    // Calendar-less targets have no per-day plan to assume; derived count-style events can still report as assumed.
+    summary.assumedSessions = confidenceCounts.assumedSessions;
+  }
+
+  return summary;
+}
+
+function buildProgressAdherenceEvidence(
+  target: QueryExperimentAdherenceTarget | null,
+): ExperimentProgressSummary["adherence"]["evidence"] | null {
+  if (!target || target.evidence.kind !== "linkedEventCount") {
+    return null;
+  }
+
+  if (
+    target.evidence.eventKind !== "activity_session" &&
+    target.evidence.eventKind !== "intervention_session"
+  ) {
+    return null;
+  }
+
+  return {
+    eventKind: target.evidence.eventKind,
+    ...(target.evidence.activityKind ? { activityKind: target.evidence.activityKind } : {}),
   };
 }
 
@@ -688,17 +815,25 @@ function buildAdherenceObservations(
     switch (target.evidence.kind) {
       case "linkedEventCount":
         const linkedEvidence = target.evidence;
-        observations.push(...context.events
-          .filter((event) => event.kind === linkedEvidence.eventKind)
+        observations.push(...context.adherenceEvents
+          .filter((event) => eventKindIsCandidateForEvidence(event.kind, linkedEvidence))
           .map((event) => ({
+            activityKind: resolveAdherenceObservationActivityKind({
+              attributes: event.attributes as Record<string, unknown>,
+            }),
             evidenceId: event.entityId,
             eventKind: event.kind,
             localDate:
-              readStringAttribute(event, "scheduledLocalDate") ??
-              readStringAttribute(event, "sessionLocalDate") ??
-              (event.occurredAt
-                ? toLocalDayKey(new Date(event.occurredAt), target.calendar.timeZone)
-                : event.date ?? context.asOf),
+              event.kind === "activity_session"
+                ? resolveActivityEvidenceLocalDate(event) ?? context.asOf
+                : event.kind === "intervention_session"
+                  ? resolveInterventionSessionLocalDate(event) ?? context.asOf
+                  : readStringAttribute(event, "scheduledLocalDate") ??
+                    readStringAttribute(event, "sessionLocalDate") ??
+                    (target.calendar && event.occurredAt
+                      ? toLocalDayKey(new Date(event.occurredAt), target.calendar?.timeZone ?? "UTC")
+                      : event.date ?? extractDate(event.occurredAt) ?? context.asOf),
+            source: readStringAttribute(event, "source"),
             status: readExperimentSessionStatus(event),
             targetId: target.targetId,
           })));
@@ -747,6 +882,7 @@ function selectMetricAdherenceRows(
 }
 
 function buildCoverageSummary(input: {
+  asOf: string;
   baselineDaysAvailable: number;
   interventionDaysAvailable: number;
   frontmatter: ExperimentFrontmatter;
@@ -754,6 +890,7 @@ function buildCoverageSummary(input: {
   progressPhase: ExperimentProgressPhase;
   signals: readonly ExperimentMetricResult[];
   summariesByDate: Map<string, WearableDaySummary | null>;
+  vault: VaultReadModel;
 }): ExperimentProgressSummary["dataCoverage"] {
   const primaryMetricDaysAvailable =
     (input.primarySignal?.baselineDayCount ?? 0) +
@@ -802,11 +939,13 @@ function buildCoverageSummary(input: {
     status = "insufficient";
   }
 
-  const wearableProviders = [...new Set(
+  const activityProviders = buildActivityProviderCoverage(input.vault, input.asOf);
+  const wearableProviders = normalizeDataCoverageProviderList(
     [...input.summariesByDate.values()].flatMap((summary) => summary?.providers ?? []),
-  )].sort((left, right) => left.localeCompare(right));
+  );
 
   return {
+    activityProviders,
     baselineDaysAvailable: input.baselineDaysAvailable,
     interventionDaysAvailable: input.interventionDaysAvailable,
     primaryBiomarkerKey: input.primarySignal?.biomarkerKey ?? null,
@@ -814,6 +953,73 @@ function buildCoverageSummary(input: {
     status,
     wearableProviders,
   };
+}
+
+function buildActivityProviderCoverage(vault: VaultReadModel, asOf: string): string[] {
+  const windowStart = addDaysToIsoDate(
+    asOf,
+    -(ACTIVITY_PROVIDER_COVERAGE_WINDOW_DAYS - 1),
+  );
+  return normalizeDataCoverageProviderList(
+    vault.events.flatMap((event) => {
+      if (event.kind !== "activity_session") {
+        return [];
+      }
+
+      const localDate = resolveActivityEvidenceLocalDate(event);
+      if (!localDate || localDate < windowStart || localDate > asOf) {
+        return [];
+      }
+
+      const provider = resolveActivitySessionProviderCoverageLabel(event);
+      return provider ? [provider] : [];
+    }),
+  );
+}
+
+function resolveActivitySessionProviderCoverageLabel(event: CanonicalEntity): string | null {
+  const externalRef = readWearableExternalRef(event.attributes.externalRef);
+  const dataOrigin = readActivitySessionDataOrigin(event.attributes.dataOrigin, externalRef);
+  const provider = resolveWearablePublicSourceProvider({
+    dataOrigin,
+    externalRef,
+    provider: externalRef?.system,
+  }, {
+    suppressJunctionSourceInstanceFallback: true,
+  });
+
+  if (provider && provider !== "unknown" && provider !== "manual") {
+    return provider;
+  }
+
+  const source = readCoverageString(event.attributes.source);
+  if (
+    source === "device" ||
+    dataOrigin !== null ||
+    (externalRef !== null && externalRef.system !== "manual")
+  ) {
+    return "wearable";
+  }
+
+  return null;
+}
+
+function readActivitySessionDataOrigin(
+  value: unknown,
+  externalRef: WearableExternalRef | null,
+): DeviceDataOrigin | null {
+  const parsed = deviceDataOriginSchema.safeParse(value);
+  return parsed.success ? parsed.data : inferJunctionWearableDataOriginFromExternalRef(externalRef);
+}
+
+function normalizeDataCoverageProviderList(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right))
+    .slice(0, MAX_DATA_COVERAGE_PROVIDERS);
+}
+
+function readCoverageString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
 }
 
 function summarizeSignalDayCoverage(signals: readonly ExperimentMetricResult[]) {
@@ -948,6 +1154,7 @@ function buildOutcomeConfidence(input: {
 }): ExperimentOutcomeSummary["confidence"] {
   const reasons: string[] = [];
   const primary = input.metricResults[0] ?? null;
+  const loggedSessions = readLoggedAdherenceSessions(input.adherence);
 
   if (!primary || primary.completeness === "insufficient") {
     reasons.push("Primary biomarker coverage is insufficient for a strong before-and-after read.")
@@ -955,9 +1162,16 @@ function buildOutcomeConfidence(input: {
 
   if (
     input.adherence.minimumUsefulSessions !== null &&
-    input.adherence.completedSessions < input.adherence.minimumUsefulSessions
+    loggedSessions < input.adherence.minimumUsefulSessions
   ) {
-    reasons.push("Completed session count stayed below the minimum useful target.")
+    reasons.push("Logged session count stayed below the minimum useful target.")
+  }
+
+  if (
+    (input.adherence.assumedSessions ?? 0) >
+      (input.adherence.sensedSessions ?? 0) + (input.adherence.confirmedSessions ?? 0)
+  ) {
+    reasons.push("Most sessions are assumed rather than confirmed.");
   }
 
   if (input.confounders.length > 0) {
@@ -975,6 +1189,13 @@ function buildOutcomeConfidence(input: {
     level,
     reasons,
   };
+}
+
+function readLoggedAdherenceSessions(
+  adherence: ExperimentProgressSummary["adherence"],
+): number {
+  return adherence.loggedSessions ??
+    adherence.completedSessions + (adherence.partialSessions ?? 0);
 }
 
 function buildOutcomeConclusion(
@@ -1110,6 +1331,28 @@ function decideMissedLogDue(
     );
   }
 
+  if (hasSessionLogForDate(context, date)) {
+    return buildFollowupBase(
+      context,
+      date,
+      "missed-log",
+      "session_already_logged",
+      "skip",
+      date,
+    );
+  }
+
+  if (hasAssumedAfterGraceCalendarSessionTarget(context, date)) {
+    return buildFollowupBase(
+      context,
+      date,
+      "missed-log",
+      "session_assumed",
+      "skip",
+      date,
+    );
+  }
+
   if (!isDailyInterventionSchedule(context.frontmatter)) {
     return buildFollowupBase(
       context,
@@ -1121,17 +1364,6 @@ function decideMissedLogDue(
     );
   }
 
-  if (hasSessionLogForDate(context.events, date)) {
-    return buildFollowupBase(
-      context,
-      date,
-      "missed-log",
-      "session_already_logged",
-      "skip",
-      date,
-    );
-  }
-
   return buildFollowupBase(
     context,
     date,
@@ -1140,6 +1372,29 @@ function decideMissedLogDue(
     "notify",
     date,
   );
+}
+
+function hasAssumedAfterGraceCalendarSessionTarget(
+  context: ExperimentFollowupContext,
+  date: string,
+): boolean {
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(context.adherenceTargets);
+  const targets = rollupTarget ? [rollupTarget] : context.adherenceTargets;
+  const windows = buildWindowSummary(context.frontmatter);
+  const plannedCalendarTargets = targets.filter((target) =>
+    target.calendar !== undefined &&
+    experimentAdherenceTargetPlansDate({
+      localDate: date,
+      target,
+      windows,
+    })
+  );
+
+  return plannedCalendarTargets.length > 0 &&
+    plannedCalendarTargets.every((target) =>
+      target.evidence.kind === "linkedEventCount" &&
+      target.evidence.missing === "assumed_after_grace"
+    );
 }
 
 function decideWeeklyDigestDue(
@@ -1210,8 +1465,46 @@ function isWeeklyDigestDueOnDate(frontmatter: ExperimentFrontmatter, date: strin
   return daysBetweenInclusive(interventionStart, date) % 7 === 0;
 }
 
-function hasSessionLogForDate(events: readonly CanonicalEntity[], date: string): boolean {
-  return events.some((event) => event.kind === "intervention_session" && event.date === date);
+function hasSessionLogForDate(context: ExperimentFollowupContext, date: string): boolean {
+  if (
+    context.events.some((event) =>
+      event.kind === "intervention_session" &&
+      resolveInterventionSessionLocalDate(event) === date
+    )
+  ) {
+    return true;
+  }
+
+  const activityEvidenceTargets = context.adherenceTargets.flatMap((target) =>
+    target.evidence.kind === "linkedEventCount" &&
+      target.evidence.eventKind === "activity_session"
+      ? [target.evidence]
+      : []
+  );
+  if (activityEvidenceTargets.length === 0) {
+    return false;
+  }
+
+  return context.adherenceEvents.some((event) => {
+    if (event.kind !== "activity_session") {
+      return false;
+    }
+
+    const eventDate = resolveActivityEvidenceLocalDate(event);
+    if (eventDate !== date) {
+      return false;
+    }
+
+    const activityKind = resolveAdherenceObservationActivityKind({
+      attributes: event.attributes as Record<string, unknown>,
+    });
+    return activityEvidenceTargets.some((evidence) => {
+      if (!evidence.activityKind) {
+        return true;
+      }
+      return activityTextMatchesKind(activityKind, evidence.activityKind);
+    });
+  });
 }
 
 function isDailyInterventionSchedule(frontmatter: ExperimentFrontmatter): boolean {
@@ -1660,7 +1953,9 @@ function findExperimentEvents(
   const experimentId = frontmatter.experimentId;
 
   return vault.events.filter((event) => {
-    const date = event.date ?? extractDate(event.occurredAt);
+    const date = event.kind === "intervention_session"
+      ? resolveInterventionSessionLocalDate(event)
+      : event.date ?? extractDate(event.occurredAt);
     if (from && date && date < from) {
       return false;
     }
@@ -1687,6 +1982,46 @@ function findExperimentEvents(
 
     return event.links.some((link) => link.targetId === experiment.entityId);
   });
+}
+
+function findAdherenceEvidenceEvents(input: {
+  asOf: string;
+  events: readonly CanonicalEntity[];
+  frontmatter: ExperimentFrontmatter;
+  targets: readonly QueryExperimentAdherenceTarget[];
+  vault: VaultReadModel;
+}): CanonicalEntity[] {
+  const byId = new Map(input.events.map((event) => [event.entityId, event]));
+  const needsActivityEvidence = input.targets.some((target) =>
+    target.evidence.kind === "linkedEventCount" &&
+    target.evidence.eventKind === "activity_session"
+  );
+  if (!needsActivityEvidence) {
+    return [...byId.values()];
+  }
+
+  const interventionStart = input.frontmatter.runPlan?.interventionStart;
+  const interventionEnd = input.frontmatter.runPlan?.interventionEnd;
+  if (!interventionStart || !interventionEnd || input.asOf < interventionStart) {
+    return [...byId.values()];
+  }
+  const effectiveEnd = minIsoDate(interventionEnd, input.asOf);
+  if (!effectiveEnd) {
+    return [...byId.values()];
+  }
+
+  for (const event of input.vault.events) {
+    if (event.kind !== "activity_session") {
+      continue;
+    }
+    const date = resolveActivityEvidenceLocalDate(event);
+    if (!date || date < interventionStart || date > effectiveEnd) {
+      continue;
+    }
+    byId.set(event.entityId, event);
+  }
+
+  return [...byId.values()];
 }
 
 function isCompletedSessionEvent(event: CanonicalEntity): boolean {

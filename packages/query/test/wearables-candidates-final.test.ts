@@ -23,6 +23,7 @@ import type {
   WearableMetricCandidate,
   WearableSleepWindowCandidate,
 } from "../src/wearables/types.ts";
+import { resolveMetric } from "../src/wearables/selection.ts";
 
 function makeEntity(
   overrides: Partial<CanonicalEntity> & Pick<CanonicalEntity, "entityId" | "family" | "kind" | "recordClass">,
@@ -934,11 +935,18 @@ test("exported helpers merge and group wearable candidates deterministically", (
   assert.equal(activityAggregates[1]?.provider, "garmin");
   assert.equal(activityAggregates[0]?.sessionCount, 2);
   assert.equal(activityAggregates[0]?.sessionMinutes, 35);
-  assert.deepEqual(resolveSelectedActivityTypes(activityAggregates, "oura"), ["Cycling", "Running"]);
-  assert.deepEqual(resolveSelectedActivityTypes(activityAggregates, null), []);
 
   const directMinutes = buildActivitySessionMetricCandidate(activityAggregates[0]!, "sessionMinutes");
   const directCount = buildActivitySessionMetricCandidate(activityAggregates[0]!, "sessionCount");
+  const directMinutesSelection = resolveMetric("sessionMinutes", [directMinutes]).selection;
+  assert.deepEqual(resolveSelectedActivityTypes(activityAggregates, {
+    ...directMinutesSelection,
+  }), ["Cycling", "Running"]);
+  assert.deepEqual(resolveSelectedActivityTypes(activityAggregates, {
+    ...directMinutesSelection,
+    provider: null,
+    resolution: "none",
+  }), []);
   assert.equal(directMinutes.title, "Oura activity sessions");
   assert.equal(directMinutes.value, 35);
   assert.equal(directCount.unit, "count");

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -21,26 +20,6 @@ const WEBP_BYTES = new Uint8Array([
   0x57, 0x45, 0x42, 0x50,
 ])
 const GIF_BYTES = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61])
-
-function sha256Hex(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex')
-}
-
-function authorizedMap(
-  entries: ReadonlyArray<readonly [string, Uint8Array]>,
-): Map<string, { sha256: string }> {
-  return new Map(entries.map(([refPath, bytes]) => [refPath, { sha256: sha256Hex(bytes) }]))
-}
-
-// Most pre-read failure paths (count cap, prefix invalid, unsupported sniff,
-// missing materialization, oversize) reject before sha256 is ever computed, so
-// the value never gets compared. Use this stub to keep those tests focused.
-const STUB_SHA256 = '0'.repeat(64)
-function authorizedStubMap(
-  refs: readonly string[],
-): Map<string, { sha256: string }> {
-  return new Map(refs.map((refPath) => [refPath, { sha256: STUB_SHA256 }]))
-}
 
 async function withTempVault<T>(fn: (vaultRoot: string) => Promise<T>): Promise<T> {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-image-refs-'))
@@ -97,11 +76,6 @@ describe('image-reference-resolver', () => {
       await writeVaultFile(vaultRoot, 'raw/inbox/layout.webp', WEBP_BYTES)
 
       const references = await resolveGenerateImageReferences({
-        authorizedReferenceImageRefs: authorizedMap([
-          ['raw/inbox/front.png', PNG_BYTES],
-          ['raw/inbox/style.jpg', JPEG_BYTES],
-          ['raw/inbox/layout.webp', WEBP_BYTES],
-        ]),
         refs: ['raw/inbox/front.png', 'raw/inbox/style.jpg', 'raw/inbox/layout.webp'],
         vaultRoot,
       })
@@ -123,15 +97,50 @@ describe('image-reference-resolver', () => {
     })
   })
 
+  it('resolves captured media so pinned challenge photos stay referenceable across turns', async () => {
+    await withTempVault(async (vaultRoot) => {
+      await writeVaultFile(
+        vaultRoot,
+        'raw/captures/2026/07/challenge-sleep/intro-zach.jpg',
+        JPEG_BYTES,
+      )
+
+      const references = await resolveGenerateImageReferences({
+        refs: ['raw/captures/2026/07/challenge-sleep/intro-zach.jpg'],
+        vaultRoot,
+      })
+
+      expect(references).toHaveLength(1)
+      expect(references[0]?.mediaType).toBe('image/jpeg')
+    })
+  })
+
+  it('rejects refs outside the pipeline-written media families', async () => {
+    await withTempVault(async (vaultRoot) => {
+      for (const ref of [
+        'raw/documents/2026/records/scan.png',
+        'raw/workouts/2026/03/bench.jpg',
+        'bank/memory-photo.png',
+        'derived/knowledge/pages/page-image.png',
+        'journal/2026-07-06/photo.png',
+        'exports/photo.png',
+      ]) {
+        await writeVaultFile(vaultRoot, ref, PNG_BYTES)
+        await expect(
+          resolveGenerateImageReferences({ refs: [ref], vaultRoot }),
+        ).rejects.toMatchObject({
+          code: 'ASSISTANT_IMAGE_REFERENCE_REF_UNAUTHORIZED',
+        })
+      }
+    })
+  })
+
   it('calls hosted artifact materialization with normalized refs before reading', async () => {
     await withTempVault(async (vaultRoot) => {
       await writeVaultFile(vaultRoot, 'raw/inbox/photo.png', PNG_BYTES)
       let materializedPaths: readonly string[] = []
 
       await resolveGenerateImageReferences({
-        authorizedReferenceImageRefs: authorizedMap([
-          ['raw/inbox/photo.png', PNG_BYTES],
-        ]),
         materializeWorkspaceArtifacts: async (relativePaths) => {
           materializedPaths = [...relativePaths]
           return {
@@ -153,7 +162,6 @@ describe('image-reference-resolver', () => {
 
       await expect(
         resolveGenerateImageReferences({
-          authorizedReferenceImageRefs: authorizedStubMap(['raw/inbox/not-image.png']),
           materializeWorkspaceArtifacts: async (relativePaths) => ({
             materializedArtifactPaths: new Set<string>(),
             missingArtifactPaths: new Set(relativePaths),
@@ -165,7 +173,6 @@ describe('image-reference-resolver', () => {
 
       await expect(
         resolveGenerateImageReferences({
-          authorizedReferenceImageRefs: authorizedStubMap(['raw/inbox/not-image.png']),
           refs: ['raw/inbox/not-image.png'],
           vaultRoot,
         }),
@@ -182,7 +189,6 @@ describe('image-reference-resolver', () => {
 
         await expect(
           resolveGenerateImageReferences({
-            authorizedReferenceImageRefs: authorizedStubMap(['raw/inbox/linked.png']),
             refs: ['raw/inbox/linked.png'],
             vaultRoot,
           }),
@@ -204,7 +210,6 @@ describe('image-reference-resolver', () => {
 
       await expect(
         resolveGenerateImageReferences({
-          authorizedReferenceImageRefs: authorizedStubMap(['raw/inbox/huge.png']),
           refs: ['raw/inbox/huge.png'],
           vaultRoot,
         }),
@@ -219,64 +224,9 @@ describe('image-reference-resolver', () => {
     )
     await expect(
       resolveGenerateImageReferences({
-        authorizedReferenceImageRefs: authorizedStubMap(seventeenRefs),
         refs: seventeenRefs,
         vaultRoot: '/',
       }),
     ).rejects.toMatchObject({ code: 'ASSISTANT_IMAGE_REFERENCE_COUNT_UNSUPPORTED' })
-  })
-
-  it('fails closed when no per-turn authority allowlist is provided', async () => {
-    await withTempVault(async (vaultRoot) => {
-      await writeVaultFile(vaultRoot, 'raw/inbox/photo.png', PNG_BYTES)
-
-      await expect(
-        resolveGenerateImageReferences({
-          authorizedReferenceImageRefs: null,
-          refs: ['raw/inbox/photo.png'],
-          vaultRoot,
-        }),
-      ).rejects.toMatchObject({
-        code: 'ASSISTANT_IMAGE_REFERENCE_AUTHORITY_UNAVAILABLE',
-      })
-    })
-  })
-
-  it('rejects refs that are not in the current-turn authority allowlist', async () => {
-    await withTempVault(async (vaultRoot) => {
-      await writeVaultFile(vaultRoot, 'raw/inbox/stale.png', PNG_BYTES)
-
-      await expect(
-        resolveGenerateImageReferences({
-          authorizedReferenceImageRefs: authorizedStubMap(['raw/inbox/current.png']),
-          refs: ['raw/inbox/stale.png'],
-          vaultRoot,
-        }),
-      ).rejects.toMatchObject({
-        code: 'ASSISTANT_IMAGE_REFERENCE_REF_UNAUTHORIZED',
-      })
-    })
-  })
-
-  it('rejects refs whose bytes hash mismatches the authorized attachment evidence', async () => {
-    await withTempVault(async (vaultRoot) => {
-      // Authority was granted for PNG_BYTES, but the workspace copy was
-      // mutated to JPEG_BYTES after the upstream pipeline computed the
-      // allowlist. The resolver must fail closed even though path + sniff
-      // would both pass on their own.
-      await writeVaultFile(vaultRoot, 'raw/inbox/swapped.png', JPEG_BYTES)
-
-      await expect(
-        resolveGenerateImageReferences({
-          authorizedReferenceImageRefs: authorizedMap([
-            ['raw/inbox/swapped.png', PNG_BYTES],
-          ]),
-          refs: ['raw/inbox/swapped.png'],
-          vaultRoot,
-        }),
-      ).rejects.toMatchObject({
-        code: 'ASSISTANT_IMAGE_REFERENCE_BYTES_UNAUTHORIZED',
-      })
-    })
   })
 })

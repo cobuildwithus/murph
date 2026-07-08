@@ -52,7 +52,7 @@ function HistoryPageContent() {
             History
           </span>
           <h1 className="font-serif text-3xl font-semibold tracking-tight text-foreground">
-            Timeline from your vault
+            Your timeline
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Recent notes, events, assessments, and daily summaries sorted from most recent to oldest.
@@ -123,7 +123,7 @@ function HistoryPageContent() {
                   <TableHead>When</TableHead>
                   <TableHead>Entry</TableHead>
                   <TableHead>Type</TableHead>
-                  <TableHead>Stream</TableHead>
+                  <TableHead>Metric</TableHead>
                   <TableHead>Tags</TableHead>
                 </TableRow>
               </TableHeader>

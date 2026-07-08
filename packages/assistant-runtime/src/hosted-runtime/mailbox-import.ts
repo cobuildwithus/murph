@@ -27,6 +27,9 @@ import type {
 import type {
   HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
+import type {
+  HostedAssistantEmailDeliveryContext,
+} from "./email-delivery-context.ts";
 
 const HOSTED_MAILBOX_RETRYABLE_BLOCK_RETRY_DELAY_MS = 15 * 1000;
 export const HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE = "budget.mailbox_items";
@@ -44,10 +47,19 @@ export type HostedMailboxItemImportOutcome =
   | {
       status: "imported" | "skipped";
       assistantInputId?: string | null;
+      emailDeliveryContext?: HostedAssistantEmailDeliveryContext | null;
       linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
       reasonCode?: string | null;
       afterCheckpoint?: HostedMailboxPostCheckpointEffect | null;
+      conversationImportTiming?: HostedMailboxConversationImportTiming | null;
     };
+
+export interface HostedMailboxConversationImportTiming {
+  projectionPrepareMs?: number;
+  projectionImportMs?: number;
+  attachmentEvidenceMs?: number;
+  projectionTotalMs?: number;
+}
 
 export interface HostedMailboxPostCheckpointEffectResult {
   kind: "inbox_projection";
@@ -61,9 +73,8 @@ export type HostedMailboxPostCheckpointEffect = () =>
   Promise<HostedMailboxPostCheckpointEffectResult>;
 
 export interface HostedMailboxResolvedImportItem {
-  // True when the durable consumed watermark from the mailbox fetch response
-  // already covers this item's laneSeq: the item is a replay of an
-  // already-handled message and must stay conversation context only, never a
+  // True when this item is durably marked handled by its item stamp or the
+  // lane consumed watermark: it must stay conversation context only, never a
   // fresh reply candidate.
   durablyConsumed?: boolean;
   item: HostedMailboxItem;
@@ -73,16 +84,25 @@ export interface HostedMailboxResolvedImportItem {
 
 export interface HostedMailboxImportLoopResult {
   assistantInputIds?: string[];
+  assistantInputRecords?: HostedMailboxAssistantInputRecord[];
   blocked: HostedMailboxImportLoopBlockedItem[];
   conversationImportedCount?: number;
   consumedSeqByLane: Record<HostedMailboxLane, string | null>;
   fetchedCount: number;
   importedCount: number;
   importedSystemMailboxItemIds?: string[];
+  emailDeliveryContexts?: HostedAssistantEmailDeliveryContext[];
   latestLinqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: HostedAssistantLinqDeliveryContext[];
+  conversationImportTiming?: HostedMailboxConversationImportTiming;
   nextRetryAt?: string | null;
   state: HostedMailboxImportState;
+}
+
+export interface HostedMailboxAssistantInputRecord {
+  assistantInputId: string;
+  emailDeliveryContext?: HostedAssistantEmailDeliveryContext;
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext;
 }
 
 export interface HostedMailboxImportLoopBlockedItem {
@@ -187,12 +207,15 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const consumedSeqByLane = consumedSeqState.seqByLane;
   let nextState = input.state;
   const assistantInputIds: string[] = [];
+  const assistantInputRecords: HostedMailboxAssistantInputRecord[] = [];
   let conversationImportedCount = 0;
   let importedCount = 0;
   const importedSystemMailboxItemIds: string[] = [];
+  const emailDeliveryContexts: HostedAssistantEmailDeliveryContext[] = [];
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
   let latestLinqDeliveryContext: HostedAssistantLinqDeliveryContext | null = null;
   const linqDeliveryContexts: HostedAssistantLinqDeliveryContext[] = [];
+  let conversationImportTiming: HostedMailboxConversationImportTiming | null = null;
   let nextRetryAt: string | null = null;
   const stoppedLanes = new Set<HostedMailboxLane>();
   const expectedSeqByLane = resolveHostedMailboxExpectedSeqByLane({
@@ -209,11 +232,11 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
     const itemSeq = parseMailboxSeqForImportOrNull(item.laneSeq);
     const itemIsDurablyConsumedReplay = itemSeq !== null
-      && isDurablyConsumedConversationReplay({
+      && isDurablyConsumedReplay({
         consumedSeq: consumedSeqByLane[lane],
         consumedSeqPresent: consumedSeqState.presentByLane[lane],
+        item,
         itemSeq,
-        lane,
       });
     if (itemSeq !== null && shouldFastForwardHostedMailboxExpectedSeq({
       consumedSeq: consumedSeqByLane[lane],
@@ -348,7 +371,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     }
 
     const outcome = await input.importItem({
-      durablyConsumed: itemSeq <= consumedSeqByLane[lane],
+      durablyConsumed: itemIsDurablyConsumedReplay,
       item,
       payload,
       route,
@@ -439,17 +462,41 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         importedSystemMailboxItemIds.push(item.id);
       }
       const replyableConversationInput =
-        route.action === "import-conversation-message" && itemSeq > consumedSeqByLane[lane];
+        route.action === "import-conversation-message" && !itemIsDurablyConsumedReplay;
+      const foregroundAssistantInput =
+        replyableConversationInput
+        || (
+          route.action === "import-group-newsletter-email-needed"
+          && !itemIsDurablyConsumedReplay
+        );
       if (replyableConversationInput) {
         conversationImportedCount += 1;
       }
-      if (replyableConversationInput && outcome.assistantInputId) {
+      if (foregroundAssistantInput && outcome.assistantInputId) {
         assistantInputIds.push(outcome.assistantInputId);
+        assistantInputRecords.push({
+          assistantInputId: outcome.assistantInputId,
+          ...(outcome.emailDeliveryContext
+            ? { emailDeliveryContext: outcome.emailDeliveryContext }
+            : {}),
+          ...(outcome.linqDeliveryContext
+            ? { linqDeliveryContext: outcome.linqDeliveryContext }
+            : {}),
+        });
       }
     }
     if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.linqDeliveryContext) {
       latestLinqDeliveryContext = outcome.linqDeliveryContext;
       linqDeliveryContexts.push(outcome.linqDeliveryContext);
+    }
+    if (outcome.status === "imported" || outcome.status === "skipped") {
+      conversationImportTiming = mergeHostedMailboxConversationImportTiming(
+        conversationImportTiming,
+        outcome.conversationImportTiming ?? null,
+      );
+    }
+    if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.emailDeliveryContext) {
+      emailDeliveryContexts.push(outcome.emailDeliveryContext);
     }
     expectedSeqByLane[lane] += 1n;
   }
@@ -466,28 +513,71 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
   return {
     assistantInputIds,
+    ...(assistantInputRecords.length > 0 ? { assistantInputRecords } : {}),
     blocked,
     conversationImportedCount,
     consumedSeqByLane: serializeHostedMailboxConsumedSeqByLane(consumedSeqState),
     fetchedCount: fetched.items.length,
     importedCount,
     ...(importedSystemMailboxItemIds.length > 0 ? { importedSystemMailboxItemIds } : {}),
+    ...(emailDeliveryContexts.length > 0 ? { emailDeliveryContexts } : {}),
     ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
     ...(linqDeliveryContexts.length > 0 ? { linqDeliveryContexts } : {}),
+    ...(conversationImportTiming ? { conversationImportTiming } : {}),
     ...(nextRetryAt ? { nextRetryAt } : {}),
     state: nextState,
   };
 }
 
-function isDurablyConsumedConversationReplay(input: {
+function mergeHostedMailboxConversationImportTiming(
+  current: HostedMailboxConversationImportTiming | null,
+  next: HostedMailboxConversationImportTiming | null,
+): HostedMailboxConversationImportTiming | null {
+  if (!next) {
+    return current;
+  }
+
+  const merged: HostedMailboxConversationImportTiming = { ...(current ?? {}) };
+  addHostedMailboxConversationImportTimingField(merged, "projectionPrepareMs", next.projectionPrepareMs);
+  addHostedMailboxConversationImportTimingField(merged, "projectionImportMs", next.projectionImportMs);
+  addHostedMailboxConversationImportTimingField(merged, "attachmentEvidenceMs", next.attachmentEvidenceMs);
+  addHostedMailboxConversationImportTimingField(merged, "projectionTotalMs", next.projectionTotalMs);
+  return Object.keys(merged).length > 0 ? merged : current;
+}
+
+function addHostedMailboxConversationImportTimingField(
+  target: HostedMailboxConversationImportTiming,
+  key: keyof HostedMailboxConversationImportTiming,
+  value: number | undefined,
+): void {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return;
+  }
+
+  target[key] = (target[key] ?? 0) + Math.trunc(value);
+}
+
+function isDurablyConsumedReplay(input: {
   consumedSeq: bigint;
   consumedSeqPresent: boolean;
+  item: HostedMailboxItem;
   itemSeq: bigint;
-  lane: HostedMailboxLane;
 }): boolean {
-  return input.lane === "conversation"
-    && input.consumedSeqPresent
-    && input.itemSeq <= input.consumedSeq;
+  // Two complementary consume signals, not redundant: consumedAt is the
+  // delivery-time per-item stamp for Linq-answered items (fills the window
+  // before checkpoint so the direct wake is duplicate-safe); consumedSeq is the
+  // checkpoint watermark covering every handled conversation item across all
+  // channels, suppressions, and no-reply turns. Do not collapse to one: only
+  // Linq replies stamp consumedAt, so dropping consumedSeq would re-process
+  // non-Linq/no-reply handled items after a restore.
+  if (hasHostedMailboxItemConsumedAt(input.item)) {
+    return true;
+  }
+  return input.consumedSeqPresent && input.itemSeq <= input.consumedSeq;
+}
+
+function hasHostedMailboxItemConsumedAt(item: HostedMailboxItem): boolean {
+  return typeof item.consumedAt === "string" && item.consumedAt.trim().length > 0;
 }
 
 function recordHostedMailboxDurablyConsumedReplaySkip(input: {

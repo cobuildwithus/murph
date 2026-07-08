@@ -24,11 +24,11 @@ import {
 } from "./errors";
 import {
   appendHostedFamilyChatNotificationTx,
-  buildHostedFamilyInviteAcceptedReplyText,
+  buildHostedFamilyInviteAcceptedNotification,
   acceptHostedFamilyInviteFromPhoneTx,
-  hasHostedMemberEffectiveActiveAccessForMember,
-  parseHostedFamilyInviteStartToken,
+  resolveHostedFamilyInviteTokenForInbound,
 } from "./family-plan";
+import { readActiveHostedMemberAccess } from "./member-access";
 import { normalizePhoneNumber } from "./phone";
 import {
   buildHostedWhatsAppWebhookEventId,
@@ -155,7 +155,10 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     return buildWhatsAppInboundTextNoWakePlan("invalid-whatsapp-sender");
   }
 
-  const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(input.inboundText.text) !== null;
+  const familyInviteTokenPresent = await resolveHostedFamilyInviteTokenForInbound({
+    prisma: input.prisma,
+    text: input.inboundText.text,
+  }) !== null;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
   try {
     familyAcceptance = await acceptHostedFamilyInviteFromPhoneTx({
@@ -192,7 +195,6 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     const notification = await appendHostedWhatsAppFamilyChatNotification({
       inboundText: input.inboundText,
       memberId: familyAcceptance.memberId,
-      message: buildHostedFamilyInviteAcceptedReplyText(),
       prisma: input.prisma,
       reason: "family-invite-accepted",
     });
@@ -221,8 +223,8 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     return buildWhatsAppInboundTextNoWakePlan("suspended-member");
   }
 
-  if (!await hasHostedMemberEffectiveActiveAccessForMember({
-    member,
+  if (!await readActiveHostedMemberAccess({
+    memberId: member.id,
     prisma: input.prisma,
   })) {
     return buildWhatsAppInboundTextNoWakePlan("inactive-member");
@@ -324,6 +326,10 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
         mailboxItemId: mailboxAppend.item.id,
         source: "whatsapp",
         userId: member.id,
+        wakeMailboxCheckpoint: {
+          lane: mailboxAppend.item.lane,
+          laneSeq: mailboxAppend.item.laneSeq,
+        },
       },
     };
   }
@@ -338,6 +344,10 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
       mailboxItemId: mailboxAppend.item.id,
       source: "whatsapp",
       userId: member.id,
+      wakeMailboxCheckpoint: {
+        lane: mailboxAppend.item.lane,
+        laneSeq: mailboxAppend.item.laneSeq,
+      },
     },
   };
 }
@@ -345,14 +355,15 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
 async function appendHostedWhatsAppFamilyChatNotification(input: {
   inboundText: WhatsAppInboundText;
   memberId: string;
-  message: string;
   prisma: Prisma.TransactionClient;
   reason: string;
 }): Promise<{ wakeHandoff: HostedWebhookWakeHandoff | null }> {
   const sourceEventId = `${buildHostedWhatsAppWebhookEventId(input.inboundText.externalMessageId)}:${input.reason}`;
   const notification = await appendHostedFamilyChatNotificationTx({
     memberId: input.memberId,
-    message: input.message,
+    notification: buildHostedFamilyInviteAcceptedNotification({
+      memberId: input.memberId,
+    }),
     occurredAt: input.inboundText.receivedAt.toISOString(),
     route: buildHostedWhatsAppFamilyChatNotificationRoute(input.inboundText),
     sourceEventId,

@@ -386,7 +386,7 @@ const canonicalTypedCommands = [
   {
     label: 'intervention edit',
     commandNames: ['intervention edit'],
-    fieldHints: ['note', 'type', 'duration', 'regimenId', 'dayKeyPolicy'],
+    fieldHints: ['note', 'type', 'duration', 'regimenId', 'sessionStatus', 'dayKeyPolicy'],
   },
   {
     label: 'provider edit',

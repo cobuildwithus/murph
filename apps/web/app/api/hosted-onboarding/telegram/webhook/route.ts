@@ -1,3 +1,5 @@
+import { after } from "next/server";
+
 import {
   jsonOk,
   readHostedOnboardingRawBodyText,
@@ -20,9 +22,18 @@ export const POST = withJsonError(async (request: Request) => {
   return jsonOk(
     await handleHostedOnboardingTelegramWebhook({
       rawBody,
+      scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,
       secretToken,
       signal: request.signal,
     }),
     202,
   );
 });
+
+function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
+}

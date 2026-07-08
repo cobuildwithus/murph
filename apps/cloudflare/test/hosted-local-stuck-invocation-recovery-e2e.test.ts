@@ -76,9 +76,9 @@ describe("hosted local stuck invocation recovery e2e", () => {
     });
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
-    requireScenario().queueAssistantResponses([
-      firstReplyText,
-    ]);
+    requireScenario().queueAssistantResponses([firstReplyText], {
+      matchInputContains: firstUserText,
+    });
     const firstWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
         eventId: `evt_stuck_invocation_setup_${runId}`,
@@ -105,7 +105,9 @@ describe("hosted local stuck invocation recovery e2e", () => {
 
     const recoveryBaselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
-    requireScenario().queueAssistantResponses([replyText]);
+    requireScenario().queueAssistantResponses([replyText], {
+      matchInputContains: userText,
+    });
 
     const stuckInvocation = await requireScenario().harness.startStuckInvocationForTest(userId, {
       startedAgoMs: 35_000,

@@ -4,8 +4,8 @@ const mocks = vi.hoisted(() => ({
   createHostedFamilyBillingCheckout: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
-  hasActiveHostedFamilyAccess: vi.fn(),
   issueHostedFamilyInviteFromOwnerTx: vi.fn(),
+  readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
 }));
 
@@ -16,8 +16,8 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   createHostedFamilyBillingCheckout: mocks.createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx: mocks.ensureHostedAccountGroupForOwnerTx,
-  hasActiveHostedFamilyAccess: mocks.hasActiveHostedFamilyAccess,
   issueHostedFamilyInviteFromOwnerTx: mocks.issueHostedFamilyInviteFromOwnerTx,
+  readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
 }));
 
@@ -44,7 +44,7 @@ describe("hosted runtime Family plan tool", () => {
       alreadyActive: false,
       url: "https://checkout.stripe.test/family",
     });
-    mocks.hasActiveHostedFamilyAccess.mockResolvedValue(false);
+    mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
     mocks.issueHostedFamilyInviteFromOwnerTx.mockResolvedValue({
       group: {
         id: "hbag_family",
@@ -106,7 +106,7 @@ describe("hosted runtime Family plan tool", () => {
       },
     });
 
-    expect(mocks.hasActiveHostedFamilyAccess).toHaveBeenCalledWith({
+    expect(mocks.readHostedFamilyAccessForMember).toHaveBeenCalledWith({
       memberId: "member_owner",
       prisma: expect.any(Object),
     });
@@ -369,7 +369,10 @@ describe("hosted runtime Family plan tool", () => {
   });
 
   it("does not create checkout for a member already sponsored by another Family plan", async () => {
-    mocks.hasActiveHostedFamilyAccess.mockResolvedValueOnce(true);
+    mocks.readHostedFamilyAccessForMember.mockResolvedValueOnce({
+      groupId: "hbag_other_family",
+      status: "active",
+    });
 
     await expect(handleHostedRuntimeFamilyPlanTool({
       memberId: "member_child",
@@ -404,7 +407,10 @@ describe("hosted runtime Family plan tool", () => {
         used: 1,
       },
     });
-    mocks.hasActiveHostedFamilyAccess.mockResolvedValueOnce(true);
+    mocks.readHostedFamilyAccessForMember.mockResolvedValueOnce({
+      groupId: "hbag_other_family",
+      status: "active",
+    });
 
     await expect(handleHostedRuntimeFamilyPlanTool({
       memberId: "member_child",

@@ -1,7 +1,18 @@
 import { createHmac } from "node:crypto";
 
 import { readHostedContactPrivacyKeyring } from "./env";
+import {
+  normalizeHostedEmailAddress,
+  normalizeHostedOpaqueInput,
+  normalizeHostedTelegramUsernameForLookup,
+} from "./contact-normalization";
 import { maskPhoneNumber, normalizePhoneNumber } from "./phone";
+
+export {
+  normalizeHostedEmailAddress,
+  normalizeHostedOpaqueInput,
+  normalizeHostedTelegramUsernameForLookup,
+} from "./contact-normalization";
 
 const HOSTED_BLIND_INDEX_PREFIX = "hbidx";
 const HOSTED_OPAQUE_ID_PREFIX = "hbid";
@@ -52,20 +63,6 @@ export function createHostedTelegramUserLookupKeyReadCandidates(
   value: string | null | undefined,
 ): string[] {
   return createHostedLookupKeyReadCandidates("telegram-user", normalizeHostedOpaqueInput(value));
-}
-
-export function normalizeHostedTelegramUsernameForLookup(
-  value: string | null | undefined,
-): string | null {
-  const normalized = normalizeHostedOpaqueInput(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const username = normalized.startsWith("@") ? normalized.slice(1) : normalized;
-
-  return /^[A-Za-z0-9_]{5,32}$/u.test(username) ? username.toLowerCase() : null;
 }
 
 export function createHostedTelegramUsernameLookupKey(
@@ -342,21 +339,6 @@ export function readHostedPhoneHint(value: string | null | undefined): string {
   return maskPhoneNumber(normalized);
 }
 
-export function normalizeHostedOpaqueInput(
-  value: string | number | null | undefined | unknown,
-): string | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
 function normalizeHostedExternalThreadLookupInput(input: {
   accountLookupKey: string | null | undefined;
   channel: string | null | undefined;
@@ -394,17 +376,6 @@ function normalizeHostedExternalThreadChannel(
     default:
       return null;
   }
-}
-
-export function normalizeHostedEmailAddress(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(normalized)
-    ? normalized
-    : null;
 }
 
 function createHostedLookupKey(

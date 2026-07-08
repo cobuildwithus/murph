@@ -15,6 +15,7 @@ import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import type { AssistantProviderProgressEvent } from './provider-progress.js'
 import type { AssistantUsageAttribution } from './usage-attribution.js'
 import type {
+  AssistantProviderRequestStartTiming,
   AssistantProviderServiceTier,
   AssistantProviderTurnExecutionResult,
 } from './providers/types.js'
@@ -43,6 +44,9 @@ import type {
 import type {
   CodexThreadIdentity,
 } from './codex-thread-route.js'
+import type {
+  HostedRuntimeNewsletterScheduledAuthority,
+} from '@murphai/hosted-execution/runtime-control'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import type { finalizeAssistantTurnReceipt } from './turns.js'
 
@@ -88,7 +92,7 @@ export type AssistantProviderRequestStartHook = (event: {
   sessionResolveMs?: number
   startedAt: string
   turnLockWaitMs?: number
-}) => Promise<void> | void
+} & AssistantProviderRequestStartTiming) => Promise<void> | void
 
 export type AssistantFinishWithoutReplyAcceptedHook = (event: {
   acceptedInputIds: readonly string[]
@@ -112,10 +116,13 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   // Automation-owned per-turn provider route override. It is execution input,
   // not durable session target state.
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
+  // Codex --config overrides for this turn only; never part of route identity.
+  codexConfigOverrides?: readonly string[] | null
   codexCommand?: string
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryIdempotencyKey?: string | null
+  answeredMailboxItemIds?: readonly string[] | null
   deliveryMessageReactionsAvailable?: boolean | null
   deliveryReplyToMessageId?: string | null
   deliverySource?: AssistantDeliverySource | null
@@ -132,9 +139,11 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   operatorAuthority?: AssistantOperatorAuthority
   persistUserPromptOnFailure?: boolean
   prompt: string
+  suppressProviderFailureTranscriptAudit?: boolean
   turnContext?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
+  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null
   // Per-turn provider processing tier; never part of session/route identity.
   serviceTier?: AssistantProviderServiceTier | null
   showThinkingTraces?: boolean
@@ -168,7 +177,6 @@ export interface PersistedUserTurn {
 export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTurnExecutionResult {
   assistantContractFingerprint: string
   attemptCount: number
-  nonReplayableProviderWork?: boolean
   onboardingGuidanceInjected?: boolean
   codexContinuation: AssistantCodexContinuation
   providerOptions: AssistantProviderSessionOptions

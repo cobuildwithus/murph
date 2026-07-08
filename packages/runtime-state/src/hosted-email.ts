@@ -4,32 +4,43 @@ export const HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH = 8_192;
 export const HOSTED_EMAIL_THREAD_TARGET_MESSAGE_ID_MAX_LENGTH = 256;
 export const HOSTED_EMAIL_THREAD_TARGET_REFERENCE_MAX_COUNT = 12;
 export const HOSTED_EMAIL_THREAD_TARGET_RECIPIENT_MAX_COUNT = 8;
+export const HOSTED_EMAIL_THREAD_TARGET_GROUP_ID_MAX_LENGTH = 128;
 export const HOSTED_EMAIL_THREAD_TARGET_SUBJECT_MAX_LENGTH = 256;
 export const HOSTED_EMAIL_ADDRESS_MAX_LENGTH = 254;
+export const hostedEmailThreadTargetKindValues = ["explicit", "group"] as const;
+
+export type HostedEmailThreadTargetKind =
+  (typeof hostedEmailThreadTargetKindValues)[number];
 
 export interface HostedEmailThreadTarget {
   cc: string[];
+  groupId: string | null;
   lastMessageId: string | null;
   references: string[];
   schema: typeof HOSTED_EMAIL_THREAD_TARGET_SCHEMA;
   subject: string | null;
+  targetKind: HostedEmailThreadTargetKind;
   to: string[];
 }
 
 interface HostedEmailThreadTargetPayload {
   cc?: unknown;
+  groupId?: unknown;
   lastMessageId?: unknown;
   references?: unknown;
   schema?: unknown;
   subject?: unknown;
+  targetKind?: unknown;
   to?: unknown;
 }
 
 export function createHostedEmailThreadTarget(input: {
   cc?: ReadonlyArray<string> | null;
+  groupId?: string | null;
   lastMessageId?: string | null;
   references?: ReadonlyArray<string> | null;
   subject?: string | null;
+  targetKind?: string | null;
   to?: ReadonlyArray<string> | null;
 }): HostedEmailThreadTarget {
   const lastMessageId = normalizeHostedEmailMessageId(input.lastMessageId);
@@ -37,20 +48,31 @@ export function createHostedEmailThreadTarget(input: {
     lastMessageId,
     references: input.references ?? [],
   });
+  const groupId = normalizeHostedEmailThreadTargetGroupId(input.groupId);
+  const targetKind = normalizeHostedEmailThreadTargetKind({
+    groupId,
+    targetKind: input.targetKind,
+  });
 
   return {
-    cc: normalizeHostedEmailAddressList(input.cc ?? []).slice(
-      0,
-      HOSTED_EMAIL_THREAD_TARGET_RECIPIENT_MAX_COUNT,
-    ),
+    cc: targetKind === "group"
+      ? []
+      : normalizeHostedEmailAddressList(input.cc ?? []).slice(
+          0,
+          HOSTED_EMAIL_THREAD_TARGET_RECIPIENT_MAX_COUNT,
+        ),
+    groupId: targetKind === "group" ? groupId : null,
     lastMessageId,
     references,
     schema: HOSTED_EMAIL_THREAD_TARGET_SCHEMA,
     subject: normalizeHostedEmailSubject(input.subject),
-    to: normalizeHostedEmailAddressList(input.to ?? []).slice(
-      0,
-      HOSTED_EMAIL_THREAD_TARGET_RECIPIENT_MAX_COUNT,
-    ),
+    targetKind,
+    to: targetKind === "group"
+      ? []
+      : normalizeHostedEmailAddressList(input.to ?? []).slice(
+          0,
+          HOSTED_EMAIL_THREAD_TARGET_RECIPIENT_MAX_COUNT,
+        ),
   };
 }
 
@@ -83,9 +105,11 @@ export function parseHostedEmailThreadTarget(
 
     return createHostedEmailThreadTarget({
       cc: readHostedEmailThreadTargetList(record.cc),
+      groupId: readHostedEmailThreadTargetString(record.groupId),
       lastMessageId: readHostedEmailThreadTargetString(record.lastMessageId),
       references: readHostedEmailThreadTargetList(record.references),
       subject: readHostedEmailThreadTargetString(record.subject),
+      targetKind: readHostedEmailThreadTargetString(record.targetKind),
       to: readHostedEmailThreadTargetList(record.to),
     });
   } catch {
@@ -169,6 +193,22 @@ function readHostedEmailThreadTargetString(value: unknown): string | null | unde
   }
 
   return undefined;
+}
+
+function normalizeHostedEmailThreadTargetGroupId(
+  value: string | null | undefined,
+): string | null {
+  return normalizeHostedEmailOptionalText(value, {
+    maxLength: HOSTED_EMAIL_THREAD_TARGET_GROUP_ID_MAX_LENGTH,
+    overLimit: "drop",
+  });
+}
+
+function normalizeHostedEmailThreadTargetKind(input: {
+  groupId: string | null;
+  targetKind?: string | null;
+}): HostedEmailThreadTargetKind {
+  return input.targetKind === "group" && input.groupId ? "group" : "explicit";
 }
 
 export function appendHostedEmailReferenceChain(input: {
@@ -292,6 +332,24 @@ export function resolveHostedEmailDirectSenderLookupAddress(input: {
   return envelopeSender && headerSender && envelopeSender === headerSender
     ? headerSender
     : null;
+}
+
+const HOSTED_GROUP_EMAIL_PROMPT_EMAIL_ADDRESS_PATTERN =
+  /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu;
+const HOSTED_GROUP_EMAIL_PROMPT_QUOTED_HEADER_LINE_PATTERN =
+  /^\s*(?:>+\s*)?(?:from|to|cc|reply-to)\s*:/iu;
+
+export function redactHostedGroupEmailPromptText(
+  value: string | null | undefined,
+): string | null {
+  const redacted = (value ?? "")
+    .split(/\r\n|\r|\n/u)
+    .filter((line) => !HOSTED_GROUP_EMAIL_PROMPT_QUOTED_HEADER_LINE_PATTERN.test(line))
+    .join("\n")
+    .replace(HOSTED_GROUP_EMAIL_PROMPT_EMAIL_ADDRESS_PATTERN, "[redacted email]")
+    .trim();
+
+  return redacted.length > 0 ? redacted : null;
 }
 
 export function resolveHostedEmailAuthorizedSenderAddresses(input: {

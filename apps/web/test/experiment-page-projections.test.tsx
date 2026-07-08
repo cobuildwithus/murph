@@ -108,7 +108,7 @@ describe("experiment page projections", () => {
       }),
     })).resolves.toEqual(expect.objectContaining({
       description: expect.stringContaining("steady, tolerable heat"),
-      title: "Finnish Dry Sauna — Murph Experiments",
+      title: "Finnish Dry Sauna | Murph Experiments",
     }));
 
     const element = await ExperimentDetailLayout({

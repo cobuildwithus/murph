@@ -25,6 +25,7 @@ describe('hosted runtime email subject support', () => {
         targetKind: 'explicit',
       }),
     ).toEqual({
+      html: null,
       idempotencyKey: null,
       message: 'Hello from Murph',
       replyToMessageId: null,
@@ -58,6 +59,7 @@ describe('hosted runtime email subject support', () => {
             effectId: intent.intentId,
             payload: {
               actorId: null,
+              answeredMailboxItemIds: [],
               bindingDeliveryKind: null,
               bindingDeliveryTarget: null,
               channel: 'email',

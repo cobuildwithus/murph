@@ -68,6 +68,11 @@ interface HostedWorkerDeploymentSettings {
   versionTag: string;
 }
 
+const DEFAULT_CONTAINER_ROLLOUT_BY_CONTEXT: Readonly<Record<string, ContainerRolloutMode>> = {
+  production: "immediate",
+};
+const DEFAULT_CONTAINER_ROLLOUT_MODE: ContainerRolloutMode = "gradual";
+
 export async function runHostedWorkerDeployment(input: {
   configPath: string;
   dependencies: HostedWorkerDeploymentDependencies;
@@ -181,18 +186,24 @@ function resolveHostedWorkerDeploymentSettings(
   const deploymentMessageOverride = normalizeOptionalString(env.HOSTED_EXECUTION_DEPLOYMENT_MESSAGE);
 
   return {
-    containerRolloutMode: readContainerRolloutMode(env.HOSTED_EXECUTION_CONTAINER_ROLLOUT),
+    containerRolloutMode: readContainerRolloutMode(
+      env.HOSTED_EXECUTION_CONTAINER_ROLLOUT,
+      DEFAULT_CONTAINER_ROLLOUT_BY_CONTEXT[deployContext] ?? DEFAULT_CONTAINER_ROLLOUT_MODE,
+    ),
     deploymentMessage: deploymentMessageOverride ?? `${deployContext} direct deploy ${versionTag}`,
     includeSecrets,
     versionTag,
   };
 }
 
-function readContainerRolloutMode(value: string | undefined): ContainerRolloutMode {
+function readContainerRolloutMode(
+  value: string | undefined,
+  defaultMode: ContainerRolloutMode,
+): ContainerRolloutMode {
   const normalized = normalizeOptionalString(value);
 
   if (!normalized) {
-    return "gradual";
+    return defaultMode;
   }
 
   if (normalized === "gradual" || normalized === "immediate") {

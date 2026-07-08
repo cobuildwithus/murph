@@ -10,6 +10,7 @@ const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20;
 
 const TEST_TEMPLATE_KEYS = [
   "assistant.signup_welcome",
+  "assistant.family_welcome",
   "linq.invite_signup",
   "linq.daily_quota",
   "linq.home_redirect",
@@ -21,6 +22,7 @@ const TEST_TEMPLATE_KEYS = [
 
 const TEST_CONTEXT_BY_KEY = {
   "assistant.signup_welcome": {},
+  "assistant.family_welcome": {},
   "linq.invite_signup": {
     joinUrl: "https://withmurph.ai/join/test-code",
   },

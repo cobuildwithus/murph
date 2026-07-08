@@ -82,11 +82,11 @@ function ExperimentsPageContent({ protocols }: ExperimentsPageClientProps) {
 
       {nonAuthError ? (
         <Alert>
-          <AlertTitle>Private overlays could not be refreshed</AlertTitle>
+          <AlertTitle>Your experiments couldn&apos;t be refreshed</AlertTitle>
           <AlertDescription>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <span>
-                {error ?? "Your private experiment list could not be decrypted."}
+                {error ?? "We couldn't unlock your private experiment list right now."}
                 {" "}
                 The public experiment library is still available below.
               </span>

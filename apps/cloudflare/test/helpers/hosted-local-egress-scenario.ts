@@ -141,7 +141,9 @@ export async function startHostedLocalLinqEgressScenario(input: {
         replyPath,
         expectedReplyMatcher,
       );
-      requireScenario().queueAssistantResponses([turnInput.expectedReplyText]);
+      requireScenario().queueAssistantResponses([turnInput.expectedReplyText], {
+        matchInputContains: turnInput.text,
+      });
       const webhookResponse = await postSignedLinqWebhook({
         event: buildHostedLinqInboundEvent(userId, chatId, {
           eventId: `evt_${turnInput.eventSuffix}_${userId}`,

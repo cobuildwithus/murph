@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     void _input;
     return null;
   }),
+  resolveHostedFamilyInviteTokenForInbound: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
     envelope?: { eventId?: string };
   }) => ({
@@ -89,10 +90,14 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/family-plan")>(
     "@/src/lib/hosted-onboarding/family-plan",
   );
+  mocks.resolveHostedFamilyInviteTokenForInbound.mockImplementation(async (input: {
+    text: string | null | undefined;
+  }) => actual.parseHostedFamilyInviteStartToken(input.text));
 
   return {
     ...actual,
     acceptHostedFamilyInviteFromPhoneTx: mocks.acceptHostedFamilyInviteFromPhoneTx,
+    resolveHostedFamilyInviteTokenForInbound: mocks.resolveHostedFamilyInviteTokenForInbound,
   };
 });
 
@@ -104,6 +109,7 @@ import {
   grantHostedWhatsAppMessagingConsentTx,
   revokeHostedWhatsAppMessagingConsentTx,
 } from "@/src/lib/hosted-onboarding/whatsapp-consent";
+import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 
 type HostedOnboardingWhatsAppWebhookInput =
   Parameters<typeof handleHostedOnboardingWhatsAppWebhookImpl>[0];
@@ -618,6 +624,45 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     });
   });
 
+  it("routes unknown token-shaped WhatsApp text to the assistant", async () => {
+    mocks.resolveHostedFamilyInviteTokenForInbound.mockResolvedValueOnce(null);
+    const prisma = createWhatsAppPrismaHarness({
+      consentGranted: true,
+      memberId: "member_whatsapp_123",
+    });
+    const rawBody = buildWhatsAppInboundTextBody("sending the family_photos album now");
+
+    await expect(handleHostedOnboardingWhatsAppWebhook({
+      prisma,
+      rawBody,
+      signature: signWhatsAppBody(rawBody),
+    })).resolves.toEqual({
+      commandHandledCount: 0,
+      ignored: false,
+      inboundTextCount: 1,
+      ok: true,
+      reason: "wake-appended-active-member",
+      routedTextCount: 1,
+    });
+
+    expect(mocks.resolveHostedFamilyInviteTokenForInbound).toHaveBeenCalledWith({
+      prisma,
+      text: "sending the family_photos album now",
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "whatsapp:message:wamid.test-message-1",
+        kind: "conversation.message",
+        message: expect.objectContaining({
+          whatsappMessage: expect.objectContaining({
+            text: "sending the family_photos album now",
+          }),
+        }),
+      }),
+      tx: prisma,
+    });
+  });
+
   it("signals the hosted user runtime for opted-in WhatsApp texts", async () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
       accepted: false,
@@ -690,9 +735,14 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     expect(envelope).toMatchObject({
       kind: "assistant.notification.requested",
       notification: {
+        instructions: "Send the selected Murph Family welcome variant in responsePolicy.",
         responsePolicy: {
           kind: "require_send_exact_text",
-          text: expect.stringContaining("The Family owner cannot see them."),
+          text: renderUserFacingMessage({
+            context: {},
+            key: "assistant.family_welcome",
+            seed: "member_whatsapp_family",
+          }).text,
         },
         route: {
           channel: "whatsapp",
@@ -941,6 +991,9 @@ type WhatsAppPrismaHarness = {
     findUnique: ReturnType<typeof vi.fn>;
     updateMany: ReturnType<typeof vi.fn>;
   };
+  hostedMember: {
+    findUnique: ReturnType<typeof vi.fn>;
+  };
   hostedMemberIdentity: {
     findMany: ReturnType<typeof vi.fn>;
   };
@@ -995,6 +1048,16 @@ function createWhatsAppPrismaHarness(input: {
         : null),
       create: vi.fn(async () => ({})),
       updateMany: vi.fn(async () => ({ count: input.consentGrantUpdateManyCount ?? 1 })),
+    },
+    hostedMember: {
+      findUnique: vi.fn(async () => memberId
+        ? {
+            accountGroupMemberships: [],
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+            threadContainer: null,
+          }
+        : null),
     },
     hostedMemberIdentity: {
       findMany: vi.fn(async () => memberId

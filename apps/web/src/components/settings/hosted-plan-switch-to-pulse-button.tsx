@@ -98,7 +98,7 @@ export function SwitchToPulseButton(props: {
 
 const EDGE_ONLY_FEATURES = [
   "More usage on latest AI models",
-  "Longer experiment context",
+  "Murph remembers more of your history",
   "Deeper research and analysis",
 ];
 

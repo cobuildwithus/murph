@@ -16,6 +16,7 @@ import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { SignupCtaSection } from "@/src/components/homepage/signup-cta-section";
+import { TogetherSection } from "@/src/components/homepage/together-section";
 import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
@@ -30,18 +31,18 @@ import { StickyNav } from "./sticky-nav";
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Murph — Discover what actually makes you healthier",
   description:
-    "Your personal health assistant. Sync your biomarkers, pick a protocol, see what actually makes you healthier.",
+    "Your health assistant for you and your people. Run health challenges with friends, get a weekly family health newsletter, and discover what actually makes you healthier.",
   alternates: {
     canonical: "/",
   },
   openGraph: {
     description:
-      "Your personal health assistant. Text Murph over iMessage, connect any wearable. Pick a protocol and see what actually makes you healthier.",
+      "Text Murph over iMessage. Run health challenges with friends, get a weekly family health newsletter, and see what actually makes you healthier.",
     type: "website",
   },
   twitter: {
     description:
-      "Your personal health assistant. Text Murph over iMessage, connect any wearable. Pick a protocol and see what actually makes you healthier.",
+      "Text Murph over iMessage. Run health challenges with friends, get a weekly family health newsletter, and see what actually makes you healthier.",
   },
 });
 
@@ -136,6 +137,7 @@ export default async function HomePage() {
           messengerChannel={messengerChannel}
           murphHeadshotSrc={murphHeadshotSrc}
         />
+        <TogetherSection />
         <AsksGridSection />
         <TrustSection />
         <PersonasSection murphHeadshotSrc={murphHeadshotSrc} />

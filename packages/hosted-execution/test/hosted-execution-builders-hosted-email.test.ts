@@ -16,13 +16,17 @@ import {
   buildHostedExecutionWhatsAppConversationMessageWake,
 } from "../src/builders.ts";
 import {
+  HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
   HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
   createHostedEmailReplyAliasRoute,
+  createHostedEmailGroupReplyAliasRoute,
   createHostedEmailUserReplyAliasRoute,
   isHostedEmailReplyAliasLookupKey,
   normalizeHostedEmailReplyAliasLookupKey,
+  parseHostedEmailGroupRecipientsCallbackRequest,
+  parseHostedEmailGroupRecipientsCallbackResponse,
   parseHostedEmailReplyAliasRegistrationCallbackRequest,
   parseHostedEmailRouteResolutionCallbackRequest,
   parseHostedEmailRouteResolutionCallbackResponse,
@@ -567,6 +571,27 @@ describe("hosted email helpers", () => {
     expect(derivedAgain).toEqual(route);
   });
 
+  it("creates compact signed reply alias routes for hosted groups without lengthening the local part", async () => {
+    const route = await createHostedEmailGroupReplyAliasRoute({
+      domain: "Mail.Example.TEST",
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      localPart: "assistant",
+      signingSecret: "test-email-signing-secret",
+    });
+    const derivedAgain = await createHostedEmailGroupReplyAliasRoute({
+      domain: "mail.example.test",
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      localPart: "assistant",
+      signingSecret: "test-email-signing-secret",
+    });
+
+    expect(route.groupId).toBe("hgrp_AAAAAAAAAAAAAAAA");
+    expect(route.token).toMatch(/^g2-[0-9a-z]{20}-[0-9a-z]{25}$/u);
+    expect(route.address).toBe(`assistant+${route.token}@mail.example.test`);
+    expect(route.address.split("@")[0]?.length).toBeLessThanOrEqual(64);
+    expect(derivedAgain).toEqual(route);
+  });
+
   it("normalizes and validates only current reply alias lookup keys", () => {
     expect(normalizeHostedEmailReplyAliasLookupKey(
       "  0123456789ABCDEF0123456789abcdef  ",
@@ -652,6 +677,9 @@ describe("hosted email helpers", () => {
     expect(HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH).toBe(
       "/api/internal/hosted-execution/email/resolve-route",
     );
+    expect(HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH).toBe(
+      "/api/internal/hosted-execution/email/group-recipients",
+    );
     expect(parseHostedEmailReplyAliasRegistrationCallbackRequest({
       aliasKey: " replyalias1234 ",
     })).toEqual({
@@ -665,6 +693,7 @@ describe("hosted email helpers", () => {
         spfAligned: false,
       },
       envelopeFrom: "owner@example.test",
+      groupId: " hgrp_123 ",
       hasRepeatedHeaderFrom: true,
       headerFrom: "Owner <owner@example.test>",
     })).toEqual({
@@ -675,6 +704,7 @@ describe("hosted email helpers", () => {
         spfAligned: false,
       },
       envelopeFrom: "owner@example.test",
+      groupId: "hgrp_123",
       hasRepeatedHeaderFrom: true,
       headerFrom: "Owner <owner@example.test>",
     });
@@ -682,6 +712,7 @@ describe("hosted email helpers", () => {
       aliasKey: null,
       authenticatedSender: null,
       envelopeFrom: null,
+      groupId: null,
       hasRepeatedHeaderFrom: false,
       headerFrom: null,
     });
@@ -693,5 +724,37 @@ describe("hosted email helpers", () => {
     expect(() => parseHostedEmailRouteResolutionCallbackResponse({})).toThrow(
       /userId must be present/u,
     );
+  });
+
+  it("parses group-recipient callback contracts through normalized email addresses", () => {
+    expect(parseHostedEmailGroupRecipientsCallbackRequest({
+      groupId: " group_123 ",
+    })).toEqual({
+      groupId: "group_123",
+    });
+    expect(() => parseHostedEmailGroupRecipientsCallbackRequest({})).toThrow(
+      /groupId must be present/u,
+    );
+
+    expect(parseHostedEmailGroupRecipientsCallbackResponse({
+      recipients: [
+        {
+          address: "Alex <ALEX@EXAMPLE.TEST>",
+          memberId: " member_123 ",
+        },
+      ],
+    })).toEqual({
+      recipients: [
+        {
+          address: "alex@example.test",
+          memberId: "member_123",
+        },
+      ],
+    });
+    expect(() =>
+      parseHostedEmailGroupRecipientsCallbackResponse({
+        recipients: [{ address: " ", memberId: "member_123" }],
+      })
+    ).toThrow(/memberId and address/u);
   });
 });

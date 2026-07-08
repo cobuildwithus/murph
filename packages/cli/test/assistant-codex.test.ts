@@ -168,7 +168,7 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
 
     assert.deepEqual(args, ['app-server'])
     assert.deepEqual(options, {
-      cwd: expectedWorkingDirectory,
+      cwd: tmpdir(),
       detached: true,
       env: {
         CODEX_HOME: codexHome,

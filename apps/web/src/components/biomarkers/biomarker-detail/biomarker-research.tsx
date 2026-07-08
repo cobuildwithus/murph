@@ -53,8 +53,8 @@ export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerResearchP
           <div className="flex max-w-3xl flex-col gap-1.5">
             <SectionLabel>Evidence</SectionLabel>
             <p className="text-sm/6 text-muted-foreground">
-              Source-backed claims stay separate from your private trend and from future opt-in
-              community outcomes.
+              Everything here comes from published research, kept separate from your own private
+              data.
             </p>
           </div>
 
@@ -67,12 +67,12 @@ export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerResearchP
             {hasClaims ? (
               <div className="flex flex-col gap-5">
                 <div>
-                  <SectionLabel>Claim boundaries</SectionLabel>
+                  <SectionLabel>What the research says</SectionLabel>
                   <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
                     Evidence-backed interpretation
                   </h3>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    These claims are attached to source artifacts in Health Commons so the page can
+                    Each claim links back to the research it came from, so the page can
                     stay useful without overreaching.
                   </p>
                 </div>
@@ -115,7 +115,7 @@ export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerResearchP
             {hasSourceHighlights ? (
               <div className="flex flex-col gap-5">
                 <div>
-                  <SectionLabel>Source artifacts</SectionLabel>
+                  <SectionLabel>Sources</SectionLabel>
                   <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
                     Research highlights
                   </h3>
@@ -137,7 +137,7 @@ export function BiomarkerResearch({ biomarker }: { biomarker: BiomarkerResearchP
       {hasMemo && (
         <section className="flex flex-col gap-5">
           <div className="flex max-w-3xl flex-col gap-1.5">
-            <SectionLabel>Commons memo</SectionLabel>
+            <SectionLabel>Research notes</SectionLabel>
             <p className="text-sm/6 text-muted-foreground">
               Extended notes on measurement, interpretation, and context.
             </p>

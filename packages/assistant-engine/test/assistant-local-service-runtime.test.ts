@@ -140,6 +140,7 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls[0]?.[0], 'telegram')
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.deepEqual(mocks.maybeRunAssistantRuntimeMaintenance.mock.calls[0]?.[0], {
     vault: '/vaults/test',
   })
@@ -429,6 +430,169 @@ test('sendAssistantMessageLocal delivers pre-steer final answers before the fina
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
       ?.precedingAssistantTranscriptTexts,
   ).toEqual(['Answer one.', 'Answer two.'])
+})
+
+test('sendAssistantMessageLocal strips reply bubble delimiters from bubble-capable persisted and returned text', async () => {
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        precedingResponseSegments: [
+          {
+            response: 'Preceding one.\n---\nPreceding two.',
+            media: [],
+          },
+        ],
+        response: 'Final one.\n---\nFinal two?',
+        session,
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'First question',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        response: 'Preceding one.\n---\nPreceding two.',
+      }),
+    ])
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
+    .toBe('Final one.\n---\nFinal two?')
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.precedingAssistantTranscriptTexts,
+  ).toEqual(['Preceding one.\n\nPreceding two.'])
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+  ).toBe('Final one.\n\nFinal two?')
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.response)
+    .toBe('Final one.\n\nFinal two?')
+  expect(result.response).toBe('Final one.\n\nFinal two?')
+})
+
+test('sendAssistantMessageLocal strips reply bubble delimiters from failed receipt text after provider output', async () => {
+  const usageError = new Error('usage persistence failed')
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response: 'Final one.\n---\nFinal two?',
+        session,
+      },
+    },
+    session,
+  })
+  mocks.recordAssistantUsageEvent.mockRejectedValueOnce(usageError)
+
+  await assert.rejects(
+    () =>
+      sendAssistantMessageLocal({
+        deliverResponse: true,
+        prompt: 'First question',
+        vault: '/vaults/test',
+      }),
+    (error) => {
+      assert.equal(error, usageError)
+      return true
+    },
+  )
+
+  expect(mocks.finalizeAssistantTurnReceipt.mock.calls[0]?.[0]).toMatchObject({
+    response: 'Final one.\n\nFinal two?',
+    status: 'failed',
+  })
+})
+
+test('sendAssistantMessageLocal preserves email delimiter lines in delivery, transcript, and receipt text', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'email-actor',
+      channel: 'email',
+      conversationKey: 'channel:email|identity:email-identity|thread:email-thread',
+      delivery: {
+        kind: 'thread',
+        target: 'email-thread',
+      },
+      identityId: 'email-identity',
+      threadId: 'email-thread',
+      threadIsDirect: true,
+    },
+  })
+  const plan = createSharedPlan()
+  plan.conversationPolicy.audience = {
+    ...plan.conversationPolicy.audience,
+    actorId: 'email-actor',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'email-thread',
+    },
+    channel: 'email',
+    effectiveThreadIsDirect: true,
+    explicitTarget: 'email-thread',
+    identityId: 'email-identity',
+    threadId: 'email-thread',
+    threadIsDirect: true,
+  }
+  const finalResponse = 'Final one.\n---\nFinal two?'
+  const precedingResponse = 'Preceding one.\n---\nPreceding two.'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan,
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        precedingResponseSegments: [
+          {
+            response: precedingResponse,
+            media: [],
+          },
+        ],
+        response: finalResponse,
+        session,
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Email question',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        response: precedingResponse,
+      }),
+    ])
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
+    .toBe(finalResponse)
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.precedingAssistantTranscriptTexts,
+  ).toEqual([precedingResponse])
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+  ).toBe(finalResponse)
+  expect(mocks.finalizeDeliveredAssistantTurn.mock.calls[0]?.[0]?.response)
+    .toBe(finalResponse)
+  expect(result.response).toBe(finalResponse)
 })
 
 test('sendAssistantMessageLocal preserves real same-text preceding answers', async () => {
@@ -833,7 +997,13 @@ test('sendAssistantMessageLocal reports preceding delivery failure when no final
   const session = createAssistantSession({
     sessionId: 'session-no-reply-preceding-failure',
   })
+  const stopTyping = vi.fn(async () => undefined)
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        stop: stopTyping,
+      })),
+    },
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
@@ -890,13 +1060,22 @@ test('sendAssistantMessageLocal reports preceding delivery failure when no final
       kind: 'failed',
       intentId: 'intent-preceding-failed',
     })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: true,
+  })
 })
 
 test('sendAssistantMessageLocal reports preceding queued delivery when no final reply exists', async () => {
   const session = createAssistantSession({
     sessionId: 'session-no-reply-preceding-queued',
   })
+  const stopTyping = vi.fn(async () => undefined)
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        stop: stopTyping,
+      })),
+    },
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
@@ -953,6 +1132,131 @@ test('sendAssistantMessageLocal reports preceding queued delivery when no final 
       kind: 'queued',
       intentId: 'intent-preceding-queued',
     })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: false,
+  })
+})
+
+test('sendAssistantMessageLocal stops typing when only a different-target preceding delivery is queued', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+    sessionId: 'session-preceding-different-target',
+  })
+  const providerStarted = createDeferred<void>()
+  const providerRelease = createDeferred<void>()
+  const liveSteeredPrompts: string[] = []
+  const stopTyping = vi.fn(async () => undefined)
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        stop: stopTyping,
+      })),
+    },
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
+      interrupt: async () => undefined,
+      codexThreadId: 'provider-thread-different-target-preceding',
+      providerTurnId: 'provider-turn-different-target-preceding',
+      sessionId: session.sessionId,
+      steer: async (input) => {
+        liveSteeredPrompts.push(input.prompt)
+      },
+      turnId: 'turn-1',
+    })
+    providerStarted.resolve()
+    await providerRelease.promise
+    releaseLiveTurn?.()
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        finalAction: {
+          kind: 'none',
+        },
+        precedingResponseSegments: [
+          {
+            deliveryContextOrdinal: 1,
+            response: 'Answer for the later target.',
+            media: [],
+          },
+        ],
+        response: '',
+        session,
+      },
+    }
+  })
+  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
+    {
+      error: {
+        code: 'ASSISTANT_DELIVERY_DEFERRED',
+        message: 'preceding delivery queued',
+      },
+      intentId: 'intent-preceding-queued-different-target',
+      kind: 'queued',
+      media: [],
+      session,
+    },
+  ])
+
+  const initialResultPromise = sendAssistantMessageLocal({
+    deliverResponse: true,
+    deliveryDispatchMode: 'queue-only',
+    deliveryTarget: 'thread-one',
+    prompt: 'Initial prompt',
+    vault: '/vaults/test',
+  })
+  await providerStarted.promise
+
+  const steeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+    },
+    deliveryDispatchMode: 'queue-only',
+    deliveryTarget: 'thread-two',
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Later prompt',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(liveSteeredPrompts).toEqual(['Later prompt'])
+  })
+  providerRelease.resolve()
+
+  const [initialResult, steeredResult] = await Promise.all([
+    initialResultPromise,
+    steeredResultPromise,
+  ])
+
+  expect(initialResult.deliveryDeferred).toBe(true)
+  expect(steeredResult.deliveryDeferred).toBe(true)
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
+    .toEqual([
+      expect.objectContaining({
+        deliveryContext: expect.objectContaining({
+          deliveryTarget: 'thread-two',
+        }),
+      }),
+    ])
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: true,
+  })
 })
 
 test('sendAssistantMessageLocal reports thrown preceding delivery when no final reply exists', async () => {
@@ -1013,6 +1317,11 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.onProviderRequestStarted?.({
+      codexAppServerInitializeMs: 7,
+      codexAppServerPreProviderMs: 17,
+      codexAppServerSpawnReadyMs: 1,
+      codexAppServerThreadResumeMs: 9,
+      codexAppServerWarmReuseMs: 0,
       providerRequestOrdinal: 0,
       startedAt: '2026-06-09T00:00:00.000Z',
     })
@@ -1038,12 +1347,22 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
   expect(providerRequestStarted).toHaveBeenCalledTimes(1)
   const event = providerRequestStarted.mock.calls[0]?.[0] as {
     admissionMs: number
+    codexAppServerInitializeMs: number
+    codexAppServerPreProviderMs: number
+    codexAppServerSpawnReadyMs: number
+    codexAppServerThreadResumeMs: number
+    codexAppServerWarmReuseMs: number
     preProviderSetupMs: number
     promptBuildMs: number
     sessionResolveMs: number
     turnLockWaitMs: number
   }
   expect(typeof event.turnLockWaitMs).toBe('number')
+  expect(event.codexAppServerInitializeMs).toBe(7)
+  expect(event.codexAppServerPreProviderMs).toBe(17)
+  expect(event.codexAppServerSpawnReadyMs).toBe(1)
+  expect(event.codexAppServerThreadResumeMs).toBe(9)
+  expect(event.codexAppServerWarmReuseMs).toBe(0)
   expect(typeof event.sessionResolveMs).toBe('number')
   expect(typeof event.promptBuildMs).toBe('number')
   expect(typeof event.admissionMs).toBe('number')
@@ -4823,7 +5142,11 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
   ])
 })
 
-test('sendAssistantMessageLocal suppresses hosted progress in queue-only auto-replies', async () => {
+// Hosted-runner turns always run queue-only (the outbox owns final-reply
+// delivery), including interactive auto-replies where a member is actively
+// waiting. Progress delivery must stay wired there so mid-turn updates and
+// commentary-phase messages reach the member instead of silently vanishing.
+test('sendAssistantMessageLocal keeps hosted progress wired in queue-only auto-replies', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-hosted-auto-reply-progress-',
   )
@@ -4872,11 +5195,9 @@ test('sendAssistantMessageLocal suppresses hosted progress in queue-only auto-re
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   const hostedToolContext =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
-  assert.equal(progressDelivery, null)
+  assert.ok(progressDelivery, 'queue-only auto-reply turns keep progress delivery wired')
   assert.ok(hostedToolContext)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
-  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
-  assert.equal(progressDeliveryDependencies.sendLinq.mock.calls.length, 0)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
 
@@ -5484,15 +5805,20 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
   await expect(
     progressDelivery.send('Still checking the attachment context.'),
   ).resolves.toEqual({
-    kind: 'skipped',
-    reason: 'too-soon',
+    kind: 'sent',
     source: 'model',
   })
   await expect(
     progressDelivery.send('One more progress update.'),
   ).resolves.toEqual({
+    kind: 'sent',
+    source: 'model',
+  })
+  await expect(
+    progressDelivery.send('A fourth progress update.'),
+  ).resolves.toEqual({
     kind: 'skipped',
-    reason: 'too-soon',
+    reason: 'limit',
     source: 'model',
   })
   await expect(
@@ -5501,7 +5827,7 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
     kind: 'sent',
     source: 'model',
   })
-  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(2)
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(4)
 })
 
 test('sendAssistantMessageLocal uses resolved audience channel for hosted model progress', async () => {
@@ -6497,6 +6823,9 @@ test('sendAssistantMessageLocal does not wait for a pending typing indicator sta
   await vi.waitFor(() => {
     expect(stopTyping).toHaveBeenCalledTimes(1)
   })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: false,
+  })
 })
 
 test('sendAssistantMessageLocal returns deferred delivery results and keeps typing in queue-only mode', async () => {
@@ -6564,6 +6893,7 @@ test('sendAssistantMessageLocal returns deferred delivery results and keeps typi
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(startTypingIndicator.mock.calls[0]?.[1]?.startTelegramTyping, startTelegramTyping)
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 0)
 })
 
@@ -6571,6 +6901,7 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
   const failedSession = createAssistantSession({
     sessionId: 'session-failed-delivery',
   })
+  const stopTyping = vi.fn(async () => undefined)
   const failedDeliveryOutcome = {
     error: {
       code: 'ASSISTANT_DELIVERY_FAILED',
@@ -6583,6 +6914,11 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
     session: failedSession,
   }
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        stop: stopTyping,
+      })),
+    },
     deliveryOutcome: failedDeliveryOutcome,
   })
 
@@ -6608,6 +6944,9 @@ test('sendAssistantMessageLocal reports failed delivery outcomes after provider 
     status: 'completed',
     vault: '<redacted-vault>',
   })
+  expect(stopTyping).toHaveBeenCalledWith({
+    providerStop: true,
+  })
 })
 
 test('sendAssistantMessageLocal starts typing indicators for queue-only delivery', async () => {
@@ -6632,6 +6971,7 @@ test('sendAssistantMessageLocal starts typing indicators for queue-only delivery
   assert.equal(mocks.getAssistantChannelAdapter.mock.calls.length, 1)
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
 })
 
 test('sendAssistantMessageLocal swallows typing-indicator startup failures', async () => {
@@ -6693,6 +7033,7 @@ test('sendAssistantMessageLocal surfaces queued delivery state after queue-only 
   assert.deepEqual(result.deliveryError, queuedError)
   assert.equal(startTypingIndicator.mock.calls.length, 1)
   assert.equal(stopTyping.mock.calls.length, 1)
+  assert.deepEqual(stopTyping.mock.calls[0], [{ providerStop: false }])
   assert.equal(mocks.finalizeDeliveredAssistantTurn.mock.calls.length, 1)
 })
 
@@ -8461,10 +8802,14 @@ async function loadLocalServiceModule(input?: {
             null,
           channel,
           deliverySource: message.deliverySource ?? null,
-          explicitTarget: audience.explicitTarget ?? message.deliveryTarget ?? null,
+          explicitTarget: message.deliveryTarget === undefined
+            ? audience.explicitTarget ?? null
+            : message.deliveryTarget,
           identityId,
           replyToMessageId:
-            audience.replyToMessageId ?? message.deliveryReplyToMessageId ?? null,
+            message.deliveryReplyToMessageId === undefined
+              ? audience.replyToMessageId ?? null
+              : message.deliveryReplyToMessageId,
           sessionId: input.session.sessionId,
           subject: message.deliverySubject ?? null,
           threadId,

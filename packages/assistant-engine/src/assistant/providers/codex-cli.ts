@@ -1,5 +1,4 @@
 import {
-  HOSTED_RUNTIME_PROCESS_ENV_MARKER,
   prepareAssistantDirectCliEnv,
 } from '../../assistant-cli-access.js'
 import {
@@ -68,6 +67,10 @@ const CODEX_RESUME_FAILURE_TRACE_SCHEMA =
   'murph.assistant-codex-resume-failure-diagnostics.v1'
 const CODEX_RESUME_FAILURE_TRACE_TYPE =
   'assistant.codex.resume_failure'
+const CODEX_FRESH_THREAD_FALLBACK_TRACE_SCHEMA =
+  'murph.assistant-codex-fresh-thread-fallback-diagnostics.v1'
+const CODEX_FRESH_THREAD_FALLBACK_TRACE_TYPE =
+  'assistant.codex.fresh_thread_fallback'
 const ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_SCHEMA =
   'murph.assistant-provider-prompt-size-diagnostics.v1'
 const ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_TYPE =
@@ -191,6 +194,13 @@ export async function executeCodexAssistantTurnAttempt(
     voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
   })
   const codexProcessEnv = prepareAssistantDirectCliEnv(input.env)
+  const codexConfigOverrides = [
+    ...(mergeCodexConfigOverrides({
+      modelProvider: providerConfig.target.modelProvider,
+      showThinkingTraces: input.showThinkingTraces ?? false,
+    }) ?? []),
+    ...(input.codexConfigOverrides ?? []),
+  ]
 
   const baseAppServerInput = {
     abortSignal: input.abortSignal,
@@ -201,13 +211,8 @@ export async function executeCodexAssistantTurnAttempt(
     dynamicTools: input.dynamicTools,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
-    configOverrides: mergeCodexConfigOverrides({
-      enableMultiAgentV2:
-        codexProcessEnv[HOSTED_RUNTIME_PROCESS_ENV_MARKER]?.trim() === '1',
-      modelProvider: providerConfig.target.modelProvider,
-      showThinkingTraces: input.showThinkingTraces ?? false,
-    }),
-    loadAuthorizedReferenceImageRefs: input.loadAuthorizedReferenceImageRefs ?? null,
+    configOverrides:
+      codexConfigOverrides.length > 0 ? codexConfigOverrides : undefined,
     env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
@@ -341,9 +346,45 @@ export async function executeCodexAssistantTurnAttempt(
       }
     } else if (
       input.resume &&
-      isCodexNoSideEffectResumeTransportFailure(error, failureContext)
+      isCodexResumeTransportFailure(error)
     ) {
-      result = await runFreshThreadFallback(input.resume)
+      emitCodexFreshThreadFallbackTraceEvent({
+        onTraceEvent: input.onTraceEvent,
+        rawEvent: buildCodexFreshThreadFallbackTraceEvent({
+          error,
+          failureContext,
+          fallbackResult: 'started',
+          reason: 'resume-transport-failure',
+          resumeCodexThreadId: input.resume.codexThreadId,
+        }),
+      })
+      try {
+        result = await runFreshThreadFallback(input.resume)
+      } catch (fallbackError) {
+        emitCodexFreshThreadFallbackTraceEvent({
+          onTraceEvent: input.onTraceEvent,
+          rawEvent: buildCodexFreshThreadFallbackTraceEvent({
+            error,
+            failureContext,
+            fallbackError,
+            fallbackResult: 'failed',
+            reason: 'resume-transport-failure',
+            resumeCodexThreadId: input.resume.codexThreadId,
+          }),
+        })
+        throw fallbackError
+      }
+      emitCodexFreshThreadFallbackTraceEvent({
+        onTraceEvent: input.onTraceEvent,
+        rawEvent: buildCodexFreshThreadFallbackTraceEvent({
+          error,
+          failureContext,
+          fallbackResult: 'succeeded',
+          reason: 'resume-transport-failure',
+          result,
+          resumeCodexThreadId: input.resume.codexThreadId,
+        }),
+      })
       codexContinuation = {
         kind: 'thread-start' as const,
       }
@@ -666,14 +707,9 @@ function isCodexInvalidOutputResumeFailure(error: unknown): boolean {
   )
 }
 
-function isCodexNoSideEffectResumeTransportFailure(
+function isCodexResumeTransportFailure(
   error: unknown,
-  failureContext: CodexAppServerTurnFailureContext | null,
 ): boolean {
-  if (failureContext?.providerActionCount !== 0) {
-    return false
-  }
-
   const errorCode = readCodexDiagnosticErrorCode(error)
   if (
     errorCode === 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT' ||
@@ -716,6 +752,9 @@ interface CodexInvalidOutputEventShapeSummary {
   outputStringLengths: number[]
   paramKeys: string[]
 }
+
+type CodexFreshThreadFallbackReason = 'resume-transport-failure'
+type CodexFreshThreadFallbackResult = 'failed' | 'started' | 'succeeded'
 
 function buildCodexResumeFailureTraceEvent(input: {
   error: unknown
@@ -809,6 +848,82 @@ function buildCodexResumeFailureTraceEvent(input: {
     providerTraceKind: 'codex.resume_failure',
     schema: CODEX_RESUME_FAILURE_TRACE_SCHEMA,
     type: CODEX_RESUME_FAILURE_TRACE_TYPE,
+  }
+}
+
+function buildCodexFreshThreadFallbackTraceEvent(input: {
+  error: unknown
+  failureContext: CodexAppServerTurnFailureContext | null
+  fallbackError?: unknown
+  fallbackResult: CodexFreshThreadFallbackResult
+  reason: CodexFreshThreadFallbackReason
+  resumeCodexThreadId: string
+  result?: Awaited<ReturnType<typeof executeCodexAppServerTurn>>
+}): CodexInvalidOutputTraceRawEvent {
+  const failureContext = input.failureContext
+  const resumeSessionId = normalizeNullableString(input.resumeCodexThreadId)
+  const failureSessionId = normalizeNullableString(failureContext?.codexThreadId)
+  const freshSessionId = normalizeNullableString(input.result?.sessionId)
+  const fallbackErrorMessageLength =
+    input.fallbackError
+      ? readCodexDiagnosticErrorMessageLength(input.fallbackError)
+      : null
+
+  return {
+    codexFreshThreadFallbackErrorCode:
+      readCodexDiagnosticErrorCode(input.error),
+    codexFreshThreadFallbackErrorKind:
+      classifyCodexResumeFailureErrorKind(input.error),
+    codexFreshThreadFallbackErrorMessageLength:
+      readCodexDiagnosticErrorMessageLength(input.error),
+    codexFreshThreadFallbackErrorMessagePresent:
+      readCodexDiagnosticErrorMessageLength(input.error) !== null,
+    codexFreshThreadFallbackErrorPhrases:
+      collectCodexResumeFailureErrorPhrases(
+        readCodexDiagnosticErrorMessage(input.error) ?? '',
+      ),
+    codexFreshThreadFallbackEventCount: input.result?.jsonEvents.length ?? null,
+    codexFreshThreadFallbackFailureEventCount:
+      failureContext?.jsonEvents.length ?? null,
+    codexFreshThreadFallbackFailureProviderActionCount:
+      failureContext?.providerActionCount ?? null,
+    codexFreshThreadFallbackFailureSessionPresent: failureSessionId !== null,
+    codexFreshThreadFallbackFailureTurnPresent:
+      normalizeNullableString(failureContext?.providerTurnId) !== null,
+    codexFreshThreadFallbackFallbackErrorCode:
+      input.fallbackError
+        ? readCodexDiagnosticErrorCode(input.fallbackError)
+        : null,
+    codexFreshThreadFallbackFallbackErrorKind:
+      input.fallbackError
+        ? classifyCodexResumeFailureErrorKind(input.fallbackError)
+        : null,
+    codexFreshThreadFallbackFallbackErrorMessageLength:
+      fallbackErrorMessageLength,
+    codexFreshThreadFallbackFallbackErrorMessagePresent:
+      input.fallbackError ? fallbackErrorMessageLength !== null : null,
+    codexFreshThreadFallbackPhase:
+      input.fallbackResult === 'started'
+        ? 'fallback-started'
+        : input.fallbackResult === 'succeeded'
+          ? 'fallback-succeeded'
+          : 'fallback-failed',
+    codexFreshThreadFallbackProviderActionCount:
+      input.result?.providerActionCount ?? null,
+    codexFreshThreadFallbackReason: input.reason,
+    codexFreshThreadFallbackResult: input.fallbackResult,
+    codexFreshThreadFallbackResumeMatchesFailureSession:
+      resumeSessionId && failureSessionId ? resumeSessionId === failureSessionId : null,
+    codexFreshThreadFallbackResumeSessionPresent: resumeSessionId !== null,
+    codexFreshThreadFallbackSessionChanged:
+      resumeSessionId && freshSessionId ? freshSessionId !== resumeSessionId : null,
+    codexFreshThreadFallbackSessionPresent: freshSessionId !== null,
+    codexFreshThreadFallbackTraceType: 'fallback',
+    codexFreshThreadFallbackTurnPresent:
+      normalizeNullableString(input.result?.turnId) !== null,
+    providerTraceKind: 'codex.fresh_thread_fallback',
+    schema: CODEX_FRESH_THREAD_FALLBACK_TRACE_SCHEMA,
+    type: CODEX_FRESH_THREAD_FALLBACK_TRACE_TYPE,
   }
 }
 
@@ -950,6 +1065,13 @@ function emitCodexInvalidOutputTraceEvent(input: {
 }
 
 function emitCodexResumeFailureTraceEvent(input: {
+  onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
+  rawEvent: CodexInvalidOutputTraceRawEvent
+}): void {
+  emitCodexInvalidOutputTraceEvent(input)
+}
+
+function emitCodexFreshThreadFallbackTraceEvent(input: {
   onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
   rawEvent: CodexInvalidOutputTraceRawEvent
 }): void {

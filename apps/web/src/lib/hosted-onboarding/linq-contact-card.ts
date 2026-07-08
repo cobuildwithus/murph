@@ -1,13 +1,14 @@
+import "server-only";
+
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
-import {
-  createHostedPhoneLookupKey,
-} from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import { listHostedLinqContactCardLines } from "./linq-line-store";
 import {
-  syncHostedLinqConfiguredLinesTx,
-} from "./linq-line-store";
+  HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
+  syncHostedLinqPhoneNumberInventory,
+} from "./linq-phone-number-inventory";
 import { normalizePhoneNumber } from "./phone";
 import {
   getHostedOnboardingEnvironment,
@@ -17,10 +18,10 @@ import { normalizeNullableString } from "./shared";
 
 const HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT = 50;
 const MURPH_CONTACT_CARD_FIRST_NAME = "Murph";
+const MURPH_CONTACT_CARD_DEFAULT_ORIGIN = "https://www.withmurph.ai";
 const MURPH_CONTACT_CARD_DEFAULT_IMAGE_URL =
   "https://www.withmurph.ai/murph_headshot.png";
 const MURPH_CONTACT_CARD_IMAGE_PATH = "/murph_headshot.png";
-const LINQ_CONTACT_CARD_IMAGE_CDN_HOST = "cdn.linqapp.com";
 
 export type HostedLinqContactCard = {
   firstName: string;
@@ -65,9 +66,8 @@ export async function reconcileHostedLinqContactCards(input: {
     maxLines: input.maxLines,
     observedAt,
     prisma: input.prisma,
+    signal: input.signal,
   });
-  const murphImageUrl = getMurphContactCardImageUrl();
-
   const result: HostedLinqContactCardReconciliation = {
     activeCards: 0,
     atRiskLines: 0,
@@ -92,7 +92,6 @@ export async function reconcileHostedLinqContactCards(input: {
     });
     const outcome = await reconcileHostedLinqContactCardForLine({
       existingCard,
-      imageUrl: murphImageUrl,
       phoneNumber: line.phoneNumber,
       signal: input.signal,
     });
@@ -197,119 +196,75 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   maxLines?: number;
   observedAt: Date;
   prisma: HostedLinqContactCardClient;
+  signal?: AbortSignal;
 }): Promise<Array<{
   phoneNumber: string;
   providerStatus: string | null;
 }>> {
-  const environment = getHostedOnboardingEnvironment();
   const maxLines = normalizeLineLimit(input.maxLines);
-  const phoneNumbers = uniqueNormalizedPhoneNumbers(
-    environment.linqConversationPhoneNumbers,
-  ).slice(0, maxLines);
-  const lineInputs = phoneNumbers
-    .map((phoneNumber) => ({
-      phoneNumber,
-      phoneNumberLookupKey: createHostedPhoneLookupKey(phoneNumber),
-    }))
-    .filter((line): line is {
-      phoneNumber: string;
-      phoneNumberLookupKey: string;
-    } => typeof line.phoneNumberLookupKey === "string" && line.phoneNumberLookupKey.length > 0);
 
-  if (lineInputs.length === 0) {
-    return [];
-  }
-
-  await syncHostedLinqConfiguredLinesTx({
-    activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
+  await syncHostedLinqPhoneNumberInventory({
+    maxLines: HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
     observedAt: input.observedAt,
-    phoneNumbers: lineInputs.map((line) => line.phoneNumber),
+    prisma: input.prisma,
+    signal: input.signal,
+  });
+
+  const lines = await listHostedLinqContactCardLines({
+    limit: maxLines,
     prisma: input.prisma,
   });
-
-  const rows = await input.prisma.hostedLinqLine.findMany({
-    where: {
-      phoneNumberLookupKey: {
-        in: lineInputs.map((line) => line.phoneNumberLookupKey),
-      },
-    },
-    select: {
-      phoneNumberLookupKey: true,
-      providerStatus: true,
-    },
-    take: maxLines,
-  });
-  const providerStatusByLookupKey = new Map(
-    rows.map((row) => [row.phoneNumberLookupKey, row.providerStatus]),
-  );
-
-  return lineInputs.map((line) => ({
+  return lines.map((line) => ({
     phoneNumber: line.phoneNumber,
-    providerStatus: providerStatusByLookupKey.get(line.phoneNumberLookupKey) ?? null,
+    providerStatus: line.providerStatus,
   }));
 }
 
 async function reconcileHostedLinqContactCardForLine(input: {
   existingCard: HostedLinqContactCard | null;
-  imageUrl: string | null;
   phoneNumber: string;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCardOutcome> {
   if (!input.existingCard) {
     const created = await setupHostedLinqContactCard({
       firstName: MURPH_CONTACT_CARD_FIRST_NAME,
-      imageUrl: input.imageUrl,
       phoneNumber: input.phoneNumber,
       signal: input.signal,
     });
     return created.isActive ? "createdCards" : "inactiveCards";
   }
 
-  if (isCurrentMurphContactCard(input.existingCard, input.imageUrl)) {
+  if (isCurrentMurphContactCard(input.existingCard)) {
     return input.existingCard.isActive ? "activeCards" : "inactiveCards";
   }
 
   const updated = await updateHostedLinqContactCard({
     firstName: MURPH_CONTACT_CARD_FIRST_NAME,
-    imageUrl: input.imageUrl,
+    imageUrl: null,
     phoneNumber: input.phoneNumber,
     signal: input.signal,
   });
   return updated.isActive ? "updatedCards" : "inactiveCards";
 }
 
-function isCurrentMurphContactCard(
-  card: HostedLinqContactCard,
-  imageUrl: string | null,
-): boolean {
+function isCurrentMurphContactCard(card: HostedLinqContactCard): boolean {
   if (card.firstName !== MURPH_CONTACT_CARD_FIRST_NAME || (card.lastName ?? "") !== "") {
     return false;
   }
 
-  if (!imageUrl) {
-    return true;
-  }
-
-  // Linq rewrites accepted contact-card images to its own CDN URL.
-  return card.imageUrl === imageUrl || isHostedLinqContactCardImageUrl(card.imageUrl);
+  return card.imageUrl === null;
 }
 
-function isHostedLinqContactCardImageUrl(value: string | null): boolean {
-  const imageUrl = normalizeNullableString(value);
-  if (!imageUrl) {
-    return false;
-  }
-
-  try {
-    const url = new URL(imageUrl);
-    return url.protocol === "https:"
-      && url.hostname === LINQ_CONTACT_CARD_IMAGE_CDN_HOST
-      && url.search === ""
-      && url.pathname.includes("/contact-card/")
-      && /\/image-[^/]+\.png$/i.test(url.pathname);
-  } catch {
-    return false;
-  }
+/**
+ * Absolute URL for one of our own public contact-card avatar assets. Anchored
+ * to the operator-configured public base URL (canonical production host as
+ * the fallback), never to request-derived origins, so a hostile Host header
+ * can not steer the server-side photo fetch.
+ */
+export function resolveMurphContactCardAssetUrl(assetPath: string): string {
+  const publicBaseUrl = getHostedOnboardingEnvironment().publicBaseUrl
+    ?? MURPH_CONTACT_CARD_DEFAULT_ORIGIN;
+  return new URL(assetPath, `${publicBaseUrl}/`).toString();
 }
 
 function getMurphContactCardImageUrl(): string | null {
@@ -390,15 +345,15 @@ function buildHostedLinqContactCardBody(input: {
   imageUrl?: string | null;
   lastName?: string | null;
   phoneNumber?: string | null;
-}): Record<string, string> {
+}): Record<string, string | null> {
   const firstName = normalizeNullableString(input.firstName);
-  const imageUrl = normalizeNullableString(input.imageUrl);
+  const imageUrl = input.imageUrl === null ? null : normalizeNullableString(input.imageUrl);
   const lastName = normalizeNullableString(input.lastName);
   const phoneNumber = normalizeNullableString(input.phoneNumber);
 
   return {
     ...(firstName ? { first_name: firstName } : {}),
-    ...(imageUrl ? { image_url: imageUrl } : {}),
+    ...(input.imageUrl === null ? { image_url: null } : imageUrl ? { image_url: imageUrl } : {}),
     ...(lastName ? { last_name: lastName } : {}),
     ...(phoneNumber ? { phone_number: phoneNumber } : {}),
   };
@@ -460,19 +415,144 @@ function normalizeLineLimit(value: number | null | undefined): number {
   return Math.min(value, HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT);
 }
 
-function uniqueNormalizedPhoneNumbers(values: readonly string[]): string[] {
-  const seen = new Set<string>();
-  const phoneNumbers: string[] = [];
+const MURPH_CONTACT_CARD_VCF_PHOTO_MAX_BYTES = 2 * 1024 * 1024;
+const MURPH_CONTACT_CARD_VCF_PHOTO_FETCH_TIMEOUT_MS = 5_000;
+const MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS = 75;
 
-  for (const value of values) {
-    const phoneNumber = normalizePhoneNumber(value);
-    if (!phoneNumber || seen.has(phoneNumber)) {
-      continue;
-    }
+export const MURPH_CONTACT_CARD_VCF_FILE_NAME = "Murph.vcf";
+export const MURPH_CONTACT_CARD_VCF_CONTENT_TYPE = "text/vcard";
 
-    seen.add(phoneNumber);
-    phoneNumbers.push(phoneNumber);
+export type MurphHostedLinqContactCardVcfPhoto = {
+  base64: string;
+  type: "JPEG" | "PNG";
+};
+
+/**
+ * vCard 3.0 with CRLF line endings and 75-char folding so iMessage renders it
+ * as a native tappable contact bubble rather than a generic file. The chat's
+ * own line is the `mobile` number; a second healthy pool line, when
+ * available, rides along under a `backup` label so members keep a way to
+ * reach Murph if the primary line degrades.
+ */
+export function buildMurphHostedLinqContactCardVcf(input: {
+  backupPhoneNumber?: string | null;
+  phoneNumber: string;
+  photo?: MurphHostedLinqContactCardVcfPhoto | null;
+}): string {
+  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+  if (!phoneNumber) {
+    throw new TypeError("Murph contact-card vCard requires a line phone number.");
+  }
+  const backupPhoneNumber = normalizePhoneNumber(input.backupPhoneNumber ?? null);
+
+  const lines = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    `N:;${MURPH_CONTACT_CARD_FIRST_NAME};;;`,
+    `FN:${MURPH_CONTACT_CARD_FIRST_NAME}`,
+    `TEL;TYPE=CELL:${phoneNumber}`,
+    ...(backupPhoneNumber && backupPhoneNumber !== phoneNumber
+      ? [
+          `item1.TEL:${backupPhoneNumber}`,
+          "item1.X-ABLabel:backup",
+        ]
+      : []),
+    ...(input.photo
+      ? [`PHOTO;ENCODING=b;TYPE=${input.photo.type}:${input.photo.base64}`]
+      : []),
+    "END:VCARD",
+  ];
+
+  return lines.map(foldMurphContactCardVcfLine).join("\r\n") + "\r\n";
+}
+
+/**
+ * Second healthy configured conversation line (excluding the chat's own) for
+ * the vCard's `backup` slot. Reuses the contact-card cron's line listing so
+ * health comes from the synced `hostedLinqLine` provider status; lines the
+ * provider marks AT_RISK/CRITICAL are skipped. Fails soft to null.
+ */
+export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: {
+  excludePhoneNumber: string;
+  prisma: HostedLinqContactCardClient;
+}): Promise<string | null> {
+  const excludePhoneNumber = normalizePhoneNumber(input.excludePhoneNumber);
+  try {
+    const lines = await listHostedLinqConfiguredContactCardLines({
+      observedAt: new Date(),
+      prisma: input.prisma,
+    });
+    return lines.find((line) =>
+      line.phoneNumber !== excludePhoneNumber
+      && line.providerStatus !== "AT_RISK"
+      && line.providerStatus !== "CRITICAL"
+    )?.phoneNumber ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function foldMurphContactCardVcfLine(line: string): string {
+  if (line.length <= MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS) {
+    return line;
+  }
+  const folded: string[] = [line.slice(0, MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS)];
+  for (
+    let index = MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS;
+    index < line.length;
+    index += MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS - 1
+  ) {
+    folded.push(` ${line.slice(index, index + MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS - 1)}`);
+  }
+  return folded.join("\r\n");
+}
+
+/**
+ * Best-effort fetch of a Murph contact-card photo for embedding; any failure
+ * returns null so the card ships without a photo instead of failing the
+ * share. Defaults to the canonical headshot; pass `imageUrl` to embed a
+ * different member-chosen avatar asset.
+ */
+export async function fetchMurphHostedLinqContactCardVcfPhoto(input: {
+  fetchImpl?: typeof fetch;
+  imageUrl?: string | null;
+  signal?: AbortSignal;
+} = {}): Promise<MurphHostedLinqContactCardVcfPhoto | null> {
+  const imageUrl = input.imageUrl ?? getMurphContactCardImageUrl();
+  if (!imageUrl) {
+    return null;
   }
 
-  return phoneNumbers;
+  try {
+    const fetchImpl = input.fetchImpl ?? fetch;
+    const response = await fetchImpl(imageUrl, {
+      // Own-asset fetch only; a redirect means the asset boundary was crossed.
+      redirect: "error",
+      signal: input.signal ?? AbortSignal.timeout(MURPH_CONTACT_CARD_VCF_PHOTO_FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    const type = contentType.includes("png")
+      ? "PNG" as const
+      : contentType.includes("jpeg") || contentType.includes("jpg")
+        ? "JPEG" as const
+        : imageUrl.toLowerCase().endsWith(".png")
+          ? "PNG" as const
+          : null;
+    if (!type) {
+      return null;
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > MURPH_CONTACT_CARD_VCF_PHOTO_MAX_BYTES) {
+      return null;
+    }
+    return {
+      base64: Buffer.from(bytes).toString("base64"),
+      type,
+    };
+  } catch {
+    return null;
+  }
 }

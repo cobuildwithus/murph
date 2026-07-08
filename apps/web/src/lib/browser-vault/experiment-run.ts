@@ -1,4 +1,5 @@
 import {
+  resolveExperimentAdherenceRollupTarget,
   selectBrowserVaultExperimentResults,
   type BrowserVaultExperimentBiomarkerResult,
   type BrowserVaultExperimentExpectedRange,
@@ -417,6 +418,10 @@ function buildSchedule(
   results: BrowserVaultExperimentResultsView,
 ): ExperimentRunProjection["schedule"] {
   const schedule = results.schedule;
+  if (hasCalendarLessCountAdherenceTarget(results)) {
+    return undefined;
+  }
+
   if (!schedule && hasUnsupportedExplicitAdherence(results)) {
     return undefined;
   }
@@ -451,6 +456,14 @@ function buildSchedule(
     loggedSessions: results.progress?.adherence.loggedSessions ?? schedule?.completedSessions,
     weeks,
   };
+}
+
+function hasCalendarLessCountAdherenceTarget(results: BrowserVaultExperimentResultsView): boolean {
+  const rollupTarget = resolveExperimentAdherenceRollupTarget(
+    results.experiment.runPlan.adherenceTargets,
+  );
+
+  return rollupTarget !== null && rollupTarget.calendar === undefined;
 }
 
 function hasUnsupportedExplicitAdherence(results: BrowserVaultExperimentResultsView): boolean {
@@ -601,6 +614,8 @@ function formatScheduleCellDetail(
   switch (kind) {
     case "completed":
       return "Done";
+    case "assumed":
+      return "Assumed done";
     case "partial":
       return "Partial";
     case "missed":
@@ -627,6 +642,7 @@ function summarizeScheduleWeek(cells: readonly ScheduleCell[]): string | undefin
 
   const parts = [
     formatCount(countScheduleCells(cells, "completed"), "done"),
+    formatCount(countScheduleCells(cells, "assumed"), "assumed"),
     formatCount(countScheduleCells(cells, "partial"), "partial"),
     formatCount(countScheduleCells(cells, "missed"), "not logged"),
     formatCount(countScheduleCells(cells, "failed"), "not met"),
@@ -640,6 +656,10 @@ function summarizeScheduleWeek(cells: readonly ScheduleCell[]): string | undefin
 function readTargetCountPerDay(
   calendar: BrowserVaultExperimentResultsView["experiment"]["runPlan"]["adherenceTargets"][number]["calendar"],
 ): number {
+  if (!calendar) {
+    return 1;
+  }
+
   switch (calendar.kind) {
     case "daily":
     case "weekdays":
@@ -651,7 +671,7 @@ function readTargetCountPerDay(
 
 function formatScheduleCadence(results: BrowserVaultExperimentResultsView): string {
   const adherenceTarget = results.experiment.runPlan.adherenceTargets[0];
-  if (adherenceTarget) {
+  if (adherenceTarget?.calendar) {
     const targetCount = readTargetCountPerDay(adherenceTarget.calendar);
     const countPrefix = targetCount > 1 ? `${targetCount}x ` : "";
     if (adherenceTarget.calendar.kind === "daily") {
@@ -662,6 +682,9 @@ function formatScheduleCadence(results: BrowserVaultExperimentResultsView): stri
         adherenceTarget.calendar.localTime ? ` at ${adherenceTarget.calendar.localTime}` : ""
       }`;
     }
+    return `${adherenceTarget.label} target`;
+  }
+  if (adherenceTarget) {
     return `${adherenceTarget.label} target`;
   }
 
@@ -699,7 +722,8 @@ function formatScheduleDose(results: BrowserVaultExperimentResultsView): string 
   const parts = [
     target !== null ? `${target} planned` : undefined,
     minimum !== null ? `${minimum} minimum useful` : undefined,
-    schedule ? formatCount(schedule.completedSessions, "done") : undefined,
+    schedule ? formatCount(Math.max(0, schedule.completedSessions - schedule.assumedSessions), "done") : undefined,
+    schedule ? formatCount(schedule.assumedSessions, "assumed") : undefined,
     schedule ? formatCount(schedule.partialSessions, "partial") : undefined,
     schedule ? formatCount(schedule.missedSessions, "not logged") : undefined,
     schedule ? formatCount(schedule.failedSessions, "not met") : undefined,
@@ -734,9 +758,7 @@ function buildRunSummary(
     return `${phaseLabel} in progress`;
   }
 
-  const adherencePart = adherence
-    ? ` with ${adherence.loggedSessions} logged target${adherence.loggedSessions === 1 ? "" : "s"}`
-    : "";
+  const adherencePart = adherence ? ` with ${formatRunSummaryAdherence(adherence)}` : "";
 
   return `${phaseLabel}${adherencePart}: ${primary.label} is ${formatDelta(primary.deltaAbs, primary.unit ?? undefined)} from baseline.`;
 }
@@ -756,7 +778,7 @@ function buildRunSummaryDetail(
       details.push(`Outcome confidence is ${outcome.confidence.level}.`);
       details.push(...outcome.confidence.reasons);
     } else {
-      details.push("The browser-vault snapshot has the finished run, but no outcome window is ready yet.");
+      details.push("The run is finished, but a full before-and-after window isn't ready yet.");
     }
   } else if (coverage) {
     details.push(`Coverage is ${coverage.status.replaceAll("_", " ")} for the primary signal.`);
@@ -808,7 +830,7 @@ function buildConclusions(
       variant: "insight",
       items: [{
         icon: "→",
-        text: "The private run is present, but the browser-vault snapshot does not contain enough metric data for a before-and-after conclusion yet.",
+        text: "This run doesn't have enough measured data for a before-and-after conclusion yet.",
       }],
     });
   }
@@ -889,8 +911,8 @@ function buildRunNextStep(input: {
           ?? input.protocol.protocol[0]?.detail
           ?? "Resume the protocol when you're ready and keep the rest of the week ordinary.",
       context: inBaseline
-        ? "The run exists in your browser vault, but the active protocol window has not started yet."
-        : "Murph kept the private run state, but the protocol is paused until you resume it.",
+        ? "Your run is saved privately on this device; the protocol window hasn't started yet."
+        : "Your run is saved, but the protocol is paused until you resume it.",
     };
   }
 
@@ -953,7 +975,7 @@ function buildPrivateRunTimeline(input: {
     title: input.baselineDays > 0 ? "Baseline started" : "Experiment started",
     description: input.baselineDays > 0
       ? `${input.baselineDays} baseline days before the protocol window.`
-      : "The private run is linked to this protocol.",
+      : "Your run of this protocol has started.",
     variant: "primary",
   }];
 
@@ -974,7 +996,7 @@ function buildPrivateRunTimeline(input: {
       date: formatShortDate(input.referenceDate),
       label: input.day ? `Day ${input.day}` : "Now",
       title: formatProgressPhase(input.phase),
-      description: "Murph has the private run state; Results update from the current browser-vault snapshot.",
+      description: "Results update automatically as new private data arrives on this device.",
       variant: "default",
     });
 
@@ -992,16 +1014,16 @@ function buildPrivateRunTimeline(input: {
     events.push({
       date: formatShortDate(input.referenceDate),
       label: input.day ? `Day ${input.day}` : "Paused",
-      title: "Private run paused",
-      description: "The run is still present in your browser vault, but the protocol is paused for now.",
+      title: "Experiment paused",
+      description: "Your run is saved, but the protocol is paused for now.",
       variant: "muted",
     });
   } else if (input.status === "stopped") {
     events.push({
       date: formatShortDate(input.referenceDate),
       label: "Stopped",
-      title: "Private run stopped",
-      description: "The run remains in your browser vault, but it was marked stopped before a browser-vault outcome comparison was ready.",
+      title: "Experiment stopped",
+      description: "This run was stopped before a before-and-after comparison was ready.",
       variant: "muted",
     });
   } else if (input.analysisAvailableOn) {
@@ -1009,7 +1031,7 @@ function buildPrivateRunTimeline(input: {
       date: formatShortDate(input.analysisAvailableOn),
       label: "Finished",
       title: "Experiment window complete",
-      description: "The private run is marked finished in the browser-vault snapshot.",
+      description: "Your run is finished.",
       variant: "primary",
     });
   }
@@ -1101,14 +1123,31 @@ function formatProgressPhase(
 function formatAdherenceDetail(
   adherence: NonNullable<BrowserVaultExperimentResultsView["progress"]>["adherence"],
 ): string {
+  const assumedSessions = adherence.assumedSessions ?? 0;
   const parts = [
-    `${adherence.loggedSessions} logged`,
+    assumedSessions > 0
+      ? `${adherence.loggedSessions} done (${assumedSessions} assumed)`
+      : `${adherence.loggedSessions} logged`,
+    formatCount(adherence.sensedSessions ?? 0, "sensed"),
+    formatCount(adherence.confirmedSessions ?? 0, "confirmed"),
+    assumedSessions > 0 ? undefined : formatCount(assumedSessions, "assumed"),
     formatCount(adherence.partialSessions, "partial"),
     formatCount(adherence.missedSessions, "not logged"),
     adherence.targetSessions !== null ? `${adherence.targetSessions} target` : undefined,
   ].filter((part): part is string => Boolean(part));
 
   return `Adherence is ${adherence.status.replaceAll("_", " ")} (${parts.join(" · ")}).`;
+}
+
+function formatRunSummaryAdherence(
+  adherence: NonNullable<BrowserVaultExperimentResultsView["progress"]>["adherence"],
+): string {
+  const assumedSessions = adherence.assumedSessions ?? 0;
+  if (assumedSessions > 0) {
+    return `${adherence.loggedSessions} done (${assumedSessions} assumed)`;
+  }
+
+  return `${adherence.loggedSessions} logged target${adherence.loggedSessions === 1 ? "" : "s"}`;
 }
 
 function formatExpectedSignalText(

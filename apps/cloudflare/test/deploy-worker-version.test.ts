@@ -126,6 +126,46 @@ describe("runHostedWorkerDeployment", () => {
     expect(result.smokeVersionId).toBe("version-direct");
   });
 
+  it("defaults production deploys to immediate container rollout during selector-scope migration", async () => {
+    const finalDeployment: DeploymentStatusPayload = {
+      created_on: "2026-03-27T00:10:00.000Z",
+      versions: [
+        {
+          percentage: 100,
+          version_id: "version-direct",
+        },
+      ],
+    };
+    const dependencies = createDependencies({
+      readCurrentDeployment: vi
+        .fn<HostedWorkerDeploymentDependencies["readCurrentDeployment"]>()
+        .mockResolvedValue(finalDeployment),
+    });
+
+    await runHostedWorkerDeployment({
+      configPath: "/tmp/wrangler.generated.jsonc",
+      dependencies,
+      env: {
+        CF_WORKER_NAME: "hosted-worker",
+        HOSTED_EXECUTION_DEPLOY_CONTEXT: "production",
+      },
+      resultPath: "/tmp/deployment-result.json",
+      runnerBundleDir: "/tmp/runner-bundle",
+      secretsFilePath: "/tmp/worker-secrets.json",
+      workerName: "hosted-worker",
+    });
+
+    expect(dependencies.deployDirect).toHaveBeenCalledWith({
+      containerRolloutMode: "immediate",
+      configPath: "/tmp/wrangler.generated.jsonc",
+      deploymentMessage: expect.stringContaining("production direct deploy"),
+      includeSecrets: true,
+      secretsFilePath: "/tmp/worker-secrets.json",
+      versionTag: expect.any(String),
+      workerName: "hosted-worker",
+    });
+  });
+
   it("fails direct deploys that do not report a 100% Worker version for smoke", async () => {
     const finalDeployment: DeploymentStatusPayload = {
       created_on: "2026-03-27T00:10:00.000Z",

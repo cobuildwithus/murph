@@ -194,6 +194,7 @@ test('intervention edit/delete schemas expose typed mutation options', async () 
   assert.equal('note' in editSchema.options.properties, true)
   assert.equal('duration' in editSchema.options.properties, true)
   assert.equal('type' in editSchema.options.properties, true)
+  assert.equal('sessionStatus' in editSchema.options.properties, true)
   assert.equal('dayKeyPolicy' in editSchema.options.properties, true)
   assert.deepEqual(editSchema.options.required, ['vault'])
   assert.deepEqual(deleteSchema.options.required, ['vault'])
@@ -1009,6 +1010,8 @@ test.sequential(
         'Cooldown sauna after lifting.',
         '--duration',
         '25',
+        '--session-status',
+        'skipped',
         '--title',
         '25-minute sauna',
         '--vault',
@@ -1019,6 +1022,7 @@ test.sequential(
       assert.equal(requireData(edited).entity.kind, 'intervention_session')
       assert.equal(requireData(edited).entity.data.note, 'Cooldown sauna after lifting.')
       assert.equal(requireData(edited).entity.data.durationMinutes, 25)
+      assert.equal(requireData(edited).entity.data.sessionStatus, 'skipped')
       assert.equal(requireData(edited).entity.title, '25-minute sauna')
 
       const deleted = await runCli<DeleteEnvelope>([

@@ -1210,13 +1210,20 @@ function normalizeDeviceEventInputs(
       errorMessage: `Device event ${index + 1} relatedIds is no longer supported; use links.`,
     });
     const normalizedLegacyExternalRefs = normalizeLegacyExternalRefs(eventInput.legacyExternalRefs, index);
+    const inputDayKey = typeof eventInput.dayKey === "string" ? eventInput.dayKey : undefined;
+    const inputTimeZone = typeof eventInput.timeZone === "string" ? eventInput.timeZone : undefined;
+    const preservesProviderDayWithoutTimeZone = Boolean(
+      inputDayKey &&
+        !inputTimeZone &&
+        isJunctionSleepStageExternalRefInput(eventInput.externalRef),
+    );
     const seed = buildNormalizedEventSeed({
       kind,
       occurredAt: eventInput.occurredAt ?? eventInput.recordedAt ?? context.importedAt,
       recordedAt: eventInput.recordedAt ?? eventInput.occurredAt,
-      dayKey: typeof eventInput.dayKey === "string" ? eventInput.dayKey : undefined,
-      timeZone: typeof eventInput.timeZone === "string" ? eventInput.timeZone : undefined,
-      defaultTimeZone: context.defaultTimeZone,
+      dayKey: inputDayKey,
+      timeZone: inputTimeZone,
+      defaultTimeZone: preservesProviderDayWithoutTimeZone ? undefined : context.defaultTimeZone,
       source: eventInput.source ?? context.source,
       title: typeof eventInput.title === "string" ? eventInput.title : undefined,
       note: eventInput.note,
@@ -1722,6 +1729,15 @@ function isSameObservationValue(existing: EventRecord, incoming: EventRecord): b
     existing.value === incoming.value;
 }
 
+const JUNCTION_SLEEP_STAGE_METRIC_FACETS = new Set([
+  "sleep-awake-minutes",
+  "sleep-light-minutes",
+  "sleep-deep-minutes",
+  "sleep-rem-minutes",
+]);
+const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
+const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
+
 function deviceDataOriginSourceMatches(
   existing: DeviceDataOrigin | undefined,
   incoming: DeviceDataOrigin | undefined,
@@ -1769,6 +1785,73 @@ function isWhoopBodyMeasurementDateOnlyLegacyRef(
     isScopedDateLikeWhoopBodyMeasurementResourceId(incoming.externalRef.resourceId);
 }
 
+function isJunctionSleepStageExternalRefInput(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const externalRef = value as UnknownRecord;
+  return externalRef.system === "junction" &&
+    typeof externalRef.resourceType === "string" &&
+    /^junction-[a-z0-9-]+-sleep$/u.test(externalRef.resourceType) &&
+    typeof externalRef.facet === "string" &&
+    JUNCTION_SLEEP_STAGE_METRIC_FACETS.has(externalRef.facet);
+}
+
+function isJunctionSleepStageObservation(record: EventRecord): boolean {
+  return record.kind === "observation" &&
+    isJunctionSleepStageExternalRefInput(record.externalRef);
+}
+
+function isJunctionSleepStageSummaryObservation(record: EventRecord): boolean {
+  return isJunctionSleepStageObservation(record) &&
+    record.dataOrigin?.normalizerVersion === JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION;
+}
+
+function isJunctionSleepStageCycleFallbackObservation(record: EventRecord): boolean {
+  return isJunctionSleepStageObservation(record) &&
+    record.dataOrigin?.normalizerVersion === JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION;
+}
+
+function isJunctionSleepStageSummaryLegacyRef(
+  legacyExternalRef: ExternalRef,
+  incoming: EventRecord,
+): boolean {
+  return isJunctionSleepStageSummaryObservation(incoming) &&
+    legacyExternalRef.system === "junction" &&
+    incoming.externalRef?.system === "junction" &&
+    legacyExternalRef.resourceType === incoming.externalRef.resourceType &&
+    /^junction-[a-z0-9-]+-sleep$/u.test(legacyExternalRef.resourceType) &&
+    legacyExternalRef.facet !== undefined &&
+    legacyExternalRef.facet === incoming.externalRef.facet &&
+    JUNCTION_SLEEP_STAGE_METRIC_FACETS.has(legacyExternalRef.facet);
+}
+
+function hasStableJunctionSleepStageSummaryLegacyProof(
+  existing: IndexedEventExternalRefMatch,
+  incoming: EventRecord,
+): boolean {
+  if (!isSameObservationFacet(existing.record, incoming)) {
+    return false;
+  }
+
+  const existingDataOrigin = existing.indexedRecord.dataOrigin ?? existing.record.dataOrigin;
+  return existing.record.occurredAt === incoming.occurredAt &&
+    deviceDataOriginSourceMatches(existingDataOrigin, incoming.dataOrigin);
+}
+
+function shouldKeepExistingJunctionSleepStageSummaryObservation(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  if (!isSameObservationFacet(existing, incoming)) {
+    return false;
+  }
+
+  return isJunctionSleepStageSummaryObservation(existing) &&
+    isJunctionSleepStageCycleFallbackObservation(incoming);
+}
+
 function hasStableLegacyOccurrenceProof(
   existing: IndexedEventExternalRefMatch,
   incoming: EventRecord,
@@ -1813,6 +1896,10 @@ function isCompatibleLegacyExternalRefMatch(
   if (isWhoopBodyMeasurementDateOnlyLegacyRef(legacyExternalRef, incoming)) {
     return isSameObservationFacet(existing.record, incoming) &&
       hasStableLegacyOccurrenceProof(existing, incoming, legacyExternalRef);
+  }
+
+  if (isJunctionSleepStageSummaryLegacyRef(legacyExternalRef, incoming)) {
+    return hasStableJunctionSleepStageSummaryLegacyProof(existing, incoming);
   }
 
   return existing.record.dayKey === incoming.dayKey ||
@@ -1978,7 +2065,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       ...legacyMatchedEntries,
     ];
     const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
-    const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
+    let latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
 
     if (!latest) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
@@ -2011,6 +2098,15 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
     }
 
+    if (!latest) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+          `${externalRef.facet ? `#${externalRef.facet}` : ""}" could not select a canonical alias owner; ` +
+          "ambiguous legacy cleanup must be repaired explicitly.",
+      );
+    }
+
     // externalRef identity does not include kind. Event spines are kind-stable,
     // so device reconciliation must reject under-faceted provider refs instead
     // of rewriting an existing event id as a different event kind.
@@ -2033,6 +2129,11 @@ async function reconcileDeviceEventEntriesByExternalRef(
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
       records.push(entry.record);
+      continue;
+    }
+
+    if (shouldKeepExistingJunctionSleepStageSummaryObservation(latest, entry.record)) {
+      records.push(latest);
       continue;
     }
 

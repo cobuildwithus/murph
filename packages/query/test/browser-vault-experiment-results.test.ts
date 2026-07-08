@@ -7,6 +7,8 @@ import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
   createBrowserVaultQueryClient,
+  createBrowserVaultReplica,
+  createVaultReadModel,
   selectBrowserVaultExperimentResults,
   type BrowserVaultEntity,
   type BrowserVaultMetricRow,
@@ -16,6 +18,8 @@ import {
   buildExperimentAdherenceCalendar,
   type ExperimentAdherenceObservation,
 } from "../src/experiment-adherence.ts";
+
+type CanonicalEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 
 test("returns null when no matching private run exists", () => {
   const client = createBrowserVaultQueryClient(createReplica());
@@ -351,11 +355,12 @@ test("builds active intervention progress and treats skipped sessions as missed 
 
   assert.ok(result);
   assert.equal(result.experiment.phase, "intervention");
-  assert.equal(result.progress?.adherence.completedSessions, 1);
+  assert.equal(result.progress?.adherence.completedSessions, 2);
+  assert.equal(result.progress?.adherence.assumedSessions, 1);
   assert.equal(result.progress?.adherence.partialSessions, 1);
   assert.equal(result.progress?.adherence.skippedSessions, 0);
-  assert.equal(result.progress?.adherence.missedSessions, 2);
-  assert.equal(result.progress?.adherence.loggedSessions, 2);
+  assert.equal(result.progress?.adherence.missedSessions, 1);
+  assert.equal(result.progress?.adherence.loggedSessions, 3);
   assert.deepEqual(
     result.schedule?.cells
       .filter((cell) => cell.source === "event")
@@ -365,6 +370,12 @@ test("builds active intervention progress and treats skipped sessions as missed 
       ["2026-04-09", "partial"],
       ["2026-04-10", "missed"],
     ],
+  );
+  assert.deepEqual(
+    result.schedule?.cells
+      .filter((cell) => cell.kind === "assumed")
+      .map((cell) => [cell.localDate, cell.kind]),
+    [["2026-04-11", "assumed"]],
   );
   assert.equal(result.biomarkers[0]?.intervention.daysWithData, 2);
 });
@@ -676,6 +687,286 @@ test("does not mark adherence behind before the next scheduled session is due", 
   assert.equal(result.progress?.adherence.status, "on_track");
 });
 
+test("browser SAUNA calendar cells assume done after grace and corrections override them", () => {
+  const runPlan = {
+    baselineStart: "2026-04-01",
+    baselineEnd: "2026-04-05",
+    interventionStart: "2026-04-06",
+    interventionEnd: "2026-04-12",
+    modality: "sauna",
+    schedule: {
+      kind: "cron",
+      expression: "0 8 * * 1,3,5",
+      timeZone: "America/New_York",
+    },
+    targetSessions: 3,
+    minimumUsefulSessions: 2,
+  };
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-12T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_sauna_assumed",
+          slug: "browser-sauna-assumed",
+          runPlan,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "browser-sauna-assumed");
+
+  assert.ok(result);
+  assert.deepEqual(result.schedule?.cells.map((cell) => [cell.localDate, cell.kind]), [
+    ["2026-04-06", "assumed"],
+    ["2026-04-08", "assumed"],
+    ["2026-04-10", "assumed"],
+  ]);
+  assert.equal(result.schedule?.completedSessions, 3);
+  assert.equal(result.schedule?.assumedSessions, 3);
+  assert.equal(result.progress?.adherence.completedSessions, 3);
+  assert.equal(result.progress?.adherence.loggedSessions, 3);
+  assert.equal(result.progress?.adherence.assumedSessions, 3);
+  assert.equal(result.progress?.adherence.status, "met_target");
+
+  const correctedClient = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-12T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_sauna_assumed",
+          slug: "browser-sauna-assumed",
+          runPlan,
+        }),
+        sessionEvent("2026-04-12", "skipped", {
+          attributes: {
+            sessionLocalDate: "2026-04-08",
+          },
+          experimentId: "exp_browser_sauna_assumed",
+          experimentSlug: "browser-sauna-assumed",
+          id: "evt_browser_sauna_skipped",
+          occurredAt: "2026-04-12T19:00:00.000Z",
+        }),
+      ],
+    }),
+  );
+  const corrected = selectBrowserVaultExperimentResults(correctedClient, "browser-sauna-assumed");
+
+  assert.deepEqual(corrected?.schedule?.cells.map((cell) => [cell.localDate, cell.kind]), [
+    ["2026-04-06", "assumed"],
+    ["2026-04-08", "missed"],
+    ["2026-04-10", "assumed"],
+  ]);
+  assert.equal(corrected?.progress?.adherence.completedSessions, 2);
+  assert.equal(corrected?.progress?.adherence.loggedSessions, 2);
+  assert.equal(corrected?.progress?.adherence.assumedSessions, 2);
+});
+
+test("browser TRETINOIN nightly schedule reports confirmed and assumed sessions", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-12T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_tretinoin_assumed",
+          slug: "browser-tretinoin-assumed",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-07",
+            interventionStart: "2026-04-08",
+            interventionEnd: "2026-04-10",
+            modality: "tretinoin",
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "21:00",
+              timeZone: "America/New_York",
+            },
+            targetSessions: 3,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        sessionEvent("2026-04-09", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_tretinoin_assumed",
+          experimentSlug: "browser-tretinoin-assumed",
+          id: "evt_browser_tretinoin_manual",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "browser-tretinoin-assumed");
+
+  assert.deepEqual(result?.schedule?.cells.map((cell) => [cell.localDate, cell.kind]), [
+    ["2026-04-08", "assumed"],
+    ["2026-04-09", "completed"],
+    ["2026-04-10", "assumed"],
+  ]);
+  assert.equal(result?.progress?.adherence.completedSessions, 3);
+  assert.equal(result?.progress?.adherence.loggedSessions, 3);
+  assert.equal(result?.progress?.adherence.assumedSessions, 2);
+  assert.equal(result?.progress?.adherence.confirmedSessions, 1);
+});
+
+test("browser device running schedules keep missed gaps and sensed sessions", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-12T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_device_run",
+          slug: "browser-device-run",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-07",
+            interventionStart: "2026-04-08",
+            interventionEnd: "2026-04-10",
+            modality: "Run",
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "07:00",
+              timeZone: "America/New_York",
+            },
+            targetSessions: 3,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        activitySessionEvent({
+          id: "evt_browser_device_run_sensed",
+          date: "2026-04-09",
+          activityType: "Running",
+          source: "device",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "browser-device-run");
+
+  assert.deepEqual(result?.schedule?.cells.map((cell) => [cell.localDate, cell.kind]), [
+    ["2026-04-08", "missed"],
+    ["2026-04-09", "completed"],
+    ["2026-04-10", "missed"],
+  ]);
+  assert.equal(result?.progress?.adherence.completedSessions, 1);
+  assert.equal(result?.progress?.adherence.loggedSessions, 1);
+  assert.equal(result?.progress?.adherence.sensedSessions, 1);
+  assert.equal(result?.progress?.adherence.assumedSessions, undefined);
+  assert.equal(result?.progress?.adherence.status, "behind");
+});
+
+test("counts browser count-less run-plan device sessions", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_countless_browser_run",
+          slug: "countless-browser-run",
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Run",
+          },
+        }),
+        activitySessionEvent({
+          activityType: "workout",
+          date: "2026-06-02",
+          id: "evt_countless_browser_run_1",
+          sportName: "Run",
+        }),
+        activitySessionEvent({
+          activityType: "workout",
+          date: "2026-06-05",
+          id: "evt_countless_browser_run_2",
+          sportName: "Run",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "countless-browser-run");
+
+  assert.equal(result?.progress?.adherence.completedSessions, 2);
+  assert.equal(result?.progress?.adherence.expectedSessionsByNow, null);
+  assert.notEqual(result?.progress?.adherence.status, "not_started");
+});
+
+test("counts browser count-less run-plan manual sessions", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_countless_browser_sauna",
+          slug: "countless-browser-sauna",
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "sauna",
+          },
+        }),
+        sessionEvent("2026-06-02", "completed", {
+          experimentId: "exp_countless_browser_sauna",
+          experimentSlug: "countless-browser-sauna",
+          id: "evt_countless_browser_sauna_1",
+        }),
+        sessionEvent("2026-06-05", "completed", {
+          experimentId: "exp_countless_browser_sauna",
+          experimentSlug: "countless-browser-sauna",
+          id: "evt_countless_browser_sauna_2",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "countless-browser-sauna");
+
+  assert.equal(result?.progress?.adherence.completedSessions, 2);
+  assert.equal(result?.progress?.adherence.expectedSessionsByNow, null);
+  assert.notEqual(result?.progress?.adherence.status, "not_started");
+});
+
+test("browser count path treats partial intervention sessions as logged", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-10T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_partial_count_path",
+          slug: "browser-partial-count-path",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-07",
+            interventionStart: "2026-04-08",
+            interventionEnd: "2026-04-12",
+            modality: "sauna",
+            targetSessions: 2,
+            minimumUsefulSessions: 1,
+          },
+        }),
+        sessionEvent("2026-04-09", "partial", {
+          experimentId: "exp_browser_partial_count_path",
+          experimentSlug: "browser-partial-count-path",
+          id: "evt_browser_partial_count_path",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "browser-partial-count-path");
+
+  assert.equal(result?.progress?.adherence.completedSessions, 0);
+  assert.equal(result?.progress?.adherence.partialSessions, 1);
+  assert.equal(result?.progress?.adherence.loggedSessions, 1);
+  assert.notEqual(result?.progress?.adherence.status, "not_started");
+});
+
 test("builds finished outcomes when enough baseline and intervention data exists", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
@@ -722,6 +1013,122 @@ test("builds finished outcomes when enough baseline and intervention data exists
   assert.equal(result.biomarkers[0]?.completeness, "good");
   assert.equal(result.biomarkers[0]?.deltaAbs, -4);
   assert.equal(result.biomarkers[0]?.movedAsExpected, true);
+});
+
+test("browser outcome demotes confidence when most sessions are assumed", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-20T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_assumed_outcome",
+          slug: "browser-assumed-outcome",
+          status: "completed",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-06",
+            modality: "sauna",
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+            targetSessions: 3,
+            minimumUsefulSessions: 1,
+          },
+        }),
+        sessionEvent("2026-04-04", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_assumed_outcome",
+          experimentSlug: "browser-assumed-outcome",
+          id: "evt_browser_assumed_outcome_manual_1",
+        }),
+        sessionEvent("2026-04-04", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_assumed_outcome",
+          experimentSlug: "browser-assumed-outcome",
+          id: "evt_browser_assumed_outcome_manual_2",
+          occurredAt: "2026-04-04T15:00:00.000Z",
+        }),
+      ],
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 63],
+        ["2026-04-02", 62],
+        ["2026-04-03", 61],
+        ["2026-04-04", 59],
+        ["2026-04-05", 58],
+        ["2026-04-06", 57],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "browser-assumed-outcome");
+
+  assert.equal(result?.progress?.adherence.completedSessions, 3);
+  assert.equal(result?.progress?.adherence.confirmedSessions, 1);
+  assert.equal(result?.progress?.adherence.assumedSessions, 2);
+  assert.equal(result?.outcome?.confidence.level, "medium");
+  assert.deepEqual(result?.outcome?.confidence.reasons, [
+    "Most sessions are assumed rather than confirmed.",
+  ]);
+});
+
+test("browser outcome keeps confidence high when confirmed sessions are the majority", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-20T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_confirmed_outcome",
+          slug: "browser-confirmed-outcome",
+          status: "completed",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-06",
+            modality: "sauna",
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+            targetSessions: 3,
+            minimumUsefulSessions: 1,
+          },
+        }),
+        sessionEvent("2026-04-04", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_confirmed_outcome",
+          experimentSlug: "browser-confirmed-outcome",
+          id: "evt_browser_confirmed_outcome_1",
+        }),
+        sessionEvent("2026-04-05", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_confirmed_outcome",
+          experimentSlug: "browser-confirmed-outcome",
+          id: "evt_browser_confirmed_outcome_2",
+        }),
+      ],
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 63],
+        ["2026-04-02", 62],
+        ["2026-04-03", 61],
+        ["2026-04-04", 59],
+        ["2026-04-05", 58],
+        ["2026-04-06", 57],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "browser-confirmed-outcome");
+
+  assert.equal(result?.progress?.adherence.assumedSessions, 1);
+  assert.equal(result?.progress?.adherence.confirmedSessions, 2);
+  assert.equal(result?.outcome?.confidence.level, "high");
+  assert.deepEqual(result?.outcome?.confidence.reasons, []);
 });
 
 test("treats done private runs as review-due outcomes", () => {
@@ -1147,6 +1554,927 @@ test("returns null schedule when the run has no structured schedule", () => {
   assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "no_schedule"));
 });
 
+test("counts calendar-less browser running adherence from activity sessions by sport", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_run_block",
+          slug: "run-block",
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Run",
+            targetSessions: 24,
+            minimumUsefulSessions: 12,
+          },
+        }),
+        activitySessionEvent({ id: "evt_run_1", date: "2026-06-01", activityType: "Running" }),
+        activitySessionEvent({ id: "evt_run_2", date: "2026-06-03", activityType: "Run" }),
+        activitySessionEvent({ id: "evt_run_3", date: "2026-06-05", activityType: "Morning run" }),
+        activitySessionEvent({ id: "evt_run_4", date: "2026-06-08", activityType: "Trail running" }),
+        activitySessionEvent({ id: "evt_bike_1", date: "2026-06-02", activityType: "Cycling" }),
+        activitySessionEvent({ id: "evt_walk_1", date: "2026-06-04", activityType: "Walking" }),
+        activitySessionEvent({ id: "evt_strength_1", date: "2026-06-06", activityType: "Strength" }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug: "run-block" });
+  const evidence = result?.adherence?.targets[0]?.evidence;
+
+  assert.ok(result);
+  assert.equal(result.progress?.adherence.completedSessions, 4);
+  assert.equal(result.progress?.adherence.loggedSessions, 4);
+  assert.equal(result.progress?.adherence.expectedSessionsByNow, 7);
+  assert.equal(result.progress?.adherence.status, "behind");
+  assert.equal(result.adherence?.targets[0]?.calendar, undefined);
+  assert.equal(evidence?.kind, "linkedEventCount");
+  if (evidence?.kind === "linkedEventCount") {
+    assert.equal(evidence.eventKind, "activity_session");
+    assert.equal(evidence.activityKind, "running");
+  }
+  assert.equal(result.schedule, null);
+});
+
+test("counts browser cycling adherence from provider ride activity sessions", () => {
+  const slug = "cycling-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_cycling_block",
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Cycling",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        activitySessionEvent({
+          activityType: "ride",
+          date: "2026-06-02",
+          id: "evt_ride_1",
+          sportName: "Ride",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 1);
+  assert.equal(result?.progress?.adherence.loggedSessions, 1);
+});
+
+test("counts browser generic workout modality from any activity sessions", () => {
+  const slug = "generic-workout-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_generic_workout_block",
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Workout",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        activitySessionEvent({ id: "evt_generic_workout_ride", date: "2026-06-02", activityType: "Cycling" }),
+        activitySessionEvent({ id: "evt_generic_workout_strength", date: "2026-06-04", activityType: "Strength" }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const evidence = result?.adherence?.targets[0]?.evidence;
+
+  assert.ok(result);
+  assert.equal(result.progress?.adherence.completedSessions, 2);
+  assert.equal(result.progress?.adherence.loggedSessions, 2);
+  assert.equal(evidence?.kind, "linkedEventCount");
+  if (evidence?.kind === "linkedEventCount") {
+    assert.equal(evidence.eventKind, "activity_session");
+    assert.equal(evidence.activityKind, undefined);
+  }
+});
+
+test("counts browser cardio category from running and swimming but not strength sessions", () => {
+  const slug = "cardio-category-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_cardio_category_block",
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "cardio",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        activitySessionEvent({ id: "evt_cardio_run", date: "2026-06-01", activityType: "Running", source: "device" }),
+        activitySessionEvent({ id: "evt_cardio_swim", date: "2026-06-03", activityType: "Swimming", source: "device" }),
+        activitySessionEvent({ id: "evt_cardio_strength", date: "2026-06-04", activityType: "Strength" }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const evidence = result?.adherence?.targets[0]?.evidence;
+
+  assert.ok(result);
+  assert.equal(result.progress?.adherence.completedSessions, 2);
+  assert.equal(result.progress?.adherence.loggedSessions, 2);
+  assert.equal(result.progress?.adherence.sensedSessions, 2);
+  assert.equal(evidence?.kind, "linkedEventCount");
+  if (evidence?.kind === "linkedEventCount") {
+    assert.equal(evidence.eventKind, "activity_session");
+    assert.equal(evidence.activityKind, "cardio");
+  }
+});
+
+test("counts browser running adherence after replica skips generic activity type for nested sport", async () => {
+  const slug = "nested-workout-run-block";
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-06-09T12:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "c".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        canonicalExperimentEntity({
+          id: "exp_browser_nested_workout_run",
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Run",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        canonicalActivitySessionEvent({
+          activityType: "workout",
+          date: "2026-06-02",
+          id: "evt_browser_workout_run_1",
+          workout: { sportName: "Run" },
+        }),
+      ],
+      metadata: { title: "Browser nested workout adherence fixture" },
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const projectedRun = replica.entities.find((entity) => entity.id === "evt_browser_workout_run_1");
+  assert.deepEqual(projectedRun?.attributes, { activityKind: "run" });
+
+  const client = createBrowserVaultQueryClient(replica);
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 1);
+  assert.equal(result?.progress?.adherence.loggedSessions, 1);
+});
+
+test("ignores fully generic browser activity sessions for running adherence", async () => {
+  const slug = "generic-workout-run-block";
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-06-09T12:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "d".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        canonicalExperimentEntity({
+          id: "exp_browser_generic_workout_run",
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Run",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        canonicalActivitySessionEvent({
+          activityType: "workout",
+          date: "2026-06-02",
+          id: "evt_browser_generic_workout_1",
+        }),
+      ],
+      metadata: { title: "Browser generic workout adherence fixture" },
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const projectedWorkout = replica.entities.find((entity) => entity.id === "evt_browser_generic_workout_1");
+  assert.deepEqual(projectedWorkout?.attributes, {});
+
+  const client = createBrowserVaultQueryClient(replica);
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 0);
+  assert.equal(result?.progress?.adherence.loggedSessions, 0);
+});
+
+test("ignores browser activity free-text names for running adherence", async () => {
+  const slug = "free-text-workout-name-run-block";
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-06-09T12:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "e".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        canonicalExperimentEntity({
+          id: "exp_browser_free_text_workout_run",
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Run",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        canonicalActivitySessionEvent({
+          activityType: "workout",
+          date: "2026-06-02",
+          id: "evt_browser_named_workout_1",
+          name: "post run mobility",
+          workout: { name: "post run mobility" },
+        }),
+        canonicalActivitySessionEvent({
+          activityType: "workout",
+          date: "2026-06-03",
+          id: "evt_browser_structured_run_1",
+          sportName: "Run",
+        }),
+      ],
+      metadata: { title: "Browser free-text workout name adherence fixture" },
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const projectedNamedWorkout = replica.entities.find((entity) => entity.id === "evt_browser_named_workout_1");
+  assert.deepEqual(projectedNamedWorkout?.attributes, {});
+
+  const client = createBrowserVaultQueryClient(replica);
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 1);
+  assert.equal(result?.progress?.adherence.loggedSessions, 1);
+});
+
+test("counts browser running adherence after the real replica projects activity session classifications", async () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFN";
+  const slug = "device-run-block";
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-06-09T12:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "b".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        canonicalExperimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Run",
+            targetSessions: 24,
+            minimumUsefulSessions: 12,
+          },
+        }),
+        canonicalActivitySessionEvent({
+          activityType: "Running",
+          date: "2026-06-01",
+          id: "evt_device_run_1",
+          sportName: "Running",
+        }),
+        canonicalActivitySessionEvent({
+          activityType: "Run",
+          date: "2026-06-03",
+          id: "evt_device_run_2",
+          sportName: "Run",
+        }),
+        canonicalActivitySessionEvent({
+          activityType: "Morning run",
+          date: "2026-06-05",
+          id: "evt_device_run_3",
+          sportName: "Running",
+        }),
+        canonicalActivitySessionEvent({
+          activityType: "Trail running",
+          date: "2026-06-08",
+          id: "evt_device_run_4",
+          sportName: "Trail running",
+        }),
+        canonicalActivitySessionEvent({
+          activityType: "Cycling",
+          date: "2026-06-02",
+          id: "evt_device_bike_1",
+          sportName: "Cycling",
+        }),
+        canonicalActivitySessionEvent({
+          activityType: "Walking",
+          date: "2026-06-04",
+          id: "evt_device_walk_1",
+          sportName: "Walking",
+        }),
+      ],
+      metadata: { title: "Browser device adherence fixture" },
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const projectedRun = replica.entities.find((entity) => entity.id === "evt_device_run_1");
+  assert.deepEqual(projectedRun?.attributes, { activityKind: "running" });
+  assert.equal(Object.hasOwn(projectedRun?.attributes ?? {}, "activityType"), false);
+  assert.equal(Object.hasOwn(projectedRun?.attributes ?? {}, "sportName"), false);
+
+  const client = createBrowserVaultQueryClient(replica);
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.ok(result);
+  assert.equal(result.progress?.adherence.completedSessions, 4);
+  assert.equal(result.progress?.adherence.loggedSessions, 4);
+  assert.equal(result.progress?.adherence.expectedSessionsByNow, 7);
+  assert.equal(result.progress?.adherence.status, "behind");
+  assert.equal(result.schedule, null);
+});
+
+test("counts calendar-less browser running adherence from manual sessions", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFN";
+  const slug = "manual-run-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Run",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_manual_run_1",
+          experimentId,
+          experimentSlug: slug,
+        }),
+        sessionEvent("2026-06-03", "completed", {
+          id: "evt_manual_run_2",
+          experimentId,
+          experimentSlug: slug,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 2);
+  assert.equal(result?.progress?.adherence.loggedSessions, 2);
+});
+
+test("counts mixed browser manual and device sessions for running adherence", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFG";
+  const slug = "mixed-run-block";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-09T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-28",
+            modality: "Run",
+            targetSessions: 4,
+            minimumUsefulSessions: 2,
+          },
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_mixed_manual_run_1",
+          experimentId,
+          experimentSlug: slug,
+        }),
+        activitySessionEvent({ id: "evt_mixed_device_run_1", date: "2026-06-03", activityType: "Running" }),
+        activitySessionEvent({ id: "evt_mixed_bike_1", date: "2026-06-05", activityType: "Cycling" }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 2);
+  assert.equal(result?.progress?.adherence.loggedSessions, 2);
+});
+
+for (const scenario of [
+  {
+    name: "prefers a same-date sensed run over a manual missed-wearable run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGA",
+    slug: "browser-same-date-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BA",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGA",
+        experimentSlug: "browser-same-date-manual-device-run",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_device_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+    ],
+  },
+  {
+    name: "counts a surplus same-date done manual run beside one sensed run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGG",
+    slug: "browser-same-date-surplus-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_surplus_manual_run_1a",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGG",
+        experimentSlug: "browser-same-date-surplus-manual-device-run",
+        occurredAt: "2026-06-01T13:00:00.000Z",
+      }),
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_surplus_manual_run_1b",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGG",
+        experimentSlug: "browser-same-date-surplus-manual-device-run",
+        occurredAt: "2026-06-01T15:00:00.000Z",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_surplus_device_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+    ],
+  },
+  {
+    name: "lets two same-date sensed runs suppress two done manual rows",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGH",
+    slug: "browser-same-date-two-manual-two-device-runs",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_pair_manual_run_1a",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGH",
+        experimentSlug: "browser-same-date-two-manual-two-device-runs",
+        occurredAt: "2026-06-01T13:00:00.000Z",
+      }),
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_browser_same_date_pair_manual_run_1b",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGH",
+        experimentSlug: "browser-same-date-two-manual-two-device-runs",
+        occurredAt: "2026-06-01T15:00:00.000Z",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_pair_device_run_1a",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_pair_device_run_1b",
+        date: "2026-06-01",
+        activityType: "Run",
+      }),
+    ],
+  },
+  {
+    name: "prefers a same-date device run over a manual activity run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGK",
+    slug: "browser-same-date-manual-activity-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      activitySessionEvent({
+        id: "evt_browser_same_date_manual_activity_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+        source: "manual",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_device_activity_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+        source: "device",
+      }),
+    ],
+  },
+  {
+    name: "counts a manual activity run when it is the only evidence",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGP",
+    slug: "browser-manual-activity-only-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      activitySessionEvent({
+        id: "evt_browser_manual_activity_only_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+        source: "manual",
+      }),
+    ],
+  },
+  {
+    name: "suppresses only one non-device done row for one same-date device run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGM",
+    slug: "browser-same-date-one-device-two-non-device-runs",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      activitySessionEvent({
+        id: "evt_browser_one_device_two_non_device_manual_activity",
+        date: "2026-06-01",
+        activityType: "Running",
+        source: "manual",
+      }),
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE3BM",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGM",
+        experimentSlug: "browser-same-date-one-device-two-non-device-runs",
+        occurredAt: "2026-06-01T15:00:00.000Z",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_one_device_two_non_device_device_activity",
+        date: "2026-06-01",
+        activityType: "Running",
+        source: "device",
+      }),
+    ],
+  },
+  {
+    name: "counts different-date manual and sensed runs separately",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGB",
+    slug: "browser-different-date-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BB",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGB",
+        experimentSlug: "browser-different-date-manual-device-run",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_different_date_device_run_1",
+        date: "2026-06-02",
+        activityType: "Running",
+      }),
+    ],
+  },
+  {
+    name: "counts two same-date sensed runs separately",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGC",
+    slug: "browser-same-date-two-device-runs",
+    modality: "Run",
+    expectedCompletedSessions: 2,
+    events: [
+      activitySessionEvent({
+        id: "evt_browser_same_date_device_run_2a",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_device_run_2b",
+        date: "2026-06-01",
+        activityType: "Run",
+      }),
+    ],
+  },
+  {
+    name: "keeps a same-date missed manual annotation beside one sensed run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGI",
+    slug: "browser-same-date-missed-manual-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    expectedMissedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "missed", {
+        id: "evt_browser_same_date_missed_manual_run_1",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGI",
+        experimentSlug: "browser-same-date-missed-manual-device-run",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_same_date_missed_device_run_1",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+    ],
+  },
+  {
+    name: "keeps a manual-only missed-wearable run",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGD",
+    slug: "browser-manual-only-device-run",
+    modality: "Run",
+    expectedCompletedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BC",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGD",
+        experimentSlug: "browser-manual-only-device-run",
+      }),
+    ],
+  },
+  {
+    name: "leaves non-sensable manual sauna logs unchanged",
+    experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGE",
+    slug: "browser-manual-sauna-unchanged",
+    modality: "sauna",
+    expectedCompletedSessions: 1,
+    events: [
+      sessionEvent("2026-06-01", "completed", {
+        id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BD",
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QKGE",
+        experimentSlug: "browser-manual-sauna-unchanged",
+      }),
+      activitySessionEvent({
+        id: "evt_browser_manual_sauna_device_run_ignored",
+        date: "2026-06-01",
+        activityType: "Running",
+      }),
+    ],
+  },
+] satisfies Array<{
+  events: BrowserVaultEntity[];
+  expectedCompletedSessions: number;
+  expectedMissedSessions?: number;
+  experimentId: string;
+  modality: string;
+  name: string;
+  slug: string;
+}>) {
+  test(`counts browser adherence when it ${scenario.name}`, () => {
+    const client = createBrowserVaultQueryClient(
+      createReplica({
+        generatedAt: "2026-06-09T12:00:00.000Z",
+        entities: [
+          experimentEntity({
+            id: scenario.experimentId,
+            slug: scenario.slug,
+            runPlan: {
+              baselineStart: "2026-05-25",
+              baselineEnd: "2026-05-31",
+              interventionStart: "2026-06-01",
+              interventionEnd: "2026-06-28",
+              modality: scenario.modality,
+              targetSessions: 4,
+              minimumUsefulSessions: 1,
+            },
+          }),
+          ...scenario.events,
+        ],
+      }),
+    );
+
+    const result = selectBrowserVaultExperimentResults(client, { slug: scenario.slug });
+
+    assert.equal(result?.progress?.adherence.completedSessions, scenario.expectedCompletedSessions);
+    assert.equal(result?.progress?.adherence.loggedSessions, scenario.expectedCompletedSessions);
+    assert.equal(result?.progress?.adherence.missedSessions ?? 0, scenario.expectedMissedSessions ?? 0);
+  });
+}
+
+test("browser adherence calendar suppresses same-date manual fallback when a sensed run matches", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QKGF";
+  const slug = "browser-calendar-same-date-manual-device-run";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-03T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-01",
+            modality: "Run",
+            targetSessions: 1,
+            minimumUsefulSessions: 1,
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+          },
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_01JNV45RHN0TQ9ZXE0A7YSE4BE",
+          experimentId,
+          experimentSlug: slug,
+        }),
+        activitySessionEvent({
+          id: "evt_browser_calendar_same_date_device_run_1",
+          date: "2026-06-01",
+          activityType: "Running",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const cell = result?.schedule?.cells.find((entry) => entry.localDate === "2026-06-01");
+
+  assert.equal(result?.schedule?.completedSessions, 1);
+  assert.deepEqual(cell?.evidenceIds, ["evt_browser_calendar_same_date_device_run_1"]);
+});
+
+test("browser adherence calendar suppresses same-date manual activity when a device run matches", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QKGN";
+  const slug = "browser-calendar-same-date-manual-activity-device-run";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-03T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-01",
+            modality: "Run",
+            targetSessions: 1,
+            minimumUsefulSessions: 1,
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+          },
+        }),
+        activitySessionEvent({
+          id: "evt_browser_calendar_same_date_manual_activity_run_1",
+          date: "2026-06-01",
+          activityType: "Running",
+          source: "manual",
+        }),
+        activitySessionEvent({
+          id: "evt_browser_calendar_same_date_device_activity_run_1",
+          date: "2026-06-01",
+          activityType: "Running",
+          source: "device",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const cell = result?.schedule?.cells.find((entry) => entry.localDate === "2026-06-01");
+
+  assert.equal(result?.schedule?.completedSessions, 1);
+  assert.deepEqual(cell?.evidenceIds, ["evt_browser_calendar_same_date_device_activity_run_1"]);
+});
+
+test("browser adherence calendar keeps surplus same-date manual evidence after one sensed run", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QKGJ";
+  const slug = "browser-calendar-same-date-surplus-manual-device-run";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-03T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-01",
+            modality: "Run",
+            targetSessions: 1,
+            minimumUsefulSessions: 1,
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+          },
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_browser_calendar_surplus_manual_run_1a",
+          experimentId,
+          experimentSlug: slug,
+          occurredAt: "2026-06-01T13:00:00.000Z",
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          id: "evt_browser_calendar_surplus_manual_run_1b",
+          experimentId,
+          experimentSlug: slug,
+          occurredAt: "2026-06-01T15:00:00.000Z",
+        }),
+        activitySessionEvent({
+          id: "evt_browser_calendar_surplus_device_run_1",
+          date: "2026-06-01",
+          activityType: "Running",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, { slug });
+  const cell = result?.schedule?.cells.find((entry) => entry.localDate === "2026-06-01");
+
+  assert.equal(cell?.kind, "completed");
+  assert.deepEqual(cell?.evidenceIds, [
+    "evt_browser_calendar_surplus_manual_run_1b",
+    "evt_browser_calendar_surplus_device_run_1",
+  ]);
+});
+
+test("uses canonical activity date for scheduled browser running adherence", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFH";
+  const slug = "run-date-boundary";
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-02T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-07",
+            modality: "Run",
+            targetSessions: 7,
+            minimumUsefulSessions: 1,
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "08:00",
+              timeZone: "America/New_York",
+            },
+          },
+        }),
+        activitySessionEvent({
+          id: "evt_run_boundary_1",
+          date: "2026-06-01",
+          occurredAt: "2026-06-01T01:30:00.000Z",
+          activityType: "Run",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, {
+    slug,
+  }, {
+    asOf: "2026-06-02T12:00:00.000Z",
+  });
+
+  assert.equal(result?.progress?.adherence.completedSessions, 1);
+  assert.equal(result?.progress?.adherence.loggedSessions, 1);
+  assert.equal(
+    result?.schedule?.cells.find((cell) => cell.localDate === "2026-06-01")?.kind,
+    "completed",
+  );
+});
+
 test("does not synthesize legacy schedules for unsupported explicit metric adherence targets", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
@@ -1299,6 +2627,159 @@ test("uses adherence target rollups for browser progress targets", () => {
   assert.equal(result.schedule?.plannedSessions, 3);
   assert.equal(result.schedule?.cells.length, 6);
   assert.equal(result.schedule?.cells.filter((cell) => cell.targetId === "sauna").length, 3);
+});
+
+test("browser cardio category rejects explicitly contradictory intervention sessions only", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-06-05T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_cardio_interventions",
+          slug: "browser-cardio-intervention-kind-scope",
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-07",
+            adherenceTargets: [{
+              targetId: "cardio",
+              label: "Cardio",
+              phase: "intervention",
+              calendar: {
+                kind: "explicitDates",
+                timeZone: "America/New_York",
+                dates: [
+                  { localDate: "2026-06-01" },
+                  { localDate: "2026-06-02" },
+                  { localDate: "2026-06-03" },
+                  { localDate: "2026-06-04" },
+                ],
+              },
+              evidence: {
+                kind: "linkedEventCount",
+                eventKind: "activity_session",
+                activityKind: "cardio",
+                missing: "missed_after_grace",
+              },
+              rollup: {
+                targetCompletions: 4,
+                minimumUsefulCompletions: 3,
+              },
+            }],
+          },
+        }),
+        sessionEvent("2026-06-01", "completed", {
+          attributes: {
+            interventionType: "strength",
+          },
+          experimentId: "exp_browser_cardio_interventions",
+          experimentSlug: "browser-cardio-intervention-kind-scope",
+          id: "evt_browser_cardio_strength_intervention",
+        }),
+        sessionEvent("2026-06-02", "completed", {
+          experimentId: "exp_browser_cardio_interventions",
+          experimentSlug: "browser-cardio-intervention-kind-scope",
+          id: "evt_browser_cardio_kindless_intervention",
+        }),
+        sessionEvent("2026-06-03", "completed", {
+          attributes: {
+            interventionType: "running",
+          },
+          experimentId: "exp_browser_cardio_interventions",
+          experimentSlug: "browser-cardio-intervention-kind-scope",
+          id: "evt_browser_cardio_running_intervention",
+        }),
+        sessionEvent("2026-06-04", "completed", {
+          attributes: {
+            interventionType: "hiit",
+          },
+          experimentId: "exp_browser_cardio_interventions",
+          experimentSlug: "browser-cardio-intervention-kind-scope",
+          id: "evt_browser_cardio_hiit_intervention",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "browser-cardio-intervention-kind-scope");
+
+  assert.ok(result);
+  assert.equal(result.progress?.adherence.completedSessions, 3);
+  assert.equal(result.progress?.adherence.loggedSessions, 3);
+  assert.deepEqual(
+    result.schedule?.cells.map((cell) => [cell.localDate, cell.kind, cell.evidenceIds]),
+    [
+      ["2026-06-01", "missed", []],
+      ["2026-06-02", "completed", ["evt_browser_cardio_kindless_intervention"]],
+      ["2026-06-03", "completed", ["evt_browser_cardio_running_intervention"]],
+      ["2026-06-04", "completed", ["evt_browser_cardio_hiit_intervention"]],
+    ],
+  );
+});
+
+test("browser cardio category rejects contradictory interventionType through the real replica", async () => {
+  const experimentId = "exp_browser_real_cardio_intervention_type";
+  const slug = "browser-real-cardio-intervention-type";
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-06-05T12:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "c".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        canonicalExperimentEntity({
+          id: experimentId,
+          slug,
+          runPlan: {
+            baselineStart: "2026-05-25",
+            baselineEnd: "2026-05-31",
+            interventionStart: "2026-06-01",
+            interventionEnd: "2026-06-01",
+            adherenceTargets: [{
+              targetId: "cardio",
+              label: "Cardio",
+              phase: "intervention",
+              calendar: {
+                kind: "explicitDates",
+                timeZone: "America/New_York",
+                dates: [{ localDate: "2026-06-01" }],
+              },
+              evidence: {
+                kind: "linkedEventCount",
+                eventKind: "activity_session",
+                activityKind: "cardio",
+                missing: "missed_after_grace",
+              },
+            }],
+          },
+        }),
+        canonicalInterventionSessionEvent({
+          date: "2026-06-01",
+          experimentId,
+          experimentSlug: slug,
+          id: "evt_browser_real_strength_intervention",
+          interventionType: "strength",
+        }),
+      ],
+      metadata: { title: "Browser intervention type fixture" },
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const projectedSession = replica.entities.find((entity) =>
+    entity.id === "evt_browser_real_strength_intervention"
+  );
+  assert.equal(projectedSession?.attributes.interventionType, "strength");
+
+  const result = selectBrowserVaultExperimentResults(createBrowserVaultQueryClient(replica), { slug });
+
+  assert.ok(result);
+  assert.equal(result.progress?.adherence.completedSessions, 0);
+  assert.equal(result.progress?.adherence.loggedSessions, 0);
+  assert.deepEqual(
+    result.schedule?.cells.map((cell) => [cell.localDate, cell.kind, cell.evidenceIds]),
+    [["2026-06-01", "missed", []]],
+  );
 });
 
 test("does not replace metric adherence rollups with auxiliary session targets", () => {
@@ -1698,6 +3179,129 @@ test("requires complete lab measurement windows before skipping browser run base
   }
 });
 
+function canonicalExperimentEntity(input: {
+  id: string;
+  runPlan: Record<string, unknown>;
+  slug: string;
+  status?: string;
+}): CanonicalEntity {
+  const status = input.status ?? "active";
+
+  return {
+    attributes: {
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:resting-heart-rate",
+        desiredDirection: "decrease",
+      },
+      commonsProtocolRef: {
+        key: "protocol:running",
+        pageRevisionId: "sha256:page",
+        runSpecRevisionId: "sha256:run",
+        testPlanId: "running-adherence",
+      },
+      experimentId: input.id,
+      runPlan: input.runPlan,
+      slug: input.slug,
+      status,
+    },
+    body: null,
+    date: "2026-05-25",
+    entityId: input.id,
+    experimentSlug: input.slug,
+    family: "experiment",
+    frontmatter: null,
+    kind: "experiment",
+    links: [],
+    lookupIds: [input.id, input.slug],
+    occurredAt: "2026-05-25T08:00:00.000Z",
+    path: `bank/experiments/${input.slug}.md`,
+    primaryLookupId: input.id,
+    recordClass: "bank",
+    relatedIds: [],
+    status,
+    stream: null,
+    tags: ["running"],
+    title: "Device running block",
+  } satisfies CanonicalEntity;
+}
+
+function canonicalActivitySessionEvent(input: {
+  activityType: string;
+  date: string;
+  id: string;
+  name?: string;
+  source?: string;
+  sportName?: string;
+  workout?: Record<string, unknown>;
+}): CanonicalEntity {
+  return {
+    attributes: {
+      activityType: input.activityType,
+      ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.source === undefined ? {} : { source: input.source }),
+      ...(input.sportName === undefined ? {} : { sportName: input.sportName }),
+      ...(input.workout === undefined ? {} : { workout: input.workout }),
+    },
+    body: null,
+    date: input.date,
+    entityId: input.id,
+    experimentSlug: null,
+    family: "event",
+    frontmatter: null,
+    kind: "activity_session",
+    links: [],
+    lookupIds: [input.id],
+    occurredAt: `${input.date}T12:00:00.000Z`,
+    path: "ledger/events/2026/2026-06.jsonl",
+    primaryLookupId: input.id,
+    recordClass: "ledger",
+    relatedIds: [],
+    status: null,
+    stream: null,
+    tags: [],
+    title: input.activityType,
+  } satisfies CanonicalEntity;
+}
+
+function canonicalInterventionSessionEvent(input: {
+  date: string;
+  experimentId: string;
+  experimentSlug: string;
+  id: string;
+  interventionType?: string;
+  sessionStatus?: string;
+}): CanonicalEntity {
+  return {
+    attributes: {
+      experimentId: input.experimentId,
+      experimentSlug: input.experimentSlug,
+      ...(input.interventionType === undefined
+        ? {}
+        : { interventionType: input.interventionType }),
+      sessionLocalDate: input.date,
+      sessionStatus: input.sessionStatus ?? "completed",
+    },
+    body: null,
+    date: input.date,
+    entityId: input.id,
+    experimentSlug: input.experimentSlug,
+    family: "event",
+    frontmatter: null,
+    kind: "intervention_session",
+    links: [{ targetId: input.experimentId, type: "related_to" }],
+    lookupIds: [input.id],
+    occurredAt: `${input.date}T13:00:00.000Z`,
+    path: "ledger/events/2026/2026-06.jsonl",
+    primaryLookupId: input.id,
+    recordClass: "ledger",
+    relatedIds: [input.experimentId],
+    status: null,
+    stream: null,
+    tags: [],
+    title: "Intervention session",
+  } satisfies CanonicalEntity;
+}
+
 function createReplica(input: {
   entities?: BrowserVaultEntity[];
   generatedAt?: string;
@@ -1799,29 +3403,69 @@ function sessionEvent(
   sessionStatus: string,
   overrides: Partial<Pick<BrowserVaultEntity, "occurredAt">> & {
     attributes?: Record<string, unknown>;
+    experimentId?: string;
+    experimentSlug?: string;
+    id?: string;
+    title?: string;
   } = {},
 ): BrowserVaultEntity {
+  const experimentId = overrides.experimentId ?? "exp_sauna";
+  const experimentSlug = overrides.experimentSlug ?? "finnish-sauna-run";
+  const id = overrides.id ?? `evt_${date}_${sessionStatus}`;
+
   return {
     attributes: {
-      experimentId: "exp_sauna",
-      experimentSlug: "finnish-sauna-run",
+      experimentId,
+      experimentSlug,
       sessionStatus,
       ...overrides.attributes,
     },
     bodyPreview: null,
     date,
-    experimentSlug: "finnish-sauna-run",
+    experimentSlug,
     family: "event",
-    id: `evt_${date}_${sessionStatus}`,
+    id,
     kind: "intervention_session",
-    links: [{ targetId: "exp_sauna", type: "related" }],
-    lookupIds: [`evt_${date}_${sessionStatus}`],
+    links: [{ targetId: experimentId, type: "related" }],
+    lookupIds: [id],
     occurredAt: overrides.occurredAt ?? `${date}T13:00:00.000Z`,
     recordClass: "ledger",
     status: null,
     stream: null,
     tags: ["sauna"],
-    title: "Sauna session",
+    title: overrides.title ?? "Sauna session",
+  };
+}
+
+function activitySessionEvent(input: {
+  activityType: string;
+  date: string;
+  id: string;
+  occurredAt?: string;
+  source?: string;
+  sportName?: string;
+  title?: string;
+}): BrowserVaultEntity {
+  return {
+    attributes: {
+      activityType: input.activityType,
+      ...(input.source === undefined ? {} : { source: input.source }),
+      sportName: input.sportName ?? input.activityType,
+    },
+    bodyPreview: null,
+    date: input.date,
+    experimentSlug: null,
+    family: "event",
+    id: input.id,
+    kind: "activity_session",
+    links: [],
+    lookupIds: [input.id],
+    occurredAt: input.occurredAt ?? `${input.date}T12:00:00.000Z`,
+    recordClass: "ledger",
+    status: null,
+    stream: null,
+    tags: [],
+    title: input.title ?? input.activityType,
   };
 }
 

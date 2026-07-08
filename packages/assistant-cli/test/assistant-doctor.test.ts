@@ -11,6 +11,7 @@ import type {
   AssistantOutboxIntent,
   AssistantSession,
   AssistantTurnReceipt,
+  AssistantTurnReceiptSummary,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 const test = baseTest.sequential
@@ -166,6 +167,26 @@ const BASE_RECEIPT: AssistantTurnReceipt = {
   timeline: [],
 }
 
+const BASE_RECEIPT_SUMMARY: AssistantTurnReceiptSummary = {
+  schema: 'murph.assistant-turn-receipt-summary.v1',
+  turnId: BASE_RECEIPT.turnId,
+  sessionId: BASE_RECEIPT.sessionId,
+  provider: BASE_RECEIPT.provider,
+  providerModel: BASE_RECEIPT.providerModel,
+  promptPreview: BASE_RECEIPT.promptPreview,
+  responsePreview: BASE_RECEIPT.responsePreview,
+  status: BASE_RECEIPT.status,
+  deliveryRequested: BASE_RECEIPT.deliveryRequested,
+  deliveryDisposition: BASE_RECEIPT.deliveryDisposition,
+  deliveryIntentId: BASE_RECEIPT.deliveryIntentId,
+  startedAt: BASE_RECEIPT.startedAt,
+  updatedAt: BASE_RECEIPT.updatedAt,
+  completedAt: BASE_RECEIPT.completedAt,
+  lastError: BASE_RECEIPT.lastError,
+  timelineEventCount: BASE_RECEIPT.timeline.length,
+  latestTimelineEvent: null,
+}
+
 const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   schema: 'murph.assistant-outbox-intent.v1',
   intentId: 'intent_demo',
@@ -187,6 +208,7 @@ const BASE_OUTBOX_INTENT: AssistantOutboxIntent = {
   channel: 'local',
   identityId: null,
   actorId: null,
+  answeredMailboxItemIds: [],
   threadId: null,
   threadIsDirect: true,
   replyToMessageId: null,
@@ -426,7 +448,7 @@ test('runAssistantDoctor reports a clean assistant state as healthy', async () =
           notes: [],
         },
       },
-      recentTurns: [BASE_RECEIPT],
+      recentTurns: [BASE_RECEIPT_SUMMARY],
       warnings: [],
     },
   })

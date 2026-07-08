@@ -3910,9 +3910,27 @@ test("hosted snapshots ignore live warm-cache Codex home files", async () => {
     await mkdir(path.join(operatorHomeRoot, ".codex-hosted", path.dirname(rolloutRelativePath)), {
       recursive: true,
     });
+    await mkdir(path.join(operatorHomeRoot, ".codex-hosted", "memories"), {
+      recursive: true,
+    });
     await writeFile(
       path.join(operatorHomeRoot, ".codex-hosted", rolloutRelativePath),
       rolloutJson,
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "memories", "MEMORY.md"),
+      "# Codex memory\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "state_5.sqlite"),
+      "state-db\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(operatorHomeRoot, ".codex-hosted", "memories_1.sqlite"),
+      "memories-db\n",
       "utf8",
     );
     await writeFile(
@@ -3951,6 +3969,33 @@ test("hosted snapshots ignore live warm-cache Codex home files", async () => {
         bytes: snapshot.bundle,
         expectedKind: "vault",
         path: ".codex-hosted/config.toml",
+        root: "operator-home",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/memories/MEMORY.md",
+        root: "operator-home",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/state_5.sqlite",
+        root: "operator-home",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.bundle,
+        expectedKind: "vault",
+        path: ".codex-hosted/memories_1.sqlite",
         root: "operator-home",
       }),
       null,

@@ -10,5 +10,3 @@ export * from "./series.ts";
 export * from "./goals.ts";
 export * from "./format.ts";
 export * from "./windows.ts";
-export * from "./murph-age.ts";
-export * from "./murph-age-source-routes.ts";

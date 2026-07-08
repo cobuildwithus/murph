@@ -17,6 +17,7 @@ import {
 } from '@murphai/gateway-core'
 
 import {
+  ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT,
   assistantAskResultSchema,
   assistantCronAtScheduleSchema,
   assistantCronDailyLocalScheduleSchema,
@@ -109,6 +110,56 @@ describe('assistant CLI delivery contracts', () => {
     expect(intent.intentId).toBe('outbox_123')
     expect(intent.sessionId).toBe('session_123')
     expect(intent.turnId).toBe('turn_123')
+  })
+
+  it('bounds assistant outbox answered mailbox item ids above the hosted import default', () => {
+    const baseIntent = {
+      schema: 'murph.assistant-outbox-intent.v1',
+      intentId: 'outbox_123',
+      sessionId: 'session_123',
+      turnId: 'turn_123',
+      createdAt: '2026-04-12T00:00:00.000Z',
+      updatedAt: '2026-04-12T00:00:00.000Z',
+      lastAttemptAt: null,
+      nextAttemptAt: null,
+      sentAt: null,
+      attemptCount: 0,
+      status: 'pending',
+      message: 'hello',
+      dedupeKey: 'dedupe',
+      targetFingerprint: 'target',
+      channel: null,
+      identityId: null,
+      actorId: null,
+      threadId: null,
+      threadIsDirect: null,
+      replyToMessageId: null,
+      bindingDelivery: null,
+      explicitTarget: null,
+      delivery: null,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: false,
+      lastError: null,
+    }
+    const maxIds = Array.from(
+      { length: ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT },
+      (_, index) => `mailbox_item_${index}`,
+    )
+
+    expect(assistantOutboxIntentSchema.parse({
+      ...baseIntent,
+      answeredMailboxItemIds: maxIds,
+    }).answeredMailboxItemIds).toEqual(maxIds)
+    expect(() =>
+      assistantOutboxIntentSchema.parse({
+        ...baseIntent,
+        answeredMailboxItemIds: [
+          ...maxIds,
+          'mailbox_item_over_limit',
+        ],
+      }),
+    ).toThrow()
   })
 
   it('normalizes assistant cron ids and nullable session ids', () => {

@@ -8,9 +8,6 @@ import {
   incrementHostedLinqInboundDailyState,
 } from "./linq-daily-state";
 import {
-  recordHostedMemberLinqInboundEngagementTx,
-} from "./linq-egress-engagement";
-import {
   type HostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqOccurredAt,
@@ -160,6 +157,38 @@ export function buildSignupLinkResponse(input: {
   });
 }
 
+export function buildFallbackSignupLinkResponse(input: {
+  assignedPhone: string;
+  inviteCode: string;
+  inviteId: string;
+  memberId: string;
+  memberPhone: string;
+  occurredAt: string;
+  sourceEventId: string;
+}): HostedOnboardingLinqDirectPlan {
+  const joinUrl = buildHostedInviteUrl(input.inviteCode);
+
+  return buildActiveMemberDirectPlan({
+    desiredSideEffects: [
+      createHostedWebhookLinqMessageSideEffect({
+        assignedRecipientPhone: input.assignedPhone,
+        inviteId: input.inviteId,
+        memberId: input.memberId,
+        memberPhone: input.memberPhone,
+        occurredAt: input.occurredAt,
+        sourceEventId: input.sourceEventId,
+        template: "invite_signup_fallback",
+      }),
+    ],
+    response: {
+      ok: true,
+      inviteCode: input.inviteCode,
+      joinUrl,
+      reason: "sent-signup-link",
+    },
+  });
+}
+
 export function buildFamilyInviteAcceptedResponse(input: {
   chatId: string;
   memberId: string;
@@ -202,9 +231,7 @@ export function buildAiUsageQuotaReplyResponse(input: {
   noticeCode: HostedAiUsageGateNoticeCode;
   occurredAt: string;
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
-  service?: string | null;
   sourceEventId: string;
-  threadIsDirect?: boolean | null;
 }): HostedOnboardingLinqDirectPlan {
   const baseInput = {
     chatId: input.chatId,
@@ -213,9 +240,7 @@ export function buildAiUsageQuotaReplyResponse(input: {
     occurredAt: input.occurredAt,
     replyToMessageId: input.messageId,
     ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
-    service: input.service ?? null,
     sourceEventId: input.sourceEventId,
-    threadIsDirect: input.threadIsDirect ?? null,
     template: "ai_usage_quota" as const,
   };
 
@@ -245,9 +270,7 @@ export function buildConversationHomeRedirectResponse(input: {
   homeRecipientPhone: string;
   memberId: string;
   messageId: string;
-  service?: string | null;
   sourceEventId: string;
-  threadIsDirect?: boolean | null;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
@@ -258,9 +281,7 @@ export function buildConversationHomeRedirectResponse(input: {
         homeRecipientPhone: input.homeRecipientPhone,
         memberId: input.memberId,
         replyToMessageId: input.messageId,
-        service: input.service ?? null,
         sourceEventId: input.sourceEventId,
-        threadIsDirect: input.threadIsDirect ?? null,
         template: "conversation_home_redirect",
       }),
     ],
@@ -277,9 +298,7 @@ export function buildQuotaReplyResponse(input: {
   messageId: string;
   occurredAt: string;
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
-  service?: string | null;
   sourceEventId: string;
-  threadIsDirect?: boolean | null;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
@@ -289,9 +308,7 @@ export function buildQuotaReplyResponse(input: {
         occurredAt: input.occurredAt,
         replyToMessageId: input.messageId,
         ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
-        service: input.service ?? null,
         sourceEventId: input.sourceEventId,
-        threadIsDirect: input.threadIsDirect ?? null,
         template: "daily_quota",
       }),
     ],
@@ -304,6 +321,7 @@ export function buildQuotaReplyResponse(input: {
 
 export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
   chatId: string;
+  homeLineAssignedAt?: Date | null;
   memberId: string;
   occurredAt: string;
   prisma: Prisma.TransactionClient;
@@ -311,18 +329,11 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
 }) {
   await upsertHostedMemberHomeLinqBindingTx({
     clearPending: true,
+    homeLineAssignedAt: input.homeLineAssignedAt ?? null,
     linqChatId: input.chatId,
     memberId: input.memberId,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
-  });
-
-  await recordHostedMemberLinqInboundEngagementTx({
-    chatId: input.chatId,
-    linePhoneNumber: input.recipientPhone,
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    prisma: input.prisma,
   });
 
   return incrementHostedLinqInboundDailyState({
@@ -358,6 +369,7 @@ function requireHostedLinqTrialConversionNoticeCode(
 
 export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
   chatId: string;
+  homeLineAssignedAt?: Date | null;
   memberId: string;
   occurredAt: string;
   participantContact?: HostedLinqParticipantContact | null;
@@ -365,20 +377,13 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
   recipientPhone: string | null;
 }) {
   await upsertHostedMemberPendingLinqBindingTx({
+    homeLineAssignedAt: input.homeLineAssignedAt ?? null,
     linqChatId: input.chatId,
     memberId: input.memberId,
     participantContact: input.participantContact ?? null,
     participantContactObservedAt: new Date(input.occurredAt),
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
-  });
-
-  await recordHostedMemberLinqInboundEngagementTx({
-    chatId: input.chatId,
-    linePhoneNumber: input.recipientPhone,
-    memberId: input.memberId,
-    occurredAt: input.occurredAt,
-    prisma: input.prisma,
   });
 
   return incrementHostedLinqInboundDailyState({

@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-06-25
+Last verified: 2026-07-06
 
 ## Current Repo Checks
 
@@ -20,6 +20,37 @@ Last verified: 2026-06-25
 
 ## Current CI Workflows
 
+- Linux CI `apps/web verify` invocations default to wrapping the hosted-web production
+  `next build` step with `apps/web/scripts/build-memory-guard.sh`. The guard
+  creates a root-level cgroup-v2 child for accounting only and moves the build
+  process into that cgroup while keeping the build itself on the invoking user,
+  environment, cwd, and stdio. It does not currently write `memory.max`,
+  `memory.swap.max`, or `memory.oom.group`. The advisory budget is a cgroup-unit
+  model of Vercel Standard's 8 GB build machine: 7.2 GB available to the build
+  cgroup and a 0.8 GB reserve for OS/container overhead outside it at the
+  ceiling. The legacy-named guard budget override must stay strictly above the
+  6,000,000,000-byte known-false-positive cgroup floor and at or below
+  7,200,000,000 bytes, preserving at least a 0.8 GB reserve under the 8 GB
+  machine model. The floor comes from the fully working 2026-07-06 Linux CI run
+  where a 6.0 GB cgroup cap OOM-killed a build that Vercel's real 8 GB Standard
+  machine accepts. PR #349's 5.34 GB passing and 6.18 GB exit-137 failure
+  numbers are historical single-process RSS measurements only, not cgroup cap
+  bounds; cgroup accounting includes anonymous memory across all build workers
+  plus page cache. Live CI on 2026-07-07 showed the hard limit cannot ship green
+  yet: `turbopackMemoryLimit=3GiB` matched the 4 GiB cold-build anon ramp,
+  rising about 2.9 GB at 12 seconds, 5.5 GB at 27 seconds, and 6.9 GB at 42
+  seconds before an OOM-group kill. The guard samples cgroup `memory.current`
+  and selected `memory.stat` fields about every 3 seconds, prints trajectory
+  lines about every 15 seconds, then reports sampled maxima before cgroup
+  `memory.peak`, `memory.events`, and selected final-read `memory.stat` values.
+  If sampled max anon or `memory.peak` exceeds the advisory budget, it prints a
+  loud `WOULD EXCEED` warning while preserving the wrapped build's exit status.
+  It fails loudly if cgroup v2, the root memory controller, passwordless `sudo`,
+  or peak-accounting machinery is unavailable. Disabling the guard in Linux CI
+  requires `MURPH_HOSTED_WEB_BUILD_MEMORY_GUARD=0` and logs a prominent warning
+  that the Vercel Standard-machine memory budget is not being measured. Flipping
+  back to enforcement means restoring the `memory.max`, `memory.swap.max`, and
+  `memory.oom.group` writes once the cold build fits under the advisory budget.
 - `.github/workflows/repo-hygiene.yml` runs the tracked private/build artifact guard on GitHub-hosted `ubuntu-24.04`.
 - `.github/workflows/host-support.yml` runs a host-support matrix on GitHub-hosted `ubuntu-24.04` and `macos-latest`, installing with `pnpm install --frozen-lockfile`, building the workspace, preparing `pnpm build:test-runtime:prepared`, and then exercising the focused built-runtime CLI host-support suite (`packages/cli/test/setup-cli.test.ts` and `packages/cli/test/inbox-service-boundaries.test.ts`) with `MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1` on both hosts. The macOS host leg serializes package-script workspace builds so sibling `tsc -b --force` package scripts do not rewrite shared project-reference declarations at once while the Linux leg keeps the normal package-build fanout. The workflow also carries deterministic CI-only hosted-web build placeholders for `DATABASE_URL`, hosted device routing, contact privacy, hosted mailbox fingerprinting, and the public Privy app id so its Linux release shards can finish `apps/web verify` without inheriting production secrets.
 - The same workflow also preserves the Ubuntu `pnpm release:check` surface without running it as one long job: release metadata/build/typecheck, package coverage shards, app verification, and fixture coverage run as parallel jobs, then a final `Release checks (ubuntu)` aggregator preserves the required-check name. This keeps Linux bootstrap and release packaging exercised in CI while avoiding the serial package-coverage wall clock.
@@ -28,7 +59,46 @@ Last verified: 2026-06-25
 - `.github/workflows/cloudflare-hosted-e2e.yml` runs focused hosted local E2E jobs on GitHub-hosted `ubuntu-24.04` for every pull request and `main` push. A shared `runner-bundle` job builds the hosted-local runner bundle plus workspace `dist` outputs once per run with `MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY=4` and publishes them as a tar.zst artifact; each scenario job downloads that artifact, unpacks it at the repo root, installs the pinned Codex CLI version from `Dockerfile.cloudflare-hosted-runner-base` so the host-side harness can read the bundled model catalog, and runs its scenario with `--no-bundle` instead of rebuilding the workspace (the workspace `dist` outputs ride along because the Temporal worker's workflow webpack bundle resolves `@murphai/*` package exports to `dist/`). Each scenario job provisions a local `postgres:17` service container (pulled from the `public.ecr.aws/docker/library` mirror to avoid anonymous Docker Hub rate limits) with an explicit `pg_isready -U postgres -d murph_test` readiness probe, runs `pnpm temporal:cli:setup` before the managed local Temporal harness starts, does not authenticate to GHCR before running PR-controlled code, uses anonymous pulls for the public fingerprinted native runner base image on cold runners, and points `DATABASE_URL` at `127.0.0.1:5432/murph_test`, while still using deterministic CI-only hosted-web placeholders for hosted device routing, contact privacy, mailbox fingerprinting, and Privy values. The workflow then runs `pnpm hosted-local e2e device-connect`, `pnpm hosted-local e2e codex-image-media-delivery`, `pnpm hosted-local e2e linq-delivery`, `pnpm hosted-local e2e linq-webhook` (the audio-media gate that proves the Worker-mediated Workers AI transcription path through the container parser drain, the remote-transcription provider, and the `murph-transcribe.worker` egress handler with a deterministic fake `AI` binding from the hosted-local test entrypoint), `pnpm hosted-local e2e linq-scheduled-reminder`, `pnpm hosted-local e2e idle-checkpoint-deferred-progress`, `pnpm hosted-local e2e direct-r2-presigned-put`, `pnpm hosted-local e2e temporal-orchestration`, and `pnpm hosted-local e2e telegram`, and always uploads per-job logs plus redacted hosted-local `state.json` files instead of broadening to the full serial hosted-local E2E suite or uploading every harness artifact. The local aggregate `pnpm --dir apps/cloudflare test:e2e:local` also runs the Workers-runtime E2E lane through `test:e2e:workers:local`; CI keeps that narrower Workers proof inside `apps/cloudflare verify` / `test:workers` rather than duplicating it in each hosted-local E2E job.
 - `.github/workflows/cloudflare-hosted-device-sync-e2e.yml` runs the Junction wearable direct-resource replay hosted local E2E job on every pull request and `main` push. The single job uses the same loopback `postgres:17` service (same `public.ecr.aws/docker/library` mirror) and explicit readiness probe, pinned host Codex CLI install for the hosted-local model catalog, Temporal CLI setup, anonymous runner-image pulls, parallel runner-bundle build concurrency, and deterministic hosted-web placeholder env pattern as the hosted E2E workflow, but keeps its own in-job runner bundle build because a separate prepare job would serialize a single-job workflow, then runs `pnpm hosted-local e2e device-sync-junction-wearable-direct-resource-replay` and always uploads the focused job log.
 - `.github/workflows/release.yml` uses GitHub-hosted `ubuntu-24.04`, installs once, runs `pnpm release:check` with `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1` so the release verification lane uses the parallel package/smoke branches and parallel app substeps without enabling full app/package overlap unless `MURPH_ACCEPTANCE_APP_VERIFY_WITH_COVERAGE=1` is set explicitly, while the same deterministic hosted-web build placeholders keep `apps/web verify` on its truthful build path without injecting production DB or production hosted device secrets, then packs the publishable tarballs once for upload/publication.
-- Vercel deploys of `apps/web` use the checked-in Vercel build command `pnpm release:production:migrate && pnpm build`, so the guarded migration wrapper still runs automatically on main-branch production deploys while preview/non-main builds skip through the wrapper guard. The generic `pnpm --dir apps/web build` script is non-mutating and does not run production migrations. The guarded migration entrypoint uses `DIRECT_DATABASE_URL` when present, requires it in Vercel production, and rejects known pooled Postgres ports such as `6432` and `6543`. Production migrations must remain backward compatible with the currently deployed app because a successful migration can outlive a later build failure.
+- Vercel deploys of `apps/web` use the checked-in Vercel build command
+  `pnpm release:production:migrate && pnpm build`, so the guarded migration
+  wrapper still runs automatically on main-branch production deploys while
+  preview/non-main builds skip through the wrapper guard. The generic
+  `pnpm --dir apps/web build` script is non-mutating and does not run production
+  migrations. The guarded predeploy migration entrypoint uses
+  `DIRECT_DATABASE_URL` when present, requires it in Vercel production, rejects
+  known pooled Postgres ports such as `6432` and `6543`, blocks destructive or
+  incompatible Prisma migration SQL outside the frozen hosted web migration
+  history set ending at `20260707170000_drop_stale_linq_recency_columns`,
+  regenerates the
+  hosted web Prisma client after migrations, and runs the hosted Linq DB
+  configured-line sync/readiness check so DB-backed Linq assignment cannot
+  deploy with an empty assignable line pool or stale generated client.
+  Production deploy sync skips provider inventory; provider inventory remains on
+  explicit operator/contact-card paths. Normal production Prisma migrations must
+  remain backward compatible with the currently deployed app because a
+  successful predeploy migration can outlive a later build failure. Required
+  columns, renames, `SET NOT NULL`, and incompatible type changes require
+  expand/backfill/switch/final-cleanup sequencing; only final cleanup belongs in
+  `apps/web/prisma/contract-migrations`. Destructive hosted web contract cleanup
+  is applied by `.github/workflows/hosted-web-contract-migrations.yml` after a
+  successful Vercel-originated completed production deployment status; that
+  workflow checks out the deployed SHA, verifies it is reachable from
+  `origin/main`, waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for
+  prior production function executions to drain, rechecks that the configured
+  Vercel production alias still points at that SHA before exposing the database
+  secret, supports manual dispatch with `deployed_sha` for the same current-alias
+  proof path, does not use GitHub Actions concurrency for this lane so stale
+  events cannot replace valid pending runs, and requires GitHub Actions values for
+  `HOSTED_WEB_VERCEL_TOKEN`,
+  `HOSTED_WEB_VERCEL_PROJECT_ID`, `HOSTED_WEB_PRODUCTION_BASE_URL`, and
+  `HOSTED_WEB_DIRECT_DATABASE_URL`. The shared production migration URL resolver
+  removes Prisma-style `sslcert=system`, `sslkey=system`, and
+  `sslrootcert=system` markers before handing Postgres URLs to raw `pg` clients.
+  After contract cleanup applies, the rollback floor is the first deployed Vercel
+  commit that no longer reads or writes the dropped schema shape; rollback below
+  that floor requires DB restore/re-expand or a forward deploy. Cloudflare
+  `container_rollout=immediate` is not applicable to this Vercel-only lane; the
+  bounded drain wait and final alias check own the old-function window.
 
 ## Current Gaps
 
@@ -39,11 +109,11 @@ Last verified: 2026-06-25
   Background Worker Blueprint for the worker process. The hosted-local E2E
   suite now includes `temporal-orchestration`, which starts managed local
   Temporal, signals through web, queries the workflow, and proves the worker
-  reaches Cloudflare ensure-processing. The hosted Temporal package also has a
-  replay test that runs `Worker.runReplayHistory` against a synthetic
-  pre-patch mailbox history that scheduled `ensureRuntimeProcessing` directly,
-  the `hosted-temporal:guard` script requires that replay gate and CI
-  package-coverage entry to remain present, and the host-support package
+  reaches Cloudflare ensure-processing. The hosted Temporal package has retired
+  the reconciliation-before-mailbox pre-patch branch after production pre-patch
+  histories drained; during the intermediate retirement window the
+  `hosted-temporal:guard` script requires the workflow `deprecatePatch()` marker
+  and CI package-coverage entry to remain present, and the host-support package
   coverage shard runs `packages/hosted-orchestrator-temporal`. Future
   command-ordering edits to `hosted-user-runtime.ts` still require Worker
   Versioning/deployment pinning, `patched()` / `deprecatePatch()`, or a replay

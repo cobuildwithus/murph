@@ -5,6 +5,9 @@ interface TestContainerStorage {
 }
 
 interface TestContainerContext {
+  container?: {
+    readonly running: boolean;
+  };
   storage: TestContainerStorage;
 }
 
@@ -68,8 +71,12 @@ export class Container {
   pingEndpoint = "ping";
   sleepAfter: string | number = "10m";
 
-  constructor(ctx?: { storage?: TestContainerStorage }) {
+  constructor(ctx?: {
+    container?: TestContainerContext["container"];
+    storage?: TestContainerStorage;
+  }) {
     this.ctx = {
+      ...(ctx?.container ? { container: ctx.container } : {}),
       storage: ctx?.storage ?? createMemoryStorage(),
     };
   }

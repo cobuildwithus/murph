@@ -6,8 +6,8 @@ import {
   parseTelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { shouldCreateAssistantProgressDelivery } from './progress-constants.js'
 import { markAssistantFirstContactSeen } from './first-contact.js'
-import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
 import { createHostedDeliveryId } from './hosted-delivery-id.js'
 import {
   type AssistantOutboxDispatchMessage,
@@ -38,6 +38,10 @@ import {
   applyAssistantReplyDeliveryContext,
   type AssistantReplyDeliveryContext,
 } from './reply-delivery-context.js'
+import {
+  assistantChannelSupportsReplyBubbles,
+  splitAssistantReplyBubbles,
+} from './reply-bubbles.js'
 
 export interface AssistantPrecedingReplySegment {
   deliveryContext?: AssistantReplyDeliveryContext | null
@@ -175,19 +179,99 @@ export async function deliverAssistantReply(input: {
     media: deliveryMedia,
     session: input.session,
   })
+  const baseDedupeToken =
+    input.dedupeToken ?? hostedDelivery.deliveryIdempotencyKey ?? null
+
+  if (!assistantChannelSupportsReplyBubbles(deliveryFields.channel)) {
+    return await deliverAssistantCurrentAudienceMessage({
+      dedupeToken: baseDedupeToken,
+      answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+      input: input.input,
+      media: deliveryMedia,
+      message: input.response,
+      session: input.session,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+  }
+
+  const replyBubbles = splitAssistantReplyBubbles(input.response)
+  if (replyBubbles.length <= 1) {
+    return await deliverAssistantCurrentAudienceMessage({
+      dedupeToken: baseDedupeToken,
+      answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+      input: input.input,
+      media: deliveryMedia,
+      message: replyBubbles[0]!,
+      session: input.session,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+  }
+
+  let session = input.session
+  // Bubbles deliver sequentially with per-bubble idempotency keys. Persisted
+  // intent ordering is owned by the outbox drain comparator
+  // (`compareAssistantOutboxDeliverySequenceOrder`) plus hosted boundary
+  // gating, so hosted queue-only delivery stays strictly ordered across
+  // retries; local immediate retry behavior remains best-effort like steered
+  // segments.
+  for (let bubbleIndex = 0; bubbleIndex < replyBubbles.length - 1; bubbleIndex += 1) {
+    const bubbleIdempotencyKey = buildAssistantReplyBubbleDeliveryIdempotencyKey({
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      index: bubbleIndex,
+      turnId: input.turnId,
+    })
+    const outcome = await deliverAssistantCurrentAudienceMessage({
+      dedupeToken: bubbleIdempotencyKey,
+      answeredMailboxItemIds: [],
+      deliveryIdempotencyKey: bubbleIdempotencyKey,
+      deliveryTransportIdempotent:
+        resolveHostedAssistantDeliveryTransportIdempotentOverride({
+          channel: deliveryFields.channel,
+          deliveryIdempotencyKey: bubbleIdempotencyKey,
+          executionContext: input.input.executionContext,
+          media: [],
+        }),
+      input: input.input,
+      media: [],
+      message: replyBubbles[bubbleIndex]!,
+      session,
+      sharedPlan: input.sharedPlan,
+      turnId: input.turnId,
+    })
+    session = outcome.session
+    if (outcome.kind === 'failed') {
+      return outcome
+    }
+  }
 
   return await deliverAssistantCurrentAudienceMessage({
-    dedupeToken:
-      input.dedupeToken ?? hostedDelivery.deliveryIdempotencyKey ?? null,
+    dedupeToken: baseDedupeToken,
+    answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     input: input.input,
     media: deliveryMedia,
-    message: input.response,
-    session: input.session,
+    message: replyBubbles[replyBubbles.length - 1]!,
+    session,
     sharedPlan: input.sharedPlan,
     turnId: input.turnId,
   })
+}
+
+export function buildAssistantReplyBubbleDeliveryIdempotencyKey(input: {
+  deliveryIdempotencyKey?: string | null
+  index: number
+  turnId: string
+}): string {
+  const explicitKey = normalizeNullableString(input.deliveryIdempotencyKey)
+  const prefix = explicitKey ?? `assistant-bubble:${input.turnId}`
+  return `${prefix}:bubble:${input.index}`
 }
 
 export async function deliverAssistantReaction(input: {
@@ -409,12 +493,19 @@ export async function deliverAssistantProgressUpdate(input: {
   turnId: string
 }): Promise<AssistantSession> {
   // Progress updates are ephemeral current-audience sends, not final-reply
-  // delivery or commit-aware outbox decisions.
-  if (!input.input.deliverResponse) {
-    return input.session
-  }
-  if (input.input.deliveryDispatchMode === 'queue-only') {
-    return input.session
+  // delivery or commit-aware outbox decisions. The caller gates on the same
+  // shared predicate before invoking, so failing it here means the delivery
+  // context diverged mid-send; fail loudly instead of returning a
+  // success-shaped no-op that the model reports to the user as "sent".
+  if (!shouldCreateAssistantProgressDelivery(input.input)) {
+    throw new VaultCliError(
+      'ASSISTANT_PROGRESS_DELIVERY_SUPPRESSED',
+      `Progress update suppressed: delivery context is not progress-eligible ` +
+      `(turn=${input.turnId} ordinal=${input.ordinal} ` +
+      `deliverResponse=${String(input.input.deliverResponse)} ` +
+      `dispatchMode=${String(input.input.deliveryDispatchMode)} ` +
+      `turnTrigger=${String(input.input.turnTrigger)}).`,
+    )
   }
 
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
@@ -437,6 +528,17 @@ export async function deliverAssistantProgressUpdate(input: {
     deliveryFields,
     input: input.input,
   })
+  // Progress sends bypass the persisted outbox, so this dispatch summary is
+  // the only durable trace tying a "sent" tool result to a transport attempt.
+  const progressTurnId = input.turnId
+  const progressOrdinal = input.ordinal
+  console.warn(
+    'Assistant progress update dispatching ' +
+    `(turn=${progressTurnId} ordinal=${progressOrdinal} ` +
+    `channel=${String(messageDeliveryFields.channel)} ` +
+    `explicitTargetPresent=${Boolean(messageDeliveryFields.explicitTarget)} ` +
+    `threadIdPresent=${Boolean(messageDeliveryFields.threadId)}).`,
+  )
 
   const delivery = await sendAssistantOutboxDispatchMessage({
     ...(input.dependencies ? { dependencies: input.dependencies } : {}),
@@ -450,6 +552,16 @@ export async function deliverAssistantProgressUpdate(input: {
     vault: input.input.vault,
     signal: input.signal,
   })
+  console.warn(
+    'Assistant progress update dispatched ' +
+    `(turn=${progressTurnId} ordinal=${progressOrdinal} ` +
+    `deliveredTargetPresent=${Boolean(delivery.delivery?.target)} ` +
+    `providerMessageIdPresent=${Boolean(
+      delivery.delivery && 'providerMessageId' in delivery.delivery
+        ? delivery.delivery.providerMessageId
+        : null,
+    )}).`,
+  )
   return delivery.session ?? input.session
 }
 
@@ -712,6 +824,7 @@ function resolveAssistantInputRouteBindingDelivery(input: {
 }
 
 async function deliverAssistantCurrentAudienceMessage(input: {
+  answeredMailboxItemIds?: readonly string[] | null
   dedupeToken: string | null
   deliveryIdempotencyKey: string | null
   deliveryTransportIdempotent: boolean | undefined
@@ -734,6 +847,7 @@ async function deliverAssistantCurrentAudienceMessage(input: {
   })
   const outcome = await state.outbox.deliverMessage({
     ...messageDeliveryFields,
+    answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     dedupeToken: input.dedupeToken,
     media: input.media,
     message: input.message,
@@ -869,18 +983,22 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   vault: string
 }): Promise<void> {
   const completedAt = new Date().toISOString()
+  const response = input.response
   const plan = buildAssistantTurnDeliveryFinalizationPlan({
     completedAt,
     outcome: input.outcome,
-    response: input.response,
+    response,
     turnId: input.turnId,
   })
   const state = createAssistantRuntimeStateService(input.vault)
   await state.turns.finalizeReceipt(plan.receipt)
   await state.diagnostics.recordEvent(plan.diagnostic)
+  // Any accepted reply on a first-contact-scoped route is first contact, not
+  // just the canned welcome text: once the user has heard from the assistant
+  // here, a queued signup welcome for this route is stale and must skip.
   const firstContactAcceptedForDelivery =
     input.firstContactGuidanceInjected === true &&
-    input.response === ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE &&
+    response !== '' &&
     isAssistantFirstContactAcceptedForDelivery(input.outcome)
   if (firstContactAcceptedForDelivery) {
     await markAssistantFirstContactSeen({
@@ -891,14 +1009,14 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   }
 }
 
+// The first-contact marker's only reader is the hosted signup-welcome skip,
+// so it must mean "a reply actually reached (or is queued for) this route".
+// A 'not-requested' outcome delivered nothing and must not suppress the
+// welcome for a route that has never heard from the assistant.
 function isAssistantFirstContactAcceptedForDelivery(
   outcome: AssistantDeliveryOutcome,
 ): boolean {
-  return (
-    outcome.kind === 'sent' ||
-    outcome.kind === 'queued' ||
-    outcome.kind === 'not-requested'
-  )
+  return outcome.kind === 'sent' || outcome.kind === 'queued'
 }
 
 export function buildAssistantTurnDeliveryFinalizationPlan(input: {
@@ -907,6 +1025,7 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
   response: string
   turnId: string
 }): AssistantTurnDeliveryFinalizationPlan {
+  const response = input.response
   switch (input.outcome.kind) {
     case 'not-requested':
       return {
@@ -914,7 +1033,7 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           turnId: input.turnId,
           status: 'completed',
           deliveryDisposition: 'not-requested',
-          response: input.response,
+          response,
           completedAt: input.completedAt,
         },
         diagnostic: {
@@ -936,7 +1055,7 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           status: 'completed',
           deliveryDisposition: 'sent',
           deliveryIntentId: input.outcome.intentId,
-          response: input.response,
+          response,
           completedAt: input.completedAt,
         },
         diagnostic: {
@@ -960,7 +1079,7 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           deliveryDisposition: input.outcome.error ? 'retryable' : 'queued',
           deliveryIntentId: input.outcome.intentId,
           error: input.outcome.error,
-          response: input.response,
+          response,
           completedAt: input.completedAt,
         },
         diagnostic: {
@@ -988,7 +1107,7 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           deliveryDisposition: 'failed',
           deliveryIntentId: input.outcome.intentId,
           error: input.outcome.error,
-          response: input.response,
+          response,
           completedAt: input.completedAt,
         },
         diagnostic: {

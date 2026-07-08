@@ -32,6 +32,13 @@ const runnerPythonPathFinallyCleanupBlock = `} finally {
     await removeHostedRunnerFinalImageBestEffort();
   }`;
 
+const hostedRunnerFlexModelSlugs = [
+  "gpt-5.5",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+] as const;
+
 function createDeployEnvironment() {
   return {
     allowedRunnerSecretKeys: null,
@@ -416,7 +423,7 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.135.0");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.143.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -451,6 +458,10 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain(
       'npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}"',
     );
+    expect(baseDockerfile).toContain(
+      'native_codex="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/bin/codex\' -type f -perm /111 -print -quit)"',
+    );
+    expect(baseDockerfile).toContain('ln -sfn "${native_codex}" /usr/local/bin/codex');
     expect(baseDockerfile).toContain("npm cache clean --force");
     expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
     expect(baseDockerfile).not.toContain("/etc/profile.d/murph-runner-path.sh");
@@ -516,15 +527,18 @@ describe("hosted runner container image contract", () => {
     expect(finalLocalBuildIdLabelIndex).toBeGreaterThan(finalLocalBuildIdArgIndex);
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local");
     expect(finalDockerfile).toContain("ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle");
-    expect(finalDockerfile).toContain('select(.slug == "gpt-5.5")');
+    for (const slug of hostedRunnerFlexModelSlugs) {
+      expect(finalDockerfile).toContain(`"${slug}"`);
+    }
+    expect(finalDockerfile).toContain("ensure_future_gpt_model");
     expect(finalDockerfile).toContain('slug == "gpt-5.4-nano"');
     expect(finalDockerfile).toContain('first_model("gpt-5.4-mini")');
     expect(finalDockerfile).toContain(".supports_search_tool = false");
     expect(finalDockerfile).toContain(".supports_parallel_tool_calls = false");
-    expect(finalDockerfile).toContain(".use_responses_lite = true");
+    expect(finalDockerfile).toContain(".use_responses_lite = false");
     expect(finalDockerfile).toContain('"id":"flex"');
     expect(finalDockerfile).toContain(
-      'jq -s -e \'length == 1 and (.[0] | any(.models[]?; .slug == "gpt-5.5" and any(.service_tiers[]?; .id == "flex")) and any(.models[]?; .slug == "gpt-5.4-nano" and .supports_search_tool == false and .supports_parallel_tool_calls == false and .use_responses_lite == true))\'',
+      'jq -s -e \'length == 1 and (.[0] as $catalog | all(["gpt-5.5","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))) and ($catalog | any(.models[]?; .slug == "gpt-5.4-nano" and .supports_search_tool == false and .supports_parallel_tool_calls == false and .use_responses_lite == false)))\'',
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
@@ -614,15 +628,32 @@ describe("hosted runner container image contract", () => {
     expect(readCodexModelSlugs(patchedCatalog)).toEqual([
       "gpt-5.5",
       "gpt-5.4-mini",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
       "gpt-5.4-nano",
     ]);
-    expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.5")).toEqual(["auto", "flex"]);
+    for (const slug of hostedRunnerFlexModelSlugs) {
+      expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(["auto", "flex"]);
+    }
     expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-mini")).toEqual(["auto"]);
     expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-nano")).toEqual([]);
+    expect(readCodexModel(patchedCatalog, "gpt-5.6-sol")).toMatchObject({
+      description: "Future OpenAI model prepared for hosted runtime rollout.",
+      display_name: "GPT-5.6 Sol",
+    });
+    expect(readCodexModel(patchedCatalog, "gpt-5.6-terra")).toMatchObject({
+      description: "Future OpenAI model prepared for hosted runtime rollout.",
+      display_name: "GPT-5.6 Terra",
+    });
+    expect(readCodexModel(patchedCatalog, "gpt-5.6-luna")).toMatchObject({
+      description: "Future OpenAI model prepared for hosted runtime rollout.",
+      display_name: "GPT-5.6 Luna",
+    });
     expect(readCodexModel(patchedCatalog, "gpt-5.4-nano")).toMatchObject({
       supports_parallel_tool_calls: false,
       supports_search_tool: false,
-      use_responses_lite: true,
+      use_responses_lite: false,
     });
     expect(runJqFilter(validationFilter, patchedCatalog, { slurp: true }).trim()).toBe("true");
 
@@ -687,7 +718,7 @@ describe("hosted runner container image contract", () => {
     expect(readCodexModel(normalizedNanoCatalog, "gpt-5.4-nano")).toMatchObject({
       supports_parallel_tool_calls: false,
       supports_search_tool: false,
-      use_responses_lite: true,
+      use_responses_lite: false,
     });
     expect(runJqFilter(validationFilter, normalizedNanoCatalog, { slurp: true }).trim()).toBe("true");
 
@@ -715,6 +746,10 @@ describe("hosted runner container image contract", () => {
     );
 
     expect(repatchedTargetTierIds.filter((tierId) => tierId === "flex")).toHaveLength(1);
+    for (const slug of hostedRunnerFlexModelSlugs) {
+      expect(readCodexModelServiceTierIds(twicePatchedCatalog, slug).filter((tierId) => tierId === "flex"))
+        .toHaveLength(1);
+    }
     expect(readCodexModelSlugs(twicePatchedCatalog).filter((slug) => slug === "gpt-5.4-nano"))
       .toHaveLength(1);
     expect(runJqFilter(validationFilter, repatchedCatalog, { slurp: true }).trim()).toBe("true");
@@ -844,7 +879,7 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain("cwdRebound: process.cwd() === expectedVaultRoot");
     expect(hostedRunnerSmokeChild).toContain('model = "gpt-5.5"');
     expect(hostedRunnerSmokeChild).toContain('model_reasoning_effort = "low"');
-    expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 128000");
+    expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 164000");
     expect(hostedRunnerSmokeChild).toContain("runCodexVaultCliProof");
     expect(hostedRunnerSmokeChild).toContain('"vault-show-default"');
     expect(hostedRunnerSmokeChild).toContain('"vault-show-explicit"');

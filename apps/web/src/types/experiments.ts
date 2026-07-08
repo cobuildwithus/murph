@@ -290,6 +290,7 @@ export interface ExperimentProtocol {
 export type ScheduleCellKind =
   | "baseline"
   | "completed"
+  | "assumed"
   | "partial"
   | "missed"
   | "failed"

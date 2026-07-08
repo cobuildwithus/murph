@@ -7,6 +7,9 @@ import {
   type AutomationRecord,
 } from '@murphai/core'
 import {
+  isHostedRuntimeProcessEnv,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
   MURPH_PRODUCT_ORIGIN,
   type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
@@ -39,6 +42,7 @@ export interface MurphManagedAutomationSeed {
   automationId: string
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
   continuityPolicy?: AutomationContinuityPolicy
+  hostedRuntimeOnly?: boolean
   instructions: string
   requiredRuntimeEnvKeys?: readonly string[]
   schedule: MurphManagedAutomationSchedule
@@ -74,6 +78,10 @@ export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
   'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
 export const MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
   'automation_01K0Z7X9Y8W6V5T4S3R2Q1P0NM'
+export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID =
+  'automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX'
+export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY =
+  'Overnight memory consolidation maintenance wake completed.'
 
 interface MurphManagedWeeklyScheduleSpread {
   daysOfWeek: readonly number[]
@@ -284,8 +292,10 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'On this scheduled weekly run, run a quiet weekly health research scout for the configured automation route.',
       '',
       'Outcome:',
-      "Surface 0-1 genuinely useful research-backed note that changes how the user might think about a current health experiment, habit, symptom, lab, device trend, or clinician question.",
-      'If nothing is useful enough to feel like a natural chat message from Murph, send nothing.',
+      "Surface 0-1 genuinely useful research-backed insight that changes how the user might think about a current health experiment, habit, symptom, lab, device trend, or clinician question.",
+      'The unit of value is the insight, not the paper: one insight may synthesize several returned sources when they converge on the same practical interpretation.',
+      'A send-worthy insight answers: what does this change about something the user is already doing or watching?',
+      'If nothing clears that bar as a natural chat message from Murph, send nothing.',
       '',
       'Language and conversational style:',
       "- Write the outbound note in the user's normal Murph chat language. If unclear, use English.",
@@ -307,16 +317,25 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- If unsure about the batch file body, run `vault-cli research scout-batch-payload-schema --format json` before the scout call.',
       '- Use `vault-cli research scout-batch` once. The `--input` body is `{"lanes":[{"label":"sleep","profile":{...}}]}`. Each lane profile uses bucket fields `topics`, `biomarkers`, `behaviors`, `supplements`, `conditionsOrConcerns`, `goals`, and `activeExperiments`; do not use a generic `tags` field. Example body: `{"lanes":[{"label":"evening light and sleep","profile":{"topics":["sleep"],"behaviors":["evening light"],"activeExperiments":["blue light glasses"]}},{"label":"wearable hrv reliability","profile":{"topics":["recovery"],"behaviors":["wearable tracking"]}}]}`.',
       '- Pass publication bounds as `--since` and `--until`; YYYY-MM-DD dates or full ISO timestamps are accepted. Prefer the last two years and cap `--maxCandidatesPerLane` at 8 for this automation.',
-      '- Treat the returned results as a candidate pool only. Review, dedupe, and rank candidates locally against the current vault context and prior research scout ledger, then either send one conversational note or suppress the run.',
+      '- Treat the returned results as a candidate pool only. Review, dedupe, and rank candidates locally against the current vault context and prior research scout ledger, then either send one conversational insight or suppress the run.',
+      '- The scout-batch call is the retrieval budget. Make another research/provider/web call only if the batch result is structurally unusable, the payload schema is unclear, or the chosen candidate lacks enough source evidence to summarize safely. Do not search again just to find something sendable or improve phrasing.',
       '- Do not perform an open-ended web browsing loop.',
       '',
       'Selection rules:',
-      "- A candidate clears the bar only if it changes one practical question the user is already working on: how to run an active experiment, what to measure next, what to ask a clinician, how to interpret a device or lab signal, or what noisy metric to ignore.",
+      '- Before ranking, identify the current user question each candidate would answer. Current means an active experiment or plan, a recently discussed metric, symptom, lab, device trend, or clinician question, a live tradeoff, or a recent change where research helps decide what to keep stable, measure, ignore, or ask.',
+      '- Recent conversation and automation/regimen changes are veto context. If the user recently removed, paused, archived, or down-ranked a habit or reminder, do not send research that nudges them back toward it unless there is a clear safety reason.',
+      "- Reject candidates that match only stale vault tags, old concerns, or one historic context clue without a current user question.",
+      '- A candidate clears only if it passes all gates: currentness, incremental value beyond known basics, decision impact, evidence fit, low burden, and taste.',
+      '- Incremental value means the finding changes, clarifies, or simplifies something beyond advice the user probably already knows.',
+      '- Decision impact means the finding helps interpret data, avoid overreacting, choose what to measure, ask a sharper clinician question, or make an existing plan cleaner.',
+      '- Burden check: usually do not add a new task. Prefer interpreting, simplifying, keeping a variable stable, or ignoring noisy signals. Add a behavior only when evidence is strong, the burden is tiny, and it clearly fits a current priority.',
+      '- Taste check: the user would likely thank Murph for this today. If it feels like nagging, compliance policing, generic optimization, stale reminder resurrection, or a homework assignment, suppress it.',
+      "- Do not reuse the provider candidate's `actionOrQuestion` as advice unless it survives the local currentness, burden, and taste gates.",
       '- Prefer human studies, clinical guidelines, meta-analyses, systematic reviews, randomized trials, and large prospective cohorts, but do not send a stronger-but-irrelevant source over a weaker-but-practical one.',
       '- Include therapies or treatments only when source quality is credible.',
       '- Treat preprints, animal studies, cell studies, press releases, supplement marketing, podcasts, and tweets as weak evidence.',
-      '- Reject generic health news, obvious habit advice, mildly topical findings, and narrow supplement-timing, performance-hack, or biomarker trivia.',
-      "- Reject items that are not clearly related to the user's vault context.",
+      '- Automatically skip generic health news, obvious habit advice, mildly topical findings, narrow supplement-timing, performance-hack, or biomarker trivia.',
+      '- Automatically skip findings whose practical move is mainly `do more support work`, `be consistent`, `sleep better`, `eat protein`, `manage stress`, or similar known basics unless the research changes a specific live interpretation.',
       '- Reject alarmist or fear-mongering interpretations.',
       '- Do not recommend starting, stopping, or changing medications.',
       '- For medical topics, frame the item as a clinician discussion prompt, not a diagnosis or prescription.',
@@ -325,49 +344,106 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Suppress the scheduled message and do not append to the wiki.',
       '',
       'If something clears the bar:',
-      '- Send exactly one short note about the single best item. Never send a second item, even if several candidates are interesting.',
-      '- Lead with why the item is useful for this user, not with source metadata.',
+      '- Send exactly one short note about the single best insight. Never send a second item, even if several candidates are interesting.',
+      '- The insight may be supported by one source or a small cluster of sources; do not stack unrelated findings.',
+      "- Lead with what changes for the user's current thinking, not with source metadata.",
       '- Mention source provenance naturally only when it helps trust, such as `I found a recent sleep paper...`; do not include source URLs unless the user asks.',
       '- Keep study names, publication dates, study type, evidence strength, source URLs, candidate ranking notes, and detailed caveats in the `weekly-health-research-scout` wiki section instead of the outbound note unless the user asks for sources.',
       '- Explain any technical term in ordinary language before using it.',
-      '- Put one practical next move in the prose: tweak an active experiment, measure one thing, ignore a noisy metric, ask a clinician a better question, or keep a simple behavior stable.',
+      '- Put at most one practical next move in the prose. Prefer keep one variable stable, measure one thing, ignore a noisy metric, ask a clinician a better question, or avoid changing the plan based on weak/noisy evidence. Suggest adding behavior only when it passes the burden check.',
       '- Keep the message practical, calm, and non-alarmist.',
-      '- Append one dated section to `weekly-health-research-scout` with source details, candidate ranking notes, and why the final item was chosen.',
+      '- Append one dated section to `weekly-health-research-scout` with source details, synthesis notes, candidate ranking notes, why the final insight was chosen, and why close alternatives were suppressed.',
     ].join('\n'),
   },
   {
     automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
     slug: 'weekly-product-updates',
-    title: 'This week in Murph',
-    summary: 'A personalized weekly look at what is new in Murph.',
+    title: 'Murph product notes',
+    summary: 'A personalized note alternating what is new in Murph with things Murph can do for you.',
     schedule: {
       kind: 'cron',
       expression: '30 11 * * 4',
     },
     continuityPolicy: 'fresh',
+    assistantTargetOverride: {
+      reasoningEffort: 'high',
+    },
     tags: [
       'murph-managed:weekly-product-updates',
     ],
     instructions: [
-      'Goal: send one concise personalized in-chat update with the 2-3 shipped Murph updates this user is most likely to find genuinely interesting. If nothing clears that bar, send nothing.',
+      'Goal: send one concise personalized in-chat product note. Each run is one of two kinds, alternating run to run: a changelog note with the 2-3 recently shipped Murph updates this user is most likely to find genuinely interesting, or a feature discovery note with the 2-3 things Murph can already do that this user has not tried and is most likely to value. Fallback is allowed at most once: attempt the initially chosen kind once; you may attempt the other kind once as the fallback; never fall back from a fallback. If both kinds are unavailable, invalid, empty, or below bar, return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. A note with no substance is worse than no note.',
       '',
-      `Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=7&featureLimit=70&improvementLimit=10.`,
+      "Decide this run's kind first:",
+      '- Read `vault-cli knowledge show murph-product-notes`. If the page is missing, treat that as no prior product notes and choose the feature discovery kind.',
+      '- Otherwise find the most recent dated section and choose the other kind: last recorded changelog means feature discovery now; last recorded feature discovery means changelog now.',
+      '- Use `murph-product-notes` as the only ledger for this automation. Do not create per-week pages and do not scan unrelated wiki pages.',
+      '',
+      'Changelog kind:',
+      `- Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=14&featureLimit=70&improvementLimit=10.`,
       '- Treat that feed as the only source of shipped-product truth. Do not infer launches from repository history or invent availability, benefits, or try-it instructions.',
-      '- If the feed is unavailable, invalid, or empty, return `{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}` and do not attach media.',
+      '- If the feed is unavailable, invalid, or empty, do not fabricate updates; fall back to the feature discovery kind.',
+      '- Choose 2-3 items using only context Murph already has for normal assistance: connected providers and channels, active experiments and automations, recurring request categories, and features the user already uses.',
+      '- Skip items already covered in a prior ledger section.',
+      '- Do not inspect raw health values solely to personalize product news, and do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to judge relevance.',
+      '- Prefer user-fit, practical benefit, editorial priority, and novelty. Do not pad with weak matches; one strong item beats stretching to fill 2-3 slots.',
+      '- Use the canonical title, summary, URL, and tryIt fields from the feed, and verify each selected item has a concrete reason it may interest this user.',
       '',
-      'Selection budget: choose 2-3 items from the feed using only context Murph already has for normal assistance: connected providers and channels, active experiments and automations, recurring request categories, and features the user already uses.',
-      '- Do not inspect raw health values solely to personalize product news.',
-      '- Prefer user-fit, practical benefit, editorial priority, and novelty. Do not pad with weak matches; send one strong item or skip rather than stretching to fill 2-3 slots.',
-      '- Use the canonical title, summary, URL, and tryIt fields from the feed.',
-      '- Before sending, verify each selected item has a concrete reason it may interest this user and a canonical feed-backed title or summary. Drop anything that is merely generally new.',
+      'Feature discovery kind:',
+      `- Fetch the canonical JSON catalog once from ${MURPH_PRODUCT_ORIGIN}/api/feature-catalog.`,
+      '- Treat that catalog as the only source of truth for what Murph can do. Do not invent capabilities, availability, or try-it instructions beyond it.',
+      '- If the catalog is unavailable or invalid, do not fabricate capabilities; fall back to the changelog kind.',
+      "- Drop items the user is already using. Each item's alreadyUsing field says what to check; judge it using only context Murph already has for normal assistance, and do not inspect raw health values solely to personalize suggestions. Judge alreadyUsing only from context already surfaced for ordinary assistance: connected providers and channels, active experiments and automations, group memberships, and recurring request categories. Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used.",
+      '- Drop items already pitched in any prior ledger section; never repeat a feature pitch.',
+      '- Drop items this conversation cannot actually do right now: if the capability behind an item, such as phone calls, voice memos, songs, or a connected-app action, is not available as a tool in this runtime or supported on this channel, do not pitch it. When unsure, prefer items you are certain work here.',
+      "- If an item lists a requires prerequisite, check it from the same ordinary context. When the user clearly lacks the prerequisite, either skip the item or make the prerequisite an explicit, honest part of the pitch, such as connecting a wearable first.",
+      '- From the remainder pick the 2-3 items this user is most likely to genuinely value right now, judged by user-fit, practical benefit, and editorial priority. Each needs a concrete reason grounded in this user\'s context. One strong item beats padding.',
+      "- Frame each as something the user can try right now in this chat, weaving the item's tryIt prompt in naturally rather than quoting it mechanically.",
       '',
-      'Keep this scheduled announcement text-only. Do not create, attach, or send a changelog image or response media.',
+      'Both kinds:',
+      '- Before sending, append one dated section to the ledger with the locked append surface, for example: `vault-cli knowledge append-section murph-product-notes YYYY-MM-DD --title "Murph product notes" --body <markdown>`. The appended section body must record only this run\'s kind and the chosen item ids; do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text.',
+      '- If `append-section` reports that the section already exists, another run already recorded today\'s note: read that section and, if its recorded kind and item ids still clear the current bar, compose and send a note for those exact items; otherwise return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. Do not append again and do not switch kinds.',
+      '- Keep this scheduled note text-only. Do not create, attach, or send images or response media.',
+      '- Write a brief, warm note with the selected items and why each may matter for this user. 2-3 short bullets or short paragraphs are enough.',
+      '- If the ledger page was missing before this run, open with one short sentence that Murph occasionally shares what is new or useful, then move directly into the items.',
+      '- Close by inviting the user to reply if anything sounds interesting, or if there is something else they wish Murph could do.',
+      '- If sending nothing, return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}` and do not append to the ledger.',
       '',
-      'Write a brief, warm note with the selected updates and why they may be interesting for this user. Keep it compact; 2-3 short bullets or short paragraphs are enough.',
-      'If the user has not received one of these announcement automations before, add one short opening sentence about the update, then move directly into the chosen items.',
-      'Close by inviting the user to reply if any update sounds interesting, or if they have another feature in mind they would like Murph to add.',
+      'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog or catalog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
+    ].join('\n'),
+  },
+  {
+    automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    slug: 'overnight-memory-consolidation',
+    title: 'Overnight memory consolidation',
+    summary:
+      'A hosted-only app-server maintenance wake for canonical vault memory.',
+    schedule: {
+      kind: 'cron',
+      // Alternating nights via day-of-month steps ('*/2') is wrong at month
+      // boundaries (a 31st fires again on the 1st). Fixed days-of-week keep
+      // the 03:00 local anchor with no consecutive-night occurrences.
+      expression: '0 3 * * 1,3,5',
+    },
+    continuityPolicy: 'fresh',
+    hostedRuntimeOnly: true,
+    assistantTargetOverride: {
+      reasoningEffort: 'medium',
+    },
+    tags: [
+      'murph-managed:overnight-memory-consolidation',
+      'runtime-maintenance',
+    ],
+    instructions: [
+      'Goal: consolidate durable user context from recent assistant/user conversation history into the canonical vault memory surface.',
       '',
-      'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
+      'Read existing saved context with `vault-cli memory show --format json` first. Existing memory is for deduplication and update targeting only; it is never an independent source for new writes.',
+      'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days; count assistant messages as support only when they record a completed user-approved action or directly clarify user context. If that section reports no messages, do not write any new memory.',
+      'Write durable memory only with `vault-cli memory upsert` or `vault-cli memory update` when a concise, user-useful fact is clearly supported by the supplied conversation evidence and is not already represented.',
+      'Before returning, validate each proposed write against existing memory and the supplied conversation evidence. Skip anything uncertain, duplicated, sensitive, or merely transient task detail.',
+      'Do not read transcript files or session storage, hidden Codex memory state, assistant runtime logs, unbounded filesystem trees, or vault health data. Do not call external services or send the user a message.',
+      'Do not save assistant speculation, generic advice, transient task details, credentials, payment details, contact details, identifiers of any kind, or medical or health details from conversation text.',
+      `Return exactly \`{"kind":"skip","privateSummary":"${MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY}"}\`.`,
     ].join('\n'),
   },
 ] satisfies readonly MurphManagedAutomationSeed[]
@@ -382,6 +458,9 @@ export async function applyMurphManagedAutomations(
       ...MURPH_MANAGED_AUTOMATIONS,
       ...(await buildExperimentFinalResultsSeeds({ vaultRoot: input.vaultRoot, now })),
     ]
+  const seeds = rawSeeds.filter((seed) =>
+    murphManagedAutomationAppliesToRuntime(seed, input.runtimeEnv)
+  )
   let scheduleStableKey: string | null | undefined
   let scheduleStableKeyUnavailable = false
   const resolveScheduleStableKey = async (): Promise<string | null> => {
@@ -407,7 +486,7 @@ export async function applyMurphManagedAutomations(
     updated: 0,
   }
 
-  for (const rawSeed of rawSeeds) {
+  for (const rawSeed of seeds) {
     const existing = await showAutomation({
       automationId: rawSeed.automationId,
       vaultRoot: input.vaultRoot,
@@ -830,6 +909,14 @@ function murphManagedAutomationRuntimeRequirementsMet(
   return seed.requiredRuntimeEnvKeys.every((key) =>
     typeof runtimeEnv[key] === 'string' && runtimeEnv[key].trim().length > 0
   )
+}
+
+function murphManagedAutomationAppliesToRuntime(
+  seed: MurphManagedAutomationSeed,
+  runtimeEnv: Readonly<Record<string, string | undefined>> | undefined,
+): boolean {
+  return seed.hostedRuntimeOnly !== true ||
+    isHostedRuntimeProcessEnv(runtimeEnv ?? {})
 }
 
 function normalizeMurphManagedAutomationSummary(

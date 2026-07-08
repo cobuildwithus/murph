@@ -1,7 +1,9 @@
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import {
+  readHostedFamilyOwnerSnapshotForMember,
   updateHostedFamilySeatCount,
+  waitForHostedFamilyBilledSeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -40,7 +42,18 @@ export const PATCH = withJsonError(async (request: Request) => {
     targetSeatCount: body.seatCount,
   });
 
+  // Wait for the webhook to reconcile the new count so the owner sees the real
+  // number right away instead of the pre-change value; fall back to the initial
+  // snapshot if confirmation is slow.
+  const confirmed = await waitForHostedFamilyBilledSeatCount({
+    groupId: group.id,
+    prisma,
+    targetSeatCount: Number(body.seatCount),
+  })
+    ? await readHostedFamilyOwnerSnapshotForMember({ memberId: auth.member.id, prisma })
+    : null;
+
   return jsonOk({
-    seats: snapshot.seats,
+    seats: (confirmed ?? snapshot).seats,
   });
 });

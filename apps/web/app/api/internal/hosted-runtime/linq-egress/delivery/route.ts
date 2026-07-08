@@ -24,13 +24,13 @@ import {
   jsonOk,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
-import {
-  assertHostedThreadRouteEgressAuthority,
-} from "@/src/lib/hosted-routing/thread-route-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_LINQ_EGRESS_DELIVERY_BODY_LIMIT_BYTES = 8 * 1024;
+// Must stay >= the hosted mailbox run import limit so one grouped auto-reply
+// can stamp every answered conversation item.
+const HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
@@ -45,6 +45,10 @@ export const POST = withJsonError(async (request: Request) => {
     "acceptedAt",
   );
   const failedAt = parseOptionalHostedLinqDeliveryDate(body.failedAt, "failedAt");
+  const threadIsDirect = parseOptionalHostedLinqDeliveryBoolean(
+    body.threadIsDirect,
+    "threadIsDirect",
+  );
 
   if (!acceptedAt && !failedAt) {
     throw hostedOnboardingError({
@@ -67,6 +71,9 @@ export const POST = withJsonError(async (request: Request) => {
     body.attemptedAt,
     "attemptedAt",
   );
+  const answeredMailboxItemIds = acceptedAt
+    ? parseAnsweredMailboxItemIds(body.answeredMailboxItemIds)
+    : [];
   const providerTarget = readOptionalBodyString(body.providerTarget);
   const providerThreadId = readOptionalBodyString(body.providerThreadId);
   const target = readOptionalBodyString(body.target);
@@ -84,7 +91,6 @@ export const POST = withJsonError(async (request: Request) => {
   if (validatedRouteAuthority) {
     routeLineLookupKey = await readHostedLinqDeliveryRouteLineLookupKey({
       memberId: userId,
-      prisma,
       routeAuthority: validatedRouteAuthority,
     });
   } else if (!fromPhoneNumber) {
@@ -96,6 +102,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
   const result = await recordHostedLinqRuntimeDeliveryOutcomeTx({
     acceptedAt,
+    answeredMailboxItemIds,
     attemptedAt,
     failedAt,
     failureCode: readOptionalBodyString(body.failureCode),
@@ -109,6 +116,8 @@ export const POST = withJsonError(async (request: Request) => {
     sourceRef: readOptionalBodyString(body.intentId)
       ?? readOptionalBodyString(body.idempotencyKey),
     targetKind,
+    threadIsDirect,
+    userId,
   });
 
   return jsonOk({
@@ -119,9 +128,8 @@ export const POST = withJsonError(async (request: Request) => {
 
 async function readHostedLinqDeliveryRouteLineLookupKey(input: {
   memberId: string;
-  prisma: ReturnType<typeof getPrisma>;
   routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority;
-}): Promise<string> {
+}): Promise<string | null> {
   if (input.routeAuthority.containerMemberId !== input.memberId) {
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_DELIVERY_ROUTE_BOUND_USER_MISMATCH",
@@ -131,11 +139,55 @@ async function readHostedLinqDeliveryRouteLineLookupKey(input: {
     });
   }
 
-  const route = await assertHostedThreadRouteEgressAuthority({
-    authority: input.routeAuthority,
-    prisma: input.prisma,
-  });
-  return route.accountLookupKey;
+  // This is a post-send delivery-OUTCOME callback (Cloudflare-runner
+  // authenticated), not a routing decision. The cheap channel/chat/member
+  // consistency check already ran before this helper; the returned line key is
+  // used only to attribute the recorded outcome to a Linq line's stats. A stale
+  // route row cannot prevent a send that already happened, so it must not make
+  // outcome recording fail or trigger retries.
+  return input.routeAuthority.accountLookupKey?.trim() || null;
+}
+
+function parseAnsweredMailboxItemIds(value: unknown): string[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_IDS_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq delivery answered mailbox item ids must be an array.",
+      retryable: false,
+    });
+  }
+  const itemIds: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const itemId = readOptionalBodyString(entry);
+    if (!itemId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_INVALID",
+        httpStatus: 400,
+        message: "Hosted Linq delivery answered mailbox item id is invalid.",
+        retryable: false,
+      });
+    }
+    if (seen.has(itemId)) {
+      continue;
+    }
+    seen.add(itemId);
+    itemIds.push(itemId);
+    if (itemIds.length > HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_IDS_TOO_MANY",
+        httpStatus: 400,
+        message: "Hosted Linq delivery answered mailbox item ids are too many.",
+        retryable: false,
+      });
+    }
+  }
+
+  return itemIds;
 }
 
 async function readHostedLinqDeliveryMemberRouteLineLookupKey(input: {
@@ -217,6 +269,25 @@ function parseHostedLinqDeliveryTargetKind(
     code: "HOSTED_LINQ_DELIVERY_TARGET_KIND_INVALID",
     httpStatus: 400,
     message: "Hosted Linq delivery target kind is invalid.",
+    retryable: false,
+  });
+}
+
+function parseOptionalHostedLinqDeliveryBoolean(
+  value: unknown,
+  field: string,
+): boolean | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_DELIVERY_BOOLEAN_INVALID",
+    details: { code: field },
+    httpStatus: 400,
+    message: "Hosted Linq delivery boolean is invalid.",
     retryable: false,
   });
 }

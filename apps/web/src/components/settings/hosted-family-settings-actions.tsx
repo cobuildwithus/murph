@@ -2,9 +2,14 @@
 
 import { Check, Copy, Loader2, Minus } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
+import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
+import { usePhoneCountryCode } from "@/src/components/hosted-onboarding/phone-country-code-client-provider";
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import {
@@ -16,6 +21,13 @@ import {
 } from "@/src/components/ui/dialog";
 import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
+import { PhoneNumberInput } from "@/src/components/ui/phone-number-input";
+import { SegmentedControl } from "@/src/components/ui/segmented-control";
+import {
+  normalizeHostedEmailAddress,
+  normalizeHostedTelegramUsernameForLookup,
+} from "@/src/lib/hosted-onboarding/contact-normalization";
+import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/shared";
 import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
@@ -39,6 +51,16 @@ export interface FamilyManagerInvite {
   telegramInviteUrl: string | null;
 }
 
+interface CreatedFamilyInvite {
+  acceptUrl: string | null;
+  id: string;
+  targetEmail?: string | null;
+  targetLabel: string | null;
+  targetPhoneHint: string | null;
+  targetTelegramUsername?: string | null;
+  telegramInviteUrl: string | null;
+}
+
 function inviteContacts(invite: FamilyManagerInvite): string[] {
   return [
     invite.targetEmail,
@@ -51,12 +73,50 @@ function inviteDisplayName(invite: FamilyManagerInvite): string {
   return invite.targetLabel ?? inviteContacts(invite)[0] ?? "Pending invite";
 }
 
+function inviteShareLink(invite: {
+  acceptUrl: string | null;
+  targetTelegramUsername?: string | null;
+  telegramInviteUrl: string | null;
+}): string | null {
+  if (invite.targetTelegramUsername && invite.telegramInviteUrl) {
+    return invite.telegramInviteUrl;
+  }
+  return invite.acceptUrl ?? invite.telegramInviteUrl;
+}
+
 type PendingAction =
   | { id: string; kind: "cancel-invite"; label: string }
   | { id: string; kind: "remove-member"; label: string };
 
+type InviteChannel = "imessage" | "email" | "telegram";
+
+const INVITE_CHANNEL_OPTIONS: ReadonlyArray<{
+  label: string;
+  value: InviteChannel;
+}> = [
+  { label: "iMessage", value: "imessage" },
+  { label: "Email", value: "email" },
+  { label: "Telegram", value: "telegram" },
+];
 const DIALOG_CLASS =
   "max-w-md gap-6 border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7";
+const DEFAULT_INVITE_PHONE_COUNTRY_CODE = "US";
+
+function resolveInvitePhoneCountryOption(value: string | null | undefined) {
+  const normalized = value?.trim().toUpperCase() ?? null;
+  const option =
+    (normalized
+      ? HOSTED_PHONE_COUNTRY_OPTIONS.find((candidate) => candidate.code === normalized)
+      : null)
+    ?? HOSTED_PHONE_COUNTRY_OPTIONS.find(
+      (candidate) => candidate.code === DEFAULT_INVITE_PHONE_COUNTRY_CODE,
+    )
+    ?? HOSTED_PHONE_COUNTRY_OPTIONS[0];
+  if (!option) {
+    throw new Error("Phone country options are empty.");
+  }
+  return option;
+}
 
 export function HostedFamilyStartButton(props: {
   block?: boolean;
@@ -129,12 +189,19 @@ export function HostedFamilyManager(props: {
 }) {
   const router = useRouter();
   const [inviteOpen, setInviteOpen] = useState(false);
+  const phoneCountryCodeHint = usePhoneCountryCode();
+  const [phoneCountryCode, setPhoneCountryCode] = useState(() =>
+    resolveInvitePhoneCountryOption(phoneCountryCodeHint).code
+  );
+  const [inviteChannel, setInviteChannel] = useState<InviteChannel>("imessage");
   const [label, setLabel] = useState("");
   const [phone, setPhone] = useState("");
   const [telegram, setTelegram] = useState("");
   const [email, setEmail] = useState("");
   const [isInviting, setIsInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [createdInvite, setCreatedInvite] = useState<CreatedFamilyInvite | null>(null);
+  const [createdInviteCopied, setCreatedInviteCopied] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isActing, setIsActing] = useState(false);
@@ -143,47 +210,131 @@ export function HostedFamilyManager(props: {
   const [seatError, setSeatError] = useState<string | null>(null);
 
   const seatsFull = props.seats.remaining <= 0;
-  const inviteWillAddSeat =
-    props.billingActive && seatsFull && props.seats.billed < props.seats.max;
+  const selectedPhoneCountry = useMemo(
+    () => resolveInvitePhoneCountryOption(phoneCountryCode),
+    [phoneCountryCode],
+  );
+  const normalizedPhone = useMemo(
+    () => normalizePhoneNumberForCountry(phone, selectedPhoneCountry.dialCode),
+    [phone, selectedPhoneCountry.dialCode],
+  );
+  const trimmedLabel = label.trim();
+  const trimmedEmail = email.trim();
+  const trimmedTelegram = telegram.trim();
+  const normalizedEmail = normalizeHostedEmailAddress(email);
+  const normalizedTelegram = normalizeHostedTelegramUsernameForLookup(telegram);
+  const activeContactInput = (() => {
+    if (inviteChannel === "imessage") {
+      return phone.trim();
+    }
+    if (inviteChannel === "email") {
+      return trimmedEmail;
+    }
+    return trimmedTelegram;
+  })();
+  const planCanGrow = props.billingActive && seatsFull && props.seats.billed < props.seats.max;
+  // A seat is only auto-added for invites the server can dedup on retry, so the
+  // paid CTA and addSeatIfNeeded flag require a contact on the active channel.
+  const hasStableTarget =
+    inviteChannel === "imessage"
+      ? Boolean(normalizedPhone)
+      : inviteChannel === "email"
+        ? Boolean(normalizedEmail)
+        : Boolean(normalizedTelegram);
+  const activeContactInputNoun =
+    inviteChannel === "imessage"
+      ? "phone number"
+      : inviteChannel === "email"
+        ? "email"
+        : "Telegram username";
+  const inviteWillAddSeat = planCanGrow && hasStableTarget;
+  const inviteNeedsStableTargetForSeat = planCanGrow && !hasStableTarget;
+  const inviteSubmitDisabled = isInviting || inviteNeedsStableTargetForSeat;
   const inviteDisabled = !props.billingActive || props.seats.used >= props.seats.max;
   const canRemoveSeat =
     props.billingActive &&
     props.seats.billed > props.seats.used &&
     props.seats.billed > props.seats.min;
+  const createdInviteHasContact = Boolean(
+    createdInvite?.targetEmail ||
+      createdInvite?.targetPhoneHint ||
+      createdInvite?.targetTelegramUsername,
+  );
 
   function resetInviteForm() {
+    setInviteChannel("imessage");
     setLabel("");
     setPhone("");
     setTelegram("");
     setEmail("");
     setInviteError(null);
+    setCreatedInvite(null);
+    setCreatedInviteCopied(false);
+  }
+
+  function changeInviteChannel(nextChannel: InviteChannel) {
+    setInviteChannel(nextChannel);
+    setInviteError(null);
   }
 
   async function submitInvite() {
-    if (!phone.trim() && !telegram.trim() && !email.trim() && !label.trim()) {
-      setInviteError("Add a phone number, email, Telegram username, or name.");
+    if (!activeContactInput && !trimmedLabel) {
+      setInviteError("Add a name or a contact first.");
+      return;
+    }
+    if (inviteChannel === "imessage" && phone.trim() && !normalizedPhone) {
+      setInviteError(`Enter a valid phone number for ${selectedPhoneCountry.label}.`);
+      return;
+    }
+    if (inviteChannel === "email" && trimmedEmail && !normalizedEmail) {
+      setInviteError("Enter a valid email address.");
+      return;
+    }
+    if (inviteChannel === "telegram" && trimmedTelegram && !normalizedTelegram) {
+      setInviteError("Enter a valid Telegram username.");
       return;
     }
     setInviteError(null);
+    setCreatedInvite(null);
+    setCreatedInviteCopied(false);
     setIsInviting(true);
     try {
-      await requestHostedOnboardingJson({
+      const response = await requestHostedOnboardingJson<{
+        invite: CreatedFamilyInvite;
+      }>({
         method: "POST",
         payload: {
           // Only authorize buying a seat when the dialog actually showed the
           // paid-seat cost, so a stale open-seat form never charges silently.
           addSeatIfNeeded: inviteWillAddSeat,
-          targetEmail: email.trim() || undefined,
-          targetLabel: label.trim() || undefined,
-          targetPhoneNumber: phone.trim() || undefined,
-          targetTelegramUsername: telegram.trim() || undefined,
+          targetLabel: trimmedLabel || undefined,
+          ...(inviteChannel === "imessage" && normalizedPhone
+            ? { targetPhoneNumber: normalizedPhone }
+            : {}),
+          ...(inviteChannel === "email" && normalizedEmail ? { targetEmail: normalizedEmail } : {}),
+          ...(inviteChannel === "telegram" && normalizedTelegram
+            ? { targetTelegramUsername: normalizedTelegram }
+            : {}),
         },
         url: "/api/settings/billing/family/invite",
       });
-      setInviteOpen(false);
-      resetInviteForm();
+      setCreatedInvite({
+        ...response.invite,
+        targetEmail: inviteChannel === "email" ? normalizedEmail : null,
+        targetPhoneHint:
+          inviteChannel === "imessage" && normalizedPhone ? response.invite.targetPhoneHint : null,
+        targetTelegramUsername: inviteChannel === "telegram" ? normalizedTelegram : null,
+      });
       router.refresh();
     } catch (error) {
+      // The seat was added but Stripe is still confirming: refresh so the new
+      // seat shows, and keep the dialog open so the owner can resend in a moment.
+      if (
+        error instanceof HostedOnboardingApiError &&
+        error.code === "HOSTED_FAMILY_SEAT_ADDED_SYNCING"
+      ) {
+        router.refresh();
+      }
       setInviteError(toErrorMessage(error, "Could not create the invite right now."));
     } finally {
       setIsInviting(false);
@@ -241,7 +392,7 @@ export function HostedFamilyManager(props: {
   }
 
   async function copyInviteLink(invite: FamilyManagerInvite) {
-    const link = invite.acceptUrl ?? invite.telegramInviteUrl;
+    const link = inviteShareLink(invite);
     if (!link) {
       return;
     }
@@ -252,6 +403,28 @@ export function HostedFamilyManager(props: {
     } catch {
       setCopiedId(null);
     }
+  }
+
+  async function copyCreatedInviteLink() {
+    if (!createdInvite) {
+      return;
+    }
+    const link = inviteShareLink(createdInvite);
+    if (!link) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(link);
+      setCreatedInviteCopied(true);
+      window.setTimeout(() => setCreatedInviteCopied(false), 2_000);
+    } catch {
+      setCreatedInviteCopied(false);
+    }
+  }
+
+  function closeInviteDialog() {
+    setInviteOpen(false);
+    resetInviteForm();
   }
 
   return (
@@ -266,13 +439,10 @@ export function HostedFamilyManager(props: {
           </div>
           <p className="text-xs text-muted-foreground">
             {seatsFull
-              ? inviteWillAddSeat
-                ? `No open seats. Inviting adds a paid seat at ${props.seatPrice}.`
+              ? planCanGrow
+                ? `No open seats. Inviting with a contact adds a paid seat at ${props.seatPrice}.`
                 : "All seats are full. Remove a member or cancel an invite to free one."
               : `${props.seats.remaining} paid ${props.seats.remaining === 1 ? "seat" : "seats"} open`}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Family supports {props.seats.min} to {props.seats.max} people.
           </p>
           {seatError ? (
             <p role="alert" className="max-w-sm text-xs leading-tight text-destructive">
@@ -357,7 +527,7 @@ export function HostedFamilyManager(props: {
         ))}
 
         {props.invites.map((invite) => {
-          const link = invite.acceptUrl ?? invite.telegramInviteUrl;
+          const link = inviteShareLink(invite);
           const secondary = invite.targetLabel ? inviteContacts(invite)[0] ?? null : null;
           return (
             <tr key={invite.id}>
@@ -423,110 +593,176 @@ export function HostedFamilyManager(props: {
         </p>
       ) : null}
 
-      <Dialog open={inviteOpen} onOpenChange={(open) => { if (!open) { setInviteOpen(false); resetInviteForm(); } }}>
+      <Dialog open={inviteOpen} onOpenChange={(open) => { if (!open) { closeInviteDialog(); } }}>
         <DialogContent className={DIALOG_CLASS}>
           <DialogHeader className="pr-10">
             <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-              Invite a family member
+              {createdInvite ? "Invite created" : "Invite a family member"}
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-[#736a58]">
-              They join from their own phone or Telegram. Their Murph stays private to them.
+              {createdInvite
+                ? "Copy the link and send it to them yourself."
+                : "You'll get a link to send them yourself. Murph won't message them."}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="family-invite-label">Name (optional)</Label>
-              <Input
-                id="family-invite-label"
-                value={label}
-                onChange={(event) => setLabel(event.target.value)}
-                placeholder="Mom"
-                autoComplete="off"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="family-invite-phone">Phone number</Label>
-              <Input
-                id="family-invite-phone"
-                value={phone}
-                onChange={(event) => setPhone(event.target.value)}
-                placeholder="+1 555 000 1234"
-                inputMode="tel"
-                autoComplete="off"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="family-invite-email">Email (optional)</Label>
-              <Input
-                id="family-invite-email"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="mom@example.com"
-                inputMode="email"
-                autoComplete="off"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="family-invite-telegram">Telegram username (optional)</Label>
-              <Input
-                id="family-invite-telegram"
-                value={telegram}
-                onChange={(event) => setTelegram(event.target.value)}
-                placeholder="@username"
-                autoComplete="off"
-              />
-            </div>
-            <p className="text-xs leading-5 text-[#736a58]">
-              Add a phone, email, or Telegram username so they can join.
-            </p>
-            {inviteWillAddSeat ? (
-              <p
-                role="status"
-                className="rounded-lg border border-[#c4a882]/25 bg-[#fffcf6] p-3 text-xs leading-5 text-[#736a58]"
+          {createdInvite ? (
+            <div className="flex flex-col gap-4">
+              <div className="rounded-lg border border-[#c4a882]/25 bg-[#f5f0e8] p-4">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                    <Check className="size-4" aria-hidden="true" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[#2d3436]">
+                      Send this invite to {createdInvite.targetLabel ?? createdInvite.targetPhoneHint ?? "your family member"}.
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-[#736a58]">
+                      {createdInviteHasContact
+                        ? "Only they can use this invite."
+                        : "Anyone with this link can join."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="xl"
+                onClick={() => void copyCreatedInviteLink()}
+                disabled={!inviteShareLink(createdInvite)}
+                className="w-full"
               >
-                No open seats — inviting adds a paid seat at {props.seatPrice}.
-              </p>
-            ) : null}
-          </div>
+                {createdInviteCopied ? (
+                  <>
+                    <Check className="size-4" aria-hidden="true" /> Copied invite link
+                  </>
+                ) : (
+                  <>
+                    <Copy className="size-4" aria-hidden="true" /> Copy invite link
+                  </>
+                )}
+              </Button>
+              <Button type="button" size="xl" variant="ghost" onClick={closeInviteDialog} className="w-full">
+                Done
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="family-invite-label">Name</Label>
+                  <Input
+                    id="family-invite-label"
+                    value={label}
+                    onChange={(event) => setLabel(event.target.value)}
+                    placeholder="Mom"
+                    autoComplete="off"
+                    autoFocus
+                    className="h-12 text-base"
+                  />
+                </div>
 
-          {inviteError ? (
-            <p
-              role="alert"
-              className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
-            >
-              {inviteError}
-            </p>
-          ) : null}
+                <SegmentedControl
+                  aria-label="Invite by"
+                  options={INVITE_CHANNEL_OPTIONS}
+                  value={inviteChannel}
+                  onValueChange={changeInviteChannel}
+                  className="border-[#c4a882]/25 bg-[#f5f0e8]"
+                  itemClassName="text-[#736a58] hover:bg-[#fffcf6]/70 hover:text-[#2d3436] aria-pressed:bg-[#fffcf6] aria-pressed:text-[#2d3436] aria-pressed:shadow-none"
+                />
 
-          <div className="flex flex-col gap-2">
-            <Button
-              type="button"
-              size="xl"
-              onClick={() => void submitInvite()}
-              disabled={isInviting}
-              className="w-full"
-            >
-              {isInviting ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-              ) : inviteWillAddSeat ? (
-                `Invite & add seat · ${props.seatPrice}`
-              ) : (
-                "Create invite"
-              )}
-            </Button>
-            <Button
-              type="button"
-              size="xl"
-              variant="ghost"
-              onClick={() => { setInviteOpen(false); resetInviteForm(); }}
-              disabled={isInviting}
-              className="w-full"
-            >
-              Cancel
-            </Button>
-          </div>
+                {inviteChannel === "imessage" ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="family-invite-phone">Phone number</Label>
+                    <PhoneNumberInput
+                      id="family-invite-phone"
+                      autoComplete="off"
+                      inputName="family-invite-phone"
+                      options={HOSTED_PHONE_COUNTRY_OPTIONS}
+                      selectedCountry={selectedPhoneCountry}
+                      value={phone}
+                      onCountryChange={setPhoneCountryCode}
+                      onPhoneNumberChange={setPhone}
+                    />
+                  </div>
+                ) : null}
+                {inviteChannel === "email" ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="family-invite-email">Email</Label>
+                    <Input
+                      id="family-invite-email"
+                      type="email"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      placeholder="mom@example.com"
+                      inputMode="email"
+                      autoComplete="off"
+                    />
+                  </div>
+                ) : null}
+                {inviteChannel === "telegram" ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="family-invite-telegram">Telegram username</Label>
+                    <Input
+                      id="family-invite-telegram"
+                      value={telegram}
+                      onChange={(event) => setTelegram(event.target.value)}
+                      placeholder="@username"
+                      autoComplete="off"
+                    />
+                  </div>
+                ) : null}
+                {inviteNeedsStableTargetForSeat ? (
+                  <p role="status" className="text-xs leading-5 text-[#736a58]">
+                    {activeContactInput
+                      ? `Enter a valid ${activeContactInputNoun} to invite. It adds a paid seat at ${props.seatPrice}.`
+                      : `Add a contact to invite. It adds a paid seat at ${props.seatPrice}.`}
+                  </p>
+                ) : !activeContactInput ? (
+                  <p className="text-xs leading-5 text-[#736a58]">
+                    No contact? Anyone with the link can join.
+                  </p>
+                ) : null}
+              </div>
+
+              {inviteError ? (
+                <p
+                  role="alert"
+                  className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive [overflow-wrap:anywhere]"
+                >
+                  {inviteError}
+                </p>
+              ) : null}
+
+              <div className="flex flex-col gap-2">
+                <Button
+                  type="button"
+                  size="xl"
+                  onClick={() => void submitInvite()}
+                  disabled={inviteSubmitDisabled}
+                  className="w-full"
+                >
+                  {isInviting ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                  ) : inviteWillAddSeat ? (
+                    `Create invite & add seat · ${props.seatPrice}`
+                  ) : (
+                    "Create invite"
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  size="xl"
+                  variant="ghost"
+                  onClick={closeInviteDialog}
+                  disabled={isInviting}
+                  className="w-full"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -538,7 +774,7 @@ export function HostedFamilyManager(props: {
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-[#736a58]">
               {pendingAction?.kind === "remove-member"
-                ? `Remove ${pendingAction.label}? They keep their own Murph account and data, but sponsored access ends.`
+                ? `Remove ${pendingAction.label}? They keep their own Murph account and data, but their access through your Family plan ends.`
                 : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
             </DialogDescription>
           </DialogHeader>

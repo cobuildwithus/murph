@@ -115,6 +115,30 @@ export const ASSISTANT_SKILLS = [
     triggerHint:
       'Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development. For a named event, date, competition category, qualifying target, concrete benchmark, or event-specific performance goal, use competition-training when registered; otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression. Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance. Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
   },
+  {
+    slug: 'group-chat',
+    name: 'group-chat',
+    triggerHint:
+      'Read before replying in any group chat, meaning any conversation with multiple human participants, such as when the murph.group tool is available or inbound messages carry sender handles. Governs when to reply, stay silent, react, or joke, and how to use shared challenge data.',
+  },
+  {
+    slug: 'groupchat-comedy',
+    name: 'groupchat-comedy',
+    triggerHint:
+      'Read before composing any group-chat message in a challenge or banter context: kickoffs, daily dispatches, score updates, replies to trash talk, rulings, verdicts, comics, songs, or voice memos. Governs the referee comedy engine, roast hierarchy, register flips between group humor and private care, canon and callback management, dispatch format rotation, and the hard safety limits that outrank every joke.',
+  },
+  {
+    slug: 'group-challenge',
+    name: 'group-challenge',
+    triggerHint:
+      'Read whenever a group chat starts, runs, scores, or closes a challenge, and on every scheduled challenge dispatch. Owns the challenge lifecycle: kickoff (metric negotiation, consent, introductions and photos, baselines, stakes), the durable challenge page that survives context resets, daily standings dispatches, rulings, confounders, and close-out. Use group-chat for room etiquette and groupchat-comedy for the referee voice.',
+  },
+  {
+    slug: 'music-generation',
+    name: 'music-generation',
+    triggerHint:
+      'Read before calling the generate_song tool or writing any music prompt, including reminder songs, group-challenge hype tracks, jingles, celebration anthems, and any generated song or instrumental. Owns how to write the ElevenLabs music prompt (genre, instrumentation, tempo, key, vocals, lyrics, structure, instrumental-only, and duration), the copyright-safe style rules, and the reggae house-style default. Use behavior-followthrough and groupchat-comedy to decide when to send a song; use this to decide what prompt to send.',
+  },
 ] as const
 
 export type AssistantSkillSlug = typeof ASSISTANT_SKILLS[number]['slug']

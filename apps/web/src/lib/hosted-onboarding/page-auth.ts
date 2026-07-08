@@ -9,7 +9,7 @@ import {
   anonymousHostedSidebarAuthSnapshot,
   type HostedSidebarAuthSnapshot,
 } from "./sidebar-auth";
-import { hasActiveHostedFamilyAccess } from "./family-plan";
+import { readActiveHostedMemberAccess } from "./member-access";
 import { deriveHostedPostVerificationStage } from "./lifecycle";
 
 export interface HostedPageAuthSnapshot {
@@ -58,18 +58,15 @@ export async function redirectHostedDashboardCheckoutIfNeeded(
     return;
   }
 
-  const stageWithoutFamilyAccess = deriveHostedPostVerificationStage({
+  const stageWithoutSponsoredAccess = deriveHostedPostVerificationStage({
     billingStatus: member.billingStatus,
     suspendedAt: member.suspendedAt,
   });
-  if (stageWithoutFamilyAccess !== "checkout") {
+  if (stageWithoutSponsoredAccess !== "checkout") {
     return;
   }
 
-  const familyAccessActive = await hasActiveHostedFamilyAccess({
-    memberId: member.id,
-  });
-  if (familyAccessActive) {
+  if (await readActiveHostedMemberAccess({ memberId: member.id })) {
     return;
   }
 
@@ -99,6 +96,10 @@ async function getHostedAppSessionForPublicPageAuth(): Promise<HostedAppSession 
     return await getHostedAppSession();
   } catch (error) {
     if (isHostedSessionStoreUnavailableError(error)) {
+      console.warn("Hosted app session store unavailable during public page auth.", {
+        code: getErrorStringField(error, "code"),
+        name: getErrorStringField(error, "name"),
+      });
       return null;
     }
 

@@ -299,7 +299,7 @@ test("pending success page shows email support after the setup delay", async () 
 
   assert.match(view.container.textContent ?? "", /Setup is taking longer than expected/);
   assert.match(view.container.textContent ?? "", /Support ready/);
-  assert.match(view.container.textContent ?? "", /the draft will include the setup context we need/);
+  assert.match(view.container.textContent ?? "", /The draft already includes the details we need/);
   assert.match(view.container.textContent ?? "", /Email support/);
 
   const supportButton = findButtonByText(view.container, /Email support/);

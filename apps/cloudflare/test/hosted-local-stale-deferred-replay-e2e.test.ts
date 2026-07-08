@@ -92,7 +92,10 @@ describe("hosted local stale deferred invocation recovery", () => {
       await seedActivatedWorkspaceCheckpoint();
 
       const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
-      requireScenario().queueAssistantResponses([replyText]);
+      const inboundText = "stale deferred turn";
+      requireScenario().queueAssistantResponses([replyText], {
+        matchInputContains: inboundText,
+      });
 
       const initialStatus = await readHostedRunnerStatusWithLogLimit(100);
       const initialConversationSeq = readConversationMaxSeq(initialStatus);
@@ -108,7 +111,7 @@ describe("hosted local stale deferred invocation recovery", () => {
         buildHostedLinqInboundEvent(userId, chatId, {
           eventId: `evt_stale_deferred_${runId}`,
           messageId: `msg_stale_deferred_${runId}`,
-          text: "stale deferred turn",
+          text: inboundText,
         }),
       );
       expect(webhookResponse.status).toBe(202);

@@ -22,9 +22,13 @@ type AssistantVaultFileResponseMedia = Extract<
   { kind: 'vault_file' }
 >
 
+export interface AssistantChannelActivityStopOptions {
+  providerStop?: boolean
+}
+
 export interface AssistantChannelActivityHandle {
   refreshNow?: () => Promise<void>
-  stop: () => Promise<void>
+  stop: (options?: AssistantChannelActivityStopOptions) => Promise<void>
 }
 
 export interface TelegramRuntimeDependencies {
@@ -41,6 +45,7 @@ export interface EmailRuntimeDependencies {
 export interface LinqRuntimeDependencies {
   env?: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
+  publicFetchImplementation?: LinqFetch
   loadVaultFile?: (
     media: AssistantVaultFileResponseMedia,
   ) => Promise<Uint8Array>
@@ -59,6 +64,8 @@ export interface AssistantChannelDependencies {
   signal?: AbortSignal
   startLinqTyping?: (input: {
     target: string
+    targetKind?: AssistantChannelDeliveryTargetKind | null
+    replyToMessageId?: string | null
   }) => Promise<AssistantChannelActivityHandle | void>
   startTelegramTyping?: (input: {
     target: string
@@ -130,6 +137,7 @@ export interface AssistantChannelDependencies {
   >
   telegramVoiceMemoRuntime?: TelegramRuntimeDependencies
   sendLinq?: (input: {
+    answeredMailboxItemIds?: readonly string[] | null
     directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
     idempotencyKey?: string | null
@@ -150,6 +158,7 @@ export interface AssistantChannelDependencies {
     | void
   >
   sendLinqVoiceMemo?: (input: {
+    answeredMailboxItemIds?: readonly string[] | null
     attachmentId: string
     replyToMessageId?: string | null
     signal?: AbortSignal
@@ -224,6 +233,7 @@ export interface AssistantChannelAdapter {
       bindingDelivery: AssistantBindingDelivery | null
       explicitTarget: string | null
       identityId: string | null
+      replyToMessageId?: string | null
     },
     dependencies: AssistantChannelDependencies,
   ) => Promise<AssistantChannelActivityHandle | null>
@@ -231,6 +241,7 @@ export interface AssistantChannelAdapter {
   send: (
     input: {
       actorId: string | null
+      answeredMailboxItemIds?: readonly string[] | null
       bindingDelivery: AssistantBindingDelivery | null
       deliverySource?: AssistantDeliverySource | null
       explicitTarget: string | null
@@ -271,6 +282,7 @@ export interface AssistantChannelAdapterSpec {
     candidate: AssistantDeliveryCandidate
     dependencies: AssistantChannelDependencies
     identityId: string | null
+    replyToMessageId: string | null
   }) => Promise<AssistantChannelActivityHandle | null | void>
   supportsIdempotencyKey: boolean
   resolveDeliveryTransportIdempotent?: (input: {
@@ -279,6 +291,7 @@ export interface AssistantChannelAdapterSpec {
   }) => boolean
   sendMessage: (input: {
     actorId: string | null
+    answeredMailboxItemIds?: readonly string[] | null
     candidate: AssistantDeliveryCandidate
     deliverySource?: AssistantDeliverySource | null
     dependencies: AssistantChannelDependencies

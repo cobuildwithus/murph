@@ -401,16 +401,24 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   supportedResponseMediaKinds: ['image', 'voice_memo', 'vault_file'],
   targetRequiredMessage:
     'iMessage delivery requires an explicit chat id or a stored thread binding.',
-  async startTypingIndicator({ candidate, dependencies }) {
-    const startTyping = dependencies.startLinqTyping ?? startLinqTypingIndicator
-    return (await startTyping({
+  async startTypingIndicator({ candidate, dependencies, replyToMessageId }) {
+    if (dependencies.startLinqTyping) {
+      return (await dependencies.startLinqTyping({
+        replyToMessageId,
+        target: candidate.target,
+        targetKind: candidate.kind,
+      })) ?? null
+    }
+
+    return (await startLinqTypingIndicator({
       target: candidate.target,
     })) ?? null
   },
-  async sendMessage({ actorId, candidate, deliverySource, dependencies, idempotencyKey, media, message, replyToMessageId }) {
+  async sendMessage({ actorId, answeredMailboxItemIds, candidate, deliverySource, dependencies, idempotencyKey, media, message, replyToMessageId }) {
     if (hasVoiceMemoMedia(media)) {
       return await sendLinqVoiceMemoDelivery({
         actorId,
+        answeredMailboxItemIds,
         candidate,
         deliverySource,
         dependencies,
@@ -437,6 +445,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       delivered = dependencies.sendLinq
         ? await dependencies.sendLinq({
             ...request,
+            answeredMailboxItemIds: answeredMailboxItemIds ?? [],
             directRecipientPhoneNumber: normalizeDirectLinqRecipient(actorId),
             ...(mediaInput ? { media: mediaInput } : {}),
           })
@@ -498,6 +507,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
 
 async function sendLinqVoiceMemoDelivery(input: {
   actorId: string | null
+  answeredMailboxItemIds?: readonly string[] | null
   candidate: AssistantDeliveryCandidate
   deliverySource?: AssistantDeliverySource | null
   dependencies: AssistantChannelDependencies
@@ -558,6 +568,7 @@ async function sendLinqVoiceMemoDelivery(input: {
       deliveredText = input.dependencies.sendLinq
         ? await input.dependencies.sendLinq({
             directRecipientPhoneNumber: normalizeDirectLinqRecipient(input.actorId),
+            answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
             fromPhoneNumber:
               input.deliverySource?.kind === 'linq'
                 ? input.deliverySource.fromPhoneNumber
@@ -628,6 +639,7 @@ async function sendLinqVoiceMemoDelivery(input: {
   try {
     deliveredVoiceMemo = input.dependencies.sendLinqVoiceMemo
       ? await input.dependencies.sendLinqVoiceMemo({
+          answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
           attachmentId,
           replyToMessageId: input.replyToMessageId ?? null,
           target: voiceMemoTarget,

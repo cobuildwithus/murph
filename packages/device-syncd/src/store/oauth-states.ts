@@ -14,6 +14,7 @@ interface OAuthStateRow {
   metadata_json: string | null;
   created_at: string;
   expires_at: string;
+  consumed_at: string | null;
 }
 
 function mapOAuthStateRow(row: OAuthStateRow | undefined): OAuthStateRecord | null {
@@ -63,7 +64,7 @@ export function consumeOAuthState(
 ): ConsumeOAuthStateResult {
   return withImmediateTransaction(database, () => {
     const row = database.prepare(`
-      select state, provider, owner_id, return_to, metadata_json, created_at, expires_at
+      select state, provider, owner_id, return_to, metadata_json, created_at, expires_at, consumed_at
       from oauth_state
       where state = ?
     `).get(state) as OAuthStateRow | undefined;
@@ -94,15 +95,24 @@ export function consumeOAuthState(
       };
     }
 
-    const deleteResult = expectedOwnerId
-      ? database.prepare("delete from oauth_state where state = ? and provider = ? and owner_id = ?")
-        .run(state, row.provider, expectedOwnerId) as { changes: number }
-      : database.prepare("delete from oauth_state where state = ? and provider = ?")
-        .run(state, row.provider) as { changes: number };
-
-    if ((deleteResult.changes ?? 0) !== 1) {
+    if (row.consumed_at !== null) {
       return {
-        status: "missing",
+        status: "replayed",
+        record: mapOAuthStateRow(row)!,
+      };
+    }
+
+    // Mark instead of delete so a redelivered callback stays distinguishable
+    // from an unknown state until the row expires; duplicate or concurrent
+    // consumers resolve to "replayed" instead of doing the work again.
+    const consumeResult = database.prepare(
+      "update oauth_state set consumed_at = ? where state = ? and consumed_at is null",
+    ).run(now, state) as { changes: number };
+
+    if ((consumeResult.changes ?? 0) !== 1) {
+      return {
+        status: "replayed",
+        record: mapOAuthStateRow(row)!,
       };
     }
 

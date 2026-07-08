@@ -5,6 +5,7 @@ import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
 import { buildTimeline, type TimelineEntry } from "../timeline.ts";
 import { createVaultReadModel, type VaultReadModel } from "../read-model.ts";
+import { resolveAdherenceObservationActivityKind } from "../experiment-adherence.ts";
 import {
   buildWearableAssistantSummary,
   summarizeWearableSourceHealth,
@@ -437,17 +438,27 @@ function projectSafeEventAttributes(entity: CanonicalEntity): Record<string, unk
   }
 
   switch (entity.kind) {
+    case "activity_session": {
+      const attributes = projectSafeAttributeKeys(entity, ["source"]);
+      const activityKind = resolveAdherenceObservationActivityKind({ attributes: entity.attributes });
+      if (activityKind) {
+        attributes.activityKind = activityKind;
+      }
+      return attributes;
+    }
     case "intervention_session":
       return projectSafeAttributeKeys(entity, [
         "afterExercise",
         "confounders",
         "experimentId",
         "experimentSlug",
+        "interventionType",
         "note",
         "protocolId",
         "sessionStatus",
         "sessionLocalDate",
         "scheduledLocalDate",
+        "source",
         "symptoms",
       ]);
     case "experiment_context":

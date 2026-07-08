@@ -322,6 +322,169 @@ test("hosted web private-field encryption uses already-provisioned control roots
   assert.equal(tx.persistedEnvelopes.length, 1);
 });
 
+test("domain root unwraps are memoized inside the scoped cache and wiped at scope end", async () => {
+  const { tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    unwrapHostedDomainRootForWeb,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.provision",
+    userId: "member-test-memo",
+  });
+
+  const counting = createEnvelopeReadCountingClient(tx.prisma);
+  const keys: Uint8Array[] = [];
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const first = await unwrapHostedDomainRootForWeb({
+      domain: "control",
+      prisma: counting.client,
+      userId: "member-test-memo",
+    });
+    const readsAfterFirst = counting.readCount();
+    assert.ok(readsAfterFirst > 0);
+
+    const second = await unwrapHostedDomainRootForWeb({
+      domain: "control",
+      prisma: counting.client,
+      userId: "member-test-memo",
+    });
+    assert.equal(counting.readCount(), readsAfterFirst);
+
+    // Callers receive independent copies so per-call zeroization cannot
+    // corrupt later unwraps.
+    assert.notEqual(first.rootKey, second.rootKey);
+    assert.deepEqual(Array.from(first.rootKey), Array.from(second.rootKey));
+    first.rootKey.fill(0);
+    assert.ok(second.rootKey.some((byte) => byte !== 0));
+    keys.push(second.rootKey);
+  });
+  assert.ok(keys[0]);
+
+  // Outside a scope every unwrap re-reads (no ambient caching).
+  const outside = createEnvelopeReadCountingClient(tx.prisma);
+  await unwrapHostedDomainRootForWeb({
+    domain: "control",
+    prisma: outside.client,
+    userId: "member-test-memo",
+  });
+  const outsideFirst = outside.readCount();
+  await unwrapHostedDomainRootForWeb({
+    domain: "control",
+    prisma: outside.client,
+    userId: "member-test-memo",
+  });
+  assert.ok(outside.readCount() > outsideFirst);
+});
+
+test("scoped domain root cache does not cache failed unwraps", async () => {
+  const { tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    unwrapHostedDomainRootForWeb,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(unwrapHostedDomainRootForWeb({
+      domain: "control",
+      prisma: tx.prisma,
+      userId: "member-test-retry",
+    })).rejects.toThrow();
+
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain: "control",
+      prisma: tx.prisma,
+      reason: "test.provision",
+      userId: "member-test-retry",
+    });
+
+    const retried = await unwrapHostedDomainRootForWeb({
+      domain: "control",
+      prisma: tx.prisma,
+      userId: "member-test-retry",
+    });
+    assert.ok(retried.rootKey.some((byte) => byte !== 0));
+  });
+});
+
+test("webhook-style multi-field crypto reuses one unwrap per domain inside the scope", async () => {
+  const { tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.provision",
+    userId: "member-test-fields",
+  });
+
+  const counting = createEnvelopeReadCountingClient(tx.prisma);
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const ciphertexts = await Promise.all([
+      encryptHostedWebNullableString({
+        field: "hosted-member-identity.phone-number",
+        memberId: "member-test-fields",
+        prisma: counting.client,
+        value: "redacted-phone-token",
+      }),
+      encryptHostedWebNullableString({
+        field: "hosted-member-routing.linq-chat-id",
+        memberId: "member-test-fields",
+        prisma: counting.client,
+        value: "redacted-chat-token",
+      }),
+    ]);
+    const readsAfterSeals = counting.readCount();
+    assert.equal(readsAfterSeals, 1);
+
+    await expect(decryptHostedWebNullableString({
+      field: "hosted-member-identity.phone-number",
+      memberId: "member-test-fields",
+      prisma: counting.client,
+      value: ciphertexts[0],
+    })).resolves.toBe("redacted-phone-token");
+    await expect(decryptHostedWebNullableString({
+      field: "hosted-member-routing.linq-chat-id",
+      memberId: "member-test-fields",
+      prisma: counting.client,
+      value: ciphertexts[1],
+    })).resolves.toBe("redacted-chat-token");
+    // Decrypts key the cache by rootKeyId, so both opens share one more read.
+    assert.equal(counting.readCount(), readsAfterSeals + 1);
+  });
+});
+
+function createEnvelopeReadCountingClient(
+  base: HostedCryptoTestTransaction["prisma"],
+): { client: HostedCryptoTestTransaction["prisma"]; readCount: () => number } {
+  let reads = 0;
+  const client = {
+    ...base,
+    $queryRaw: async (...args: Parameters<typeof base.$queryRaw>) => {
+      reads += 1;
+      return base.$queryRaw(...args);
+    },
+  };
+  return {
+    client: client as HostedCryptoTestTransaction["prisma"],
+    readCount: () => reads,
+  };
+}
+
 test("hosted member identity upsert keeps private-field crypto inside the caller transaction", async () => {
   const { encryptCalls, signCalls, tx } = await createHostedWebCryptoTransactionFixture(
     createHostedMemberIdentityTransaction,

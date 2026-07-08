@@ -15,6 +15,10 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  createHostedEmailGroupReplyAliasRoute,
+  HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
+} from "@murphai/hosted-execution/hosted-email";
+import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -74,6 +78,7 @@ import {
   readHostedEmailRawMessageRecoveryRef,
   writeHostedEmailRawMessage,
 } from "../src/hosted-email.ts";
+import { sendHostedEmailMessage } from "../src/hosted-email/transport.ts";
 import { handleHostedEmailIngress as handleHostedEmailIngressImpl } from "../src/hosted-email/worker-ingress.ts";
 import type { WorkerEnvironmentSource } from "../src/worker-routes/shared.ts";
 
@@ -118,6 +123,14 @@ function handleHostedEmailIngress(
   return handleHostedEmailIngressImpl(workerMessage, env, ctx, {
     trustedSenderVerifier: () => authenticatedSender ?? null,
   });
+}
+
+function handleHostedEmailIngressProduction(
+  message: Parameters<typeof handleHostedEmailIngressImpl>[0],
+  env: Parameters<typeof handleHostedEmailIngressImpl>[1],
+  ctx?: Parameters<typeof handleHostedEmailIngressImpl>[2],
+) {
+  return handleHostedEmailIngressImpl(message, env, ctx);
 }
 
 class RecoveryWriteFailureBucket extends MemoryEncryptedR2Bucket {
@@ -374,6 +387,273 @@ describe("hosted email worker ingress", () => {
       from: "Owner <owner@example.com>",
       to: replyAliasAddress,
     })));
+  });
+
+  it("preserves signed group reply aliases from newsletter send through email reply ingress and follow-up fanout", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const emailBinding = {
+      send: vi.fn(async (_message: unknown) => undefined),
+    };
+    const groupId = "hgrp_AAAAAAAAAAAAAAAA";
+    mocks.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          recipients: [
+            { address: "member-one@example.test", memberId: "member_one" },
+            { address: "member-two@example.test", memberId: "member_two" },
+          ],
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: "group_runtime_member",
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          recipients: [
+            { address: "member-two@example.test", memberId: "member_two" },
+            { address: "member-three@example.test", memberId: "member_three" },
+          ],
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
+
+    await sendHostedEmailMessage({
+      config: createHostedEmailConfig(),
+      emailBinding,
+      request: {
+        idempotencyKey: "group-newsletter:test-edition",
+        message: "weekly note",
+        subject: "Weekly health note",
+        target: groupId,
+        targetKind: "group",
+      },
+      userId: "group_runtime_member",
+      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
+    });
+
+    const firstMessage = emailBinding.send.mock.calls[0]?.[0] as {
+      raw: string;
+    } | undefined;
+    const replyAliasAddress = firstMessage?.raw.match(/^Reply-To: ([^\r\n]+)$/mu)?.[1];
+    expect(replyAliasAddress).toMatch(/^assistant\+g2-/u);
+
+    if (!replyAliasAddress) {
+      throw new Error("Expected hosted group newsletter send to include a Reply-To alias.");
+    }
+
+    await handleHostedEmailIngressProduction({
+      from: "member-one@example.test",
+      raw: buildRawEmailWithAttachment({
+        attachmentBase64: Buffer.from("newsletter attachment bytes").toString("base64"),
+        attachmentContentType: "application/pdf",
+        attachmentFileName: "member-one@example.test.pdf",
+        body: [
+          "Loved the weekly note. Please compare my Friday sleep with the group.",
+          "",
+          "On Tue, Jul 7, Member Two <member-two@example.test> wrote:",
+          "> From: Member Two <member-two@example.test>",
+          "> To: Member One <member-one@example.test>, Member Three <member-three@example.test>",
+          "> Cc: stale-header-recipient@example.test",
+          "> Reply-To: member-two@example.test",
+          "> Nice work from inline-address@example.test this week.",
+        ].join("\n"),
+        extraHeaders: [
+          "Reply-To: member-one@example.test",
+          "Cc: Member Two <member-two@example.test>, stale-header-recipient@example.test",
+        ],
+        from: "Member One <member-one@example.test>",
+        subject: "Re: member-one@example.test weekly health note",
+        to: `${replyAliasAddress}, Member Three <member-three@example.test>`,
+      }),
+      to: replyAliasAddress,
+    }, createWorkerEnv(bucket));
+
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    expect(appendInput).toMatchObject({
+      boundUserId: "group_runtime_member",
+    });
+    expect(appendInput?.body?.from).toBe("Email reply from group participant: Member One");
+    expect(appendInput?.body).not.toHaveProperty("to");
+    expect(appendInput?.body).not.toHaveProperty("cc");
+    expect(appendInput?.body).not.toHaveProperty("selfAddress");
+    expect(appendInput?.body?.identityId).toBeNull();
+    expect(appendInput?.body?.subject).toBe("Re: [redacted email] weekly health note");
+    expect(appendInput?.body?.attachmentSummaries).toEqual([
+      {
+        contentType: "application/pdf",
+        fileName: "[redacted email]",
+        sizeBytes: null,
+      },
+    ]);
+    expect(appendInput?.body?.textPreview).toContain(
+      "Loved the weekly note. Please compare my Friday sleep with the group.",
+    );
+    expect(appendInput?.body?.textPreview).toContain(
+      "On Tue, Jul 7, Member Two <[redacted email]> wrote:",
+    );
+    expect(appendInput?.body?.textPreview).not.toContain("From:");
+    expect(appendInput?.body?.textPreview).not.toContain("To:");
+    expect(appendInput?.body?.textPreview).not.toContain("Cc:");
+    expect(appendInput?.body?.textPreview).not.toContain("Reply-To:");
+    const wakeBodyJson = JSON.stringify(appendInput?.body);
+    for (const address of [
+      "member-one@example.test",
+      "member-two@example.test",
+      "member-three@example.test",
+      "stale-header-recipient@example.test",
+      "inline-address@example.test",
+    ]) {
+      expect(wakeBodyJson).not.toContain(address);
+    }
+    expect(wakeBodyJson).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu);
+    const threadTarget = parseHostedEmailThreadTarget(appendInput?.body?.threadTarget);
+    expect(threadTarget?.targetKind).toBe("group");
+    expect(threadTarget?.groupId).toBe(groupId);
+    expect(threadTarget?.to).toEqual([]);
+    expect(threadTarget?.cc).toEqual([]);
+
+    await sendHostedEmailMessage({
+      config: createHostedEmailConfig(),
+      emailBinding,
+      request: {
+        message: "reply to current grants",
+        target: appendInput?.body?.threadTarget,
+        targetKind: "thread",
+      },
+      userId: "group_runtime_member",
+      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
+    });
+
+    const groupRecipientCalls = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
+      .map(([call]) => call)
+      .filter((call) => call?.path === HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH);
+    expect(groupRecipientCalls).toHaveLength(2);
+    expect(groupRecipientCalls[1]).toMatchObject({
+      body: JSON.stringify({ groupId }),
+      boundUserId: "group_runtime_member",
+    });
+
+    expect(emailBinding.send).toHaveBeenCalledTimes(4);
+    const followUpMessages = emailBinding.send.mock.calls.slice(2).map(([message]) => message as {
+      raw: string;
+      to: string;
+    });
+    expect(followUpMessages.map((message) => message.to)).toEqual([
+      "member-two@example.test",
+      "member-three@example.test",
+    ]);
+    expect(followUpMessages[0]?.raw).toContain("To: member-two@example.test, member-three@example.test");
+    expect(followUpMessages[0]?.raw).not.toContain("member-one@example.test");
+    expect(followUpMessages[0]?.raw).not.toContain("stale-header-recipient@example.test");
+  });
+
+  it("rejects signed group reply aliases when the web-owned sender lookup denies before raw-message persistence and wake append", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const groupAlias = await createHostedEmailGroupReplyAliasRoute({
+      domain: createHostedEmailConfig().domain,
+      groupId: "hgrp_AAAAAAAAAAAAAAAA",
+      localPart: createHostedEmailConfig().localPart,
+      signingSecret: createHostedEmailConfig().signingSecret,
+    });
+    const setReject = vi.fn();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(new Response(
+      JSON.stringify({
+        userId: null,
+      }),
+      {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      },
+    ));
+
+    await handleHostedEmailIngressProduction({
+      from: "member-one@example.test",
+      raw: buildRawEmail({
+        from: "Member One <member-one@example.test>",
+        to: groupAlias.address,
+      }),
+      setReject,
+      to: groupAlias.address,
+    }, createWorkerEnv(bucket));
+
+    expect(setReject).toHaveBeenCalledWith("Hosted email message was not accepted.");
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
+  });
+
+  it("leaves direct signed email body addresses unredacted in prompt projection", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    mocks.fetchHostedExecutionWebControlPlaneResponse
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ ok: true }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({
+          userId: "user_123",
+        }),
+        {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        },
+      ));
+    const replyAliasAddress = await createHostedEmailUserAddress({
+      config: createHostedEmailConfig(),
+      userId: "user_123",
+      webCallbackSigning: TEST_ENVIRONMENT.webCallbackSigning,
+      webControlBaseUrl: TEST_ENVIRONMENT.hostedWebBaseUrl,
+    });
+
+    await handleHostedEmailIngress({
+      authenticatedSender: AUTHENTICATED_SENDER,
+      from: "owner@example.com",
+      raw: buildRawEmail({
+        body: "Please compare this note from teammate@example.test and keep From: Owner <owner@example.com> intact.",
+        from: "Owner <owner@example.com>",
+        subject: "Question from owner@example.com",
+        to: replyAliasAddress,
+      }),
+      to: replyAliasAddress,
+    }, createWorkerEnv(bucket));
+
+    expect(mocks.appendHostedEmailIngressWakeInWeb).toHaveBeenCalledTimes(1);
+    const [appendInput] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0] ?? [];
+    expect(appendInput?.body?.subject).toBe("Question from owner@example.com");
+    expect(appendInput?.body?.textPreview).toContain("teammate@example.test");
+    expect(appendInput?.body?.textPreview).toContain("owner@example.com");
   });
 
   it("preserves long hosted email thread targets without truncation", async () => {
@@ -1222,13 +1502,14 @@ function buildRawEmail(input: {
   body?: string;
   extraHeaders?: string[];
   from: string;
+  subject?: string;
   to: string;
 }) {
   return [
     ...(input.extraHeaders ?? []),
     `From: ${input.from}`,
     `To: ${input.to}`,
-    "Subject: hello",
+    `Subject: ${input.subject ?? "hello"}`,
     "",
     input.body ?? "hello from murph",
   ].join("\r\n");
@@ -1239,15 +1520,18 @@ function buildRawEmailWithAttachment(input: {
   attachmentContentType: string;
   attachmentFileName: string;
   body: string;
+  extraHeaders?: string[];
   from: string;
+  subject?: string;
   to: string;
 }) {
   const boundary = "murph-test-boundary";
 
   return [
+    ...(input.extraHeaders ?? []),
     `From: ${input.from}`,
     `To: ${input.to}`,
-    "Subject: hello",
+    `Subject: ${input.subject ?? "hello"}`,
     "MIME-Version: 1.0",
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     "",

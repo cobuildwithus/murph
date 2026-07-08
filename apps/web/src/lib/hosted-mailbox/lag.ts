@@ -26,21 +26,6 @@ export function computeHostedMailboxLaneLag(input: {
   };
 }
 
-export function isHostedMailboxLaneCheckpointed(input: {
-  lane: HostedMailboxLane;
-  laneSeq: bigint | number | string;
-  redactedStatusJson: unknown;
-}): boolean {
-  const redactedStatus = readHostedMailboxRedactedStatusRecord(input.redactedStatusJson);
-  const importedSeq = readHostedMailboxImportedSeqForLane(redactedStatus, input.lane);
-  const laneSeq = readRequiredNonNegativeBigInt(
-    input.laneSeq,
-    "Hosted mailbox lane seq",
-  );
-
-  return importedSeq >= laneSeq;
-}
-
 export function readHostedMailboxImportedSeqForLane(
   redactedStatus: Record<string, unknown> | null,
   lane: HostedMailboxLane,
@@ -92,14 +77,4 @@ function readNonNegativeBigInt(value: unknown): bigint | null {
   }
 
   return null;
-}
-
-function readRequiredNonNegativeBigInt(value: unknown, label: string): bigint {
-  const parsed = readNonNegativeBigInt(value);
-
-  if (parsed === null) {
-    throw new TypeError(`${label} must be a non-negative integer.`);
-  }
-
-  return parsed;
 }

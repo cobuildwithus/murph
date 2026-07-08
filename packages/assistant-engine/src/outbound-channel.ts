@@ -299,6 +299,7 @@ function shouldRetargetThreadDeliveryAsAssistantIdentity(input: {
 export async function deliverAssistantMessageOverBinding(
   input: {
     actorId?: string | null
+    answeredMailboxItemIds?: readonly string[] | null
     channel?: string | null
     deliverySource?: AssistantDeliverySource | null
     idempotencyKey?: string | null
@@ -357,6 +358,7 @@ export async function deliverAssistantMessageOverBinding(
   const delivery = await adapter.send(
     {
       actorId: binding.actorId,
+      answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
       bindingDelivery: binding.delivery,
       deliverySource: input.deliverySource ?? null,
       explicitTarget,

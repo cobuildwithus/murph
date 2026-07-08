@@ -168,10 +168,10 @@ describe("hosted-local worktree config", () => {
         ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
       MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
         ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
-      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "auto",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
         ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
-      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
       DEVICE_SYNC_PUBLIC_BASE_URL: "http://localhost:3101/api/device-sync",
       HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
         "http://localhost:3101,http://127.0.0.1:3101",
@@ -194,8 +194,8 @@ describe("hosted-local worktree config", () => {
     expect(rendered).toContain("export MURPH_HOSTED_LOCAL_PROFILE='dev'");
     expect(rendered).toContain("export MURPH_DEV_WORKTREE_SCOPE='feature-a'");
     expect(rendered).toContain("export MURPH_DEV_DATABASE_URL='[redacted]'");
-    expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='auto'");
-    expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='0'");
+    expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='0'");
+    expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='1'");
     expect(rendered).toContain("export MURPH_DEV_SKIP_STRIPE_LISTEN='1'");
     expect(rendered).toContain("export MURPH_DEV_WEB_HOST='localhost'");
     expect(rendered).toContain("export MURPH_DEV_WEB_PORT='3101'");
@@ -436,7 +436,9 @@ describe("hosted-local worktree config", () => {
 
   it("derives a worktree Linq tunnel config from another git worktree", async () => {
     const config = buildHostedLocalWorktreeConfig({
-      env: {},
+      env: {
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "auto",
+      },
       ports,
       slug: "feature-a",
     });

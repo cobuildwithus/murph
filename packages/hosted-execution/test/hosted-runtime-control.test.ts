@@ -27,6 +27,7 @@ import {
   isHostedMailboxKind,
   isHostedMailboxLane,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
+  normalizeHostedAiUsageAllowanceOpenAiImageModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
   parseHostedRunnerNudgeRequest,
   readHostedIngressLatencySource,
@@ -107,7 +108,9 @@ describe("hosted runtime control contracts", () => {
       "member.channels.updated",
       "assistant.notification.requested",
       "device-sync.wake",
+      "group-newsletter.email-needed",
       "vault-share.delivery",
+      "vault-share.revoke",
       "runtime.manual-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
@@ -136,6 +139,7 @@ describe("hosted runtime control contracts", () => {
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.dense_raw_retention");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.job_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.module_load_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.wake_projection_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.reconnect_notice_created");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.reconnect_notice_duplicate");
@@ -213,8 +217,26 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.5")).toBe("gpt-5.5");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.5-2026-04-23")).toBe("gpt-5.5");
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.5-2026-04-23")).toBe("gpt-5.5");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.6-terra-2026-07-08")).toBe("gpt-5.6-terra");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-luna-2026-07-08")).toBe("gpt-5.6-luna");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-sol")).toBeNull();
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-terra")).toBeNull();
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-luma-2026-07-08")).toBeNull();
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-image-2")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.4-mini")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-4.1-mini-2026-04-23")).toBeNull();
+  });
+
+  it("normalizes OpenAI image usage priced model aliases separately", () => {
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-image-2"))
+      .toBe("gpt-image-2");
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("openai/gpt-image-2"))
+      .toBe("gpt-image-2");
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-image-2-2026-07-01"))
+      .toBe("gpt-image-2");
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-5.5"))
+      .toBeNull();
   });
 
   it("uses OpenAI flex token pricing only for supported OpenAI flex models", () => {
@@ -229,6 +251,21 @@ describe("hosted runtime control contracts", () => {
       serviceTier: "flex",
     })).toBe("openai-flex");
     expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "gpt-5.6-sol",
+      providerName: "hosted-openai",
+      serviceTier: "flex",
+    })).toBe("openai-flex");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "openai/gpt-5.6-terra-2026-07-08",
+      providerName: "openai",
+      serviceTier: "flex",
+    })).toBe("openai-flex");
+    expect(resolveHostedAiUsageTokenPricingBasis({
+      model: "openai/gpt-5.6-luna-2026-07-08",
+      providerName: "hosted-openai",
+      serviceTier: "flex",
+    })).toBe("openai-flex");
+    expect(resolveHostedAiUsageTokenPricingBasis({
       model: "gpt-5.5",
       providerName: "openai-local-test",
       serviceTier: "flex",
@@ -239,7 +276,7 @@ describe("hosted runtime control contracts", () => {
       serviceTier: "flex",
     })).toBe("standard");
     expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-5.5",
+      model: "gpt-5.6-luna",
       providerName: "vercel-ai-gateway",
       serviceTier: "flex",
     })).toBe("standard");
@@ -383,7 +420,9 @@ describe("hosted runtime control contracts", () => {
   });
 
   it("parses mailbox fetch contracts without run ownership fields", () => {
-    const item = createMailboxItem();
+    const item = createMailboxItem({
+      consumedAt: "2026-04-26T00:00:03.000Z",
+    });
 
     expect(parseHostedMailboxItem(item)).toEqual(item);
     expect(parseHostedMailboxFetchRequest({
@@ -473,6 +512,7 @@ describe("hosted runtime control contracts", () => {
     };
     const nullableItem = {
       ...minimalItem,
+      consumedAt: null,
       expiresAt: null,
       payloadBytes: null,
       payloadInlineCiphertext: null,
@@ -864,6 +904,12 @@ describe("hosted runtime control contracts", () => {
       orchestration: {
         temporalActivityStartedAtEpochMs: 1_777_000_000_000,
         temporalActivityRequestStartedAtEpochMs: 1_777_000_000_010,
+        tokenAcquireStartedAtEpochMs: 1_777_000_000_011,
+        tokenAcquiredAtEpochMs: 1_777_000_000_012,
+        directEnsureRequestStartedAtEpochMs: 1_777_000_000_013,
+        directEnsureResponseReceivedAtEpochMs: 1_777_000_000_014,
+        runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
+        runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
         userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
         activeWakeStartedAtEpochMs: 1_777_000_000_040,
@@ -932,6 +978,12 @@ describe("hosted runtime control contracts", () => {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
       },
       provider: {
+        codexAppServerInitializeMs: 7,
+        codexAppServerPreProviderMs: 17,
+        codexAppServerSpawnReadyMs: 1,
+        codexAppServerThreadResumeMs: 9,
+        codexAppServerThreadStartMs: 0,
+        codexAppServerWarmReuseMs: 0,
         turnLockWaitMs: 1,
         sessionResolveMs: 2,
         promptBuildMs: 3,
@@ -969,6 +1021,7 @@ describe("hosted runtime control contracts", () => {
       { sessionResolveMs: "not-a-number" }, // string leaf
       { sessionResolveMs: { secret: 1 } }, // object leaf
       { sessionResolveMs: [1, 2, 3] }, // array leaf
+      { codexAppServerWarmReuseMs: "0" }, // numeric leaf must stay numeric
       { networkToken: 1 }, // unknown sub key
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({
@@ -989,6 +1042,9 @@ describe("hosted runtime control contracts", () => {
     // numbers plus explicit booleans only.
     for (const unsafeOrchestration of [
       { temporalActivityStartedAtEpochMs: 1, requestUrl: 1 }, // unknown sub key
+      { tokenAcquireStartedAtEpochMs: -1 }, // web-side negative leaf
+      { directEnsureResponseReceivedAtEpochMs: 1.5 }, // web-side non-integer leaf
+      { runtimeControlAuthStartedAtEpochMs: "1777000000015" }, // CF-side string leaf
       { cloudflareRouteReceivedAtEpochMs: 1.5 }, // non-integer leaf
       { userRunnerEnsureStartedAtEpochMs: -1 }, // negative leaf
       { activeWakeAccepted: 1 }, // boolean leaf must stay boolean
@@ -1165,6 +1221,31 @@ describe("hosted runtime control contracts", () => {
       changed: false,
       value: merged.value,
     });
+
+    const providerMerged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {},
+      incoming: {
+        schemaVersion: 1,
+        provider: {
+          codexAppServerInitializeMs: 7,
+          codexAppServerPreProviderMs: 17,
+          codexAppServerSpawnReadyMs: 1,
+          codexAppServerThreadResumeMs: 9,
+          codexAppServerWarmReuseMs: 0,
+          turnLockWaitMs: 2,
+        },
+      },
+      phases: ["provider"],
+    });
+
+    expect(providerMerged.value.provider).toEqual({
+      codexAppServerInitializeMs: 7,
+      codexAppServerPreProviderMs: 17,
+      codexAppServerSpawnReadyMs: 1,
+      codexAppServerThreadResumeMs: 9,
+      codexAppServerWarmReuseMs: 0,
+      turnLockWaitMs: 2,
+    });
   });
 
   it("sanitizes orchestration diagnostics with the package-owned phase schema", () => {
@@ -1176,19 +1257,62 @@ describe("hosted runtime control contracts", () => {
       activeWakeAccepted: true,
       activeWakeFinishedAtEpochMs: 1_777_000_000_125,
       activeWakeStartedAtEpochMs: 1_777_000_000_100,
+      directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+      directEnsureResponseReceivedAtEpochMs: 1_777_000_000_132,
       extraLeaf: 1,
       freshStartRequestedAtEpochMs: -1,
       replacedStaleFence: "true",
+      runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
+      runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
+      tokenAcquiredAtEpochMs: 1_777_000_000_010,
+      tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
     })).toEqual({
       activeWakeAccepted: true,
       activeWakeFinishedAtEpochMs: 1_777_000_000_125,
       activeWakeStartedAtEpochMs: 1_777_000_000_100,
+      directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
+      directEnsureResponseReceivedAtEpochMs: 1_777_000_000_132,
+      runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
+      runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
+      tokenAcquiredAtEpochMs: 1_777_000_000_010,
+      tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
     });
 
     expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
       activeWakeAccepted: "true",
       freshStartRequestedAtEpochMs: -1,
     })).toBeNull();
+  });
+
+  it("keeps the direct-wake trigger as a boolean orchestration leaf", () => {
+    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
+      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
+      triggeredByWebDirect: true,
+    })).toEqual({
+      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
+      triggeredByWebDirect: true,
+    });
+
+    // Non-boolean values are dropped like any other schema-mismatched leaf.
+    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
+      triggeredByWebDirect: 1,
+    })).toBeNull();
+
+    const merged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
+      existing: {},
+      incoming: {
+        orchestration: {
+          cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
+          triggeredByWebDirect: true,
+        },
+        schemaVersion: 1,
+      },
+      phases: ["orchestration"],
+    });
+    expect(merged.value.orchestration).toEqual({
+      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
+      triggeredByWebDirect: true,
+    });
   });
 
   it("parses workspace checkpoint contracts as the hosted commit primitive", () => {
@@ -1212,6 +1336,7 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "4",
+      idleCheckpointTrigger: "shutdown_signal",
       leaseGeneration: "9",
       nextWakeAt: null,
       nextWakeReason: null,
@@ -1226,6 +1351,7 @@ describe("hosted runtime control contracts", () => {
     })).toEqual({
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "4",
+      idleCheckpointTrigger: "shutdown_signal",
       leaseGeneration: "9",
       nextWakeAt: null,
       nextWakeReason: null,
@@ -1304,6 +1430,15 @@ describe("hosted runtime control contracts", () => {
         generatedAt: "not-a-date",
       },
     })).toThrow(/replicaRef\.generatedAt must be a valid ISO-8601 timestamp/u);
+
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      idleCheckpointTrigger: "deploy_rollout",
+      leaseGeneration: "9",
+      reason: "idle_shutdown",
+      snapshotRef: null,
+    })).toThrow(/Hosted idle checkpoint trigger/u);
 
     expect(() => parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
@@ -2112,7 +2247,7 @@ describe("hosted runtime control contracts", () => {
   });
 });
 
-function createMailboxItem() {
+function createMailboxItem(overrides: Record<string, unknown> = {}) {
   return {
     createdAt: "2026-04-26T00:00:01.000Z",
     dedupeKey: "conversation:member_123:message_10",
@@ -2126,6 +2261,7 @@ function createMailboxItem() {
     payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
     updatedAt: "2026-04-26T00:00:01.000Z",
     userId: "member_123",
+    ...overrides,
   };
 }
 

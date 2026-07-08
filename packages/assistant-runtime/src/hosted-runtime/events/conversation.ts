@@ -12,6 +12,9 @@ import {
   resolveHostedEmailSelfAddresses,
 } from "@murphai/hosted-execution/hosted-email";
 import {
+  parseHostedEmailThreadTarget,
+} from "@murphai/runtime-state";
+import {
   normalizeHostedEmailConversationCapture,
   normalizeHostedLinqConversationCapture,
   normalizeHostedTelegramConversationCapture,
@@ -21,7 +24,7 @@ import {
   createInboxPipeline,
   type PersistedCapture,
   openInboxRuntime,
-} from "@murphai/inboxd";
+} from "@murphai/inboxd/runtime";
 import {
   createConfiguredParserRegistry,
   createInboxParserService,
@@ -56,7 +59,7 @@ import type {
 const HOSTED_CONVERSATION_PARSER_RETRY_DELAY_MS = 60_000;
 
 export interface HostedConversationWakeLocalImportResult {
-  capture: PersistedCapture;
+  capture: PersistedCapture | null;
   metrics: HostedConversationWakeMetrics;
 }
 
@@ -74,10 +77,18 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedConversationWakeLocalImportResult> {
+  if (shouldSkipHostedEmailRawInboxProjection(input.wake)) {
+    return {
+      capture: null,
+      metrics: createHostedConversationParserMetrics(),
+    };
+  }
+
   const capture = await normalizeHostedConversationMessageWake(input);
   const runtime = await openInboxRuntime({
     vaultRoot: input.vaultRoot,
   });
+  assertHostedConversationProjectionLive(input.signal ?? null);
   let pipeline: Awaited<ReturnType<typeof createInboxPipeline>> | null = null;
 
   try {
@@ -85,20 +96,26 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
       runtime,
       vaultRoot: input.vaultRoot,
     });
+    assertHostedConversationProjectionLive(input.signal ?? null);
     let persistedCapture: PersistedCapture;
     try {
       persistedCapture = await pipeline.processCapture(capture);
     } catch (error) {
+      if (isHostedConversationProjectionAbortError(error, input.signal ?? null)) {
+        throw readHostedConversationProjectionAbortReason(error, input.signal ?? null);
+      }
       throw new HostedConversationInboxProjectionError(
         "Canonical inbox capture projection failed.",
         { cause: error },
       );
     }
+    assertHostedConversationProjectionLive(input.signal ?? null);
     const metrics = await drainHostedConversationParsers({
       captureId: persistedCapture.captureId,
       parserToolchain: input.runtime.parserToolchain ?? null,
       platform: input.runtime.platform,
       runtime,
+      signal: input.signal ?? null,
       vaultRoot: input.vaultRoot,
     });
 
@@ -120,6 +137,7 @@ async function drainHostedConversationParsers(input: {
   parserToolchain: NormalizedHostedAssistantRuntimeConfig["parserToolchain"];
   platform: Pick<NormalizedHostedAssistantRuntimeConfig["platform"], "logPort">;
   runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+  signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedConversationWakeMetrics> {
   const hasPendingJob = input.runtime.listAttachmentParseJobs({
@@ -168,47 +186,14 @@ async function drainHostedConversationParsers(input: {
     });
   }
 
+  assertHostedConversationProjectionLive(input.signal ?? null);
+  // The parser drain is not abort-safe: a cooperative abort can terminalize
+  // the claimed parse job. Let the bounded parser pipeline finish, then land
+  // hosted preemption at the post-drain liveness boundary.
+  let results: Awaited<ReturnType<typeof parserService.drain>>;
   try {
-    const results = await parserService.drain({
+    results = await parserService.drain({
       captureId: input.captureId,
-    });
-    const failedResults = results.filter((result) => result.status === "failed");
-    const observedFailedJobs = input.runtime.listAttachmentParseJobs({
-      captureId: input.captureId,
-      state: "failed",
-    });
-    const parserFailures = collectHostedParserFailures({
-      failedJobs: observedFailedJobs,
-      failedResults,
-    });
-    if (parserFailures.length > 0) {
-      await writeHostedRuntimeLogBestEffort({
-        entry: {
-          component: "mailbox",
-          errorCode: "parser_jobs_failed",
-          eventCode: "mailbox.parser_jobs_failed",
-          level: "warn",
-          phase: "import",
-          redactedJson: {
-            captureIdPresent: Boolean(input.captureId),
-            errorCode: "parser_jobs_failed",
-            errorCodes: compactHostedRuntimeLogCodes(
-              parserFailures.map((failure) => failure.errorCode ?? "parser_failed"),
-            ),
-            nextWakeAtPresent: false,
-            safeErrorMessage: "One or more hosted conversation parser jobs failed.",
-            parserFailed: parserFailures.length,
-            parserObservedFailedJobs: observedFailedJobs.length,
-            parserProcessed: results.length,
-            parserSucceeded: results.length - failedResults.length,
-          },
-        },
-        platform: input.platform,
-      });
-    }
-    return createHostedConversationParserMetrics({
-      nextWakeAt: null,
-      parserProcessed: results.length,
     });
   } catch (error) {
     return await logHostedConversationParserRetryFailure({
@@ -218,6 +203,48 @@ async function drainHostedConversationParsers(input: {
       safeFallbackMessage: "Hosted conversation parser drain failed.",
     });
   }
+  const failedResults = results.filter((result) => result.status === "failed");
+  const observedFailedJobs = input.runtime.listAttachmentParseJobs({
+    captureId: input.captureId,
+    state: "failed",
+  });
+  const parserFailures = collectHostedParserFailures({
+    failedJobs: observedFailedJobs,
+    failedResults,
+  });
+  if (parserFailures.length > 0) {
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        component: "mailbox",
+        errorCode: "parser_jobs_failed",
+        eventCode: "mailbox.parser_jobs_failed",
+        level: "warn",
+        phase: "import",
+        redactedJson: {
+          captureIdPresent: Boolean(input.captureId),
+          errorCode: "parser_jobs_failed",
+          errorCodes: compactHostedRuntimeLogCodes(
+            parserFailures.map((failure) => failure.errorCode ?? "parser_failed"),
+          ),
+          nextWakeAtPresent: false,
+          safeErrorMessage: "One or more hosted conversation parser jobs failed.",
+          parserFailed: parserFailures.length,
+          parserObservedFailedJobs: observedFailedJobs.length,
+          parserProcessed: results.length,
+          parserSucceeded: results.length - failedResults.length,
+        },
+      },
+      platform: input.platform,
+    });
+  }
+  // Failed-job warnings are durable once drained, so emit them before landing
+  // a hosted preemption abort: a retried import skips drain when no jobs are
+  // pending and would otherwise never log these terminal parser failures.
+  assertHostedConversationProjectionLive(input.signal ?? null);
+  return createHostedConversationParserMetrics({
+    nextWakeAt: null,
+    parserProcessed: results.length,
+  });
 }
 
 async function logHostedConversationParserRetryFailure(input: {
@@ -253,6 +280,37 @@ async function logHostedConversationParserRetryFailure(input: {
   return createHostedConversationParserMetrics({
     nextWakeAt,
   });
+}
+
+function assertHostedConversationProjectionLive(signal: AbortSignal | null): void {
+  if (signal?.aborted) {
+    throw readHostedConversationProjectionAbortReason(
+      new DOMException("Aborted", "AbortError"),
+      signal,
+    );
+  }
+}
+
+function isHostedConversationProjectionAbortError(
+  error: unknown,
+  signal: AbortSignal | null,
+): boolean {
+  return signal?.aborted === true
+    || (
+      error instanceof DOMException
+      && error.name === "AbortError"
+    )
+    || (
+      error instanceof Error
+      && error.name === "AbortError"
+    );
+}
+
+function readHostedConversationProjectionAbortReason(
+  error: unknown,
+  signal: AbortSignal | null,
+): unknown {
+  return signal?.reason ?? error;
 }
 
 function createHostedConversationParserMetrics(input: {
@@ -400,6 +458,25 @@ async function normalizeHostedConversationMessageWake(input: {
   }
 
   throw new TypeError("Unsupported hosted conversation message wake kind.");
+}
+
+function shouldSkipHostedEmailRawInboxProjection(
+  wake: HostedExecutionConversationMessageWake,
+): boolean {
+  if (!isHostedEmailConversationMessageWake(wake)) {
+    return false;
+  }
+
+  const threadTarget = wake.message.threadTarget?.trim() ?? "";
+  if (!threadTarget) {
+    return false;
+  }
+
+  // Group email prompt fields are already minimized on the Worker path; raw
+  // .eml bytes can carry group addresses, subjects, bodies, and quoted
+  // headers. Threading uses threadTarget, so the runtime vault does not need a
+  // raw inbox projection for group-routed email wakes.
+  return parseHostedEmailThreadTarget(threadTarget)?.targetKind === "group";
 }
 
 function buildHostedLinqAttachmentDownloadEnv(input: Pick<

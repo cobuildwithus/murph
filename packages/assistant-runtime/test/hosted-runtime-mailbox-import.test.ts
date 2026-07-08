@@ -195,6 +195,51 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "2");
   });
 
+  test("uses consumedAt as per-item durable consume authority without covering a lower gap", async () => {
+    const { mailboxPort } = createMailboxPort({
+      consumedSeqByLane: [
+        { consumedSeq: "0", lane: "conversation" },
+      ],
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_conversation_pending_gap_001",
+          laneSeq: "1",
+        }),
+        createMailboxItem({
+          consumedAt: "2026-04-26T00:00:04.000Z",
+          id: "mailbox_item_conversation_answered_behind_gap_002",
+          laneSeq: "2",
+        }),
+      ],
+    });
+    const durablyConsumedBySeq = new Map<string, boolean | undefined>();
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        durablyConsumedBySeq.set(input.item.laneSeq, input.durablyConsumed);
+        return {
+          assistantInputId: `assistant_input_per_item_${input.item.laneSeq}`,
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_consumed_at_gap",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual([...durablyConsumedBySeq.entries()], [
+      ["1", false],
+      ["2", true],
+    ]);
+    assert.deepEqual(result.assistantInputIds, ["assistant_input_per_item_1"]);
+    assert.equal(result.importedCount, 2);
+    assert.equal(result.conversationImportedCount, 1);
+    assert.equal(result.state.watermarks.conversation, "2");
+  });
+
   test("imports a fresh conversation tail when the consumed watermark lags local import", async () => {
     const nextItem = createMailboxItem({
       id: "mailbox_item_conversation_new_after_replay",
@@ -1130,6 +1175,51 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "2");
   });
 
+  test("continues the system lane after a skipped best-effort newsletter nudge", async () => {
+    const routeLessNewsletterNudge = createMailboxItem({
+      dedupeKey: "group-newsletter.email-needed:member_synthetic_import:hgrp_123",
+      id: "mailbox_item_system_newsletter_route_less",
+      kind: "group-newsletter.email-needed",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const laterSystemItem = createMailboxItem({
+      id: "mailbox_item_system_after_newsletter_skip",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [routeLessNewsletterNudge, laterSystemItem],
+    });
+    const imported: string[] = [];
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        if (input.item.id === "mailbox_item_system_newsletter_route_less") {
+          return {
+            reasonCode: "group-newsletter.email-needed.no-direct-route",
+            status: "skipped",
+          };
+        }
+
+        imported.push(input.item.id);
+        return { status: "imported" };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_newsletter_skip",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(imported, ["mailbox_item_system_after_newsletter_skip"]);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.importedCount, 1);
+    assert.equal(result.state.watermarks.system, "2");
+  });
+
   test("interleaves mailbox lanes so conversation replies are not starved by system backlogs", async () => {
     const firstSystem = createMailboxItem({
       id: "mailbox_item_system_001",
@@ -1441,6 +1531,41 @@ describe("hosted mailbox import loop", () => {
     assert.equal(serialized.includes("runId"), false);
     assert.equal(serialized.includes("committedSeq"), false);
     assert.equal(serialized.includes("source_cursor"), false);
+  });
+
+  test("quarantines unknown future mailbox kinds and advances the lane", async () => {
+    const item = createMailboxItem({
+      id: "mailbox_item_system_future_kind",
+      kind: "future.mailbox.kind" as HostedMailboxItem["kind"],
+      lane: "system",
+      laneSeq: "1",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [item],
+    });
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem() {
+        throw new Error("Import should not run for an unknown mailbox kind.");
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_synthetic_import_future_kind",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(result.blocked, [
+      {
+        itemId: "mailbox_item_system_future_kind",
+        lane: "system",
+        reasonCode: "route.unsupported_kind",
+        retryable: false,
+        seq: "1",
+      },
+    ]);
+    assert.equal(result.state.watermarks.system, "1");
   });
 
   test("quarantines invalid sequence metadata instead of throwing from prefix checks", async () => {
@@ -1791,6 +1916,7 @@ function createMailboxPort(input: {
 function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMailboxItem {
   return {
     createdAt: TEST_NOW,
+    consumedAt: null,
     dedupeKey: "dedupe_synthetic_import",
     expiresAt: null,
     id: "mailbox_item_conversation_001",

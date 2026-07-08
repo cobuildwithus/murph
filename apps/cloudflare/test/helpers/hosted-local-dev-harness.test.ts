@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+
 import { afterEach, expect, it, vi } from "vitest";
 
 import {
@@ -9,6 +13,7 @@ import type { HostedLocalDevConfig } from "@murphai/hosted-local-harness/dev-hos
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
 } from "../hosted-execution-fixtures.ts";
+import { repoRoot } from "../../vitest.shared.js";
 
 const hostedLocalDevConfig: HostedLocalDevConfig = {
   databaseUrlOverride: null,
@@ -109,6 +114,62 @@ it("passes the harness process pid to hosted web dev for orphan cleanup", async 
     }),
     pipeOutput: false,
   });
+});
+
+it("preserves a prebuilt production web dist across E2E prod stack stops", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const distSuffix = "preserve-prod-dist-test";
+  const distDir = path.join(repoRoot, "apps/web", `.next-smoke-${distSuffix}`);
+
+  await rm(distDir, { force: true, recursive: true });
+  await mkdir(distDir, { recursive: true });
+  await writeFile(path.join(distDir, "BUILD_ID"), "hosted-e2e-build\n", "utf8");
+
+  try {
+    const harness = await startHostedLocalDevHarness({
+      env: {
+        DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: distSuffix,
+      },
+      persistDirPrefix: "murph-hosted-local-test-",
+    });
+
+    await harness.stop();
+
+    expect(existsSync(path.join(distDir, "BUILD_ID"))).toBe(true);
+  } finally {
+    await rm(distDir, { force: true, recursive: true });
+  }
+});
+
+it("removes disposable hosted web smoke artifacts outside the E2E prod profile", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const distSuffix = "remove-dev-dist-test";
+  const distDir = path.join(repoRoot, "apps/web", `.next-smoke-${distSuffix}`);
+
+  await rm(distDir, { force: true, recursive: true });
+  await mkdir(distDir, { recursive: true });
+  await writeFile(path.join(distDir, "BUILD_ID"), "dev-smoke-build\n", "utf8");
+
+  try {
+    const harness = await startHostedLocalDevHarness({
+      env: {
+        DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+        MURPH_HOSTED_LOCAL_PROFILE: "dev",
+        NEXT_DIST_DIR_MODE: "smoke",
+        NEXT_DIST_DIR_SUFFIX: distSuffix,
+      },
+      persistDirPrefix: "murph-hosted-local-test-",
+    });
+
+    await harness.stop();
+
+    expect(existsSync(distDir)).toBe(false);
+  } finally {
+    await rm(distDir, { force: true, recursive: true });
+  }
 });
 
 it("fails fast when hosted completion reaches a terminal runner error", async () => {
@@ -338,6 +399,83 @@ it("lets fresh mailbox lag settle before recovery nudging", async () => {
       String(request) === "http://127.0.0.1:8787/internal/users/member_fresh_lag/runtime/ensure-processing"
       && init?.method === "POST"
     )).toBe(false);
+  } finally {
+    await harness.stop();
+  }
+});
+
+it("keeps polling hosted completion while a workspace wake is due", async () => {
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+  const dueWakeStatus = {
+    inFlight: false,
+    lastErrorCode: null,
+    mailboxLag: [
+      {
+        importedSeq: "1",
+        lag: "0",
+        lane: "conversation",
+        maxSeq: "1",
+      },
+    ],
+    recentLogs: [],
+    userId: "member_due_wake_completion",
+    workspace: {
+      browserVaultReplicaRef: null,
+      checkpointedAt: "2026-05-08T00:00:02.000Z",
+      createdAt: "2026-05-08T00:00:00.000Z",
+      nextWakeAt: "2026-05-08T00:00:01.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: null,
+      snapshotRef: null,
+      updatedAt: "2026-05-08T00:00:02.000Z",
+      userId: "member_due_wake_completion",
+      version: "1",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const completedStatus = {
+    ...dueWakeStatus,
+    workspace: {
+      ...dueWakeStatus.workspace,
+      checkpointedAt: "2026-05-08T00:00:04.000Z",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      updatedAt: "2026-05-08T00:00:04.000Z",
+      version: "2",
+    },
+  } satisfies HostedRunnerStatusResponse;
+  const statuses = [dueWakeStatus, completedStatus];
+  const fetch = vi.fn(async (request: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(request).includes("/runtime/ensure-processing")) {
+      return Response.json({ accepted: true });
+    }
+    return Response.json(statuses.shift() ?? completedStatus);
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const harness = await startHostedLocalDevHarness({
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+    statusPath: (userId) => `/status/${userId}`,
+  });
+
+  try {
+    await expect(harness.waitForHostedCompletion("member_due_wake_completion", {
+      pollIntervalMs: 1,
+      timeoutMs: 5_000,
+    })).resolves.toMatchObject({
+      userId: "member_due_wake_completion",
+      workspace: {
+        nextWakeAt: null,
+      },
+    });
+
+    expect(fetch.mock.calls.some(([request, init]) =>
+      String(request) === "http://127.0.0.1:8787/internal/users/member_due_wake_completion/runtime/ensure-processing"
+      && init?.method === "POST"
+    )).toBe(true);
   } finally {
     await harness.stop();
   }

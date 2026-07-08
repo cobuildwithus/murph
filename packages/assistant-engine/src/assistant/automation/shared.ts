@@ -41,6 +41,7 @@ export interface AssistantRunEvent {
     | 'capture.skipped'
     | 'daemon.failed'
     | 'cron.job.completed'
+    | 'cron.occurrence.expired'
     | 'cron.scan.job'
     | 'cron.scan.started'
     | 'reply.scan.started'
@@ -63,6 +64,7 @@ export interface AssistantAutoReplyScanResult {
   nextWakeAt: string | null
   replied: number
   skipped: number
+  terminalLinqCleanup?: string[]
 }
 
 export interface AssistantAutomationScanStateProgress {
@@ -80,9 +82,17 @@ export interface AssistantAutomationPassResult {
   currentTurnDeliveryIntentIds: string[]
   nextWakeAt: string | null
   outboxAttempted: number
+  passTiming?: AssistantAutomationPassTiming
   progressed: boolean
   replies: AssistantAutoReplyScanResult
   routing: AssistantInboxScanResult
+}
+
+export interface AssistantAutomationPassTiming {
+  cronStatusDeferred: boolean
+  cronStatusElapsedMs: number | null
+  postScanTailElapsedMs: number
+  scanElapsedMs: number
 }
 
 export function compareAssistantCaptureOrder(

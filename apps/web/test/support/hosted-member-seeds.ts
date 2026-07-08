@@ -31,6 +31,14 @@ const hostedMemberBillingStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/hosted-member-billing-store.ts",
   import.meta.url,
 ).href;
+const hostedLinqLineStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/linq-line-store.ts",
+  import.meta.url,
+).href;
+const hostedLinqDailyStateModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/linq-daily-state.ts",
+  import.meta.url,
+).href;
 const hostedCryptoDomainRootStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-crypto/domain-root-store.ts",
   import.meta.url,
@@ -131,15 +139,6 @@ interface HostedMemberSeedPrismaClient {
   $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
 }
 
-interface HostedMemberSeedRoutingTx {
-  hostedMemberRouting: {
-    updateMany(input: {
-      data: { linqLastInboundAt: Date };
-      where: { memberId: string };
-    }): Promise<unknown>;
-  };
-}
-
 interface HostedMemberSeedPrismaModule {
   createPrismaClient(input: {
     databaseUrl: string;
@@ -222,6 +221,23 @@ interface HostedMemberRoutingStoreModule {
   }): Promise<unknown>;
 }
 
+interface HostedLinqLineStoreModule {
+  upsertHostedLinqLineForPhoneTx(input: {
+    observedAt: Date;
+    phoneNumber: string;
+    prisma: unknown;
+    source: "configured";
+  }): Promise<unknown>;
+}
+
+interface HostedLinqDailyStateModule {
+  incrementHostedLinqInboundDailyState(input: {
+    memberId: string;
+    occurredAt: Date | string;
+    prisma: unknown;
+  }): Promise<unknown>;
+}
+
 interface HostedDeviceSyncControlPlaneStore {
   upsertConnection(input: {
     connectedAt: string;
@@ -282,6 +298,10 @@ interface HostedMemberSeedModules {
   upsertHostedMemberTelegramRoutingBindingTx:
     HostedMemberRoutingStoreModule["upsertHostedMemberTelegramRoutingBindingTx"];
   upsertHostedMemberIdentity: HostedMemberIdentityStoreModule["upsertHostedMemberIdentity"];
+  incrementHostedLinqInboundDailyState:
+    HostedLinqDailyStateModule["incrementHostedLinqInboundDailyState"];
+  upsertHostedLinqLineForPhoneTx:
+    HostedLinqLineStoreModule["upsertHostedLinqLineForPhoneTx"];
   writeHostedMemberStripeBillingRefTx:
     HostedMemberBillingStoreModule["writeHostedMemberStripeBillingRefTx"];
 }
@@ -389,6 +409,14 @@ export async function seedHostedActiveLinqMember(
           walletCreatedAt: input.walletAddress ? new Date() : null,
           walletProvider: input.walletAddress ? "privy" : null,
         });
+        // A member's assigned home phone must exist in the hosted_linq_line
+        // inventory; route binding rejects lines the DB does not know.
+        await modules.upsertHostedLinqLineForPhoneTx({
+          observedAt: new Date(),
+          phoneNumber: input.homePhone,
+          prisma: tx,
+          source: "configured",
+        });
         await modules.upsertHostedMemberHomeLinqRecipientPhoneTx({
           clearPending: true,
           memberId: input.memberId,
@@ -399,8 +427,9 @@ export async function seedHostedActiveLinqMember(
           ? null
           : normalizeHostedMemberSeedDate(input.recentInboundAt);
         if (recentInboundAt) {
-          await updateHostedMemberSeedLinqLastInboundAtTx({
+          await seedHostedMemberLinqRecentInboundAtTx({
             memberId: input.memberId,
+            modules,
             tx,
             value: recentInboundAt,
           });
@@ -412,38 +441,17 @@ export async function seedHostedActiveLinqMember(
   });
 }
 
-async function updateHostedMemberSeedLinqLastInboundAtTx(input: {
+async function seedHostedMemberLinqRecentInboundAtTx(input: {
   memberId: string;
+  modules: HostedMemberSeedModules;
   tx: unknown;
   value: Date;
 }): Promise<void> {
-  const prisma = requireHostedMemberSeedRoutingTx(input.tx);
-  await prisma.hostedMemberRouting.updateMany({
-    where: {
-      memberId: input.memberId,
-    },
-    data: {
-      linqLastInboundAt: input.value,
-    },
+  await input.modules.incrementHostedLinqInboundDailyState({
+    memberId: input.memberId,
+    occurredAt: input.value,
+    prisma: input.tx,
   });
-}
-
-function requireHostedMemberSeedRoutingTx(value: unknown): HostedMemberSeedRoutingTx {
-  if (isHostedMemberSeedRoutingTx(value)) {
-    return value;
-  }
-
-  throw new Error("Hosted member Linq seed requires Prisma hostedMemberRouting access.");
-}
-
-function isHostedMemberSeedRoutingTx(value: unknown): value is HostedMemberSeedRoutingTx {
-  return typeof value === "object"
-    && value !== null
-    && "hostedMemberRouting" in value
-    && typeof value.hostedMemberRouting === "object"
-    && value.hostedMemberRouting !== null
-    && "updateMany" in value.hostedMemberRouting
-    && typeof value.hostedMemberRouting.updateMany === "function";
 }
 
 function normalizeHostedMemberSeedDate(value: Date | string | null | undefined): Date | null {
@@ -490,8 +498,9 @@ export async function bindHostedActiveLinqHomeChat(input: {
           ? null
           : normalizeHostedMemberSeedDate(input.recentInboundAt);
         if (recentInboundAt) {
-          await updateHostedMemberSeedLinqLastInboundAtTx({
+          await seedHostedMemberLinqRecentInboundAtTx({
             memberId: input.memberId,
+            modules,
             tx,
             value: recentInboundAt,
           });
@@ -767,6 +776,8 @@ async function loadHostedMemberSeedModules(
     hostedMemberRoutingStoreModule,
     hostedMemberStoreModule,
     hostedMemberBillingStoreModule,
+    hostedLinqDailyStateModule,
+    hostedLinqLineStoreModule,
   ] = await Promise.all([
     import(prismaModuleSpecifier),
     import(contactPrivacyModuleSpecifier),
@@ -775,6 +786,8 @@ async function loadHostedMemberSeedModules(
     import(hostedMemberRoutingStoreModuleSpecifier),
     import(hostedMemberStoreModuleSpecifier),
     import(hostedMemberBillingStoreModuleSpecifier),
+    import(hostedLinqDailyStateModuleSpecifier),
+    import(hostedLinqLineStoreModuleSpecifier),
   ]);
 
   if (environment.DATABASE_URL) {
@@ -792,6 +805,10 @@ async function loadHostedMemberSeedModules(
   const typedHostedMemberStoreModule = hostedMemberStoreModule as HostedMemberStoreModule;
   const typedHostedMemberBillingStoreModule =
     hostedMemberBillingStoreModule as HostedMemberBillingStoreModule;
+  const typedHostedLinqDailyStateModule =
+    hostedLinqDailyStateModule as HostedLinqDailyStateModule;
+  const typedHostedLinqLineStoreModule =
+    hostedLinqLineStoreModule as HostedLinqLineStoreModule;
 
   return {
     createPrismaClient: typedPrismaModule.createPrismaClient,
@@ -807,6 +824,10 @@ async function loadHostedMemberSeedModules(
     upsertHostedMemberTelegramRoutingBindingTx:
       typedHostedMemberRoutingStoreModule.upsertHostedMemberTelegramRoutingBindingTx,
     upsertHostedMemberIdentity: typedHostedMemberIdentityStoreModule.upsertHostedMemberIdentity,
+    incrementHostedLinqInboundDailyState:
+      typedHostedLinqDailyStateModule.incrementHostedLinqInboundDailyState,
+    upsertHostedLinqLineForPhoneTx:
+      typedHostedLinqLineStoreModule.upsertHostedLinqLineForPhoneTx,
     writeHostedMemberStripeBillingRefTx:
       typedHostedMemberBillingStoreModule.writeHostedMemberStripeBillingRefTx,
   };

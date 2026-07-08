@@ -384,6 +384,33 @@ describe('assistant infra final coverage', () => {
     expect(rebound.binding.threadId).toBe('thread-2')
     expect(rebound.sessionId).toBe(session.sessionId)
 
+    // A conversation-key match may rebind within-conversation drift fields
+    // (here the direct/group flag) without opting in, because the key already
+    // pins channel/identity/scope.
+    const driftRebound = await persistResolvedSession(paths, session, {
+      alias: session.alias,
+      bindingPatch: {
+        threadIsDirect: false,
+      },
+      lookupSource: 'conversation-key',
+    })
+    expect(driftRebound.binding.threadIsDirect).toBe(false)
+    expect(driftRebound.sessionId).toBe(session.sessionId)
+
+    // But a conversation-key conflict on a routing-boundary field (identity)
+    // must still fail closed rather than silently rebind across the boundary.
+    await expect(
+      persistResolvedSession(paths, session, {
+        alias: session.alias,
+        bindingPatch: {
+          identityId: 'user-2',
+        },
+        lookupSource: 'conversation-key',
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_ROUTING_CONFLICT',
+    })
+
     await expect(
       loadAndPersistResolvedSession({
         maxSessionAgeMs: 1,

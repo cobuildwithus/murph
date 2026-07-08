@@ -17,7 +17,6 @@ describe('Codex provider config overrides', () => {
       'model_providers.venice.env_key="VENICE_API_KEY"',
       'model_providers.venice.wire_api="responses"',
       'model_providers.venice.requires_openai_auth=false',
-      'shell_environment_policy.ignore_default_excludes=false',
     ])
     expect(JSON.stringify(overrides)).not.toContain('sk-venice-secret-test')
     expect(overrides?.some((override) => override.startsWith('model_provider='))).toBe(false)
@@ -30,22 +29,23 @@ describe('Codex provider config overrides', () => {
     })
 
     expect(overrides).toEqual([
-      'shell_environment_policy.ignore_default_excludes=false',
       'model_reasoning_summary="auto"',
       'hide_agent_reasoning=false',
     ])
   })
 
-  it('can enable hosted MultiAgent V2 as a process-launch override', () => {
+  it('never emits a multi_agent_v2 CLI override that would shadow the hosted config table', () => {
+    // A CLI `--config features.multi_agent_v2=true` boolean takes precedence
+    // over the hosted config.toml [features.multi_agent_v2] table and resets
+    // the feature to defaults, dropping root_agent_usage_hint_text.
     const overrides = mergeCodexConfigOverrides({
-      enableMultiAgentV2: true,
       modelProvider: 'openai-local-test',
-      showThinkingTraces: false,
+      showThinkingTraces: true,
     })
 
-    expect(overrides).toEqual([
-      'features.multi_agent_v2=true',
-    ])
+    expect(
+      overrides?.some((override) => override.includes('multi_agent')),
+    ).toBe(false)
   })
 
   it('fails closed when a provider id has no known provider config', () => {

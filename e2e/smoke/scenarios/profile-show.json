@@ -1,0 +1,10 @@
+{
+  "id": "profile-show",
+  "command": "vault-cli profile show --vault <path>",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents canonical typed profile reads from bank/profile.md (preferred display name)."
+}

@@ -59,6 +59,7 @@ export async function executeHostedMemberActivatedWake(input: {
     }),
   ];
   let seededOnboardingFollowupWakeAt: string | null = null;
+  let notificationDecisionKind: string | null = null;
 
   try {
     const notificationResult = await sendAssistantNotification(
@@ -73,6 +74,7 @@ export async function executeHostedMemberActivatedWake(input: {
         },
       ),
     );
+    notificationDecisionKind = notificationResult?.decision.kind ?? null;
     seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
       logDetails: buildHostedMemberActivationSignupWelcomeLogDetails(input.wake),
       notificationResult,
@@ -96,6 +98,7 @@ export async function executeHostedMemberActivatedWake(input: {
 
   redactedLogEntries.push(
     emitHostedMemberActivationSignupWelcomeLifecycleLog({
+      extraDetails: { notificationDecisionKind },
       message: "Hosted member activation signup welcome finished.",
       phase: "wake.running",
       wake: input.wake,
@@ -127,6 +130,7 @@ export async function executeHostedAssistantNotificationWake(input: {
     }),
   ];
   let seededOnboardingFollowupWakeAt: string | null = null;
+  let notificationDecisionKind: string | null = null;
 
   try {
     const notificationResult = await sendAssistantNotification(
@@ -142,6 +146,7 @@ export async function executeHostedAssistantNotificationWake(input: {
         },
       ),
     );
+    notificationDecisionKind = notificationResult?.decision.kind ?? null;
     if (isHostedSignupWelcomeNotification(input.wake)) {
       seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
         logDetails: buildHostedAssistantNotificationLogDetails(input.wake),
@@ -176,6 +181,7 @@ export async function executeHostedAssistantNotificationWake(input: {
 
   redactedLogEntries.push(
     emitHostedAssistantNotificationLifecycleLog({
+      extraDetails: { notificationDecisionKind },
       message: "Hosted assistant notification finished.",
       phase: "wake.running",
       wake: input.wake,
@@ -199,7 +205,10 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
   vaultRoot: string;
   wake: HostedExecutionSystemWake;
 }): Promise<string | null> {
-  if (!didAssistantNotificationAcceptDelivery(input.notificationResult)) {
+  if (
+    !didAssistantNotificationAcceptDelivery(input.notificationResult)
+    && !wasAssistantNotificationSupersededByPriorFirstContact(input.notificationResult)
+  ) {
     return null;
   }
 
@@ -236,6 +245,16 @@ function didAssistantNotificationAcceptDelivery(
 ): boolean {
   const outcomeKind = result?.deliveryOutcome?.kind;
   return outcomeKind === "sent" || outcomeKind === "queued";
+}
+
+// A signup-welcome turn only skips when first contact was already accepted on
+// this route (the user is mid-conversation). Onboarding is underway in that
+// case, so the follow-up automation must still be seeded; it self-archives
+// once onboarding completes and the upsert is idempotent by slug.
+function wasAssistantNotificationSupersededByPriorFirstContact(
+  result: AssistantNotificationResult | undefined,
+): boolean {
+  return result?.decision.kind === "skip";
 }
 
 function buildOnboardingFollowupAutomationRoute(
@@ -382,6 +401,7 @@ function buildHostedAssistantNotificationRouteLogDetails(input: {
 
 function emitHostedAssistantNotificationLifecycleLog(input: {
   error?: unknown;
+  extraDetails?: HostedExecutionStructuredLogDetails;
   level?: HostedExecutionLogLevel;
   message: string;
   phase: HostedExecutionLogPhase;
@@ -389,12 +409,16 @@ function emitHostedAssistantNotificationLifecycleLog(input: {
 }): HostedExecutionRedactedLogEntry {
   return emitHostedNotificationLifecycleLog({
     ...input,
-    details: buildHostedAssistantNotificationLogDetails(input.wake),
+    details: {
+      ...buildHostedAssistantNotificationLogDetails(input.wake),
+      ...(input.extraDetails ?? {}),
+    },
   });
 }
 
 function emitHostedMemberActivationSignupWelcomeLifecycleLog(input: {
   error?: unknown;
+  extraDetails?: HostedExecutionStructuredLogDetails;
   level?: HostedExecutionLogLevel;
   message: string;
   phase: HostedExecutionLogPhase;
@@ -402,7 +426,10 @@ function emitHostedMemberActivationSignupWelcomeLifecycleLog(input: {
 }): HostedExecutionRedactedLogEntry {
   return emitHostedNotificationLifecycleLog({
     ...input,
-    details: buildHostedMemberActivationSignupWelcomeLogDetails(input.wake),
+    details: {
+      ...buildHostedMemberActivationSignupWelcomeLogDetails(input.wake),
+      ...(input.extraDetails ?? {}),
+    },
   });
 }
 

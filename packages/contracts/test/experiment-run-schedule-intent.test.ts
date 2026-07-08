@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  experimentAdherenceTargetSchema,
   experimentAdherenceTargetsSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
@@ -164,6 +165,106 @@ describe("experiment adherence targets", () => {
         },
       ]).success,
     ).toBe(false);
+  });
+
+  it("accepts calendar-less linked activity targets", () => {
+    const target = {
+      targetId: "running",
+      label: "Running",
+      phase: "intervention",
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "activity_session",
+        activityKind: "running",
+        missing: "missed_after_grace",
+      },
+      rollup: {
+        targetCompletions: 24,
+        minimumUsefulCompletions: 12,
+      },
+    } as const;
+
+    expect(experimentAdherenceTargetsSchema.parse([target])).toEqual([target]);
+    expect(experimentRunPlanSchema.parse({ adherenceTargets: [target] }).adherenceTargets).toEqual([
+      target,
+    ]);
+  });
+
+  it("limits assumed missing policy to intervention-session evidence", () => {
+    const interventionTarget = {
+      targetId: "sauna",
+      label: "Sauna",
+      phase: "intervention",
+      calendar: {
+        kind: "daily",
+        timeZone: "America/New_York",
+      },
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "intervention_session",
+        missing: "assumed_after_grace",
+      },
+    } as const;
+    const activityTarget = {
+      ...interventionTarget,
+      targetId: "running",
+      label: "Running",
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "activity_session",
+        activityKind: "running",
+        missing: "assumed_after_grace",
+      },
+    } as const;
+
+    expect(experimentAdherenceTargetSchema.parse(interventionTarget)).toEqual(interventionTarget);
+    const activityResult = experimentAdherenceTargetSchema.safeParse(activityTarget);
+    expect(activityResult.success).toBe(false);
+    if (activityResult.success) {
+      throw new Error("expected activity-session assumed target to fail validation");
+    }
+    expect(activityResult.error.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "assumed_after_grace requires intervention_session evidence.",
+          path: ["evidence", "missing"],
+        }),
+      ]),
+    );
+  });
+
+  it("requires calendars for metric adherence targets", () => {
+    const calendar = {
+      kind: "daily",
+      timeZone: "America/New_York",
+    } as const;
+    const metricThresholdTarget = {
+      targetId: "step-floor",
+      label: "Step floor",
+      phase: "intervention",
+      evidence: {
+        kind: "metricThreshold",
+        metricKey: "steps",
+        op: ">=",
+        value: 8000,
+        missing: "unknown",
+      },
+    } as const;
+    const metricPresenceTarget = {
+      targetId: "steps-present",
+      label: "Steps present",
+      phase: "intervention",
+      evidence: {
+        kind: "metricPresence",
+        metricKey: "steps",
+        missing: "unknown",
+      },
+    } as const;
+
+    expect(experimentAdherenceTargetsSchema.safeParse([metricThresholdTarget]).success).toBe(false);
+    expect(experimentAdherenceTargetsSchema.safeParse([metricPresenceTarget]).success).toBe(false);
+    expect(experimentAdherenceTargetsSchema.safeParse([{ ...metricThresholdTarget, calendar }]).success).toBe(true);
+    expect(experimentAdherenceTargetsSchema.safeParse([{ ...metricPresenceTarget, calendar }]).success).toBe(true);
   });
 
   it("rejects ambiguous target ids and invalid threshold rules", () => {

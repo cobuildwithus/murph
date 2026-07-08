@@ -20,6 +20,7 @@ import {
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
+  HOSTED_IDLE_CHECKPOINT_TRIGGERS,
   HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES,
   HOSTED_RUNTIME_LOG_COMPONENTS,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
@@ -33,8 +34,6 @@ import {
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
-  type HostedMailboxConsumeRequest,
-  type HostedMailboxConsumeResponse,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
   type HostedMailboxItem,
@@ -81,11 +80,32 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
-  type HostedRuntimeLinqContactCardShareAfterOutboundRequest,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_KINDS,
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
+  HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
+  HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  type HostedRuntimeGroupChatParticipant,
+  type HostedRuntimeGroupCreateJoinLinkRequest,
+  type HostedRuntimeGroupKind,
+  type HostedRuntimeGroupPostJoinOfferRequest,
+  type HostedRuntimeGroupUpdateDisplayNameRequest,
+  type HostedRuntimeGroupToolLinqThreadContext,
+  type HostedRuntimeGroupMemberSummary,
+  type HostedRuntimeGroupToolSelfOptOutContext,
+  type HostedRuntimeGroupToolRequest,
+  type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeNewsletterParticipantSummary,
+  type HostedRuntimeNewsletterToolRequest,
+  type HostedRuntimeNewsletterToolResponse,
   type HostedRuntimeProductFeedbackRecordRequest,
   type HostedRuntimeProductFeedbackRecordResponse,
   type HostedCodexAuthUpdate,
@@ -93,6 +113,7 @@ import {
   type HostedCodexAuthUpdateResponseStatus,
   type HostedProductFeedbackKind,
   type HostedIngressLatencySource,
+  type HostedIdleCheckpointTrigger,
   type HostedWorkspaceCheckpointReason,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
@@ -106,6 +127,17 @@ import {
 import type {
   HostedExecutionLinqExternalThreadRouteAuthority,
 } from "../contracts.ts";
+import {
+  HOSTED_VAULT_SHARE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareProjectionScopeKey,
+  hostedVaultShareProjectionKindToScope,
+  parseHostedVaultShareProjectionScope,
+  type HostedVaultShareProjectionScope,
+  type HostedVaultShareProjectionKind,
+  type HostedVaultShareSelectableProjectionScope,
+} from "../vault-share.ts";
 import {
   rejectLegacyAliases,
   requireArray,
@@ -302,6 +334,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   restore: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.restore),
   boot: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.boot),
   wake: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.wake),
+  import: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.import),
   provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
 };
 const HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS = [
@@ -341,6 +374,9 @@ export function parseHostedMailboxItem(value: unknown): HostedMailboxItem {
   const record = requireObject(value, "Hosted mailbox item");
 
   return {
+    ...(record.consumedAt === undefined
+      ? {}
+      : { consumedAt: readNullableString(record.consumedAt, "Hosted mailbox item consumedAt") }),
     createdAt: requireString(record.createdAt, "Hosted mailbox item createdAt"),
     dedupeKey: requireString(record.dedupeKey, "Hosted mailbox item dedupeKey"),
     ...(record.expiresAt === undefined
@@ -515,38 +551,6 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
   };
 }
 
-export function parseHostedMailboxConsumeRequest(value: unknown): HostedMailboxConsumeRequest {
-  const record = requireObject(value, "Hosted mailbox consume request");
-
-  return {
-    lanes: requireArray(record.lanes, "Hosted mailbox consume request lanes")
-      .map((entry, index) => parseHostedMailboxLaneConsumed(
-        entry,
-        `Hosted mailbox consume request lanes[${index}]`,
-      )),
-    requestId: requireString(record.requestId, "Hosted mailbox consume request requestId"),
-  };
-}
-
-export function parseHostedMailboxConsumeResponse(value: unknown): HostedMailboxConsumeResponse {
-  const record = requireObject(value, "Hosted mailbox consume response");
-
-  return {
-    acknowledgedAt: requireString(
-      record.acknowledgedAt,
-      "Hosted mailbox consume response acknowledgedAt",
-    ),
-    consumedSeqByLane: requireArray(
-      record.consumedSeqByLane,
-      "Hosted mailbox consume response consumedSeqByLane",
-    ).map((entry, index) => parseHostedMailboxLaneConsumed(
-      entry,
-      `Hosted mailbox consume response consumedSeqByLane[${index}]`,
-    )),
-    userId: requireString(record.userId, "Hosted mailbox consume response userId"),
-  };
-}
-
 export function parseHostedRuntimeDeviceSyncBridgeEnvelope(
   value: unknown,
 ): HostedRuntimeDeviceSyncBridgeEnvelope {
@@ -614,40 +618,6 @@ export function parseHostedRuntimeUsageRecordResponse(
   return {
     recorded: requireBoolean(record.recorded, "Hosted runtime usage record response recorded"),
     usageId: requireString(record.usageId, "Hosted runtime usage record response usageId"),
-  };
-}
-
-export function parseHostedRuntimeLinqContactCardShareAfterOutboundRequest(
-  value: unknown,
-): HostedRuntimeLinqContactCardShareAfterOutboundRequest {
-  const record = requireObject(value, "Hosted runtime Linq contact-card share after-outbound request");
-  assertAllowedObjectKeys(
-    record,
-    new Set(["authority", "chatId", "service", "threadIsDirect"]),
-    "Hosted runtime Linq contact-card share after-outbound request",
-  );
-
-  return {
-    authority: record.authority === undefined || record.authority === null
-      ? null
-      : parseHostedRuntimeLinqExternalThreadRouteAuthority(
-        record.authority,
-        "Hosted runtime Linq contact-card share after-outbound request authority",
-      ),
-    chatId: requireString(
-      record.chatId,
-      "Hosted runtime Linq contact-card share after-outbound request chatId",
-    ),
-    service: readNullableString(
-      record.service,
-      "Hosted runtime Linq contact-card share after-outbound request service",
-    ),
-    threadIsDirect: record.threadIsDirect === null
-      ? null
-      : requireBoolean(
-          record.threadIsDirect,
-          "Hosted runtime Linq contact-card share after-outbound request threadIsDirect",
-        ),
   };
 }
 
@@ -725,6 +695,1037 @@ export function parseHostedRuntimeProductFeedbackRecordResponse(
       "Hosted runtime product feedback response recorded",
     ),
   };
+}
+
+export function parseHostedRuntimeGroupToolRequest(
+  value: unknown,
+): HostedRuntimeGroupToolRequest {
+  const record = requireObject(value, "Hosted runtime group tool request");
+  const action = requireString(record.action, "Hosted runtime group tool request action");
+  if (action === "read_current") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action"]),
+      "Hosted runtime group tool read_current request",
+    );
+    return { action };
+  }
+  if (action === "update_display_name") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "updateDisplayName", "linqThread"]),
+      "Hosted runtime group tool update_display_name request",
+    );
+    return {
+      action,
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool update_display_name request linqThread",
+            ),
+          }),
+      updateDisplayName: parseHostedRuntimeGroupUpdateDisplayNameRequest(
+        record.updateDisplayName,
+      ),
+    };
+  }
+  if (action === "create_join_link") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "joinLink"]),
+      "Hosted runtime group tool create_join_link request",
+    );
+    if (record.joinLink === undefined || record.joinLink === null) {
+      return { action };
+    }
+    return {
+      action,
+      joinLink: parseHostedRuntimeGroupCreateJoinLinkRequest(record.joinLink),
+    };
+  }
+  if (action === "post_join_offer") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "joinOffer", "linqThread"]),
+      "Hosted runtime group tool post_join_offer request",
+    );
+    return {
+      action,
+      ...(record.joinOffer === undefined || record.joinOffer === null
+        ? {}
+        : { joinOffer: parseHostedRuntimeGroupPostJoinOfferRequest(record.joinOffer) }),
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool post_join_offer request linqThread",
+            ),
+      }),
+    };
+  }
+  if (action === "set_chat_avatar") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "groupChatIconUrl", "linqThread"]),
+      "Hosted runtime group tool set_chat_avatar request",
+    );
+    return {
+      action,
+      groupChatIconUrl: parseHostedRuntimeGroupChatIconUrl(record.groupChatIconUrl),
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool set_chat_avatar request linqThread",
+            ),
+      }),
+    };
+  }
+  if (action === "preflight_set_chat_avatar") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqThread"]),
+      "Hosted runtime group tool preflight_set_chat_avatar request",
+    );
+    if (record.linqThread === undefined || record.linqThread === null) {
+      return { action };
+    }
+    return {
+      action,
+      linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+        record.linqThread,
+        "Hosted runtime group tool preflight_set_chat_avatar request linqThread",
+      ),
+    };
+  }
+  if (action === "read_chat_participants" || action === "share_contact_card") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqThread"]),
+      `Hosted runtime group tool ${action} request`,
+    );
+    if (record.linqThread === undefined || record.linqThread === null) {
+      return { action };
+    }
+    return {
+      action,
+      linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+        record.linqThread,
+        `Hosted runtime group tool ${action} request linqThread`,
+      ),
+    };
+  }
+  if (action === "revoke_own_email_share") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "selfOptOut"]),
+      "Hosted runtime group tool revoke_own_email_share request",
+    );
+    if (record.selfOptOut === undefined || record.selfOptOut === null) {
+      return { action };
+    }
+    return {
+      action,
+      selfOptOut: parseHostedRuntimeGroupToolSelfOptOutContext(
+        record.selfOptOut,
+        "Hosted runtime group tool revoke_own_email_share request selfOptOut",
+      ),
+    };
+  }
+  throw new TypeError("Hosted runtime group tool action is not supported.");
+}
+
+function parseHostedRuntimeGroupUpdateDisplayNameRequest(
+  value: unknown,
+): HostedRuntimeGroupUpdateDisplayNameRequest {
+  const record = requireObject(
+    value,
+    "Hosted runtime group tool update_display_name updateDisplayName",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set(["displayName"]),
+    "Hosted runtime group tool update_display_name updateDisplayName",
+  );
+  const displayName = requireString(
+    record.displayName,
+    "Hosted runtime group tool update_display_name displayName",
+  ).trim().replace(/\s+/gu, " ");
+  if (displayName.length === 0) {
+    throw new TypeError("Hosted runtime group tool update_display_name displayName must not be blank.");
+  }
+  if (displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
+    throw new TypeError("Hosted runtime group tool update_display_name displayName is too long.");
+  }
+  return { displayName };
+}
+
+function parseHostedRuntimeGroupChatIconUrl(value: unknown): string {
+  const iconUrl = requireString(
+    value,
+    "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
+  ).trim();
+  if (
+    iconUrl.length === 0 ||
+    iconUrl.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH
+  ) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(iconUrl);
+  } catch {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl must be HTTPS.");
+  }
+  if (!isHostedRuntimeGroupChatIconDeliveryUrl(parsed)) {
+    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+  }
+  return parsed.toString();
+}
+
+function isHostedRuntimeGroupChatIconDeliveryUrl(url: URL): boolean {
+  if (url.hostname !== "imagedelivery.net" || url.search || url.hash) {
+    return false;
+  }
+  return url.pathname.split("/").filter(Boolean).length >= 3;
+}
+
+function parseHostedRuntimeGroupToolLinqThreadContext(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupToolLinqThreadContext {
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(record, new Set(["authority", "chatId"]), label);
+  return {
+    authority: parseHostedRuntimeLinqExternalThreadRouteAuthority(
+      record.authority,
+      `${label} authority`,
+    ),
+    chatId: requireString(record.chatId, `${label} chatId`),
+  };
+}
+
+function parseHostedRuntimeGroupPostJoinOfferRequest(
+  value: unknown,
+): HostedRuntimeGroupPostJoinOfferRequest {
+  const record = requireObject(value, "Hosted runtime group tool post_join_offer joinOffer");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["displayName", "messageTemplate", "projectionKinds", "projectionScopes"]),
+    "Hosted runtime group tool post_join_offer joinOffer",
+  );
+  const displayName = parseHostedRuntimeGroupDisplayName(
+    record.displayName,
+    "Hosted runtime group tool post_join_offer displayName",
+  );
+  const messageTemplate = record.messageTemplate === undefined || record.messageTemplate === null
+    ? null
+    : parseHostedRuntimeGroupJoinOfferMessageTemplate(record.messageTemplate);
+  return {
+    displayName,
+    ...(messageTemplate === null ? {} : { messageTemplate }),
+    projectionKinds: parseHostedRuntimeGroupProjectionKindArray(
+      record.projectionKinds,
+      "Hosted runtime group tool post_join_offer projectionKinds",
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    ),
+    projectionScopes: parseHostedRuntimeGroupSelectableProjectionScopes(
+      record.projectionScopes,
+      record.projectionKinds,
+      "Hosted runtime group tool post_join_offer projectionScopes",
+    ),
+  };
+}
+
+function parseHostedRuntimeGroupJoinOfferMessageTemplate(value: unknown): string {
+  const template = requireString(
+    value,
+    "Hosted runtime group tool post_join_offer messageTemplate",
+  ).trim().replace(/\s+/gu, " ");
+  if (
+    template.length === 0
+    || template.length > HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH
+  ) {
+    throw new TypeError(
+      `Hosted runtime group tool post_join_offer messageTemplate must be between 1 and ${HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH} characters.`,
+    );
+  }
+  return template;
+}
+
+function parseHostedRuntimeGroupToolSelfOptOutContext(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupToolSelfOptOutContext {
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(record, new Set(["senderHandle", "source"]), label);
+  const source = requireString(record.source, `${label} source`);
+  if (source !== "email" && source !== "linq") {
+    throw new TypeError("Hosted runtime group tool self opt-out source is not supported.");
+  }
+  return {
+    senderHandle: requireString(record.senderHandle, `${label} senderHandle`),
+    source,
+  };
+}
+
+function parseHostedRuntimeGroupCreateJoinLinkRequest(
+  value: unknown,
+): HostedRuntimeGroupCreateJoinLinkRequest {
+  const record = requireObject(value, "Hosted runtime group tool create_join_link joinLink");
+  assertAllowedObjectKeys(
+    record,
+    new Set([
+      "displayName",
+      "kind",
+      "requestedVaultShareProjectionKinds",
+      "requestedVaultShareProjectionScopes",
+    ]),
+    "Hosted runtime group tool create_join_link joinLink",
+  );
+  const displayName = parseHostedRuntimeGroupDisplayName(
+    record.displayName,
+    "Hosted runtime group tool create_join_link displayName",
+  );
+
+  return {
+    displayName,
+    kind: readHostedRuntimeGroupKind(record.kind),
+    // Compatibility for old fixed-kind callers.
+    requestedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
+      record.requestedVaultShareProjectionKinds,
+      "Hosted runtime group tool create_join_link requestedVaultShareProjectionKinds",
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    ),
+    // The membership-implied profile-name.v0 kind is never requestable through a join
+    // link: the request contract is closed over the individually selectable scopes.
+    requestedVaultShareProjectionScopes: parseHostedRuntimeGroupSelectableProjectionScopes(
+      record.requestedVaultShareProjectionScopes,
+      record.requestedVaultShareProjectionKinds,
+      "Hosted runtime group tool create_join_link requestedVaultShareProjectionScopes",
+    ),
+  };
+}
+
+function parseHostedRuntimeGroupDisplayName(
+  value: unknown,
+  label: string,
+): string | null {
+  const displayName = readNullableString(value, label);
+  if (displayName !== null && displayName.trim().length === 0) {
+    throw new TypeError(`${label} must not be blank.`);
+  }
+  if (displayName !== null && displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
+    throw new TypeError(`${label} is too long.`);
+  }
+  return displayName;
+}
+
+function readHostedRuntimeGroupKind(value: unknown): HostedRuntimeGroupKind | null {
+  if (value === undefined || value === null) return null;
+  for (const kind of HOSTED_RUNTIME_GROUP_KINDS) {
+    if (value === kind) return kind;
+  }
+  throw new TypeError("Hosted runtime group tool create_join_link kind is not supported.");
+}
+
+export function parseHostedRuntimeGroupToolResponse(
+  value: unknown,
+): HostedRuntimeGroupToolResponse {
+  const record = requireObject(value, "Hosted runtime group tool response");
+  const action = requireString(record.action, "Hosted runtime group tool response action");
+  assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime group tool response");
+
+  if (action === "read_current") {
+    const result = requireObject(record.result, "Hosted runtime group tool read_current response result");
+    const status = requireString(result.status, "Hosted runtime group tool read_current response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool read_current ok response result");
+      return { action, result: { status, group: parseHostedRuntimeGroupSummary(result.group) } };
+    }
+    if (status === "none") {
+      assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool read_current none response result");
+      return { action, result: { status, group: null } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool read_current unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "create_join_link") {
+    const result = requireObject(record.result, "Hosted runtime group tool create_join_link response result");
+    const status = requireString(result.status, "Hosted runtime group tool create_join_link response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), "Hosted runtime group tool create_join_link ok response result");
+      return {
+        action,
+        result: {
+          status,
+          group: parseHostedRuntimeGroupSummary(result.group),
+          joinUrl: requireString(result.joinUrl, "Hosted runtime group tool create_join_link joinUrl"),
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool create_join_link unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "update_display_name") {
+    const result = requireObject(record.result, "Hosted runtime group tool update_display_name response result");
+    const status = requireString(result.status, "Hosted runtime group tool update_display_name response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool update_display_name ok response result");
+      return { action, result: { status, group: parseHostedRuntimeGroupSummary(result.group) } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool update_display_name unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "post_join_offer") {
+    const result = requireObject(record.result, "Hosted runtime group tool post_join_offer response result");
+    const status = requireString(result.status, "Hosted runtime group tool post_join_offer response status");
+    if (status === "sent") {
+      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), "Hosted runtime group tool post_join_offer sent response result");
+      return {
+        action,
+        result: {
+          status,
+          group: parseHostedRuntimeGroupSummary(result.group),
+          joinUrl: requireString(result.joinUrl, "Hosted runtime group tool post_join_offer joinUrl"),
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool post_join_offer unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "read_chat_participants") {
+    const result = requireObject(record.result, "Hosted runtime group tool read_chat_participants response result");
+    const status = requireString(result.status, "Hosted runtime group tool read_chat_participants response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status", "participants"]), "Hosted runtime group tool read_chat_participants ok response result");
+      return {
+        action,
+        result: {
+          status,
+          participants: parseHostedRuntimeGroupChatParticipants(result.participants),
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "participants"]), "Hosted runtime group tool read_chat_participants unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          participants: null,
+        },
+      };
+    }
+  }
+
+  if (action === "set_chat_avatar") {
+    const result = requireObject(record.result, "Hosted runtime group tool set_chat_avatar response result");
+    const status = requireString(result.status, "Hosted runtime group tool set_chat_avatar response status");
+    if (status === "ok" || status === "requested") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool set_chat_avatar accepted response result");
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool set_chat_avatar unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+        },
+      };
+    }
+  }
+
+  if (action === "preflight_set_chat_avatar") {
+    const result = requireObject(record.result, "Hosted runtime group tool preflight_set_chat_avatar response result");
+    const status = requireString(result.status, "Hosted runtime group tool preflight_set_chat_avatar response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool preflight_set_chat_avatar ok response result");
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool preflight_set_chat_avatar unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+        },
+      };
+    }
+  }
+
+  if (action === "share_contact_card") {
+    const result = requireObject(record.result, "Hosted runtime group tool share_contact_card response result");
+    const status = requireString(result.status, "Hosted runtime group tool share_contact_card response status");
+    if (status === "sent" || status === "already_shared") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool share_contact_card response result");
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool share_contact_card unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+        },
+      };
+    }
+  }
+
+  if (action === "revoke_own_email_share") {
+    const result = requireObject(record.result, "Hosted runtime group tool revoke_own_email_share response result");
+    const status = requireString(result.status, "Hosted runtime group tool revoke_own_email_share response status");
+    if (status === "revoked") {
+      assertAllowedObjectKeys(result, new Set(["status", "revokedCount"]), "Hosted runtime group tool revoke_own_email_share revoked response result");
+      return {
+        action,
+        result: {
+          status,
+          revokedCount: requireExactInteger(
+            result.revokedCount,
+            "Hosted runtime group tool revoke_own_email_share revokedCount",
+            1,
+          ),
+        },
+      };
+    }
+    if (status === "already_removed") {
+      assertAllowedObjectKeys(result, new Set(["status", "revokedCount"]), "Hosted runtime group tool revoke_own_email_share already_removed response result");
+      requireExactInteger(
+        result.revokedCount,
+        "Hosted runtime group tool revoke_own_email_share revokedCount",
+        0,
+      );
+      return { action, result: { status, revokedCount: 0 } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool revoke_own_email_share unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+        },
+      };
+    }
+  }
+
+  throw new TypeError("Hosted runtime group tool response action/status is not supported.");
+}
+
+export function parseHostedRuntimeNewsletterToolRequest(
+  value: unknown,
+): HostedRuntimeNewsletterToolRequest {
+  const record = requireObject(value, "Hosted runtime newsletter tool request");
+  const action = requireString(record.action, "Hosted runtime newsletter tool request action");
+  if (action === "read_stats") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "groupId"]),
+      "Hosted runtime newsletter tool read_stats request",
+    );
+    return {
+      action,
+      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
+    };
+  }
+  if (action === "send") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "groupId", "subject", "html", "text"]),
+      "Hosted runtime newsletter tool send request",
+    );
+    const subject = requireString(record.subject, "Hosted runtime newsletter tool subject");
+    const html = requireString(record.html, "Hosted runtime newsletter tool html");
+    const text = readOptionalNullableString(
+      record.text,
+      "Hosted runtime newsletter tool text",
+    ) ?? null;
+    if (subject.trim().length === 0) {
+      throw new TypeError("Hosted runtime newsletter tool subject must not be blank.");
+    }
+    if (subject.length > HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH) {
+      throw new TypeError("Hosted runtime newsletter tool subject is too long.");
+    }
+    if (html.trim().length === 0) {
+      throw new TypeError("Hosted runtime newsletter tool html must not be blank.");
+    }
+    if (html.length > HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH) {
+      throw new TypeError("Hosted runtime newsletter tool html is too long.");
+    }
+    if (text !== null && text.length > HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH) {
+      throw new TypeError("Hosted runtime newsletter tool text is too long.");
+    }
+    return {
+      action,
+      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
+      html,
+      subject,
+      text,
+    };
+  }
+
+  throw new TypeError("Hosted runtime newsletter tool action is not supported.");
+}
+
+export function parseHostedRuntimeNewsletterToolResponse(
+  value: unknown,
+): HostedRuntimeNewsletterToolResponse {
+  const record = requireObject(value, "Hosted runtime newsletter tool response");
+  const action = requireString(record.action, "Hosted runtime newsletter tool response action");
+  assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime newsletter tool response");
+
+  if (action === "read_stats") {
+    const result = requireObject(record.result, "Hosted runtime newsletter tool read_stats response result");
+    const status = requireString(result.status, "Hosted runtime newsletter tool read_stats response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "groupId", "participants", "missingEmailParticipants"]),
+        "Hosted runtime newsletter tool read_stats ok response result",
+      );
+      return {
+        action,
+        result: {
+          groupId: requireString(result.groupId, "Hosted runtime newsletter tool groupId"),
+          missingEmailParticipants: parseHostedRuntimeNewsletterParticipants(
+            result.missingEmailParticipants,
+            "Hosted runtime newsletter tool missingEmailParticipants",
+          ),
+          participants: parseHostedRuntimeNewsletterParticipants(
+            result.participants,
+            "Hosted runtime newsletter tool participants",
+          ),
+          status,
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime newsletter tool read_stats unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime newsletter tool unavailableReason",
+          ),
+        },
+      };
+    }
+  }
+
+  if (action === "send") {
+    const result = requireObject(record.result, "Hosted runtime newsletter tool send response result");
+    const status = requireString(result.status, "Hosted runtime newsletter tool send response status");
+    if (status === "sent" || status === "no_recipients") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "participantCount", "skippedNoEmailMemberIds"]),
+        "Hosted runtime newsletter tool send response result",
+      );
+      const participantCount = requireNumber(
+        result.participantCount,
+        "Hosted runtime newsletter tool participantCount",
+      );
+      if (!Number.isInteger(participantCount) || participantCount < 0) {
+        throw new TypeError("Hosted runtime newsletter tool participantCount must be a non-negative integer.");
+      }
+      const skippedNoEmailMemberIds = parseHostedRuntimeNewsletterMemberIds(
+        result.skippedNoEmailMemberIds,
+        "Hosted runtime newsletter tool skippedNoEmailMemberIds",
+      );
+      if (status === "no_recipients") {
+        if (participantCount !== 0) {
+          throw new TypeError("Hosted runtime newsletter tool no_recipients participantCount must be 0.");
+        }
+        return {
+          action,
+          result: {
+            participantCount: 0,
+            skippedNoEmailMemberIds,
+            status,
+          },
+        };
+      }
+      return {
+        action,
+        result: {
+          participantCount,
+          skippedNoEmailMemberIds,
+          status,
+        },
+      };
+    }
+    if (status === "partial_failure") {
+      assertAllowedObjectKeys(
+        result,
+        new Set([
+          "status",
+          "failedRecipientCount",
+          "participantCount",
+          "sentRecipientCount",
+          "skippedNoEmailMemberIds",
+        ]),
+        "Hosted runtime newsletter tool partial_failure response result",
+      );
+      const participantCount = requireNumber(
+        result.participantCount,
+        "Hosted runtime newsletter tool participantCount",
+      );
+      if (!Number.isInteger(participantCount) || participantCount < 0) {
+        throw new TypeError("Hosted runtime newsletter tool participantCount must be a non-negative integer.");
+      }
+      const skippedNoEmailMemberIds = parseHostedRuntimeNewsletterMemberIds(
+        result.skippedNoEmailMemberIds,
+        "Hosted runtime newsletter tool skippedNoEmailMemberIds",
+      );
+      const sentRecipientCount = requireNumber(
+        result.sentRecipientCount,
+        "Hosted runtime newsletter tool sentRecipientCount",
+      );
+      const failedRecipientCount = requireNumber(
+        result.failedRecipientCount,
+        "Hosted runtime newsletter tool failedRecipientCount",
+      );
+      if (!Number.isInteger(sentRecipientCount) || sentRecipientCount < 0) {
+        throw new TypeError("Hosted runtime newsletter tool sentRecipientCount must be a non-negative integer.");
+      }
+      if (!Number.isInteger(failedRecipientCount) || failedRecipientCount < 0) {
+        throw new TypeError("Hosted runtime newsletter tool failedRecipientCount must be a non-negative integer.");
+      }
+      return {
+        action,
+        result: {
+          failedRecipientCount,
+          participantCount,
+          sentRecipientCount,
+          skippedNoEmailMemberIds,
+          status,
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason"]),
+        "Hosted runtime newsletter tool send unavailable response result",
+      );
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime newsletter tool unavailableReason",
+          ),
+        },
+      };
+    }
+  }
+
+  throw new TypeError("Hosted runtime newsletter tool response action/status is not supported.");
+}
+
+function parseHostedRuntimeNewsletterParticipants(
+  value: unknown,
+  label: string,
+): HostedRuntimeNewsletterParticipantSummary[] {
+  const entries = requireArray(value, label);
+  if (entries.length > HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX) {
+    throw new TypeError(`${label} must contain at most ${HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX} entries.`);
+  }
+  return entries.map((entry) => {
+    const record = requireObject(entry, `${label} entry`);
+    assertAllowedObjectKeys(record, new Set(["displayName", "hasEmail", "memberId"]), `${label} entry`);
+    return {
+      displayName: readNullableString(record.displayName, `${label} entry displayName`),
+      hasEmail: requireBoolean(record.hasEmail, `${label} entry hasEmail`),
+      memberId: requireString(record.memberId, `${label} entry memberId`),
+    };
+  });
+}
+
+function parseHostedRuntimeNewsletterMemberIds(
+  value: unknown,
+  label: string,
+): string[] {
+  const entries = requireArray(value, label);
+  return entries.map((entry) => requireString(entry, `${label} entry`));
+}
+
+function parseHostedRuntimeGroupChatParticipants(
+  value: unknown,
+): HostedRuntimeGroupChatParticipant[] {
+  const label = "Hosted runtime group tool read_chat_participants participants";
+  const entries = requireArray(value, label);
+  if (entries.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
+    throw new TypeError(`${label} must contain at most ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`);
+  }
+  return entries.map((entry) => {
+    const record = requireObject(entry, `${label} entry`);
+    assertAllowedObjectKeys(record, new Set(["handle", "hasOwnMurph"]), `${label} entry`);
+    return {
+      handle: requireString(record.handle, `${label} entry handle`),
+      hasOwnMurph: requireBoolean(record.hasOwnMurph, `${label} entry hasOwnMurph`),
+    };
+  });
+}
+
+function parseHostedRuntimeGroupProjectionKindArray<
+  K extends HostedVaultShareProjectionKind,
+>(
+  value: unknown,
+  label: string,
+  allowedKinds: readonly K[],
+): K[] | null {
+  if (value === undefined || value === null) return null;
+  const requested = requireArray(value, label);
+  if (requested.length > allowedKinds.length) {
+    throw new TypeError(`${label} must contain at most ${allowedKinds.length} entries.`);
+  }
+  const seen = new Set<K>();
+  for (const entry of requested) {
+    if (!isAllowedProjectionKind(allowedKinds, entry)) {
+      throw new TypeError(`${label} contains an unsupported projection kind.`);
+    }
+    seen.add(entry);
+  }
+  return allowedKinds.filter((kind) => seen.has(kind));
+}
+
+const HOSTED_RUNTIME_GROUP_SUMMARY_PROJECTION_SCOPES = Object.freeze([
+  hostedVaultShareProjectionKindToScope("profile-name.v0"),
+  ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+] satisfies readonly HostedVaultShareProjectionScope[]);
+
+function parseHostedRuntimeGroupSelectableProjectionScopes(
+  value: unknown,
+  legacyKindsValue: unknown,
+  label: string,
+): HostedVaultShareSelectableProjectionScope[] | null {
+  const scopes = parseHostedRuntimeGroupProjectionScopeArray(
+    value,
+    label,
+    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  );
+  if (scopes !== null) {
+    return scopes;
+  }
+  const legacyKinds = parseHostedRuntimeGroupProjectionKindArray(
+    legacyKindsValue,
+    `${label} legacy projectionKinds`,
+    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  );
+  if (legacyKinds === null) {
+    return null;
+  }
+  return legacyKinds.map((projectionKind) => hostedVaultShareProjectionKindToScope(projectionKind));
+}
+
+function parseHostedRuntimeGroupProjectionScopeArray<
+  K extends HostedVaultShareProjectionScope,
+>(
+  value: unknown,
+  label: string,
+  allowedScopes: readonly K[],
+): K[] | null {
+  if (value === undefined || value === null) return null;
+  const requested = requireArray(value, label);
+  if (requested.length > allowedScopes.length) {
+    throw new TypeError(`${label} must contain at most ${allowedScopes.length} entries.`);
+  }
+  const allowedScopeByKey = new Map(
+    allowedScopes.map((scope) => [buildHostedVaultShareProjectionScopeKey(scope), scope]),
+  );
+  const seen = new Set<string>();
+  for (const entry of requested) {
+    let scope: HostedVaultShareProjectionScope;
+    try {
+      scope = parseHostedVaultShareProjectionScope(entry, `${label} entry`);
+    } catch (error) {
+      throw new TypeError(
+        `${label} contains an unsupported projection scope.`,
+        { cause: error },
+      );
+    }
+    const scopeKey = buildHostedVaultShareProjectionScopeKey(scope);
+    if (!allowedScopeByKey.has(scopeKey)) {
+      throw new TypeError(`${label} contains an unsupported projection scope.`);
+    }
+    seen.add(scopeKey);
+  }
+  return allowedScopes.filter((scope) =>
+    seen.has(buildHostedVaultShareProjectionScopeKey(scope))
+  );
+}
+
+function isAllowedProjectionKind<K extends HostedVaultShareProjectionKind>(
+  allowedKinds: readonly K[],
+  value: unknown,
+): value is K {
+  return (allowedKinds as readonly unknown[]).includes(value);
+}
+
+function legacyProjectionKindsToScopes(
+  projectionKinds: readonly HostedVaultShareProjectionKind[],
+  label: string,
+): HostedVaultShareProjectionScope[] {
+  return projectionKinds.map((projectionKind) =>
+    parseHostedVaultShareProjectionScope(projectionKind, `${label} ${projectionKind}`)
+  );
+}
+
+function parseHostedRuntimeGroupSummary(value: unknown) {
+  const record = requireObject(value, "Hosted runtime group summary");
+  assertAllowedObjectKeys(
+    record,
+    new Set([
+      "displayName",
+      "id",
+      "kind",
+      "memberCount",
+      "members",
+      "requestedVaultShareProjectionKinds",
+      "requestedVaultShareProjectionScopes",
+      "status",
+    ]),
+    "Hosted runtime group summary",
+  );
+  const requestedVaultShareProjectionKinds =
+    parseHostedRuntimeGroupProjectionKindArray(
+      record.requestedVaultShareProjectionKinds,
+      "Hosted runtime group summary requestedVaultShareProjectionKinds",
+      HOSTED_VAULT_SHARE_PROJECTION_KINDS,
+    ) ?? [];
+  const requestedVaultShareProjectionScopes =
+    parseHostedRuntimeGroupProjectionScopeArray(
+      record.requestedVaultShareProjectionScopes,
+      "Hosted runtime group summary requestedVaultShareProjectionScopes",
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+    ) ?? legacyProjectionKindsToScopes(
+      requestedVaultShareProjectionKinds,
+      "Hosted runtime group summary requestedVaultShareProjectionKinds",
+    );
+  return {
+    displayName: readNullableString(record.displayName, "Hosted runtime group summary displayName"),
+    id: requireString(record.id, "Hosted runtime group summary id"),
+    kind: requireString(record.kind, "Hosted runtime group summary kind"),
+    memberCount: requireNumber(record.memberCount, "Hosted runtime group summary memberCount"),
+    members: parseHostedRuntimeGroupMemberSummaries(record.members),
+    requestedVaultShareProjectionKinds,
+    requestedVaultShareProjectionScopes,
+    status: requireString(record.status, "Hosted runtime group summary status"),
+  };
+}
+
+const HOSTED_RUNTIME_GROUP_MEMBER_SUMMARY_MAX_ENTRIES = 200;
+
+// Optional for deploy skew: a runner updated before web tolerates summaries
+// without a roster; the reverse order is rejected by the allowed-keys check
+// above, so Cloudflare deploys before web when this shape widens.
+function parseHostedRuntimeGroupMemberSummaries(
+  value: unknown,
+): HostedRuntimeGroupMemberSummary[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  const entries = requireArray(value, "Hosted runtime group summary members");
+  if (entries.length > HOSTED_RUNTIME_GROUP_MEMBER_SUMMARY_MAX_ENTRIES) {
+    throw new TypeError("Hosted runtime group summary members has too many entries.");
+  }
+  return entries.map((entry) => {
+    const record = requireObject(entry, "Hosted runtime group summary member");
+    assertAllowedObjectKeys(
+      record,
+      new Set([
+        "grantedVaultShareProjectionKinds",
+        "grantedVaultShareProjectionScopes",
+        "handle",
+        "memberId",
+        "role",
+      ]),
+      "Hosted runtime group summary member",
+    );
+    const grantedVaultShareProjectionKinds =
+      parseHostedRuntimeGroupProjectionKindArray(
+        record.grantedVaultShareProjectionKinds,
+        "Hosted runtime group summary member grantedVaultShareProjectionKinds",
+        HOSTED_VAULT_SHARE_PROJECTION_KINDS,
+      ) ?? [];
+    const grantedVaultShareProjectionScopes =
+      parseHostedRuntimeGroupProjectionScopeArray(
+        record.grantedVaultShareProjectionScopes,
+        "Hosted runtime group summary member grantedVaultShareProjectionScopes",
+        HOSTED_RUNTIME_GROUP_SUMMARY_PROJECTION_SCOPES,
+      ) ?? legacyProjectionKindsToScopes(
+        grantedVaultShareProjectionKinds,
+        "Hosted runtime group summary member grantedVaultShareProjectionKinds",
+      );
+    return {
+      grantedVaultShareProjectionKinds,
+      grantedVaultShareProjectionScopes,
+      handle: readNullableString(record.handle, "Hosted runtime group summary member handle"),
+      memberId: requireString(record.memberId, "Hosted runtime group summary member memberId"),
+      role: requireString(record.role, "Hosted runtime group summary member role"),
+    };
+  });
 }
 
 export function parseHostedRuntimeFamilyPlanToolRequest(
@@ -990,13 +1991,27 @@ function parseHostedRuntimeLinqExternalThreadRouteAuthority(
   label: string,
 ): HostedExecutionLinqExternalThreadRouteAuthority {
   const record = requireObject(value, label);
+  assertAllowedObjectKeys(
+    record,
+    new Set(["accountLookupKey", "channel", "containerMemberId", "threadId"]),
+    label,
+  );
   const channel = requireString(record.channel, `${label} channel`);
   if (channel !== "linq") {
     throw new TypeError(`${label} channel must be linq.`);
   }
 
+  // Phase 1 deploy skew: readers tolerate missing accountLookupKey while
+  // emitters keep sending it until both web and runner readers are rolled out.
   return {
-    accountLookupKey: requireString(record.accountLookupKey, `${label} accountLookupKey`),
+    ...(record.accountLookupKey === undefined
+      ? {}
+      : {
+          accountLookupKey: readOptionalNullableString(
+            record.accountLookupKey,
+            `${label} accountLookupKey`,
+          ),
+        }),
     channel,
     containerMemberId: requireString(record.containerMemberId, `${label} containerMemberId`),
     threadId: requireString(record.threadId, `${label} threadId`),
@@ -1460,7 +2475,14 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     breakdown.orchestration = {
       ...requireOptionalNonNegativeInteger(orchestration, "temporalActivityStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "temporalActivityRequestStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "tokenAcquireStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "tokenAcquiredAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "directEnsureRequestStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "directEnsureResponseReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalBoolean(orchestration, "triggeredByWebDirect", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "userRunnerEnsureStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeWakeStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeWakeFinishedAtEpochMs", orchestrationLabel),
@@ -1546,6 +2568,23 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
     };
   }
 
+  if (record.import !== undefined) {
+    const importLabel = `${label}.import`;
+    const importBreakdown = requireObject(record.import, importLabel);
+    assertAllowedObjectKeys(
+      importBreakdown,
+      HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.import,
+      importLabel,
+    );
+    breakdown.import = {
+      ...requireOptionalNonNegativeInteger(importBreakdown, "decodeStartedAtEpochMs", importLabel),
+      ...requireOptionalNonNegativeInteger(importBreakdown, "decodeDoneAtEpochMs", importLabel),
+      ...requireOptionalNonNegativeInteger(importBreakdown, "autoReplyPreparedAtEpochMs", importLabel),
+      ...requireOptionalNonNegativeInteger(importBreakdown, "pendingIndexEnsuredAtEpochMs", importLabel),
+      ...requireOptionalNonNegativeInteger(importBreakdown, "stagedAtEpochMs", importLabel),
+    };
+  }
+
   if (record.provider !== undefined) {
     const providerLabel = `${label}.provider`;
     const provider = requireObject(record.provider, providerLabel);
@@ -1555,6 +2594,12 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       providerLabel,
     );
     breakdown.provider = {
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerInitializeMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerPreProviderMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerSpawnReadyMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadResumeMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadStartMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerWarmReuseMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "turnLockWaitMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "sessionResolveMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "promptBuildMs", providerLabel),
@@ -1736,6 +2781,13 @@ export function parseHostedWorkspaceCheckpointRequest(
       record.expectedWorkspaceVersion,
       "Hosted workspace checkpoint request expectedWorkspaceVersion",
     ),
+    ...(record.idleCheckpointTrigger === undefined
+      ? {}
+      : {
+          idleCheckpointTrigger: parseHostedIdleCheckpointTrigger(
+            record.idleCheckpointTrigger,
+          ),
+        }),
     leaseGeneration: requireNonNegativeBigIntString(
       record.leaseGeneration,
       "Hosted workspace checkpoint request leaseGeneration",
@@ -2281,6 +3333,14 @@ function parseHostedWorkspaceCheckpointReason(
   );
 }
 
+function parseHostedIdleCheckpointTrigger(value: unknown): HostedIdleCheckpointTrigger {
+  return parseAllowedString(
+    value,
+    "Hosted idle checkpoint trigger",
+    HOSTED_IDLE_CHECKPOINT_TRIGGERS,
+  );
+}
+
 function parseHostedWorkspaceInvocationBudget(
   value: unknown,
   label: string,
@@ -2536,6 +3596,14 @@ function requireNonNegativeInteger(value: unknown, label: string): number {
   return parsed;
 }
 
+function requireExactInteger(value: unknown, label: string, expected: number): number {
+  const parsed = requireNonNegativeInteger(value, label);
+  if (parsed !== expected) {
+    throw new TypeError(`${label} must be ${expected}.`);
+  }
+  return parsed;
+}
+
 function requireNonNegativeBigIntString(value: unknown, label: string): string {
   const text = requireString(value, label);
 
@@ -2763,6 +3831,7 @@ function isHostedRuntimeFailureLogEntry(entry: HostedRuntimeLogEntry): boolean {
     || entry.eventCode === "mailbox.parser_drain_failed"
     || entry.eventCode === "mailbox.parser_jobs_failed"
     || entry.eventCode === "device-sync.job_failed"
+    || entry.eventCode === "device-sync.module_load_failed"
     || (entry.eventCode === "assistant.device_connect" && entry.level === "warn")
     || (entry.eventCode === "assistant.automation_detail"
       && entry.level === "warn"

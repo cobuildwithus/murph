@@ -2,13 +2,18 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  METRIC_POINT_SCHEMA_VERSION,
+  normalizeMetricValue,
+  resolveMetricInputKey,
+  type MetricPoint,
+} from "@murphai/health-metrics";
+import {
   MURPH_AGE_WEARABLE_COVERAGE_MIN_VALID_DAYS,
   MURPH_AGE_WEARABLE_COVERAGE_WINDOW_DAYS,
   MURPH_AGE_INPUT_BUNDLE_SCHEMA_VERSION,
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_SUBMITTED_CALCULATOR_VIEW_BUNDLE_SCHEMA_VERSION,
-  METRIC_POINT_SCHEMA_VERSION,
   assessMurphAgeInputBundle,
   assessMurphAgeSecondaryContextBundles,
   assessMurphAgeWearableShadowIncrements,
@@ -29,10 +34,8 @@ import {
   listMurphAgeModelCardProductPromotionBlockers,
   listMurphAgeInputBundleMetricKeys,
   listMurphAgeSubmittedCalculatorInputBundleSpecs,
-  normalizeMetricValue,
   parseMurphAgeLocalModelCardArtifact,
   resolveMurphAgeModelCardPolicy,
-  resolveMetricInputKey,
   summarizeMurphAgeCalculatorPublicOutput,
   summarizeMurphAgeSubmittedCalculatorCapabilities,
   summarizeMurphAgePublicWearableBridgeFromInputBundle,
@@ -40,7 +43,6 @@ import {
   validateMurphAgeRiskModel,
   validateMurphAgeLocalModelCardArtifactPolicy,
   validateMurphAgeWearableResidualParameterPack,
-  type MetricPoint,
   type MurphAgeCalculationInput,
   type MurphAgeCalculatorInput,
   type MurphAgeCalculatorMode,
@@ -65,7 +67,7 @@ import {
   type MurphAgeWearableShadowIncrementFamily,
   type MurphAgeWearableShadowIncrementStatus,
   type MurphAgeWarning,
-} from "@murphai/health-metrics";
+} from "@murphai/health-metrics/murph-age";
 
 import {
   listMetricPointsRuntime,

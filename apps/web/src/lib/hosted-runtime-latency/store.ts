@@ -21,7 +21,7 @@ type HostedIngressLatencyPrismaReadClient = {
 
 type HostedIngressLatencyPrismaClient = Pick<
   PrismaClient,
-  "$queryRaw" | "$transaction" | "hostedIngressLatencyTrace"
+  "$executeRaw" | "$queryRaw" | "$transaction" | "hostedIngressLatencyTrace"
 >;
 
 type HostedIngressLatencyPrismaTransactionClient = Pick<
@@ -30,7 +30,7 @@ type HostedIngressLatencyPrismaTransactionClient = Pick<
 >;
 
 type HostedIngressLatencyTraceRow = Awaited<
-  ReturnType<PrismaClient["hostedIngressLatencyTrace"]["findFirst"]>
+  ReturnType<PrismaClient["hostedIngressLatencyTrace"]["findUnique"]>
 >;
 
 type HostedIngressLatencyRuntimeMilestoneField =
@@ -156,6 +156,37 @@ export async function recordHostedIngressTemporalSignalAccepted(input: {
   });
 
   return { matchedCount: 1, recorded: true, unmatchedCount: 0 };
+}
+
+export async function recordHostedIngressDirectEnsureTiming(input: {
+  expectedUserId?: string | null;
+  mailboxItemId: string;
+  phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown;
+  prisma?: HostedIngressLatencyPrismaClient;
+  source: HostedIngressLatencySource | string;
+}): Promise<HostedIngressLatencyWriteResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const source = normalizeHostedIngressLatencySource(input.source);
+  const mailboxItem = await readTraceMailboxItem(prisma, {
+    expectedUserId: input.expectedUserId ?? null,
+    mailboxItemId: input.mailboxItemId,
+  });
+
+  if (!mailboxItem) {
+    return { matchedCount: 0, recorded: false, unmatchedCount: 1 };
+  }
+
+  const trace = await upsertHostedIngressLatencyTraceFromMailboxItem(prisma, {
+    mailboxItem,
+    source,
+  });
+  const recorded = await updateHostedIngressLatencyTracePhaseBreakdownLocked(prisma, {
+    phaseBreakdown: input.phaseBreakdown,
+    phases: ["orchestration"],
+    traceId: trace.id,
+  });
+
+  return { matchedCount: 1, recorded, unmatchedCount: 0 };
 }
 
 export async function recordHostedIngressAssistantInputStaged(input: {
@@ -620,21 +651,39 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
     source: HostedIngressLatencySource;
   },
 ) {
-  return await prisma.hostedIngressLatencyTrace.upsert({
-    create: {
-      acceptedAt: input.mailboxItem.acceptedAt,
-      id: randomUUID(),
-      mailboxItemId: input.mailboxItem.id,
-      mailboxLane: input.mailboxItem.lane,
-      mailboxLaneSeq: input.mailboxItem.laneSeq,
-      source: input.source,
-      userId: input.mailboxItem.userId,
-    },
-    update: {},
-    where: {
-      mailboxItemId: input.mailboxItem.id,
-    },
+  await prisma.$executeRaw`
+    INSERT INTO hosted_ingress_latency_trace (
+      id,
+      user_id,
+      source,
+      mailbox_item_id,
+      mailbox_lane,
+      mailbox_lane_seq,
+      accepted_at,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ${randomUUID()},
+      ${input.mailboxItem.userId},
+      ${input.source},
+      ${input.mailboxItem.id},
+      ${input.mailboxItem.lane},
+      ${input.mailboxItem.laneSeq},
+      ${input.mailboxItem.acceptedAt},
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    )
+    ON CONFLICT (mailbox_item_id) DO NOTHING
+  `;
+
+  const trace = await prisma.hostedIngressLatencyTrace.findUnique({
+    where: { mailboxItemId: input.mailboxItem.id },
   });
+  if (!trace) {
+    throw new Error("Hosted ingress latency trace insert did not produce a readable row.");
+  }
+  return trace;
 }
 
 async function updateHostedIngressLatencyRuntimeMilestone(
@@ -738,6 +787,40 @@ async function readHostedIngressLatencyTraceForUpdate(
     FOR UPDATE
   `;
   return rows[0] ?? null;
+}
+
+async function updateHostedIngressLatencyTracePhaseBreakdownLocked(
+  prisma: HostedIngressLatencyPrismaClient,
+  input: {
+    phaseBreakdown: HostedRuntimeLatencyPhaseBreakdown;
+    phases: readonly HostedRuntimeLatencyPhaseBreakdownPhase[];
+    traceId: string;
+  },
+): Promise<boolean> {
+  return await prisma.$transaction(async (tx) => {
+    const trace = await readHostedIngressLatencyTraceForUpdate(tx, input.traceId);
+    if (!trace) {
+      return false;
+    }
+
+    const phaseBreakdownUpdate = readPhaseBreakdownMergeUpdate(
+      trace.phaseBreakdownJson,
+      input.phaseBreakdown,
+      input.phases,
+    );
+    if (Object.keys(phaseBreakdownUpdate).length === 0) {
+      return false;
+    }
+
+    await tx.hostedIngressLatencyTrace.update({
+      data: phaseBreakdownUpdate,
+      where: {
+        id: trace.id,
+      },
+    });
+
+    return true;
+  });
 }
 
 async function updateHostedIngressAssistantInputStagedLocked(

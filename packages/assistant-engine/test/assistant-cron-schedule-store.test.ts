@@ -197,6 +197,33 @@ describe('assistant cron schedule helpers', () => {
     ).toBe('2026-04-09T09:15:00.000Z')
   })
 
+  it('keeps the overnight maintenance cadence off consecutive nights across month boundaries', () => {
+    // 2026-07-31 is a Friday. Day-of-month stepping ('*/2') resets each
+    // month, so after a 31st it fires again on the 1st — consecutive nights.
+    const afterFridayRun = new Date('2026-07-31T03:00:00.000Z')
+    expect(
+      computeAssistantCronNextRunAt(
+        {
+          expression: '0 3 */2 * *',
+          kind: 'cron',
+        },
+        afterFridayRun,
+      ),
+    ).toBe('2026-08-01T03:00:00.000Z')
+
+    // The seeded day-of-week cadence keeps the 03:00 anchor and never
+    // produces back-to-back nights: Friday's next occurrence is Monday.
+    expect(
+      computeAssistantCronNextRunAt(
+        {
+          expression: '0 3 * * 1,3,5',
+          kind: 'cron',
+        },
+        afterFridayRun,
+      ),
+    ).toBe('2026-08-03T03:00:00.000Z')
+  })
+
   it('finds the next Sunday occurrence when cron day-of-week uses 7', () => {
     expect(
       findNextAssistantCronOccurrence(
@@ -443,6 +470,36 @@ describe('assistant cron store filesystem edges', () => {
     ])
   })
 
+  it('reads legacy status-only cron run records as outcomes', async () => {
+    const paths = await createAssistantPaths('assistant-cron-schedule-store-runs-legacy-')
+    await mkdir(paths.cronRunsDirectory, { recursive: true })
+    await writeFile(
+      path.join(paths.cronRunsDirectory, 'cron_alpha.jsonl'),
+      `${JSON.stringify({
+        error: null,
+        finishedAt: '2026-04-08T10:01:00.000Z',
+        jobId: 'cron_alpha',
+        response: 'Delivered.',
+        responseLength: 'Delivered.'.length,
+        runId: 'cronrun_alpha_legacy',
+        schema: 'murph.assistant-cron-run.v1',
+        sessionId: null,
+        startedAt: '2026-04-08T10:00:00.000Z',
+        status: 'succeeded',
+        trigger: 'scheduled',
+      })}\n`,
+      'utf8',
+    )
+
+    await expect(readAssistantCronRuns(paths, 'cron_alpha')).resolves.toEqual([
+      expect.objectContaining({
+        outcome: 'delivered',
+        reason: 'legacy_succeeded',
+        status: 'succeeded',
+      }),
+    ])
+  })
+
   it('redacts older cron responses and prunes stale run history during maintenance', async () => {
     const paths = await createAssistantPaths('assistant-cron-schedule-store-retention-')
     await appendAssistantCronRun(paths, createCronRun({
@@ -614,6 +671,8 @@ function createCronRun(input: {
     error: null,
     finishedAt: input.finishedAt ?? '2026-04-08T10:01:00.000Z',
     jobId: input.jobId ?? 'cron_alpha',
+    outcome: 'delivered',
+    reason: 'sent',
     response: input.response ?? null,
     responseLength: input.response?.length ?? 0,
     runId: input.runId,

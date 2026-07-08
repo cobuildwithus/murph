@@ -49,6 +49,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
     'signupWelcomeEmailAttemptedAt DateTime? @map("signup_welcome_email_attempted_at")',
     'suspendedAt DateTime? @map("suspended_at")',
+    'threadContainerParticipations HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -78,7 +79,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'linqChatIdEncrypted String? @map("linq_chat_id_encrypted")',
     'linqRecipientPhoneLookupKey String? @map("linq_recipient_phone_lookup_key")',
     'linqRecipientPhoneEncrypted String? @map("linq_recipient_phone_encrypted")',
-    'linqLastInboundAt DateTime? @map("linq_last_inbound_at")',
+    'linqHomeLineAssignedAt DateTime? @map("linq_home_line_assigned_at")',
     'pendingLinqChatLookupKey String? @unique @map("pending_linq_chat_lookup_key")',
     'pendingLinqChatIdEncrypted String? @map("pending_linq_chat_id_encrypted")',
     'pendingLinqParticipantContactKind String? @map("pending_linq_participant_contact_kind")',
@@ -87,7 +88,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'pendingLinqParticipantContactObservedAt DateTime? @map("pending_linq_participant_contact_observed_at")',
     'pendingLinqRecipientPhoneLookupKey String? @map("pending_linq_recipient_phone_lookup_key")',
     'pendingLinqRecipientPhoneEncrypted String? @map("pending_linq_recipient_phone_encrypted")',
-    'pendingLinqLastInboundAt DateTime? @map("pending_linq_last_inbound_at")',
     'replyAliasLookupKey String? @unique @map("reply_alias_lookup_key")',
     'telegramUserLookupKey String? @unique @map("telegram_user_lookup_key")',
     'telegramUserIdEncrypted String? @map("telegram_user_id_encrypted")',
@@ -138,6 +138,11 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAccountGroupBillingRef",
   "HostedAccountGroupInvite",
   "HostedAccountGroupMembership",
+  // Generic hosted groups: relation-only back-references from HostedMember.
+  // Group membership rows stay in dedicated group tables; optional sharing
+  // remains explicit through HostedVaultShare grants.
+  "HostedGroup",
+  "HostedGroupMember",
   // VaultShare v0: consent-grant relation only (grantor/destination back-references).
   // No new scalar member data; share payloads stay on the encrypted mailbox path.
   "HostedVaultShare",
@@ -475,6 +480,55 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedVaultShareActiveIndexesMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260701153000_hosted_vault_share_active_indexes/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const deviceOauthSessionConsumedAtMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260703160000_device_oauth_session_consumed_at/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedMailboxItemConsumedAtMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260705120000_hosted_mailbox_item_consumed_at/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedThreadContainerParticipantMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260706120000_hosted_thread_container_participant/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedGroupJoinOfferMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260706130000_hosted_group_join_offer/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedGrowthDailySnapshotMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260706130000_hosted_growth_daily_snapshot/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const staleLinqRecencyDropMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260707170000_drop_stale_linq_recency_columns/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -548,6 +602,17 @@ describe("hosted Prisma baseline migration", () => {
       "20260628000000_linq_first_contact_scrub_rejected_message_text",
       "20260628010000_linq_first_contact_drop_rejected_message_text",
       "20260629160000_computer_handoff_viewport_session_hint",
+      "20260630190000_hosted_linq_db_home_lines",
+      "20260701040000_hosted_groups",
+      "20260701050000_hosted_vault_share_drop_source",
+      "20260701153000_hosted_vault_share_active_indexes",
+      "20260703160000_device_oauth_session_consumed_at",
+      "20260705120000_hosted_mailbox_item_consumed_at",
+      "20260706120000_hosted_thread_container_participant",
+      "20260706130000_hosted_group_join_offer",
+      "20260706130000_hosted_growth_daily_snapshot",
+      "20260707170000_drop_stale_linq_recency_columns",
+      "20260707180000_hosted_vault_share_projection_scopes",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -577,6 +642,46 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedThreadRoutesMigrationSql).not.toContain("thread_id_encrypted");
     expect(hostedThreadRoutesMigrationSql).not.toContain('"source"');
     expect(hostedThreadRoutesMigrationSql).not.toContain('"status"');
+    expect(hostedThreadContainerParticipantMigrationSql).toContain(
+      'CREATE TABLE "hosted_thread_container_participant"',
+    );
+    expect(hostedThreadContainerParticipantMigrationSql).toContain(
+      '"handle_lookup_key" TEXT NOT NULL',
+    );
+    expect(hostedThreadContainerParticipantMigrationSql).toContain(
+      'PRIMARY KEY ("container_member_id", "participant_member_id")',
+    );
+    expect(hostedThreadContainerParticipantMigrationSql).toContain(
+      'REFERENCES "hosted_thread_container"("member_id") ON DELETE CASCADE',
+    );
+    expect(hostedThreadContainerParticipantMigrationSql).toContain(
+      'REFERENCES "hosted_member"("id") ON DELETE CASCADE',
+    );
+    expect(hostedThreadContainerParticipantMigrationSql).not.toContain('"handle" TEXT');
+    expect(hostedThreadContainerParticipantMigrationSql).not.toMatch(
+      /"(?:raw_)?(?:message|body|payload)[^"]*"/iu,
+    );
+    expect(hostedGroupJoinOfferMigrationSql).toContain(
+      'CREATE TABLE "hosted_group_join_offer"',
+    );
+    expect(hostedGroupJoinOfferMigrationSql).toContain('"message_lookup_key" TEXT NOT NULL');
+    expect(hostedGroupJoinOfferMigrationSql).toContain('"projection_kinds_json" JSONB NOT NULL');
+    expect(hostedGroupJoinOfferMigrationSql).toContain('"revoked_at" TIMESTAMP(3)');
+    expect(hostedGroupJoinOfferMigrationSql).toContain(
+      'REFERENCES "hosted_group"("id")',
+    );
+    expect(hostedGroupJoinOfferMigrationSql).not.toContain(
+      'ALTER TABLE "hosted_group"',
+    );
+    expect(hostedGrowthDailySnapshotMigrationSql).toContain(
+      'CREATE TABLE "hosted_growth_daily_snapshot"',
+    );
+    expect(hostedGrowthDailySnapshotMigrationSql).toContain(
+      '"snapshot_date" DATE NOT NULL',
+    );
+    expect(hostedGrowthDailySnapshotMigrationSql).toContain(
+      'PRIMARY KEY ("snapshot_date")',
+    );
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
     expect(schema).not.toContain("@@index([memberId, profileKey, updatedAt])");
     expect(singleMemberComputerProfileMigrationSql).toContain(
@@ -653,6 +758,24 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedLinqEgressEngagementMigrationSql).not.toContain(
       'SET "last_inbound_at" = CURRENT_TIMESTAMP',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP INDEX IF EXISTS "hosted_member_routing_linq_last_inbound_at_idx"',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP INDEX IF EXISTS "hosted_member_routing_pending_linq_last_inbound_at_idx"',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP INDEX IF EXISTS "hosted_thread_route_channel_last_inbound_at_idx"',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP COLUMN IF EXISTS "linq_last_inbound_at"',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP COLUMN IF EXISTS "pending_linq_last_inbound_at"',
+    );
+    expect(staleLinqRecencyDropMigrationSql).toContain(
+      'DROP COLUMN IF EXISTS "last_inbound_at"',
     );
     expect(hostedLinqObservabilityMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
     expect(hostedLinqObservabilityMigrationSql).toContain('"skip_reason" TEXT');
@@ -1010,6 +1133,17 @@ describe("hosted Prisma baseline migration", () => {
     expect(deviceOauthSessionMetadataMigrationSql).toContain(
       'ADD COLUMN "metadata_json" JSONB',
     );
+    expect(deviceOauthSessionConsumedAtMigrationSql).toContain(
+      'ALTER TABLE "device_oauth_session" ADD COLUMN "consumed_at" TIMESTAMP(3);',
+    );
+    expect(schema).toMatch(
+      /model HostedMailboxItem \{[\s\S]*consumedAt\s+DateTime\?\s+@map\("consumed_at"\)/u,
+    );
+    expect(hostedMailboxItemConsumedAtMigrationSql).toContain(
+      'ALTER TABLE "hosted_mailbox_item" ADD COLUMN "consumed_at" TIMESTAMP(3);',
+    );
+    expect(hostedMailboxItemConsumedAtMigrationSql).not.toContain("CREATE TABLE");
+    expect(hostedMailboxItemConsumedAtMigrationSql).not.toContain("CREATE INDEX");
     expect(linqPendingParticipantContactMigrationSql).toContain(
       'ALTER TABLE "hosted_member_routing"',
     );
@@ -1112,6 +1246,20 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(schema).not.toContain("model HostedRevnetIssuance");
     expect(schema).not.toContain("enum HostedRevnetIssuanceStatus");
+    expect(hostedVaultShareActiveIndexesMigrationSql).toContain(
+      'CREATE INDEX "hosted_vault_share_active_grantor_projection_idx"',
+    );
+    expect(hostedVaultShareActiveIndexesMigrationSql).toContain(
+      'ON "hosted_vault_share"("grantor_member_id", "projection_kind")',
+    );
+    expect(hostedVaultShareActiveIndexesMigrationSql).toContain(
+      'CREATE INDEX "hosted_vault_share_active_destination_projection_idx"',
+    );
+    expect(hostedVaultShareActiveIndexesMigrationSql).toContain(
+      'ON "hosted_vault_share"("destination_member_id", "projection_kind")',
+    );
+    expect(hostedVaultShareActiveIndexesMigrationSql.match(/WHERE "status" = 'granted'/gu))
+      .toHaveLength(2);
   });
 
   it("makes eligible stuck device connections due even when their reconcile is scheduled in the future", () => {

@@ -32,9 +32,11 @@ import {
   appendTranscriptEntries,
   inspectAssistantSessionStorage,
   loadAndPersistResolvedSession,
+  readAssistantRecentSessionIds,
   readAssistantIndexStore,
   readAssistantSession,
   readAssistantTranscriptEntries,
+  readAssistantTranscriptTailEntries,
   readAutomationState,
   writeAutomationState,
   replaceTranscriptEntries,
@@ -323,8 +325,20 @@ function hasAssistantSessionProviderOverrideInput(
 
 export async function listAssistantSessions(
   vault: string,
+  options?: {
+    limit?: number
+  },
 ): Promise<AssistantSession[]> {
-  return listAssistantSessionsLocal(vault)
+  if (typeof options?.limit !== 'number') {
+    return listAssistantSessionsLocal(vault)
+  }
+
+  const limit = Math.max(0, Math.trunc(options.limit))
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const sessionIds = await readAssistantRecentSessionIds(paths, { limit })
+    return (await readAssistantSessionsSorted(paths, sessionIds)).slice(0, limit)
+  })
 }
 
 // Maps a Codex thread back to the Murph assistant session that owns it (via
@@ -346,32 +360,40 @@ export async function listAssistantSessionsLocal(
 ): Promise<AssistantSession[]> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
-
-    const entries = await readdir(paths.sessionsDirectory, {
-      withFileTypes: true,
-    })
-    const sessions: AssistantSession[] = []
-
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) {
-        continue
-      }
-
-      const sessionId = entry.name.replace(/\.json$/u, '')
-      const session = await readAssistantSession({
-        paths,
-        sessionId,
-        treatCorruptedAsMissing: true,
-      })
-      if (session) {
-        sessions.push(session)
-      }
-    }
-
-    return sessions.sort((left, right) =>
-      compareAssistantTimestampsAscending(right.updatedAt, left.updatedAt),
-    )
+    return readAssistantSessionsSorted(paths, await listAssistantSessionFileIds(paths))
   })
+}
+
+async function listAssistantSessionFileIds(
+  paths: AssistantStatePaths,
+): Promise<string[]> {
+  const entries = await readdir(paths.sessionsDirectory, {
+    withFileTypes: true,
+  })
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => entry.name.replace(/\.json$/u, ''))
+}
+
+async function readAssistantSessionsSorted(
+  paths: AssistantStatePaths,
+  sessionIds: readonly string[],
+): Promise<AssistantSession[]> {
+  const sessions: AssistantSession[] = []
+  for (const sessionId of sessionIds) {
+    const session = await readAssistantSession({
+      paths,
+      sessionId,
+      treatCorruptedAsMissing: true,
+    })
+    if (session) {
+      sessions.push(session)
+    }
+  }
+
+  return sessions.sort((left, right) =>
+    compareAssistantTimestampsAscending(right.updatedAt, left.updatedAt),
+  )
 }
 
 export async function getAssistantSession(
@@ -442,6 +464,16 @@ export async function listAssistantTranscriptEntries(
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
   return readAssistantTranscriptEntries(paths, sessionId)
+}
+
+export async function listAssistantTranscriptTailEntries(
+  vault: string,
+  sessionId: string,
+  options: { maxBytes: number },
+): Promise<AssistantTranscriptEntry[]> {
+  const paths = resolveAssistantStatePaths(vault)
+  await ensureAssistantState(paths)
+  return readAssistantTranscriptTailEntries(paths, sessionId, options.maxBytes)
 }
 
 export async function appendAssistantTranscriptEntries(

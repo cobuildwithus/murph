@@ -20,6 +20,7 @@ import {
 import type {
   AssistantProviderServiceTier,
   AssistantProviderAttemptMetadata,
+  AssistantProviderRequestStartTiming,
   AssistantProviderRequestOutcome,
   AssistantProviderUsage,
   AssistantProviderUsageDraft,
@@ -88,12 +89,6 @@ import type {
   AssistantCodexTurnExecutionProfile,
   AssistantCodexTurnThreadScopeProfile,
 } from './codex-turn/planning.js'
-import {
-  collectAuthorizedTurnAttachmentImageRefs,
-} from '../assistant-codex/turn-attachment-image-refs.js'
-import {
-  readAssistantAcceptedTurnInputJournal,
-} from './active-turn-input-journal.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
@@ -177,7 +172,7 @@ export async function executeCodexTurnWithRecovery(input: {
   onProviderRequestStarted?: (event: {
     providerRequestOrdinal: number | null
     startedAt: string
-  }) => Promise<void> | void
+  } & AssistantProviderRequestStartTiming) => Promise<void> | void
   plan: AssistantTurnSharedPlan
   profile?: AssistantCodexTurnThreadScopeProfile | null
   providerRequestOrdinal?: number | null
@@ -351,7 +346,7 @@ async function executeAssistantCodexAttempt(input: {
   onProviderRequestStarted?: ((event: {
     providerRequestOrdinal: number | null
     startedAt: string
-  }) => Promise<void> | void) | null
+  } & AssistantProviderRequestStartTiming) => Promise<void> | void) | null
   providerRequestOrdinal: number | null
 }): Promise<AssistantCodexAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
@@ -458,26 +453,12 @@ async function executeAssistantCodexAttempt(input: {
           session: attemptPlan.session,
           sharedPlan: executionPlan.sharedPlan,
         }),
+        codexConfigOverrides: executionPlan.input.codexConfigOverrides ?? null,
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
         dynamicTools: attemptPlan.routePlan.dynamicTools,
         env: attemptEnv,
-        // Re-read the accepted-input journal at every generate_image call so
-        // live-steered attachments accepted after the provider attempt started
-        // are still recognized as authorized for this turn. The pre-attempt
-        // executionPlan.acceptedInputItems is a snapshot and would miss them.
-        loadAuthorizedReferenceImageRefs: async () => {
-          const journal = await readAssistantAcceptedTurnInputJournal(
-            executionPlan.input.vault,
-            executionPlan.turnId,
-          )
-          return collectAuthorizedTurnAttachmentImageRefs({
-            acceptedInputItems:
-              journal?.inputs ?? executionPlan.acceptedInputItems ?? null,
-            vault: executionPlan.input.vault,
-          })
-        },
         generatedImageUploader:
           executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
         hostedToolContext: executionPlan.hostedToolContext ?? null,
@@ -491,8 +472,8 @@ async function executeAssistantCodexAttempt(input: {
         onProviderRequestStarted: (event) => {
           notifyProviderRequestStartedBestEffort({
             event: {
+              ...event,
               providerRequestOrdinal: input.providerRequestOrdinal,
-              startedAt: event.startedAt,
             },
             hook: input.onProviderRequestStarted ?? null,
           })
@@ -577,9 +558,6 @@ async function executeAssistantCodexAttempt(input: {
         assistantContractFingerprint:
           attemptPlan.routePlan.assistantContractFingerprint,
         attemptCount: attemptPlan.attemptCount,
-        nonReplayableProviderWork:
-          attemptMetadata.executedToolCount > 0 ||
-          attemptMetadata.providerActionCount > 0,
         onboardingGuidanceInjected: attemptPlan.routePlan.onboardingGuidanceInjected,
         codexContinuation:
           result.codexContinuation ?? effectiveCodexContinuation,
@@ -623,15 +601,17 @@ async function executeAssistantCodexAttempt(input: {
       policy: attemptPlan.routePlan.diagnosticsPolicy,
       vault: executionPlan.input.vault,
     })
-    void appendAssistantTranscriptEntries(
-      executionPlan.input.vault,
-      session.sessionId,
-      buildAssistantProviderTranscriptAuditEntries({
-        error,
-        rawToolEvents: attemptMetadata.rawToolEvents,
-        routeLabel: attemptPlan.route.label,
-      }),
-    ).catch(() => undefined)
+    if (executionPlan.input.suppressProviderFailureTranscriptAudit !== true) {
+      void appendAssistantTranscriptEntries(
+        executionPlan.input.vault,
+        session.sessionId,
+        buildAssistantProviderTranscriptAuditEntries({
+          error,
+          rawToolEvents: attemptMetadata.rawToolEvents,
+          routeLabel: attemptPlan.route.label,
+        }),
+      ).catch(() => undefined)
+    }
 
     await recordCodexAttemptFailed({
       activityLabels: attemptMetadata.activityLabels,
@@ -685,11 +665,11 @@ function notifyProviderRequestStartedBestEffort(input: {
   event: {
     providerRequestOrdinal: number | null
     startedAt: string
-  }
+  } & AssistantProviderRequestStartTiming
   hook?: ((event: {
     providerRequestOrdinal: number | null
     startedAt: string
-  }) => Promise<void> | void) | null
+  } & AssistantProviderRequestStartTiming) => Promise<void> | void) | null
 }): void {
   if (!input.hook) {
     return

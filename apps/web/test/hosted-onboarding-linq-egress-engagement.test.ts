@@ -1,647 +1,365 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  getPrisma: vi.fn(),
+  requireHostedCloudflareCallbackRequest: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
+  requireHostedCloudflareCallbackRequest:
+    mocks.requireHostedCloudflareCallbackRequest,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
+}));
 
 import {
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
-  assertHostedLinqRouteAuthorityMatchesTarget,
   assertHostedLinqRecentInboundEngagementForRuntime,
-  decideHostedLinqRecentInbound,
-  recordHostedMemberLinqInboundEngagementTx,
-  recordHostedThreadRouteLinqInboundEngagementTx,
-  readHostedLinqSideEffectRecentInboundDecision,
+  assertHostedLinqRouteAuthorityMatchesTarget,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
+import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
 
-describe("hosted Linq egress engagement", () => {
-  it("allows recent inbound and blocks missing or stale inbound proof", () => {
-    const now = new Date("2026-06-25T12:00:00.000Z");
-
-    expect(decideHostedLinqRecentInbound({
-      lastInboundAt: new Date("2026-06-01T12:00:00.000Z"),
-      now,
-    })).toMatchObject({
-      allowed: true,
-    });
-    expect(decideHostedLinqRecentInbound({
-      lastInboundAt: null,
-      now,
-    })).toMatchObject({
-      allowed: false,
-      lastInboundAt: null,
-      reason: "missing_inbound",
-    });
-    expect(decideHostedLinqRecentInbound({
-      lastInboundAt: new Date("2026-05-01T12:00:00.000Z"),
-      now,
-    })).toMatchObject({
-      allowed: false,
-      reason: "stale_inbound",
-    });
-    expect(decideHostedLinqRecentInbound({
-      lastInboundAt: new Date("2026-07-25T12:00:00.000Z"),
-      now,
-    })).toMatchObject({
-      allowed: false,
-      reason: "stale_inbound",
-    });
+describe("hosted Linq egress authority", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member-1");
   });
 
   it("allows explicit signup welcome first contact for the bound runtime user", async () => {
-    const memberPhoneLookupKey = createHostedPhoneLookupKey("+15550100001");
-    const homeLineLookupKey = createHostedPhoneLookupKey("+15550100099");
-    if (!memberPhoneLookupKey || !homeLineLookupKey) {
-      throw new Error("Expected test phone lookup keys.");
-    }
-    const prisma = {
-      hostedLinqDelivery: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
-      },
-      hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue({
-          phoneLookupKey: memberPhoneLookupKey,
-        }),
-      },
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          linqRecipientPhoneLookupKey: homeLineLookupKey,
-        }),
-      },
-      hostedThreadRoute: {
-        findUnique: vi.fn(),
-      },
-    };
+    const prisma = createPrismaStub({
+      identityPhone: "+15550100001",
+      homeLinePhone: "+15550100099",
+    });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      engagementKind: "first_contact",
       fromPhoneNumber: "+15550100099",
       idempotencyKey: "signup-welcome:member-1",
-      intentId: "intent-1",
       memberId: "member-1",
-      prisma: prisma as never,
+      prisma: asRuntimeEngagementPrisma(prisma),
       target: "+15550100001",
       targetKind: "participant",
     })).resolves.toBeUndefined();
 
     expect(prisma.hostedMemberIdentity.findUnique).toHaveBeenCalledWith({
-      where: { memberId: "member-1" },
       select: { phoneLookupKey: true },
+      where: { memberId: "member-1" },
     });
     expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
-      where: { memberId: "member-1" },
       select: { linqRecipientPhoneLookupKey: true },
+      where: { memberId: "member-1" },
     });
-    expect(prisma.hostedThreadRoute.findUnique).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
   });
 
-  it("rejects signup welcome first contact when the participant route does not match durable member routing", async () => {
-    const memberPhoneLookupKey = createHostedPhoneLookupKey("+15550100001");
-    const homeLineLookupKey = createHostedPhoneLookupKey("+15550100099");
-    if (!memberPhoneLookupKey || !homeLineLookupKey) {
-      throw new Error("Expected test phone lookup keys.");
-    }
-    const prisma = {
-      hostedLinqDelivery: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
-      },
-      hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue({
-          phoneLookupKey: memberPhoneLookupKey,
-        }),
-      },
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          linqRecipientPhoneLookupKey: homeLineLookupKey,
-        }),
-      },
-    };
-
+  it("rejects first contact without signup-welcome authority", async () => {
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      engagementKind: "first_contact",
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "signup-welcome:member-1",
-      memberId: "member-1",
-      prisma: prisma as never,
-      target: "+15550100002",
-      targetKind: "participant",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-    });
-
-    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      engagementKind: "first_contact",
-      fromPhoneNumber: "+15550100100",
-      idempotencyKey: "signup-welcome:member-1",
-      memberId: "member-1",
-      prisma: prisma as never,
-      target: "+15550100001",
-      targetKind: "participant",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-    });
-
-    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      engagementKind: "first_contact",
-      fromPhoneNumber: "+15550100099",
-      idempotencyKey: "signup-welcome:member-1",
-      memberId: "member-1",
-      prisma: prisma as never,
-      target: "chat-1",
-      targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-    });
-
-    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
-  });
-
-  it("rejects first-contact runtime egress without signup welcome authority", async () => {
-    const prisma = {
-      hostedLinqDelivery: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
-      },
-    };
-
-    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      engagementKind: "first_contact",
       idempotencyKey: "signup-welcome:member-2",
       memberId: "member-1",
-      prisma: prisma as never,
-      target: "chat-1",
-      targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
-      httpStatus: 403,
-    });
-
-    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
-  });
-
-  it("allows participant follow-up egress when the member replied to the hosted Linq line", async () => {
-    const memberPhoneLookupKey = createHostedPhoneLookupKey("+15550100001");
-    const homeLineLookupKey = createHostedPhoneLookupKey("+15550100099");
-    if (!memberPhoneLookupKey || !homeLineLookupKey) {
-      throw new Error("Expected test phone lookup keys.");
-    }
-    const prisma = {
-      hostedLinqDelivery: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
-      },
-      hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue({
-          phoneLookupKey: memberPhoneLookupKey,
-        }),
-      },
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          linqChatLookupKey: null,
-          linqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
-          linqRecipientPhoneLookupKey: homeLineLookupKey,
-          pendingLinqChatLookupKey: null,
-          pendingLinqLastInboundAt: null,
-          pendingLinqRecipientPhoneLookupKey: null,
-        }),
-      },
-      hostedThreadRoute: {
-        findUnique: vi.fn(),
-      },
-    };
-
-    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      fromPhoneNumber: "+15550100099",
-      idempotencyKey: "assistant-outbox:intent-1",
-      intentId: "intent-1",
-      memberId: "member-1",
-      now: new Date("2026-06-25T12:05:00.000Z"),
-      prisma: prisma as never,
+      prisma: asRuntimeEngagementPrisma(createPrismaStub({
+        identityPhone: "+15550100001",
+        homeLinePhone: "+15550100099",
+      })),
       target: "+15550100001",
       targetKind: "participant",
-    })).resolves.toBeUndefined();
-
-    expect(prisma.hostedMemberIdentity.findUnique).toHaveBeenCalledWith({
-      where: { memberId: "member-1" },
-      select: { phoneLookupKey: true },
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
+      httpStatus: 403,
     });
-    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
-      where: { memberId: "member-1" },
-      select: {
-        linqChatLookupKey: true,
-        linqLastInboundAt: true,
-        linqRecipientPhoneLookupKey: true,
-        pendingLinqChatLookupKey: true,
-        pendingLinqLastInboundAt: true,
-        pendingLinqRecipientPhoneLookupKey: true,
-      },
-    });
-    expect(prisma.hostedThreadRoute.findUnique).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
   });
 
-  it("rejects participant follow-up egress when the participant target is not the runtime user", async () => {
-    const memberPhoneLookupKey = createHostedPhoneLookupKey("+15550100001");
-    if (!memberPhoneLookupKey) {
-      throw new Error("Expected test phone lookup key.");
-    }
-    const prisma = {
-      hostedLinqDelivery: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
-      },
-      hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue({
-          phoneLookupKey: memberPhoneLookupKey,
-        }),
-      },
-      hostedMemberRouting: {
-        findUnique: vi.fn(),
-      },
-    };
+  it("rejects participant sends without signup-welcome idempotency even when identity and source line match", async () => {
+    const prisma = createPrismaStub({
+      identityPhone: "+15550100001",
+      homeLinePhone: "+15550100099",
+    });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       fromPhoneNumber: "+15550100099",
-      idempotencyKey: "assistant-outbox:intent-1",
       memberId: "member-1",
-      now: new Date("2026-06-25T12:05:00.000Z"),
-      prisma: prisma as never,
-      target: "+15550100002",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "+15550100001",
       targetKind: "participant",
     })).rejects.toMatchObject({
       code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
       httpStatus: 403,
     });
 
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      fromPhoneNumber: "+15550100100",
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "+15550100001",
+      targetKind: "participant",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      fromPhoneNumber: "+15550100099",
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "+15550100002",
+      targetKind: "participant",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+  });
+
+  it("allows thread sends only when the target matches home or pending Linq routing", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+      pendingChatId: "chat-pending",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-home",
+      targetKind: "thread",
+    })).resolves.toBeUndefined();
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-pending",
+      targetKind: "thread",
+    })).resolves.toBeUndefined();
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      target: "chat-other",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+  });
+
+  it("allows same-user route authority without a DB route assertion", async () => {
+    const prisma = createPrismaStub({});
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:line-1",
+        channel: "linq",
+        containerMemberId: "member-1",
+        threadId: "chat-authorized",
+      },
+      target: "chat-authorized",
+      targetKind: "thread",
+    })).resolves.toBeUndefined();
+
+    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
-  });
-
-  it("allows invite side effects as explicit first contact", async () => {
-    await expect(readHostedLinqSideEffectRecentInboundDecision({
-      payload: {
-        chatId: "chat-1",
-        inviteId: "invite-1",
-        memberId: "member-1",
-        occurredAt: "2026-06-25T12:00:00.000Z",
-        replyToMessageId: null,
-        template: "invite_signup",
-      },
-      prisma: {} as never,
-    })).resolves.toEqual({
-      allowed: true,
-      lastInboundAt: null,
-    });
-  });
-
-  it("projects real inbound Linq messages onto active and pending member routes", async () => {
-    const prisma = {
-      hostedMemberRouting: {
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-    };
-
-    await recordHostedMemberLinqInboundEngagementTx({
-      chatId: "chat-1",
-      memberId: "member-1",
-      occurredAt: "2026-06-25T12:00:00.000Z",
-      prisma: prisma as never,
-    });
-
-    expect(prisma.hostedMemberRouting.updateMany).toHaveBeenCalledTimes(2);
-    expect(prisma.hostedMemberRouting.updateMany).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        data: {
-          linqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
-        },
-        where: expect.objectContaining({
-          memberId: "member-1",
-        }),
-      }),
-    );
-    expect(prisma.hostedMemberRouting.updateMany).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        data: {
-          pendingLinqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
-        },
-        where: expect.objectContaining({
-          memberId: "member-1",
-        }),
-      }),
-    );
-  });
-
-  it("caps future-dated inbound member engagement at server receipt time", async () => {
-    const prisma = {
-      hostedMemberRouting: {
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-    };
-
-    await recordHostedMemberLinqInboundEngagementTx({
-      chatId: "chat-1",
-      memberId: "member-1",
-      now: new Date("2026-06-25T12:00:00.000Z"),
-      occurredAt: "2026-08-25T12:00:00.000Z",
-      prisma: prisma as never,
-    });
-
-    expect(prisma.hostedMemberRouting.updateMany).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        data: {
-          linqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
-        },
-      }),
-    );
-    expect(prisma.hostedMemberRouting.updateMany).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        data: {
-          pendingLinqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
-        },
-      }),
-    );
-  });
-
-  it("caps future-dated inbound thread-route engagement at server receipt time", async () => {
-    const lineLookupKey = createHostedPhoneLookupKey("+15550100001");
-    if (!lineLookupKey) {
-      throw new Error("Expected test Linq line lookup key.");
-    }
-    const prisma = {
-      hostedThreadRoute: {
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-    };
-
-    await recordHostedThreadRouteLinqInboundEngagementTx({
-      chatId: "chat-1",
-      linePhoneNumberLookupKey: lineLookupKey,
-      memberId: "member-1",
-      now: new Date("2026-06-25T12:00:00.000Z"),
-      occurredAt: "2026-08-25T12:00:00.000Z",
-      prisma: prisma as never,
-    });
-
-    expect(prisma.hostedThreadRoute.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: {
-          lastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
-        },
-        where: expect.objectContaining({
-          channel: "linq",
-          containerMemberId: "member-1",
-          threadLookupKey: {
-            in: expect.arrayContaining([
-              expect.stringMatching(/^hbidx:external-thread:/u),
-            ]),
-          },
-        }),
-      }),
-    );
-    expect(prisma.hostedThreadRoute.updateMany.mock.calls[0]?.[0]?.where)
-      .not.toHaveProperty("threadIdentityLookupKey");
-  });
-
-  it("records skipped runtime sends when no recent inbound exists", async () => {
-    const chatLookupKey = createHostedLinqChatLookupKey("chat-1");
-    if (!chatLookupKey) {
-      throw new Error("Expected test Linq chat lookup key.");
-    }
-    const prisma = {
-      hostedLinqDelivery: {
-        create: vi.fn().mockResolvedValue({ id: "hld_skip" }),
-        findUnique: vi.fn().mockResolvedValue(null),
-      },
-      hostedLinqLine: {
-        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
-          Promise.resolve({
-            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
-          })),
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
-          Promise.resolve({
-            phoneNumberLookupKey: input.where?.phoneNumberLookupKey ?? "hbidx:phone:updated",
-          })),
-      },
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          linqChatLookupKey: chatLookupKey,
-          linqLastInboundAt: new Date("2026-05-01T12:00:00.000Z"),
-          linqRecipientPhoneLookupKey: null,
-          pendingLinqChatLookupKey: null,
-          pendingLinqLastInboundAt: null,
-          pendingLinqRecipientPhoneLookupKey: null,
-        }),
-      },
-    };
-
-    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      fromPhoneNumber: "+15550100001",
-      idempotencyKey: "delivery-key-1",
-      intentId: "intent-1",
-      memberId: "member-1",
-      now: new Date("2026-06-25T12:00:00.000Z"),
-      prisma: prisma as never,
-      target: "chat-1",
-      targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
-      httpStatus: 403,
-    });
-
-    expect(prisma.hostedLinqLine.upsert).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          idempotencyKey: expect.stringMatching(/^hbid:linq\.delivery-idempotency:/u),
-          skippedAt: new Date("2026-06-25T12:00:00.000Z"),
-          sourceRef: expect.stringMatching(/^hbid:linq\.delivery-source-ref:/u),
-          source: "hosted_runtime_linq_egress_guard",
-          status: "skipped",
-        }),
-      }),
-    );
-  });
-
-  it("records skipped runtime sends when inbound proof is missing", async () => {
-    const chatLookupKey = createHostedLinqChatLookupKey("chat-1");
-    if (!chatLookupKey) {
-      throw new Error("Expected test Linq chat lookup key.");
-    }
-    const prisma = {
-      hostedLinqDelivery: {
-        create: vi.fn().mockResolvedValue({ id: "hld_skip" }),
-        findUnique: vi.fn().mockResolvedValue(null),
-      },
-      hostedLinqLine: {
-        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
-          Promise.resolve({
-            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
-          })),
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
-          Promise.resolve({
-            phoneNumberLookupKey: input.where?.phoneNumberLookupKey ?? "hbidx:phone:updated",
-          })),
-      },
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          linqChatLookupKey: chatLookupKey,
-          linqLastInboundAt: null,
-          linqRecipientPhoneLookupKey: null,
-          pendingLinqChatLookupKey: null,
-          pendingLinqLastInboundAt: null,
-          pendingLinqRecipientPhoneLookupKey: null,
-        }),
-      },
-    };
-
-    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
-      fromPhoneNumber: "+15550100001",
-      idempotencyKey: "delivery-key-1",
-      intentId: "intent-1",
-      memberId: "member-1",
-      now: new Date("2026-06-25T12:00:00.000Z"),
-      prisma: prisma as never,
-      target: "chat-1",
-      targetKind: "thread",
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
-      details: {
-        lastInboundAt: null,
-        reason: "missing_inbound",
-      },
-      httpStatus: 403,
-    });
-
-    expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          skipReason: `last_inbound_at=null; window_days=28`,
-          status: "skipped",
-        }),
-      }),
-    );
-  });
-
-  it("rejects non-Linq route authority before using it as freshness proof", async () => {
-    const prisma = {
-      hostedLinqDelivery: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
-      },
-    };
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
-      now: new Date("2026-06-25T12:05:00.000Z"),
-      prisma: prisma as never,
+      prisma: asRuntimeEngagementPrisma(prisma),
       routeAuthority: {
-        accountLookupKey: "hbidx:email:v1:account",
-        channel: "email",
-        containerMemberId: "member-1",
-        threadId: "email-thread-1",
+        accountLookupKey: "hbidx:phone:v1:line-1",
+        channel: "linq",
+        containerMemberId: "member-2",
+        threadId: "chat-authorized",
       },
-      target: "chat-b",
+      target: "chat-authorized",
       targetKind: "thread",
     })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      code: "HOSTED_LINQ_EGRESS_BOUND_USER_MISMATCH",
       httpStatus: 403,
     });
-
-    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
   });
 
-  it("rejects Linq route authority for a different requested thread", async () => {
-    const prisma = {
-      hostedLinqDelivery: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
-      },
-    };
+  it("rejects same-user route authority when hosted member access is inactive", async () => {
+    const prisma = createPrismaStub({
+      activeMemberAccess: false,
+    });
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       memberId: "member-1",
-      now: new Date("2026-06-25T12:05:00.000Z"),
-      prisma: prisma as never,
+      prisma: asRuntimeEngagementPrisma(prisma),
       routeAuthority: {
-        accountLookupKey: "hbidx:phone:v1:account",
+        accountLookupKey: "hbidx:phone:v1:line-1",
         channel: "linq",
         containerMemberId: "member-1",
-        threadId: "chat-a",
+        threadId: "chat-authorized",
       },
-      target: "chat-b",
+      target: "chat-authorized",
       targetKind: "thread",
     })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      code: "HOSTED_LINQ_EGRESS_ACCESS_REQUIRED",
       httpStatus: 403,
     });
 
-    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalled();
   });
 
-  it("requires Linq route authority to match the provider chat and payload member", () => {
+  it("falls back to the durable home route when same-user route authority is stale", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      prisma: asRuntimeEngagementPrisma(prisma),
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:line-1",
+        channel: "linq",
+        containerMemberId: "member-1",
+        threadId: "chat-stale",
+      },
+      target: "chat-home",
+      targetKind: "thread",
+    })).resolves.toBeUndefined();
+
+    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
+      select: {
+        linqChatLookupKey: true,
+        linqRecipientPhoneLookupKey: true,
+        pendingLinqChatLookupKey: true,
+        pendingLinqRecipientPhoneLookupKey: true,
+      },
+      where: { memberId: "member-1" },
+    });
+  });
+
+  it("keeps direct route-authority target matching strict", () => {
     expect(assertHostedLinqRouteAuthorityMatchesTarget({
-      chatId: "chat-a",
+      chatId: "chat-1",
       memberId: "member-1",
       routeAuthority: {
-        accountLookupKey: "hbidx:phone:v1:account",
+        accountLookupKey: "hbidx:phone:v1:line-1",
         channel: "linq",
         containerMemberId: "member-1",
-        threadId: "chat-a",
+        threadId: "chat-1",
       },
     })).toMatchObject({
       channel: "linq",
       containerMemberId: "member-1",
-      threadId: "chat-a",
+      threadId: "chat-1",
     });
 
-    let threadMismatch: unknown = null;
-    try {
-      assertHostedLinqRouteAuthorityMatchesTarget({
-        chatId: "chat-b",
-        memberId: "member-1",
-        routeAuthority: {
-          accountLookupKey: "hbidx:phone:v1:account",
-          channel: "linq",
-          containerMemberId: "member-1",
-          threadId: "chat-a",
-        },
-      });
-    } catch (error) {
-      threadMismatch = error;
-    }
-    expect(threadMismatch).toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-    });
-
-    let memberMismatch: unknown = null;
-    try {
-      assertHostedLinqRouteAuthorityMatchesTarget({
-        chatId: "chat-a",
-        memberId: "member-2",
-        routeAuthority: {
-          accountLookupKey: "hbidx:phone:v1:account",
-          channel: "linq",
-          containerMemberId: "member-1",
-          threadId: "chat-a",
-        },
-      });
-    } catch (error) {
-      memberMismatch = error;
-    }
-    expect(memberMismatch).toMatchObject({
-      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-    });
+    expect(() => assertHostedLinqRouteAuthorityMatchesTarget({
+      chatId: "chat-2",
+      memberId: "member-1",
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:line-1",
+        channel: "linq",
+        containerMemberId: "member-1",
+        threadId: "chat-1",
+      },
+    })).toThrow(/Linq egress route authority/u);
   });
 
+  it("accepts old-runner currentInbound payloads for external thread egress authority", async () => {
+    const prisma = createPrismaStub({
+      homeChatId: "chat-home",
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const response = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          currentInbound: {
+            dedupeKey: "linq_external_event",
+            eventId: "linq_external_event",
+            mailboxItemId: "mailbox_external",
+            occurredAt: "2026-06-01T12:00:00.000Z",
+            replyToMessageId: "message_external",
+            target: "chat-external",
+          },
+          target: "chat-external",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(response.status).toBe(200);
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+  });
 });
+
+function createPrismaStub(input: {
+  activeMemberAccess?: boolean;
+  homeChatId?: string;
+  homeLinePhone?: string;
+  identityPhone?: string;
+  pendingChatId?: string;
+}) {
+  return {
+    hostedMember: {
+      findUnique: vi.fn().mockResolvedValue(input.activeMemberAccess === false
+        ? null
+        : {
+            accountGroupMemberships: [],
+            billingStatus: "active",
+            suspendedAt: null,
+            threadContainer: null,
+          }),
+    },
+    hostedMemberIdentity: {
+      findUnique: vi.fn().mockResolvedValue({
+        phoneLookupKey: createRequiredPhoneLookupKey(input.identityPhone),
+      }),
+    },
+    hostedMemberRouting: {
+      findUnique: vi.fn().mockResolvedValue({
+        linqChatLookupKey: createRequiredLinqChatLookupKey(input.homeChatId),
+        linqRecipientPhoneLookupKey: createRequiredPhoneLookupKey(input.homeLinePhone),
+        pendingLinqChatLookupKey: createRequiredLinqChatLookupKey(input.pendingChatId),
+        pendingLinqRecipientPhoneLookupKey: null,
+      }),
+    },
+    hostedThreadRoute: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+  };
+}
+
+function asRuntimeEngagementPrisma(
+  prisma: ReturnType<typeof createPrismaStub>,
+): Parameters<typeof assertHostedLinqRecentInboundEngagementForRuntime>[0]["prisma"] {
+  return prisma as never;
+}
+
+function createRequiredPhoneLookupKey(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const lookupKey = createHostedPhoneLookupKey(value);
+  if (!lookupKey) {
+    throw new Error("Expected phone lookup key.");
+  }
+  return lookupKey;
+}
+
+function createRequiredLinqChatLookupKey(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const lookupKey = createHostedLinqChatLookupKey(value);
+  if (!lookupKey) {
+    throw new Error("Expected Linq chat lookup key.");
+  }
+  return lookupKey;
+}

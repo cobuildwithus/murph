@@ -6,7 +6,7 @@ import {
   isValidIanaTimeZone,
   type ExperimentFrontmatter,
 } from '@murphai/contracts'
-import { loadVault } from '@murphai/core'
+import { isVaultError, loadVault, patchAutomation } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 
@@ -33,6 +33,7 @@ const PROGRESS_MILESTONE_TAGS = ['experiment', 'progress-card', 'milestone'] as 
 const FINAL_RESULTS_TAGS = ['experiment', 'final-results', 'progress-card'] as const
 const AUTOMATION_ID_PREFIX = 'automation_'
 const EXPERIMENT_ID_PREFIX = 'exp_'
+const ACTIVITY_NUDGE_AUTOMATION_SLUG_PREFIX = 'experiment-activity-nudge-'
 
 export async function buildExperimentLifecycleSeeds(
   input: BuildExperimentLifecycleSeedsInput,
@@ -54,15 +55,19 @@ export async function buildExperimentLifecycleSeeds(
 }
 
 async function resolveVaultTimeZone(vaultRoot: string): Promise<string> {
+  return (await resolveVaultTimeZoneOrNull(vaultRoot)) ?? 'UTC'
+}
+
+async function resolveVaultTimeZoneOrNull(vaultRoot: string): Promise<string | null> {
   try {
     const { metadata } = await loadVault({ vaultRoot })
     if (isValidIanaTimeZone(metadata.timezone)) {
       return metadata.timezone
     }
   } catch {
-    // Best-effort: fall through to the UTC default below.
+    // Best-effort: the caller decides whether UTC fallback is appropriate.
   }
-  return 'UTC'
+  return null
 }
 
 /** Kept for the existing managed-automations call site. */
@@ -178,6 +183,7 @@ function buildFinalResultsInstructions(
     `Goal: make finishing the experiment "${experiment.title}" (${slug}) feel complete, useful, and worth celebrating.`,
     `Read \`vault-cli experiment show ${slug} --format json\` first. Skip when the run ended early, is no longer eligible for review, its final review was already shared, or saved assistant support opts out of scheduled summaries.`,
     `The deterministic outcome was persisted by the cron precondition before this turn — do not attempt to write it yourself. Reference the saved outcome record when composing the review.`,
+    `Archive the experiment's activity nudge automation if it exists: run \`vault-cli automation set-status experiment-activity-nudge-${slug} --status archived\` and ignore errors if it does not exist.`,
     // Pin --as-of to the run's intervention end so the card matches the
     // outcome the precondition just persisted (and stays stable across cron
     // retries that may cross a UTC midnight boundary).
@@ -222,6 +228,7 @@ export type ExperimentLifecyclePreconditionResult =
  */
 export async function runExperimentLifecycleOutcomePrecondition(input: {
   automationId: string
+  now?: Date | string
   tags: readonly string[]
   vault: string
 }): Promise<ExperimentLifecyclePreconditionResult> {
@@ -262,7 +269,15 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
     throw error
   }
 
+  const archiveActivityNudge = async (): Promise<void> => {
+    await archiveExperimentActivityNudgeAutomation({
+      experimentSlug: experiment.slug,
+      vaultRoot: input.vault,
+    })
+  }
+
   if (experiment.status !== 'active' && experiment.status !== 'completed') {
+    await archiveActivityNudge()
     return {
       kind: 'skip',
       reason: `experiment status is ${experiment.status}; final review not eligible`,
@@ -274,7 +289,19 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
     return { kind: 'skip', reason: 'experiment has no intervention end date' }
   }
 
+  if (experiment.status === 'active') {
+    const currentLocalDate = await currentExperimentLocalIsoDate({
+      experiment,
+      now: input.now,
+      vaultRoot: input.vault,
+    })
+    if (currentLocalDate !== null && currentLocalDate <= interventionEnd) {
+      return { kind: 'skip', reason: 'experiment is still running' }
+    }
+  }
+
   if (experiment.endedOn && experiment.endedOn < interventionEnd) {
+    await archiveActivityNudge()
     return {
       kind: 'skip',
       reason: 'experiment was stopped before its intervention end',
@@ -282,6 +309,7 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
   }
 
   if (experiment.assistantSupport?.notificationStyle === 'skip_by_default') {
+    await archiveActivityNudge()
     return {
       kind: 'skip',
       reason: 'assistant support opts out of scheduled summaries',
@@ -294,8 +322,68 @@ export async function runExperimentLifecycleOutcomePrecondition(input: {
     asOf: interventionEnd,
     requestId: null,
   })
+  await archiveActivityNudge()
 
   return { kind: 'continue' }
+}
+
+async function currentExperimentLocalIsoDate(input: {
+  experiment: ExperimentFrontmatter
+  now: Date | string | undefined
+  vaultRoot: string
+}): Promise<string | null> {
+  const date = currentInstant(input.now)
+  const timeZone = await resolveExperimentPreconditionTimeZone(
+    input.experiment,
+    input.vaultRoot,
+  )
+  if (!timeZone) {
+    return null
+  }
+  return formatTimeZoneDateTimeParts(date, timeZone).dayKey
+}
+
+async function resolveExperimentPreconditionTimeZone(
+  experiment: ExperimentFrontmatter,
+  vaultRoot: string,
+): Promise<string | null> {
+  const runTimeZone = experiment.runPlan?.schedule?.timeZone
+  if (runTimeZone && isValidIanaTimeZone(runTimeZone)) {
+    return runTimeZone
+  }
+  const vaultTimeZone = await resolveVaultTimeZoneOrNull(vaultRoot)
+  if (!vaultTimeZone) {
+    return null
+  }
+  return resolveExperimentTimeZone(experiment, vaultTimeZone)
+}
+
+function currentInstant(now: Date | string | undefined): Date {
+  const date = now instanceof Date ? now : new Date(now ?? Date.now())
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError('Experiment lifecycle precondition received an invalid current date.')
+  }
+  return date
+}
+
+async function archiveExperimentActivityNudgeAutomation(input: {
+  experimentSlug: string
+  vaultRoot: string
+}): Promise<void> {
+  try {
+    await patchAutomation({
+      lookup: `${ACTIVITY_NUDGE_AUTOMATION_SLUG_PREFIX}${input.experimentSlug}`,
+      status: 'archived',
+      vaultRoot: input.vaultRoot,
+    })
+  } catch (error) {
+    if (isVaultError(error) && error.code === 'VAULT_AUTOMATION_MISSING') {
+      return
+    }
+    // Deliberate best-effort cleanup: final-results delivery outranks nudge
+    // cleanup, and the prompt plus nudge self-archive remain later backstops.
+    void error
+  }
 }
 
 function isExperimentFinalResultsAutomation(tags: readonly string[]): boolean {

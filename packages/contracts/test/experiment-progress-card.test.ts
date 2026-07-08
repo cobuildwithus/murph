@@ -14,9 +14,9 @@ const sampleCard: ExperimentProgressCardData = {
   title: "Creatine · 5g daily",
   asOf: "2026-06-09",
   phase: { day: 9, totalDays: 28 },
-  sessions: { logged: 7, target: 24 },
+  sessions: { logged: 7, assumed: 2, target: 24 },
   weeks: [
-    { start: "2026-06-01", cells: "CCPMCCN" },
+    { start: "2026-06-01", cells: "CCPMAAN" },
     { start: "2026-06-08", cells: "CNSSSSS" },
   ],
   movers: [
@@ -38,6 +38,18 @@ describe("experiment progress card codec", () => {
     const encoded = encodeExperimentProgressCard(sampleCard);
     expect(encoded).toMatch(/^[A-Za-z0-9_-]+$/u);
     expect(decodeExperimentProgressCard(encoded)).toEqual(sampleCard);
+  });
+
+  it("keeps assumed session counts optional", () => {
+    const encoded = encodeExperimentProgressCard({
+      ...sampleCard,
+      sessions: { logged: 7, target: 24 },
+    });
+
+    expect(decodeExperimentProgressCard(encoded)?.sessions).toEqual({
+      logged: 7,
+      target: 24,
+    });
   });
 
   it("builds a path that satisfies assistant response-media URL rules", () => {

@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
 
 type StoredAutomationRecord = {
   automationId: string
@@ -104,6 +107,7 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
 import {
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -337,30 +341,97 @@ describe('applyMurphManagedAutomations', () => {
     }
 
     expect(seed.schedule.expression).toBe('30 11 * * 4')
-    expect(seed.instructions).toContain('/api/changelog?days=7&featureLimit=70&improvementLimit=10')
-    expect(seed.instructions).toContain('2-3 shipped Murph updates')
-    expect(seed.instructions).toContain('Selection budget: choose 2-3 items')
+    expect(seed.title).toBe('Murph product notes')
+    expect(seed.summary).toBe('A personalized note alternating what is new in Murph with things Murph can do for you.')
+    expect(seed.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
+    expect(seed.instructions).toContain('/api/feature-catalog')
+    expect(seed.instructions).toContain('Read `vault-cli knowledge show murph-product-notes`')
+    expect(seed.instructions).toContain('choose the feature discovery kind')
+    expect(seed.instructions).toContain('last recorded changelog means feature discovery now')
+    expect(seed.instructions).toContain('last recorded feature discovery means changelog now')
+    expect(seed.instructions).toContain('Use `murph-product-notes` as the only ledger')
+    expect(seed.instructions).toContain('vault-cli knowledge append-section murph-product-notes YYYY-MM-DD')
+    expect(seed.instructions).toContain('Fallback is allowed at most once')
+    expect(seed.instructions).toContain('never fall back from a fallback')
+    expect(seed.instructions).toContain('If both kinds are unavailable, invalid, empty, or below bar')
+    expect(seed.instructions).toContain('record only this run\'s kind and the chosen item ids')
+    expect(seed.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
+    expect(seed.instructions).toContain('another run already recorded today\'s note')
+    expect(seed.instructions).toContain('Do not append again and do not switch kinds')
+    expect(seed.instructions).toContain('2-3 recently shipped Murph updates')
+    expect(seed.instructions).toContain('2-3 things Murph can already do')
     expect(seed.instructions).toContain('Do not pad with weak matches')
-    expect(seed.instructions).toContain('Drop anything that is merely generally new')
-    expect(seed.instructions).toContain('scheduled announcement text-only')
+    expect(seed.instructions).toContain('Drop items the user is already using')
+    expect(seed.instructions).toContain('context already surfaced for ordinary assistance')
+    expect(seed.instructions).toContain('Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used')
+    expect(seed.instructions).toContain('Drop items already pitched in any prior ledger section; never repeat a feature pitch')
+    expect(seed.instructions).toContain('If an item lists a requires prerequisite')
+    expect(seed.instructions).toContain('Drop items this conversation cannot actually do right now')
+    expect(seed.instructions).toContain('Keep this scheduled note text-only')
     expect(seed.instructions).not.toContain('Choose 3-7 items')
     expect(seed.instructions).not.toContain('murph.attach_response_media')
     expect(seed.instructions).not.toContain('visual digest')
     expect(seed.instructions).not.toContain('links.digestCardTemplate')
     expect(seed.instructions).toContain('murph.submit_product_feedback')
-    expect(seed.instructions).toContain('another feature in mind')
+    expect(seed.instructions).toContain('if there is something else they wish Murph could do')
     expect(seed.instructions).toContain('clear inferred workflow friction')
+    expect(seed.instructions).toContain('interest in shipped changelog or catalog items')
     expect(seed.instructions).toContain('Speculative:')
     expect(seed.instructions).toContain('Murph-observed:')
     expect(seed.instructions).toContain('Do not log vague low-confidence guesses')
     expect(seed.instructions).toContain('concise product-only summary')
     expect(seed.instructions).toContain('tags, topics, raw user wording')
     expect(seed.instructions).not.toContain('kind/topic')
+    expect(seed.instructions).toContain(
+      '{"kind":"skip","privateSummary":"No product note cleared the send bar."}',
+    )
     expect(findNextAssistantCronOccurrence(
       seed.schedule.expression,
       new Date('2026-06-22T12:00:00.000Z'),
       'America/New_York',
     )).toBe('2026-06-25T15:30:00.000Z')
+  })
+
+  it('keeps overnight memory consolidation as a hosted-only every-other-night maintenance seed', () => {
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(
+      (entry) =>
+        entry.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    )
+    if (!seed || seed.schedule.kind !== 'cron') {
+      throw new Error('Expected overnight memory consolidation to use a cron schedule.')
+    }
+
+    expect(seed.hostedRuntimeOnly).toBe(true)
+    expect(seed.continuityPolicy).toBe('fresh')
+    expect(seed.assistantTargetOverride).toEqual({
+      reasoningEffort: 'medium',
+    })
+    expect(seed.schedule.expression).toBe('0 3 * * 1,3,5')
+    expect(seed.slug).toBe('overnight-memory-consolidation')
+    expect(seed.tags).toContain('murph-managed:overnight-memory-consolidation')
+    expect(seed.tags).toContain('runtime-maintenance')
+    expect(seed.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(seed.instructions).toContain('Goal: consolidate durable user context')
+    expect(seed.instructions).toContain('engine-supplied "Conversation evidence" section')
+    expect(seed.instructions).toContain('bounded committed user and assistant conversation messages from the last 7 days')
+    expect(seed.instructions).toContain('supplied conversation evidence')
+    expect(seed.instructions).toContain('vault-cli memory show --format json')
+    expect(seed.instructions).toContain('vault-cli memory upsert')
+    expect(seed.instructions).toContain('vault-cli memory update')
+    expect(seed.instructions).toContain('hidden Codex memory state')
+    expect(seed.instructions).toContain('Do not read transcript files or session storage')
+    expect(seed.instructions).toContain('Do not save assistant speculation')
+    expect(seed.instructions).toContain('identifiers of any kind, or medical or health details')
+    expect(seed.instructions).toContain(
+      'clearly supported by the supplied conversation evidence',
+    )
+    expect(seed.instructions).toContain(
+      'deduplication and update targeting only',
+    )
+    expect(seed.instructions).not.toContain('generated memory extraction')
+    expect(seed.instructions).toContain(
+      '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',
+    )
   })
 
   it('creates the managed automations in a fresh vault', async () => {
@@ -493,8 +564,10 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.instructions).not.toContain('Wednesday at 7:30 PM local time')
     expect(researchScoutRecord?.instructions).not.toContain('assistant onboarding')
     expect(researchScoutRecord?.instructions).not.toContain('14 days')
-    expect(researchScoutRecord?.instructions).toContain('0-1 genuinely useful research-backed note')
+    expect(researchScoutRecord?.instructions).toContain('0-1 genuinely useful research-backed insight')
     expect(researchScoutRecord?.instructions).toContain('natural chat message from Murph')
+    expect(researchScoutRecord?.instructions).toContain('The unit of value is the insight, not the paper')
+    expect(researchScoutRecord?.instructions).toContain('one insight may synthesize several returned sources')
     expect(researchScoutRecord?.instructions).not.toContain('0-3 new studies')
     expect(researchScoutRecord?.instructions).toContain('normal Murph chat language')
     expect(researchScoutRecord?.instructions).toContain('If unclear, use English')
@@ -524,20 +597,28 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.instructions).not.toContain('cap `--maxCandidates` at 1')
     expect(researchScoutRecord?.instructions).not.toContain('cap `--maxCandidates` at 3')
     expect(researchScoutRecord?.instructions).toContain('Treat the returned results as a candidate pool')
+    expect(researchScoutRecord?.instructions).toContain('The scout-batch call is the retrieval budget')
     expect(researchScoutRecord?.instructions).toContain('Do not perform an open-ended web browsing loop')
-    expect(researchScoutRecord?.instructions).toContain('changes one practical question')
-    expect(researchScoutRecord?.instructions).toContain('Reject generic health news, obvious habit advice')
+    expect(researchScoutRecord?.instructions).toContain('current user question each candidate would answer')
+    expect(researchScoutRecord?.instructions).toContain('Recent conversation and automation/regimen changes are veto context')
+    expect(researchScoutRecord?.instructions).toContain('stale vault tags')
+    expect(researchScoutRecord?.instructions).toContain('incremental value beyond known basics')
+    expect(researchScoutRecord?.instructions).toContain('Do not reuse the provider candidate\'s `actionOrQuestion` as advice')
+    expect(researchScoutRecord?.instructions).toContain('Automatically skip generic health news, obvious habit advice')
+    expect(researchScoutRecord?.instructions).toContain('`do more support work`, `be consistent`, `sleep better`, `eat protein`, `manage stress`')
     expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
     expect(researchScoutRecord?.instructions).toContain('Send exactly one short note')
     expect(researchScoutRecord?.instructions).toContain('Never send a second item')
     expect(researchScoutRecord?.instructions).not.toContain('Send 1-3 items max')
-    expect(researchScoutRecord?.instructions).toContain('Lead with why the item is useful')
+    expect(researchScoutRecord?.instructions).toContain("Lead with what changes for the user's current thinking")
+    expect(researchScoutRecord?.instructions).toContain('small cluster of sources')
     expect(researchScoutRecord?.instructions).toContain('Mention source provenance naturally')
     expect(researchScoutRecord?.instructions).toContain('Keep study names, publication dates, study type, evidence strength')
     expect(researchScoutRecord?.instructions).not.toContain('For each item include:')
     expect(researchScoutRecord?.instructions).not.toContain('one thing not to overinterpret')
     expect(researchScoutRecord?.instructions).not.toContain('plain-English `Basically:` sentence')
     expect(researchScoutRecord?.instructions).toContain('Append one dated section to `weekly-health-research-scout`')
+    expect(researchScoutRecord?.instructions).toContain('why close alternatives were suppressed')
     expect(researchScoutRecord?.instructions).toContain('clinician discussion prompt')
 
     const productUpdatesRecord = managedAutomationMocks.records.get(
@@ -549,7 +630,8 @@ describe('applyMurphManagedAutomations', () => {
       route: defaultRoute,
       slug: 'weekly-product-updates',
       status: 'active',
-      title: 'This week in Murph',
+      summary: 'A personalized note alternating what is new in Murph with things Murph can do for you.',
+      title: 'Murph product notes',
     })
     expect(productUpdatesRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.productUpdates)
     expect(productUpdatesRecord?.tags).toContain(
@@ -558,15 +640,84 @@ describe('applyMurphManagedAutomations', () => {
     expect(productUpdatesRecord?.tags).not.toContain(
       ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
     )
-    expect(productUpdatesRecord?.instructions).toContain('2-3 shipped Murph updates')
-    expect(productUpdatesRecord?.instructions).toContain('Selection budget: choose 2-3 items')
+    expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
+    expect(productUpdatesRecord?.instructions).toContain('/api/feature-catalog')
+    expect(productUpdatesRecord?.instructions).toContain('Read `vault-cli knowledge show murph-product-notes`')
+    expect(productUpdatesRecord?.instructions).toContain('choose the feature discovery kind')
+    expect(productUpdatesRecord?.instructions).toContain('Use `murph-product-notes` as the only ledger')
+    expect(productUpdatesRecord?.instructions).toContain('vault-cli knowledge append-section murph-product-notes YYYY-MM-DD')
+    expect(productUpdatesRecord?.instructions).toContain('Fallback is allowed at most once')
+    expect(productUpdatesRecord?.instructions).toContain('never fall back from a fallback')
+    expect(productUpdatesRecord?.instructions).toContain('If both kinds are unavailable, invalid, empty, or below bar')
+    expect(productUpdatesRecord?.instructions).toContain('record only this run\'s kind and the chosen item ids')
+    expect(productUpdatesRecord?.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
+    expect(productUpdatesRecord?.instructions).toContain('another run already recorded today\'s note')
+    expect(productUpdatesRecord?.instructions).toContain('Do not append again and do not switch kinds')
+    expect(productUpdatesRecord?.instructions).toContain('2-3 recently shipped Murph updates')
+    expect(productUpdatesRecord?.instructions).toContain('2-3 things Murph can already do')
     expect(productUpdatesRecord?.instructions).toContain('Do not pad with weak matches')
-    expect(productUpdatesRecord?.instructions).toContain('Drop anything that is merely generally new')
+    expect(productUpdatesRecord?.instructions).toContain('Drop items the user is already using')
+    expect(productUpdatesRecord?.instructions).toContain('context already surfaced for ordinary assistance')
+    expect(productUpdatesRecord?.instructions).toContain('Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used')
     expect(productUpdatesRecord?.instructions).not.toContain('Choose 3-7 items')
     expect(productUpdatesRecord?.instructions).toContain(
-      '{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}',
+      '{"kind":"skip","privateSummary":"No product note cleared the send bar."}',
     )
     expect(productUpdatesRecord?.instructions).not.toContain('finish_without_reply')
+    expect(
+      managedAutomationMocks.records.has(MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID),
+    ).toBe(false)
+  })
+
+  it('creates the hosted overnight memory consolidation automation in hosted runtime', async () => {
+    const result = await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+        EXA_API_KEY: 'fixture-exa-key',
+      },
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 0,
+    })
+    const memoryRecord = managedAutomationMocks.records.get(
+      MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    )
+    expect(memoryRecord).toMatchObject({
+      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 3 * * 1,3,5',
+      },
+      slug: 'overnight-memory-consolidation',
+      status: 'active',
+      title: 'Overnight memory consolidation',
+    })
+    expect(memoryRecord?.assistantTargetOverride).toEqual({
+      reasoningEffort: 'medium',
+    })
+    expect(memoryRecord?.tags).toContain('murph-managed:overnight-memory-consolidation')
+    expect(memoryRecord?.tags).toContain('runtime-maintenance')
+    expect(memoryRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(memoryRecord?.instructions).toContain('Goal: consolidate durable user context')
+    expect(memoryRecord?.instructions).toContain('engine-supplied "Conversation evidence" section')
+    expect(memoryRecord?.instructions).toContain('bounded committed user and assistant conversation messages from the last 7 days')
+    expect(memoryRecord?.instructions).toContain('supplied conversation evidence')
+    expect(memoryRecord?.instructions).toContain('vault-cli memory show --format json')
+    expect(memoryRecord?.instructions).toContain('vault-cli memory upsert')
+    expect(memoryRecord?.instructions).toContain('Do not read transcript files or session storage')
+    expect(memoryRecord?.instructions).toContain('Do not save assistant speculation')
+    expect(memoryRecord?.instructions).not.toContain('generated memory extraction')
+    expect(memoryRecord?.instructions).toContain(
+      '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',
+    )
   })
 
   it('updates existing research-oriented automations without rewriting their cadence', async () => {
@@ -644,6 +795,43 @@ describe('applyMurphManagedAutomations', () => {
       managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)
         ?.instructions,
     ).not.toContain('Wednesday at 7:30 PM local time')
+  })
+
+  it('updates existing weekly product notes instructions without rewriting the spread cadence', async () => {
+    const existingSchedule = EXPECTED_MANAGED_SPREAD_CRONS.productUpdates
+    managedAutomationMocks.records.set(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'OLD weekly product updates instructions with changelog-only behavior.',
+      route: defaultRoute,
+      schedule: existingSchedule,
+      slug: 'weekly-product-updates',
+      status: 'active',
+      summary: 'Old weekly product updates.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Weekly product updates',
+    })
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-20T12:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 3,
+      skipped: 0,
+      updated: 1,
+    })
+    const productUpdatesRecord = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    )
+    expect(productUpdatesRecord?.schedule).toBe(existingSchedule)
+    expect(productUpdatesRecord?.instructions).toContain('/api/feature-catalog')
+    expect(productUpdatesRecord?.instructions).toContain('record only this run\'s kind and the chosen item ids')
+    expect(productUpdatesRecord?.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
+    expect(productUpdatesRecord?.instructions).toContain('Do not append again and do not switch kinds')
+    expect(productUpdatesRecord?.instructions).not.toContain('OLD weekly product updates instructions')
   })
 
   it('preserves an existing device activity cadence on managed reconciliation', async () => {

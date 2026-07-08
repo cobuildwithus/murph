@@ -15,7 +15,7 @@ import {
   readAssistantAutomationState,
   withAssistantRuntimeWriteLock,
 } from "@murphai/assistant-engine/assistant-state";
-import { INBOX_MEDIA_RETENTION_WINDOW_MS } from "@murphai/inboxd";
+import { INBOX_MEDIA_RETENTION_WINDOW_MS } from "@murphai/inboxd/runtime";
 import {
   readVersionedJsonStateFile,
 } from "@murphai/runtime-state/node";

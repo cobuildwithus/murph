@@ -13,6 +13,7 @@ export { deterministicContractId } from "./ids.ts";
 export * from "./automation.ts";
 export * from "./scheduled-logs.ts";
 export * from "./memory.ts";
+export * from "./profile.ts";
 export {
   readPreferencesDocument,
   resolvePreferencesDocumentPath,

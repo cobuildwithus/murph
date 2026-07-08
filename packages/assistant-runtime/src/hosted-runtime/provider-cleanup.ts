@@ -1,4 +1,4 @@
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -7,6 +7,10 @@ import type {
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
+import {
+  listPendingAssistantAutoReplyLinqCleanupEvidence,
+  markAssistantAutoReplyLinqCleanupQueued,
+} from "@murphai/assistant-engine/assistant-automation";
 import {
   resolveAssistantStatePaths,
   writeAssistantStateJson,
@@ -22,6 +26,12 @@ import {
 
 const HOSTED_PROVIDER_CLEANUP_SCHEMA = "murph.hosted-provider-cleanup.v1";
 const HOSTED_PROVIDER_CLEANUP_FILE_NAME = "hosted-provider-cleanup.json";
+const HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA =
+  "murph.hosted-provider-cleanup-recovery.v1";
+const HOSTED_PROVIDER_CLEANUP_RECOVERY_FILE_NAME =
+  "hosted-provider-cleanup-recovery.json";
+const HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS = 180_000;
+const HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS = 1_000;
 const HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS = 5 * 60_000;
 
 interface HostedProviderCleanupState {
@@ -32,6 +42,14 @@ interface HostedProviderCleanupState {
 
 export interface HostedProviderCleanupCheckpoint {
   nextWakeAt?: string | null;
+}
+
+export interface HostedProviderCleanupPlan {
+  checkpoint: HostedProviderCleanupCheckpoint | null;
+  deferred: boolean;
+  due: boolean;
+  requiresCheckpoint: boolean;
+  stateQueued: boolean;
 }
 
 export interface HostedProviderCleanupDrainResult {
@@ -45,16 +63,19 @@ export async function recordHostedProviderCleanupBeforeCommit(input: {
   linqMessageIds?: readonly string[] | null;
   checkpoint: HostedProviderCleanupCheckpoint;
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<HostedProviderCleanupCheckpoint> {
   const existing = await readHostedProviderCleanupState(input.vaultRoot);
+  const checkpoint = normalizeHostedProviderCleanupCheckpoint(input.checkpoint)
+    ?? { nextWakeAt: null };
   await writeHostedProviderCleanupState(input.vaultRoot, {
     schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
-    checkpoint: normalizeHostedProviderCleanupCheckpoint(input.checkpoint),
+    checkpoint,
     linqMessageIds: normalizeHostedProviderMessageIds([
       ...(existing?.linqMessageIds ?? []),
       ...(input.linqMessageIds ?? []),
     ]),
   });
+  return checkpoint;
 }
 
 export async function readHostedProviderCleanupCheckpoint(
@@ -63,21 +84,232 @@ export async function readHostedProviderCleanupCheckpoint(
   return (await readHostedProviderCleanupState(vaultRoot))?.checkpoint ?? null;
 }
 
+// hosted-provider-cleanup.json is the single owner of the next cleanup wake.
+// This returns the durable wake only while it is still in the future; a due
+// stored wake belongs to the drain paths, never to phase wake assembly.
+export async function resolveHostedProviderCleanupScheduledWakeAt(input: {
+  nowMs: number;
+  vaultRoot: string;
+}): Promise<string | null> {
+  const state = await readHostedProviderCleanupState(input.vaultRoot);
+  const scheduledWakeAt = resolveHostedProviderCleanupCheckpointWakeAt({
+    checkpoint: state?.checkpoint ?? null,
+    deferDueOrInvalid: false,
+    nowMs: input.nowMs,
+  });
+  if (scheduledWakeAt !== null) {
+    return scheduledWakeAt;
+  }
+
+  // Queued ids with a due/invalid checkpoint surface an immediate wake so the
+  // durable projection never checkpoints wakeless while cleanup still needs
+  // draining (a failed post-checkpoint drain must leave a retry path); a
+  // successful drain clears or replaces this through the post-checkpoint wake
+  // merge.
+  return state && state.linqMessageIds.length > 0
+    ? new Date(input.nowMs).toISOString()
+    : null;
+}
+
+export async function prepareHostedProviderCleanupPlan(input: {
+  deferred: boolean;
+  idleCheckpointDelayMs?: number | null;
+  initialCheckpoint?: HostedProviderCleanupCheckpoint | null;
+  nowMs: number;
+  shouldYield?: (() => boolean) | null;
+  terminalCleanupMessageIds?: readonly string[] | null;
+  vaultRoot: string;
+}): Promise<HostedProviderCleanupPlan> {
+  const pendingLinqMessageIds =
+    normalizeHostedProviderMessageIds([...(input.terminalCleanupMessageIds ?? [])]);
+
+  if (input.deferred) {
+    if (pendingLinqMessageIds.length > 0) {
+      const checkpoint = await recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          }),
+        },
+        linqMessageIds: pendingLinqMessageIds,
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        checkpoint,
+        deferred: true,
+        due: false,
+        requiresCheckpoint: true,
+        stateQueued: true,
+      };
+    }
+
+    const storedCheckpoint = await readHostedProviderCleanupCheckpoint(input.vaultRoot);
+    const scheduledWakeAt = resolveHostedProviderCleanupCheckpointWakeAt({
+      checkpoint: storedCheckpoint,
+      deferDueOrInvalid: true,
+      idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+      nowMs: input.nowMs,
+    });
+    // A due or invalid stored checkpoint re-arms to a future wake. Persist
+    // the re-armed wake so hosted-provider-cleanup.json stays the single
+    // owner of the next cleanup wake; phase wake assembly derives its
+    // candidate from that file, never from a plan-only value.
+    if (
+      scheduledWakeAt !== null
+      && scheduledWakeAt !== (storedCheckpoint?.nextWakeAt ?? null)
+    ) {
+      const checkpoint = await recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: scheduledWakeAt,
+        },
+        linqMessageIds: [],
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        checkpoint,
+        deferred: true,
+        due: false,
+        requiresCheckpoint: true,
+        stateQueued: true,
+      };
+    }
+    // Migration bootstrap (delete together with
+    // recoverLegacyPendingTerminalLinqCleanupOnce): a pre-upgrade vault whose
+    // first post-upgrade touch is foreground-only would otherwise never
+    // schedule the non-deferred pass that runs the one-shot recovery. Record
+    // an empty cleanup checkpoint with a future wake so that pass happens.
+    // Gated on the evidence directory existing (an O(1) stat, not a scan) so
+    // vaults with no auto-reply history never bootstrap.
+    if (
+      scheduledWakeAt === null
+      && !(await hasHostedProviderCleanupRecoveryCompleted(input.vaultRoot))
+      && (await hasAssistantAutoReplyEvidenceDirectory(input.vaultRoot))
+    ) {
+      const checkpoint = await recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          }),
+        },
+        linqMessageIds: [],
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        checkpoint,
+        deferred: true,
+        due: false,
+        requiresCheckpoint: true,
+        stateQueued: true,
+      };
+    }
+
+    return {
+      checkpoint: input.initialCheckpoint ?? null,
+      deferred: true,
+      due: false,
+      requiresCheckpoint: false,
+      stateQueued: false,
+    };
+  }
+
+  const recovery = await recoverLegacyPendingTerminalLinqCleanupOnce({
+    shouldYield: input.shouldYield ?? null,
+    vaultRoot: input.vaultRoot,
+  });
+  // completedNow counts as checkpoint work even with nothing queued so the
+  // recovery marker becomes durable on this pass instead of being lost to a
+  // no-progress checkpoint skip and rescanned after a cold restore.
+  const terminalCleanupQueued =
+    recovery.queuedIds || recovery.completedNow || pendingLinqMessageIds.length > 0;
+  if (pendingLinqMessageIds.length > 0) {
+    // Current-pass ids are never due in the same invocation: provider-visible
+    // deletion may only drain after the recording pass has durably
+    // checkpointed, so schedule them past the idle horizon like the deferred
+    // path does. Hot drains are reserved for state already due from an
+    // existing durable checkpoint.
+    await recordHostedProviderCleanupBeforeCommit({
+      checkpoint: {
+        nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
+          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+          nowMs: input.nowMs,
+        }),
+      },
+      linqMessageIds: pendingLinqMessageIds,
+      vaultRoot: input.vaultRoot,
+    });
+  }
+
+  const checkpoint =
+    terminalCleanupQueued || !input.initialCheckpoint
+      ? await readHostedProviderCleanupCheckpoint(input.vaultRoot)
+      : input.initialCheckpoint;
+  return buildHostedProviderCleanupPlan({
+    checkpoint,
+    deferred: false,
+    nowMs: input.nowMs,
+    stateQueued: terminalCleanupQueued,
+  });
+}
+
+export async function recordHostedProviderCleanupAfterDelivery(input: {
+  idleCheckpointDelayMs?: number | null;
+  nowMs: number;
+  outcomes: readonly HostedAssistantDeliveryOutcome[];
+  vaultRoot: string;
+}): Promise<{ nextWakeAt: string | null }> {
+  const providerCleanupMessageIds =
+    collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(input.outcomes);
+  if (providerCleanupMessageIds.length === 0) {
+    return {
+      nextWakeAt: null,
+    };
+  }
+
+  const checkpoint = await recordHostedProviderCleanupBeforeCommit({
+    checkpoint: {
+      nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
+        idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+        nowMs: input.nowMs,
+      }),
+    },
+    linqMessageIds: providerCleanupMessageIds,
+    vaultRoot: input.vaultRoot,
+  });
+  return {
+    nextWakeAt: checkpoint.nextWakeAt ?? null,
+  };
+}
+
 export async function drainHostedProviderCleanupAfterCommit(input: {
-  assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
   assertLiveness?: () => Promise<void>;
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch | null;
   checkpoint: HostedProviderCleanupCheckpoint;
+  shouldYield?: (() => boolean) | null;
   signal?: AbortSignal | null;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
 }): Promise<HostedProviderCleanupDrainResult> {
   assertHostedProviderCleanupLiveness(input.signal);
   const existing = await readHostedProviderCleanupState(input.vaultRoot);
+  // The file is the single owner: if its checkpoint was re-armed to a future
+  // wake after the caller's plan was prepared (for example the assistant lane
+  // recorded current-pass ids with a post-idle wake in the same invocation),
+  // a stale due plan must not delete those ids now. Defer to the file's own
+  // scheduled wake.
+  const existingWakeMs = Date.parse(existing?.checkpoint?.nextWakeAt ?? "");
+  if (Number.isFinite(existingWakeMs) && existingWakeMs > Date.now()) {
+    return {
+      attemptedLinqMessageCount: 0,
+      deletedLinqMessageCount: 0,
+      failedLinqMessageCount: 0,
+      nextWakeAt: existing?.checkpoint?.nextWakeAt ?? null,
+    };
+  }
   const messageIds = normalizeHostedProviderMessageIds([
     ...(existing?.linqMessageIds ?? []),
-    ...collectHostedLinqProviderMessageIds(input.assistantDeliveryOutcomes),
   ]);
 
   if (messageIds.length === 0) {
@@ -92,46 +324,67 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
     };
   }
 
-  try {
-    await assertHostedProviderCleanupLiveNow(input);
-    const dependencies = requireHostedProviderFetchDependencies({
-      env: input.env,
-      fetchImplementation: input.fetchImplementation,
-      ...(input.signal ? { signal: input.signal } : {}),
-    }, "Hosted Linq provider cleanup");
-    await deleteHostedLinqMessages({
-      ...dependencies,
-      messageIds,
-    });
-    await assertHostedProviderCleanupLiveNow(input);
-  } catch (error) {
-    const nextWakeAt = new Date(Date.now() + HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS).toISOString();
-    await writeHostedProviderCleanupState(input.vaultRoot, {
-      schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
-      checkpoint: {
+  let deletedCount = 0;
+  for (let index = 0; index < messageIds.length; index += 1) {
+    if (input.shouldYield?.() === true) {
+      const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
+      await writeHostedProviderCleanupState(input.vaultRoot, {
+        schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
+        checkpoint: {
+          nextWakeAt,
+        },
+        linqMessageIds: messageIds.slice(index),
+      });
+      return {
+        attemptedLinqMessageCount: deletedCount,
+        deletedLinqMessageCount: deletedCount,
+        failedLinqMessageCount: 0,
         nextWakeAt,
-      },
-      linqMessageIds: messageIds,
-    });
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      details: {
-        linqMessageCount: messageIds.length,
-        provider: "linq",
-      },
-      error,
-      level: "warn",
-      message:
-        "Hosted runtime could not delete provider-visible Linq messages after commit; retry state remains in the runtime snapshot.",
-      phase: "outbox",
-      wake: input.wake,
-    });
-    return {
-      attemptedLinqMessageCount: messageIds.length,
-      deletedLinqMessageCount: 0,
-      failedLinqMessageCount: messageIds.length,
-      nextWakeAt,
-    };
+      };
+    }
+
+    try {
+      await assertHostedProviderCleanupLiveNow(input);
+      const dependencies = requireHostedProviderFetchDependencies({
+        env: input.env,
+        fetchImplementation: input.fetchImplementation,
+        ...(input.signal ? { signal: input.signal } : {}),
+      }, "Hosted Linq provider cleanup");
+      await deleteHostedLinqMessages({
+        ...dependencies,
+        messageIds: [messageIds[index]!],
+      });
+      deletedCount += 1;
+    } catch (error) {
+      const remainingMessageIds = messageIds.slice(index);
+      const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
+      await writeHostedProviderCleanupState(input.vaultRoot, {
+        schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
+        checkpoint: {
+          nextWakeAt,
+        },
+        linqMessageIds: remainingMessageIds,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "runtime",
+        details: {
+          linqMessageCount: remainingMessageIds.length,
+          provider: "linq",
+        },
+        error,
+        level: "warn",
+        message:
+          "Hosted runtime could not delete provider-visible Linq messages after commit; retry state remains in the runtime snapshot.",
+        phase: "outbox",
+        wake: input.wake,
+      });
+      return {
+        attemptedLinqMessageCount: deletedCount + remainingMessageIds.length,
+        deletedLinqMessageCount: deletedCount,
+        failedLinqMessageCount: remainingMessageIds.length,
+        nextWakeAt,
+      };
+    }
   }
 
   await clearHostedProviderCleanupState(input.vaultRoot);
@@ -143,10 +396,205 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   };
 }
 
-export function collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(
+function collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(
   outcomes: readonly HostedAssistantDeliveryOutcome[],
 ): string[] {
   return normalizeHostedProviderMessageIds(collectHostedLinqProviderMessageIds(outcomes));
+}
+
+export function resolveHostedProviderCleanupFirstDeferredWakeAt(input: {
+  idleCheckpointDelayMs?: number | null;
+  nowMs?: number | null;
+} = {}): string {
+  const nowMs = Number.isFinite(input.nowMs)
+    ? Number(input.nowMs)
+    : Date.now();
+  return new Date(
+    nowMs
+      + resolveHostedProviderCleanupIdleCheckpointDelayMs(input.idleCheckpointDelayMs)
+      + HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS,
+  ).toISOString();
+}
+
+function resolveHostedProviderCleanupRetryWakeAt(input: {
+  nowMs?: number | null;
+} = {}): string {
+  const nowMs = Number.isFinite(input.nowMs)
+    ? Number(input.nowMs)
+    : Date.now();
+  return new Date(nowMs + HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS).toISOString();
+}
+
+function resolveHostedProviderCleanupCheckpointWakeAt(input: {
+  checkpoint: HostedProviderCleanupCheckpoint | null;
+  deferDueOrInvalid: boolean;
+  idleCheckpointDelayMs?: number | null;
+  nowMs: number;
+}): string | null {
+  if (!input.checkpoint) {
+    return null;
+  }
+
+  const checkpointWakeAt = input.checkpoint.nextWakeAt ?? null;
+  const checkpointWakeMs = Date.parse(checkpointWakeAt ?? "");
+  if (!Number.isFinite(checkpointWakeMs) || checkpointWakeMs <= input.nowMs) {
+    return input.deferDueOrInvalid
+      ? resolveHostedProviderCleanupFirstDeferredWakeAt({
+          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+          nowMs: input.nowMs,
+        })
+      : null;
+  }
+
+  return checkpointWakeAt;
+}
+
+// One-shot migration per vault: terminal evidence written before producers
+// carried cleanup message ids used a queuedAt marker as the pending-cleanup
+// queue. Drain any such evidence into hosted-provider-cleanup.json in bounded
+// batches, then mark recovery complete so steady-state wakes never scan the
+// evidence directory. Delete this migration (and the evidence-scan helpers it
+// uses: listPendingAssistantAutoReplyLinqCleanupEvidence,
+// markAssistantAutoReplyLinqCleanupQueued) once production vaults have all
+// written the recovery marker.
+async function recoverLegacyPendingTerminalLinqCleanupOnce(input: {
+  shouldYield: (() => boolean) | null;
+  vaultRoot: string;
+}): Promise<{ completedNow: boolean; queuedIds: boolean }> {
+  const { shouldYield, vaultRoot } = input;
+  if (await hasHostedProviderCleanupRecoveryCompleted(vaultRoot)) {
+    return { completedNow: false, queuedIds: false };
+  }
+  // Vaults with no auto-reply history have nothing to migrate: skip the scan,
+  // the marker, and the forced checkpoint entirely (O(1) stat per pass).
+  if (!(await hasAssistantAutoReplyEvidenceDirectory(vaultRoot))) {
+    return { completedNow: false, queuedIds: false };
+  }
+
+  let recoveredCleanupQueued = false;
+  const queuedCaptureIds = new Set<string>();
+  for (;;) {
+    // Fresh foreground work preempts the migration between batches. Recovered
+    // batches are already durable in cleanup state; the marker stays absent so
+    // the next non-foreground pass resumes the scan where it left off.
+    if (shouldYield?.() === true) {
+      return { completedNow: false, queuedIds: recoveredCleanupQueued };
+    }
+    const pending = await listPendingAssistantAutoReplyLinqCleanupEvidence({
+      vault: vaultRoot,
+    });
+    if (
+      pending.linqMessageIds.length === 0
+      || pending.captureIds.every((captureId) => queuedCaptureIds.has(captureId))
+    ) {
+      break;
+    }
+    recoveredCleanupQueued = true;
+    for (const captureId of pending.captureIds) {
+      queuedCaptureIds.add(captureId);
+    }
+    await recordHostedProviderCleanupBeforeCommit({
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      linqMessageIds: pending.linqMessageIds,
+      vaultRoot,
+    });
+    await markAssistantAutoReplyLinqCleanupQueued({
+      captureIds: pending.captureIds,
+      vault: vaultRoot,
+    });
+  }
+  await markHostedProviderCleanupRecoveryCompleted(vaultRoot);
+  return { completedNow: true, queuedIds: recoveredCleanupQueued };
+}
+
+// Mirrors the engine's evidence directory layout; migration-only, delete with
+// the recovery block above.
+async function hasAssistantAutoReplyEvidenceDirectory(
+  vaultRoot: string,
+): Promise<boolean> {
+  try {
+    await stat(path.join(
+      resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+      "auto-reply",
+      "evidence",
+    ));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function hasHostedProviderCleanupRecoveryCompleted(
+  vaultRoot: string,
+): Promise<boolean> {
+  try {
+    const raw = await readFile(
+      resolveHostedProviderCleanupRecoveryPath(vaultRoot),
+      "utf8",
+    );
+    return (JSON.parse(raw) as { schema?: unknown }).schema
+      === HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA;
+  } catch {
+    return false;
+  }
+}
+
+async function markHostedProviderCleanupRecoveryCompleted(
+  vaultRoot: string,
+): Promise<void> {
+  await writeAssistantStateJson(resolveHostedProviderCleanupRecoveryPath(vaultRoot), {
+    schema: HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA,
+  });
+}
+
+function resolveHostedProviderCleanupRecoveryPath(vaultRoot: string): string {
+  return path.join(
+    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+    HOSTED_PROVIDER_CLEANUP_RECOVERY_FILE_NAME,
+  );
+}
+
+function buildHostedProviderCleanupPlan(input: {
+  checkpoint: HostedProviderCleanupCheckpoint | null;
+  deferred: boolean;
+  nowMs: number;
+  stateQueued: boolean;
+}): HostedProviderCleanupPlan {
+  const due =
+    !input.deferred
+    && isHostedProviderCleanupCheckpointDue(input.checkpoint, input.nowMs);
+  return {
+    checkpoint: input.checkpoint,
+    deferred: input.deferred,
+    due,
+    requiresCheckpoint: due || input.stateQueued,
+    stateQueued: input.stateQueued,
+  };
+}
+
+function isHostedProviderCleanupCheckpointDue(
+  checkpoint: HostedProviderCleanupCheckpoint | null,
+  nowMs: number,
+): boolean {
+  if (!checkpoint) {
+    return false;
+  }
+
+  const wakeAt = checkpoint.nextWakeAt ?? null;
+  const wakeMs = Date.parse(wakeAt ?? "");
+  return !Number.isFinite(wakeMs) || wakeMs <= nowMs;
+}
+
+function resolveHostedProviderCleanupIdleCheckpointDelayMs(
+  value: number | null | undefined,
+): number {
+  if (value !== null && value !== undefined && Number.isFinite(value) && value > 0) {
+    return Math.trunc(value);
+  }
+
+  return HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS;
 }
 
 async function assertHostedProviderCleanupLiveNow(input: {

@@ -12,8 +12,8 @@ import {
 } from "../computer-use/viewport";
 import { getPrisma } from "../prisma";
 import {
-  assertHostedMemberEffectiveActiveAccessAllowed,
-} from "./family-plan";
+  assertActiveHostedMemberAccessAllowed,
+} from "./member-access";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberCoreState,
@@ -70,8 +70,8 @@ export async function requireHostedAppSession(): Promise<HostedAppSession> {
 
 export async function requireActiveHostedAppSession(): Promise<HostedAppSession> {
   const session = await requireHostedAppSession();
-  await assertHostedMemberEffectiveActiveAccessAllowed({
-    member: session.member,
+  await assertActiveHostedMemberAccessAllowed({
+    memberId: session.member.id,
   });
   return session;
 }
@@ -95,8 +95,8 @@ export async function requireHostedAppSessionFromRequest(request: Request): Prom
 
 export async function requireActiveHostedAppSessionFromRequest(request: Request): Promise<HostedAppSession> {
   const session = await requireHostedAppSessionFromRequest(request);
-  await assertHostedMemberEffectiveActiveAccessAllowed({
-    member: session.member,
+  await assertActiveHostedMemberAccessAllowed({
+    memberId: session.member.id,
   });
   return session;
 }

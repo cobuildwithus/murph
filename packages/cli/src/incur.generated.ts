@@ -32,7 +32,7 @@ declare module 'incur' {
       'assistant self-target list': { args: {}; options: { requestId?: string } }
       'assistant self-target set': { args: { channel: string }; options: { requestId?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
       'assistant self-target show': { args: { channel: string }; options: { requestId?: string } }
-      'assistant session list': { args: {}; options: { requestId?: string } }
+      'assistant session list': { args: {}; options: { requestId?: string; limit: number } }
       'assistant session show': { args: { sessionId: string }; options: { requestId?: string } }
       'assistant status': { args: {}; options: { requestId?: string; session?: string; limit: number } }
       'assistant stop': { args: {}; options: { requestId?: string } }
@@ -89,7 +89,7 @@ declare module 'incur' {
       'document delete': { args: { id: string }; options: { requestId?: string } }
       'document edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string; timeZone?: string; dayKey?: string; source?: "manual" | "import" | "device" | "derived"; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearSource?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute" } }
       'document import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string; note?: string; source?: "manual" | "import" | "device" | "derived" } }
-      'document list': { args: {}; options: { requestId?: string; from?: string; to?: string } }
+      'document list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'document manifest': { args: { id: string }; options: { requestId?: string } }
       'document show': { args: { id: string }; options: { requestId?: string } }
       'encounter import-json': { args: {}; options: { requestId?: string; input: string } }
@@ -163,11 +163,7 @@ declare module 'incur' {
       'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
-      'habitat catalog': { args: { aspect?: string }; options: {} }
-      'habitat coverage': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
-      'habitat list': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
-      'habitat save': { args: { aspect: string }; options: { indicator?: string[]; recordedAt?: string; note?: string; body?: string; status?: string } }
-      'habitat show': { args: { lookup: string }; options: {} }
+      'group shared': { args: {}; options: { requestId?: string; kind?: ("group-email.v0" | "sleep-times.v0" | "activity-days.v0" | "workout-days.v0" | "heart-rate-zones-days.v0" | "steps-days.v0" | "max-heart-rate-days.v0" | "distance-days.v0" | "active-calories-days.v0" | "elevation-gain-days.v0" | "floors-climbed-days.v0" | "day-strain-days.v0" | "workout-strain-days.v0" | "activity-score-days.v0" | "vo2-max-days.v0" | "resting-heart-rate-days.v0" | "hrv-days.v0")[]; scope?: string[] } }
       'immunization import-json': { args: {}; options: { requestId?: string; input: string } }
       'immunization list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'immunization save': { args: { vaccineName: string }; options: { requestId?: string; occurredAt?: string | string; recordedAt?: string; timeZone?: string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[]; rawRef?: string[]; manufacturer?: string; lotNumber?: string; route?: string; site?: string; series?: string; targetDisease?: string[] } }
@@ -181,7 +177,7 @@ declare module 'incur' {
       'intake show': { args: { id: string }; options: { requestId?: string } }
       'intervention add': { args: { text: string }; options: { requestId?: string; duration?: number; type?: string; regimenId?: string; experiment?: string; skipExperimentLink?: boolean; allowOutOfWindow?: boolean; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived" } }
       'intervention delete': { args: { id: string }; options: { requestId?: string } }
-      'intervention edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string; timeZone?: string; dayKey?: string; source?: "manual" | "import" | "device" | "derived"; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearSource?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute"; type?: string; duration?: number; regimenId?: string; clearDuration?: boolean; clearRegimenId?: boolean } }
+      'intervention edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string; timeZone?: string; dayKey?: string; source?: "manual" | "import" | "device" | "derived"; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearSource?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute"; type?: string; duration?: number; regimenId?: string; sessionStatus?: "completed" | "partial" | "missed" | "skipped"; clearDuration?: boolean; clearRegimenId?: boolean } }
       'journal append': { args: { date: string }; options: { requestId?: string; text: string } }
       'journal ensure': { args: { date: string }; options: { requestId?: string } }
       'journal link': { args: { date: string }; options: { requestId?: string; eventId?: string[]; stream?: string[] } }
@@ -216,6 +212,8 @@ declare module 'incur' {
       'memory update': { args: { memoryId: string; text: string }; options: { section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'memory upsert': { args: { text: string }; options: { section: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'model': { args: {}; options: { show?: boolean; preset?: "codex"; model?: string; modelProvider?: string; codexCommand?: string; profile?: string; codexHome?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
+      'profile set-name': { args: { displayName: string }; options: {} }
+      'profile show': { args: {}; options: {} }
       'protocol import-json': { args: {}; options: { requestId?: string; input: string } }
       'protocol list': { args: {}; options: { requestId?: string; status?: string; commonsProtocol?: string; limit: number } }
       'protocol show': { args: { id: string }; options: { requestId?: string } }

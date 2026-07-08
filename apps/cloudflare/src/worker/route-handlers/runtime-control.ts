@@ -3,6 +3,7 @@ import {
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeEnsureProcessingRequest,
+  HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
@@ -10,8 +11,11 @@ import type {
 import {
   assertHostedRuntimeProcessingTimeoutMs,
   HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
+  HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRuntimeEnsureProcessingRequest,
@@ -31,6 +35,7 @@ import {
   type WorkerRouteContext,
 } from "../../worker-routes/shared.ts";
 import {
+  readPresentedWorkerRouteAuthorization,
   requireBoundInternalRouteUser,
 } from "../auth.ts";
 import {
@@ -51,7 +56,9 @@ import {
 
 const runtimeEnsureProcessingRoute = {
   authorizeBeforeMethod: true,
-  authorization: "web-callback-signature",
+  // Signed requests come from the Temporal orchestrator; OIDC requests come
+  // from the web app's direct ingress wake fast path. Same idempotent ensure.
+  authorization: "web-callback-signature-or-vercel-oidc",
   beforeMethod(context, params) {
     return requireBoundInternalRouteUser(context, params, "runtime-ensure-processing");
   },
@@ -137,10 +144,45 @@ export async function handleRuntimeEnsureProcessingRoute(
       requireJsonObject(payload.trim() ? JSON.parse(payload) : {}),
     );
     commandTimeoutMs = readRuntimeEnsureProcessingCommandTimeoutMs(context.request.headers);
+    const authorizationKind = readPresentedWorkerRouteAuthorization(context.request);
     orchestration = readRuntimeEnsureProcessingOrchestrationDiagnostics(
       context.request.headers,
       cloudflareRouteReceivedAtEpochMs,
+      context.runtimeControlAuthTiming ?? null,
+      // Derived from the credential that authorized this request, never from
+      // caller-supplied body fields.
+      authorizationKind === "vercel-oidc",
     );
+    if (authorizationKind === "vercel-oidc") {
+      const executionCtx = context.executionCtx;
+      if (!executionCtx) {
+        throw new Error("Worker execution context is required for direct runtime ensure-processing.");
+      }
+
+      executionCtx.waitUntil(
+        runRuntimeEnsureProcessingForUser({
+          commandTimeoutMs,
+          context,
+          ensureRequest,
+          orchestration,
+          userId,
+        }).catch((error: unknown) => {
+          emitHostedExecutionStructuredLog({
+            component: "worker",
+            details: buildWorkerRouteLogDetails({
+              reason: "runtime-ensure-processing-waituntil-failed",
+              routeName: "runtime-ensure-processing",
+            }, context.request, userId),
+            error,
+            level: "error",
+            message: "Hosted worker runtime ensure-processing waitUntil task failed.",
+            phase: "failed",
+            userId,
+          });
+        }),
+      );
+      return json({ accepted: true }, 202);
+    }
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",
@@ -161,13 +203,29 @@ export async function handleRuntimeEnsureProcessingRoute(
     }, classified.status);
   }
 
-  const stub = context.env.USER_RUNNER.getByName(userId);
-  return json(await stub.ensureRuntimeProcessingForUser({
-    ...ensureRequest,
-    ...(commandTimeoutMs === null ? {} : { commandTimeoutMs }),
+  return json(await runRuntimeEnsureProcessingForUser({
+    commandTimeoutMs,
+    context,
+    ensureRequest,
     orchestration,
     userId,
   }));
+}
+
+function runRuntimeEnsureProcessingForUser(input: {
+  commandTimeoutMs: number | null;
+  context: WorkerRouteContext;
+  ensureRequest: HostedRuntimeEnsureProcessingRequest;
+  orchestration: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]>;
+  userId: string;
+}): Promise<HostedRuntimeEnsureProcessingResponse> {
+  const stub = input.context.env.USER_RUNNER.getByName(input.userId);
+  return stub.ensureRuntimeProcessingForUser({
+    ...input.ensureRequest,
+    ...(input.commandTimeoutMs === null ? {} : { commandTimeoutMs: input.commandTimeoutMs }),
+    orchestration: input.orchestration,
+    userId: input.userId,
+  });
 }
 
 export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): number | null {
@@ -196,6 +254,8 @@ export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): n
 function readRuntimeEnsureProcessingOrchestrationDiagnostics(
   headers: Headers,
   cloudflareRouteReceivedAtEpochMs: number,
+  runtimeControlAuthTiming: WorkerRouteContext["runtimeControlAuthTiming"] | null,
+  triggeredByWebDirect: boolean,
 ): NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> {
   const temporalActivityStartedAtEpochMs = readOptionalEpochMsHeader(
     headers,
@@ -205,12 +265,31 @@ function readRuntimeEnsureProcessingOrchestrationDiagnostics(
     headers,
     HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   );
+  const tokenAcquireStartedAtEpochMs = readOptionalEpochMsHeader(
+    headers,
+    HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRE_STARTED_AT_MS_HEADER,
+  );
+  const tokenAcquiredAtEpochMs = readOptionalEpochMsHeader(
+    headers,
+    HOSTED_RUNTIME_ENSURE_PROCESSING_TOKEN_ACQUIRED_AT_MS_HEADER,
+  );
+  const directEnsureRequestStartedAtEpochMs = readOptionalEpochMsHeader(
+    headers,
+    HOSTED_RUNTIME_ENSURE_PROCESSING_DIRECT_REQUEST_STARTED_AT_MS_HEADER,
+  );
   return {
     cloudflareRouteReceivedAtEpochMs,
+    ...(triggeredByWebDirect ? { triggeredByWebDirect } : {}),
     ...(temporalActivityStartedAtEpochMs === null ? {} : { temporalActivityStartedAtEpochMs }),
     ...(temporalActivityRequestStartedAtEpochMs === null ? {} : {
       temporalActivityRequestStartedAtEpochMs,
     }),
+    ...(tokenAcquireStartedAtEpochMs === null ? {} : { tokenAcquireStartedAtEpochMs }),
+    ...(tokenAcquiredAtEpochMs === null ? {} : { tokenAcquiredAtEpochMs }),
+    ...(directEnsureRequestStartedAtEpochMs === null
+      ? {}
+      : { directEnsureRequestStartedAtEpochMs }),
+    ...(runtimeControlAuthTiming ?? {}),
   };
 }
 

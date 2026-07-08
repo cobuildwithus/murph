@@ -22,6 +22,7 @@ import {
   resolveAssistantOutboxQuarantineDirectory,
 } from './intents.js'
 import { normalizeAssistantDeliveryError } from './retry-policy.js'
+import { compareAssistantOutboxDeliverySequenceOrder } from './ordering.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 
 const ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT = 100
@@ -83,7 +84,8 @@ export async function listAssistantOutboxIntentsLocal(
   }
 
   return intents.sort((left, right) =>
-    compareAssistantTimestampsAscending(left.createdAt, right.createdAt),
+    compareAssistantTimestampsAscending(left.createdAt, right.createdAt) ||
+    compareAssistantOutboxDeliverySequenceOrder(left, right),
   )
 }
 

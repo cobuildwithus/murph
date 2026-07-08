@@ -100,7 +100,7 @@ export function useHostedEmailSettingsController(input: {
     setSuccessMessage(null);
 
     if (!input.authenticated) {
-      setErrorMessage("Sign in with your existing hosted account before you try to link an email address.");
+      setErrorMessage("Sign in to your Murph account first, then link your email.");
       return;
     }
 
@@ -236,7 +236,7 @@ export function useHostedEmailSettingsController(input: {
     setPendingEmailAddress(null);
 
     if (!input.authenticated) {
-      setErrorMessage("Sign in with your existing hosted account before you try to link an email address.");
+      setErrorMessage("Sign in to your Murph account first, then link your email.");
       return;
     }
 
@@ -279,7 +279,7 @@ export function useHostedEmailSettingsController(input: {
     setSuccessMessage(null);
 
     if (!effectiveVerifiedEmail?.address) {
-      setErrorMessage("Verify an email address before you try to sync it.");
+      setErrorMessage("Verify your email address first.");
       return;
     }
 
@@ -301,7 +301,7 @@ export function useHostedEmailSettingsController(input: {
         try {
           await input.onSynced?.(syncPresentation.syncResult);
         } catch (error) {
-          setErrorMessage(toErrorMessage(error, "Email was synced, but we could not refresh the page state yet."));
+          setErrorMessage(toErrorMessage(error, "Your email is connected, but the page didn't refresh. Reload to see it."));
         }
       }
     } finally {

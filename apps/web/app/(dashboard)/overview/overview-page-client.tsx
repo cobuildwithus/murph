@@ -117,7 +117,7 @@ function OverviewPageContent() {
           <AlertTitle>Could not load your overview</AlertTitle>
           <AlertDescription>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>{error ?? "Your dashboard data could not be decrypted."}</span>
+              <span>{error ?? "We couldn't unlock your dashboard data right now."}</span>
               <Button size="sm" variant="outline" onClick={() => void refresh()}>
                 Retry
               </Button>
@@ -140,7 +140,7 @@ function OverviewPageContent() {
             <CardDescription>
               {isPreparingEmptyReplica
                 ? "Your latest dashboard data is still being prepared."
-                : "As soon as notes, experiments, or samples land in your vault, this page will fill in automatically."}
+                : "As soon as you add notes, experiments, or measurements, this page will fill in automatically."}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -298,9 +298,9 @@ function OverviewPageContent() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Weekly sample deltas</CardTitle>
+              <CardTitle>Weekly changes</CardTitle>
               <CardDescription>
-                This week versus last week for tracked numeric signals.
+                How this week compares to last week across what you track.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -308,10 +308,10 @@ function OverviewPageContent() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Stream</TableHead>
+                      <TableHead>Metric</TableHead>
                       <TableHead>This week</TableHead>
                       <TableHead>Last week</TableHead>
-                      <TableHead>Delta</TableHead>
+                      <TableHead>Change</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -335,7 +335,7 @@ function OverviewPageContent() {
                 </Table>
               ) : (
                 <div className="rounded-xl border border-dashed border-border bg-background/40 p-4 text-sm text-muted-foreground">
-                  There were not enough numeric samples in the current and prior weeks to compute a delta table.
+                  Not enough data yet to compare this week with last week.
                 </div>
               )}
             </CardContent>

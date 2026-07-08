@@ -216,14 +216,13 @@ import /* keep */ {
     expect(failure).toContain("explicit hosted invocation capabilities");
   });
 
-  it("allows Cloudflare to import Codex process hooks from the assistant-engine owner", () => {
+  it("allows Cloudflare to import the Codex lifecycle stop hook from the assistant-engine owner", () => {
     const filePath = path.join(repoRoot, "apps/cloudflare/src/container-entrypoint.ts");
     const failure = verifyWorkspaceImportPolicy({
       filePath,
       source: `
 import path from "node:path";
 import {
-  snapshotExpectedCodexRootProcess,
   stopWarmCodexAppServer,
 } from "@murphai/assistant-engine/codex-lifecycle";
       `,
@@ -239,7 +238,6 @@ import {
       "extra named imports",
       `
 import {
-  snapshotExpectedCodexRootProcess,
   stopWarmCodexAppServer,
   debugCodexLifecycle,
 } from "@murphai/assistant-engine/codex-lifecycle";
@@ -261,7 +259,6 @@ import {
       "mixed allowed imports and re-exports",
       `
 import {
-  snapshotExpectedCodexRootProcess,
   stopWarmCodexAppServer,
 } from "@murphai/assistant-engine/codex-lifecycle";
 export { debugCodexLifecycle } from "@murphai/assistant-engine/codex-lifecycle";
@@ -279,13 +276,12 @@ export { debugCodexLifecycle } from "@murphai/assistant-engine/codex-lifecycle";
     expect(failure).toContain("apps/cloudflare must depend on @murphai/assistant-runtime");
   });
 
-  it("rejects Cloudflare Codex process hook imports outside the container entrypoint", () => {
+  it("rejects Cloudflare Codex lifecycle imports outside the container entrypoint", () => {
     const filePath = path.join(repoRoot, "apps/cloudflare/src/runner-container.ts");
     const failure = verifyWorkspaceImportPolicy({
       filePath,
       source: `
 import {
-  snapshotExpectedCodexRootProcess,
   stopWarmCodexAppServer,
 } from "@murphai/assistant-engine/codex-lifecycle";
       `,
@@ -300,12 +296,12 @@ import {
     [
       "hosted-runtime-contracts.ts",
       "aliased lifecycle re-exports",
-      'export { snapshotExpectedCodexRootProcess as snapshotCodexRoot } from "@murphai/assistant-engine/codex-lifecycle";',
+      'export { stopWarmCodexAppServer as stopWarmCodex } from "@murphai/assistant-engine/codex-lifecycle";',
     ],
     [
       "hosted-runtime-contracts.ts",
       "type-only lifecycle re-exports",
-      'export type { HostedExpectedCodexRootProcess } from "@murphai/assistant-engine/codex-lifecycle";',
+      'export type { CodexLifecycleHook } from "@murphai/assistant-engine/codex-lifecycle";',
     ],
     [
       "hosted-runtime-worker-contracts.ts",
@@ -315,7 +311,7 @@ import {
     [
       "hosted-runtime-worker-contracts.ts",
       "type-only lifecycle re-exports",
-      'export type { HostedExpectedCodexRootProcess } from "@murphai/assistant-engine/codex-lifecycle";',
+      'export type { CodexLifecycleHook } from "@murphai/assistant-engine/codex-lifecycle";',
     ],
   ])("rejects assistant-runtime %s %s", (contractFileName, _label, source) => {
     const filePath = path.join(

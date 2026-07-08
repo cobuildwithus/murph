@@ -68,6 +68,7 @@ import {
 } from '../experiment-onboarding-options.js'
 import { upsertEventRecord } from './provider-event.js'
 import {
+  assertExperimentMatchesIntervention,
   attachInterventionSessionToExperiment,
   detachInterventionSessionFromExperiment,
 } from './intervention-experiment-link.js'
@@ -676,7 +677,7 @@ function hydrateRunPlanAdherenceTargets(
   }
 
   const [adherenceTarget] = synthesizeLegacySessionAdherenceTargets({ runPlan })
-  if (!adherenceTarget) {
+  if (!adherenceTarget?.calendar) {
     return runPlan
   }
 
@@ -1061,16 +1062,36 @@ export async function logExperimentSessionRecord(input: {
 }) {
   const experiment = await requireEntityFamily(input.vault, input.lookup, 'experiment')
   const frontmatter = requireExperimentFrontmatter(experiment)
-  const interventionType =
-    slugifyExperimentValue(input.interventionType) ??
+  const explicitInterventionType = slugifyExperimentValue(input.interventionType)
+  const derivedInterventionType =
     slugifyExperimentValue(frontmatter.runPlan?.modality) ??
     inferExperimentInterventionType(frontmatter.commonsProtocolRef?.key)
+  const interventionType =
+    explicitInterventionType ??
+    derivedInterventionType
 
   if (!interventionType) {
     throw new VaultCliError(
       'invalid_payload',
       'Experiment session logging requires interventionType or runPlan.modality.',
     )
+  }
+
+  if (
+    input.interventionType !== undefined &&
+    explicitInterventionType !== null &&
+    derivedInterventionType !== null &&
+    explicitInterventionType !== derivedInterventionType
+  ) {
+    assertExperimentMatchesIntervention({
+      experiment: {
+        entity: experiment,
+        experimentId: frontmatter.experimentId,
+        experimentSlug: frontmatter.slug,
+        frontmatter,
+      },
+      interventionType: input.interventionType,
+    })
   }
 
   const title = normalizeOptionalText(input.title) ?? buildExperimentSessionTitle({

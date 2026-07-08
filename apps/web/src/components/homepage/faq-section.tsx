@@ -20,6 +20,18 @@ const FAQ_ITEMS = [
     "Wearable apps show status. Murph turns whatever evidence you have into a bounded experiment with a baseline and a clear outcome.",
   ],
   [
+    "Can I do challenges with friends and family?",
+    "Yes. Start a group with Murph and invite your people. Murph referees the challenge: fair baselines across different devices, scoring, reminders, and a winner at the end. Scoring is adherence and change against your own baseline, never raw body stats.",
+  ],
+  [
+    "What does the group actually see?",
+    "Only what each person agrees to share when they join a challenge or newsletter. The weekly newsletter is a short recap of how everyone's week went. Everything else stays private by default.",
+  ],
+  [
+    "Can I set it up for a parent?",
+    "Yes. Murph works over plain texting with no app to download, which makes it a good fit for parents and grandparents. Their answers stay grounded in their own labs and routines, and the weekly newsletter keeps the family in the loop if they opt in.",
+  ],
+  [
     "Can I run multiple experiments?",
     "Yes. We recommend one at a time so you know what caused the change, but you can run more if they don’t overlap.",
   ],

@@ -5,9 +5,10 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   buildHostedFamilyInviteAcceptUrl: vi.fn(),
-  buildHostedFamilyTelegramInviteUrl: vi.fn(),
+  resolveHostedFamilyTelegramInviteUrl: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
+  hostedFamilyInviteHasReusableTarget: vi.fn(),
   hostedAccountGroupFindUnique: vi.fn(),
   issueHostedFamilyInviteTx: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedAppSessionFromRequest: vi.fn(),
   revokeHostedFamilyInviteTx: vi.fn(),
   updateHostedFamilySeatCount: vi.fn(),
+  waitForHostedFamilyBilledSeatCount: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -32,13 +34,15 @@ vi.mock("@/src/lib/hosted-onboarding/env", () => ({
 }));
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   buildHostedFamilyInviteAcceptUrl: mocks.buildHostedFamilyInviteAcceptUrl,
-  buildHostedFamilyTelegramInviteUrl: mocks.buildHostedFamilyTelegramInviteUrl,
+  resolveHostedFamilyTelegramInviteUrl: mocks.resolveHostedFamilyTelegramInviteUrl,
   ensureHostedAccountGroupForOwnerTx: mocks.ensureHostedAccountGroupForOwnerTx,
+  hostedFamilyInviteHasReusableTarget: mocks.hostedFamilyInviteHasReusableTarget,
   issueHostedFamilyInviteTx: mocks.issueHostedFamilyInviteTx,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
   removeHostedFamilyMemberTx: mocks.removeHostedFamilyMemberTx,
   revokeHostedFamilyInviteTx: mocks.revokeHostedFamilyInviteTx,
   updateHostedFamilySeatCount: mocks.updateHostedFamilySeatCount,
+  waitForHostedFamilyBilledSeatCount: mocks.waitForHostedFamilyBilledSeatCount,
 }));
 
 let inviteRoute: typeof import("../app/api/settings/billing/family/invite/route");
@@ -81,12 +85,17 @@ beforeEach(async () => {
     status: "pending",
     targetLabel: "Mom",
     targetPhoneHint: "+48 6** *** ***",
+    targetTelegramUsername: null,
   });
   mocks.buildHostedFamilyInviteAcceptUrl.mockReturnValue(
     "https://app.murph.test/family/accept/NEWCODE",
   );
-  mocks.buildHostedFamilyTelegramInviteUrl.mockReturnValue(
-    "https://t.me/withmurph_bot?start=family_NEWCODE",
+  // Mirror the real gate: a Telegram link only for a Telegram-bound invite.
+  mocks.resolveHostedFamilyTelegramInviteUrl.mockImplementation(
+    (input: { inviteCode: string; isTelegramBound: boolean }) =>
+      input.isTelegramBound
+        ? `https://t.me/withmurph_bot?start=family_${input.inviteCode}`
+        : null,
   );
   mocks.revokeHostedFamilyInviteTx.mockResolvedValue(true);
   mocks.removeHostedFamilyMemberTx.mockResolvedValue(true);
@@ -106,6 +115,8 @@ beforeEach(async () => {
     groupId: "hbag_family",
     seats: { active: 2, billed: 2, invited: 0, max: 6, min: 2, remaining: 0, used: 2 },
   });
+  mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValue(true);
+  mocks.hostedFamilyInviteHasReusableTarget.mockReturnValue(true);
 
   inviteRoute = await import("../app/api/settings/billing/family/invite/route");
   inviteCancelRoute = await import("../app/api/settings/billing/family/invite/[inviteId]/route");
@@ -136,7 +147,8 @@ test("issues a family invite and returns safe share links", async () => {
       status: "pending",
       targetLabel: "Mom",
       targetPhoneHint: "+48 6** *** ***",
-      telegramInviteUrl: "https://t.me/withmurph_bot?start=family_NEWCODE",
+      // Phone-bound invite: no Telegram link even though a bot is configured.
+      telegramInviteUrl: null,
     },
   });
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledWith(
@@ -149,7 +161,96 @@ test("issues a family invite and returns safe share links", async () => {
   );
 });
 
+test("returns a Telegram share link only for a Telegram-bound invite", async () => {
+  mocks.issueHostedFamilyInviteTx.mockResolvedValueOnce({
+    channel: "family",
+    expiresAt: new Date("2026-07-01T00:00:00.000Z"),
+    id: "inv_new",
+    inviteCode: "NEWCODE",
+    status: "pending",
+    targetLabel: "Uncle",
+    targetPhoneHint: null,
+    targetTelegramUsername: "uncle",
+  });
+
+  const response = await inviteRoute.POST(
+    inviteRequest({ targetLabel: "Uncle", targetTelegramUsername: "@uncle" }),
+  );
+
+  expect(response.status).toBe(200);
+  const payload = (await response.json()) as { invite: { telegramInviteUrl: string | null } };
+  expect(payload.invite.telegramInviteUrl).toBe(
+    "https://t.me/withmurph_bot?start=family_NEWCODE",
+  );
+});
+
+test("does not return a Telegram share link when the stored invite is not Telegram-bound", async () => {
+  mocks.issueHostedFamilyInviteTx.mockResolvedValueOnce({
+    channel: "family",
+    expiresAt: new Date("2026-07-01T00:00:00.000Z"),
+    id: "inv_new",
+    inviteCode: "NEWCODE",
+    status: "pending",
+    targetLabel: "Uncle",
+    targetPhoneHint: "+48 6** *** ***",
+    targetTelegramUsername: null,
+  });
+
+  const response = await inviteRoute.POST(
+    inviteRequest({
+      targetLabel: "Uncle",
+      targetPhoneNumber: "+48600000000",
+      targetTelegramUsername: " ",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  const payload = (await response.json()) as { invite: { telegramInviteUrl: string | null } };
+  expect(payload.invite.telegramInviteUrl).toBeNull();
+  expect(mocks.resolveHostedFamilyTelegramInviteUrl).toHaveBeenCalledWith({
+    inviteCode: "NEWCODE",
+    isTelegramBound: false,
+    telegramBotUsername: "withmurph_bot",
+  });
+});
+
 test("adds one paid seat and retries when the plan is full", async () => {
+  const seatLimit = () =>
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    });
+  // Initial attempt and the pre-buy re-check both hit the limit, then it lands.
+  mocks.issueHostedFamilyInviteTx
+    .mockRejectedValueOnce(seatLimit())
+    .mockRejectedValueOnce(seatLimit())
+    .mockResolvedValueOnce({
+      channel: "family",
+      expiresAt: new Date("2026-07-01T00:00:00.000Z"),
+      id: "inv_new",
+      inviteCode: "NEWCODE",
+      status: "pending",
+      targetLabel: "Dad",
+      targetPhoneHint: "+48 6** *** ***",
+      targetTelegramUsername: null,
+    });
+
+  const response = await inviteRoute.POST(
+    inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledWith({
+    groupId: "hbag_family",
+    ownerMemberId: "member_owner",
+    prisma: expect.any(Object),
+    targetSeatCount: 3,
+  });
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
+});
+
+test("reuses a concurrently-created invite on the pre-buy re-check (no purchase)", async () => {
   mocks.issueHostedFamilyInviteTx
     .mockRejectedValueOnce(
       hostedOnboardingError({
@@ -166,6 +267,7 @@ test("adds one paid seat and retries when the plan is full", async () => {
       status: "pending",
       targetLabel: "Dad",
       targetPhoneHint: "+48 6** *** ***",
+      targetTelegramUsername: null,
     });
 
   const response = await inviteRoute.POST(
@@ -173,22 +275,19 @@ test("adds one paid seat and retries when the plan is full", async () => {
   );
 
   expect(response.status).toBe(200);
-  expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledWith({
-    groupId: "hbag_family",
-    ownerMemberId: "member_owner",
-    prisma: expect.any(Object),
-    targetSeatCount: 3,
-  });
+  expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
 
-test("keeps adding seats across retries until the invite lands", async () => {
+test("uses a seat freed before the purchase instead of buying another", async () => {
   const seatLimit = () =>
     hostedOnboardingError({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
       httpStatus: 409,
       message: "This Family plan has no open paid seats.",
     });
+  // Initial attempt and pre-buy re-check fail, but the snapshot then shows a seat
+  // freed up (cancel/remove), so the invite lands without a purchase.
   mocks.issueHostedFamilyInviteTx
     .mockRejectedValueOnce(seatLimit())
     .mockRejectedValueOnce(seatLimit())
@@ -200,14 +299,44 @@ test("keeps adding seats across retries until the invite lands", async () => {
       status: "pending",
       targetLabel: "Dad",
       targetPhoneHint: "+48 6** *** ***",
+      targetTelegramUsername: null,
     });
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
+    billingActive: true,
+    groupId: "hbag_family",
+    seats: { active: 1, billed: 2, invited: 0, max: 6, min: 2, remaining: 1, used: 1 },
+  });
 
   const response = await inviteRoute.POST(
     inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
   );
 
   expect(response.status).toBe(200);
-  expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledTimes(2);
+  expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
+});
+
+test("adds one seat then reports syncing if the invite still cannot land", async () => {
+  // Every attempt (initial, pre-buy re-check, post-buy) hits the limit, e.g. a
+  // slow webhook or a concurrent grab. Exactly one seat is purchased and the
+  // owner is told it is syncing rather than seeing a bare seat-limit error.
+  mocks.issueHostedFamilyInviteTx.mockRejectedValue(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    }),
+  );
+
+  const response = await inviteRoute.POST(
+    inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_FAMILY_SEAT_ADDED_SYNCING" },
+  });
+  expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledTimes(1);
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
 });
 
@@ -219,6 +348,28 @@ test("does not buy a seat when a full-plan invite is reused (no seat-limit error
   expect(response.status).toBe(200);
   expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(1);
+});
+
+test("does not auto-add a seat for a label-only invite (no dedup key)", async () => {
+  mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    }),
+  );
+
+  mocks.hostedFamilyInviteHasReusableTarget.mockReturnValueOnce(false);
+
+  const response = await inviteRoute.POST(
+    inviteRequest({ addSeatIfNeeded: true, targetLabel: "Grandpa" }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED" },
+  });
+  expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
 });
 
 test("does not add a seat when the seat limit is hit but addSeatIfNeeded is off", async () => {
@@ -242,6 +393,12 @@ test("does not add a seat when the seat limit is hit but addSeatIfNeeded is off"
 });
 
 test("updates paid Family seat count explicitly", async () => {
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
+    billingActive: true,
+    groupId: "hbag_family",
+    seats: { active: 1, billed: 3, invited: 1, max: 6, min: 2, remaining: 1, used: 2 },
+  });
+
   const response = await seatsRoute.PATCH(
     new Request("https://join.example.test/api/settings/billing/family/seats", {
       body: JSON.stringify({ seatCount: 3 }),
@@ -270,7 +427,7 @@ test("updates paid Family seat count explicitly", async () => {
   });
 });
 
-test("does not create a Family owner group from the seats route", async () => {
+test("does not create a family owner group from the seats route", async () => {
   mocks.hostedAccountGroupFindUnique.mockResolvedValueOnce(null);
 
   const response = await seatsRoute.PATCH(

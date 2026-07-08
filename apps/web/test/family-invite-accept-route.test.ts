@@ -36,6 +36,7 @@ const ACTIVE_PHONE_BOUND = {
   inviteCode: "CODEDAD",
   isEmailBound: false,
   isPhoneBound: true,
+  isTelegramBound: false,
   seatAvailable: true,
   status: "pending",
   targetLabel: "Dad",
@@ -114,11 +115,35 @@ test("passes a null email when the member's email is not verified", async () => 
   );
 });
 
-test("rejects web acceptance of a Telegram/label-only invite (no phone or email)", async () => {
+test("accepts web acceptance of an unbound label-only invite", async () => {
   mocks.readHostedFamilyInviteAcceptanceView.mockResolvedValueOnce({
     ...ACTIVE_PHONE_BOUND,
     isEmailBound: false,
     isPhoneBound: false,
+    isTelegramBound: false,
+    telegramInviteUrl: "https://t.me/withmurph_bot?start=family_CODEDAD",
+    webAcceptable: true,
+  });
+
+  const response = await acceptRoute.POST(postRequest(), params);
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({ accepted: true });
+  expect(mocks.acceptHostedFamilyInvite).toHaveBeenCalledWith(
+    expect.objectContaining({
+      acceptedMemberId: "member_mom",
+      inviteCode: "CODEDAD",
+      requireWebBinding: true,
+    }),
+  );
+});
+
+test("rejects web acceptance of a Telegram-only invite", async () => {
+  mocks.readHostedFamilyInviteAcceptanceView.mockResolvedValueOnce({
+    ...ACTIVE_PHONE_BOUND,
+    isEmailBound: false,
+    isPhoneBound: false,
+    isTelegramBound: true,
     telegramInviteUrl: "https://t.me/withmurph_bot?start=family_CODEDAD",
     webAcceptable: false,
   });

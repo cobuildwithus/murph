@@ -140,23 +140,23 @@ function terminalContent(
   switch (status) {
     case "approved":
       return {
-        description: "The exact action is approved. Return to Murph to continue.",
+        description: "You approved this action. Head back to Murph to continue.",
         icon: CheckCircle2,
-        replyBody: "I approved the secure request.",
+        replyBody: "I approved the request.",
         title: "Approved",
       };
     case "denied":
       return {
         description: "Murph will not continue with this action.",
         icon: XCircle,
-        replyBody: "I denied the secure request.",
+        replyBody: "I denied the request.",
         title: "Denied",
       };
     case "expired":
       return {
-        description: "Murph cannot continue from this link. Request a new secure approval.",
+        description: "This link expired. Ask Murph to send a new approval link.",
         icon: Clock3,
-        replyBody: "The secure approval request expired. Please send a new one.",
+        replyBody: "That approval link expired. Please send a new one.",
         title: "This request expired",
       };
   }

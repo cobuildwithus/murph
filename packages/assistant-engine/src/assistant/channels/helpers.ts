@@ -61,6 +61,7 @@ export function createAssistantChannelAdapter(
               candidate,
               dependencies,
               identityId: normalizeOptionalText(input.identityId),
+              replyToMessageId: normalizeOptionalText(input.replyToMessageId),
             })
             return isAssistantChannelActivityHandle(handle) ? handle : null
           },
@@ -88,6 +89,7 @@ export function createAssistantChannelAdapter(
       })
       const delivered = await spec.sendMessage({
         actorId: normalizeOptionalText(input.actorId),
+        answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
         candidate,
         deliverySource: input.deliverySource ?? null,
         dependencies,

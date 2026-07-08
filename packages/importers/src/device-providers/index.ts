@@ -26,6 +26,7 @@ export {
   JUNCTION_OPT_IN_SUMMARY_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
+  canNormalizeJunctionSleepCycleRecordToCompactStages,
   junctionProviderAdapter,
   normalizeJunctionResourceName,
   normalizeJunctionSnapshot,

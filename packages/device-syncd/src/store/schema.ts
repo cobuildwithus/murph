@@ -5,7 +5,8 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 6;
+// v7: oauth_state.consumed_at (replay-tolerant OAuth state consumption).
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 7;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -191,7 +192,7 @@ function ensureWebhookTraceClaimTokenColumn(database: DatabaseSync): void {
   }
 }
 
-function ensureOAuthStateOwnerColumn(database: DatabaseSync): void {
+function ensureOAuthStateColumns(database: DatabaseSync): void {
   if (!tableExists(database, "oauth_state")) {
     return;
   }
@@ -199,6 +200,9 @@ function ensureOAuthStateOwnerColumn(database: DatabaseSync): void {
   const names = columnNames(readOAuthStateColumns(database));
   if (!names.has("owner_id")) {
     database.exec("alter table oauth_state add column owner_id text");
+  }
+  if (!names.has("consumed_at")) {
+    database.exec("alter table oauth_state add column consumed_at text");
   }
 }
 
@@ -233,7 +237,8 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
         return_to text,
         metadata_json text not null,
         created_at text not null,
-        expires_at text not null
+        expires_at text not null,
+        consumed_at text
       );
 
       create index if not exists oauth_state_expires_idx
@@ -353,7 +358,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
     `);
 
   ensureDeviceCredentialStateSchema(database);
-  ensureOAuthStateOwnerColumn(database);
+  ensureOAuthStateColumns(database);
   ensureDeviceConnectionSetupColumns(database);
   ensureWebhookTraceClaimTokenColumn(database);
   clearLegacyEmptyTokenCredentials(database);

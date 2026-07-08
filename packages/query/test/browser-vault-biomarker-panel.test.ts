@@ -93,7 +93,7 @@ test("does not promote chart series rows to a current value without a metric sel
   assert.equal(panel.status, "missing_selection");
   assert.equal(panel.primary?.latest, null);
   assert.equal(panel.primary?.sampleCount, 2);
-  assert.match(panel.emptyState?.body ?? "", /did not include a selected current value/u);
+  assert.match(panel.emptyState?.body ?? "", /no current value is available yet/u);
 });
 
 test("returns insufficient_data before the biomarker minimum point threshold", () => {

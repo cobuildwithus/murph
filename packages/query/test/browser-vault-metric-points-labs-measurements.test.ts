@@ -16,7 +16,11 @@ import {
   createVaultReadModel,
   parseBrowserVaultReplica,
 } from "../src/browser.ts";
-import { buildMetricProjection, rebuildQueryProjection } from "../src/index.ts";
+import {
+  buildMetricProjection,
+  listCanonicalEntities,
+  rebuildQueryProjection,
+} from "../src/index.ts";
 
 type CanonicalEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 type CreateReplicaInput = Omit<Parameters<typeof createBrowserVaultReplica>[0], "metricPoints">;
@@ -719,6 +723,29 @@ test("query projection rebuild stores shared event and wearable metric points in
     } finally {
       database.close();
     }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("listCanonicalEntities applies projection-table family, kind, and date filters", async () => {
+  const vaultRoot = await createMetricPointProjectionVault();
+
+  try {
+    const testEvents = await listCanonicalEntities(vaultRoot, {
+      family: "event",
+      from: "2026-05-02",
+      kinds: ["test"],
+      to: "2026-05-02",
+    });
+    assert.deepEqual(testEvents.map((entity) => entity.entityId), ["evt_projection_test"]);
+
+    const staleMeasurements = await listCanonicalEntities(vaultRoot, {
+      family: "event",
+      from: "2026-05-02",
+      kinds: ["measurement"],
+    });
+    assert.deepEqual(staleMeasurements, []);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

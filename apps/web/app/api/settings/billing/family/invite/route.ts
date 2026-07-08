@@ -3,13 +3,14 @@ import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/enti
 import { readHostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/env";
 import {
   buildHostedFamilyInviteAcceptUrl,
-  buildHostedFamilyTelegramInviteUrl,
   ensureHostedAccountGroupForOwnerTx,
+  hostedFamilyInviteHasReusableTarget,
   issueHostedFamilyInviteTx,
   readHostedFamilyOwnerSnapshotForMember,
+  resolveHostedFamilyTelegramInviteUrl,
   updateHostedFamilySeatCount,
+  waitForHostedFamilyBilledSeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
-import { HOSTED_FAMILY_MAX_SEATS } from "@/src/lib/hosted-onboarding/billing-plans";
 import { hostedOnboardingError, isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
@@ -38,6 +39,13 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
+  // Auto-adding a seat only happens for invites the issuer can dedup on retry
+  // (a normalized phone/email/Telegram). Label-only or invalid-contact invites
+  // have no reuse key, so a lost-response retry could otherwise buy a second seat.
+  const canAutoAddSeat =
+    body.addSeatIfNeeded === true &&
+    hostedFamilyInviteHasReusableTarget({ targetEmail, targetPhoneNumber, targetTelegramUsername });
+
   const issueInvite = () =>
     prisma.$transaction(async (tx) => {
       const group = await ensureHostedAccountGroupForOwnerTx({
@@ -57,25 +65,27 @@ export const POST = withJsonError(async (request: Request) => {
 
   // Only grow the plan when the invite genuinely needs a seat. Reused invites
   // return before the seat check, so a duplicate/retried invite never buys one.
-  // Loop (bounded by max seats) so concurrent full-plan invites each add their
-  // own seat instead of racing on the same billed count.
   let invite;
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      invite = await issueInvite();
-      break;
-    } catch (error) {
-      if (
-        body.addSeatIfNeeded === true &&
-        isHostedOnboardingError(error) &&
-        error.code === "HOSTED_FAMILY_SEAT_LIMIT_REACHED" &&
-        attempt < HOSTED_FAMILY_MAX_SEATS &&
-        (await addHostedFamilySeatForOwner(prisma, auth.member.id))
-      ) {
-        continue;
-      }
+  try {
+    invite = await issueInvite();
+  } catch (error) {
+    if (!canAutoAddSeat || !isSeatLimitError(error)) {
       throw error;
     }
+    const seatResult = await addSeatThenInvite(prisma, auth.member.id, issueInvite);
+    if (seatResult === "unavailable") {
+      throw error;
+    }
+    if (seatResult === "syncing") {
+      // The seat was added and charged, but Stripe has not reconciled the count
+      // yet. Tell the owner it is finishing rather than failing the invite.
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_SEAT_ADDED_SYNCING",
+        httpStatus: 409,
+        message: "Added a paid seat — finishing with Stripe. Send the invite again in a moment.",
+      });
+    }
+    invite = seatResult.invite;
   }
 
   const { publicBaseUrl, telegramBotUsername } = readHostedOnboardingEnvironment();
@@ -92,32 +102,78 @@ export const POST = withJsonError(async (request: Request) => {
       status: invite.status,
       targetLabel: invite.targetLabel,
       targetPhoneHint: invite.targetPhoneHint,
-      telegramInviteUrl: telegramBotUsername
-        ? buildHostedFamilyTelegramInviteUrl({
-            botUsername: telegramBotUsername,
-            inviteCode: invite.inviteCode,
-          })
-        : null,
+      telegramInviteUrl: resolveHostedFamilyTelegramInviteUrl({
+        inviteCode: invite.inviteCode,
+        isTelegramBound: invite.targetTelegramUsername !== null,
+        telegramBotUsername,
+      }),
     },
   });
 });
 
-async function addHostedFamilySeatForOwner(
+function isSeatLimitError(error: unknown): boolean {
+  return isHostedOnboardingError(error) && error.code === "HOSTED_FAMILY_SEAT_LIMIT_REACHED";
+}
+
+async function addSeatThenInvite<T>(
   prisma: ReturnType<typeof getPrisma>,
   ownerMemberId: string,
-): Promise<boolean> {
+  issueInvite: () => Promise<T>,
+): Promise<{ invite: T } | "syncing" | "unavailable"> {
+  // Re-check before buying: a concurrent invite for the same target may have just
+  // created the reusable invite or freed a seat, in which case this issue reuses
+  // it (or takes the open seat) and no purchase is needed.
+  try {
+    return { invite: await issueInvite() };
+  } catch (error) {
+    if (!isSeatLimitError(error)) {
+      throw error;
+    }
+  }
+
   const snapshot = await readHostedFamilyOwnerSnapshotForMember({
     memberId: ownerMemberId,
     prisma,
   });
-  if (!snapshot?.billingActive || snapshot.seats.billed >= snapshot.seats.max) {
-    return false;
+  if (!snapshot?.billingActive) {
+    return "unavailable";
   }
+  // A seat may have freed (invite expired/canceled, member removed) since the
+  // re-check; take it instead of buying another.
+  if (snapshot.seats.remaining > 0) {
+    try {
+      return { invite: await issueInvite() };
+    } catch (error) {
+      if (!isSeatLimitError(error)) {
+        throw error;
+      }
+    }
+  }
+  if (snapshot.seats.billed >= snapshot.seats.max) {
+    return "unavailable";
+  }
+  const targetSeatCount = snapshot.seats.billed + 1;
   await updateHostedFamilySeatCount({
     groupId: snapshot.groupId,
     ownerMemberId,
     prisma,
-    targetSeatCount: snapshot.seats.billed + 1,
+    targetSeatCount,
   });
-  return true;
+  // Give the webhook a moment to reconcile the new count, then let the invite
+  // itself be the test: if any seat is now open (even if a concurrent change
+  // pushed the count past our target) it lands; only a still-full plan reports
+  // syncing so the owner retries instead of seeing a bare seat-limit error.
+  await waitForHostedFamilyBilledSeatCount({
+    groupId: snapshot.groupId,
+    prisma,
+    targetSeatCount,
+  });
+  try {
+    return { invite: await issueInvite() };
+  } catch (error) {
+    if (isSeatLimitError(error)) {
+      return "syncing";
+    }
+    throw error;
+  }
 }

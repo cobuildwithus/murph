@@ -3,6 +3,7 @@ import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import type { Junction } from "@junction-api/sdk";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import type * as JunctionSerialization from "@junction-api/sdk/serialization";
+import { canNormalizeJunctionSleepCycleRecordToCompactStages } from "@murphai/importers";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
@@ -25,7 +26,15 @@ import {
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
-import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
+import {
+  isHostedRuntimeIdShapedDiagnosticToken,
+  sanitizeHostedRuntimeDiagnosticText,
+} from "../hosted-runtime.ts";
+import {
+  JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+  type JunctionHistoricalBackfillStatus,
+} from "../junction-historical-backfill-progress.ts";
+import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   assertValidJunctionClientUserIdSecret,
   normalizeJunctionDeviceSyncRuntimeConfig,
@@ -97,6 +106,8 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
+type JunctionHistoricalBackfillFollowUp = Pick<ProviderJobResult, "metadataPatch" | "nextReconcileAt" | "scheduledJobs">;
+
 type JunctionResourceCategory = "summary" | "timeseries";
 
 interface JunctionDirectResourceJobInput {
@@ -153,28 +164,20 @@ const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCE_SET = new Set<str
   JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES,
 );
 
-type JunctionOptionalResourceFailureReason = "not_found" | "unavailable" | "unsupported";
+type JunctionOptionalResourceFailureReason = "not_found" | "unavailable" | "unsupported" | "ambiguous";
 
-interface JunctionOptionalResourceFailureSkip {
-  disposition: "skip";
+interface JunctionOptionalResourceFailure {
   reason: JunctionOptionalResourceFailureReason;
   responseStatus: number;
+  responseDetail?: string;
 }
-
-interface JunctionOptionalResourceFailureAmbiguous {
-  disposition: "ambiguous";
-  responseStatus: number;
-}
-
-type JunctionOptionalResourceFailure =
-  | JunctionOptionalResourceFailureAmbiguous
-  | JunctionOptionalResourceFailureSkip;
 
 interface JunctionSkippedOptionalResource {
   reason: JunctionOptionalResourceFailureReason;
   resource: string;
   resourceCategory: JunctionResourceCategory;
   responseStatus: number;
+  responseDetail?: string;
 }
 
 const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
@@ -435,14 +438,9 @@ const EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS = Object.freeze([
   6 * 60 * 60_000,
   24 * 60 * 60_000,
 ] as const);
-const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS = Object.freeze({
-  status: "junctionHistoricalBackfillStatus",
-  emptyAttempts: "junctionHistoricalBackfillEmptyAttempts",
-  lastEmptyAt: "junctionHistoricalBackfillLastEmptyAt",
-  windowStart: "junctionHistoricalBackfillWindowStart",
-  windowEnd: "junctionHistoricalBackfillWindowEnd",
-} as const);
-type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
+const JUNCTION_SCHEDULED_RECONCILE_PRIORITY = 40;
+const JUNCTION_HISTORICAL_BACKFILL_PRIORITY = 30;
+const JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY = 50;
 
 export function createJunctionDeviceSyncProvider(
   config: JunctionDeviceSyncProviderConfig,
@@ -616,7 +614,7 @@ export function createJunctionDeviceSyncProvider(
     const providerSlugs = [
       ...new Set(
         providers
-          .filter((provider) => mapJunctionSourceStatus(provider.status) === "connected")
+          .filter((provider) => mapJunctionSourceStatus(provider.status) !== "disconnected")
           .map((provider) =>
             normalizeProviderSlug(provider.origin.sourceProviderSlug)
             ?? normalizeProviderSlug(provider.slug)
@@ -640,7 +638,7 @@ export function createJunctionDeviceSyncProvider(
     if (failedProviderSlugs.length > 0) {
       throw deviceSyncError({
         code: "JUNCTION_PROVIDER_DEREGISTER_FAILED",
-        message: "Junction provider deregistration failed for one or more connected sources.",
+        message: "Junction provider deregistration failed for one or more sources.",
         retryable: true,
         httpStatus: 503,
         details: {
@@ -651,20 +649,123 @@ export function createJunctionDeviceSyncProvider(
   }
 
   function createScheduledJobs(
-    _account: StoredDeviceSyncAccount,
+    account: StoredDeviceSyncAccount,
     now: string,
   ): ProviderScheduleResult {
+    const scheduledHistoricalBackfillJobs = buildScheduledHistoricalBackfillJobs(account, now);
+    const nextReconcileAt = resolveJunctionNextReconcileAt(
+      account,
+      now,
+      addMilliseconds(now, reconcileIntervalMs),
+    );
+
     return {
       jobs: [
         buildWindowJob({
           kind: "reconcile",
           now,
           windowStart: subtractDays(now, reconcileDays),
-          priority: 40,
+          priority: JUNCTION_SCHEDULED_RECONCILE_PRIORITY,
         }),
+        ...scheduledHistoricalBackfillJobs,
       ],
-      nextReconcileAt: addMilliseconds(now, reconcileIntervalMs),
+      nextReconcileAt,
     };
+  }
+
+  // Connect-time retry state is owned by metadata. The scheduler materializes
+  // one due backfill job from that state instead of storing a second retry
+  // identity in the job queue.
+  function buildScheduledHistoricalBackfillJobs(
+    account: StoredDeviceSyncAccount,
+    now: string,
+  ): DeviceSyncJobInput[] {
+    const metadata = account.metadata;
+    const status = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]);
+    const connectWindow = buildConnectHistoricalBackfillWindow(account, summaryBackfillDays);
+    const metadataWindowStart = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]);
+    const metadataWindowEnd = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]);
+    const metadataMatchesConnectWindow =
+      metadataWindowStart === connectWindow.windowStart
+      && metadataWindowEnd === connectWindow.windowEnd;
+
+    if ((status === "complete" || status === "exhausted") && metadataMatchesConnectWindow) {
+      return [];
+    }
+
+    if (status === "retrying" && metadataMatchesConnectWindow) {
+      const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
+      const retryAtMs = retryAt ? Date.parse(retryAt) : NaN;
+      if (retryAt && Number.isFinite(retryAtMs) && Date.parse(now) < retryAtMs) {
+        return [];
+      }
+
+      return [buildExactWindowJob({
+        kind: "backfill",
+        windowStart: connectWindow.windowStart,
+        windowEnd: connectWindow.windowEnd,
+        availableAt: now,
+        priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
+      })];
+    }
+
+    // No recorded outcome: the connect-time historical backfill never ran to
+    // completion (or predates this bookkeeping). Re-derive its exact window
+    // from the connection's connect time and run it until a terminal status
+    // lands; imports are idempotent so a redundant pass is safe.
+    return [buildExactWindowJob({
+      kind: "backfill",
+      windowStart: connectWindow.windowStart,
+      windowEnd: connectWindow.windowEnd,
+      availableAt: now,
+      priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
+    })];
+  }
+
+  function isConnectHistoricalBackfillWindow(
+    account: Pick<DeviceSyncAccount, "connectedAt">,
+    window: { windowEnd: string; windowStart: string },
+  ): boolean {
+    const connectHistoricalWindow = buildConnectHistoricalBackfillWindow(
+      account,
+      summaryBackfillDays,
+    );
+    return (
+      window.windowStart === connectHistoricalWindow.windowStart
+      && window.windowEnd === connectHistoricalWindow.windowEnd
+    );
+  }
+
+  function readPendingConnectHistoricalBackfillRetryAt(
+    account: Pick<DeviceSyncAccount, "connectedAt" | "metadata">,
+  ): string | null {
+    const connectWindow = buildConnectHistoricalBackfillWindow(account, summaryBackfillDays);
+    return readPendingHistoricalBackfillRetryAt(
+      account.metadata,
+      connectWindow.windowStart,
+      connectWindow.windowEnd,
+    );
+  }
+
+  function resolveJunctionNextReconcileAt(
+    account: Pick<DeviceSyncAccount, "connectedAt" | "metadata">,
+    now: string,
+    fallbackNextReconcileAt: string,
+  ): string {
+    const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
+    if (!retryAt) {
+      return fallbackNextReconcileAt;
+    }
+
+    const retryAtMs = Date.parse(retryAt);
+    if (!Number.isFinite(retryAtMs) || Date.parse(now) >= retryAtMs) {
+      return fallbackNextReconcileAt;
+    }
+
+    const fallbackMs = Date.parse(fallbackNextReconcileAt);
+    return Number.isFinite(fallbackMs) && fallbackMs <= retryAtMs
+      ? fallbackNextReconcileAt
+      : retryAt;
   }
 
   async function executeJob(
@@ -708,9 +809,15 @@ export function createJunctionDeviceSyncProvider(
     }
     const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(summaries, sourceProviders);
     const summaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
-    const timeseriesWindowStart = job.kind === "backfill"
+    const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
+    const timeseriesCursor = job.kind === "backfill"
+      ? readBackfillTimeseriesCursor(job, window)
+      : null;
+    const timeseriesWindowStart = timeseriesCursor
+      ? maxIsoTimestamp(baseTimeseriesWindowStart, timeseriesCursor)
+      : baseTimeseriesWindowStart;
     if (job.kind !== "backfill" || summaryHasFetchedRecords) {
       await context.importSnapshot({
         provider: "junction",
@@ -743,7 +850,8 @@ export function createJunctionDeviceSyncProvider(
               context,
               job,
               windowEnd: window.windowEnd,
-              windowStart: timeseriesImport.yieldedAt,
+              windowStart: job.kind === "backfill" ? window.windowStart : timeseriesImport.yieldedAt,
+              timeseriesCursor: job.kind === "backfill" ? timeseriesImport.yieldedAt : null,
             }),
             profileMetadataPatch,
           ),
@@ -752,22 +860,35 @@ export function createJunctionDeviceSyncProvider(
       }
     }
 
+    const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
     const backfillFollowUp = job.kind === "backfill"
-      ? buildHistoricalBackfillFollowUp({
-          hasRecords: historicalSummaryHasRecords,
-          metadata: context.account.metadata,
-          now: context.now,
-          windowStart: window.windowStart,
-          windowEnd: window.windowEnd,
-        })
+      ? isConnectHistoricalBackfill
+        ? buildHistoricalBackfillFollowUp({
+            hasRecords: historicalSummaryHasRecords,
+            metadata: context.account.metadata,
+            now: context.now,
+            windowStart: window.windowStart,
+            windowEnd: window.windowEnd,
+          })
+        : buildNonConnectHistoricalBackfillFollowUp({
+            hasRecords: historicalSummaryHasRecords,
+            job,
+            now: context.now,
+            windowStart: window.windowStart,
+            windowEnd: window.windowEnd,
+          })
       : {};
-
+    const nextReconcileAt = backfillFollowUp.nextReconcileAt ?? resolveJunctionNextReconcileAt(
+      context.account,
+      context.now,
+      addMilliseconds(context.now, reconcileIntervalMs),
+    );
     return withJunctionSkippedResourceMetadata(
       context,
       withJunctionMetadataPatch(
         {
           ...backfillFollowUp,
-          nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+          nextReconcileAt,
         },
         profileMetadataPatch,
       ),
@@ -817,6 +938,12 @@ export function createJunctionDeviceSyncProvider(
     if (!sourceProviderSlug) {
       return null;
     }
+    if (
+      resource === "sleep_cycle"
+      && !hasNormalizableJunctionDirectSleepCycleRecord(record, sourceProviderSlug)
+    ) {
+      return null;
+    }
 
     return {
       record,
@@ -826,6 +953,11 @@ export function createJunctionDeviceSyncProvider(
       windowEnd: window.windowEnd,
       windowStart: window.windowStart,
     };
+  }
+
+  function shouldLoadJunctionDirectResourceSourceProviders(input: JunctionDirectResourceJobInput): boolean {
+    return (input.resource === "sleep_cycle" || input.resource === "sleep") &&
+      hasJunctionSourceReferenceIdentity(input.record);
   }
 
   async function diagnoseBackfill(
@@ -1111,15 +1243,24 @@ export function createJunctionDeviceSyncProvider(
     const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
+    let listedSourceProviders: readonly JunctionProviderConnection[] | null = null;
     let projectedSourceProviders: readonly JunctionProviderConnection[] | null = null;
-    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
-      if (projectedSourceProviders) {
-        return projectedSourceProviders;
+    const loadSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+      if (listedSourceProviders) {
+        return listedSourceProviders;
       }
 
       const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
         signal: context.signal ?? null,
       });
+      listedSourceProviders = sourceProviders;
+      return sourceProviders;
+    };
+    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+      if (projectedSourceProviders) {
+        return projectedSourceProviders;
+      }
+      const sourceProviders = await loadSourceProviders();
       await projectJunctionSources(context, sourceProviders);
       projectedSourceProviders = sourceProviders;
       return sourceProviders;
@@ -1185,9 +1326,12 @@ export function createJunctionDeviceSyncProvider(
 
       const directInput = readJunctionDirectResourceJobInput(job, window);
       if (directInput) {
+        const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
+          ? await loadSourceProviders()
+          : [];
         await importJunctionDirectResourceSnapshot(
           context,
-          [],
+          sourceProviders,
           directInput.windowStart,
           directInput.windowEnd,
           directInput.resource,
@@ -1502,19 +1646,14 @@ export function createJunctionDeviceSyncProvider(
           ),
         );
       } catch (error) {
-        const failure = classifyOptionalJunctionResourceFailure(error, "timeseries", resource);
+        const failure = classifyOptionalJunctionResourceFailure(
+          error,
+          "timeseries",
+          resource,
+          context.account.externalAccountId,
+        );
         if (!failure) {
           throw error;
-        }
-
-        if (failure.disposition === "ambiguous") {
-          throw buildAmbiguousOptionalJunctionResourceError(
-            error,
-            "timeseries",
-            resource,
-            failure.responseStatus,
-            context.now,
-          );
         }
 
         if (!optionalFailureLogged) {
@@ -1522,10 +1661,9 @@ export function createJunctionDeviceSyncProvider(
           optionalFailureLogged = true;
         }
         skippedOptionalResources.push({
-          reason: failure.reason,
+          ...failure,
           resource,
           resourceCategory: "timeseries",
-          responseStatus: failure.responseStatus,
         });
         break;
       }
@@ -1653,14 +1791,7 @@ export function createJunctionDeviceSyncProvider(
     resource: string,
     records: readonly Record<string, unknown>[],
   ): Promise<void> {
-    const redactedRecords = records.map((record) =>
-      readPlainObject(sanitizeJunctionImportSnapshotValue(
-        record,
-        new Map(),
-        { blockedStringValues: [context.account.externalAccountId] },
-      )) ?? record
-    );
-    const snapshots = { [resource]: redactedRecords };
+    const snapshots: Record<string, unknown[]> = { [resource]: [...records] };
 
     await context.importSnapshot({
       provider: "junction",
@@ -1670,7 +1801,9 @@ export function createJunctionDeviceSyncProvider(
       windowStart,
       windowEnd,
       connections: sanitizeJunctionImportConnections(sourceProviders),
-      summaries: sanitizeJunctionImportSnapshots(snapshots, sourceProviders),
+      summaries: sanitizeJunctionImportSnapshots(snapshots, sourceProviders, {
+        blockedStringValues: [context.account.externalAccountId],
+      }),
       timeseries: {},
     });
   }
@@ -1685,27 +1818,21 @@ export function createJunctionDeviceSyncProvider(
     try {
       return await load();
     } catch (error) {
-      const failure = classifyOptionalJunctionResourceFailure(error, resourceCategory, resource);
+      const failure = classifyOptionalJunctionResourceFailure(
+        error,
+        resourceCategory,
+        resource,
+        context.account.externalAccountId,
+      );
       if (!failure) {
         throw error;
       }
 
-      if (failure.disposition === "ambiguous") {
-        throw buildAmbiguousOptionalJunctionResourceError(
-          error,
-          resourceCategory,
-          resource,
-          failure.responseStatus,
-          context.now,
-        );
-      }
-
       logSkippedOptionalJunctionResource(context, resourceCategory, resource, failure);
       skippedOptionalResources.push({
-        reason: failure.reason,
+        ...failure,
         resource,
         resourceCategory,
-        responseStatus: failure.responseStatus,
       });
       return [];
     }
@@ -1715,7 +1842,7 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
     resourceCategory: JunctionResourceCategory,
     resource: string,
-    failure: JunctionOptionalResourceFailureSkip,
+    failure: JunctionOptionalResourceFailure,
   ): void {
     context.logger.warn?.("Skipping unavailable Junction resource response.", {
       errorCode: "JUNCTION_API_REQUEST_FAILED",
@@ -1724,12 +1851,14 @@ export function createJunctionDeviceSyncProvider(
       resource,
       resourceCategory,
       responseStatus: failure.responseStatus,
+      ...(failure.responseDetail ? { responseDetail: failure.responseDetail } : {}),
     });
   }
 
   function buildYieldedJunctionJobResult(input: {
     context: ProviderJobContext;
     job: DeviceSyncJobRecord;
+    timeseriesCursor?: string | null;
     windowEnd: string;
     windowStart: string;
   }): ProviderJobResult {
@@ -1744,6 +1873,7 @@ export function createJunctionDeviceSyncProvider(
 
   function buildYieldedJunctionFollowUpJob(input: {
     job: DeviceSyncJobRecord;
+    timeseriesCursor?: string | null;
     windowEnd: string;
     windowStart: string;
   }): DeviceSyncJobInput | null {
@@ -1751,7 +1881,29 @@ export function createJunctionDeviceSyncProvider(
       return null;
     }
 
-    if (input.job.kind === "backfill" || input.job.kind === "reconcile") {
+    if (input.job.kind === "backfill") {
+      const cursor = toIsoTimestampIfValid(input.timeseriesCursor);
+      if (!cursor || !isTimestampInHalfOpenWindow(cursor, input)) {
+        return null;
+      }
+      const emptyBackfillAttempts = readHistoricalBackfillJobEmptyAttempts(input.job);
+      const followUp = buildExactWindowJob({
+        kind: "backfill",
+        priority: input.job.priority,
+        windowEnd: input.windowEnd,
+        windowStart: input.windowStart,
+      });
+      return {
+        ...followUp,
+        payload: {
+          ...followUp.payload,
+          ...(emptyBackfillAttempts > 0 ? { emptyBackfillAttempts } : {}),
+          timeseriesCursor: cursor,
+        },
+      };
+    }
+
+    if (input.job.kind === "reconcile") {
       return buildExactWindowJob({
         kind: input.job.kind,
         priority: input.job.priority,
@@ -1901,6 +2053,7 @@ function buildJunctionSkippedResourceMetadataPatch(
       last.responseStatus,
       last.reason,
     ].join("."),
+    junctionSkippedResourceLastDetail: last.responseDetail ?? null,
   };
 }
 
@@ -1921,6 +2074,7 @@ function classifyOptionalJunctionResourceFailure(
   error: unknown,
   resourceCategory: JunctionResourceCategory,
   resource: string,
+  accountExternalId: string,
 ): JunctionOptionalResourceFailure | null {
   if (!isDeviceSyncError(error) || error.code !== "JUNCTION_API_REQUEST_FAILED") {
     return null;
@@ -1940,7 +2094,6 @@ function classifyOptionalJunctionResourceFailure(
 
   if (reason) {
     return {
-      disposition: "skip",
       reason,
       responseStatus: status,
     };
@@ -1953,143 +2106,53 @@ function classifyOptionalJunctionResourceFailure(
     && isJunctionProfileSummaryNotFoundResponse({ responseErrorCode, responseErrorDescription })
   ) {
     return {
-      disposition: "skip",
       reason: "not_found",
       responseStatus: status,
     };
   }
 
-  return {
-    disposition: "ambiguous",
-    responseStatus: status,
-  };
-}
-
-function buildAmbiguousOptionalJunctionResourceError(
-  error: unknown,
-  resourceCategory: JunctionResourceCategory,
-  resource: string,
-  responseStatus: number,
-  now: string,
-): Error {
-  const safeApiDetails = copySafeJunctionApiErrorDetails(error);
-  const safeResource = readJunctionDiagnosticToken(resource) ?? "unknown";
-  const responseErrorCode = readJunctionDiagnosticToken(safeApiDetails.responseErrorCode);
-  const responseShapeKind = readJunctionDiagnosticToken(safeApiDetails.responseShapeKind);
-
-  return deviceSyncError({
-    code: "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS",
-    message: `Junction ${resourceCategory} resource ${resource} returned an ambiguous ${responseStatus} response.`,
-    retryable: true,
-    httpStatus: 502,
-    details: {
-      ...safeApiDetails,
-      failureMetadataPatch: buildJunctionOptionalResourceFailureMetadataPatch({
-        at: now,
-        resource: safeResource,
-        resourceCategory,
-        responseErrorCode,
-        responseShapeKind,
-        responseStatus,
-      }),
-      providerOptionalResourceCategory: resourceCategory,
-      providerOptionalResourceFailureDisposition: "ambiguous",
-      providerOptionalResourceName: safeResource,
-      providerOptionalResourceStatus: responseStatus,
-    },
-    cause: error,
+  // Unrecognized 404/422 bodies skip only this optional resource. Keep the
+  // provider's own explanation (redacted) so operators can see why it failed
+  // without one broken optional endpoint aborting the whole sync job.
+  const responseDetail = buildJunctionOptionalResourceResponseDetail({
+    accountExternalId,
+    responseErrorCode,
+    responseErrorDescription,
   });
-}
 
-const JUNCTION_SAFE_API_DETAIL_TOKEN_KEYS = [
-  "requestAuthKind",
-  "requestAuthPlacement",
-  "requestBodyFieldNames",
-  "requestBodyKind",
-  "requestContentType",
-  "requestEndpointKind",
-  "requestMethod",
-  "requestQueryParameterNames",
-  "responseErrorCode",
-  "responseShapeKind",
-] as const;
-
-const JUNCTION_SAFE_API_DETAIL_TEXT_KEYS = [
-  "httpStatusText",
-  "responseErrorDescription",
-] as const;
-
-const JUNCTION_SAFE_API_DETAIL_NUMBER_KEYS = [
-  "requestBodyFieldCount",
-  "requestQueryParameterCount",
-  "status",
-] as const;
-
-const JUNCTION_SAFE_API_DETAIL_BOOLEAN_KEYS = [
-  "requestCredentialPresent",
-  "responseErrorDescriptionFieldPresent",
-  "responseErrorFieldPresent",
-] as const;
-
-function copySafeJunctionApiErrorDetails(error: unknown): Record<string, unknown> {
-  if (!isDeviceSyncError(error) || !error.details) {
-    return {};
-  }
-
-  const details: Record<string, unknown> = {};
-  for (const key of JUNCTION_SAFE_API_DETAIL_TOKEN_KEYS) {
-    const value = readJunctionDiagnosticToken(error.details[key]);
-    if (value !== null) {
-      details[key] = value;
-    }
-  }
-  for (const key of JUNCTION_SAFE_API_DETAIL_TEXT_KEYS) {
-    const value = readJunctionDiagnosticText(error.details[key]);
-    if (value !== null) {
-      details[key] = value;
-    }
-  }
-  for (const key of JUNCTION_SAFE_API_DETAIL_NUMBER_KEYS) {
-    const value = readJunctionDiagnosticNumber(error.details[key]);
-    if (value !== null) {
-      details[key] = value;
-    }
-  }
-  for (const key of JUNCTION_SAFE_API_DETAIL_BOOLEAN_KEYS) {
-    if (typeof error.details[key] === "boolean") {
-      details[key] = error.details[key];
-    }
-  }
-  return details;
-}
-
-function buildJunctionOptionalResourceFailureMetadataPatch(input: {
-  at: string;
-  resource: string;
-  resourceCategory: JunctionResourceCategory;
-  responseErrorCode: string | null;
-  responseShapeKind: string | null;
-  responseStatus: number;
-}): Record<string, unknown> {
-  const metadataPatch: Record<string, unknown> = {
-    junctionResourceDiagnostic: [
-      input.resourceCategory,
-      input.resource,
-      input.responseStatus,
-      "ambiguous",
-    ].join("."),
-    junctionResourceDiagnosticAt: input.at,
-    junctionResourceDiagnosticHttpStatus: input.responseStatus,
+  return {
+    reason: "ambiguous",
+    responseStatus: status,
+    ...(responseDetail ? { responseDetail } : {}),
   };
+}
 
-  if (input.responseErrorCode) {
-    metadataPatch.junctionResourceDiagnosticCode = input.responseErrorCode;
-  }
-  if (input.responseShapeKind) {
-    metadataPatch.junctionResourceDiagnosticShape = input.responseShapeKind;
-  }
-
-  return metadataPatch;
+function buildJunctionOptionalResourceResponseDetail(input: {
+  accountExternalId: string;
+  responseErrorCode: string | null;
+  responseErrorDescription: string | null;
+}): string | null {
+  // The generic redactor does not know the current Junction user id; strip it
+  // explicitly before the shared sanitizer so provider prose that embeds the
+  // account id can never reach logs or connection metadata. Case-insensitive
+  // because the provider-diagnostics parser lowercases error codes.
+  const accountIdPattern = input.accountExternalId
+    ? new RegExp(input.accountExternalId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "giu")
+    : null;
+  const redactAccountId = (value: string | null): string | null =>
+    value === null || accountIdPattern === null
+      ? value
+      : value.replace(accountIdPattern, "<redacted-account>");
+  const code = readJunctionDiagnosticToken(redactAccountId(input.responseErrorCode));
+  const description = readJunctionDiagnosticText(redactAccountId(input.responseErrorDescription));
+  // Clamp to the stored-metadata string cap so the persisted
+  // junctionSkippedResourceLastDetail is truncated instead of silently dropped.
+  const detail = [code, description]
+    .filter(Boolean)
+    .join(": ")
+    .slice(0, DEVICE_SYNC_METADATA_MAX_STRING_LENGTH)
+    .trimEnd();
+  return detail || null;
 }
 
 function classifyClearOptionalJunctionResourceFailureReason(input: {
@@ -2206,11 +2269,9 @@ function readJunctionDiagnosticToken(value: unknown): string | null {
   }
 
   const token = value.trim();
-  return /^[A-Za-z0-9_.:-]{1,128}$/u.test(token) ? token : null;
-}
-
-function readJunctionDiagnosticNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return /^[A-Za-z0-9_.:-]{1,128}$/u.test(token) && !isHostedRuntimeIdShapedDiagnosticToken(token)
+    ? token
+    : null;
 }
 
 interface JunctionDiagnosticCallResult {
@@ -3285,13 +3346,14 @@ function sanitizeJunctionImportConnections(
 function sanitizeJunctionImportSnapshots(
   snapshots: Record<string, unknown[]>,
   providers: readonly JunctionProviderConnection[],
+  options: JunctionImportSnapshotSanitizeOptions = {},
 ): Record<string, unknown[]> {
   const sourceReferences = buildJunctionSourceReferenceMap(providers);
 
   return Object.fromEntries(
     Object.entries(snapshots).map(([resource, records]) => [
       resource,
-      records.map((record) => sanitizeJunctionImportSnapshotValue(record, sourceReferences)),
+      records.map((record) => sanitizeJunctionImportSnapshotValue(record, sourceReferences, options)),
     ]),
   );
 }
@@ -3322,10 +3384,15 @@ function buildJunctionSourceReferenceMap(
   return references;
 }
 
+interface JunctionImportSnapshotSanitizeOptions {
+  blockedStringValues?: readonly string[];
+  preserveSourceReferenceKeys?: boolean;
+}
+
 function sanitizeJunctionImportSnapshotValue(
   value: unknown,
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
-  options: { blockedStringValues?: readonly string[] } = {},
+  options: JunctionImportSnapshotSanitizeOptions = {},
 ): unknown {
   if (Array.isArray(value)) {
     return value.map((entry) => sanitizeJunctionImportSnapshotValue(entry, sourceReferences, options));
@@ -3343,12 +3410,19 @@ function sanitizeJunctionImportSnapshotValue(
   const fallback = readJunctionSourceReference(record, sourceReferences);
   const origin = resolveJunctionOrigin(record, fallback);
   const sanitized = stripJunctionRawSourceIdentityFields(record, sourceReferences, options);
+  const fallbackSourceInstanceId = normalizeString(fallback.sourceInstanceId);
+  const unresolvedPreservedSourceReference =
+    options.preserveSourceReferenceKeys === true &&
+    !fallbackSourceInstanceId &&
+    hasJunctionSourceReferenceIdentity(record);
+  const sourceInstanceId = fallbackSourceInstanceId ??
+    (unresolvedPreservedSourceReference ? undefined : origin.sourceInstanceId);
 
   return stripUndefined({
     ...sanitized,
     sourceProviderSlug: normalizeProviderSlug(origin.sourceProviderSlug) ?? sanitized.sourceProviderSlug,
     sourceType: origin.sourceType ?? sanitized.sourceType,
-    sourceInstanceId: origin.sourceInstanceId ?? sanitized.sourceInstanceId,
+    sourceInstanceId: sourceInstanceId ?? sanitized.sourceInstanceId,
   });
 }
 
@@ -3378,13 +3452,16 @@ function readJunctionSourceReference(
 function stripJunctionRawSourceIdentityFields(
   record: Record<string, unknown>,
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
-  options: { blockedStringValues?: readonly string[] },
+  options: JunctionImportSnapshotSanitizeOptions,
 ): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(record)) {
     if (
-      isBlockedJunctionImportSourceIdentityKey(key)
+      (
+        isBlockedJunctionImportSourceIdentityKey(key)
+        && !(options.preserveSourceReferenceKeys && isJunctionSourceReferenceIdentityKey(key))
+      )
       || isBlockedJunctionImportSourceIdentityContainerKey(key)
     ) {
       continue;
@@ -3437,6 +3514,33 @@ function isBlockedJunctionImportSourceIdentityKey(key: string): boolean {
     || normalized.includes("providername")
     || normalized.includes("devicename")
     || normalized.includes("appname");
+}
+
+function isJunctionSourceReferenceIdentityKey(key: string): boolean {
+  const normalized = normalizeJunctionImportSourceIdentityKey(key);
+  return normalized === "connectionid"
+    || normalized === "providerconnectionid"
+    || normalized === "sourceid";
+}
+
+function hasJunctionSourceReferenceIdentity(
+  value: unknown,
+  seen: Set<Record<string, unknown>> = new Set(),
+): boolean {
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasJunctionSourceReferenceIdentity(entry, seen));
+  }
+
+  const record = readPlainObject(value);
+  if (!record || seen.has(record)) {
+    return false;
+  }
+  seen.add(record);
+
+  return Object.entries(record).some(([key, nested]) =>
+    (isJunctionSourceReferenceIdentityKey(key) && normalizeString(nested) !== undefined) ||
+    hasJunctionSourceReferenceIdentity(nested, seen)
+  );
 }
 
 function isBlockedJunctionImportSourceIdentityContainerKey(key: string): boolean {
@@ -3678,6 +3782,30 @@ function resolveJobWindow(
   };
 }
 
+function readBackfillTimeseriesCursor(
+  job: DeviceSyncJobRecord,
+  ownerWindow: { windowStart: string; windowEnd: string },
+): string | null {
+  const cursor = toIsoTimestampIfValid(job.payload.timeseriesCursor);
+  return cursor && isTimestampInHalfOpenWindow(cursor, ownerWindow)
+    ? cursor
+    : null;
+}
+
+function isTimestampInHalfOpenWindow(
+  timestamp: string,
+  window: { windowStart: string; windowEnd: string },
+): boolean {
+  const timestampMs = Date.parse(timestamp);
+  const windowStartMs = Date.parse(window.windowStart);
+  const windowEndMs = Date.parse(window.windowEnd);
+  return Number.isFinite(timestampMs)
+    && Number.isFinite(windowStartMs)
+    && Number.isFinite(windowEndMs)
+    && timestampMs >= windowStartMs
+    && timestampMs < windowEndMs;
+}
+
 function resolveCurrentSummaryWindow(
   now: string,
   fallbackDays: number,
@@ -3903,21 +4031,45 @@ function hasUsefulJunctionSleepCycleStageRecord(
   );
 }
 
+function hasNormalizableJunctionDirectSleepCycleRecord(
+  record: Record<string, unknown>,
+  sourceProviderSlug: string,
+): boolean {
+  return canNormalizeJunctionSleepCycleRecordToCompactStages(record, sourceProviderSlug);
+}
+
 function hasJunctionSleepStageValue(entry: Record<string, unknown>): boolean {
-  return JUNCTION_SLEEP_STAGE_VALUE_PATHS.some((path) =>
-    normalizeJunctionSleepStageValue(readJunctionRecordPath(entry, path)) !== null
-  );
+  return firstJunctionSleepStageFromPaths(entry) !== null;
+}
+
+function firstJunctionSleepStageFromPaths(entry: Record<string, unknown>) {
+  for (const path of JUNCTION_SLEEP_STAGE_VALUE_PATHS) {
+    const stage = normalizeJunctionSleepStageValue(readJunctionRecordPath(entry, path));
+    if (stage !== null) {
+      return stage;
+    }
+  }
+
+  return null;
 }
 
 function collectJunctionSleepCycleStageRecords(value: unknown): Record<string, unknown>[] {
+  return collectJunctionSleepCycleStageRecordsWithSeen(value, new Set());
+}
+
+function collectJunctionSleepCycleStageRecordsWithSeen(
+  value: unknown,
+  seen: Set<Record<string, unknown>>,
+): Record<string, unknown>[] {
   if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectJunctionSleepCycleStageRecords(entry));
+    return value.flatMap((entry) => collectJunctionSleepCycleStageRecordsWithSeen(entry, seen));
   }
 
   const entry = readPlainObject(value);
-  if (!entry) {
+  if (!entry || seen.has(entry)) {
     return [];
   }
+  seen.add(entry);
 
   if (hasJunctionSleepStageValue(entry)) {
     return [entry];
@@ -3925,7 +4077,7 @@ function collectJunctionSleepCycleStageRecords(value: unknown): Record<string, u
 
   return JUNCTION_SLEEP_STAGE_ARRAY_PATHS.flatMap((path) => {
     const nested = readJunctionRecordPath(entry, path);
-    return nested === value ? [] : collectJunctionSleepCycleStageRecords(nested);
+    return nested === value ? [] : collectJunctionSleepCycleStageRecordsWithSeen(nested, seen);
   });
 }
 
@@ -4201,7 +4353,7 @@ function buildHistoricalBackfillFollowUp(input: {
   now: string;
   windowStart: string;
   windowEnd: string;
-}): Pick<ProviderJobResult, "metadataPatch" | "scheduledJobs"> {
+}): JunctionHistoricalBackfillFollowUp {
   if (input.hasRecords) {
     return {
       metadataPatch: buildHistoricalBackfillMetadataPatch({
@@ -4221,13 +4373,25 @@ function buildHistoricalBackfillFollowUp(input: {
     return {};
   }
 
-  const emptyAttempts = readHistoricalBackfillEmptyAttempts(
+  const pendingRetryAt = readPendingHistoricalBackfillRetryAt(
     input.metadata,
     input.windowStart,
     input.windowEnd,
-  ) + 1;
+  );
+  const pendingRetryAtMs = pendingRetryAt ? Date.parse(pendingRetryAt) : NaN;
+  if (pendingRetryAt && Number.isFinite(pendingRetryAtMs) && Date.parse(input.now) < pendingRetryAtMs) {
+    return { nextReconcileAt: pendingRetryAt };
+  }
+
+  const previousEmptyAttempts = readHistoricalBackfillEmptyAttempts(
+    input.metadata,
+    input.windowStart,
+    input.windowEnd,
+  );
+  const emptyAttempts = previousEmptyAttempts + 1;
   const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
   const status: JunctionHistoricalBackfillStatus = retryDelayMs === null ? "exhausted" : "retrying";
+
   const metadataPatch = buildHistoricalBackfillMetadataPatch({
     status,
     emptyAttempts,
@@ -4240,19 +4404,81 @@ function buildHistoricalBackfillFollowUp(input: {
     return { metadataPatch };
   }
 
+  const retryAt = addMilliseconds(input.now, retryDelayMs);
+  return {
+    metadataPatch,
+    nextReconcileAt: retryAt,
+  };
+}
+
+function readPendingHistoricalBackfillRetryAt(
+  metadata: Record<string, unknown>,
+  windowStart: string,
+  windowEnd: string,
+): string | null {
+  const status = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]);
+
+  if (status !== "retrying") {
+    return null;
+  }
+
+  const metadataWindowStart = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]);
+  const metadataWindowEnd = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]);
+
+  if (metadataWindowStart !== windowStart || metadataWindowEnd !== windowEnd) {
+    return null;
+  }
+
+  const emptyAttempts = Math.max(
+    1,
+    readHistoricalBackfillEmptyAttempts(metadata, windowStart, windowEnd),
+  );
+  const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
+  const lastEmptyAt = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt]);
+
+  if (retryDelayMs === null || !lastEmptyAt || !Number.isFinite(Date.parse(lastEmptyAt))) {
+    return null;
+  }
+
+  return addMilliseconds(lastEmptyAt, retryDelayMs);
+}
+
+function buildNonConnectHistoricalBackfillFollowUp(input: {
+  hasRecords: boolean;
+  job: DeviceSyncJobRecord;
+  now: string;
+  windowStart: string;
+  windowEnd: string;
+}): JunctionHistoricalBackfillFollowUp {
+  if (input.hasRecords) {
+    return {};
+  }
+
+  const emptyAttempts = readHistoricalBackfillJobEmptyAttempts(input.job) + 1;
+  const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
+  if (retryDelayMs === null) {
+    return {};
+  }
+
+  const retryAt = addMilliseconds(input.now, retryDelayMs);
   const retryJob = buildExactWindowJob({
     kind: "backfill",
+    priority: Math.max(input.job.priority, JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY),
     windowStart: input.windowStart,
     windowEnd: input.windowEnd,
-    priority: 30,
   });
 
   return {
-    metadataPatch,
-    scheduledJobs: [{
-      ...retryJob,
-      availableAt: addMilliseconds(input.now, retryDelayMs),
-    }],
+    scheduledJobs: [
+      {
+        ...retryJob,
+        availableAt: retryAt,
+        payload: {
+          ...(retryJob.payload ?? {}),
+          emptyBackfillAttempts: emptyAttempts,
+        },
+      },
+    ],
   };
 }
 
@@ -4301,6 +4527,21 @@ function readHistoricalBackfillEmptyAttempts(
     : 0;
 }
 
+function readHistoricalBackfillJobEmptyAttempts(job: DeviceSyncJobRecord): number {
+  const rawAttempts = job.payload.emptyBackfillAttempts;
+  return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts > 0 ? rawAttempts : 0;
+}
+
+function buildConnectHistoricalBackfillWindow(
+  account: Pick<DeviceSyncAccount, "connectedAt">,
+  summaryBackfillDays: number,
+): { windowStart: string; windowEnd: string } {
+  return {
+    windowStart: floorUtcDayTimestamp(subtractDays(account.connectedAt, summaryBackfillDays)),
+    windowEnd: floorUtcDayTimestamp(account.connectedAt),
+  };
+}
+
 function buildWindowJob(input: {
   kind: "backfill" | "reconcile";
   now: string;
@@ -4314,12 +4555,15 @@ function buildWindowJob(input: {
     kind: input.kind,
     windowStart,
     windowEnd,
+    availableAt: input.now,
     priority: input.priority,
   });
 }
 
 function buildExactWindowJob(input: {
+  availableAt?: string;
   kind: "backfill" | "reconcile";
+  payload?: Record<string, unknown>;
   windowStart: string;
   windowEnd: string;
   priority: number;
@@ -4329,8 +4573,10 @@ function buildExactWindowJob(input: {
     payload: {
       windowStart: input.windowStart,
       windowEnd: input.windowEnd,
+      ...(input.payload ?? {}),
     },
     priority: input.priority,
+    ...(input.availableAt ? { availableAt: input.availableAt } : {}),
     dedupeKey: sha256Text(JSON.stringify(["junction", input.kind, input.windowStart, input.windowEnd])),
   };
 }
@@ -4349,20 +4595,12 @@ function buildJunctionWebhookJobs(input: {
     const backfillWindowStart = subtractDays(input.window.windowEnd, input.summaryBackfillDays);
 
     return [
-      {
+      buildExactWindowJob({
         kind: "backfill",
-        payload: {
-          windowStart: backfillWindowStart,
-          windowEnd: input.window.windowEnd,
-        },
+        windowStart: backfillWindowStart,
+        windowEnd: input.window.windowEnd,
         priority: 35,
-        dedupeKey: sha256Text(JSON.stringify([
-          "junction-webhook",
-          "connection-backfill",
-          backfillWindowStart,
-          input.window.windowEnd,
-        ])),
-      },
+      }),
       {
         kind: "reconcile",
         payload: {
@@ -4562,7 +4800,10 @@ function buildJunctionWebhookDataJobJsons(input: {
   const sanitized = sanitizeJunctionImportSnapshotValue(
     input.data,
     new Map(),
-    { blockedStringValues: [input.externalAccountId] },
+    {
+      blockedStringValues: [input.externalAccountId],
+      preserveSourceReferenceKeys: true,
+    },
   );
   const record = readPlainObject(sanitized);
   if (!record) {

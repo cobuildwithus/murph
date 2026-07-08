@@ -13,10 +13,10 @@ import {
   BROWSER_VAULT_REPLICA_SCHEMA,
   createBrowserVaultMetricSelectionRows,
   createBrowserVaultQueryClient,
-  selectBrowserVaultMurphAgeReadiness,
   toBrowserVaultMetricRows,
   type BrowserVaultReplica,
 } from "../src/browser.ts";
+import { selectBrowserVaultMurphAgeReadiness } from "@murphai/query/browser-murph-age";
 
 test("reports current-alpha Murph Age research readiness without leaking values or model outputs", () => {
   const readiness = selectBrowserVaultMurphAgeReadiness(clientFromPoints([

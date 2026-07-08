@@ -1,4 +1,10 @@
-import { access, readdir, readFile } from 'node:fs/promises'
+import {
+  access,
+  open,
+  readdir,
+  readFile,
+  type FileHandle,
+} from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -14,6 +20,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  assistantWithinConversationDriftFields,
   getAssistantBindingIsolationConflicts,
   mergeAssistantBinding,
   type AssistantBindingPatch,
@@ -51,6 +58,7 @@ import type { ResolvedAssistantSession } from './types.js'
 export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
 export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
+const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
 
 const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({
   name: 'assistant.automation-state',
@@ -163,23 +171,65 @@ export async function readAssistantTranscriptEntries(
   const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
 
   try {
-    const raw = await readFile(transcriptPath, 'utf8')
-    const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
-      assistantTranscriptEntrySchema.parse(value),
-    )
-    if (parsed.malformedLineCount > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_TRANSCRIPT_CORRUPTED',
-        'Assistant transcript contains malformed committed entries.',
-      )
-    }
-    return parsed.values
+    return parseAssistantTranscriptRaw(await readFile(transcriptPath, 'utf8'))
   } catch (error) {
     if (isMissingFileError(error)) {
       return []
     }
 
     throw error
+  }
+}
+
+function parseAssistantTranscriptRaw(raw: string): AssistantTranscriptEntry[] {
+  const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
+    assistantTranscriptEntrySchema.parse(value),
+  )
+  if (parsed.malformedLineCount > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_TRANSCRIPT_CORRUPTED',
+      'Assistant transcript contains malformed committed entries.',
+    )
+  }
+  return parsed.values
+}
+
+// Bounded tail read for recurring maintenance work: reads at most maxBytes
+// from the end of the committed transcript JSONL instead of parsing the whole
+// file. A partial first line from the byte cut is dropped before parsing.
+export async function readAssistantTranscriptTailEntries(
+  paths: AssistantStatePaths,
+  sessionId: string,
+  maxBytes: number,
+): Promise<AssistantTranscriptEntry[]> {
+  const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
+
+  let handle: FileHandle
+  try {
+    handle = await open(transcriptPath, 'r')
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return []
+    }
+    throw error
+  }
+
+  try {
+    const size = (await handle.stat()).size
+    const readBytes = Math.min(size, Math.max(0, maxBytes))
+    if (readBytes === 0) {
+      return []
+    }
+    const buffer = Buffer.alloc(readBytes)
+    await handle.read(buffer, 0, readBytes, size - readBytes)
+    let raw = buffer.toString('utf8')
+    if (readBytes < size) {
+      const firstNewlineIndex = raw.indexOf('\n')
+      raw = firstNewlineIndex === -1 ? '' : raw.slice(firstNewlineIndex + 1)
+    }
+    return parseAssistantTranscriptRaw(raw)
+  } finally {
+    await handle.close()
   }
 }
 
@@ -392,13 +442,27 @@ export async function persistResolvedSession(
     session.binding,
     input.bindingPatch,
   )
-  if (
-    routingConflicts.length > 0 &&
-    !(
-      input.allowBindingRebind === true &&
-      input.lookupSource === 'session-id'
+  // A conversation-key match is located BY the routing boundary itself: channel,
+  // identity, and the thread-or-actor scope are all encoded in the lookup key, so
+  // a match already proves those are equal. The only isolation fields that can
+  // still differ are within-conversation drift — a group's active speaker, or the
+  // direct/group flag flipping as members are added and removed. That drift must
+  // update the binding, never fail the reply: rejecting it strands the inbound
+  // message as unhandled and wedges the whole conversation. We enforce the drift
+  // boundary locally (not just trust the key derivation) so a conflict on any
+  // wider field still fails closed. Explicit session-id resumes stay opt-in via
+  // allowBindingRebind because the caller supplies the identifier and could be
+  // retargeting the session at a genuinely different audience; alias resumes
+  // never rebind for the same reason.
+  const conversationKeyRebindAllowed =
+    input.lookupSource === 'conversation-key' &&
+    routingConflicts.every((conflict) =>
+      assistantWithinConversationDriftFields.has(conflict.field),
     )
-  ) {
+  const bindingRebindAllowed =
+    conversationKeyRebindAllowed ||
+    (input.allowBindingRebind === true && input.lookupSource === 'session-id')
+  if (routingConflicts.length > 0 && !bindingRebindAllowed) {
     throw createAssistantSessionRoutingConflictError({
       conflicts: routingConflicts,
       lookupSource: input.lookupSource,
@@ -541,6 +605,17 @@ export async function readAssistantIndexStore(
 
   try {
     const parsed = assistantAliasStoreSchema.parse(JSON.parse(raw))
+    if (parsed.recentSessions === undefined) {
+      if (await hasDurableAssistantSessions(paths)) {
+        return rebuildAssistantIndexStore(paths)
+      }
+      const upgraded = assistantAliasStoreSchema.parse({
+        ...parsed,
+        recentSessions: {},
+      })
+      await writeJsonFileAtomic(paths.indexesPath, upgraded)
+      return upgraded
+    }
     return parsed
   } catch (error) {
     const quarantine = await quarantineAssistantStateFile({
@@ -591,8 +666,49 @@ export async function synchronizeAssistantIndexes(
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
+    recentSessions: pruneAssistantRecentSessions({
+      ...(store.recentSessions ?? {}),
+      [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
+    }),
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
+}
+
+export async function readAssistantRecentSessionIds(
+  paths: AssistantStatePaths,
+  options: {
+    limit: number
+  },
+): Promise<string[]> {
+  const limit = Math.max(0, Math.trunc(options.limit))
+  if (limit === 0) {
+    return []
+  }
+
+  const store = await readAssistantIndexStore(paths, { fresh: true })
+  return sortRecentSessionIds(store.recentSessions ?? {}).slice(0, limit)
+}
+
+function sortRecentSessionIds(
+  recentSessions: Record<string, string>,
+): string[] {
+  return Object.entries(recentSessions)
+    .sort(([, left], [, right]) =>
+      compareAssistantTimestampsAscending(right, left),
+    )
+    .map(([sessionId]) => sessionId)
+}
+
+function pruneAssistantRecentSessions(
+  recentSessions: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(recentSessions)
+      .sort(([, left], [, right]) =>
+        compareAssistantTimestampsAscending(right, left),
+      )
+      .slice(0, ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT),
+  )
 }
 
 export async function writeAutomationState(
@@ -667,6 +783,7 @@ function createInitialAssistantIndexStore(): AssistantAliasStore {
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases: {},
     conversationKeys: {},
+    recentSessions: {},
   })
 }
 
@@ -700,6 +817,7 @@ async function rebuildAssistantIndexStore(
 
   const aliases: Record<string, string> = {}
   const conversationKeys: Record<string, string> = {}
+  const recentSessions: Record<string, string> = {}
   for (const session of sortSessionsForIndexRebuild(sessions)) {
     if (session.alias) {
       aliases[session.alias] = session.sessionId
@@ -707,12 +825,14 @@ async function rebuildAssistantIndexStore(
     if (session.binding.conversationKey) {
       conversationKeys[session.binding.conversationKey] = session.sessionId
     }
+    recentSessions[session.sessionId] = resolveAssistantIndexRebuildTimestamp(session)
   }
 
   const rebuilt = assistantAliasStoreSchema.parse({
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
+    recentSessions: pruneAssistantRecentSessions(recentSessions),
   })
   await writeJsonFileAtomic(paths.indexesPath, rebuilt)
   await appendAssistantRuntimeEventAtPaths(paths, {

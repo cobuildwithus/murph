@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
+  normalizeHostedLinqGroupJoinOfferReaction,
   parseHostedLinqProviderEvent,
 } from "@/src/lib/hosted-onboarding/linq-provider-events";
 
@@ -114,6 +115,66 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(JSON.stringify(failed)).not.toContain("private text");
     expect(JSON.stringify(failed?.payloadSanitizedJson)).not.toContain("raw chat text");
     expect(JSON.stringify(failed?.payloadShapeJson)).not.toContain("raw chat text");
+  });
+
+  it("parses reaction events for join-offer dispatch without persisting raw handles", () => {
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        data: {
+          chat_id: "chat_123",
+          custom_emoji: "👍🏽",
+          from_handle: {
+            handle: "+15551234567",
+            service: "iMessage",
+          },
+          line: { phone_number: "+15550000000" },
+          message_id: "msg_offer_123",
+          reacted_at: "2026-03-26T12:01:00.000Z",
+          reaction_type: "custom",
+        },
+        eventType: "reaction.added",
+      }),
+    });
+
+    expect(parsed).toMatchObject({
+      eventType: "reaction.added",
+      linqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:/u),
+      messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+      phoneNumberRole: "line",
+      reactionCustomEmoji: "👍🏽",
+      reactionFromHandle: "+15551234567",
+      reactionType: "custom",
+    });
+    expect(parsed?.providerCreatedAt.toISOString()).toBe("2026-03-26T12:01:00.000Z");
+    expect(JSON.stringify(parsed?.payloadSanitizedJson)).not.toContain("+15551234567");
+    expect(JSON.stringify(parsed?.payloadShapeJson)).not.toContain("+15551234567");
+    expect(normalizeHostedLinqGroupJoinOfferReaction({
+      customEmoji: parsed?.reactionCustomEmoji,
+      eventType: parsed?.eventType ?? "reaction.added",
+      reactionType: parsed?.reactionType,
+    })).toBe("accept");
+  });
+
+  it("normalizes the join-offer reaction allowlist deterministically", () => {
+    expect(normalizeHostedLinqGroupJoinOfferReaction({
+      eventType: "reaction.added",
+      reactionType: "love",
+    })).toBe("accept");
+    expect(normalizeHostedLinqGroupJoinOfferReaction({
+      customEmoji: "❤️",
+      eventType: "reaction.added",
+      reactionType: "custom",
+    })).toBe("accept");
+    expect(normalizeHostedLinqGroupJoinOfferReaction({
+      customEmoji: "😂",
+      eventType: "reaction.added",
+      reactionType: "custom",
+    })).toBeNull();
+    expect(normalizeHostedLinqGroupJoinOfferReaction({
+      customEmoji: "👍",
+      eventType: "reaction.removed",
+      reactionType: "custom",
+    })).toBeNull();
   });
 
   it("stores provider payload shape without raw dynamic webhook keys", () => {

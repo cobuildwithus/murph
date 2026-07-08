@@ -9,6 +9,7 @@ import type {
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
+  mergeHostedDeviceSyncConnectionMetadata,
   normalizeHostedDeviceSyncJobHints,
   resolveHostedDeviceSyncWakeContext,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
@@ -205,6 +206,12 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       codec,
       failureDiagnostic: failureDiagnosticByLocalAccountId.get(localAccountId) ?? null,
       hostedConnectionId,
+      nextReconcileAt: account.status === "active"
+        ? earliestIsoTimestamp(
+            account.nextReconcileAt ?? null,
+            store.readNextJobWakeAtForAccount(account.id),
+          )
+        : account.nextReconcileAt ?? null,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({
@@ -628,6 +635,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   codec: ReturnType<typeof createSecretCodec>;
   failureDiagnostic: DeviceSyncJobFailureDiagnostic | null;
   hostedConnectionId: string;
+  nextReconcileAt: string | null;
   observedTokenVersion: number | null;
   sourceApplyEnabled: boolean;
   sources: readonly StoredDeviceConnectionSource[];
@@ -696,7 +704,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     assignNextReconcileAtUpdate(
       update,
       input.account.status,
-      input.account.nextReconcileAt ?? null,
+      input.nextReconcileAt,
       baselineLocalState?.nextReconcileAt ?? null,
     );
     assignFailureDiagnosticUpdate(
@@ -754,7 +762,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   assignNextReconcileAtUpdate(
     update,
     input.account.status,
-    input.account.nextReconcileAt ?? null,
+    input.nextReconcileAt,
     baselineLocalState?.nextReconcileAt ?? null,
   );
 
@@ -1038,6 +1046,12 @@ function buildAcceptedHostedDeviceSyncRuntimeSnapshotEntry(input: {
       : "local-runtime",
     observedTokenVersion: input.stored.hostedObservedTokenVersion ?? null,
   });
+  const baselineMetadata = shouldUseRawHostedMetadataBaseline({
+    entry: input.entry,
+    stored: input.stored,
+  })
+    ? input.entry.connection.metadata
+    : input.stored.metadata;
 
   return {
     connection: {
@@ -1047,7 +1061,7 @@ function buildAcceptedHostedDeviceSyncRuntimeSnapshotEntry(input: {
       displayName: input.stored.displayName ?? null,
       externalAccountId: input.stored.externalAccountId,
       id: input.entry.connection.id,
-      metadata: { ...input.stored.metadata },
+      metadata: { ...baselineMetadata },
       provider: input.stored.provider,
       scopes: [...input.stored.scopes],
       setupExpiresAt: input.stored.setupExpiresAt ?? null,
@@ -1065,6 +1079,21 @@ function buildAcceptedHostedDeviceSyncRuntimeSnapshotEntry(input: {
     ...(input.entry.sources === undefined ? {} : { sources: input.entry.sources }),
     credential,
   };
+}
+
+function shouldUseRawHostedMetadataBaseline(input: {
+  entry: HostedDeviceSyncRuntimeConnectionSnapshot;
+  stored: StoredDeviceSyncAccount;
+}): boolean {
+  return mergeHostedDeviceSyncConnectionMetadata({
+    hostedMetadata: input.entry.connection.metadata,
+    localConnectionStateUnpublished: Boolean(
+      input.stored.hostedObservedUpdatedAt
+        && input.stored.hostedObservedUpdatedAt === input.entry.connection.updatedAt
+        && input.stored.localConnectionRevision !== input.stored.hostedObservedConnectionRevision,
+    ),
+    localMetadata: input.stored.metadata,
+  }).preservedLocalProgress;
 }
 
 function buildHostedAccountHydrationInput(input: {
@@ -1121,6 +1150,19 @@ function buildHostedAccountHydrationInput(input: {
     previousHostedObservedUpdatedAt,
     nextHostedObservedUpdatedAt,
   );
+  const localConnectionStateUnpublished = Boolean(
+    input.existing
+      && input.existing.localConnectionRevision !== input.existing.hostedObservedConnectionRevision,
+  );
+  const hydratedMetadata = mergeHostedDeviceSyncConnectionMetadata({
+    hostedMetadata: hostedConnection.metadata,
+    localConnectionStateUnpublished,
+    localMetadata: input.existing?.metadata,
+  });
+  const preserveUnpublishedLocalProviderProgress = Boolean(
+    input.existing
+      && hydratedMetadata.preservedLocalProgress,
+  );
   const connection = (hostedConnectionStateStale || hostedConnectionStateReplayed) && input.existing
     ? {
         connectedAt: input.existing.connectedAt,
@@ -1138,7 +1180,7 @@ function buildHostedAccountHydrationInput(input: {
         connectedAt: hostedConnection.connectedAt,
         displayName: hostedConnection.displayName ?? null,
         externalAccountId: hostedConnection.externalAccountId,
-        metadata: { ...hostedConnection.metadata },
+        metadata: hydratedMetadata.metadata,
         provider: hostedConnection.provider,
         scopes: [...hostedConnection.scopes],
         setupExpiresAt: hostedConnection.setupExpiresAt ?? null,
@@ -1153,6 +1195,7 @@ function buildHostedAccountHydrationInput(input: {
 
   return {
     clearTokens: shouldClearTokens,
+    advanceHostedObservedConnectionRevision: !preserveUnpublishedLocalProviderProgress,
     ...(credential ? { credential } : {}),
     hostedObservedTokenVersion: nextHostedObservedTokenVersion,
     hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
@@ -1161,6 +1204,7 @@ function buildHostedAccountHydrationInput(input: {
       existing: input.existing,
       hostedLocalState,
       hostedStateAdvanced,
+      preserveUnpublishedLocalProviderProgress,
       status: connection.status,
     }),
     ...(hostedTokenBundle && !hostedTokenStateStale && !hostedTokenStateReplayed
@@ -1398,6 +1442,7 @@ function resolveHydratedHostedLocalState(input: {
   existing: StoredDeviceSyncAccount | null;
   hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
   hostedStateAdvanced: boolean;
+  preserveUnpublishedLocalProviderProgress: boolean;
   status: StoredDeviceSyncAccount["status"];
 }): {
   lastErrorCode: string | null;
@@ -1510,6 +1555,29 @@ function latestIsoTimestamp(left: string | null, right: string | null): string |
   return leftMs >= rightMs ? left : right;
 }
 
+function earliestIsoTimestamp(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  const leftMs = parseIsoMs(left);
+  const rightMs = parseIsoMs(right);
+
+  if (leftMs === null) {
+    return right;
+  }
+
+  if (rightMs === null) {
+    return left;
+  }
+
+  return leftMs <= rightMs ? left : right;
+}
+
 function didHostedStateAdvance(
   previousObservedUpdatedAt: string | null,
   nextObservedUpdatedAt: string | null,
@@ -1588,6 +1656,7 @@ function resolveHydratedNextReconcileAt(input: {
   existing: StoredDeviceSyncAccount | null;
   hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
   hostedStateAdvanced: boolean;
+  preserveUnpublishedLocalProviderProgress: boolean;
   status: StoredDeviceSyncAccount["status"];
 }): string | null {
   if (input.status === "disconnected" || input.status === "reauthorization_required") {
@@ -1599,6 +1668,10 @@ function resolveHydratedNextReconcileAt(input: {
 
   if (!input.existing) {
     return hostedNextReconcileAt;
+  }
+
+  if (input.preserveUnpublishedLocalProviderProgress && localNextReconcileAt) {
+    return earliestIsoTimestamp(localNextReconcileAt, hostedNextReconcileAt);
   }
 
   if (input.hostedStateAdvanced) {
@@ -1704,10 +1777,10 @@ function assignNextReconcileAtUpdate(
     return;
   }
 
-  if (latestIsoTimestamp(localValue, baselineValue) !== localValue) {
-    return;
-  }
-
+  // `nextReconcileAt` is owned by device-sync execution, not an append-only
+  // event timestamp. Empty-backfill retry floors may intentionally pull it
+  // earlier; stale hosted replays are still rejected by the web apply
+  // observedUpdatedAt/version fence before localState mutates hosted state.
   update.localState = {
     ...(update.localState ?? {}),
     nextReconcileAt: localValue,

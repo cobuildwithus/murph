@@ -30,6 +30,7 @@ import {
 import { writeRunnerRuntimeWriteFenceHeaders } from "../runner-outbound/write-fence.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import {
+  HostedRuntimeControlPlaneRejectedError,
   HostedRuntimeInternalAuthorityRejectedError,
   isHostedRuntimeInternalAuthorityRejectedError,
   isInternalAuthorityRejectedStatus,
@@ -193,6 +194,17 @@ async function fetchCloudflareHostedInternalRequest(input: {
       });
       throw error;
     }
+    if (response.status === 403) {
+      throw await buildHostedRuntimeControlPlaneRejectedError({
+        description: readHostedRuntimeInternalRequestDescription({
+          hostname: input.url.hostname,
+          method: internalRequest.method,
+          operation,
+          pathname: input.url.pathname,
+        }),
+        response,
+      });
+    }
     return response;
   } catch (error) {
     if (!isHostedRuntimeInternalAuthorityRejectedError(error)) {
@@ -208,6 +220,59 @@ async function fetchCloudflareHostedInternalRequest(input: {
     }
     throw error;
   }
+}
+
+async function buildHostedRuntimeControlPlaneRejectedError(input: {
+  description: string;
+  response: Response;
+}): Promise<HostedRuntimeControlPlaneRejectedError> {
+  const body = await input.response.text().catch(() => null);
+  const parsed = parseHostedRuntimeControlPlaneErrorBody(body);
+  return new HostedRuntimeControlPlaneRejectedError({
+    code: parsed?.code ?? null,
+    description: input.description,
+    message: parsed?.message ?? null,
+    status: input.response.status,
+  });
+}
+
+function parseHostedRuntimeControlPlaneErrorBody(
+  body: string | null,
+): { code: string | null; message: string | null } | null {
+  if (!body || body.trim().length === 0) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const error = record.error;
+  if (!error || typeof error !== "object" || Array.isArray(error)) {
+    return null;
+  }
+
+  const errorRecord = error as Record<string, unknown>;
+  return {
+    code: normalizeHostedRuntimeControlPlaneErrorText(errorRecord.code),
+    message: normalizeHostedRuntimeControlPlaneErrorText(errorRecord.message),
+  };
+}
+
+function normalizeHostedRuntimeControlPlaneErrorText(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 export function createCloudflareHostedProviderFetch(

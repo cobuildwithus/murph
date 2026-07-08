@@ -46,8 +46,14 @@ describe("PrismaDeviceSyncControlPlaneStore due reconcile connection sweep", () 
     expect(query.text).toContain('"connection"."status" = \'active\'');
     expect(query.text).toContain('"connection"."next_reconcile_at" <= $1');
     expect(query.text).toContain('join "hosted_member" as "member"');
-    expect(query.text).toContain('"member"."billing_status" = \'active\'');
     expect(query.text).toContain('"member"."suspended_at" is null');
+    // Access is the resolver projection: own active billing OR active
+    // membership in an active, unsuspended account group.
+    expect(query.text).toContain('"member"."billing_status" = \'active\'');
+    expect(query.text).toContain('from "hosted_account_group_membership" as "membership"');
+    expect(query.text).toContain('"membership"."status" = \'active\'');
+    expect(query.text).toContain('"account_group"."billing_status" = \'active\'');
+    expect(query.text).toContain('"account_group"."suspended_at" is null');
     expect(query.text).toContain("not exists");
     expect(query.text).not.toContain('from "device_sync_dirty_connection" as "dirty"');
     expect(query.text).not.toContain('from "device_sync_dirty_payload" as "payload"');

@@ -14,13 +14,10 @@ import {
   type HostedLinqParticipantContact,
 } from "./linq-participant-contact";
 import {
-  hostedMemberHomeLinqRouteSelect,
   hostedMemberRoutingLookupSelect,
   hostedMemberRoutingStateSelect,
-  projectHostedMemberHomeLinqRouteState,
   projectHostedMemberRoutingLookup,
   projectHostedMemberRoutingState,
-  type HostedMemberHomeLinqRouteSnapshot,
   type HostedMemberRoutingLookup,
   type HostedMemberRoutingLookupRecord,
 } from "./hosted-member-routing-state";
@@ -28,6 +25,7 @@ import { type HostedOnboardingReadClient } from "./shared";
 
 export {
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
+  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
@@ -40,7 +38,6 @@ export {
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-telegram";
 export {
-  type HostedMemberHomeLinqRouteSnapshot,
   projectHostedMemberRoutingState,
   type HostedMemberRoutingLookupMatch,
   type HostedMemberRoutingLookupSnapshot,
@@ -81,6 +78,22 @@ export async function readHostedMemberIdByReplyAliasLookupKey(input: {
   });
 
   return routingRecord?.memberId ?? null;
+}
+
+export async function hasHostedMemberEstablishedLinqHomeRoute(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      linqChatLookupKey: true,
+    },
+  });
+
+  return Boolean(routingRecord?.linqChatLookupKey);
 }
 
 export async function upsertHostedMemberReplyAliasLookupKeyTx(input: {
@@ -191,32 +204,6 @@ export async function lookupHostedMemberRoutingByHomeLinqChatId(input: {
   return resolveUniqueHostedMemberRoutingLookup({
     ambiguityCode: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
     matchedBy: "linqChatLookupKey",
-    prisma: input.prisma,
-    routingRecords,
-  });
-}
-
-export async function lookupHostedMemberRoutingByPendingLinqChatId(input: {
-  linqChatId: string | null | undefined;
-  prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberRoutingLookup | null> {
-  const lookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
-  if (lookupKeys.length === 0) {
-    return null;
-  }
-
-  const routingRecords = await input.prisma.hostedMemberRouting.findMany({
-    where: {
-      pendingLinqChatLookupKey: {
-        in: lookupKeys,
-      },
-    },
-    select: hostedMemberRoutingLookupSelect,
-  });
-
-  return resolveUniqueHostedMemberRoutingLookup({
-    ambiguityCode: "LINQ_PENDING_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
-    matchedBy: "pendingLinqChatLookupKey",
     prisma: input.prisma,
     routingRecords,
   });
@@ -356,20 +343,4 @@ export async function readHostedMemberRoutingState(input: {
   });
 
   return routingRecord ? await projectHostedMemberRoutingState(routingRecord, input.prisma) : null;
-}
-
-export async function readHostedMemberHomeLinqRoute(input: {
-  memberId: string;
-  prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberHomeLinqRouteSnapshot | null> {
-  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
-    where: {
-      memberId: input.memberId,
-    },
-    select: hostedMemberHomeLinqRouteSelect,
-  });
-
-  return routingRecord
-    ? await projectHostedMemberHomeLinqRouteState(routingRecord, input.prisma)
-    : null;
 }

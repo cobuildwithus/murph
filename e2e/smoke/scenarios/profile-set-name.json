@@ -1,0 +1,10 @@
+{
+  "id": "profile-set-name",
+  "command": "vault-cli profile set-name <displayName> --vault <path>",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/init",
+  "purpose": "Documents the audited canonical write of the preferred display name into bank/profile.md."
+}

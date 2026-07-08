@@ -18,7 +18,7 @@ import { isStrictIsoDate } from "./time.ts";
  */
 
 /** Bump when the payload shape or card layout changes; old URLs 404 cleanly. */
-export const EXPERIMENT_PROGRESS_CARD_VERSION = 1;
+export const EXPERIMENT_PROGRESS_CARD_VERSION = 2;
 
 export const EXPERIMENT_PROGRESS_CARD_MAX_WEEKS = 6;
 export const EXPERIMENT_PROGRESS_CARD_MAX_MOVERS = 2;
@@ -28,12 +28,13 @@ export const EXPERIMENT_PROGRESS_CARD_MAX_ENCODED_LENGTH = 2048;
 
 /**
  * One character per scheduled day, oldest week first:
- * B baseline · C completed · P partial · M missed · N no evidence yet ·
+ * B baseline · C completed · A assumed · P partial · M missed · N no evidence yet ·
  * S scheduled (future) · O outside the run window (calendar padding).
  */
 export const EXPERIMENT_PROGRESS_CARD_DAY_CODES = {
   baseline: "B",
   completed: "C",
+  assumed: "A",
   partial: "P",
   missed: "M",
   noEvidence: "N",
@@ -53,7 +54,7 @@ const cardWeekSchema = z
     /** ISO date of the week's first cell; day labels derive from it. */
     start: isoDateSchema,
     /** One day code per cell, in day order. */
-    cells: z.string().regex(/^[BCPMNSO]{1,7}$/u),
+    cells: z.string().regex(/^[ABCPMNSO]{1,7}$/u),
   })
   .strict();
 
@@ -99,6 +100,7 @@ export const experimentProgressCardSchema = z
     sessions: z
       .object({
         logged: z.number().int().min(0),
+        assumed: z.number().int().min(0).optional(),
         target: z.number().int().min(1).nullable().default(null),
       })
       .strict(),

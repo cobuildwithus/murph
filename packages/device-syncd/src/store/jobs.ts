@@ -121,6 +121,27 @@ export function readNextDeviceSyncJobWakeAt(database: DatabaseSync): string | nu
   return row?.wake_at ?? null;
 }
 
+export function readNextDeviceSyncJobWakeAtForAccount(database: DatabaseSync, accountId: string): string | null {
+  const row = database.prepare(`
+    select wake_at
+    from (
+      select available_at as wake_at
+      from device_job
+      where account_id = ?
+        and status = 'queued'
+      union all
+      select lease_expires_at as wake_at
+      from device_job
+      where account_id = ?
+        and status = 'running'
+        and lease_expires_at is not null
+    )
+    order by wake_at asc
+    limit 1
+  `).get(accountId, accountId) as { wake_at?: string | null } | undefined;
+  return row?.wake_at ?? null;
+}
+
 export function claimDueDeviceSyncJob(
   database: DatabaseSync,
   workerId: string,
@@ -373,7 +394,7 @@ export function completeDeviceSyncJobIfOwned(
   return (result.changes ?? 0) > 0;
 }
 
-export function completeDeviceSyncJobsIfOwned(
+export function completeDeviceSyncJobsIfOwnedInTransaction(
   database: DatabaseSync,
   input: {
     jobIds: readonly string[];
@@ -386,48 +407,59 @@ export function completeDeviceSyncJobsIfOwned(
     return false;
   }
 
-  return withImmediateTransaction(database, () => {
-    const placeholders = jobIds.map(() => "?").join(", ");
-    const eligible = database.prepare(`
-      select count(*) as count
-      from device_job
-      where id in (${placeholders})
-        and status = 'running'
-        and lease_owner = ?
-        and lease_expires_at is not null
-        and lease_expires_at > ?
-    `).get(
-      ...jobIds,
-      input.workerId,
-      input.now,
-    ) as { count: number } | undefined;
+  const placeholders = jobIds.map(() => "?").join(", ");
+  const eligible = database.prepare(`
+    select count(*) as count
+    from device_job
+    where id in (${placeholders})
+      and status = 'running'
+      and lease_owner = ?
+      and lease_expires_at is not null
+      and lease_expires_at > ?
+  `).get(
+    ...jobIds,
+    input.workerId,
+    input.now,
+  ) as { count: number } | undefined;
 
-    if ((eligible?.count ?? 0) !== jobIds.length) {
-      return false;
-    }
+  if ((eligible?.count ?? 0) !== jobIds.length) {
+    return false;
+  }
 
-    database.prepare(`
-      update device_job
-      set status = 'succeeded',
-          lease_owner = null,
-          lease_expires_at = null,
-          finished_at = ?,
-          updated_at = ?
-      where id in (${placeholders})
-        and status = 'running'
-        and lease_owner = ?
-        and lease_expires_at is not null
-        and lease_expires_at > ?
-    `).run(
-      input.now,
-      input.now,
-      ...jobIds,
-      input.workerId,
-      input.now,
-    );
+  database.prepare(`
+    update device_job
+    set status = 'succeeded',
+        lease_owner = null,
+        lease_expires_at = null,
+        finished_at = ?,
+        updated_at = ?
+    where id in (${placeholders})
+      and status = 'running'
+      and lease_owner = ?
+      and lease_expires_at is not null
+      and lease_expires_at > ?
+  `).run(
+    input.now,
+    input.now,
+    ...jobIds,
+    input.workerId,
+    input.now,
+  );
 
-    return true;
-  });
+  return true;
+}
+
+export function completeDeviceSyncJobsIfOwned(
+  database: DatabaseSync,
+  input: {
+    jobIds: readonly string[];
+    now: string;
+    workerId: string;
+  },
+): boolean {
+  return withImmediateTransaction(database, () =>
+    completeDeviceSyncJobsIfOwnedInTransaction(database, input)
+  );
 }
 
 export function releaseDeviceSyncJobIfOwned(

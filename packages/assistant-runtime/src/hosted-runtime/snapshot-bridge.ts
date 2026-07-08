@@ -27,6 +27,9 @@ import {
   compactHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
 import {
+  hasHostedProviderCleanupRecoveryCompleted,
+} from "./provider-cleanup.ts";
+import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -401,6 +404,8 @@ async function createHostedWorkspaceV2Snapshot(
       assistantRuntimeResiduePruneResult = await pruneAssistantRuntimeResidue({
         now: new Date(),
         pendingInputIds,
+        protectPendingProviderCleanupEvidence:
+          !(await hasHostedProviderCleanupRecoveryCompleted(input.vaultRoot)),
         vault: input.vaultRoot,
       });
       if (
@@ -795,6 +800,9 @@ async function writeHostedCheckpointSnapshotLifecycleLog(input: {
 
   const redactedJson: HostedRuntimeRedactedJson = {
     checkpointReason: input.request.reason,
+    ...(input.request.idleCheckpointTrigger
+      ? { idleCheckpointTrigger: input.request.idleCheckpointTrigger }
+      : {}),
     ...(input.details ?? {}),
   };
   appendHostedCheckpointSnapshotFailureDiagnostics(redactedJson, input.error);
@@ -1011,6 +1019,9 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   const redactedJson: HostedRuntimeRedactedJson = {
     browserVaultReplicaState: "omitted",
     checkpointReason: input.request.reason,
+    ...(input.request.idleCheckpointTrigger
+      ? { idleCheckpointTrigger: input.request.idleCheckpointTrigger }
+      : {}),
     leaseCheckCount: input.leaseCheckCount,
     ...(input.prunedRuntimeSymlinkCount > 0
       ? {

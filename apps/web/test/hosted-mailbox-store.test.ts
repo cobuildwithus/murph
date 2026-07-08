@@ -593,6 +593,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
 describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
   it("fetches each lane after the imported cursor without hydrating sidecar payloads", async () => {
     const conversationRef = buildHostedMailboxItemRow({
+      consumedAt: new Date("2026-04-26T00:00:04.000Z"),
       id: "mailbox_ref_1",
       lane: "conversation",
       laneSeq: 12n,
@@ -673,21 +674,25 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       }),
     });
     expect(result.items.map((item) => ({
+      consumedAt: item.consumedAt,
       id: item.id,
       payloadInlineCiphertext: item.payloadInlineCiphertext,
       payloadRef: item.payloadRef,
     }))).toEqual([
       {
+        consumedAt: "2026-04-26T00:00:04.000Z",
         id: "mailbox_ref_1",
         payloadInlineCiphertext: null,
         payloadRef: MAILBOX_REF_1_PAYLOAD_REF,
       },
       {
+        consumedAt: null,
         id: "mailbox_inline_2",
         payloadInlineCiphertext: "cipher_inline_2",
         payloadRef: null,
       },
       {
+        consumedAt: null,
         id: "mailbox_system_1",
         payloadInlineCiphertext: "cipher_system_1",
         payloadRef: null,
@@ -1372,6 +1377,7 @@ function buildHostedMailboxItemRow(
 ): HostedMailboxItemRow {
   return {
     createdAt: FIXED_NOW,
+    consumedAt: null,
     dedupeKey: "dedupe_1",
     expiresAt: null,
     id: "mailbox_1",

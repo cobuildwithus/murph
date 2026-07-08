@@ -103,7 +103,7 @@ export function ConnectTelegram(props: {
         try {
           await onSynced?.(syncResult);
         } catch (error) {
-          setErrorMessage(toErrorMessage(error, "Telegram was linked, but we could not refresh the page state yet."));
+          setErrorMessage(toErrorMessage(error, "Telegram is linked, but the page didn't refresh. Reload to see it."));
         }
       }
     } finally {
@@ -203,7 +203,7 @@ export function ConnectTelegram(props: {
 
       {isSyncingTelegram && !isQuietSyncingTelegram ? (
         <Alert className="border-stone-200 bg-stone-50">
-          <AlertTitle>Finishing Telegram sync</AlertTitle>
+          <AlertTitle>Finishing Telegram setup</AlertTitle>
           <AlertDescription>
             Saving your Telegram connection&hellip;
           </AlertDescription>

@@ -7,12 +7,12 @@ import {
 
 export const JOIN_INVITE_ACTIVE_FEATURE_CARDS = [
   {
-    body: "Pick a protocol from the library, such as sauna, zone 2, or creatine, and run it for a set period.",
+    body: "Pick a protocol like sauna, zone 2, or creatine, and follow it for a set stretch of time.",
     icon: FlaskConicalIcon,
     title: "Run an experiment",
   },
   {
-    body: "Baseline vs. post-experiment metrics, with a clear verdict at the end.",
+    body: "Your numbers before and after each experiment, with a clear verdict at the end.",
     icon: TrendingUpIcon,
     title: "See what worked",
   },

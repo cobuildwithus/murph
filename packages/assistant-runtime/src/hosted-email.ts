@@ -1,8 +1,9 @@
-export const hostedEmailSendTargetKindValues = ["explicit", "thread"] as const;
+export const hostedEmailSendTargetKindValues = ["explicit", "group", "thread"] as const;
 
 export type HostedEmailSendTargetKind = (typeof hostedEmailSendTargetKindValues)[number];
 
 export interface HostedEmailSendRequest {
+  html?: string | null;
   idempotencyKey?: string | null;
   message: string;
   replyToMessageId?: string | null;
@@ -11,10 +12,26 @@ export interface HostedEmailSendRequest {
   targetKind: HostedEmailSendTargetKind;
 }
 
+export interface HostedEmailDeliverySummary {
+  failedCount: number;
+  sentCount: number;
+  skippedCount: number;
+  status: "failed" | "partial_failure" | "sent";
+}
+
+export interface HostedEmailSendResult {
+  delivery?: HostedEmailDeliverySummary | null;
+  target: string;
+}
+
 export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequest {
   const record = requireHostedEmailSendRequestObject(value, "Hosted email send request");
 
   return {
+    html: readOptionalHostedEmailSendRequestString(
+      record.html ?? null,
+      "Hosted email send request html",
+    ),
     idempotencyKey: readOptionalHostedEmailSendRequestString(
       record.idempotencyKey ?? null,
       "Hosted email send request idempotencyKey",
@@ -86,5 +103,5 @@ function requireHostedEmailSendTargetKind(
     return targetKind as HostedEmailSendTargetKind;
   }
 
-  throw new TypeError(`${label} must be explicit or thread.`);
+  throw new TypeError(`${label} must be explicit, group, or thread.`);
 }

@@ -23,8 +23,6 @@ import {
   HOSTED_LOCAL_WORKTREE_ROOT,
   HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID_ENV,
   HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
-  HOSTED_WEB_DEV_DIST_DIR,
-  HOSTED_WEB_SMOKE_DIST_DIR,
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -107,6 +105,10 @@ import {
   parseHostedExecutionOidcIdentity,
   resolveVercelOidcToken,
 } from "./vercel.ts";
+import {
+  resolveHostedWebDevDistDirName,
+  shouldUseHostedWebProductionStart,
+} from "./web-production-start.ts";
 
 const HOSTED_WEB_HEALTH_PATH = "/api/internal/health";
 const HOSTED_WEB_HEALTH_COMMONS_BRIDGE_FILES = [
@@ -623,6 +625,36 @@ export async function startHostedLocalDevStack(input: {
           signal: input.abortSignal,
         });
       }
+
+      // The DB is now the hosted Linq home-line authority, so seed the
+      // configured lines the same way the Vercel deploy does. Without this a
+      // fresh local database has no assignable line and onboarding activation
+      // fails closed with LINQ_CONVERSATION_PHONE_REQUIRED. Provider inventory
+      // sync is skipped locally so startup needs no Linq API call. With no
+      // configured conversation phones there is nothing to seed and the
+      // script's pool-ready assertion would fail startup, so skip it: e2e
+      // scenarios seed their own line inventory, and a dev stack without Linq
+      // env keeps failing closed at activation exactly as before.
+      const configuredLinqConversationPhones =
+        runtimeEnv.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS?.trim() ?? "";
+      if (configuredLinqConversationPhones.length > 0) {
+        await runCommand("pnpm", [
+          "--dir",
+          "apps/web",
+          "linq:sync-lines",
+          "--",
+          "--skip-provider-inventory",
+        ], {
+          cwd: repoRoot,
+          env: runtimeEnv,
+          name: "setup",
+          signal: input.abortSignal,
+        });
+      } else {
+        (input.stderrTarget ?? process.stderr).write(
+          "[setup] No HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS configured; skipping hosted Linq line seeding.\n",
+        );
+      }
     }
 
     if (!config.skipWeb) {
@@ -821,23 +853,16 @@ export async function startHostedLocalDevStack(input: {
     }
     throwIfAbortSignalAborted(input.abortSignal);
 
+    const shouldUseWebProductionStart = config.skipWeb
+      ? false
+      : await shouldUseHostedWebProductionStart({ env: initialEnv });
+
     const webProcess = config.skipWeb
       ? null
-      : spawnChildProcess("web", "pnpm", [
-        "--dir",
-        ".",
-        "exec",
-        "tsx",
-        "apps/web/scripts/dev-local.ts",
-        "--",
-        "--hostname",
-        config.webHost,
-        "--port",
-        String(config.webPort),
-      ], {
-        ...runtimeEnv,
-        MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
-      }, {
+      : spawnChildProcess("web", "pnpm", buildHostedWebProcessArgs({
+        config,
+        shouldUseProductionStart: shouldUseWebProductionStart,
+      }), buildHostedWebProcessEnv(runtimeEnv, shouldUseWebProductionStart), {
         pipeOutput: input.pipeOutput,
         stderrTarget: input.stderrTarget,
         stdoutTarget: input.stdoutTarget,
@@ -1501,6 +1526,53 @@ function requiresHostedLocalE2eIsolation(env: NodeJS.ProcessEnv): boolean {
     || profile === "e2e:live";
 }
 
+function buildHostedWebProcessArgs(input: {
+  config: HostedLocalDevConfig;
+  shouldUseProductionStart: boolean;
+}): string[] {
+  const serverArgs = [
+    "--hostname",
+    input.config.webHost,
+    "--port",
+    String(input.config.webPort),
+  ];
+
+  if (input.shouldUseProductionStart) {
+    return [
+      "--dir",
+      "apps/web",
+      "exec",
+      "next",
+      "start",
+      ...serverArgs,
+    ];
+  }
+
+  return [
+    "--dir",
+    ".",
+    "exec",
+    "tsx",
+    "apps/web/scripts/dev-local.ts",
+    "--",
+    ...serverArgs,
+  ];
+}
+
+function buildHostedWebProcessEnv(
+  env: NodeJS.ProcessEnv,
+  shouldUseProductionStart: boolean,
+): NodeJS.ProcessEnv {
+  if (shouldUseProductionStart) {
+    return { ...env };
+  }
+
+  return {
+    ...env,
+    MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
+  };
+}
+
 function hasHostedLocalWorktreeScope(env: NodeJS.ProcessEnv): boolean {
   return Boolean(env[HOSTED_LOCAL_WORKTREE_SCOPE_ENV]?.trim());
 }
@@ -1949,24 +2021,6 @@ function resolveHostedWebHealthCommonsDevCachePaths(env: NodeJS.ProcessEnv): str
   ];
 }
 
-function resolveHostedWebDevDistDirName(env: NodeJS.ProcessEnv): string {
-  const baseDistDir = env.NEXT_DIST_DIR_MODE === "smoke"
-    ? HOSTED_WEB_SMOKE_DIST_DIR
-    : HOSTED_WEB_DEV_DIST_DIR;
-  const configuredSuffix = env.NEXT_DIST_DIR_SUFFIX?.trim();
-
-  if (!configuredSuffix) {
-    return baseDistDir;
-  }
-
-  const normalizedSuffix = configuredSuffix.toLowerCase();
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(normalizedSuffix)) {
-    throw new Error("NEXT_DIST_DIR_SUFFIX must use lowercase letters, digits, and hyphens only.");
-  }
-
-  return `${baseDistDir}-${normalizedSuffix}`;
-}
-
 function writeHostedWebHealthCommonsInvalidationWarning(
   stderrTarget: NodeJS.WritableStream | undefined,
   message: string,
@@ -2184,7 +2238,9 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
       service_tiers: [],
       supports_parallel_tool_calls: false,
       supports_search_tool: false,
-      use_responses_lite: true,
+      // The OpenAI API rejects gpt-5.4-nano when Codex >= 0.143 sends the
+      // x-openai-internal-codex-responses-lite header.
+      use_responses_lite: false,
     });
   } else {
     const templateModel = parsed.models
@@ -2205,7 +2261,7 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
       slug: HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG,
       supports_parallel_tool_calls: false,
       supports_search_tool: false,
-      use_responses_lite: true,
+      use_responses_lite: false,
     });
   }
 
@@ -2853,6 +2909,8 @@ export function terminateKnownHostedLocalProcessResidue(input: {
       ? []
       : [
         `apps/web/scripts/dev-local\\.ts.*--port ${input.config.webPort}`,
+        `pnpm --dir apps/web exec next start .*--port ${input.config.webPort}`,
+        `next/dist/bin/next start .*--port ${input.config.webPort}`,
         "next/dist/telemetry/detached-flush\\.js dev .*apps/web",
       ]),
     ...(!input.owned.linqTunnel

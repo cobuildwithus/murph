@@ -24,6 +24,7 @@ import {
   applyAssistantVaultFileSendApprovalResult,
   beginAssistantOutboxIntentMirrorPreparedDispatch,
   buildAssistantVaultFileSendApprovalRequest,
+  compareAssistantOutboxDeliverySequenceOrder,
   deferAssistantVaultFileApprovalCheck,
   dispatchAssistantOutboxIntent,
   findAssistantAutoReplyDeliveryIntentIds,
@@ -73,7 +74,6 @@ import type {
   HostedRuntimeActionApprovalPort,
   HostedRuntimeEffectsPort,
   HostedRuntimeLinqDeliveryOutcomeRequest,
-  HostedRuntimeLinqEngagementKind,
   HostedRuntimeLinqSendResponse,
   HostedRuntimePlatform,
   HostedRuntimeProviderTargetKind,
@@ -87,12 +87,12 @@ import {
 import {
   sendHostedProviderLinqMessage,
   sendHostedProviderLinqVoiceMemo,
+  sendHostedProviderLinqChatAction,
   setHostedProviderLinqMessageReaction,
 } from "../hosted-provider-effects.ts";
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
   resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest,
-  resolveHostedAssistantLinqDeliveryContextForRequest,
   resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
@@ -764,78 +764,6 @@ function compareHostedAssistantForegroundDeliveryCandidateIntents(input: {
   return compareHostedAssistantDeliveryCandidateIntents(input.left, input.right);
 }
 
-function compareHostedAssistantSteeredSegmentOrder(
-  left: AssistantOutboxIntent,
-  right: AssistantOutboxIntent,
-): number {
-  const leftKey = left.deliveryIdempotencyKey ?? null;
-  const rightKey = right.deliveryIdempotencyKey ?? null;
-  const leftSegment = readHostedAssistantSteeredSegmentOrder(left);
-  const rightSegment = readHostedAssistantSteeredSegmentOrder(right);
-  if (leftSegment && rightSegment && leftSegment.groupKey === rightSegment.groupKey) {
-    return leftSegment.ordinal - rightSegment.ordinal;
-  }
-  if (
-    leftSegment
-    && !rightSegment
-    && shouldHostedAssistantSegmentPrecedeNonSegment(leftSegment, rightKey)
-  ) {
-    return -1;
-  }
-  if (
-    rightSegment
-    && !leftSegment
-    && shouldHostedAssistantSegmentPrecedeNonSegment(rightSegment, leftKey)
-  ) {
-    return 1;
-  }
-  return 0;
-}
-
-interface HostedAssistantSteeredSegmentOrder {
-  groupKey: string;
-  kind: "fallback" | "generated";
-  ordinal: number;
-}
-
-function readHostedAssistantSteeredSegmentOrder(
-  intent: AssistantOutboxIntent,
-): HostedAssistantSteeredSegmentOrder | null {
-  const deliveryIdempotencyKey = intent.deliveryIdempotencyKey ?? null;
-  if (!deliveryIdempotencyKey) {
-    return null;
-  }
-  const match = /^(.*):segment:([0-9]+)$/.exec(deliveryIdempotencyKey);
-  if (match?.[1] && match[2]) {
-    const ordinal = Number.parseInt(match[2], 10);
-    return Number.isSafeInteger(ordinal)
-      ? { groupKey: match[1], kind: "generated", ordinal }
-      : null;
-  }
-  const fallbackPrefix = `assistant-segment:${intent.turnId}:`;
-  if (!deliveryIdempotencyKey.startsWith(fallbackPrefix)) {
-    return null;
-  }
-  const ordinalText = deliveryIdempotencyKey.slice(fallbackPrefix.length);
-  if (!/^[0-9]+$/.test(ordinalText)) {
-    return null;
-  }
-  const ordinal = Number.parseInt(ordinalText, 10);
-  return Number.isSafeInteger(ordinal)
-    ? { groupKey: `assistant-segment:${intent.turnId}`, kind: "fallback", ordinal }
-    : null;
-}
-
-function shouldHostedAssistantSegmentPrecedeNonSegment(
-  segment: HostedAssistantSteeredSegmentOrder,
-  deliveryIdempotencyKey: string | null,
-): boolean {
-  if (segment.kind === "generated") {
-    return deliveryIdempotencyKey === segment.groupKey;
-  }
-  return deliveryIdempotencyKey === null;
-}
-
 function compareHostedAssistantDeliveryCandidateIntents(
   left: AssistantOutboxIntent,
   right: AssistantOutboxIntent,
@@ -866,7 +794,7 @@ function compareHostedAssistantDeliveryBoundaryIntents(
   right: AssistantOutboxIntent,
 ): number {
   return compareHostedAssistantDeliveryOperationOrder(left, right)
-    || compareHostedAssistantSteeredSegmentOrder(left, right)
+    || compareAssistantOutboxDeliverySequenceOrder(left, right)
     || compareHostedAssistantDeliveryCandidateCreatedAt(left, right)
     || left.intentId.localeCompare(right.intentId);
 }
@@ -1001,17 +929,22 @@ function resolveHostedAssistantOutboxIntentWakeAt(
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryPreparation> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
+  const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
+    context: input.linqDeliveryContext ?? null,
+    contexts: input.linqDeliveryContexts ?? null,
+  });
   for (const effect of input.assistantDeliveryEffects) {
     if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
       continue;
     }
     const linqDeliveryContext = resolveHostedAssistantLinqDeliveryContextForEffect({
-      context: input.linqDeliveryContext ?? null,
+      contexts: linqDeliveryContexts,
       effect,
     });
     const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
@@ -1071,12 +1004,12 @@ function hasHostedAssistantVaultFileMedia(
 }
 
 function resolveHostedAssistantLinqDeliveryContextForEffect(input: {
-  context: HostedAssistantLinqDeliveryContext | null;
+  contexts: readonly HostedAssistantLinqDeliveryContext[];
   effect: HostedAssistantDeliveryEffect;
 }): HostedAssistantLinqDeliveryContext | null {
   for (const target of readHostedAssistantDeliveryPayloadTargets(input.effect.payload)) {
-    const context = resolveHostedAssistantLinqDeliveryContextForRequest({
-      context: input.context,
+    const context = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+      contexts: input.contexts,
       replyToMessageId: input.effect.payload.replyToMessageId,
       target: target.target,
       targetKind: target.targetKind,
@@ -1101,10 +1034,8 @@ function buildHostedAssistantLinqDeliveryContextFromPreparedIntent(input: {
     return null;
   }
   const routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority = {
-    accountLookupKey: authority.accountLookupKey,
+    ...authority,
     channel: "linq",
-    containerMemberId: authority.containerMemberId,
-    threadId: authority.threadId,
   };
 
   return {
@@ -1129,6 +1060,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
   linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
+  publicInternetFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
   userEnv?: Readonly<Record<string, string>>;
   wake?: HostedRuntimeEvent | null;
@@ -1165,6 +1097,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       linqDeliveryContexts,
       linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
       providerFetch: input.providerFetch ?? null,
+      publicInternetFetch: input.publicInternetFetch ?? null,
       signal: input.signal ?? null,
     }),
     sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
@@ -1252,167 +1185,6 @@ function createHostedAssistantEmailSendDependency(input: {
   };
 }
 
-async function maybeShareHostedLinqContactCardAfterDeliveredIntent(input: {
-  delivery: AssistantChannelDelivery;
-  effectsPort: HostedRuntimeEffectsPort;
-  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-  signal: AbortSignal | null;
-  userId: string;
-  wake: HostedRuntimeEvent;
-}): Promise<void> {
-  let chatIdForLog: string | null = null;
-  try {
-    if (
-      input.delivery.kind === "message-reaction"
-      || input.delivery.channel !== "linq"
-    ) {
-      return;
-    }
-    const chatId =
-      normalizeHostedLinqContactCardChatId(input.delivery.providerThreadId)
-      ?? normalizeHostedLinqContactCardChatId(input.delivery.target);
-    if (!chatId) {
-      return;
-    }
-    const deliveryContext = selectHostedLinqContactCardDeliveryContext({
-      chatId,
-      contexts: input.linqDeliveryContexts,
-    });
-    if (!deliveryContext) {
-      return;
-    }
-    chatIdForLog = chatId;
-
-    const maybeShareContactCard =
-      input.effectsPort.maybeShareLinqContactCardAfterOutbound;
-    if (!maybeShareContactCard) {
-      return;
-    }
-
-    await maybeShareContactCard({
-      chatId,
-      service: deliveryContext.service,
-      threadIsDirect: deliveryContext.threadIsDirect,
-      ...(deliveryContext.routeAuthority
-        ? { authority: deliveryContext.routeAuthority }
-        : {}),
-    }, {
-      signal: input.signal,
-    });
-  } catch (error) {
-    logHostedLinqContactCardShareRuntimeFailure({
-      chatId: chatIdForLog,
-      error,
-      phase: "after_outbound",
-      userId: input.userId,
-      wake: input.wake,
-    });
-  }
-}
-
-function queueHostedLinqContactCardShareAfterDeliveredIntent(input: {
-  delivery: AssistantChannelDelivery | null | undefined;
-  effectsPort: HostedRuntimeEffectsPort;
-  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
-  signal: AbortSignal | null;
-  userId: string;
-  wake: HostedRuntimeEvent;
-}): void {
-  if (!input.delivery) {
-    return;
-  }
-
-  void maybeShareHostedLinqContactCardAfterDeliveredIntent({
-    delivery: input.delivery,
-    effectsPort: input.effectsPort,
-    linqDeliveryContexts: input.linqDeliveryContexts,
-    signal: input.signal,
-    userId: input.userId,
-    wake: input.wake,
-  });
-}
-
-function selectHostedLinqContactCardDeliveryContext(input: {
-  chatId: string;
-  contexts: readonly HostedAssistantLinqDeliveryContext[];
-}): HostedAssistantLinqDeliveryContext | null {
-  return input.contexts.find((context) => {
-    if (
-      context.service?.trim().toLowerCase() !== "imessage"
-      || context.threadIsDirect !== true
-    ) {
-      return false;
-    }
-    return (
-      normalizeHostedLinqContactCardChatId(context.target) === input.chatId
-      || normalizeHostedLinqContactCardChatId(context.routeAuthority?.threadId)
-        === input.chatId
-    );
-  }) ?? null;
-}
-
-function normalizeHostedLinqContactCardChatId(
-  value: string | null | undefined,
-): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized.length > 0 && !normalized.startsWith("+") ? normalized : null;
-}
-
-function logHostedLinqContactCardShareRuntimeFailure(input: {
-  chatId: string | null;
-  error: unknown;
-  phase: string;
-  userId: string;
-  wake: HostedRuntimeEvent;
-}): void {
-  const errorRecord = input.error && typeof input.error === "object"
-    ? input.error as Record<string, unknown>
-    : null;
-  const details = errorRecord?.details && typeof errorRecord.details === "object"
-    ? errorRecord.details as Record<string, unknown>
-    : null;
-
-  emitHostedExecutionStructuredLog({
-    component: "assistant-delivery",
-    details: sanitizeHostedExecutionStructuredLogDetails({
-      chatIdSuffix: readHostedLinqContactCardLogIdSuffix(input.chatId),
-      errorCode: readHostedLinqContactCardErrorString(errorRecord, "code"),
-      errorMessage: input.error instanceof Error ? input.error.message : null,
-      errorName: input.error instanceof Error ? input.error.name : null,
-      operation: "share_contact_card",
-      phase: input.phase,
-      provider: "linq",
-      status: readHostedLinqContactCardErrorNumber(details, "status"),
-    }),
-    level: "warn",
-    message: "Hosted Linq contact-card share failed.",
-    phase: "outbox",
-    userId: input.userId,
-    wake: input.wake,
-  });
-}
-
-function readHostedLinqContactCardLogIdSuffix(
-  value: string | null | undefined,
-): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized ? normalized.slice(-6) : null;
-}
-
-function readHostedLinqContactCardErrorString(
-  record: Record<string, unknown> | null,
-  key: string,
-): string | null {
-  return record && typeof record[key] === "string" ? record[key] as string : null;
-}
-
-function readHostedLinqContactCardErrorNumber(
-  record: Record<string, unknown> | null,
-  key: string,
-): number | null {
-  return record && typeof record[key] === "number" ? record[key] as number : null;
-}
-
 export async function drainHostedPreparedAssistantDeliveries(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   allowPreparedSending?: boolean;
@@ -1429,6 +1201,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
+  publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal?: AbortSignal | null;
   userEnv?: Readonly<Record<string, string>>;
@@ -1458,116 +1231,186 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   });
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
   const blockedForegroundDeliveryKeys = new Set<string>();
+  const linqTypingStopDrain = createHostedLinqTypingStopDrain();
   const preparedDispatchByIntentId = new Map(
     (input.preparedDispatches ?? []).map((preparedDispatch) => [
       preparedDispatch.intentId,
       preparedDispatch,
     ]),
   );
-  for (let index = 0; index < input.assistantDeliveryEffects.length; index += 1) {
-    const assistantDeliveryEffect = input.assistantDeliveryEffects[index];
-    if (!assistantDeliveryEffect) {
-      continue;
-    }
-    if (await maybeYieldHostedPreparedAssistantDeliveryDrain({
-      effects: input.assistantDeliveryEffects.slice(index),
-      input,
-      preparedDispatchByIntentId,
-    })) {
-      break;
-    }
-    if (blockedForegroundDeliveryKeys.has(
-      readHostedAssistantDeliveryEffectBoundaryKey(assistantDeliveryEffect),
-    )) {
-      continue;
-    }
-    emitHostedExecutionStructuredLog({
-      component: "assistant-delivery",
-      details: buildHostedAssistantDeliveryDetails({
-        effectFingerprint: assistantDeliveryEffect.fingerprint,
-        effectId: assistantDeliveryEffect.effectId,
-        extra: {
-          deliveryPhase: assistantDeliveryEffect.deliveryPhase,
-          eventType: assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
-            ? "assistant.delivery.foreground_started"
-            : "assistant.delivery.background_started",
-        },
+  let pendingTypingStopEffectIndex = 0;
+  try {
+    for (let index = 0; index < input.assistantDeliveryEffects.length; index += 1) {
+      pendingTypingStopEffectIndex = index;
+      const assistantDeliveryEffect = input.assistantDeliveryEffects[index];
+      if (!assistantDeliveryEffect) {
+        continue;
+      }
+      if (await maybeYieldHostedPreparedAssistantDeliveryDrain({
+        effects: input.assistantDeliveryEffects.slice(index),
+        input,
+        preparedDispatchByIntentId,
+      })) {
+        recordHostedLinqTypingStopStillPendingEffects({
+          effects: input.assistantDeliveryEffects.slice(index),
+          linqDeliveryContexts,
+          preparedDispatchByIntentId,
+          state: linqTypingStopDrain,
+        });
+        break;
+      }
+      if (blockedForegroundDeliveryKeys.has(
+        readHostedAssistantDeliveryEffectBoundaryKey(assistantDeliveryEffect),
+      )) {
+        continue;
+      }
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: buildHostedAssistantDeliveryDetails({
+          effectFingerprint: assistantDeliveryEffect.fingerprint,
+          effectId: assistantDeliveryEffect.effectId,
+          extra: {
+            deliveryPhase: assistantDeliveryEffect.deliveryPhase,
+            eventType: assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
+              ? "assistant.delivery.foreground_started"
+              : "assistant.delivery.background_started",
+          },
+          userId: input.wake.userId,
+        }),
+        wake: input.wake,
+        message: assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
+          ? "Hosted assistant foreground delivery starting."
+          : "Hosted assistant background delivery starting.",
+        phase: "outbox",
         userId: input.wake.userId,
-      }),
-      wake: input.wake,
-      message: assistantDeliveryEffect.deliveryPhase === "foreground_current_turn"
-        ? "Hosted assistant foreground delivery starting."
-        : "Hosted assistant background delivery starting.",
-      phase: "outbox",
-      userId: input.wake.userId,
-    });
-    let outcome: HostedAssistantDeliveryOutcome;
-    try {
+      });
+      let outcome: HostedAssistantDeliveryOutcome;
       const preparedDispatch =
         preparedDispatchByIntentId.get(assistantDeliveryEffect.effectId) ?? null;
       const ownsPreparedDispatch =
         input.allowPreparedSending === true
         && preparedDispatch !== null;
-      outcome = await deliverHostedPreparedAssistantDelivery({
-        actionApprovalPort: input.actionApprovalPort ?? null,
-        wake: input.wake,
-        effectsPort: input.effectsPort,
-        allowPreparedSending: ownsPreparedDispatch,
-        assertLiveness: input.assertLiveness,
+      const effectLinqDeliveryContexts =
+        preparedDispatch?.linqDeliveryContext
+          ? [preparedDispatch.linqDeliveryContext, ...linqDeliveryContexts]
+          : linqDeliveryContexts;
+      let currentEffectTypingStopRecorded = false;
+      try {
+        outcome = await deliverHostedPreparedAssistantDelivery({
+          actionApprovalPort: input.actionApprovalPort ?? null,
+          wake: input.wake,
+          effectsPort: input.effectsPort,
+          allowPreparedSending: ownsPreparedDispatch,
+          assertLiveness: input.assertLiveness,
+          assistantDeliveryEffect,
+          signal: input.signal ?? null,
+          shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery ?? null,
+          linqEnv,
+          linqDeliveryContexts,
+          linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
+          preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
+          telegramEnv,
+          telegramVoiceMemoEnv,
+          whatsAppEnv,
+          providerFetch: input.providerFetch ?? null,
+          publicInternetFetch: input.publicInternetFetch ?? null,
+          userId: input.wake.userId,
+          vaultRoot: input.vaultRoot,
+          onTerminalLinqTypingStopFailure: (terminalOutcome) => {
+            recordHostedLinqTypingStopOutcome({
+              assistantDeliveryEffect,
+              linqDeliveryContexts: effectLinqDeliveryContexts,
+              outcome: terminalOutcome,
+              state: linqTypingStopDrain,
+            });
+            currentEffectTypingStopRecorded = true;
+          },
+        });
+      } catch (error) {
+        pendingTypingStopEffectIndex = currentEffectTypingStopRecorded
+          ? index + 1
+          : index;
+        const remainingEffects = input.assistantDeliveryEffects.slice(index + 1);
+        await resetHostedPreparedAssistantDeliveryEffects({
+          effects: remainingEffects,
+          preparedDispatchByIntentId,
+          vaultRoot: input.vaultRoot,
+        });
+        if (isHostedBackgroundDeliveryYieldedError(error)) {
+          recordHostedLinqTypingStopStillPendingEffects({
+            effects: input.assistantDeliveryEffects.slice(pendingTypingStopEffectIndex),
+            linqDeliveryContexts,
+            preparedDispatchByIntentId,
+            state: linqTypingStopDrain,
+          });
+          input.onBackgroundDeliveryYield?.({
+            yieldedEffectCount: input.assistantDeliveryEffects.length - index,
+          });
+          break;
+        }
+        throw error;
+      }
+      outcomes.push(outcome);
+      recordHostedLinqTypingStopOutcome({
         assistantDeliveryEffect,
-        signal: input.signal ?? null,
-        shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery ?? null,
-        linqEnv,
-        linqDeliveryContexts,
-        linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
-        preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
-        telegramEnv,
-        telegramVoiceMemoEnv,
-        whatsAppEnv,
-        providerFetch: input.providerFetch ?? null,
-        userId: input.wake.userId,
-        vaultRoot: input.vaultRoot,
+        linqDeliveryContexts: effectLinqDeliveryContexts,
+        outcome,
+        state: linqTypingStopDrain,
       });
-    } catch (error) {
-      await resetHostedPreparedAssistantDeliveryEffects({
+      pendingTypingStopEffectIndex = index + 1;
+      if (await maybeYieldHostedPreparedAssistantDeliveryDrain({
         effects: input.assistantDeliveryEffects.slice(index + 1),
+        input,
         preparedDispatchByIntentId,
-        vaultRoot: input.vaultRoot,
-      });
-      if (isHostedBackgroundDeliveryYieldedError(error)) {
-        input.onBackgroundDeliveryYield?.({
-          yieldedEffectCount: input.assistantDeliveryEffects.length - index,
+      })) {
+        recordHostedLinqTypingStopStillPendingEffects({
+          effects: input.assistantDeliveryEffects.slice(index + 1),
+          linqDeliveryContexts,
+          preparedDispatchByIntentId,
+          state: linqTypingStopDrain,
         });
         break;
       }
-      throw error;
-    }
-    outcomes.push(outcome);
-    if (await maybeYieldHostedPreparedAssistantDeliveryDrain({
-      effects: input.assistantDeliveryEffects.slice(index + 1),
-      input,
-      preparedDispatchByIntentId,
-    })) {
-      break;
-    }
-    if (shouldBlockLaterHostedAssistantForegroundDeliveries({
-      effect: assistantDeliveryEffect,
-      outcome,
-    })) {
-      const boundaryKey = readHostedAssistantDeliveryEffectBoundaryKey(
-        assistantDeliveryEffect,
-      );
-      blockedForegroundDeliveryKeys.add(boundaryKey);
-      await resetHostedPreparedAssistantDeliveryEffects({
-        effects: input.assistantDeliveryEffects
+      if (shouldBlockLaterHostedAssistantForegroundDeliveries({
+        effect: assistantDeliveryEffect,
+        outcome,
+      })) {
+        const boundaryKey = readHostedAssistantDeliveryEffectBoundaryKey(
+          assistantDeliveryEffect,
+        );
+        const blockedEffects = input.assistantDeliveryEffects
           .slice(index + 1)
           .filter((effect) =>
             readHostedAssistantDeliveryEffectBoundaryKey(effect) === boundaryKey
-          ),
-        preparedDispatchByIntentId,
-        vaultRoot: input.vaultRoot,
-      });
+          );
+        blockedForegroundDeliveryKeys.add(boundaryKey);
+        recordHostedLinqTypingStopStillPendingEffects({
+          effects: blockedEffects,
+          linqDeliveryContexts,
+          preparedDispatchByIntentId,
+          state: linqTypingStopDrain,
+        });
+        await resetHostedPreparedAssistantDeliveryEffects({
+          effects: blockedEffects,
+          preparedDispatchByIntentId,
+          vaultRoot: input.vaultRoot,
+        });
+      }
     }
+  } catch (error) {
+    recordHostedLinqTypingStopStillPendingEffects({
+      effects: input.assistantDeliveryEffects.slice(pendingTypingStopEffectIndex),
+      linqDeliveryContexts,
+      preparedDispatchByIntentId,
+      state: linqTypingStopDrain,
+    });
+    throw error;
+  } finally {
+    flushHostedLinqTypingStopDrain({
+      env: linqEnv,
+      providerFetch: input.providerFetch ?? null,
+      state: linqTypingStopDrain,
+    });
   }
 
   return outcomes;
@@ -1680,6 +1523,165 @@ function isHostedAssistantReactionOnlyEffect(
     && effect.payload.replyToMessageId !== null;
 }
 
+type HostedLinqTypingStopDrainState = Map<
+  string,
+  {
+    sent: boolean;
+    stillPending: boolean;
+    terminalFailure: boolean;
+  }
+>;
+
+function createHostedLinqTypingStopDrain(): HostedLinqTypingStopDrainState {
+  return new Map();
+}
+
+function recordHostedLinqTypingStopOutcome(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  outcome: HostedAssistantDeliveryOutcome;
+  state: HostedLinqTypingStopDrainState;
+}): void {
+  const target = resolveHostedLinqTypingStopTargetForEffect({
+    assistantDeliveryEffect: input.assistantDeliveryEffect,
+    linqDeliveryContexts: input.linqDeliveryContexts,
+  });
+  if (!target) {
+    return;
+  }
+  if (
+    input.outcome.deliveryStatus !== "sent"
+    && !hostedAssistantDeliveryOutcomeShouldStopLinqTyping(input.outcome)
+  ) {
+    readHostedLinqTypingStopDrainEntry(input.state, target).stillPending = true;
+    return;
+  }
+
+  const entry = readHostedLinqTypingStopDrainEntry(input.state, target);
+  if (input.outcome.deliveryStatus === "sent") {
+    entry.sent = true;
+    return;
+  }
+
+  entry.terminalFailure = true;
+}
+
+function recordHostedLinqTypingStopStillPendingEffects(input: {
+  effects: readonly HostedAssistantDeliveryEffect[];
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  preparedDispatchByIntentId: ReadonlyMap<string, HostedAssistantDeliveryPreparedDispatch>;
+  state: HostedLinqTypingStopDrainState;
+}): void {
+  for (const effect of input.effects) {
+    const preparedDispatch =
+      input.preparedDispatchByIntentId.get(effect.effectId) ?? null;
+    const linqDeliveryContexts = preparedDispatch?.linqDeliveryContext
+      ? [preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
+      : input.linqDeliveryContexts;
+    const target = resolveHostedLinqTypingStopTargetForEffect({
+      assistantDeliveryEffect: effect,
+      linqDeliveryContexts,
+    });
+    if (!target) {
+      continue;
+    }
+    readHostedLinqTypingStopDrainEntry(input.state, target).stillPending = true;
+  }
+}
+
+function flushHostedLinqTypingStopDrain(input: {
+  env: NodeJS.ProcessEnv;
+  providerFetch: typeof fetch | null;
+  state: HostedLinqTypingStopDrainState;
+}): void {
+  for (const [target, entry] of input.state) {
+    if (
+      !entry.terminalFailure
+      || entry.sent
+      || entry.stillPending
+    ) {
+      continue;
+    }
+
+    // This skips the recent-inbound send guard intentionally: typing_stop carries
+    // no message content, targets only the bound outbox delivery context, and
+    // cannot exist for guard-blocked routes because typing start is guard-gated.
+    void sendHostedProviderLinqChatAction({
+      action: "typing_stop",
+      target,
+    }, {
+      env: input.env,
+      fetchImplementation: input.providerFetch,
+    }).catch(() => undefined);
+  }
+}
+
+function readHostedLinqTypingStopDrainEntry(
+  state: HostedLinqTypingStopDrainState,
+  target: string,
+): {
+  sent: boolean;
+  stillPending: boolean;
+  terminalFailure: boolean;
+} {
+  const existing = state.get(target);
+  if (existing) {
+    return existing;
+  }
+  const entry = {
+    sent: false,
+    stillPending: false,
+    terminalFailure: false,
+  };
+  state.set(target, entry);
+  return entry;
+}
+
+function resolveHostedLinqTypingStopTargetForEffect(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+}): string | null {
+  if (isHostedAssistantReactionOnlyEffect(input.assistantDeliveryEffect)) {
+    return null;
+  }
+  const channel = normalizeHostedAssistantDeliveryChannel(
+    input.assistantDeliveryEffect.payload.channel,
+  )?.toLowerCase();
+  if (channel !== "linq") {
+    return null;
+  }
+
+  return resolveHostedLinqTypingStopTarget({
+    assistantDeliveryEffect: input.assistantDeliveryEffect,
+    linqDeliveryContexts: input.linqDeliveryContexts,
+  });
+}
+
+function hostedAssistantDeliveryOutcomeShouldStopLinqTyping(
+  outcome: HostedAssistantDeliveryOutcome | null,
+): boolean {
+  return outcome?.deliveryStatus === "failed"
+    || outcome?.deliveryStatus === "failed_ambiguous"
+    || outcome?.deliveryStatus === "missing-result";
+}
+
+function resolveHostedLinqTypingStopTarget(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+}): string | null {
+  const payload = input.assistantDeliveryEffect.payload;
+  const payloadTarget = readHostedAssistantDeliveryPayloadTarget(payload);
+  const deliveryContext = payloadTarget.target
+    ? resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+      contexts: input.linqDeliveryContexts,
+      replyToMessageId: payload.replyToMessageId,
+      target: payloadTarget.target,
+      targetKind: payloadTarget.targetKind,
+    })
+    : null;
+  return deliveryContext?.target ?? payloadTarget.target;
+}
+
 export async function resetHostedPreparedAssistantDeliveryEffects(input: {
   effects: readonly HostedAssistantDeliveryEffect[];
   minimumNextAttemptAt?: Date | null;
@@ -1734,8 +1736,12 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
   whatsAppEnv: NodeJS.ProcessEnv;
   providerFetch: typeof fetch | null;
+  publicInternetFetch: typeof fetch | null;
   userId: string;
   vaultRoot: string;
+  onTerminalLinqTypingStopFailure?: (
+    outcome: HostedAssistantDeliveryOutcome,
+  ) => void;
 }): Promise<HostedAssistantDeliveryOutcome> {
   const now = new Date();
   const mirrorState = await readAssistantOutboxIntentMirrorState({
@@ -1744,6 +1750,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     sendingGraceMs: HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS,
     vault: input.vaultRoot,
   });
+  const linqDeliveryContexts = input.preparedDispatch?.linqDeliveryContext
+    ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
+    : input.linqDeliveryContexts;
   let providerDispatchEntered = false;
   try {
     assertHostedDeliveryLiveness(input.signal);
@@ -1772,9 +1781,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     if (disabledAutoReplyOutcome) {
       return disabledAutoReplyOutcome;
     }
-    const linqDeliveryContexts = input.preparedDispatch?.linqDeliveryContext
-      ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
-      : input.linqDeliveryContexts;
     assertHostedBackgroundDeliveryNotYielded(input);
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
@@ -1880,11 +1886,13 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
           linqEgressLatencyTrace: input.linqEgressLatencyTrace,
+          threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
           providerFetch: input.providerFetch,
+          publicInternetFetch: input.publicInternetFetch,
           signal: input.signal,
           vaultRoot: input.vaultRoot,
         }),
@@ -1894,6 +1902,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
           linqEgressLatencyTrace: input.linqEgressLatencyTrace,
+          threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
@@ -1993,7 +2002,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       vaultRoot: input.vaultRoot,
     });
     if (resetDispatchResult) {
-      return await buildHostedAssistantDeliveryDispatchResult({
+      return buildHostedAssistantDeliveryDispatchResult({
         assistantDeliveryEffect: input.assistantDeliveryEffect,
         dispatchResult: resetDispatchResult,
         userId: input.userId,
@@ -2001,18 +2010,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         wake: input.wake,
       });
     }
-    queueHostedLinqContactCardShareAfterDeliveredIntent({
-      delivery: dispatched.intent.status === "sent"
-        ? dispatched.intent.delivery
-        : null,
-      effectsPort: input.effectsPort,
-      linqDeliveryContexts,
-      signal: input.signal,
-      userId: input.userId,
-      wake: input.wake,
-    });
     assertHostedDeliveryLiveness(input.signal);
-    return await buildHostedAssistantDeliveryDispatchResult({
+    return buildHostedAssistantDeliveryDispatchResult({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
       dispatchResult: dispatched,
       userId: input.userId,
@@ -2020,13 +2019,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       wake: input.wake,
     });
   } catch (error) {
-    if (input.preparedDispatch && shouldResetHostedPreparedDeliveryOnPreProviderAbort({
-      assistantDeliveryEffect: input.assistantDeliveryEffect,
-      error,
-      mirrorState,
-      providerDispatchEntered,
-      signal: input.signal,
-    })) {
+    const resetPreparedDelivery =
+      input.preparedDispatch !== null
+      && shouldResetHostedPreparedDeliveryOnPreProviderAbort({
+        assistantDeliveryEffect: input.assistantDeliveryEffect,
+        error,
+        mirrorState,
+        providerDispatchEntered,
+        signal: input.signal,
+      });
+    if (input.preparedDispatch && resetPreparedDelivery) {
       await resetAssistantOutboxPreparedDispatchById({
         deliveryIdempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey,
         deliveryTransportIdempotent: input.assistantDeliveryEffect.payload.transportIdempotent,
@@ -2038,6 +2040,18 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           : {}),
         vault: input.vaultRoot,
       });
+    } else if (readHostedAssistantDeliveryRetryableFlag(error) !== true) {
+      const deliveryError = normalizeAssistantDeliveryError(error);
+      input.onTerminalLinqTypingStopFailure?.(
+        buildHostedAssistantDeliveryOutcome({
+          deliveryErrorCode: deliveryError.code,
+          deliveryErrorDetails: normalizeHostedAssistantDeliveryErrorDetails(deliveryError),
+          deliveryErrorMessage: deliveryError.message,
+          deliveryStatus: "failed",
+          effect: input.assistantDeliveryEffect,
+          retryable: false,
+        }),
+      );
     }
     const enrichedError = attachHostedAssistantDeliveryDispatchDetails(error, {
       effectId: input.assistantDeliveryEffect.effectId,
@@ -2201,8 +2215,10 @@ function createHostedAssistantLinqSendDependency(input: {
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
+  publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
+  threadIsDirect?: boolean | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
   return async (request) => {
@@ -2262,6 +2278,9 @@ function createHostedAssistantLinqSendDependency(input: {
         targetKind: request.targetKind ?? null,
       }, {
         ...dependencies,
+        ...(input.publicInternetFetch
+          ? { publicFetchImplementation: input.publicInternetFetch }
+          : {}),
         ...(verifiedVaultFiles.size > 0
           ? {
               loadVaultFile: async (media) => {
@@ -2284,10 +2303,11 @@ function createHostedAssistantLinqSendDependency(input: {
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
           attemptedAt,
+          answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
           deliveryContext,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
-          failureReason: null,
+          failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
           fromPhoneNumber,
           idempotencyKey: request.idempotencyKey ?? null,
           intentId: input.intentId ?? null,
@@ -2296,15 +2316,17 @@ function createHostedAssistantLinqSendDependency(input: {
           result: null,
           target: request.target,
           targetKind: request.targetKind ?? null,
+          threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
         }),
       });
       throw error;
     }
-    queueHostedAssistantLinqDeliveryOutcomeWrite({
+    await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
         acceptedAt: new Date(),
         attemptedAt,
+        answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
         fromPhoneNumber,
         idempotencyKey: request.idempotencyKey ?? null,
@@ -2314,6 +2336,7 @@ function createHostedAssistantLinqSendDependency(input: {
         result,
         target: request.target,
         targetKind: request.targetKind ?? null,
+        threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
       }),
     });
     await assertHostedDeliveryLiveNow(input);
@@ -2452,6 +2475,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   providerFetch: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
+  threadIsDirect?: boolean | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
@@ -2495,6 +2519,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
           attemptedAt,
+          answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
           deliveryContext,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
@@ -2507,15 +2532,17 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
           result: null,
           target: providerTarget,
           targetKind: "thread",
+          threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
         }),
       });
       throw error;
     }
-    queueHostedAssistantLinqDeliveryOutcomeWrite({
+    await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
         acceptedAt: new Date(),
         attemptedAt,
+        answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
         deliveryContext,
         fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
         idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
@@ -2525,6 +2552,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         result,
         target: providerTarget,
         targetKind: "thread",
+        threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
       }),
     });
     await assertHostedDeliveryLiveNow(input);
@@ -2534,6 +2562,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
 
 function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   acceptedAt?: Date | null;
+  answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt: Date;
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   failedAt?: Date | null;
@@ -2547,9 +2576,13 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   result: HostedRuntimeLinqSendResponse | null;
   target: string | null;
   targetKind: HostedRuntimeProviderTargetKind | null;
+  threadIsDirect: boolean | null;
 }): HostedRuntimeLinqDeliveryOutcomeRequest {
   return {
     ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
+    ...(input.answeredMailboxItemIds?.length
+      ? { answeredMailboxItemIds: [...input.answeredMailboxItemIds] }
+      : {}),
     attemptedAt: input.attemptedAt.toISOString(),
     ...(input.failedAt ? { failedAt: input.failedAt.toISOString() } : {}),
     failureCode: input.failureCode ?? null,
@@ -2563,10 +2596,90 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     routeAuthority: input.deliveryContext?.routeAuthority ?? null,
     target: input.targetKind === "participant" ? null : input.target,
     targetKind: input.targetKind,
+    threadIsDirect: input.threadIsDirect,
   };
 }
 
 const pendingHostedAssistantLinqDeliveryOutcomeWrites = new Set<Promise<void>>();
+
+async function recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
+  outcome: HostedRuntimeLinqDeliveryOutcomeRequest;
+}): Promise<void> {
+  if (shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(input.outcome)) {
+    await recordHostedAssistantLinqDeliveryOutcomeRequired(input);
+    return;
+  }
+
+  queueHostedAssistantLinqDeliveryOutcomeWrite(input);
+}
+
+function shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(
+  outcome: HostedRuntimeLinqDeliveryOutcomeRequest,
+): boolean {
+  return Boolean(outcome.acceptedAt && outcome.answeredMailboxItemIds?.length);
+}
+
+async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
+  outcome: HostedRuntimeLinqDeliveryOutcomeRequest;
+}): Promise<void> {
+  const recordOutcome = input.effectsPort?.recordLinqDeliveryOutcome;
+  if (!recordOutcome) {
+    throw new VaultCliError(
+      "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORDER_UNAVAILABLE",
+      "Accepted Linq delivery with answered mailbox items requires delivery outcome recording.",
+      { retryable: true },
+    );
+  }
+
+  const abortController = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const record = recordOutcome(input.outcome, { signal: abortController.signal });
+    void record.catch(() => undefined);
+    const timeout = new Promise<"timed_out">((resolve) => {
+      timer = setTimeout(() => {
+        abortController.abort();
+        resolve("timed_out");
+      }, HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    const result = await Promise.race([
+      record.then(() => "recorded" as const),
+      timeout,
+    ]);
+    if (result === "timed_out") {
+      throw new VaultCliError(
+        "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_TIMED_OUT",
+        "Accepted Linq delivery outcome recording timed out before consume state could be stored.",
+        {
+          retryable: true,
+          timeoutMs: HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS,
+        },
+      );
+    }
+  } catch (error) {
+    if (
+      error instanceof VaultCliError &&
+      error.code === "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_TIMED_OUT"
+    ) {
+      throw error;
+    }
+    throw new VaultCliError(
+      "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED",
+      "Accepted Linq delivery outcome recording failed before consume state could be stored.",
+      {
+        errorName: error instanceof Error ? error.name : typeof error,
+        retryable: true,
+      },
+    );
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  }
+}
 
 function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
   effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
@@ -2665,6 +2778,16 @@ function readHostedAssistantLinqDeliveryFailureCode(error: unknown): string {
     : "HOSTED_LINQ_PROVIDER_SEND_FAILED";
 }
 
+function readTrustedHostedAssistantLinqDeliveryFailureReason(
+  error: unknown,
+): string | null {
+  if (!(error instanceof VaultCliError)) {
+    return null;
+  }
+  const message = error.message.replace(/\s+/gu, " ").trim();
+  return message ? message.slice(0, 500) : null;
+}
+
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   directRecipientPhoneNumber: string | null;
@@ -2682,7 +2805,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   if (!assertRecentInbound) {
     throw new VaultCliError(
       "ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE",
-      "Hosted Linq delivery requires recent-recipient-engagement assertion before provider dispatch.",
+      "Hosted Linq delivery requires an egress authority assertion before provider dispatch.",
       { retryable: true },
     );
   }
@@ -2692,10 +2815,6 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   await assertRecentInbound({
     ...(currentInbound ? { currentInbound } : {}),
     directRecipientPhoneNumber: input.directRecipientPhoneNumber,
-    engagementKind: readHostedAssistantLinqEngagementKind({
-      idempotencyKey: input.idempotencyKey,
-      targetKind,
-    }),
     fromPhoneNumber: input.fromPhoneNumber,
     idempotencyKey: input.idempotencyKey,
     intentId: input.intentId,
@@ -2751,16 +2870,6 @@ function normalizeHostedAssistantLinqTargetKind(
   return targetKind === "explicit" || targetKind === "participant" || targetKind === "thread"
     ? targetKind
     : null;
-}
-
-function readHostedAssistantLinqEngagementKind(input: {
-  idempotencyKey: string | null,
-  targetKind: HostedRuntimeProviderTargetKind | null,
-}): HostedRuntimeLinqEngagementKind {
-  return input.targetKind === "participant"
-    && isHostedSignupWelcomeDeliveryIdempotencyKey(input.idempotencyKey)
-    ? "first_contact"
-    : "requires_recent_inbound";
 }
 
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {
@@ -3313,6 +3422,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
   intent: Pick<
     AssistantOutboxIntent,
     | "actorId"
+    | "answeredMailboxItemIds"
     | "bindingDelivery"
     | "channel"
     | "deliveryIdempotencyKey"
@@ -3333,6 +3443,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
 ): HostedAssistantDeliveryPayload {
   const payload = {
     actorId: intent.actorId ?? null,
+    answeredMailboxItemIds: intent.answeredMailboxItemIds ?? [],
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
     channel: intent.channel ?? null,

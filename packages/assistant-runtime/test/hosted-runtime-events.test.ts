@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionGroupNewsletterEmailNeededWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
@@ -612,6 +613,111 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
+  it("captures hosted Codex fresh-thread fallback diagnostics without raw identifiers", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_codex_fresh_thread_fallback",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_codex_fallback",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_123",
+      },
+      event: {
+        codexThreadId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-codex-fresh-thread-fallback-diagnostics.v1",
+          type: "assistant.codex.fresh_thread_fallback",
+          providerTraceKind: "codex.fresh_thread_fallback",
+          codexFreshThreadFallbackTraceType: "fallback",
+          codexFreshThreadFallbackPhase: "fallback-succeeded",
+          codexFreshThreadFallbackReason: "resume-transport-failure",
+          codexFreshThreadFallbackResult: "succeeded",
+          codexFreshThreadFallbackErrorCode: "ASSISTANT_CODEX_FAILED",
+          codexFreshThreadFallbackErrorKind: "turn-failed",
+          codexFreshThreadFallbackErrorMessageLength: 177,
+          codexFreshThreadFallbackErrorMessagePresent: true,
+          codexFreshThreadFallbackErrorPhrases: [
+            "codex-turn-failed",
+            "status-failed",
+            "raw private phrase",
+          ],
+          codexFreshThreadFallbackFailureEventCount: 2,
+          codexFreshThreadFallbackFailureProviderActionCount: 1,
+          codexFreshThreadFallbackFailureSessionPresent: true,
+          codexFreshThreadFallbackFailureTurnPresent: true,
+          codexFreshThreadFallbackEventCount: 4,
+          codexFreshThreadFallbackProviderActionCount: 0,
+          codexFreshThreadFallbackResumeMatchesFailureSession: true,
+          codexFreshThreadFallbackResumeSessionPresent: true,
+          codexFreshThreadFallbackSessionChanged: true,
+          codexFreshThreadFallbackSessionPresent: true,
+          codexFreshThreadFallbackTurnPresent: true,
+          codexFreshThreadFallbackThreadId: "raw-fresh-thread-id",
+          codexFreshThreadFallbackUrl: "https://api.openai.com/v1/responses",
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_codex_fresh_thread_fallback",
+      level: "info",
+      message: "Hosted assistant Codex fresh-thread fallback diagnostics captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        codexFreshThreadFallbackErrorCode: "ASSISTANT_CODEX_FAILED",
+        codexFreshThreadFallbackErrorKind: "turn-failed",
+        codexFreshThreadFallbackErrorMessageLength: 177,
+        codexFreshThreadFallbackErrorMessagePresent: true,
+        codexFreshThreadFallbackErrorPhrases: [
+          "codex-turn-failed",
+          "status-failed",
+        ],
+        codexFreshThreadFallbackEventCount: 4,
+        codexFreshThreadFallbackFailureEventCount: 2,
+        codexFreshThreadFallbackFailureProviderActionCount: 1,
+        codexFreshThreadFallbackFailureSessionPresent: true,
+        codexFreshThreadFallbackFailureTurnPresent: true,
+        codexFreshThreadFallbackPhase: "fallback-succeeded",
+        codexFreshThreadFallbackProviderActionCount: 0,
+        codexFreshThreadFallbackReason: "resume-transport-failure",
+        codexFreshThreadFallbackResult: "succeeded",
+        codexFreshThreadFallbackResumeMatchesFailureSession: true,
+        codexFreshThreadFallbackResumeSessionPresent: true,
+        codexFreshThreadFallbackSessionChanged: true,
+        codexFreshThreadFallbackSessionPresent: true,
+        codexFreshThreadFallbackTraceType: "fallback",
+        codexFreshThreadFallbackTurnPresent: true,
+        providerTraceKind: "codex.fresh_thread_fallback",
+        requestId: "req_123",
+        schema: "murph.assistant-codex-fresh-thread-fallback-diagnostics.v1",
+      }),
+    });
+    expect(entry?.redacted).not.toHaveProperty("codexFreshThreadFallbackThreadId");
+    expect(entry?.redacted).not.toHaveProperty("codexFreshThreadFallbackUrl");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-fresh-thread-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("api.openai.com");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw private phrase");
+  });
+
   it("captures hosted Codex app-server timing without raw identifiers", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_codex_timing",
@@ -677,6 +783,99 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
+  });
+
+  it("captures hosted Codex transport diagnostics without raw payloads", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_codex_transport_diagnostics",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_codex_transport",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: {
+        requestId: "req_123",
+      },
+      event: {
+        codexThreadId: "raw-provider-session-id",
+        rawEvent: {
+          schema: "murph.assistant-codex-transport-diagnostics.v1",
+          type: "assistant.codex.transport_diagnostics",
+          codexTransportAdditionalDetailsPresent: true,
+          codexTransportErrorMessage: "raw provider message must not appear",
+          codexTransportErrorMessageLength: 144,
+          codexTransportErrorMessagePresent: true,
+          codexTransportEventKind: "stream-idle-timeout",
+          codexTransportFallbackActivated: false,
+          codexTransportIdleTimeout: true,
+          codexTransportProviderActionCount: 0,
+          codexTransportRetryCount: 2,
+          codexTransportRetryExhausted: false,
+          codexTransportRetryMax: 5,
+          codexTransportSourceMethod: "error",
+          codexTransportStreamDisconnected: true,
+          codexTransportTerminalAfterProviderAction: false,
+          codexTransportThreadId: "raw-thread-id",
+          codexTransportThreadIdPresent: true,
+          codexTransportTransport: "websocket",
+          codexTransportTurnId: "raw-turn-id",
+          codexTransportTurnIdPresent: true,
+          codexTransportUrl: "https://api.openai.com/v1/responses",
+          codexTransportWillRetry: true,
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_codex_transport_diagnostics",
+      level: "info",
+      message: "Hosted assistant Codex transport diagnostics captured.",
+      phase: "wake.running",
+      redacted: expect.objectContaining({
+        codexTransportAdditionalDetailsPresent: true,
+        codexTransportErrorMessageLength: 144,
+        codexTransportErrorMessagePresent: true,
+        codexTransportEventKind: "stream-idle-timeout",
+        codexTransportFallbackActivated: false,
+        codexTransportIdleTimeout: true,
+        codexTransportProviderActionCount: 0,
+        codexTransportRetryCount: 2,
+        codexTransportRetryExhausted: false,
+        codexTransportRetryMax: 5,
+        codexTransportSourceMethod: "error",
+        codexTransportStreamDisconnected: true,
+        codexTransportTerminalAfterProviderAction: false,
+        codexTransportThreadIdPresent: true,
+        codexTransportTraceType: "transport-diagnostics",
+        codexTransportTransport: "websocket",
+        codexTransportTurnIdPresent: true,
+        codexTransportWillRetry: true,
+        providerTraceKind: "codex.transport_diagnostics",
+        requestId: "req_123",
+        schema: "murph.assistant-codex-transport-diagnostics.v1",
+      }),
+    });
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw provider message");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("raw-turn-id");
+    expect(JSON.stringify(entry?.redacted)).not.toContain("api.openai.com");
   });
 
   it("captures hosted Codex warm app-server timing traces", () => {
@@ -1644,16 +1843,22 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
-  it("does not seed onboarding follow-up when embedded member activation welcome delivery is skipped", async () => {
+  it("still seeds onboarding follow-up when the embedded member activation welcome is superseded by prior first contact", async () => {
+    const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
     mocks.sendAssistantNotification.mockResolvedValueOnce({
       decision: {
         kind: "skip",
-        reason: "First contact was already accepted.",
+        privateSummary: "First-contact notification already accepted for this route.",
       },
-      deliveryOutcome: null,
       response: null,
       session: {
         sessionId: "session_notification_skip",
+      },
+    });
+    mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
+      enabled: true,
+      state: {
+        nextRunAt: seededNextWakeAt,
       },
     });
     const wake = buildHostedExecutionMemberActivatedWake({
@@ -1691,10 +1896,15 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slug: "finish-onboarding-followup",
+      }),
+    );
     expect(result).toMatchObject({
       mailboxLane: "member-activated",
-      nextWakeAt: null,
+      nextWakeAt: seededNextWakeAt,
+      nextWakeReason: "assistant",
     });
   });
 
@@ -1951,13 +2161,21 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
   });
 
-  it("does not seed onboarding follow-up when signup welcome delivery is skipped", async () => {
+  it("still seeds onboarding follow-up when the signup welcome notification is superseded by prior first contact", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_welcome_skip_result",
       memberId: "member_123",
       notification: {
+        deliveryDedupeToken: "signup-welcome:member_123",
         deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
         instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
         route: {
           actorId: "hid_telegram_actor_123",
           channel: "telegram",
@@ -1975,12 +2193,17 @@ describe("executeHostedMailboxEvent", () => {
     mocks.sendAssistantNotification.mockResolvedValueOnce({
       decision: {
         kind: "skip",
-        reason: "First contact was already accepted.",
+        privateSummary: "First-contact notification already accepted for this route.",
       },
-      deliveryOutcome: null,
       response: null,
       session: {
         sessionId: "session_notification_skip",
+      },
+    });
+    mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
+      enabled: true,
+      state: {
+        nextRunAt: "2026-04-09T17:30:00.000Z",
       },
     });
 
@@ -1993,7 +2216,11 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slug: "finish-onboarding-followup",
+      }),
+    );
   });
 
   it("keeps signup welcome delivery successful when onboarding follow-up seeding fails", async () => {
@@ -2487,6 +2714,29 @@ describe("executeHostedMailboxEvent", () => {
       "Hosted conversation wakes must be imported through mailbox AssistantInputEvent staging.",
     );
     expect(mocks.prepareHostedWakeContext).not.toHaveBeenCalled();
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+  });
+
+  it("rejects direct group newsletter email-needed wakes so mailbox staging owns the private note", async () => {
+    const wake = buildHostedExecutionGroupNewsletterEmailNeededWake({
+      eventId: "group-newsletter.email-needed:member_123:hgrp_123",
+      groupDisplayName: "Tempo Crew",
+      groupId: "hgrp_123",
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    await expect(
+      executeHostedMailboxEvent({
+        wake,
+        executionContext,
+        runtime: createRuntime(),
+        runtimeEnv: {},
+        vaultRoot: "/tmp/assistant-runtime-events",
+      }),
+    ).rejects.toThrow(
+      "Hosted group newsletter email-needed wakes are staged at mailbox import and must never reach system wake execution.",
+    );
     expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
   });
 

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import * as hostedRuntime from "../src/hosted-runtime.ts";
 import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
+  isHostedRuntimeIdShapedDiagnosticToken,
+  mergeHostedDeviceSyncConnectionMetadata,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
   parseHostedExecutionDeviceSyncDirtyAckRequest,
@@ -13,8 +15,187 @@ import {
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   resolveHostedDeviceSyncWakeContext,
+  sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
 } from "../src/hosted-runtime.ts";
+
+describe("mergeHostedDeviceSyncConnectionMetadata", () => {
+  it("preserves newer unpublished local Junction retry metadata", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        hostedOnly: true,
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        localOnly: true,
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 2,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(true);
+    expect(result.metadata).toEqual({
+      hostedOnly: true,
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillEmptyAttempts: 2,
+      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    });
+  });
+
+  it("keeps hosted Junction retry metadata when local retry progress is stale", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 2,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(false);
+    expect(result.metadata).toEqual({
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillEmptyAttempts: 2,
+      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    });
+  });
+
+  it("places preserved local Junction terminal progress before full hosted metadata", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: Object.fromEntries(
+        Array.from({ length: 16 }, (_, index) => [`hostedKey${index}`, `hosted-value-${index}`]),
+      ),
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(true);
+    expect(Object.keys(result.metadata).slice(0, 5)).toEqual([
+      "junctionHistoricalBackfillStatus",
+      "junctionHistoricalBackfillEmptyAttempts",
+      "junctionHistoricalBackfillLastEmptyAt",
+      "junctionHistoricalBackfillWindowStart",
+      "junctionHistoricalBackfillWindowEnd",
+    ]);
+  });
+
+  it("preserves unpublished local complete progress ahead of hosted exhausted progress", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        hostedOnly: true,
+        junctionHistoricalBackfillStatus: "exhausted",
+        junctionHistoricalBackfillEmptyAttempts: 5,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        localOnly: true,
+        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(true);
+    expect(result.metadata).toEqual({
+      hostedOnly: true,
+      junctionHistoricalBackfillStatus: "complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    });
+  });
+
+  it("keeps hosted complete progress ahead of unpublished local retry progress", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 3,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:30:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(false);
+    expect(result.metadata).toEqual({
+      junctionHistoricalBackfillStatus: "complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    });
+  });
+
+  it("keeps hosted progress when local progress has already been published", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+      localConnectionStateUnpublished: false,
+      localMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 2,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(false);
+    expect(result.metadata).toEqual({
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    });
+  });
+});
 
 describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
   it("parses staged dirty ack overlays on dirty-pending requests", () => {
@@ -731,6 +912,58 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
   });
 
+  it("drops id-shaped provider failure codes from deploy-skewed apply updates", () => {
+    const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "conn_123",
+          failureDiagnostic: {
+            accountStatus: "reauthorization_required",
+            code: "WHOOP_TOKEN_REQUEST_FAILED",
+            details: {
+              providerResponseErrorCode: "11649ed4-27e2-4718-959f-d68de1d1a120f",
+              providerOAuthErrorCode: "invalid_grant",
+              providerOAuthErrorDescription: "Refresh token expired.",
+            },
+            retryable: false,
+          },
+          localState: {},
+          observedUpdatedAt: null,
+        },
+        {
+          connectionId: "conn_456",
+          failureDiagnostic: {
+            accountStatus: "active",
+            code: "PROVIDER_REQUEST_FAILED",
+            details: {
+              providerResponseErrorCode: "invalid_request",
+              providerOAuthErrorCode: "a1".repeat(16),
+              providerResponseErrorDescription: "Request rejected.",
+            },
+            retryable: true,
+          },
+          localState: {},
+          observedUpdatedAt: null,
+        },
+      ],
+      userId: "user_123",
+    });
+
+    const firstDetails = parsed.updates[0]?.failureDiagnostic?.details ?? {};
+    expect(firstDetails).toMatchObject({
+      providerOAuthErrorCode: "invalid_grant",
+      providerOAuthErrorDescription: "Refresh token expired.",
+    });
+    expect(firstDetails).not.toHaveProperty("providerResponseErrorCode");
+
+    const secondDetails = parsed.updates[1]?.failureDiagnostic?.details ?? {};
+    expect(secondDetails).toMatchObject({
+      providerResponseErrorCode: "invalid_request",
+      providerResponseErrorDescription: "Request rejected.",
+    });
+    expect(secondDetails).not.toHaveProperty("providerOAuthErrorCode");
+  });
+
   it("normalizes timestamps and sanitizes secret-bearing local-state fields", () => {
     expect(
       parseHostedExecutionDeviceSyncRuntimeApplyRequest({
@@ -740,7 +973,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             connectionId: "conn_01",
             localState: {
               lastErrorCode: "Authorization: Bearer secret-token",
-              lastErrorMessage: "refresh_token=super-secret",
+              lastErrorMessage: "Provider rejected Bearer abcdefghijklmnop1234",
               lastSyncErrorAt: "2026-04-12T10:20:00+10:00",
             },
             observedTokenVersion: 1,
@@ -786,7 +1019,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           connectionId: "conn_01",
           localState: {
             lastErrorCode: "Authorization: [redacted]",
-            lastErrorMessage: "refresh_token=[redacted]",
+            lastErrorMessage: "Provider rejected Bearer [redacted]",
             lastSyncErrorAt: "2026-04-12T00:20:00.000Z",
           },
           observedTokenVersion: 1,
@@ -835,6 +1068,22 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toBe(
       "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
     );
+    expect(sanitizeHostedRuntimeErrorText("bearer token expired")).toBe("bearer token expired");
+    expect(
+      sanitizeHostedRuntimeErrorText("Bearer abcdefghijklmnopqrst"),
+    ).toBe("Bearer [redacted]");
+    expect(
+      sanitizeHostedRuntimeErrorText("Provider rejected Bearer abc12345"),
+    ).toBe("Provider rejected Bearer [redacted]");
+    expect(
+      sanitizeHostedRuntimeErrorText("Provider rejected Bearer abcdefghijklmnop1234"),
+    ).toBe("Provider rejected Bearer [redacted]");
+    expect(
+      sanitizeHostedRuntimeErrorText("Provider rejected Bearer abcdefghijklmnop-foo"),
+    ).toBe("Provider rejected Bearer [redacted]");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Bearer abcdefghijklmnopqrst"),
+    ).toBe("Bearer [redacted]");
 
     expect(
       sanitizeHostedRuntimeErrorText(
@@ -1820,6 +2069,44 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ]);
   });
 
+  it("parses Junction backfill job hints with a timeseries cursor", () => {
+    const hint = parseHostedExecutionDeviceSyncWakeHint({
+      jobs: [
+        {
+          kind: "backfill",
+          payload: {
+            emptyBackfillAttempts: 2,
+            timeseriesCursor: "2026-04-02T00:00:00Z",
+            windowEnd: "2026-04-03T00:00:00Z",
+            windowStart: "2026-04-01T00:00:00Z",
+          },
+        },
+      ],
+    });
+
+    expect(hint?.jobs?.[0]?.payload).toEqual({
+      emptyBackfillAttempts: 2,
+      timeseriesCursor: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+    });
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncWakeHint({
+        jobs: [
+          {
+            kind: "backfill",
+            payload: {
+              timeseriesCursor: "not-a-timestamp",
+              windowEnd: "2026-04-03T00:00:00Z",
+              windowStart: "2026-04-01T00:00:00Z",
+            },
+          },
+        ],
+      }),
+    ).toThrow(/timeseriesCursor must be an ISO timestamp/i);
+  });
+
   it("drops empty string payload fields from hosted wake job hints", () => {
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [
@@ -1890,5 +2177,291 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         ],
       }),
     ).toThrow(/availableAt must be an ISO timestamp/i);
+  });
+});
+
+describe("sanitizeHostedRuntimeDiagnosticText", () => {
+  it("classifies standalone id-shaped diagnostic tokens", () => {
+    expect(isHostedRuntimeIdShapedDiagnosticToken("11649ed4-27e2-4718-959f-d68de1d1a120")).toBe(true);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("a1".repeat(16))).toBe(true);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("invalid_request")).toBe(false);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("value_error.date")).toBe(false);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("ERR_42")).toBe(false);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("2026-07-04T09:15:00Z")).toBe(false);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("v1.2.3")).toBe(false);
+  });
+
+  it("masks long opaque tokens in place instead of dropping the whole text", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "Team 11649ed4-27e2-4718-959f-d68de1d1a120 is not configured for sleep_cycle.",
+      ),
+    ).toBe("Team <redacted-id> is not configured for sleep_cycle.");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "record 11649ed4-27e2-4718-959f-d68de1d1a120 was rejected upstream.",
+      ),
+    ).toBe("record <redacted-token> was rejected upstream.");
+  });
+
+  it("masks colon-form identifier assignments and truncates equals-assignment tails", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123xyz upstream"),
+    ).toBe("request rejected for user_id: <redacted-id> upstream");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123/Jane-Doe upstream"),
+    ).toBe("request rejected for user_id: <redacted-id> upstream");
+    const quotedValue = sanitizeHostedRuntimeDiagnosticText('request rejected for user_id: "Jane Doe" upstream');
+    expect(quotedValue).toBe("request rejected for user_id: <redacted-id> upstream");
+    expect(quotedValue ?? "").not.toContain("Jane");
+    expect(quotedValue ?? "").not.toContain("Doe");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user_id=1234 rejected"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user_id=abcdef+tail rejected"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123, display_name=Jane Doe upstream"),
+    ).toBe("request rejected for user_id: <redacted-id>");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123, display_name = Jane Doe upstream"),
+    ).toBe("request rejected for user_id: <redacted-id>");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123, display_name: Jane Doe upstream"),
+    ).toBe("request rejected for user_id: <redacted-id>");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("display_name: Jane Doe cannot access sleep_cycle"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user: Jane Doe cannot access sleep_cycle"),
+    ).toBe("user: <redacted-id>");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Jane Doe cannot access sleep_cycle"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Jane Doe not found"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("User Jane Doe not found"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Patient Jane Doe not found"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Jane Doe"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("detail: Jane Doe"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Provider reason: Refresh token expired. Reconnect WHOOP."),
+    ).toBe("Provider reason: Refresh token expired. Reconnect WHOOP.");
+  });
+
+  it("masks token phrases while keeping prose token labels", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("refresh token abc123 leaked"),
+    ).toBe("refresh token <redacted-token> leaked");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("refresh token abcdefghijklmnopqrst leaked"),
+    ).toBe("refresh token <redacted-token> leaked");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("refresh token: abcdefghijklmnopqrst expired"),
+    ).toBe("refresh token: <redacted-token> expired");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("api key abcdefghijklmnop leaked"),
+    ).toBe("api key <redacted-token> leaked");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("api key secretvalue leaked"),
+    ).toBe("api key <redacted-token> leaked");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("client secret abcdefghijklmnop leaked"),
+    ).toBe("client secret <redacted-token> leaked");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("refresh token secretvalue leaked"),
+    ).toBe("refresh token <redacted-token> leaked");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("generic token abcdefghijklmnop leaked"),
+    ).toBe("generic token <redacted-token> leaked");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("session token expired"),
+    ).toBe("session token expired");
+  });
+
+  it("keeps plain bracketed prose and truncates validation suffixes", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Provider returned [timeout] while checking sleep_cycle"),
+    ).toBe("Provider returned [timeout] while checking sleep_cycle");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("see [option] and [other] words"),
+    ).toBe("see [option] and [other] words");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("see [docs] for details"),
+    ).toBe("see [docs] for details");
+
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "Datetimes provided to dates should have zero time [type=date_from_datetime_inexact]",
+      ),
+    ).toBe("Datetimes provided to dates should have zero time");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("rejected [input_value='Jane Doe', input_type=str]"),
+    ).toBe("rejected");
+  });
+
+  it("truncates bracketed assignment, colon, and comma segments", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Validation failed [user_id=1234, display_name=Jane Doe]"),
+    ).toBe("Validation failed");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Validation failed [display_name: Jane]"),
+    ).toBe("Validation failed");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("failed [display_name=Jane"),
+    ).toBe("failed");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Validation failed [context [field] display_name=Jane]"),
+    ).toBe("Validation failed");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("failed [outer [inner] a, b]"),
+    ).toBe("failed");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("[display_name=Jane]"),
+    ).toBeNull();
+  });
+
+  it("still fails closed on raw structured payload dumps", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText('unexpected body {"detail": "sleep_cycle disabled"}'),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("{id: abc123, detail: disabled}"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText('["junction-user-1"]'),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("[junction-user-1, Jane Doe]"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("[12345]"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText('{user_id:"junction-user-1", display_name:"Alice"}'),
+    ).toBeNull();
+  });
+
+  it("masks explicit id-noun phrases and truncates camel-case team assignments", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user id hbm_abc123xyz is blocked upstream"),
+    ).toBe("user id <redacted-id> is blocked upstream");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request denied for teamId=hbm_abc123xyz"),
+    ).toBe("request denied for");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request denied for team-id = hbm_abc123xyz"),
+    ).toBe("request denied for");
+  });
+
+  it("masks id-shaped values regardless of quoting or bracketing", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText('User "junction-user-1" is not configured'),
+    ).toBe('User "<redacted-id>" is not configured');
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("provider returned [junction-user-1] for the request"),
+    ).toBe("provider returned [<redacted-token>] for the request");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("retry after 2026-07-04T09:15:00Z with limit 250 on v1.2.3"),
+    ).toBe("retry after 2026-07-04T09:15:00Z with limit 250 on v1.2.3");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request from 203.0.113.42 denied"),
+    ).toBe("request from <redacted-ip> denied");
+  });
+
+  it("truncates quoted echoed input values", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("rejected [input_value='user junction-user-1', input_type=str]"),
+    ).toBe("rejected");
+    const quotedInput = sanitizeHostedRuntimeDiagnosticText("rejected [input_value='Jane Doe', input_type=str]");
+    expect(quotedInput).toBe("rejected");
+    expect(quotedInput ?? "").not.toContain("Doe");
+    const mixedQuoteInput = sanitizeHostedRuntimeDiagnosticText(
+      "rejected [input_value=\"Jane's device\", input_type=str]",
+    );
+    expect(mixedQuoteInput).toBe("rejected");
+    expect(mixedQuoteInput ?? "").not.toContain("Jane");
+    expect(mixedQuoteInput ?? "").not.toContain("device");
+  });
+
+  it("strips default-ignorable format characters before masking", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user junction-\u200Buser-1 denied"),
+    ).toBe("user <redacted-id> denied");
+    const sanitized = sanitizeHostedRuntimeDiagnosticText("access\u200B_token=secretvalue");
+    expect(sanitized).toBeNull();
+    expect(sanitized ?? "").not.toContain("secretvalue");
+    const bidiSecret = sanitizeHostedRuntimeDiagnosticText("access\u2066_token=secretvalue");
+    expect(bidiSecret).toBeNull();
+    expect(bidiSecret ?? "").not.toContain("secretvalue");
+    const bidiIdentifier = sanitizeHostedRuntimeDiagnosticText('user\u2066_id="Jane Doe"');
+    expect(bidiIdentifier).toBeNull();
+    expect(bidiIdentifier ?? "").not.toContain("Jane");
+    expect(bidiIdentifier ?? "").not.toContain("Doe");
+  });
+
+  it("fails closed when a structured dump starts beyond the length cap", () => {
+    const prefix = "safe provider explanation ".repeat(24).trim();
+    const sanitized = sanitizeHostedRuntimeDiagnosticText(`${prefix} {"debug":"dump"}`);
+    // Soundness beats prefix salvage: a structured dump anywhere in the
+    // normalized pre-mask diagnostic fails the whole value closed.
+    expect(sanitized).toBeNull();
+  });
+
+  it("masks long tokens that would straddle the diagnostic length cap", () => {
+    const filler = "safe words ".repeat(48).trim();
+    const token = "a1".repeat(50);
+    const sanitized = sanitizeHostedRuntimeDiagnosticText(`${filler} ${token}`);
+    expect(sanitized).not.toBeNull();
+    expect(sanitized).not.toContain("a1a1a1");
+    expect(sanitized?.length).toBeLessThanOrEqual(512);
+  });
+
+  it("truncates echoed validation input values inside bracket suffixes", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "Input should be a valid date [type=value_error, input_value=junction-user-1, input_type=str]",
+      ),
+    ).toBe("Input should be a valid date");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "Input should be valid [type=value_error, input_value=Jane Doe, input_type=str]",
+      ),
+    ).toBe("Input should be valid");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "Input should be a valid date [type=value_error, input_value='Jane Doe', input_type=str]",
+      ),
+    ).toBe("Input should be a valid date");
+  });
+
+  it("masks id-shaped identifier phrases while keeping plain words", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user hbm_abc123xyz is not configured"),
+    ).toBe("user <redacted-id> is not configured");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user hbm_abc123/Jane-Doe is blocked upstream"),
+    ).toBe("user <redacted-id> is blocked upstream");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user profile summaries are disabled for this team"),
+    ).toBe("user profile summaries are disabled for this team");
+  });
+
+  it("masks multiple unsafe spans in one string", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "user 0123456789abcdef0123456789abcdef01 denied; retry as 11649ed4-27e2-4718-959f-d68de1d1a120",
+      ),
+    ).toBe("user <redacted-id> denied; retry as <redacted-token>");
   });
 });

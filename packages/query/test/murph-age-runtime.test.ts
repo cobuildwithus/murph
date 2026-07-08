@@ -7,6 +7,10 @@ import { QUERY_DB_RELATIVE_PATH, openSqliteRuntimeDatabase } from "@murphai/runt
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  normalizeMetricValue,
+  type MetricPoint,
+} from "@murphai/health-metrics";
+import {
   MURPH_AGE_FUNCTION_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
   MURPH_AGE_RESULT_SCHEMA_VERSION,
   MURPH_AGE_WEARABLE_RESIDUAL_PARAMETER_PACK_SCHEMA_VERSION,
@@ -15,18 +19,15 @@ import {
   listMurphAgeSubmittedCalculatorMetricInputSpecs,
   listMurphAgeWearableBridgeFeatureSpecs,
   listMurphAgeWearableShadowIncrementPolicies,
-  normalizeMetricValue,
   summarizeMurphAgeCalculatorOutput,
   summarizeMurphAgeCalculatorPublicOutput,
-  type MetricPoint,
   type MurphAgeFunctionResidualParameterPack,
   type MurphAgeRiskModel,
   type MurphAgeScoreBearingCardId,
   type MurphAgeSubmittedMetricInput,
   type MurphAgeWearableResidualParameterPack,
-} from "@murphai/health-metrics";
-import { test } from "vitest";
-
+} from "@murphai/health-metrics/murph-age";
+import { rebuildQueryProjection } from "@murphai/query";
 import {
   MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
   assessMurphAgeInputReadinessFromVault,
@@ -41,10 +42,10 @@ import {
   loadMurphAgeLocalModelCardArtifacts,
   metricPointFiltersForMurphAgeInputBundle,
   metricPointFiltersForMurphAgeModel,
-  rebuildQueryProjection,
   resolveMurphAgeModelCardArtifactRoot,
   summarizeMurphAgeFromVaultInputBundle,
-} from "../src/index.ts";
+} from "@murphai/query/murph-age";
+import { test } from "vitest";
 
 test("calculateMurphAgeForVault scores a low-level supplied model from stored MetricPoints", async () => {
   const vaultRoot = await createProjectionVault();

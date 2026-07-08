@@ -64,7 +64,7 @@ const wearableResolvedMetricSchema = z.object({
   exactDuplicateCount: z.number().int().nonnegative().optional(),
   fallbackFromMetric: nullableTextSchema.optional(),
   fallbackReason: nullableTextSchema.optional(),
-  metric: z.string().min(1),
+  metric: z.string().min(1).optional(),
   occurredAt: nullableTimestampSchema.optional(),
   provider: nullableTextSchema.optional(),
   recordedAt: nullableTimestampSchema.optional(),
@@ -111,6 +111,13 @@ const wearableActivitySummarySchema = z.object({
   distanceKm: wearableResolvedMetricSchema.optional(),
   estimatedVo2Max: wearableResolvedMetricSchema.optional(),
   floorsClimbed: wearableResolvedMetricSchema.optional(),
+  heartRateZones: z.array(z.object({
+    durationMinutes: z.number().nonnegative(),
+    label: z.string().min(1).optional(),
+    maxHeartRate: z.number().nonnegative().optional(),
+    minHeartRate: z.number().nonnegative().optional(),
+    zone: z.number().int().nonnegative().optional(),
+  })).optional(),
   maxHeartRate: wearableResolvedMetricSchema.optional(),
   notes: z.array(z.string()).optional(),
   percentRecorded: wearableResolvedMetricSchema.optional(),
@@ -407,8 +414,8 @@ function withWearableListOptions() {
       .int()
       .positive()
       .max(200)
-      .default(30)
-      .describe('Maximum number of daily summaries to return.'),
+      .default(3)
+      .describe('Maximum number of daily summaries to return. Defaults to 3.'),
   })
 }
 

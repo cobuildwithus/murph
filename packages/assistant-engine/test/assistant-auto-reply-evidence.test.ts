@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { test } from 'vitest'
+import { expect, test } from 'vitest'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
   findAssistantAutoReplyDeliveryIntentIds,
@@ -45,12 +45,40 @@ test('auto-reply terminal evidence readers ignore malformed evidence files', asy
       ),
       null,
     )
-    assert.deepEqual(
-      await listPendingAssistantAutoReplyLinqCleanupEvidence({ vault: vaultRoot }),
-      {
-        captureIds: ['cap_valid_cleanup'],
+    await expect(
+      readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, 'cap_valid_cleanup'),
+    ).resolves.toMatchObject({
+      providerCleanup: {
         linqMessageIds: ['linq_message_1'],
       },
+    })
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('auto-reply terminal evidence writers return the pending Linq cleanup they recorded', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
+  try {
+    assert.deepEqual(
+      await writeAssistantAutoReplySuppressionEvidence({
+        captureIds: ['cap_linq_cleanup'],
+        linqMessageIds: ['linq_message_1', 'linq_message_1'],
+        reason: 'channel cannot reply',
+        recordedAt: '2026-04-08T00:00:00.000Z',
+        vault: vaultRoot,
+      }),
+      ['linq_message_1'],
+    )
+    assert.deepEqual(
+      await writeAssistantAutoReplySuppressionEvidence({
+        captureIds: ['cap_no_cleanup'],
+        linqMessageIds: [],
+        reason: 'channel cannot reply',
+        recordedAt: '2026-04-08T00:00:00.000Z',
+        vault: vaultRoot,
+      }),
+      [],
     )
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
@@ -127,14 +155,17 @@ test('auto-reply terminal evidence reader accepts historical retry-exhausted evi
 test('auto-reply Linq cleanup handles input-id keyed terminal evidence', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
   try {
-    await writeAssistantAutoReplySuppressionEvidence({
-      captureIds: ['cap_input_cleanup'],
-      inputIds: ['ain_input_cleanup'],
-      linqMessageIds: ['linq_message_input', 'linq_message_input'],
-      reason: 'channel cannot reply',
-      recordedAt: '2026-04-08T00:00:00.000Z',
-      vault: vaultRoot,
-    })
+    assert.deepEqual(
+      await writeAssistantAutoReplySuppressionEvidence({
+        captureIds: ['cap_input_cleanup'],
+        inputIds: ['ain_input_cleanup'],
+        linqMessageIds: ['linq_message_input', 'linq_message_input'],
+        reason: 'channel cannot reply',
+        recordedAt: '2026-04-08T00:00:00.000Z',
+        vault: vaultRoot,
+      }),
+      ['linq_message_input'],
+    )
 
     assert.deepEqual(
       await listPendingAssistantAutoReplyLinqCleanupEvidence({ vault: vaultRoot }),

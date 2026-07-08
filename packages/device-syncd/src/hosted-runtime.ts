@@ -1,4 +1,7 @@
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
+import {
+  mergeHostedJunctionHistoricalBackfillMetadata,
+} from "./junction-historical-backfill-progress.ts";
 import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
@@ -21,7 +24,7 @@ const HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH = 512;
 const HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]+/gu;
 const HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN = /\s+/gu;
 const HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN =
-  /\bBearer\s+(?=[A-Za-z0-9._~+/=-]{8,}\b)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]+\b/giu;
+  /\bBearer\s+(?=\S{8,})[^\s,;]+/giu;
 const HOSTED_RUNTIME_ERROR_JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu;
 const HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN =
   /([?&](?:access_token|refresh_token|id_token|token|apikey|api_key|client_secret|session|session_token|code|state)=)[^&#\s]+/giu;
@@ -33,14 +36,54 @@ const HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s)"']+/gu;
 const HOSTED_RUNTIME_ERROR_URL_PATTERN = /\bhttps?:\/\/[^\s)"']+/giu;
 const HOSTED_RUNTIME_ERROR_EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
 const HOSTED_RUNTIME_ERROR_PHONE_PATTERN = /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/gu;
+// Braces, primitive arrays, quoted-key colons, and structured-looking bracket
+// regions signal a raw structured payload dump or validation suffix that can
+// carry arbitrary values under keys the span redactors do not know; those stay
+// fail-closed. Bare square brackets around prose are allowed.
 const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
-  /[{}\[\]]|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
-const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN =
-  /\b(?:account|external|member|owner|provider[_\s-]?account|subject|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*["']?[A-Za-z0-9._:-]{6,}/iu;
-const HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN =
-  /\b(?:access|id|refresh|session)\s+token\s+(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{6,}/iu;
+  /[{}]|\[\s*(?:["']|\d|(?:true|false|null)\b)|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
+// Default-ignorable format characters (zero-width spaces/joiners, soft
+// hyphens, BOM) can split an identifier visually without changing how it
+// renders; strip them before span matching so they cannot defeat the masks.
+const HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN =
+  /[\u00AD\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu;
+const HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_DELIMITED_PATTERN =
+  /\b((?:api[_\s-]?key|client[_\s-]?secret|(?:access|id|refresh|session)\s+token|token)\b\s*[:=]\s*["']?)[^'",;\]\s]+/giu;
+const HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_PATTERN =
+  /\b((?:api[_\s-]?key|client[_\s-]?secret|(?:access|id|refresh|session)\s+token|token)\s+["']?)([A-Za-z0-9._~+/=-]{6,})/giu;
+const HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_SAFE_WORD_PATTERN =
+  /^(?:absent|disabled|expired|invalid|missing|required|request|revoked|unavailable)$/iu;
+const HOSTED_RUNTIME_DIAGNOSTIC_DIRECT_IDENTIFIER_COLON_ASSIGNMENT_PATTERN =
+  /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)\b\s*:\s*)(?:"[^"]*"|'[^']*'|[^,;\]\[]+)/giu;
+const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_COLON_ASSIGNMENT_PATTERN =
+  /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*:\s*)(?:"[^"]*"|'[^']*'|[A-Za-z0-9._~+/:=-]+)/giu;
+const HOSTED_RUNTIME_DIAGNOSTIC_ASSIGNMENT_TAIL_PATTERN =
+  /(?:[A-Za-z_][A-Za-z0-9_-]*\s*=\s*\S|(?:^|[\s,;])\s*(?!(?:account|client|external|member|owner|patient|provider[_-]?account|subject|team|user)(?:[_-]?(?:id|identifier))?\s*:)(?:display[_-]?name|first[_-]?name|last[_-]?name|full[_-]?name|user[_-]?name|email|phone|[A-Za-z_][A-Za-z0-9_-]*[_-][A-Za-z0-9_-]*)\s*:\s*\S)/iu;
+// Identifier values also appear as bare phrases ("user hbm_abc123xyz",
+// 'user id "hbm_abc123xyz"'); mask the value when it looks id-shaped
+// (contains a digit or underscore) so plain words ("user profile") stay
+// readable.
+const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN =
+  /\b((?:account|client|external|member|owner|patient|subject|team|user)(?:\s+(?:id|identifier))?\s+["']?)(?=[A-Za-z0-9._~+/:-]*[\d_])[A-Za-z0-9._~+/:-]{6,}\b/giu;
+const HOSTED_RUNTIME_DIAGNOSTIC_IPV4_PATTERN = /\b\d{1,3}(?:\.\d{1,3}){3}\b/gu;
+const HOSTED_RUNTIME_DIAGNOSTIC_UNLABELED_NAME_ACTION_PATTERN =
+  /\b[A-Z][a-z][A-Za-z'-]*\s+[A-Z][a-z][A-Za-z'-]*\s+(?:can(?:not| not)|could|denied|does|failed|has|is|must|not\s+found|should|was|would)\b/u;
+const HOSTED_RUNTIME_DIAGNOSTIC_BARE_NAME_PATTERN =
+  /^(?:[a-z][a-z0-9_-]{0,40}\s*:\s*)?[A-Z][a-z][A-Za-z'-]*\s+[A-Z][a-z][A-Za-z'-]*$/u;
+const HOSTED_RUNTIME_DIAGNOSTIC_SAFE_BARE_TITLE_PATTERN =
+  /^(?:Bad Request|Not Found|Request Timeout|Connect Timeout|Gateway Timeout)$/u;
+// The catch-all for id-shaped values in any remaining context (quoted,
+// bracketed, mid-prose): a token of six or more characters containing a digit
+// is masked unless it is a recognizably safe shape — a small plain number, a
+// dotted number (versions), or an ISO-8601 date/datetime. This makes leak
+// safety depend on the value's own shape rather than on enumerating every
+// surrounding context.
+const HOSTED_RUNTIME_DIAGNOSTIC_DIGIT_TOKEN_PATTERN =
+  /\b(?=[A-Za-z0-9._~+/:=-]*\d)[A-Za-z0-9._~+/:=-]{6,}\b/gu;
+const HOSTED_RUNTIME_DIAGNOSTIC_SAFE_DIGIT_TOKEN_PATTERN =
+  /^(?:\d{1,4}|[vV]?\d+(?:\.\d+){1,2}|\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})?)?)$/u;
 const HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN =
-  /\b(?=[A-Za-z0-9._~+/=-]{32,}\b)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]+\b/u;
+  /\b(?=[A-Za-z0-9._~+/=-]{32,}\b)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]+\b/gu;
 const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_BLOCKED_KEY_SUBSTRINGS = [
   "secret",
   "authorization",
@@ -54,6 +97,18 @@ const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_BLOCKED_KEY_SUBSTRINGS = [
 ] as const;
 const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_SECRET_VALUE_PATTERN =
   /\b(?:authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|hmac|webhook[_-]?secret)\b|\bBearer\s+\S+/iu;
+
+export function mergeHostedDeviceSyncConnectionMetadata(input: {
+  hostedMetadata: Record<string, unknown>;
+  localConnectionStateUnpublished: boolean;
+  localMetadata: Record<string, unknown> | null | undefined;
+}): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
+  return mergeHostedJunctionHistoricalBackfillMetadata({
+    hostedMetadata: input.hostedMetadata,
+    localConnectionStateUnpublished: input.localConnectionStateUnpublished,
+    localMetadata: input.localMetadata ?? {},
+  });
+}
 
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
   authorizationUrl: string;
@@ -443,7 +498,7 @@ export interface HostedExecutionDeviceSyncWakeEventLike {
   provider?: string | null;
 }
 
-type HostedExecutionDeviceSyncHintPayloadFieldKind = "boolean" | "isoTimestamp" | "string";
+type HostedExecutionDeviceSyncHintPayloadFieldKind = "boolean" | "isoTimestamp" | "number" | "string";
 
 // Keep this generic wake-hint seam aligned with the current manifest-owned hosted-hint fields
 // until hosted wake parsing becomes provider-aware at this boundary.
@@ -451,6 +506,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   Record<string, HostedExecutionDeviceSyncHintPayloadFieldKind>
 > = Object.freeze({
   dataType: "string",
+  emptyBackfillAttempts: "number",
   eventType: "string",
   includePersonalInfo: "boolean",
   includeProfile: "boolean",
@@ -462,6 +518,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   resourceType: "string",
   sourceEventType: "string",
   sourceProviderSlug: "string",
+  timeseriesCursor: "isoTimestamp",
   webhookDataJson: "string",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
@@ -1032,12 +1089,14 @@ function parseHostedExecutionDeviceSyncJobHintPayloadField(
   value: unknown,
   kind: HostedExecutionDeviceSyncHintPayloadFieldKind,
   label: string,
-): boolean | string {
+): boolean | number | string {
   switch (kind) {
     case "boolean":
       return requireBoolean(value, label);
     case "isoTimestamp":
       return requireIsoTimestamp(value, label);
+    case "number":
+      return requireNumber(value, label);
     case "string":
       return requireString(value, label);
   }
@@ -1647,7 +1706,13 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
       const value = sanitizeHostedRuntimeErrorCode(
         readNullableStringValue(record[field], `${label}.${field}`),
       );
-      if (value) {
+      if (
+        value
+        && (
+          (field !== "providerResponseErrorCode" && field !== "providerOAuthErrorCode")
+          || !isHostedRuntimeIdShapedDiagnosticToken(value)
+        )
+      ) {
         details[field] = value;
       }
     }
@@ -2232,30 +2297,140 @@ export function sanitizeHostedRuntimeErrorText(value: string | null): string | n
   return sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
 }
 
+export function isHostedRuntimeIdShapedDiagnosticToken(value: string): boolean {
+  const token = value.replace(HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN, "").trim();
+  if (!token) {
+    return false;
+  }
+
+  const tokenAlphanumericLength = token.replace(/[^A-Za-z0-9]/gu, "").length;
+
+  return (
+    matchesEntireHostedRuntimeDiagnosticToken(HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN, token)
+    || (
+      tokenAlphanumericLength >= 6
+      &&
+      matchesEntireHostedRuntimeDiagnosticToken(HOSTED_RUNTIME_DIAGNOSTIC_DIGIT_TOKEN_PATTERN, token)
+      && !HOSTED_RUNTIME_DIAGNOSTIC_SAFE_DIGIT_TOKEN_PATTERN.test(token)
+    )
+  );
+}
+
+function matchesEntireHostedRuntimeDiagnosticToken(pattern: RegExp, value: string): boolean {
+  pattern.lastIndex = 0;
+  const match = pattern.exec(value);
+  pattern.lastIndex = 0;
+  return match?.[0] === value;
+}
+
+function findHostedRuntimeDiagnosticStructuredBracketIndex(value: string): number {
+  const openBracketIndexes: number[] = [];
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+
+    if (char === "[") {
+      openBracketIndexes.push(index);
+      continue;
+    }
+
+    if (char === "]") {
+      openBracketIndexes.pop();
+      continue;
+    }
+
+    if (openBracketIndexes.length > 0 && (char === "=" || char === "," || char === ":")) {
+      return openBracketIndexes[0] ?? -1;
+    }
+  }
+
+  return -1;
+}
+
+function findHostedRuntimeDiagnosticUnsafeTailIndex(value: string): number {
+  const assignmentIndex = value.search(HOSTED_RUNTIME_DIAGNOSTIC_ASSIGNMENT_TAIL_PATTERN);
+  const bracketIndex = findHostedRuntimeDiagnosticStructuredBracketIndex(value);
+
+  if (assignmentIndex === -1) {
+    return bracketIndex;
+  }
+
+  if (bracketIndex === -1) {
+    return assignmentIndex;
+  }
+
+  return Math.min(assignmentIndex, bracketIndex);
+}
+
+// Keeps safe provider error prose debuggable by failing raw structured dumps
+// closed, truncating at unsafe assignment/bracket tails, then masking unsafe
+// spans that remain in the prose prefix.
 export function sanitizeHostedRuntimeDiagnosticText(value: string | null): string | null {
-  const sanitized = sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH)
-    ?.replace(HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN, "<redacted-path>")
+  const normalizedValue = value?.replace(HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN, "") ?? null;
+  const sanitizedBase = sanitizeHostedRuntimeErrorString(normalizedValue, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
+  if (
+    !sanitizedBase
+    || HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(sanitizedBase)
+  ) {
+    return null;
+  }
+
+  const unsafeTailIndex = findHostedRuntimeDiagnosticUnsafeTailIndex(sanitizedBase);
+  const prosePrefix = (unsafeTailIndex === -1
+    ? sanitizedBase
+    : sanitizedBase.slice(0, unsafeTailIndex)
+  ).replace(/[\s,;]+$/u, "");
+
+  if (!prosePrefix) {
+    return null;
+  }
+
+  const sanitized = prosePrefix
+    .replace(HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN, "<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_POSIX_PATH_PATTERN, "$1<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN, "<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_URL_PATTERN, "<redacted-url>")
     .replace(HOSTED_RUNTIME_ERROR_EMAIL_PATTERN, "<redacted-email>")
     .replace(HOSTED_RUNTIME_ERROR_PHONE_PATTERN, "<redacted-phone>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_DIRECT_IDENTIFIER_COLON_ASSIGNMENT_PATTERN, "$1<redacted-id>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_COLON_ASSIGNMENT_PATTERN, "$1<redacted-id>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN, "$1<redacted-id>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_IPV4_PATTERN, "<redacted-ip>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_DELIMITED_PATTERN, "$1<redacted-token>")
+    .replace(
+      HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_PATTERN,
+      (_match, prefix: string, token: string) => {
+        const proseWord = token.replace(/[.!?,;:]+$/u, "");
+        return HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_SAFE_WORD_PATTERN.test(proseWord)
+          ? `${prefix}${token}`
+          : `${prefix}<redacted-token>`;
+      },
+    )
+    .replace(
+      HOSTED_RUNTIME_DIAGNOSTIC_DIGIT_TOKEN_PATTERN,
+      (token) => HOSTED_RUNTIME_DIAGNOSTIC_SAFE_DIGIT_TOKEN_PATTERN.test(token) ? token : "<redacted-token>",
+    )
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN, "<redacted-token>")
     .trim();
 
   if (!sanitized) {
     return null;
   }
+  if (HOSTED_RUNTIME_DIAGNOSTIC_UNLABELED_NAME_ACTION_PATTERN.test(sanitized)) {
+    return null;
+  }
+  if (
+    HOSTED_RUNTIME_DIAGNOSTIC_BARE_NAME_PATTERN.test(sanitized)
+    && !HOSTED_RUNTIME_DIAGNOSTIC_SAFE_BARE_TITLE_PATTERN.test(sanitized)
+  ) {
+    return null;
+  }
 
-  return isHostedRuntimeSafeDiagnosticText(sanitized) ? sanitized : null;
-}
+  const clamped = sanitized.length <= HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH
+    ? sanitized
+    : `${sanitized.slice(0, HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH - 3).trimEnd()}...`;
 
-function isHostedRuntimeSafeDiagnosticText(value: string): boolean {
-  return !(
-    HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(value)
-    || HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN.test(value)
-    || HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN.test(value)
-    || HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN.test(value)
-  );
+  return clamped;
 }
 
 function requireNumber(value: unknown, label: string): number {

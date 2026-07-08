@@ -127,3 +127,38 @@ landing; record the chosen posture here so the decision is reviewable.
   bucket: the monthly shard count is also bounded by elapsed wall-clock
   months. Snapshot/restore cost remains negligible at the projected steady
   state, so no rotation or compaction seam is planned.
+
+- `derived/vault-share/projections.json`
+  (`murph.shared-vault-projections.v1`) is the destination-side materialization
+  for consented HostedVaultShare records. It is one compact JSON document per
+  workspace, not one file per shared record. Each grantor/projection entry keeps
+  only the latest `HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS` records, and a
+  `vault-share.revoke` mailbox wake removes the grantor/projection entry when
+  permission is revoked. If the final entry is removed, the compact document is
+  deleted. Group join grants also cap active grantors per destination/projection
+  through `HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION`, so the
+  single-file read/write cost is bounded on the growing destination side. This
+  derived path is included in hosted workspace snapshots while keeping `raw/`
+  reserved for immutable imported originals. The file count stays hard-bounded
+  at one file for the shared projection family and keeps normal import work
+  bounded despite delivery retries or night count.
+
+- `assistant-state/hosted-provider-cleanup.json`
+  (`murph.hosted-provider-cleanup.v1`) is compact durable operational-continuity
+  state included in hosted snapshots. It is the single owner of the queued
+  provider-visible Linq message ids awaiting deletion and of the next cleanup
+  wake. It is exactly one bounded file per workspace: queueing, deferral
+  re-arms, and retry checkpoints overwrite the same document, and a successful
+  drain deletes it. The id list is deduplicated and drains to empty on every
+  successful cleanup pass, so steady state is zero or one small file regardless
+  of message volume.
+
+- `assistant-state/hosted-provider-cleanup-recovery.json`
+  (`murph.hosted-provider-cleanup-recovery.v1`) is temporary migration state,
+  bounded to one file per workspace. It marks that the one-shot legacy
+  terminal-evidence recovery has completed so steady-state wakes never scan the
+  evidence directory again. It is deleted together with the prescribed
+  migration/recovery/bootstrap code in provider-cleanup.ts and the
+  snapshot-bridge pruning guard once production vaults have all written the
+  marker. The steady-state file bound for the provider-cleanup family is
+  asserted by the provider-cleanup unit tests.

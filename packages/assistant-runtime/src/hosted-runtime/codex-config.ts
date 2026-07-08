@@ -49,10 +49,10 @@ import {
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
-// Codex's built-in OpenAI provider id. With hosted-local subscription auth in
-// CODEX_HOME, Codex routes this provider to the ChatGPT subscription backend
-// itself; configuring a base_url would misroute subscription bearer tokens.
-const HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID = "openai";
+// Custom provider id for ChatGPT-auth OpenAI. The provider intentionally omits
+// base_url/env_key: Codex routes auth-backed providers with no base_url to the
+// ChatGPT backend while still honoring provider-level transport settings.
+const HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID = "hosted-chatgpt-openai";
 const DEFAULT_HOSTED_CODEX_REASONING_EFFORT = "low";
 const DEFAULT_HOSTED_CODEX_APPROVAL_POLICY = "never";
 const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
@@ -60,18 +60,59 @@ const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 // re-sends the whole thread, and OpenAI Standard-tier prompt caches evict
 // within ~45 minutes regardless of prefix size or prompt_cache_retention
 // (measured 2026-06-10 across 32k-170k prefixes), so member messages after an
-// idle gap re-pay the full thread at uncached input rates. 128k was a
-// reduction from 233k; 2026-06-24 rollout analysis showed multi-million-token
-// turns where a single user message ran 20+ computer-use tool round-trips
-// and finished without ever crossing 128k (starting ~44k, ending ~59k),
-// because tool-loop context grows in 1-2k chunks per round-trip. 100k fires
-// compaction in the middle of longer tool loops instead of after them, while
-// staying well above the typical conversational floor so unrelated turns
-// don't compact every message.
-const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
+// idle gap re-pay the full thread at uncached input rates. Keep the ceiling at
+// 164k: it is still a meaningful reduction from the old 233k ceiling, and the
+// 2026-07 hosted model cost profile leaves room for longer tool loops. The
+// separate idle-shutdown compaction threshold intentionally stays lower so
+// off-hot-path checkpointing can clean up large threads before the next wake.
+const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 164_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
+// Match Codex's native default so hosted runs keep provider stream reconnects.
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 5;
+const HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS = 90_000;
+const HOSTED_CODEX_OPERATOR_MEMORY_CONFIG = {
+  disableOnExternalContext: false,
+  featureEnabled: true,
+  generateMemories: true,
+  maxRawMemoriesForConsolidation: 128,
+  maxRolloutAgeDays: 10,
+  maxRolloutsPerStartup: 1,
+  maxUnusedDays: 30,
+  minRateLimitRemainingPercent: 25,
+  minRolloutIdleHours: 1,
+  useMemories: true,
+} as const;
+export const HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS = {
+  codexOperatorMemoryDisableOnExternalContext:
+    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.disableOnExternalContext,
+  codexOperatorMemoryFeatureEnabled:
+    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled,
+  codexOperatorMemoryGenerateMemories:
+    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.generateMemories,
+  codexOperatorMemoryMaxRawMemoriesForConsolidation:
+    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRawMemoriesForConsolidation,
+  codexOperatorMemoryMaxRolloutAgeDays:
+    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRolloutAgeDays,
+  codexOperatorMemoryMaxRolloutsPerStartup:
+    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRolloutsPerStartup,
+  codexOperatorMemoryMaxUnusedDays:
+    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxUnusedDays,
+  codexOperatorMemoryMinRateLimitRemainingPercent:
+    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.minRateLimitRemainingPercent,
+  codexOperatorMemoryMinRolloutIdleHours:
+    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.minRolloutIdleHours,
+  codexOperatorMemoryMode: "codex-native-operator-context",
+  codexOperatorMemoryUseMemories:
+    HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.useMemories,
+} as const;
+export const HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS = {
+  codexProviderRequestMaxRetries: HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES,
+  codexProviderStreamIdleTimeoutMs:
+    HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS,
+  codexProviderStreamMaxRetries: HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES,
+  codexProviderTransportMode: "codex-native-provider-transport",
+} as const;
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
@@ -125,10 +166,6 @@ export async function prepareHostedCodexRuntimeEnvironment(
     provider: normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER),
     runtimeEnv: input.runtimeEnv,
   });
-  const usesTestProviderBaseUrlOverride =
-    normalizeHostedCodexEnvString(
-      input.runtimeEnv[HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV],
-    ) !== null;
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
@@ -194,7 +231,6 @@ export async function prepareHostedCodexRuntimeEnvironment(
     codexConfigPath,
     buildHostedCodexConfigToml({
       chatGptAuth,
-      writeProviderRetryDefaults: usesTestProviderBaseUrlOverride,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
       provider: providerConfig,
       reasoningEffort: runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT,
@@ -469,35 +505,32 @@ function normalizeHostedCodexUrlHostname(hostname: string): string {
 
 export function buildHostedCodexConfigToml(input: {
   chatGptAuth?: boolean;
-  writeProviderRetryDefaults?: boolean;
   model: string | null;
   provider: AssistantCodexModelProviderConfig;
   reasoningEffort: string;
 }): string {
-  // ChatGPT-subscription auth uses Codex's built-in provider so Codex itself
-  // selects the subscription backend; a custom provider entry with base_url or
-  // env_key would bypass that routing.
-  const providerConfigLines = input.chatGptAuth ? [] : [
-    `[model_providers.${tomlQuotedKey(input.provider.id)}]`,
+  const modelProviderId = input.chatGptAuth
+    ? HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID
+    : input.provider.id;
+  const providerConfigLines = [
+    `[model_providers.${tomlQuotedKey(modelProviderId)}]`,
     `name = ${tomlString(input.provider.name)}`,
-    `base_url = ${tomlString(input.provider.baseUrl)}`,
-    `env_key = ${tomlString(input.provider.envKey)}`,
+    ...(input.chatGptAuth
+      ? []
+      : [
+          `base_url = ${tomlString(input.provider.baseUrl)}`,
+          `env_key = ${tomlString(input.provider.envKey)}`,
+        ]),
     `wire_api = ${tomlString(input.provider.wireApi)}`,
     ...(input.provider.supportsWebSockets
       ? ["supports_websockets = true"]
       : []),
-    "requires_openai_auth = false",
-    ...(input.writeProviderRetryDefaults
-      ? [
-          `request_max_retries = ${HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES}`,
-          `stream_max_retries = ${HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES}`,
-        ]
-      : []),
+    `stream_idle_timeout_ms = ${HOSTED_CODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS}`,
+    `requires_openai_auth = ${input.chatGptAuth ? "true" : "false"}`,
+    `request_max_retries = ${HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES}`,
+    `stream_max_retries = ${HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES}`,
     "",
   ];
-  const modelProviderId = input.chatGptAuth
-    ? HOSTED_CODEX_CHATGPT_MODEL_PROVIDER_ID
-    : input.provider.id;
 
   return [
     ...(input.model ? [`model = ${tomlString(input.model)}`] : []),
@@ -509,13 +542,38 @@ export function buildHostedCodexConfigToml(input: {
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
     `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,
     "check_for_update_on_startup = false",
+    // Login shells re-source /etc/profile, which resets PATH to the stock
+    // system dirs and drops /app/node_modules/.bin (vault-cli). The runner
+    // image has no profile.d content worth sourcing, so force non-login
+    // shells and let shell_environment_policy own the exec environment.
+    "allow_login_shell = false",
     "",
     ...providerConfigLines,
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
+    "# Multi-agent V2 spawn tools back Murph's skill-directed delegation for",
+    "# slow ingestion (lab PDFs, supplement labels). Codex >=0.143's multi-agent",
+    "# mode message accepts skill instructions as explicit delegation requests,",
+    "# so no custom usage hint is needed. Enable only here, never via a CLI",
+    "# --config override.",
     "[features]",
     "plugins = false",
     "multi_agent_v2 = true",
+    `memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled}`,
+    "",
+    "# Codex-native memories are operator memory only. Murph product memory",
+    "# remains canonical in the vault; snapshots keep the Codex home allowlist",
+    "# narrow instead of recursively preserving every generated memory artifact.",
+    "[memories]",
+    `use_memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.useMemories}`,
+    `generate_memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.generateMemories}`,
+    `disable_on_external_context = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.disableOnExternalContext}`,
+    `min_rollout_idle_hours = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.minRolloutIdleHours}`,
+    `max_rollouts_per_startup = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRolloutsPerStartup}`,
+    `max_rollout_age_days = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRolloutAgeDays}`,
+    `min_rate_limit_remaining_percent = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.minRateLimitRemainingPercent}`,
+    `max_raw_memories_for_consolidation = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxRawMemoriesForConsolidation}`,
+    `max_unused_days = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.maxUnusedDays}`,
     "",
     "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
     "# runner paths change on each wake and break provider prefix caching.",
@@ -530,6 +588,11 @@ export function buildHostedCodexConfigToml(input: {
     "",
     "[shell_environment_policy]",
     `inherit = ${tomlString(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
+    // include_only is the single gate for shell env. Codex's default
+    // *KEY*/*TOKEN*/*SECRET* excludes run before include_only and can only
+    // subtract deliberately allowlisted vars (bridge token, provider keys),
+    // so they add no protection here and must stay off.
+    "ignore_default_excludes = true",
     `include_only = ${tomlStringArray(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
     "",
     "[shell_environment_policy.set]",

@@ -1,4 +1,5 @@
 import {
+  applyHostedVaultShareRevokeWake,
   importHostedVaultShareDeliveryWake,
 } from "./vault-share-import.ts";
 import {
@@ -12,6 +13,9 @@ import {
 import {
   createHostedConversationMailboxImportItem,
 } from "./mailbox-conversation-import.ts";
+import {
+  importHostedGroupNewsletterEmailNeededMailboxItem,
+} from "./mailbox-group-newsletter-email-needed.ts";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
 } from "./platform.ts";
@@ -203,6 +207,49 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   if (
     input.item.route.action === "import-vault-share-delivery"
     || wake.kind === "vault-share.delivery"
+  ) {
+    return {
+      reasonCode: "payload.decode_mismatch",
+      retryable: false,
+      status: "blocked",
+    };
+  }
+
+  if (
+    input.item.route.action === "import-vault-share-revoke"
+    && wake.kind === "vault-share.revoke"
+  ) {
+    return await applyHostedVaultShareRevokeWake({
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+  }
+
+  if (
+    input.item.route.action === "import-vault-share-revoke"
+    || wake.kind === "vault-share.revoke"
+  ) {
+    return {
+      reasonCode: "payload.decode_mismatch",
+      retryable: false,
+      status: "blocked",
+    };
+  }
+
+  if (
+    input.item.route.action === "import-group-newsletter-email-needed"
+    && wake.kind === "group-newsletter.email-needed"
+  ) {
+    return await importHostedGroupNewsletterEmailNeededMailboxItem({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+  }
+
+  if (
+    input.item.route.action === "import-group-newsletter-email-needed"
+    || wake.kind === "group-newsletter.email-needed"
   ) {
     return {
       reasonCode: "payload.decode_mismatch",

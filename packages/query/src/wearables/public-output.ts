@@ -89,6 +89,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     distanceKm,
     estimatedVo2Max,
     floorsClimbed,
+    heartRateZones: (day.heartRateZones ?? []).map((zone) => ({ ...zone })),
     maxHeartRate,
     notes: projectSummaryNotes({
       metrics: metrics.map(([, metric]) => metric),

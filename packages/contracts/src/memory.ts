@@ -165,14 +165,27 @@ export function upsertMemoryRecord(
   record: MemoryRecord;
 } {
   const now = (next.now ?? new Date()).toISOString();
+  const normalizedText = normalizeMemoryText(next.text);
+  const explicitRecordId = normalizeMemoryRecordId(input.records, next.recordId ?? null);
+  const existingContentRecord =
+    explicitRecordId === null
+      ? input.records.find(
+          (record) =>
+            record.section === next.section &&
+            normalizeMemoryText(record.text) === normalizedText,
+        ) ?? null
+      : null;
   const nextRecordId =
-    normalizeMemoryRecordId(input.records, next.recordId ?? null) ?? createMemoryRecordId(next);
+    explicitRecordId ?? existingContentRecord?.id ?? createMemoryRecordId({
+      section: next.section,
+      text: normalizedText,
+    });
   const existingIndex = input.records.findIndex((record) => record.id === nextRecordId);
   const existingRecord = existingIndex >= 0 ? input.records[existingIndex] ?? null : null;
   const record: MemoryRecord = memoryRecordSchema.parse({
     id: nextRecordId,
     section: next.section,
-    text: normalizeMemoryText(next.text),
+    text: normalizedText,
     createdAt: existingRecord?.createdAt ?? now,
     updatedAt: now,
     sourceLine: existingRecord?.sourceLine ?? input.records.length + 1,

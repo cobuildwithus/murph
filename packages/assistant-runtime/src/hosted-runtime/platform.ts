@@ -11,8 +11,6 @@ import type {
   HostedAssistantDeliverySideEffect,
 } from "@murphai/hosted-execution/side-effects";
 import type {
-  HostedMailboxConsumeRequest,
-  HostedMailboxConsumeResponse,
   HostedMailboxFetchRequest,
   HostedMailboxFetchResponse,
   HostedMailboxPayloadFetchRequest,
@@ -24,6 +22,10 @@ import type {
   HostedRuntimeIssueExportResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeGroupToolRequest,
+  HostedRuntimeGroupToolResponse,
+  HostedRuntimeNewsletterToolRequest,
+  HostedRuntimeNewsletterToolResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
   HostedCodexAuthUpdate,
@@ -33,7 +35,6 @@ import type {
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceReadResponse,
   HostedBrowserVaultReplicaPublishResponse,
-  HostedRuntimeLinqContactCardShareAfterOutboundRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantUsageRecord,
@@ -50,6 +51,7 @@ import type {
 import type {
   HostedVaultShareDeliverRequest,
   HostedVaultShareDeliverResponse,
+  HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import type {
   HostedWorkspaceSnapshotV2Aad,
@@ -71,6 +73,7 @@ import type {
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   HostedEmailSendRequest,
+  HostedEmailSendResult,
 } from "../hosted-email.ts";
 import type {
   AssistantConnectedAppsPort,
@@ -187,10 +190,6 @@ export interface HostedRuntimeLinqSendResponse {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
-export type HostedRuntimeLinqEngagementKind =
-  | "first_contact"
-  | "requires_recent_inbound";
-
 export interface HostedRuntimeLinqCurrentInboundProof {
   dedupeKey: string;
   eventId: string;
@@ -203,7 +202,6 @@ export interface HostedRuntimeLinqCurrentInboundProof {
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
-  engagementKind?: HostedRuntimeLinqEngagementKind | null;
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
@@ -214,6 +212,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
 
 export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   acceptedAt?: string | null;
+  answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt: string;
   failedAt?: string | null;
   failureCode?: string | null;
@@ -227,6 +226,7 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
+  threadIsDirect?: boolean | null;
 }
 
 export interface HostedRuntimeWhatsAppSendRequest {
@@ -256,13 +256,6 @@ export interface HostedRuntimeLinqDeleteMessagesRequest {
   messageIds: readonly string[];
 }
 
-type HostedRuntimeLinqContactCardShareAfterOutboundEffectsRequest = Omit<
-  HostedRuntimeLinqContactCardShareAfterOutboundRequest,
-  "authority"
-> & {
-  authority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
-};
-
 type HostedRuntimeEffectsPortBase = {
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
@@ -283,15 +276,11 @@ type HostedRuntimeEffectsPortBase = {
     request: HostedRuntimeLinqRecentInboundEngagementRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
-  maybeShareLinqContactCardAfterOutbound?(
-    request: HostedRuntimeLinqContactCardShareAfterOutboundEffectsRequest,
-    context?: { signal?: AbortSignal | null },
-  ): Promise<void>;
   recordLinqDeliveryOutcome?(
     request: HostedRuntimeLinqDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
-  sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;
+  sendEmail(request: HostedEmailSendRequest): Promise<HostedEmailSendResult | void>;
   writeAssistantDeliveryRecord?(
     record: HostedAssistantDeliveryRecord,
   ): Promise<HostedAssistantDeliveryRecord>;
@@ -347,6 +336,18 @@ export interface HostedRuntimeFamilyPlanToolPort {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>;
 }
 
+export interface HostedRuntimeGroupToolPort {
+  request(
+    request: HostedRuntimeGroupToolRequest,
+  ): Promise<HostedRuntimeGroupToolResponse>;
+}
+
+export interface HostedRuntimeNewsletterToolPort {
+  request(
+    request: HostedRuntimeNewsletterToolRequest,
+  ): Promise<HostedRuntimeNewsletterToolResponse>;
+}
+
 export interface HostedRuntimeCodexAuthPort {
   update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
 }
@@ -361,10 +362,6 @@ export interface HostedRuntimePhoneCallPort {
 }
 
 export interface HostedRuntimeMailboxPort {
-  // Optional for deploy-window compatibility with older platform builds.
-  // Advances the durable per-lane consumed watermark after a clean pass;
-  // idempotent monotonic max on the web side.
-  consume?(request: HostedMailboxConsumeRequest): Promise<HostedMailboxConsumeResponse>;
   fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
@@ -469,6 +466,7 @@ export interface HostedRuntimeActionApprovalPort {
 }
 
 export interface HostedRuntimeVaultSharePort {
+  listActiveProjectionScopes(): Promise<HostedVaultShareProjectionScope[]>;
   deliver(
     request: HostedVaultShareDeliverRequest,
   ): Promise<HostedVaultShareDeliverResponse>;
@@ -483,6 +481,7 @@ export interface HostedRuntimePlatform {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   familyPlanToolPort?: HostedRuntimeFamilyPlanToolPort | null;
+  groupToolPort?: HostedRuntimeGroupToolPort | null;
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
@@ -490,6 +489,7 @@ export interface HostedRuntimePlatform {
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
+  newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;
   runtimeLivenessIntervalMs?: number | null;

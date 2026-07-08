@@ -413,8 +413,14 @@
                         "type": "string",
                         "enum": [
                           "missed_after_grace",
+                          "assumed_after_grace",
                           "unknown"
                         ]
+                      },
+                      "activityKind": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
                       },
                       "partialCredit": {
                         "type": "number",
@@ -553,7 +559,6 @@
               "targetId",
               "label",
               "phase",
-              "calendar",
               "evidence"
             ],
             "additionalProperties": false

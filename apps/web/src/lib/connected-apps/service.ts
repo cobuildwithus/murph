@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash, randomBytes } from "node:crypto";
 
-import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   HostedConnectedAppsManageInput,
   HostedConnectedAppsRequest,
@@ -25,6 +25,7 @@ import {
 } from "./config";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -622,16 +623,9 @@ async function assertHostedConnectedAppsMemberActiveTx(input: {
 
 async function isHostedConnectedAppsMemberActive(input: {
   memberId: string;
-  prisma: Pick<PrismaClient | Prisma.TransactionClient, "hostedMember">;
+  prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<boolean> {
-  const member = await input.prisma.hostedMember.findUnique({
-    select: {
-      billingStatus: true,
-      suspendedAt: true,
-    },
-    where: { id: input.memberId },
-  });
-  return member?.billingStatus === HostedBillingStatus.active && !member.suspendedAt;
+  return readActiveHostedMemberAccess(input);
 }
 
 async function cleanupInactiveMemberConnectedAccountBestEffort(input: {

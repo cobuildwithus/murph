@@ -28,6 +28,7 @@ import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
+import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export const metadata: Metadata = createMurphPageMetadata({
@@ -35,7 +36,18 @@ export const metadata: Metadata = createMurphPageMetadata({
   description: "Manage your Murph account settings.",
 });
 
-export default async function SettingsPage() {
+type SettingsSearchParams = {
+  addEmail?: string | string[] | undefined;
+};
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<SettingsSearchParams>;
+} = {}) {
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const openEmailLink =
+    readFirstSearchParamValue(resolvedSearchParams.addEmail) === "true";
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
 
@@ -44,7 +56,15 @@ export default async function SettingsPage() {
   }
 
   const prisma = getPrisma();
-  const [routing, account, billingRef, freshPrivySession, familyOwner, familyAccess] =
+  const [
+    routing,
+    account,
+    billingRef,
+    freshPrivySession,
+    familyOwner,
+    familyAccess,
+    secureApprovalStatus,
+  ] =
     authenticatedMember
       ? await Promise.all([
           readHostedMemberRoutingState({
@@ -67,8 +87,11 @@ export default async function SettingsPage() {
             memberId: authenticatedMember.id,
             prisma,
           }),
+          readHostedSecureApprovalStatus({
+            privyUserId: session?.privyUserId,
+          }),
         ])
-      : [null, null, null, null, null, null];
+      : [null, null, null, null, null, null, { status: "unavailable" } as const];
   const activeFamilyOwner = familyOwner?.billingActive === true;
   const sponsoredMember = familyAccess !== null && familyOwner === null;
   const canStartFamily =
@@ -154,7 +177,8 @@ export default async function SettingsPage() {
         {accountWithPrivyDisplay ? (
           <HostedAccountSettingsCards
             account={accountWithPrivyDisplay}
-            murphPhoneNumber={routing?.linqRecipientPhone ?? null}
+            murphPhoneNumber={routing?.linqRecipientPhone ?? routing?.pendingLinqRecipientPhone ?? null}
+            openEmailLink={openEmailLink}
           />
         ) : null}
       </section>
@@ -178,10 +202,13 @@ export default async function SettingsPage() {
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Security
             </div>
-            <HostedPasskeySettings authenticated={authenticated} />
+            <HostedPasskeySettings
+              authenticated={authenticated}
+              secureApprovalStatus={secureApprovalStatus}
+            />
           </section>
 
-          <section className="flex flex-col gap-4">
+          <section id="data-privacy" className="flex scroll-mt-24 flex-col gap-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Data & privacy
             </div>
@@ -189,7 +216,7 @@ export default async function SettingsPage() {
           </section>
         </HostedPrivyProvider>
       ) : (
-        <section className="flex flex-col gap-4">
+        <section id="data-privacy" className="flex scroll-mt-24 flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
             Data & privacy
           </div>
@@ -198,4 +225,10 @@ export default async function SettingsPage() {
       )}
     </div>
   );
+}
+
+function readFirstSearchParamValue(
+  value: string | string[] | undefined,
+): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }

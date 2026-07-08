@@ -100,13 +100,15 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
-  resolveHostedDeviceSyncNextWakeAt,
   runHostedAssistantAutomation,
   runHostedAssistantAutomationLane,
-  runHostedDeviceSyncPass,
-  runHostedDeviceSyncWakeLane,
   runHostedNoopSystemWakeLane,
 } from "../src/hosted-runtime/maintenance.ts";
+import {
+  resolveHostedDeviceSyncNextWakeAt,
+  runHostedDeviceSyncPass,
+  runHostedDeviceSyncWakeLane,
+} from "../src/hosted-runtime/device-sync-maintenance.ts";
 import {
   readHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -3150,6 +3152,7 @@ describe("runHostedAssistantAutomationLane", () => {
       onProviderRequestStarted: expect.any(Function),
       onTraceEvent: expect.any(Function),
       requestId: "req_123",
+      shouldYieldBackgroundMaintenance: null,
       signal: undefined,
       turnEnvironment: {
         currentWorkingDirectory: null,
@@ -3165,6 +3168,11 @@ describe("runHostedAssistantAutomationLane", () => {
       mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
     automationPassInput.onProviderRequestStarted?.({
       assistantInputIds: ["input_1"],
+      codexAppServerInitializeMs: 7,
+      codexAppServerPreProviderMs: 17,
+      codexAppServerSpawnReadyMs: 1,
+      codexAppServerThreadResumeMs: 9,
+      codexAppServerWarmReuseMs: 0,
       providerRequestOrdinal: 0,
       source: "linq",
       startedAt: "2026-04-08T00:00:01.000Z",
@@ -3174,6 +3182,16 @@ describe("runHostedAssistantAutomationLane", () => {
       event: {
         assistantInputIds: ["input_1"],
         at: "2026-04-08T00:00:01.000Z",
+        phaseBreakdown: {
+          provider: {
+            codexAppServerInitializeMs: 7,
+            codexAppServerPreProviderMs: 17,
+            codexAppServerSpawnReadyMs: 1,
+            codexAppServerThreadResumeMs: 9,
+            codexAppServerWarmReuseMs: 0,
+          },
+          schemaVersion: 1,
+        },
         providerRequestOrdinal: 0,
         runtimeAttemptId: "attempt_123",
         source: "linq",
@@ -3232,6 +3250,73 @@ describe("runHostedAssistantAutomationLane", () => {
       expect.objectContaining({
         requestId: "req_yield",
         shouldDeferCron: shouldYieldBackgroundMaintenance,
+      }),
+    );
+  });
+
+  it("defers hosted cron when the current pass selected fresh foreground input", async () => {
+    let shouldDeferCronDuringPass: boolean | null = null;
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      shouldDeferCronDuringPass = input.shouldDeferCron?.() ?? null;
+      return {
+        cronProcessed: shouldDeferCronDuringPass ? 0 : 1,
+        nextWakeAt: shouldDeferCronDuringPass ? "2026-04-08T00:00:30.000Z" : null,
+        passTiming: {
+          cronStatusDeferred: true,
+          cronStatusElapsedMs: null,
+          postScanTailElapsedMs: 4,
+          scanElapsedMs: 12,
+        },
+        progressed: false,
+        replies: {
+          considered: 1,
+          failed: 0,
+          replied: 0,
+          skipped: 1,
+        },
+        routing: {
+          considered: 0,
+          failed: 0,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+      };
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_assistant_lane_current_foreground",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      freshAssistantInputIds: ["ain_current_foreground"],
+      requestId: "req_current_foreground",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(shouldDeferCronDuringPass).toBe(true);
+    expect(result.assistantAutomationCronProcessed).toBe(0);
+    expect(result.assistantAutomationCronStatusDeferred).toBe(true);
+    expect(result.assistantAutomationCronStatusElapsedMs).toBeNull();
+    expect(result.assistantAutomationPostScanTailElapsedMs).toBe(4);
+    expect(result.assistantAutomationScanElapsedMs).toBe(12);
+    const automationPassInput =
+      mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
+    expect(automationPassInput.shouldYieldBackgroundMaintenance).toBeNull();
+    expect(mocks.selectHostedAssistantInputIds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        freshAssistantInputIds: ["ain_current_foreground"],
+        mode: "foreground",
       }),
     );
   });

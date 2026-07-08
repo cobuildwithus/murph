@@ -1,6 +1,6 @@
 import { cn } from "@/src/lib/utils";
 
-import { VoiceMemoPlayer } from "./voice-memo-player";
+import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 
 type Tint = "sage" | "gold" | "bronze";
 
@@ -36,7 +36,8 @@ const TINTS: Record<
   },
 };
 
-function WideFeature({
+export function WideFeature({
+  artifactAlign = "end",
   artifactSide,
   body,
   bubble,
@@ -45,6 +46,9 @@ function WideFeature({
   tint,
   artifact,
 }: {
+  // Short artifacts read better vertically centered in the panel; tall ones
+  // anchor to the bottom edge.
+  artifactAlign?: "center" | "end";
   artifactSide: "left" | "right";
   body: string;
   bubble: string;
@@ -83,10 +87,15 @@ function WideFeature({
         )}
       >
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_20%_-10%,rgba(255,255,255,0.55)_0%,rgba(255,255,255,0)_55%)]" />
+        {/* Below lg the bubble sits in flow above the artifact: with the
+            fixed-reserve overlay, long bubble copy wraps on narrow screens
+            and collides with the artifact card. */}
         <div
           className={cn(
-            "absolute z-20 top-6 sm:top-8",
-            artifactSide === "left" ? "left-5 sm:left-7" : "right-5 sm:right-7",
+            "relative z-20 flex px-5 pt-6 sm:px-7 sm:pt-8 lg:absolute lg:top-8 lg:px-0 lg:pt-0",
+            artifactSide === "left"
+              ? "justify-start lg:left-7"
+              : "justify-end lg:right-7",
           )}
         >
           <div
@@ -101,7 +110,14 @@ function WideFeature({
             {bubble}
           </div>
         </div>
-        <div className="relative z-10 flex h-full items-end justify-center px-5 pb-6 pt-24 sm:px-8 sm:pb-8 sm:pt-28 lg:pt-32">
+        <div
+          className={cn(
+            "relative z-10 flex h-full justify-center px-5 pb-6 pt-5 sm:px-8 sm:pb-8 sm:pt-6 lg:pt-32",
+            artifactAlign === "center"
+              ? "items-center lg:absolute lg:inset-0"
+              : "items-end",
+          )}
+        >
           <div className="w-full max-w-[440px]">{artifact}</div>
         </div>
       </div>
@@ -466,14 +482,11 @@ function HabitArtifact() {
 
       <div className="mt-4">
         <VoiceMemoPlayer
+          bars={56}
           src="/audio/one-foot-two-foot.mp3"
           caption="Murph sent a hype track. Press play."
         />
       </div>
-
-      <p className="mt-4 text-[0.75rem] leading-[1.5] text-[#736a58]">
-        Sticking. Reminders backed off from daily to weekly check-in.
-      </p>
     </div>
   );
 }
@@ -482,6 +495,21 @@ export function AsksGridSection() {
   return (
     <section className="bg-[#f5f0e8] px-4 py-20 sm:px-8 lg:px-16 lg:py-28">
       <div className="mx-auto max-w-[1200px]">
+        {/* Bridges the group-chat story above back to the 1:1 assistant:
+            everything below happens in a private thread with Murph. */}
+        <div className="mb-12 max-w-[720px]">
+          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+            Just you and Murph
+          </p>
+          <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
+            Your personal health assistant, too.
+          </h2>
+          <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
+            Outside the group chat, Murph is all yours. Experiments, bloodwork,
+            habits, bookings, and daily readouts, in a private one on one
+            thread.
+          </p>
+        </div>
         <div className="space-y-5 sm:space-y-6">
           <WideFeature
             tint="gold"

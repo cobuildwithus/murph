@@ -9,6 +9,7 @@ import {
 } from "../worker-contracts.ts";
 import type {
   WorkerRouteContext,
+  WorkerExecutionContext,
   WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
 import type {
@@ -29,6 +30,7 @@ export function createWorkerFetchHandler(input: {
   return async function handleWorkerFetch(
     request: Request,
     env: WorkerEnvironmentSource,
+    executionCtx?: WorkerExecutionContext,
   ): Promise<Response> {
     const url = new URL(request.url);
     const publicResponse = await handleDeclarativeRoute(input.publicRoutes, { env, request, url });
@@ -42,6 +44,7 @@ export function createWorkerFetchHandler(input: {
       await handleDeclarativeRoute(input.internalRoutes, {
         env,
         environment,
+        ...(executionCtx ? { executionCtx } : {}),
         request,
         url,
       })

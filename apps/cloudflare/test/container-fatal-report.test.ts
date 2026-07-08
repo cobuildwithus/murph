@@ -75,7 +75,7 @@ describe("reportHostedContainerFatalBestEffort", () => {
       boundUserId: "member_123",
       error: new Error("synthetic fatal"),
       fetchImpl,
-      stage: "shell_isolation_poison",
+      stage: "ambiguous_abort_poison",
     });
 
     expect(requests).toHaveLength(1);
@@ -85,7 +85,7 @@ describe("reportHostedContainerFatalBestEffort", () => {
     const headers = new Headers(requests[0]?.init?.headers);
     expect(headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
     const body = JSON.parse(String(requests[0]?.init?.body));
-    expect(body.stage).toBe("shell_isolation_poison");
+    expect(body.stage).toBe("ambiguous_abort_poison");
   });
 
   it("omits the bound user header when no user binding exists", async () => {

@@ -18,6 +18,7 @@ import {
 import {
   HOSTED_WEB_NEXT_TSCONFIG_PATH,
   HOSTED_WEB_PRODUCTION_BUILD_CPUS,
+  HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES,
   HOSTED_WEB_WORKFLOW_OPTIONS,
   WORKSPACE_SOURCE_PACKAGE_NAMES,
   buildHostedWebClientEnv,
@@ -168,14 +169,23 @@ test("hosted web dev smoke uses its own Next artifact directory", () => {
       PHASE_PRODUCTION_BUILD,
       createHostedWebSmokeEnvironment(createProcessEnv({})),
     ),
-    HOSTED_WEB_BUILD_DIST_DIR,
+    HOSTED_WEB_SMOKE_DIST_DIR,
   );
 });
 
-test("hosted web dev smoke can isolate concurrent runs with a dist-dir suffix", () => {
+test("hosted web smoke can isolate concurrent dev and production runs with a dist-dir suffix", () => {
   assert.equal(
     resolveHostedWebDistDir(
       PHASE_DEVELOPMENT_SERVER,
+      createHostedWebSmokeEnvironment(createProcessEnv({
+        NEXT_DIST_DIR_SUFFIX: "e2e-run",
+      })),
+    ),
+    `${HOSTED_WEB_SMOKE_DIST_DIR}-e2e-run`,
+  );
+  assert.equal(
+    resolveHostedWebDistDir(
+      PHASE_PRODUCTION_BUILD,
       createHostedWebSmokeEnvironment(createProcessEnv({
         NEXT_DIST_DIR_SUFFIX: "e2e-run",
       })),
@@ -295,6 +305,15 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
     tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
   });
   assert.equal(productionNextConfig.experimental?.cpus, HOSTED_WEB_PRODUCTION_BUILD_CPUS);
+});
+
+test("production build bounds Turbopack memory and skips source maps to fit the standard builder", () => {
+  assert.equal(
+    productionNextConfig.experimental?.turbopackMemoryLimit,
+    HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES,
+  );
+  assert.equal(HOSTED_WEB_TURBOPACK_BUILD_MEMORY_LIMIT_BYTES, 4 * 1024 * 1024 * 1024);
+  assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
 });
 
 test("hosted runtime issue imports avoid the runtime-state Node barrel", () => {

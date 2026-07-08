@@ -266,7 +266,7 @@ function resolvePrivateTrend(input: {
 
   if (input.browserVaultStatus === "error") {
     return {
-      message: input.error ?? "Your private biomarker trend could not be decrypted.",
+      message: input.error ?? "We couldn't unlock your private trend right now. Try again.",
       status: "error",
     };
   }
@@ -322,7 +322,7 @@ function resolvePrivateTrend(input: {
     }
 
     return {
-      body: panel.emptyState?.body ?? `No ${input.biomarker.shortName} values were found in browser-vault.`,
+      body: panel.emptyState?.body ?? `No ${input.biomarker.shortName} values saved on this device yet.`,
       panelStatus: "no_data",
       status: "empty",
       title: panel.emptyState?.title ?? "No private values yet",
@@ -383,7 +383,7 @@ function ContextMetricStrip({ metrics }: { metrics: TrendContextValue[] }) {
             <span className="min-w-0 truncate">{metric.label}</span>
             {metric.stale ? (
               <span className="shrink-0 text-[9px] text-muted-foreground">
-                Stale
+                Out of date
               </span>
             ) : null}
           </dt>
@@ -409,7 +409,7 @@ function ContextMetricStrip({ metrics }: { metrics: TrendContextValue[] }) {
 
 function emptyStateAction(status: BrowserVaultBiomarkerPanelStatus): { href: string; label: string } | null {
   if (status === "stale") {
-    return { href: "/settings", label: "View sync status" };
+    return { href: "/settings", label: "Check your connections" };
   }
 
   if (status === "no_data" || status === "no_private_vault") {

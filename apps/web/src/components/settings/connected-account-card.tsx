@@ -69,6 +69,23 @@ export function SettingsContactLink(props: {
   );
 }
 
+export function SettingsContactAction(props: {
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <p className="text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+      <button
+        type="button"
+        onClick={props.onClick}
+        className="font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+      >
+        {props.children}
+      </button>
+    </p>
+  );
+}
+
 type SettingsStatusTone = "neutral" | "success" | "destructive";
 
 export function SettingsStatusLine(props: {

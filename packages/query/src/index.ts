@@ -1,4 +1,6 @@
+import type { CanonicalEntity } from "./canonical-entities.ts";
 import type {
+  QueryCanonicalEntityFilters,
   QueryMetricPointFilters,
   QueryMetricTarget,
   QueryProjectionStatus,
@@ -90,6 +92,7 @@ export {
 export {
   buildOverviewMetrics,
   isActiveOverviewExperimentStatus,
+  buildOverviewWeeklyStatsFromDailySampleSummaries,
   buildOverviewWeeklyStats,
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
@@ -98,6 +101,7 @@ export type {
   OverviewExperiment,
   OverviewJournalEntry,
   OverviewMetric,
+  OverviewWeeklySampleSummary,
   OverviewWeeklyStat,
 } from "./overview.ts";
 export {
@@ -113,6 +117,7 @@ export type {
   ExperimentProgressCardConfounderInput,
 } from "./experiment-progress-card.ts";
 export {
+  resolveAdherenceObservationActivityKind,
   synthesizeLegacySessionAdherenceTargets,
 } from "./experiment-adherence.ts";
 export type {
@@ -211,6 +216,7 @@ export {
   type MetricRowEvidence,
 } from "./metrics/index.ts";
 export {
+  type QueryCanonicalEntityFilters,
   type QueryMetricPointFilters,
   type QueryMetricTarget,
   type QueryMetricTargetRow,
@@ -373,6 +379,7 @@ export {
 export * from "./automation.ts";
 export * from "./health/index.ts";
 export * from "./memory.ts";
+export * from "./profile.ts";
 
 export async function listMetricPoints(
   vaultRoot: string,
@@ -380,6 +387,14 @@ export async function listMetricPoints(
 ): Promise<import("@murphai/health-metrics").MetricPoint[]> {
   const mod = await import("./query-projection.ts");
   return mod.listMetricPointsRuntime(vaultRoot, filters);
+}
+
+export async function listCanonicalEntities(
+  vaultRoot: string,
+  filters: QueryCanonicalEntityFilters = {},
+): Promise<CanonicalEntity[]> {
+  const mod = await import("./query-projection.ts");
+  return mod.listCanonicalEntitiesRuntime(vaultRoot, filters);
 }
 
 export async function listMetricPointsBatch(
@@ -398,83 +413,6 @@ export async function selectMetric(input: {
 }): Promise<import("@murphai/health-metrics").MetricSelection> {
   const mod = await import("./query-projection.ts");
   return mod.selectMetricRuntime(input);
-}
-
-export type {
-  AssessMurphAgeInputReadinessFromVaultInput,
-  AssessMurphAgeWearableShadowReadinessFromVaultInput,
-  CalculateMurphAgeForVaultInput,
-  CalculateMurphAgeFromVaultInputBundleInput,
-  GetMurphAgeResearchPreviewForSubmittedInputsInput,
-  GetMurphAgeResearchPreviewForVaultInput,
-  GetMurphAgeSubmittedCalculatorViewBundleInput,
-  MurphAgeInputReadinessForVault,
-  MurphAgeLocalModelCardArtifact,
-  MurphAgeLocalModelCardLoadResult,
-  MurphAgeWearableShadowAnchorReadiness,
-  MurphAgeWearableShadowIncrementReadiness,
-  MurphAgeWearableShadowReadinessForVault,
-} from "./murph-age.ts";
-export {
-  assessMurphAgeInputReadinessFromVault,
-  assessMurphAgeWearableShadowReadinessFromVault,
-  defaultMurphAgeModelCardArtifactRoot,
-  defaultMurphAgeWearableResidualParameterPackRoot,
-  loadMurphAgeLocalModelCardArtifacts,
-  metricPointFiltersForMurphAgeInputBundle,
-  metricPointFiltersForMurphAgeModel,
-  MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
-  resolveMurphAgeModelCardArtifactRoot,
-  resolveMurphAgeWearableResidualParameterPackRoot,
-} from "./murph-age.ts";
-
-export async function calculateMurphAgeForVault(
-  input: import("./murph-age.ts").CalculateMurphAgeForVaultInput,
-): Promise<import("@murphai/health-metrics").MurphAgeResult> {
-  const mod = await import("./murph-age.ts");
-  return mod.calculateMurphAgeForVault(input);
-}
-
-export async function calculateMurphAgeFromVaultInputBundle(
-  input: import("./murph-age.ts").CalculateMurphAgeFromVaultInputBundleInput,
-): Promise<import("@murphai/health-metrics").MurphAgeCalculatorOutput> {
-  const mod = await import("./murph-age.ts");
-  return mod.calculateMurphAgeFromVaultInputBundle(input);
-}
-
-export async function calculateMurphAgePublicReportFromVaultInputBundle(
-  input: import("./murph-age.ts").CalculateMurphAgeFromVaultInputBundleInput,
-): Promise<import("@murphai/health-metrics").MurphAgePublicCalculatorReport> {
-  const mod = await import("./murph-age.ts");
-  return mod.calculateMurphAgePublicReportFromVaultInputBundle(input);
-}
-
-export async function summarizeMurphAgeFromVaultInputBundle(
-  input: import("./murph-age.ts").CalculateMurphAgeFromVaultInputBundleInput,
-): Promise<import("@murphai/health-metrics").MurphAgePublicDisplaySummary> {
-  const mod = await import("./murph-age.ts");
-  return mod.summarizeMurphAgeFromVaultInputBundle(input);
-}
-
-export async function getMurphAgeResearchPreviewForVault(
-  input: import("./murph-age.ts").GetMurphAgeResearchPreviewForVaultInput,
-): Promise<import("@murphai/health-metrics").MurphAgePublicCalculatorReport> {
-  const mod = await import("./murph-age.ts");
-  return mod.getMurphAgeResearchPreviewForVault(input);
-}
-
-export async function getMurphAgeResearchPreviewForSubmittedInputs(
-  input: import("./murph-age.ts").GetMurphAgeResearchPreviewForSubmittedInputsInput,
-): Promise<import("@murphai/health-metrics").MurphAgePublicCalculatorReport> {
-  const mod = await import("./murph-age.ts");
-  return mod.getMurphAgeResearchPreviewForSubmittedInputs(input);
-}
-
-export async function getMurphAgeSubmittedCalculatorViewBundle(
-  input: import("./murph-age.ts").GetMurphAgeSubmittedCalculatorViewBundleInput,
-): Promise<import("@murphai/health-metrics").MurphAgeSubmittedCalculatorViewBundle> {
-  const mod = await import("./murph-age.ts");
-  return mod.getMurphAgeSubmittedCalculatorViewBundle(input);
 }
 
 export async function listMetricTargets(

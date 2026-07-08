@@ -1,11 +1,35 @@
 import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
+import {
+  RAW_CAPTURES_DIRECTORY,
+  RAW_INBOX_DIRECTORY,
+} from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
 import type {
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
+
+// Reference authority is structural: refs must live in a vault family whose
+// only writers are the inbound-attachment pipeline (raw/inbox/**) or the
+// canonical capture surface (raw/captures/**). Both hold media a human sent
+// into this vault's conversation, so "pipeline-written media family" is the
+// consent fact that authorizes reuse in image generation. Confidentiality
+// across relationships is owned by vault separation (each 1:1 and each group
+// is its own runtime and vault), not by this check; this check blocks DIRECT
+// reference of document scans (raw/documents/**), bank/, derived/, and other
+// non-media vault files by a confused or injected model. It is a
+// misreference guardrail, not a wall against deliberate re-materialization:
+// the agent holds shell and capture authority inside its own vault, so no
+// within-vault path check can stop it from copying bytes into an authorized
+// family — just as it can already read any vault file into its own provider
+// -bound context. Do not "harden" this by coupling capture or other product
+// surfaces to image authority; the hard boundary lives at the vault seam.
+const AUTHORIZED_REFERENCE_IMAGE_PATH_PREFIXES = [
+  `${RAW_INBOX_DIRECTORY}/`,
+  `${RAW_CAPTURES_DIRECTORY}/`,
+] as const
 
 export const MAX_GENERATE_IMAGE_REFERENCE_COUNT = 16
 // Sized so the maximum 16-image total stays inside the hosted runner Worker
@@ -33,9 +57,6 @@ export interface ResolvedGenerateImageReference {
 }
 
 export async function resolveGenerateImageReferences(input: {
-  authorizedReferenceImageRefs:
-    | ReadonlyMap<string, { sha256: string }>
-    | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   refs: readonly string[]
   vaultRoot: string
@@ -59,26 +80,14 @@ export async function resolveGenerateImageReferences(input: {
     )
   }
 
-  // Per-turn authority: refs must be a subset of the image attachments the
-  // upstream pipeline accepted for this exact turn, AND the bytes on disk must
-  // still hash to the sha256 the evidence recorded. Vault-state pre-existence
-  // (an old materialized inbox image) is not authority on its own; neither is
-  // a path that was authorized earlier in the turn but whose bytes were
-  // mutated before tool execution. Fail closed when the caller did not compute
-  // an allowlist for this turn, when a requested ref is not in the allowlist,
-  // or (later, after read) when the computed sha256 mismatches.
-  const authorizedRefs = input.authorizedReferenceImageRefs
-  if (!authorizedRefs) {
-    throw new VaultCliError(
-      'ASSISTANT_IMAGE_REFERENCE_AUTHORITY_UNAVAILABLE',
-      'Image references require per-turn attachment authority.',
-    )
-  }
   for (const ref of refs) {
-    if (!authorizedRefs.has(ref)) {
+    const authorized = AUTHORIZED_REFERENCE_IMAGE_PATH_PREFIXES.some(
+      (prefix) => ref.startsWith(prefix),
+    )
+    if (!authorized) {
       throw new VaultCliError(
         'ASSISTANT_IMAGE_REFERENCE_REF_UNAUTHORIZED',
-        'Image references must point at attachments accepted for this turn.',
+        'Image references must live under raw/inbox/** or raw/captures/**.',
       )
     }
   }
@@ -140,14 +149,6 @@ export async function resolveGenerateImageReferences(input: {
     }
 
     const bytesSha256 = sha256Hex(bytes)
-    const expectedSha256 = authorizedRefs.get(ref)?.sha256
-    if (!expectedSha256 || expectedSha256.toLowerCase() !== bytesSha256.toLowerCase()) {
-      throw new VaultCliError(
-        'ASSISTANT_IMAGE_REFERENCE_BYTES_UNAUTHORIZED',
-        'Image reference bytes do not match the attachment evidence accepted for this turn.',
-      )
-    }
-
     totalBytes += bytes.byteLength
     resolved.push({
       bytes,

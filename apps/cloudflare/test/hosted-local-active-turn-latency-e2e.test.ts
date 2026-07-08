@@ -180,13 +180,18 @@ async function runActiveTurnLatencyProbe(input: {
     const baselineProviderRequestCount = requireScenario().assistantProviderRequests.length;
     // Keep the first turn busy with a real sandboxed sleep so the late input
     // below arrives while the Codex turn is still active.
-    requireScenario().queueAssistantResponses([
-      buildAssistantProviderShellCommandCall(
-        `sleep ${Math.ceil(codexTurnDelayMs / 1000)}`,
-      ),
-      replyText,
-      "Late reply.",
-    ]);
+    requireScenario().queueAssistantResponses(
+      [
+        buildAssistantProviderShellCommandCall(
+          `sleep ${Math.ceil(codexTurnDelayMs / 1000)}`,
+        ),
+        replyText,
+      ],
+      { matchInputContains: firstText },
+    );
+    requireScenario().queueAssistantResponses(["Late reply."], {
+      matchInputContains: lateText,
+    });
 
     const startedAt = performance.now();
     const firstResponse = await postSignedLinqWebhook(
@@ -295,13 +300,16 @@ async function runIdleShutdownDelayProbe(input: {
     expect(baselineCheckpoint.version).not.toBeNull();
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
-    requireScenario().queueAssistantResponses([replyText]);
+    const userText = "idle shutdown delay probe input";
+    requireScenario().queueAssistantResponses([replyText], {
+      matchInputContains: userText,
+    });
 
     const response = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
         eventId: `evt_idle_shutdown_delay_${probeId}`,
         messageId: `msg_idle_shutdown_delay_${probeId}`,
-        text: "idle shutdown delay probe input",
+        text: userText,
       }),
     );
     expect(response.status).toBe(202);

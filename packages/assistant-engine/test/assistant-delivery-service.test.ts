@@ -11,6 +11,9 @@ import {
   startAssistantChannelTypingIndicator,
 } from '../src/assistant/channel-typing.ts'
 import type {
+  AssistantChannelActivityHandle,
+} from '../src/assistant/channels/types.ts'
+import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
 } from '../src/assistant/service-contracts.ts'
@@ -388,7 +391,65 @@ test('typing indicators use the current audience route', async () => {
   expect(indicator).not.toBeNull()
   await vi.waitFor(() => {
     expect(startLinqTyping).toHaveBeenCalledWith({
+      replyToMessageId: null,
       target: 'linq-thread',
+      targetKind: 'thread',
+    })
+  })
+  await indicator?.stop()
+})
+
+test('typing indicators forward explicit Linq targets with reply-to proof', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'linq-participant',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'linq-thread',
+      },
+      identityId: null,
+      threadId: 'linq-thread',
+      threadIsDirect: true,
+    },
+  })
+  const input: AssistantMessageInput = {
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryReplyToMessageId: 'msg_123',
+    deliveryTarget: 'h1_0123456789abcdef01234567',
+    participantId: 'linq-participant',
+    prompt: 'Send the reply.',
+    threadId: 'linq-thread',
+    vault: '/vaults/test',
+  }
+  const startLinqTyping = vi.fn(async () => ({
+    stop: async () => undefined,
+  }))
+
+  const indicator = startAssistantChannelTypingIndicator({
+    channelDependencies: {
+      startLinqTyping,
+    },
+    input,
+    session,
+    sharedPlan: createSharedPlan({
+      audience: {
+        actorId: 'linq-participant',
+        channel: 'linq',
+        threadId: 'linq-thread',
+        threadIsDirect: true,
+      },
+    }),
+  })
+
+  expect(indicator).not.toBeNull()
+  await vi.waitFor(() => {
+    expect(startLinqTyping).toHaveBeenCalledWith({
+      replyToMessageId: 'msg_123',
+      target: 'h1_0123456789abcdef01234567',
+      targetKind: 'explicit',
     })
   })
   await indicator?.stop()
@@ -499,8 +560,8 @@ test('typing indicator stop does not wait for a pending start', async () => {
     vault: '/vaults/test',
   }
   const stop = vi.fn(async () => undefined)
-  let resolveStart!: (indicator: { stop(): Promise<void> }) => void
-  const startPromise = new Promise<{ stop(): Promise<void> }>((resolve) => {
+  let resolveStart!: (indicator: AssistantChannelActivityHandle) => void
+  const startPromise = new Promise<AssistantChannelActivityHandle>((resolve) => {
     resolveStart = resolve
   })
   const startLinqTyping = vi.fn(() => startPromise)
@@ -523,7 +584,9 @@ test('typing indicator stop does not wait for a pending start', async () => {
   })
 
   expect(indicator).not.toBeNull()
-  const stopPromise = indicator?.stop()
+  const stopPromise = indicator?.stop({
+    providerStop: false,
+  })
   let stopResolved = false
   stopPromise?.then(() => {
     stopResolved = true
@@ -535,6 +598,9 @@ test('typing indicator stop does not wait for a pending start', async () => {
   resolveStart({ stop })
   await vi.waitFor(() => {
     expect(stop).toHaveBeenCalledTimes(1)
+  })
+  expect(stop).toHaveBeenCalledWith({
+    providerStop: false,
   })
 })
 

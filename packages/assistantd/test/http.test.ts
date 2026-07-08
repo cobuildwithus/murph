@@ -117,6 +117,7 @@ const TEST_OUTBOX_INTENT: AssistantOutboxIntent = {
   channel: 'telegram',
   identityId: null,
   actorId: 'chat-123',
+  answeredMailboxItemIds: [],
   threadId: 'chat-123',
   threadIsDirect: true,
   replyToMessageId: null,
@@ -141,6 +142,7 @@ type LegacyMessageOutboxIntentWire = {
 
 const LEGACY_MESSAGE_OUTBOX_INTENT_KEYS = [
   'actorId',
+  'answeredMailboxItemIds',
   'attemptCount',
   'bindingDelivery',
   'channel',
@@ -238,6 +240,8 @@ const TEST_CRON_RUN = {
   jobId: TEST_CRON_JOB.jobId,
   trigger: 'scheduled',
   status: 'succeeded',
+  outcome: 'delivered',
+  reason: 'sent',
   startedAt: '2026-03-28T00:00:00.000Z',
   finishedAt: '2026-03-28T00:00:10.000Z',
   sessionId: TEST_SESSION.sessionId,

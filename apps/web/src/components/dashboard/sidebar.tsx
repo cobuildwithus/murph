@@ -88,7 +88,7 @@ function SidebarAuthActions() {
           Experiments tailored to you
         </p>
         <p className="text-[13px] leading-relaxed text-white/60">
-          Discover what actually makes you healthier. Sync your signals and track your progress.
+          Discover what actually makes you healthier. Connect your health data and track your progress.
         </p>
       </div>
       <Button

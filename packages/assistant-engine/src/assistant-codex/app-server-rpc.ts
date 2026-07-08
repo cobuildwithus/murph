@@ -355,6 +355,20 @@ export function rejectPendingCodexRpcRequests(
   pendingRequests.clear()
 }
 
+export function rejectCodexServerRequest(input: {
+  message: string
+  requestId: CodexRpcId
+  writeRpcMessage: (payload: Record<string, unknown>) => void
+}): void {
+  input.writeRpcMessage({
+    id: input.requestId,
+    error: {
+      code: -32000,
+      message: input.message,
+    },
+  })
+}
+
 export function denyUnsupportedCodexServerRequest(input: {
   message: CodexRpcMessage
   requestId: CodexRpcId
@@ -363,12 +377,10 @@ export function denyUnsupportedCodexServerRequest(input: {
   const method = typeof input.message.method === 'string'
     ? input.message.method
     : 'unknown'
-  input.writeRpcMessage({
-    id: input.requestId,
-    error: {
-      code: -32000,
-      message: `Murph does not support interactive Codex app-server request ${method} in noninteractive assistant turns.`,
-    },
+  rejectCodexServerRequest({
+    message: `Murph does not support interactive Codex app-server request ${method} in noninteractive assistant turns.`,
+    requestId: input.requestId,
+    writeRpcMessage: input.writeRpcMessage,
   })
 }
 

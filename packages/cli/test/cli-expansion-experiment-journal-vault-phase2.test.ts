@@ -1335,7 +1335,7 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
     assert.deepEqual(requireRecord(adherenceTarget.evidence, 'adherenceTarget.evidence'), {
       kind: 'linkedEventCount',
       eventKind: 'intervention_session',
-      missing: 'missed_after_grace',
+      missing: 'assumed_after_grace',
     })
     assert.deepEqual(requireRecord(adherenceTarget.grace, 'adherenceTarget.grace'), {
       hours: 24,
@@ -2224,10 +2224,13 @@ test.sequential(
             targetSessions: number | null
           }
           dataCoverage: {
+            activityProviders: string[]
             baselineDaysAvailable: number
             interventionDaysAvailable: number
+            primaryBiomarkerKey: string | null
             primaryMetricDaysAvailable: number
             status: string
+            wearableProviders: string[]
           }
           recommendation: {
             action: string
@@ -2449,7 +2452,10 @@ test.sequential(
       assert.equal(requireData(progress).progress.dayInRun, 20)
       assert.deepEqual(requireData(progress).progress.adherence, {
         completedSessions: 2,
+        confirmedSessions: 2,
+        evidence: { eventKind: 'intervention_session' },
         expectedSessionsByNow: 3,
+        loggedSessions: 2,
         minimumUsefulSessions: 3,
         sessionEventIds: [
           requireData(sessionBySlug).eventId,
@@ -2459,6 +2465,7 @@ test.sequential(
         targetSessions: 4,
       })
       assert.deepEqual(requireData(progress).progress.dataCoverage, {
+        activityProviders: [],
         baselineDaysAvailable: 0,
         interventionDaysAvailable: 0,
         primaryBiomarkerKey: 'biomarker:resting-heart-rate',
@@ -2522,7 +2529,7 @@ test.sequential(
         level: 'low',
         reasons: [
           'Primary biomarker coverage is insufficient for a strong before-and-after read.',
-          'Completed session count stayed below the minimum useful target.',
+          'Logged session count stayed below the minimum useful target.',
           'Context and confounder logs were present during the run.',
         ],
       })

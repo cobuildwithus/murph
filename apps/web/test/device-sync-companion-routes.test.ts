@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   listRecentConnectionWebhookSignals: vi.fn(),
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
   prismaClient: {
+    hostedMember: {
+      findUnique: vi.fn(),
+    },
     label: "test-prisma",
   },
   readHostedMemberCoreState: vi.fn(),
@@ -94,6 +97,12 @@ function mockVerifiedPrivyUser(): void {
     core: ACTIVE_MEMBER,
   });
   mocks.readHostedMemberCoreState.mockResolvedValue(ACTIVE_MEMBER);
+  mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
+    accountGroupMemberships: [],
+    billingStatus: ACTIVE_MEMBER.billingStatus,
+    suspendedAt: ACTIVE_MEMBER.suspendedAt,
+    threadContainer: null,
+  });
 }
 
 function signInTokenRequest(body?: unknown, bearerToken: string | null = "privy-identity-token") {
@@ -208,6 +217,12 @@ describe("device sync companion routes", () => {
         core: suspendedMember,
       });
       mocks.readHostedMemberCoreState.mockResolvedValue(suspendedMember);
+      mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
+        accountGroupMemberships: [],
+        billingStatus: suspendedMember.billingStatus,
+        suspendedAt: suspendedMember.suspendedAt,
+        threadContainer: null,
+      });
 
       const response = await signInTokenRoute.POST(signInTokenRequest({}));
 

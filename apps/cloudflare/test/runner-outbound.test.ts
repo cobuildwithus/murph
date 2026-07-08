@@ -69,8 +69,8 @@ import {
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
+  HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
-  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
@@ -157,6 +157,8 @@ const RUNNER_PROXY_TOKEN = "proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
 const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`;
 const HEARTBEAT_URL = "http://runner-control.worker/internal/active-invocation/heartbeat";
+const LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH =
+  "/api/internal/hosted-runtime/linq/contact-card/share-after-outbound";
 const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
@@ -224,12 +226,26 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
-      engagementKind: "requires_recent_inbound",
       target: "chat_123",
       targetKind: "thread",
     },
-    name: "hosted Linq egress engagement",
+    name: "hosted Linq egress authority",
     path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+  },
+  {
+    body: {
+      authority: {
+        accountLookupKey: "hbidx:phone:v1:account",
+        channel: "linq",
+        containerMemberId: "member_123",
+        threadId: "linq_chat_123",
+      },
+      chatId: "linq_chat_123",
+      service: "iMessage",
+      threadIsDirect: true,
+    },
+    name: "legacy hosted Linq contact-card share after outbound",
+    path: LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   },
   {
     body: {
@@ -333,21 +349,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted issue recording",
     path: "/api/internal/hosted-execution/issues/record",
-  },
-  {
-    body: {
-      authority: {
-        accountLookupKey: "hbidx:phone:v1:account",
-        channel: "linq",
-        containerMemberId: "member_123",
-        threadId: "linq_chat_123",
-      },
-      chatId: "linq_chat_123",
-      service: "iMessage",
-      threadIsDirect: true,
-    },
-    name: "hosted Linq contact-card share after outbound",
-    path: HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   },
   {
     body: {
@@ -656,8 +657,8 @@ describe("handleRunnerOutboundRequest", () => {
                     || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
+                    || path === LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH
                     || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
-                    || path === HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
                         "x-hosted-runtime-attempt-id": "attempt_1",
@@ -728,47 +729,6 @@ describe("handleRunnerOutboundRequest", () => {
       expect(timeoutSpy).toHaveBeenCalledWith(45_000);
     },
   );
-
-  it("rejects Linq contact-card share-after-outbound without the active runtime fence", async () => {
-    const validateRuntimeWriteFence = vi.fn(async () => true);
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request(`http://web-control.worker${HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH}`, {
-        body: JSON.stringify({
-          authority: {
-            accountLookupKey: "hbidx:phone:v1:account",
-            channel: "linq",
-            containerMemberId: "member_123",
-            threadId: "linq_chat_123",
-          },
-          chatId: "linq_chat_123",
-          service: "iMessage",
-          threadIsDirect: true,
-        }),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-        USER_RUNNER: {
-          getByName() {
-            return {
-              validateRuntimeWriteFence,
-            };
-          },
-        },
-      }),
-      "member_123" ,
-    );
-
-    expect(response.status).toBe(401);
-    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 
   it("rejects device-sync runtime snapshots without the active runtime fence", async () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
@@ -845,7 +805,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects Linq egress engagement assertions without the active runtime fence", async () => {
+  it("rejects Linq egress authority assertions without the active runtime fence", async () => {
     const validateRuntimeWriteFence = vi.fn(async () => true);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -853,9 +813,49 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`, {
         body: JSON.stringify({
-          engagementKind: "requires_recent_inbound",
           target: "chat_123",
           targetKind: "thread",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects legacy Linq contact-card share-after-outbound without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH}`, {
+        body: JSON.stringify({
+          authority: {
+            accountLookupKey: "hbidx:phone:v1:account",
+            channel: "linq",
+            containerMemberId: "member_123",
+            threadId: "linq_chat_123",
+          },
+          chatId: "linq_chat_123",
+          service: "iMessage",
+          threadIsDirect: true,
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -1230,6 +1230,135 @@ describe("handleRunnerOutboundRequest", () => {
               recordKey: "2026-06-09",
             },
           ],
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects hosted group tool requests without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_GROUP_TOOL_PATH}`, {
+        body: JSON.stringify({
+          action: "read_current",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards hosted group tool requests after active runtime fence validation", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn(async (
+      ..._args: Parameters<typeof fetch>
+    ): Promise<Response> =>
+      new Response(JSON.stringify({
+        action: "read_current",
+        result: { status: "ok" },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_GROUP_TOOL_PATH}`, {
+        body: JSON.stringify({
+          action: "read_current",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const requestInit = fetchMock.mock.calls[0]?.[1];
+    const headers = new Headers(requestInit?.headers);
+    expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("x-api-key")).toBeNull();
+  });
+
+  it("rejects hosted group tool requests when the runtime fence is stale", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_GROUP_TOOL_PATH}`, {
+        body: JSON.stringify({
+          action: "read_current",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",

@@ -24,6 +24,7 @@ import {
 } from "@murphai/runtime-state";
 
 import { getPrisma } from "../prisma";
+import { getHostedDomainRootUnwrapCache } from "./domain-root-unwrap-cache";
 import { getHostedWebCryptoConfig, selectActiveHostedCloudflareAutomationRecipient } from "./env";
 
 type HostedCryptoTx = Prisma.TransactionClient;
@@ -70,6 +71,32 @@ interface VerifiedHostedDomainRootEnvelopeRecord {
 export interface UnwrappedHostedDomainRoot {
   envelope: HostedDomainRootKeyEnvelopeV1;
   rootKey: Uint8Array;
+}
+
+async function unwrapWithScopedCache(
+  cacheKey: string,
+  compute: () => Promise<UnwrappedHostedDomainRoot>,
+): Promise<UnwrappedHostedDomainRoot> {
+  const cache = getHostedDomainRootUnwrapCache();
+  if (!cache) {
+    return compute();
+  }
+
+  let pending = cache.get(cacheKey);
+  if (!pending) {
+    pending = compute();
+    cache.set(cacheKey, pending);
+    pending.catch(() => {
+      cache.delete(cacheKey);
+    });
+  }
+  const unwrapped = await pending;
+  return {
+    envelope: unwrapped.envelope,
+    // Uint8Array.from copies; Buffer#slice would alias the cached master,
+    // which callers zeroize after use.
+    rootKey: Uint8Array.from(unwrapped.rootKey),
+  };
 }
 
 export async function provisionHostedCryptoDomainRootsForUser(input: {
@@ -155,13 +182,18 @@ export async function unwrapHostedDomainRootForWeb(input: {
   if (!WEB_UNWRAP_DOMAINS.has(input.domain)) {
     throw new Error(`Web is not allowed to unwrap hosted ${input.domain} domain roots.`);
   }
-  const envelope = await readActiveHostedDomainRootEnvelopeOrThrow({
-    domain: input.domain,
-    prisma: input.prisma,
-    userId: input.userId,
-  });
-  const rootKey = await unwrapEnvelopeForWeb({ envelope });
-  return { envelope, rootKey };
+  return unwrapWithScopedCache(
+    `${input.userId}|${input.domain}|@active`,
+    async () => {
+      const envelope = await readActiveHostedDomainRootEnvelopeOrThrow({
+        domain: input.domain,
+        prisma: input.prisma,
+        userId: input.userId,
+      });
+      const rootKey = await unwrapEnvelopeForWeb({ envelope });
+      return { envelope, rootKey };
+    },
+  );
 }
 
 export async function unwrapHostedDomainRootForWebByRootKeyId(input: {
@@ -173,9 +205,14 @@ export async function unwrapHostedDomainRootForWebByRootKeyId(input: {
   if (!WEB_UNWRAP_DOMAINS.has(input.domain)) {
     throw new Error(`Web is not allowed to unwrap hosted ${input.domain} domain roots.`);
   }
-  const envelope = await readHostedDomainRootEnvelopeByRootKeyIdOrThrow(input);
-  const rootKey = await unwrapEnvelopeForWeb({ envelope });
-  return { envelope, rootKey };
+  return unwrapWithScopedCache(
+    `${input.userId}|${input.domain}|${input.rootKeyId}`,
+    async () => {
+      const envelope = await readHostedDomainRootEnvelopeByRootKeyIdOrThrow(input);
+      const rootKey = await unwrapEnvelopeForWeb({ envelope });
+      return { envelope, rootKey };
+    },
+  );
 }
 
 export async function readHostedRuntimeCryptoContextForWorker(input: {

@@ -1,3 +1,5 @@
+import { after } from "next/server";
+
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { resolveHostedWhatsAppWebhookChallenge } from "@/src/lib/hosted-onboarding/whatsapp";
@@ -31,12 +33,21 @@ export const POST = withJsonError(async (request: Request) => {
   return jsonOk(
     await handleHostedOnboardingWhatsAppWebhook({
       rawBody,
+      scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,
       signature: request.headers.get("x-hub-signature-256"),
       signal: request.signal,
     }),
     202,
   );
 });
+
+function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
+}
 
 async function readHostedWhatsAppWebhookRawBody(request: Request): Promise<string> {
   try {

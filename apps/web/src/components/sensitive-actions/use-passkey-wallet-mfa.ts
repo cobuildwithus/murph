@@ -17,7 +17,7 @@ import {
   type HostedPrivyEmbeddedEthereumWallet,
 } from "@/src/lib/hosted-onboarding/privy-wallet-mfa";
 
-type SetupStep = "create-passkey" | "create-wallet" | "enroll-mfa";
+type SetupStep = "load-client" | "create-passkey" | "create-wallet" | "enroll-mfa";
 
 export function usePasskeyWalletMfa() {
   const { user, ready } = usePrivy();
@@ -25,9 +25,13 @@ export function usePasskeyWalletMfa() {
   const { createWallet } = useCreateWallet();
   const { initEnrollmentWithPasskey, submitEnrollmentWithPasskey } = useMfaEnrollment();
   const userRef = useRef<User | null>(user);
+  const readyRef = useRef(ready);
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+  useEffect(() => {
+    readyRef.current = ready;
+  }, [ready]);
 
   const [activeStep, setActiveStep] = useState<SetupStep | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +41,9 @@ export function usePasskeyWalletMfa() {
   async function ensureConfigured(): Promise<HostedPrivyEmbeddedEthereumWallet> {
     setError(null);
     try {
-      if (!ready || !userRef.current) {
-        throw new Error("Secure approval is still loading. Try again in a moment.");
+      if (!readyRef.current || !userRef.current) {
+        setActiveStep("load-client");
+        await waitForClientReady({ readyRef, userRef });
       }
 
       if (findHostedPrivyPasskeyCredentialIds(userRef.current).length === 0) {
@@ -53,7 +58,7 @@ export function usePasskeyWalletMfa() {
 
       let currentWallet = selectHostedPrivyEmbeddedEthereumWallet(userRef.current);
       if (currentWallet.status === "ambiguous") {
-        throw new Error("More than one Murph wallet was found. Contact support before continuing.");
+        throw new Error("Something looks off with your secure setup. Contact support before continuing.");
       }
       if (currentWallet.status === "missing") {
         setActiveStep("create-wallet");
@@ -66,18 +71,18 @@ export function usePasskeyWalletMfa() {
         currentWallet = selectHostedPrivyEmbeddedEthereumWallet(userRef.current);
       }
       if (currentWallet.status !== "ready") {
-        throw new Error("Your secure Murph wallet is not ready yet. Try again.");
+        throw new Error("Your secure setup isn't ready yet. Try again.");
       }
 
       const mfaMethods = readHostedPrivyMfaMethodTypes(userRef.current);
       if (mfaMethods.length > 0 && !hasOnlyHostedPrivyPasskeyMfa(userRef.current)) {
-        throw new Error("Your passkey must be the only method protecting your Murph wallet.");
+        throw new Error("Your passkey must be the only method protecting secure approvals. Contact support to fix this.");
       }
       if (!hasOnlyHostedPrivyPasskeyMfa(userRef.current)) {
         setActiveStep("enroll-mfa");
         const credentialIds = findHostedPrivyPasskeyCredentialIds(userRef.current);
         if (credentialIds.length === 0) {
-          throw new Error("Passkey not found after creation.");
+          throw new Error("We couldn't find your new passkey. Try again.");
         }
         await initEnrollmentWithPasskey();
         await submitEnrollmentWithPasskey(
@@ -102,6 +107,7 @@ export function usePasskeyWalletMfa() {
   }
 
   return {
+    clientAuthenticated: user !== null,
     configured,
     ensureConfigured,
     error,
@@ -113,13 +119,33 @@ export function usePasskeyWalletMfa() {
 
 function stepLabel(step: SetupStep): string {
   switch (step) {
+    case "load-client":
+      return "Loading secure approval";
     case "create-passkey":
       return "Creating passkey";
     case "create-wallet":
-      return "Setting up your Murph wallet";
+      return "Setting up secure approvals";
     case "enroll-mfa":
-      return "Linking passkey to your Murph wallet";
+      return "Linking your passkey";
   }
+}
+
+async function waitForClientReady(
+  state: {
+    readyRef: { current: boolean };
+    userRef: { current: User | null };
+  },
+  timeoutMs = 10_000,
+  intervalMs = 50,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (state.readyRef.current && state.userRef.current) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("Secure approval is still loading. Try again in a moment.");
 }
 
 async function waitForUserState(

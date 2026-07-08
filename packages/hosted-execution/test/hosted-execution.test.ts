@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,9 +42,6 @@ import {
   parseHostedComputerPauseForUserRequest,
   readHostedComputerRunOperationRoute,
 } from "../src/computer-use.ts";
-import type {
-  HostedExpectedCodexRootProcess as HostedExpectedCodexRootProcessFromRuntimeControl,
-} from "@murphai/hosted-execution/runtime-control";
 import {
   assessBrowserVaultReplicaFreshness,
   getBrowserVaultReplicaFreshness,
@@ -473,6 +470,7 @@ describe("hosted execution coverage gaps", () => {
       "member.channels.updated",
       "assistant.notification.requested",
       "device-sync.wake",
+      "group-newsletter.email-needed",
       "runtime.manual-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",
@@ -553,10 +551,6 @@ describe("hosted execution coverage gaps", () => {
       string,
       unknown
     >;
-    type RuntimeControlCodexRootProcess = HostedExpectedCodexRootProcessFromRuntimeControl;
-    // @ts-expect-error HostedExpectedCodexRootProcess must stay on the runtime-control subpath.
-    type RootCodexRootProcess = import("@murphai/hosted-execution").HostedExpectedCodexRootProcess;
-
     expect("createHostedExecutionDispatchClient" in rootModule).toBe(false);
     expect("buildHostedExecutionOutboxPayload" in rootModule).toBe(false);
     expect("buildHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
@@ -572,14 +566,6 @@ describe("hosted execution coverage gaps", () => {
       "MURPH_ELEVENLABS_MODEL_ID",
       "MURPH_ELEVENLABS_VOICE_ID",
     ]);
-    expectTypeOf<RuntimeControlCodexRootProcess>().toEqualTypeOf<{
-      commandLineDigest: string;
-      owner: "codex-app-server";
-      pid: number;
-      processGroupId: number | null;
-      startTimeTicksFromProcStat: string;
-      uid: number | null;
-    }>();
     expect(rootModule.parseAssistantUsageRecord).toBeTypeOf("function");
     expect(assistantUsageModule.parseAssistantUsageRecord).toBeTypeOf("function");
     expect("parseHostedRuntimeLogRequest" in browserVaultModule).toBe(false);
@@ -627,30 +613,34 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
       "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
       "HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH",
+      "HOSTED_RUNTIME_GROUP_TOOL_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
       "HOSTED_RUNTIME_LATENCY_TRACE_PATH",
-      "HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH",
       "HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH",
       "HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH",
       "HOSTED_RUNTIME_LOG_PATH",
-      "HOSTED_RUNTIME_MAILBOX_CONSUME_PATH",
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
+      "HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH",
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
+      "HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
     ]);
-    expect(routeModule.HOSTED_RUNTIME_MAILBOX_CONSUME_PATH).toBe(
-      "/api/internal/hosted-mailbox/consume",
-    );
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(
       "/api/internal/hosted-mailbox/payload/fetch",
     );
     expect(routeModule.HOSTED_RUNTIME_USAGE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/usage/record",
+    );
+    expect(routeModule.HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH).toBe(
+      "/api/internal/hosted-execution/groups/newsletter-tool",
+    );
+    expect(routeModule.HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH).toBe(
+      "/api/internal/hosted-runtime/vault-share/active-kinds",
     );
     expect(routeModule.HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH).toBe(
       "/api/internal/hosted-runtime/action-approvals/consume",

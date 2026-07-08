@@ -1,5 +1,6 @@
 export type {
   AssistantChannelActivityHandle,
+  AssistantChannelActivityStopOptions,
   AssistantChannelAdapter,
   AssistantChannelDependencies,
   AssistantDeliveryCandidate,

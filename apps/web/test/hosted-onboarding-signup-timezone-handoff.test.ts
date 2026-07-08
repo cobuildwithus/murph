@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
   deriveHostedOnboardingTimingErrorName: () => "test_error",
   finishHostedOnboardingTiming: vi.fn(),
+  logHostedOnboardingDiagnostic: vi.fn(),
   startHostedOnboardingTiming: () => ({ startedAt: 0 }),
 }));
 
@@ -113,6 +114,12 @@ describe("hosted signup timezone handoff", () => {
         }
       }),
       hostedMember: {
+        findUnique: vi.fn(async () => ({
+          accountGroupMemberships: [],
+          billingStatus: MEMBER.billingStatus,
+          suspendedAt: null,
+          threadContainer: null,
+        })),
         updateMany: vi.fn(async ({ data }: { data: { pendingActivationTimeZone: string } }) => {
           if (!memberResolutionTransactionOpen || activationClaimed) {
             sequence.push("timezone:lost");
@@ -123,9 +130,6 @@ describe("hosted signup timezone handoff", () => {
           sequence.push("timezone:persist");
           return { count: 1 };
         }),
-      },
-      hostedAccountGroupMembership: {
-        findFirst: vi.fn().mockResolvedValue(null),
       },
     } as unknown as PrismaClient;
 

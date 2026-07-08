@@ -26,6 +26,10 @@ import {
   type HostedLocalDevStack,
 } from "@murphai/hosted-local-harness/dev-hosted-local/stack";
 import {
+  resolveHostedWebDevDistDirName,
+  shouldUseHostedWebProductionStart,
+} from "@murphai/hosted-local-harness/dev-hosted-local/web-production-start";
+import {
   createHostedWebCallbackSignatureHeaders,
   readHostedWebCallbackSigningEnvironment,
 } from "../../src/web-callback-auth.ts";
@@ -111,6 +115,7 @@ export async function startHostedLocalDevHarness(input: {
   const nextDistDirSuffix = `e2e-${randomUUID()}`.toLowerCase();
   const nextEnvPath = path.join(repoRoot, "apps/web/next-env.d.ts");
   const originalNextEnvContents = await readFile(nextEnvPath, "utf8").catch(() => null);
+  let harnessRuntimeEnv: NodeJS.ProcessEnv | null = null;
   let nextDistDir: string | null = null;
   let stack: HostedLocalDevStack | null = null;
 
@@ -144,10 +149,8 @@ export async function startHostedLocalDevHarness(input: {
       MURPH_HOSTED_WEB_DEV_OWNER_PID: String(process.pid),
       NEXT_DIST_DIR_SUFFIX: resolvedNextDistDirSuffix,
     };
-    nextDistDir = resolveHostedLocalHarnessDistDir(
-      runtimeEnv.NEXT_DIST_DIR_MODE,
-      resolvedNextDistDirSuffix,
-    );
+    harnessRuntimeEnv = runtimeEnv;
+    nextDistDir = resolveHostedWebDevDistDirName(runtimeEnv);
 
     stack = await startHostedLocalDevStack({
       env: runtimeEnv,
@@ -282,6 +285,20 @@ export async function startHostedLocalDevHarness(input: {
           }
 
           const now = Date.now();
+          const hasDueWorkspaceWake = hostedStatusHasDueWorkspaceWake(status, now);
+          if (
+            hasDueWorkspaceWake
+            && !status.inFlight
+            && !status.lastErrorCode
+            && now >= nextCompletionRetryAt
+          ) {
+            nextCompletionRetryAt = now + hostedLocalCompletionRetryMs;
+            await maybeRunHostedManualRecovery(userId)
+              .catch(() => nudgeHostedUserBestEffort(userId));
+            await sleep(pollIntervalMs);
+            continue;
+          }
+
           const hasMailboxLag = hostedStatusHasMailboxLag(status);
           mailboxLagFirstObservedAt = hasMailboxLag
             ? mailboxLagFirstObservedAt ?? now
@@ -458,8 +475,17 @@ export async function startHostedLocalDevHarness(input: {
       await writeFile(nextEnvPath, originalNextEnvContents, "utf8");
     }
 
-    if (nextDistDir !== null) {
-      await rm(path.join(repoRoot, "apps/web", nextDistDir), {
+    const nextDistPath = nextDistDir === null
+      ? null
+      : path.join(repoRoot, "apps/web", nextDistDir);
+    if (
+      nextDistPath !== null
+      && !await shouldUseHostedWebProductionStart({
+        distDir: nextDistPath,
+        env: harnessRuntimeEnv ?? input.env,
+      })
+    ) {
+      await rm(nextDistPath, {
         force: true,
         recursive: true,
       });
@@ -607,11 +633,28 @@ function resolveHostedCompletionStatus(
     return null;
   }
 
+  if (hostedStatusHasDueWorkspaceWake(status)) {
+    return null;
+  }
+
   if (status.mailboxLag.every((lane) => lane.lag === "0")) {
     return status.workspace !== null ? status : null;
   }
 
   return null;
+}
+
+function hostedStatusHasDueWorkspaceWake(
+  status: HostedRunnerStatusResponse,
+  now = Date.now(),
+): boolean {
+  const rawNextWakeAt = status.workspace?.nextWakeAt ?? null;
+  if (rawNextWakeAt === null) {
+    return false;
+  }
+
+  const nextWakeAt = Date.parse(rawNextWakeAt);
+  return Number.isFinite(nextWakeAt) && nextWakeAt <= now;
 }
 
 function hasLocalMailboxDrainEvidence(
@@ -751,14 +794,6 @@ function readHostedStatusActivityAtMs(
 function hostedStatusHasCompletedWithError(status: HostedRunnerStatusResponse): boolean {
   return !status.inFlight
     && Boolean(status.lastErrorCode);
-}
-
-function resolveHostedLocalHarnessDistDir(
-  nextDistDirMode: string | undefined,
-  nextDistDirSuffix: string,
-): string {
-  const baseDistDir = nextDistDirMode === "smoke" ? ".next-smoke" : ".next-dev";
-  return `${baseDistDir}-${nextDistDirSuffix}`;
 }
 
 async function readHostedUserStatus(input: {

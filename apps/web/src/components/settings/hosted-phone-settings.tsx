@@ -44,7 +44,7 @@ export function HostedPhoneSettings(props: {
       await props.onLinked?.(payload);
       setExpanded(false);
     } catch (error) {
-      setErrorMessage(toErrorMessage(error, "Could not refresh phone state."));
+      setErrorMessage(toErrorMessage(error, "Your number was saved, but the page didn't refresh. Reload to see it."));
     }
   }
 

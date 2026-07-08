@@ -7,6 +7,7 @@ import {
 } from "@murphai/health-metrics";
 
 import type {
+  QueryCanonicalEntityFilters,
   QueryMetricPointFilters,
   QueryMetricTargetRow,
   QueryProjectionStatus,
@@ -49,6 +50,7 @@ import type {
   SearchResult,
 } from "./search-shared.ts";
 import {
+  listStoredCanonicalEntities,
   readStoredVaultSource,
 } from "./projection/entity-store.ts";
 import {
@@ -80,6 +82,7 @@ import {
 } from "./projection/wearable-summary-store.ts";
 
 export type {
+  QueryCanonicalEntityFilters,
   QueryProjectionStatus,
   RebuildQueryProjectionResult,
   QueryMetricPointFilters,
@@ -119,6 +122,14 @@ export async function loadProjectedVaultSource(
 ): Promise<VaultSourceSnapshot> {
   const location = await ensureFreshQueryProjection(vaultRoot);
   return readStoredVaultSource(location);
+}
+
+export async function listCanonicalEntitiesRuntime(
+  vaultRoot: string,
+  filters: QueryCanonicalEntityFilters = {},
+): Promise<import("./canonical-entities.ts").CanonicalEntity[]> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  return listStoredCanonicalEntities(location, filters);
 }
 
 export async function loadProjectedVaultSourceTolerant(

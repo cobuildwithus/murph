@@ -11,6 +11,16 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./murph-age": {
+      "types": "./dist/murph-age.d.ts",
+      "import": "./dist/murph-age.js",
+      "default": "./dist/murph-age.js"
+    },
+    "./murph-age-source-routes": {
+      "types": "./dist/murph-age-source-routes.d.ts",
+      "import": "./dist/murph-age-source-routes.js",
+      "default": "./dist/murph-age-source-routes.js"
     }
   },
   "files": [

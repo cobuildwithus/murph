@@ -82,7 +82,7 @@ describe("hosted settings sync helpers", () => {
       verifiedEmailAddress: "verified@example.com",
     })).resolves.toEqual({
       errorMessage: null,
-      successMessage: "Hosted email synced: verified@example.com",
+      successMessage: "Email connected: verified@example.com",
       syncResult: {
         emailAddress: "verified@example.com",
         runTriggered: true,

@@ -660,9 +660,12 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
       : []),
     'model_provider = "openai"',
     'model_reasoning_effort = "low"',
-    "model_auto_compact_token_limit = 128000",
+    "model_auto_compact_token_limit = 164000",
     'approval_policy = "never"',
     'sandbox_mode = "danger-full-access"',
+    // Mirror the hosted runtime config: non-login shells so the smoke probe
+    // exercises the same PATH semantics as production turns.
+    "allow_login_shell = false",
     "",
     "[skills]",
     "include_instructions = false",
@@ -672,6 +675,8 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     "",
     "[shell_environment_policy]",
     `inherit = ${JSON.stringify(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
+    // Mirror the hosted runtime config: include_only is the single gate.
+    "ignore_default_excludes = true",
     `include_only = ${tomlStringArray(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
     "",
   ].join("\n");

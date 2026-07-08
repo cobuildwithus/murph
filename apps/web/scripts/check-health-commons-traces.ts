@@ -2,8 +2,13 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
+
+import { resolveHostedWebDistDir } from "../next-artifacts";
+
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const distDir = path.join(appRoot, ".next");
+const distDirName = resolveHostedWebDistDir(PHASE_PRODUCTION_BUILD);
+const distDir = path.join(appRoot, distDirName);
 const forbiddenGeneratedCatalogPattern =
   /(?:^|[/\\])packages[/\\]health-commons[/\\]generated[/\\]catalog\.json$/u;
 const forbiddenGeneratedCatalogSubstring =
@@ -29,7 +34,7 @@ const requiredMeasurementMethodTraceArtifacts = [
 
 if (!existsSync(distDir)) {
   throw new Error(
-    "Cannot check Health Commons traces because apps/web/.next does not exist. Run next build first.",
+    `Cannot check Health Commons traces because apps/web/${distDirName} does not exist. Run next build first.`,
   );
 }
 

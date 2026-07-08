@@ -1912,7 +1912,8 @@ export const experimentAdherenceEvidenceRuleSchema = z
           "activity_session",
           "measurement",
         ]),
-        missing: z.enum(["missed_after_grace", "unknown"]),
+        missing: z.enum(["missed_after_grace", "assumed_after_grace", "unknown"]),
+        activityKind: boundedString(1, 80).optional(),
         partialCredit: numberSchema(0, 1).optional(),
       })
       .strict(),
@@ -1975,7 +1976,7 @@ export const experimentAdherenceTargetSchema = z
     targetId: patternedString(SLUG_PATTERN),
     label: boundedString(1, 160),
     phase: z.enum(["baseline", "intervention", "run"]),
-    calendar: experimentAdherenceCalendarSchema,
+    calendar: experimentAdherenceCalendarSchema.optional(),
     evidence: experimentAdherenceEvidenceRuleSchema,
     grace: experimentAdherenceGraceSchema.optional(),
     rollup: z
@@ -1986,7 +1987,27 @@ export const experimentAdherenceTargetSchema = z
       .strict()
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((target, context) => {
+    if (target.calendar === undefined && target.evidence.kind !== "linkedEventCount") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "calendar is required unless evidence is linkedEventCount.",
+        path: ["calendar"],
+      });
+    }
+    if (
+      target.evidence.kind === "linkedEventCount" &&
+      target.evidence.missing === "assumed_after_grace" &&
+      target.evidence.eventKind !== "intervention_session"
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "assumed_after_grace requires intervention_session evidence.",
+        path: ["evidence", "missing"],
+      });
+    }
+  });
 
 export const experimentAdherenceTargetsSchema = uniqueArray(experimentAdherenceTargetSchema, {
   maxItems: 8,
@@ -2270,8 +2291,20 @@ export const experimentProgressSnapshotSchema = z
     adherence: z
       .object({
         completedSessions: integerSchema(0),
+        assumedSessions: integerSchema(0).optional(),
+        evidence: z
+          .object({
+            eventKind: z.enum(["activity_session", "intervention_session"]),
+            activityKind: boundedString(1, 80).optional(),
+          })
+          .strict()
+          .optional(),
+        confirmedSessions: integerSchema(0).optional(),
         expectedSessionsByNow: integerSchema(0).nullable(),
+        loggedSessions: integerSchema(0).optional(),
         minimumUsefulSessions: integerSchema(0).nullable(),
+        partialSessions: integerSchema(0).optional(),
+        sensedSessions: integerSchema(0).optional(),
         sessionEventIds: uniqueArray(idSchema(ID_PREFIXES.event), { uniqueItems: true }).optional(),
         status: z.enum(EXPERIMENT_ADHERENCE_STATUSES),
         targetSessions: integerSchema(0).nullable(),
@@ -2280,6 +2313,7 @@ export const experimentProgressSnapshotSchema = z
     confounders: z.array(boundedString(1, 4000)).max(100),
     dataCoverage: z
       .object({
+        activityProviders: z.array(boundedString(1, 160)).max(20).optional(),
         baselineDaysAvailable: integerSchema(0),
         interventionDaysAvailable: integerSchema(0),
         primaryBiomarkerKey: healthCommonsKeySchema.nullable().optional(),

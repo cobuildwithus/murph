@@ -8,7 +8,6 @@ import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/h
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
 import { Button } from "@/src/components/ui/button";
-import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 export function FamilyInviteWebAcceptButton(props: { inviteCode: string }) {
   const router = useRouter();
@@ -60,25 +59,41 @@ export function FamilyInviteWebAcceptButton(props: { inviteCode: string }) {
   );
 }
 
-export function FamilyInviteSignInButton(props: { bindingLabel: string }) {
+export function FamilyInviteSignInButton(props: {
+  bindingLabel: string;
+  description?: string;
+  variant?: "link" | "primary";
+}) {
   const [open, setOpen] = useState(false);
 
-  function handleCompleted(_payload: HostedPrivyCompletionPayload) {
+  function handleCompleted() {
     navigateHostedAuthRedirect(readCurrentFamilyInvitePath());
   }
 
   return (
     <>
-      <Button type="button" size="xl" onClick={() => setOpen(true)}>
-        Sign in to join
-      </Button>
+      {props.variant === "link" ? (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-foreground"
+          onClick={() => setOpen(true)}
+        >
+          Sign in on the web instead
+        </Button>
+      ) : (
+        <Button type="button" size="xl" onClick={() => setOpen(true)}>
+          Sign in to join
+        </Button>
+      )}
       <AuthDialog
         open={open}
         onCompleted={handleCompleted}
         onOpenChange={setOpen}
         requireLaunchConsentOnCompletion
         title="Sign in to join Murph Family"
-        description={`Use the same ${props.bindingLabel} this invite was sent to.`}
+        description={props.description ?? `Use the same ${props.bindingLabel} this invite was sent to.`}
       />
     </>
   );

@@ -92,6 +92,10 @@ import {
   registerGoalCommands,
 } from './commands/health-goal-save.js'
 import {
+  groupSharedResultSchema,
+  registerGroupCommands,
+} from './commands/group.js'
+import {
   geneticsSaveResultSchema,
   registerGeneticsCommands,
 } from './commands/health-genetics-save.js'
@@ -103,6 +107,7 @@ import { registerHabitatCommands } from './commands/habitat.js'
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
+import { registerProfileCommands } from './commands/profile.js'
 import {
   medicationHistoryResultSchema,
   registerMedicationCommands,
@@ -538,6 +543,39 @@ export const vaultCliCommandDescriptors = [
     },
   },
   {
+    id: 'group',
+    bindingMode: 'none',
+    rootCommandNames: ['group'],
+    leafCommands: [
+      {
+        path: ['group', 'shared'],
+        description:
+          "Show the consented data members share with this group, grouped by member and joined to each member's shared display name.",
+        examples: [
+          {
+            description: 'Read everything members have shared with this group before running a challenge.',
+            options: {
+              vault: './vault',
+            },
+          },
+          {
+            description: 'Build a steps leaderboard from the shared daily step totals.',
+            options: {
+              kind: ['steps-days.v0'],
+              vault: './vault',
+            },
+          },
+        ],
+        hint:
+          'Empty until members have connected the relevant data and their runtime has next woken. When empty, say so plainly and never invent figures.',
+        output: groupSharedResultSchema,
+      },
+    ],
+    register({ cli }) {
+      registerGroupCommands(cli)
+    },
+  },
+  {
     id: 'batch',
     bindingMode: 'none',
     rootCommandNames: ['batch'],
@@ -873,6 +911,14 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['memory'],
     register({ cli }) {
       registerMemoryCommands(cli)
+    },
+  },
+  {
+    id: 'profile',
+    bindingMode: 'none',
+    rootCommandNames: ['profile'],
+    register({ cli }) {
+      registerProfileCommands(cli)
     },
   },
   {

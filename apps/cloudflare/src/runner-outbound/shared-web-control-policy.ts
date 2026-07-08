@@ -19,17 +19,18 @@ import {
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
+  HOSTED_RUNTIME_GROUP_TOOL_PATH,
+  HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
-  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_LOG_PATH,
-  HOSTED_RUNTIME_MAILBOX_CONSUME_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
+  HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -47,6 +48,10 @@ export {
 
 const HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH =
   /^\/api\/internal\/device-sync\/connect-targets\/[^/]+\/connect-link$/u;
+// Legacy compat for warm runner bundles during gradual rollout. Remove this
+// with the retained no-op web route once old containers have drained.
+const LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH =
+  "/api/internal/hosted-runtime/linq/contact-card/share-after-outbound";
 
 export type HostedRunnerWebControlOperation =
   | "action_approval_consume"
@@ -62,18 +67,20 @@ export type HostedRunnerWebControlOperation =
   | "device_sync_runtime_apply"
   | "device_sync_runtime_snapshot"
   | "family_plan_tool"
-  | "mailbox_consume"
+  | "group_tool"
   | "mailbox_fetch"
   | "mailbox_payload_decode"
   | "mailbox_payload_fetch"
   | "linq_delivery_outcome"
-  | "linq_egress_engagement"
-  | "phone_call_start"
   | "linq_contact_card_share_after_outbound"
+  | "linq_egress_engagement"
+  | "newsletter_tool"
+  | "phone_call_start"
   | "runtime_latency_trace"
   | "runtime_log_write"
   | "product_feedback_recording"
   | "usage_recording"
+  | "vault_share_active_kinds"
   | "vault_share_deliver"
   | "workspace_checkpoint"
   | "workspace_read"
@@ -94,15 +101,19 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH, "device_sync_runtime_snapshot"],
   [HOSTED_RUNTIME_LOG_PATH, "runtime_log_write"],
   [HOSTED_RUNTIME_LATENCY_TRACE_PATH, "runtime_latency_trace"],
-  [HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH, "linq_contact_card_share_after_outbound"],
   [HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH, "browser_vault_replica_publish"],
   [HOSTED_RUNTIME_CODEX_AUTH_PATH, "codex_auth_update"],
   [HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH, "family_plan_tool"],
-  [HOSTED_RUNTIME_MAILBOX_CONSUME_PATH, "mailbox_consume"],
+  [HOSTED_RUNTIME_GROUP_TOOL_PATH, "group_tool"],
+  [HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH, "newsletter_tool"],
   [HOSTED_RUNTIME_MAILBOX_FETCH_PATH, "mailbox_fetch"],
   [HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH, "mailbox_payload_fetch"],
   [HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH, "linq_delivery_outcome"],
   [HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH, "linq_egress_engagement"],
+  [
+    LEGACY_HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
+    "linq_contact_card_share_after_outbound",
+  ],
   [HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH, "workspace_checkpoint"],
   [HOSTED_RUNTIME_ISSUE_RECORD_PATH, "assistant_runtime_issue_export"],
   [HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH, "product_feedback_recording"],
@@ -159,6 +170,16 @@ export function readHostedRunnerWebControlPolicy(input: {
     return {
       allowed: true,
       operation: "workspace_read",
+    };
+  }
+
+  if (
+    input.method === "GET"
+    && input.path === HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH
+  ) {
+    return {
+      allowed: true,
+      operation: "vault_share_active_kinds",
     };
   }
 

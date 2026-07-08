@@ -89,6 +89,14 @@ export const assistantTurnEventKindValues = [
 ] as const
 export const assistantCronScheduleKindValues = automationTimeScheduleKindValues
 export const assistantCronTriggerValues = ['manual', 'scheduled'] as const
+export const assistantCronRunOutcomeValues = [
+  'delivered',
+  'delivery_pending',
+  'no_op',
+  'expired',
+  'skipped_gate',
+  'failed',
+] as const
 export const assistantCronRunStatusValues = [
   'succeeded',
   'failed',
@@ -98,6 +106,14 @@ export const assistantTurnReceiptStatusValues = [
   'running',
   'completed',
   'deferred',
+  'blocked',
+  'failed',
+] as const
+export const assistantTurnDeliveryDispositionValues = [
+  'not-requested',
+  'queued',
+  'sent',
+  'retryable',
   'blocked',
   'failed',
 ] as const
@@ -118,6 +134,9 @@ export const assistantTurnTimelineEventKindValues = [
   'turn.deferred',
   'turn.failed',
 ] as const
+// Must stay >= the hosted mailbox run import limit so one grouped auto-reply
+// cannot silently drop consume authority for answered items.
+export const ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100
 export const assistantAskResultStatusValues = ['completed'] as const
 export const assistantOnboardingStatusValues = ['open', 'completed'] as const
 export const assistantOnboardingCompletionReasonValues = [
@@ -287,6 +306,7 @@ export const assistantAliasStoreSchema = z
     version: z.literal(1),
     aliases: z.record(z.string(), assistantSessionIdSchema),
     conversationKeys: z.record(z.string(), assistantSessionIdSchema),
+    recentSessions: z.record(assistantSessionIdSchema, isoTimestampSchema).optional(),
   })
   .strict()
 
@@ -306,7 +326,7 @@ export const assistantDeliverySourceSchema = z.discriminatedUnion('kind', [
 
 export const assistantExternalThreadRouteAuthoritySchema = z
   .object({
-    accountLookupKey: z.string().min(1),
+    accountLookupKey: z.string().min(1).nullable().optional(),
     channel: z.enum(['email', 'linq', 'telegram']),
     containerMemberId: z.string().min(1),
     threadId: z.string().min(1),
@@ -567,6 +587,31 @@ const assistantSessionOutputSchema = assistantPersistedSessionSchema
   })
   .strict()
 
+export const assistantSessionSummarySchema = z
+  .object({
+    schema: z.literal('murph.assistant-conversation.v2'),
+    conversationId: assistantSessionIdSchema,
+    sessionId: assistantSessionIdSchema,
+    alias: z.string().min(1).nullable(),
+    binding: assistantSessionBindingSchema,
+    createdAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    lastTurnAt: isoTimestampSchema.nullable(),
+    turnCount: z.number().int().nonnegative(),
+    provider: z.enum(assistantChatProviderValues),
+    model: z.string().min(1).nullable(),
+    modelProvider: z.string().min(1).nullable(),
+    reasoningEffort: z.string().min(1).nullable(),
+    sandbox: z.enum(assistantSandboxValues).nullable(),
+    approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
+    profile: z.string().min(1).nullable(),
+    oss: z.boolean(),
+    executionDriver: z.enum(assistantExecutionDriverValues),
+    resumeKind: z.enum(assistantResumeKindValues).nullable(),
+    resumeThreadId: z.string().min(1).nullable(),
+  })
+  .strict()
+
 function normalizeAssistantSessionRecord(
   value: z.infer<typeof assistantPersistedSessionRecordSchema>,
 ): AssistantSession {
@@ -749,20 +794,43 @@ export const assistantTurnReceiptSchema = z
     responsePreview: z.string().nullable(),
     status: z.enum(assistantTurnReceiptStatusValues),
     deliveryRequested: z.boolean(),
-    deliveryDisposition: z.enum([
-      'not-requested',
-      'queued',
-      'sent',
-      'retryable',
-      'blocked',
-      'failed',
-    ]),
+    deliveryDisposition: z.enum(assistantTurnDeliveryDispositionValues),
     deliveryIntentId: assistantOutboxIntentIdSchema.nullable(),
     startedAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
     completedAt: isoTimestampSchema.nullable(),
     lastError: assistantDeliveryErrorSchema.nullable(),
     timeline: z.array(assistantTurnTimelineEventSchema),
+  })
+  .strict()
+
+export const assistantTurnReceiptSummaryTimelineEventSchema = z
+  .object({
+    at: isoTimestampSchema,
+    kind: z.enum(assistantTurnTimelineEventKindValues),
+    detail: z.string().nullable(),
+  })
+  .strict()
+
+export const assistantTurnReceiptSummarySchema = z
+  .object({
+    schema: z.literal('murph.assistant-turn-receipt-summary.v1'),
+    turnId: assistantTurnIdSchema,
+    sessionId: assistantSessionIdSchema,
+    provider: z.enum(assistantChatProviderValues),
+    providerModel: z.string().min(1).nullable(),
+    promptPreview: z.string().nullable(),
+    responsePreview: z.string().nullable(),
+    status: z.enum(assistantTurnReceiptStatusValues),
+    deliveryRequested: z.boolean(),
+    deliveryDisposition: z.enum(assistantTurnDeliveryDispositionValues),
+    deliveryIntentId: assistantOutboxIntentIdSchema.nullable(),
+    startedAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    completedAt: isoTimestampSchema.nullable(),
+    lastError: assistantDeliveryErrorSchema.nullable(),
+    timelineEventCount: z.number().int().nonnegative(),
+    latestTimelineEvent: assistantTurnReceiptSummaryTimelineEventSchema.nullable(),
   })
   .strict()
 
@@ -803,6 +871,9 @@ export const assistantOutboxIntentSchema = z
     deliveryConfirmationPending: z.boolean().default(false),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
+    answeredMailboxItemIds: z.array(z.string().trim().min(1))
+      .max(ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT)
+      .default([]),
     preparedDispatchToken: z.string().min(1).nullable().default(null),
     lastError: assistantDeliveryErrorSchema.nullable(),
   })
@@ -976,7 +1047,7 @@ export const assistantStatusResultSchema = z
     diagnostics: assistantDiagnosticsSnapshotSchema,
     quarantine: assistantQuarantineSummarySchema,
     runtimeBudget: assistantRuntimeBudgetSnapshotSchema,
-    recentTurns: z.array(assistantTurnReceiptSchema),
+    recentTurns: z.array(assistantTurnReceiptSummarySchema),
     warnings: z.array(z.string()),
   })
   .strict()
@@ -1156,13 +1227,91 @@ export const assistantCronJobSchema = z
   })
   .strict()
 
-export const assistantCronRunRecordSchema = z
-  .object({
+const assistantCronLegacyRunStatusValues: ReadonlySet<string> =
+  new Set(assistantCronRunStatusValues)
+
+function normalizeAssistantCronRunRecordInput(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value
+  }
+
+  const record = value as Record<string, unknown>
+  const outcome = typeof record.outcome === 'string'
+    ? record.outcome.trim()
+    : ''
+  if (outcome.length > 0) {
+    return {
+      ...record,
+      reason: normalizeAssistantCronRunReason(record.reason, outcome),
+    }
+  }
+
+  const status = typeof record.status === 'string'
+    ? record.status.trim()
+    : ''
+  if (!assistantCronLegacyRunStatusValues.has(status)) {
+    return value
+  }
+
+  return {
+    ...record,
+    outcome: legacyAssistantCronStatusToOutcome(status, record.error),
+    reason: legacyAssistantCronStatusToReason(status, record.error),
+  }
+}
+
+function legacyAssistantCronStatusToOutcome(
+  status: string,
+  error: unknown,
+): (typeof assistantCronRunOutcomeValues)[number] {
+  switch (status) {
+    case 'succeeded':
+      return 'delivered'
+    case 'failed':
+      return 'failed'
+    case 'skipped':
+      return typeof error === 'string' && error.length > 0
+        ? 'skipped_gate'
+        : 'no_op'
+    default:
+      return 'failed'
+  }
+}
+
+function legacyAssistantCronStatusToReason(
+  status: string,
+  error: unknown,
+): string {
+  if (status === 'failed') {
+    return 'legacy_failed'
+  }
+  if (status === 'skipped') {
+    return typeof error === 'string' && error.length > 0
+      ? 'legacy_skipped'
+      : 'legacy_no_op'
+  }
+  return 'legacy_succeeded'
+}
+
+function normalizeAssistantCronRunReason(
+  value: unknown,
+  fallback: string,
+): string {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : fallback
+}
+
+export const assistantCronRunRecordSchema = z.preprocess(
+  normalizeAssistantCronRunRecordInput,
+  z.object({
     schema: z.literal('murph.assistant-cron-run.v1'),
     runId: assistantCronRunIdSchema,
     jobId: assistantCronJobIdSchema,
     trigger: z.enum(assistantCronTriggerValues),
-    status: z.enum(assistantCronRunStatusValues),
+    outcome: z.enum(assistantCronRunOutcomeValues),
+    reason: z.string().trim().min(1).max(120),
+    status: z.enum(assistantCronRunStatusValues).optional(),
     startedAt: isoTimestampSchema,
     finishedAt: isoTimestampSchema,
     sessionId: assistantSessionIdSchema.nullable(),
@@ -1170,7 +1319,8 @@ export const assistantCronRunRecordSchema = z
     responseLength: z.number().int().nonnegative(),
     error: z.string().nullable(),
   })
-  .strict()
+  .strict(),
+)
 
 export const assistantCronPresetVariableSchema = z
   .object({
@@ -1229,7 +1379,11 @@ export const assistantDeliverResultSchema = z.object({
 export const assistantSessionListResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
-  sessions: z.array(assistantSessionOutputSchema),
+  filters: z.object({
+    limit: z.number().int().positive().max(50),
+  }),
+  sessions: z.array(assistantSessionSummarySchema),
+  count: z.number().int().nonnegative(),
 })
 
 export const assistantSessionShowResultSchema = z.object({
@@ -1491,6 +1645,9 @@ export type AssistantTurnTimelineEvent = z.infer<
   typeof assistantTurnTimelineEventSchema
 >
 export type AssistantTurnReceipt = z.infer<typeof assistantTurnReceiptSchema>
+export type AssistantTurnReceiptSummary = z.infer<
+  typeof assistantTurnReceiptSummarySchema
+>
 export type AssistantOutboxIntent = z.infer<typeof assistantOutboxIntentSchema>
 export type AssistantDiagnosticEvent = z.infer<
   typeof assistantDiagnosticEventSchema
@@ -1532,6 +1689,9 @@ export type AssistantDeliverResult = z.infer<
 >
 export type AssistantSessionListResult = z.infer<
   typeof assistantSessionListResultSchema
+>
+export type AssistantSessionSummary = z.infer<
+  typeof assistantSessionSummarySchema
 >
 export type AssistantSessionShowResult = z.infer<
   typeof assistantSessionShowResultSchema
@@ -1665,10 +1825,14 @@ export type AssistantOutboxIntentStatus =
   (typeof assistantOutboxIntentStatusValues)[number]
 export type AssistantCronScheduleKind = AutomationTimeScheduleKind
 export type AssistantCronTrigger = (typeof assistantCronTriggerValues)[number]
+export type AssistantCronRunOutcome =
+  (typeof assistantCronRunOutcomeValues)[number]
 export type AssistantCronRunStatus =
   (typeof assistantCronRunStatusValues)[number]
 export type AssistantTurnReceiptStatus =
   (typeof assistantTurnReceiptStatusValues)[number]
+export type AssistantTurnDeliveryDisposition =
+  (typeof assistantTurnDeliveryDispositionValues)[number]
 export type AssistantTurnTimelineEventKind =
   (typeof assistantTurnTimelineEventKindValues)[number]
 export type AssistantOutboxStatus =

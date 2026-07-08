@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
   hostedRuntimeMailboxMemberFindUnique: vi.fn(),
+  hostedThreadContainerParticipantFindFirst: vi.fn(),
   getPrisma: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
   publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
@@ -149,6 +150,7 @@ describe("hosted runtime internal web routes", () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
       buildRuntimeMailboxAccessRecord(),
     );
+    mocks.hostedThreadContainerParticipantFindFirst.mockResolvedValue(null);
     mocks.getPrisma.mockReturnValue(createPrismaClientStub());
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
     mocks.readHostedMailboxConsumedSeqByLane.mockImplementation((input: {
@@ -1549,7 +1551,47 @@ describe("hosted runtime internal web routes", () => {
     }
   });
 
-  it("does not fail checkpointing when the future wake recheck signal is unavailable", async () => {
+  it("signals a runtime recheck after checkpointing a due workspace wake", async () => {
+    const nextWakeAt = "2026-04-25T23:59:00.000Z";
+    mocks.checkpointHostedWorkspace.mockResolvedValue({
+      status: "updated",
+      workspace: buildWorkspaceRecord({
+        checkpointedAt: "2026-04-26T00:01:00.000Z",
+        nextWakeAt,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+
+    const response = await workspaceCheckpointRoute.POST(jsonRequest(
+      "/api/internal/hosted-workspace/checkpoint",
+      {
+        attemptId: "attempt_due_wake_1",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "2",
+        nextWakeAt,
+        nextWakeReason: "assistant",
+        reason: "idle_shutdown",
+        snapshotRef: createBundleRef("snapshot_due_wake"),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedWorkspaceCheckpointResponse(await response.json()))
+      .toMatchObject({
+        checkpointed: true,
+        workspace: {
+          nextWakeAt,
+          nextWakeReason: "assistant",
+          version: "5",
+        },
+      });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+  });
+
+  it("does not fail checkpointing when the wake recheck signal is unavailable", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -2570,6 +2612,9 @@ function createPrismaClientStub() {
     hostedMember: {
       findUnique: mocks.hostedRuntimeMailboxMemberFindUnique,
     },
+    hostedThreadContainerParticipant: {
+      findFirst: mocks.hostedThreadContainerParticipantFindFirst,
+    },
     hostedAccountGroupMembership: {
       count: vi.fn(async () => 0),
       findFirst: vi.fn(async (): Promise<unknown | null> => null),
@@ -2580,10 +2625,18 @@ function createPrismaClientStub() {
 
 function buildRuntimeMailboxAccessRecord(overrides: Partial<{
   id: string;
+  accountGroupMemberships: Array<{
+    group: { billingStatus: string; suspendedAt: Date | null };
+    status: string;
+  }>;
   billingStatus: string;
   suspendedAt: Date | null;
   threadContainer: {
     owner: {
+      accountGroupMemberships: Array<{
+        group: { billingStatus: string; suspendedAt: Date | null };
+        status: string;
+      }>;
       billingStatus: string;
       suspendedAt: Date | null;
     };
@@ -2591,6 +2644,7 @@ function buildRuntimeMailboxAccessRecord(overrides: Partial<{
 }> = {}) {
   return {
     id: "member_routes_1",
+    accountGroupMemberships: [],
     billingStatus: "active",
     suspendedAt: null,
     threadContainer: null,

@@ -571,7 +571,7 @@ test('timeline forwards repeatable filters and selective entry types', async () 
     kinds: [],
     streams: [],
     entryTypes: [],
-    limit: 20,
+    limit: 10,
   })
   assert.equal(requireData(defaultTimeline.envelope).items[0]?.id, 'entry_01')
   assert.equal('data' in (requireData(defaultTimeline.envelope).items[0] ?? {}), false)
@@ -585,7 +585,7 @@ test('timeline forwards repeatable filters and selective entry types', async () 
     includeEvents: true,
     includeAssessments: true,
     includeDailySampleSummaries: true,
-    limit: 20,
+    limit: 10,
   })
 
   const filteredTimeline = await runSearchCli<{

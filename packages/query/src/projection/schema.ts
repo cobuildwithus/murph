@@ -13,8 +13,8 @@ export type DatabaseSync = import("node:sqlite").DatabaseSync;
 export type SqliteRow = Record<string, unknown>;
 
 export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
-// 13: canonical sample-summary metric point source ids.
-export const QUERY_PROJECTION_SQLITE_VERSION = 13;
+// 15: Junction Apple HealthKit zero sleep summary repair.
+export const QUERY_PROJECTION_SQLITE_VERSION = 15;
 
 export interface QueryProjectionLocation {
   absolutePath: string;

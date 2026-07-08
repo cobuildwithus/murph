@@ -1,5 +1,11 @@
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  normalizeMetricValue,
+  resolveMetricDefinition,
+  type MetricPoint,
+  type MetricSourceKind,
+} from "@murphai/health-metrics";
+import {
   assessMurphAgeInputBundle,
   assessMurphAgeSecondaryContextBundles,
   assessMurphAgeWearableShadowIncrements,
@@ -8,12 +14,8 @@ import {
   isMurphAgeWearableShadowAnchorCardId,
   listMurphAgeModelCardProductPromotionBlockers,
   listMurphAgeSubmittedCalculatorInputBundleSpecs,
-  normalizeMetricValue,
-  resolveMetricDefinition,
   resolveMurphAgeWearableBridgeMetricSourceKind,
   resolveMurphAgeModelCardPolicy,
-  type MetricPoint,
-  type MetricSourceKind,
   type MurphAgeContextBundleAssessment,
   type MurphAgeInputBundleAssessment,
   type MurphAgeInputBundleId,
@@ -24,7 +26,7 @@ import {
   type MurphAgeWearableShadowIncrementAssessment,
   type MurphAgeWearableShadowIncrementFamily,
   type MurphAgeWearableShadowIncrementStatus,
-} from "@murphai/health-metrics";
+} from "@murphai/health-metrics/murph-age";
 
 import type {
   BrowserVaultMetricRow,

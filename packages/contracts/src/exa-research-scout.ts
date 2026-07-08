@@ -14,11 +14,13 @@ export const MAX_RESEARCH_SCOUT_BATCH_LANES = 4;
 export const DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE = 5;
 
 export const EXA_RESEARCH_SCOUT_SYSTEM_PROMPT = [
-  "Find high-quality recent human health research.",
+  "Find high-quality recent human health research with practical interpretive value.",
   "Prefer clinical guidelines, meta-analyses, systematic reviews, randomized trials, and large prospective cohorts.",
+  "Prefer sources whose findings could change interpretation of an active experiment, metric, clinician question, or tradeoff.",
   "Include therapies or treatments only when source quality is credible.",
-  "Avoid generic wellness news, supplement marketing, podcasts, tweets, and fear-mongering.",
-  "Return candidate studies or sources, not personalized medical advice.",
+  "Avoid generic wellness news, obvious habit basics, supplement marketing, podcasts, tweets, and fear-mongering.",
+  "Return candidate studies or sources, not personalized medical advice or tasks to do.",
+  "In actionOrQuestion, phrase a cautious possible interpretation or question, not a behavior prescription.",
   "Keep caveats explicit.",
   "Use resultIndex to point to the source in the returned search results; do not put citation fields in the structured output.",
 ].join("\n");
@@ -77,8 +79,9 @@ const EXA_RESEARCH_SCOUT_QUERY_PROFILE_SECTIONS = [
 const EXA_RESEARCH_SCOUT_QUERY_SUFFIX_LINES = [
   "",
   "Prefer studies, clinical guidelines, therapy research, treatment research, and credible reviews.",
-  "Reject generic wellness content, social media, marketing pages, podcasts, and unsupported supplement claims.",
-  "Return candidates that can later be checked locally against a private user vault.",
+  "Prefer candidates whose finding changes interpretation, measurement, or clinician-question framing.",
+  "Reject generic wellness content, obvious habit basics, social media, marketing pages, podcasts, and unsupported supplement claims.",
+  "Return candidates that can later be checked locally against a private user vault; local context decides send-worthiness.",
 ] as const;
 
 const EXA_RESEARCH_SCOUT_REQUEST_KEYS = [

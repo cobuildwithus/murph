@@ -187,7 +187,7 @@ describe("HostedDataPrivacySettings", () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
 
-    const button = findButton(container, "Download vault JSON");
+    const button = findButton(container, "Download my data");
     assert.equal(button.disabled, true);
 
     await act(async () => {
@@ -239,7 +239,7 @@ describe("HostedDataPrivacySettings", () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
 
-    await clickButton(container, "Download vault JSON", window);
+    await clickButton(container, "Download my data", window);
 
     expect(mocks.authorize).toHaveBeenCalledWith("vault.export");
     expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledWith({
@@ -306,7 +306,7 @@ describe("HostedDataPrivacySettings", () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
 
-    await clickButton(container, "Download vault JSON", window);
+    await clickButton(container, "Download my data", window);
 
     expect(mocks.loadBrowserVaultReplica).toHaveBeenCalledTimes(1);
     expect(createObjectURL).not.toHaveBeenCalled();

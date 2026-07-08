@@ -5,6 +5,7 @@ import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
+  HostedExecutionGroupNewsletterEmailNeededWake,
   HostedExecutionEmailConversationMessagePayload,
   HostedExecutionLinqConversationMessagePayload,
   HostedExecutionLinqConversationMessage,
@@ -23,6 +24,7 @@ import type {
   HostedCodexAuthAction,
   HostedExecutionTelegramMessage,
   HostedExecutionVaultShareDeliveryWake,
+  HostedExecutionVaultShareRevokeWake,
   HostedExecutionTelegramConversationMessagePayload,
   HostedExecutionWhatsAppMessage,
   HostedExecutionWhatsAppConversationMessagePayload,
@@ -30,7 +32,9 @@ import type {
 } from "./contracts.ts";
 import {
   parseHostedVaultShareDeliveryPayload,
+  parseHostedVaultShareRevokePayload,
   type HostedVaultShareDeliveryPayload,
+  type HostedVaultShareRevokePayload,
 } from "./vault-share.ts";
 
 function cloneLinqMessagePart(
@@ -121,7 +125,9 @@ type HostedExecutionMemberOwnedWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
-  | HostedExecutionVaultShareDeliveryWake;
+  | HostedExecutionGroupNewsletterEmailNeededWake
+  | HostedExecutionVaultShareDeliveryWake
+  | HostedExecutionVaultShareRevokeWake;
 
 function buildHostedExecutionMemberOwnedWakeBase<
   TKind extends HostedExecutionMemberOwnedWake["kind"],
@@ -400,6 +406,24 @@ export function buildHostedExecutionVaultShareDeliveryWake(input: {
   };
 }
 
+export function buildHostedExecutionVaultShareRevokeWake(input: {
+  eventId: string;
+  memberId: string;
+  revoke: HostedVaultShareRevokePayload;
+}): HostedExecutionVaultShareRevokeWake {
+  const revoke = parseHostedVaultShareRevokePayload(input.revoke);
+
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "vault-share.revoke",
+      memberId: input.memberId,
+      occurredAt: revoke.revokedAt,
+    }),
+    revoke,
+  };
+}
+
 export function buildHostedExecutionMemberChannelsUpdatedWake(input: {
   eventId: string;
   memberChannels: HostedExecutionMemberChannels;
@@ -496,5 +520,26 @@ export function buildHostedExecutionDeviceSyncWake(input: {
     ...(input.provider === undefined ? {} : { provider: input.provider }),
     reason: input.reason,
     userId: input.userId,
+  };
+}
+
+export function buildHostedExecutionGroupNewsletterEmailNeededWake(input: {
+  directRoute?: HostedExecutionGroupNewsletterEmailNeededWake["directRoute"];
+  eventId: string;
+  groupDisplayName: string | null;
+  groupId: string;
+  memberId: string;
+  occurredAt: string;
+}): HostedExecutionGroupNewsletterEmailNeededWake {
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "group-newsletter.email-needed",
+      memberId: input.memberId,
+      occurredAt: input.occurredAt,
+    }),
+    ...(input.directRoute === undefined ? {} : { directRoute: input.directRoute }),
+    groupDisplayName: input.groupDisplayName,
+    groupId: input.groupId,
   };
 }

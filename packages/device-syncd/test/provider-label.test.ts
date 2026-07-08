@@ -7,7 +7,7 @@ import {
   formatDeviceSyncProviderLabel,
 } from "../src/provider-label.ts";
 
-test("formatDeviceSyncProviderLabel prefers the registered descriptor display name", () => {
+test("formatDeviceSyncProviderLabel prefers the configured source label", () => {
   assert.equal(formatDeviceSyncProviderLabel("whoop"), "WHOOP");
 });
 

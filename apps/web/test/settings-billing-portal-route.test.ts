@@ -110,7 +110,7 @@ test("creates a Stripe billing portal session for an authenticated hosted member
   });
 });
 
-test("creates a Stripe billing portal session for a Family owner group", async () => {
+test("creates a Stripe billing portal session for a family owner group", async () => {
   const response = await billingPortalRoute.POST(
     new Request("https://join.example.test/api/settings/billing/portal", {
       body: JSON.stringify({

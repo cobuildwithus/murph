@@ -20,6 +20,12 @@ import {
 } from "./origin.ts";
 import { formatProviderName } from "./provider-policy.ts";
 import {
+  normalizeResourceToken,
+  resolveSleepCandidateProvider,
+  sleepMetricAssociatedWithWindow,
+  sleepMetricMatchesWindow,
+} from "./sleep-association.ts";
+import {
   buildCandidateId,
   collectSortedDatesDesc,
   latestIsoTimestamp,
@@ -30,18 +36,34 @@ import {
   uniqueStrings,
 } from "./shared.ts";
 import type {
+  WearableActivitySessionMetricValues,
   WearableActivitySessionAggregate,
   WearableCandidateSourceFamily,
   WearableDataset,
   WearableExternalRef,
   WearableFilters,
+  WearableHeartRateZoneAggregate,
   WearableMetricCandidate,
   WearableMetricKey,
+  WearableMetricSuppressionEvidence,
+  WearableMetricSelection,
   WearableProvenanceDiagnostic,
   WearableSleepWindowCandidate,
 } from "./types.ts";
 
 import { compareMetricCandidateByDateDesc, compareSleepWindowByDateDesc } from "./selection.ts";
+
+const APPLE_HEALTH_KIT_PROVIDER = "apple-health-kit";
+const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
+const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
+const INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS = new Map<WearableMetricKey, string>([
+  ["totalSleepMinutes", "total-sleep-minutes"],
+  ["sleepEfficiency", "sleep-efficiency"],
+  ["deepMinutes", "deep-sleep-minutes"],
+  ["lightMinutes", "sleep-light-minutes"],
+  ["remMinutes", "rem-sleep-minutes"],
+]);
+const INVALID_ZERO_SLEEP_METRICS = new Set<string>(INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS.keys());
 
 export function collectWearableDataset(
   vault: VaultReadModel,
@@ -162,18 +184,143 @@ export function collectWearableDataset(
   const filteredSleepWindows = dedupedSleepWindows.filter((candidate) => matchesDateFilters(candidate.date, filters));
   const sleepStageAggregates = buildSleepStageAggregateCandidates(sleepStageCandidates, dedupedSleepWindows)
     .filter((candidate) => matchesDateFilters(candidate.date, filters));
+  const sanitizedMetricCandidates = sanitizeWearableMetricCandidates(rawMetricCandidates, dedupedSleepWindows);
   const metricCandidates = [
-    ...dedupeExactMetricCandidates(rawMetricCandidates).candidates,
+    ...dedupeExactMetricCandidates(sanitizedMetricCandidates.candidates).candidates,
     ...dedupeExactMetricCandidates(sleepStageAggregates).candidates,
   ].sort(compareMetricCandidateByDateDesc);
 
   return {
     activitySessionAggregates: buildActivitySessionAggregates(activitySessions),
+    metricSuppressionEvidence: sanitizedMetricCandidates.suppressionEvidence,
     metricCandidates,
     provenanceDiagnostics: [...provenanceDiagnostics.values()].sort(compareWearableProvenanceDiagnostics),
     rawMetricCandidates,
     sleepWindows: filteredSleepWindows,
   };
+}
+
+function sanitizeWearableMetricCandidates(
+  candidates: readonly WearableMetricCandidate[],
+  sleepWindows: readonly WearableSleepWindowCandidate[],
+): {
+  candidates: WearableMetricCandidate[];
+  suppressionEvidence: WearableMetricSuppressionEvidence[];
+} {
+  const invalidCandidates = collectInvalidAppleZeroSleepMetricCandidates(candidates, sleepWindows);
+  const invalidRecordIds = new Set(invalidCandidates.flatMap((candidate) => candidate.recordIds));
+
+  return {
+    candidates: candidates.filter((candidate) => !candidate.recordIds.some((recordId) => invalidRecordIds.has(recordId))),
+    suppressionEvidence: buildMetricSuppressionEvidence(invalidCandidates),
+  };
+}
+
+function collectInvalidAppleZeroSleepMetricCandidates(
+  candidates: readonly WearableMetricCandidate[],
+  sleepWindows: readonly WearableSleepWindowCandidate[],
+): WearableMetricCandidate[] {
+  const invalidCandidates: WearableMetricCandidate[] = [];
+
+  for (const window of sleepWindows) {
+    if (resolveSleepCandidateProvider(window) !== APPLE_HEALTH_KIT_PROVIDER) {
+      continue;
+    }
+
+    const windowCandidates = candidates.filter((candidate) => sleepMetricAssociatedWithWindow(candidate, window));
+    const awakeMinutes = firstPositiveMetricValue(windowCandidates, "awakeMinutes");
+    const invalidZeroTotalCandidates = windowCandidates.filter((candidate) =>
+      candidate.metric === "totalSleepMinutes" &&
+      candidate.value === 0 &&
+      isInvalidZeroSleepSummaryOwnedCandidate(candidate, window)
+    );
+    if (
+      invalidZeroTotalCandidates.length === 0 ||
+      awakeMinutes === null ||
+      window.durationMinutes <= awakeMinutes + 1
+    ) {
+      continue;
+    }
+
+    invalidCandidates.push(
+      ...windowCandidates.filter((candidate) =>
+        INVALID_ZERO_SLEEP_METRICS.has(candidate.metric) &&
+        candidate.value === 0 &&
+        (
+          isInvalidZeroSleepSummaryOwnedCandidate(candidate, window) ||
+          isLegacyInvalidZeroSleepSummaryCompanion(candidate, invalidZeroTotalCandidates)
+        )
+      ),
+    );
+  }
+
+  const invalidRecordIds = new Set<string>();
+  return invalidCandidates.filter((candidate) => {
+    const unseenRecordIds = candidate.recordIds.filter((recordId) => !invalidRecordIds.has(recordId));
+    for (const recordId of unseenRecordIds) {
+      invalidRecordIds.add(recordId);
+    }
+    return unseenRecordIds.length > 0;
+  });
+}
+
+function buildMetricSuppressionEvidence(
+  invalidCandidates: readonly WearableMetricCandidate[],
+): WearableMetricSuppressionEvidence[] {
+  const evidence = new Map<string, { date: string; metricKey: string; recordIds: string[] }>();
+
+  for (const candidate of invalidCandidates) {
+    const metricKey = INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS.get(candidate.metric as WearableMetricKey);
+    if (!metricKey) {
+      continue;
+    }
+
+    const key = `${candidate.date}\0${metricKey}`;
+    const existing = evidence.get(key) ?? {
+      date: candidate.date,
+      metricKey,
+      recordIds: [],
+    };
+    existing.recordIds = uniqueStrings([...existing.recordIds, ...candidate.recordIds]);
+    evidence.set(key, existing);
+  }
+
+  return [...evidence.values()];
+}
+
+function isInvalidZeroSleepSummaryOwnedCandidate(
+  candidate: WearableMetricCandidate,
+  window: WearableSleepWindowCandidate,
+): boolean {
+  const normalizerVersion = normalizeResourceToken(candidate.dataOrigin?.normalizerVersion);
+  if (normalizerVersion === JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION) {
+    return false;
+  }
+
+  return sleepMetricMatchesWindow(candidate, window) ||
+    normalizerVersion === JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION;
+}
+
+function isLegacyInvalidZeroSleepSummaryCompanion(
+  candidate: WearableMetricCandidate,
+  invalidZeroTotalCandidates: readonly WearableMetricCandidate[],
+): boolean {
+  if (normalizeResourceToken(candidate.dataOrigin?.normalizerVersion)) {
+    return false;
+  }
+
+  return invalidZeroTotalCandidates.some((totalCandidate) =>
+    candidate.provider === totalCandidate.provider &&
+    wearableDataOriginKey(candidate.dataOrigin) === wearableDataOriginKey(totalCandidate.dataOrigin) &&
+    candidate.recordedAt === totalCandidate.recordedAt
+  );
+}
+
+function firstPositiveMetricValue(
+  candidates: readonly WearableMetricCandidate[],
+  metric: WearableMetricKey,
+): number | null {
+  return candidates.find((candidate) => candidate.metric === metric && candidate.value > 0)?.value ?? null;
 }
 
 export function buildActivitySessionAggregates(
@@ -184,16 +331,25 @@ export function buildActivitySessionAggregates(
   for (const candidate of dedupeExactMetricCandidates(candidates).candidates) {
     const key = `${candidate.date}:${candidate.provider}:${wearableDataOriginKey(candidate.dataOrigin)}`;
     const activityType = candidate.activityType ?? null;
+    const heartRateZones = candidate.heartRateZones ?? [];
     const existing = grouped.get(key);
     if (existing) {
       existing.paths = uniqueStrings([...existing.paths, ...candidate.paths]);
       existing.recordIds = uniqueStrings([...existing.recordIds, ...candidate.recordIds]);
+      existing.heartRateZones = mergeHeartRateZoneAggregates([
+        ...existing.heartRateZones,
+        ...heartRateZones,
+      ]);
       existing.sessionMinutes += candidate.value;
       existing.sessionCount += 1;
       existing.workoutMetricKeys = uniqueStrings([
         ...existing.workoutMetricKeys,
         ...(candidate.workoutMetricKeys ?? []),
       ]).sort();
+      existing.workoutMetricValues = mergeActivitySessionWorkoutMetricValues(
+        existing.workoutMetricValues,
+        candidate.workoutMetricValues,
+      );
       if (activityType && !existing.activityTypes.includes(activityType)) {
         existing.activityTypes.push(activityType);
         existing.activityTypes.sort();
@@ -212,6 +368,7 @@ export function buildActivitySessionAggregates(
       ]),
       dataOrigin: candidate.dataOrigin ?? null,
       date: candidate.date,
+      heartRateZones: mergeHeartRateZoneAggregates(heartRateZones),
       paths: [...candidate.paths],
       provider: candidate.provider,
       recordedAt: candidate.recordedAt,
@@ -219,6 +376,7 @@ export function buildActivitySessionAggregates(
       sessionCount: 1,
       sessionMinutes: candidate.value,
       workoutMetricKeys: uniqueStrings(candidate.workoutMetricKeys ?? []).sort(),
+      workoutMetricValues: candidate.workoutMetricValues ?? {},
     });
   }
 
@@ -428,6 +586,35 @@ export function buildActivitySessionMetricCandidate(
   };
 }
 
+export function buildActivitySessionWorkoutMetricCandidates(
+  aggregate: WearableActivitySessionAggregate,
+): WearableMetricCandidate[] {
+  return ACTIVITY_SESSION_WORKOUT_METRIC_SPECS.flatMap((spec) => {
+    const value = aggregate.workoutMetricValues?.[spec.metric];
+    if (value === undefined) {
+      return [];
+    }
+
+    return [{
+      candidateId: `${aggregate.candidateId}:${spec.metric}`,
+      dataOrigin: aggregate.dataOrigin ?? null,
+      date: aggregate.date,
+      externalRef: null,
+      metric: spec.metric,
+      occurredAt: null,
+      paths: [...aggregate.paths],
+      provider: aggregate.provider,
+      recordedAt: aggregate.recordedAt,
+      recordIds: [...aggregate.recordIds],
+      sourceFamily: "derived",
+      sourceKind: "activity-session-aggregate",
+      title: `${formatProviderName(aggregate.provider)} activity sessions`,
+      unit: spec.unit,
+      value,
+    }];
+  });
+}
+
 export function buildSleepWindowMetricCandidate(
   window: WearableSleepWindowCandidate,
 ): WearableMetricCandidate {
@@ -452,14 +639,46 @@ export function buildSleepWindowMetricCandidate(
 
 export function resolveSelectedActivityTypes(
   aggregates: readonly WearableActivitySessionAggregate[],
-  selectedProvider: string | null,
+  selection: WearableMetricSelection,
 ): string[] {
-  if (!selectedProvider) {
-    return [];
+  const selected = resolveSelectedActivitySessionAggregate(aggregates, selection);
+  return selected?.activityTypes ?? [];
+}
+
+export function resolveSelectedHeartRateZones(
+  aggregates: readonly WearableActivitySessionAggregate[],
+  selection: WearableMetricSelection,
+): WearableHeartRateZoneAggregate[] {
+  const selected = resolveSelectedActivitySessionAggregate(aggregates, selection);
+  return selected ? selected.heartRateZones.map((zone) => ({ ...zone })) : [];
+}
+
+export function resolveSelectedActivitySessionAggregate(
+  aggregates: readonly WearableActivitySessionAggregate[],
+  selection: WearableMetricSelection,
+): WearableActivitySessionAggregate | null {
+  if (
+    selection.sourceFamily !== "derived"
+    || selection.sourceKind !== "activity-session-aggregate"
+    || !selection.provider
+    || selection.recordIds.length === 0
+  ) {
+    return null;
   }
 
-  const selected = aggregates.find((aggregate) => aggregate.provider === selectedProvider);
-  return selected?.activityTypes ?? [];
+  const selectedRecordIds = sortedStrings(selection.recordIds);
+  return aggregates.find((aggregate) =>
+    aggregate.provider === selection.provider
+    && equalSortedStrings(sortedStrings(aggregate.recordIds), selectedRecordIds)
+  ) ?? null;
+}
+
+function sortedStrings(values: readonly string[]): string[] {
+  return uniqueStrings(values).sort();
+}
+
+function equalSortedStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function groupMetricCandidatesByDate(
@@ -679,10 +898,12 @@ function buildActivitySessionCandidate(
   return {
     ...createMetricCandidateBase(entity, provider, externalRef, date, "event", "activity_session"),
     activityType: resolveActivitySessionActivityType(entity),
+    heartRateZones: listWorkoutHeartRateZones(entity.attributes.workout),
     metric: "sessionMinutes",
     unit: "minutes",
     value: durationMinutes,
     workoutMetricKeys: listWorkoutMetricKeys(entity.attributes.workout),
+    workoutMetricValues: readActivitySessionWorkoutMetricValues(entity),
   };
 }
 
@@ -787,6 +1008,17 @@ function mapScalarMetric(
     : null;
 }
 
+const ACTIVITY_SESSION_WORKOUT_METRIC_SPECS = [
+  { metric: "activeCalories", unit: "kcal" },
+  { metric: "distanceKm", unit: "km" },
+  { metric: "totalElevationGainMeters", unit: "meter" },
+  { metric: "maxHeartRate", unit: "bpm" },
+  { metric: "workoutStrain", unit: "strain" },
+] as const satisfies readonly {
+  metric: keyof WearableActivitySessionMetricValues;
+  unit: string;
+}[];
+
 const WORKOUT_METRIC_KEYS = [
   "activeCalories",
   "altitudeChangeMeters",
@@ -820,6 +1052,170 @@ function listWorkoutMetricKeys(workout: unknown): string[] {
 
   const metricRecord = metrics as Record<string, unknown>;
   return WORKOUT_METRIC_KEYS.filter((metric) => readNumber(metricRecord[metric]) !== null);
+}
+
+function readActivitySessionWorkoutMetricValues(
+  entity: CanonicalEntity,
+): WearableActivitySessionMetricValues {
+  const workout = readPlainRecord(entity.attributes.workout);
+  const metrics = readPlainRecord(workout?.metrics);
+  const activeCalories = firstFiniteNumber(metrics?.activeCalories, entity.attributes.activeCalories);
+  const distanceKm = firstFiniteNumber(entity.attributes.distanceKm, metrics?.distanceKm);
+  const totalElevationGainMeters = firstFiniteNumber(
+    metrics?.totalElevationGainMeters,
+    entity.attributes.totalElevationGainMeters,
+  );
+  const maxHeartRate = firstFiniteNumber(metrics?.maxHeartRate, entity.attributes.maxHeartRate);
+  const workoutStrain = firstFiniteNumber(metrics?.workoutStrain, entity.attributes.workoutStrain);
+
+  return {
+    ...(activeCalories === undefined ? {} : { activeCalories }),
+    ...(distanceKm === undefined ? {} : { distanceKm }),
+    ...(maxHeartRate === undefined ? {} : { maxHeartRate }),
+    ...(totalElevationGainMeters === undefined ? {} : { totalElevationGainMeters }),
+    ...(workoutStrain === undefined ? {} : { workoutStrain }),
+  };
+}
+
+function mergeActivitySessionWorkoutMetricValues(
+  left: WearableActivitySessionMetricValues = {},
+  right: WearableActivitySessionMetricValues = {},
+): WearableActivitySessionMetricValues {
+  const activeCalories = sumOptionalNumbers(left.activeCalories, right.activeCalories);
+  const distanceKm = sumOptionalNumbers(left.distanceKm, right.distanceKm);
+  const maxHeartRate = maxOptionalNumbers(left.maxHeartRate, right.maxHeartRate);
+  const totalElevationGainMeters = sumOptionalNumbers(
+    left.totalElevationGainMeters,
+    right.totalElevationGainMeters,
+  );
+  const workoutStrain = maxOptionalNumbers(left.workoutStrain, right.workoutStrain);
+
+  return {
+    ...(activeCalories === undefined ? {} : { activeCalories }),
+    ...(distanceKm === undefined ? {} : { distanceKm }),
+    ...(maxHeartRate === undefined ? {} : { maxHeartRate }),
+    ...(totalElevationGainMeters === undefined ? {} : { totalElevationGainMeters }),
+    ...(workoutStrain === undefined ? {} : { workoutStrain }),
+  };
+}
+
+function firstFiniteNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const numberValue = readNumber(value);
+    if (numberValue !== null) {
+      return numberValue;
+    }
+  }
+  return undefined;
+}
+
+function sumOptionalNumbers(left: number | undefined, right: number | undefined): number | undefined {
+  if (left === undefined) {
+    return right;
+  }
+  if (right === undefined) {
+    return left;
+  }
+  return left + right;
+}
+
+function maxOptionalNumbers(left: number | undefined, right: number | undefined): number | undefined {
+  if (left === undefined) {
+    return right;
+  }
+  if (right === undefined) {
+    return left;
+  }
+  return Math.max(left, right);
+}
+
+function readPlainRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function listWorkoutHeartRateZones(workout: unknown): WearableHeartRateZoneAggregate[] {
+  if (!workout || typeof workout !== "object" || Array.isArray(workout)) {
+    return [];
+  }
+
+  const zones = (workout as Record<string, unknown>).heartRateZones;
+  if (!Array.isArray(zones)) {
+    return [];
+  }
+
+  return mergeHeartRateZoneAggregates(
+    zones.flatMap((entry) => {
+      const zone = normalizeWorkoutHeartRateZone(entry);
+      return zone ? [zone] : [];
+    }),
+  );
+}
+
+function normalizeWorkoutHeartRateZone(value: unknown): WearableHeartRateZoneAggregate | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const durationMinutes = readNumber(record.durationMinutes);
+  if (durationMinutes === null || durationMinutes < 0) {
+    return null;
+  }
+
+  const zone = readNumber(record.zone);
+  const minHeartRate = readNumber(record.minHeartRate);
+  const maxHeartRate = readNumber(record.maxHeartRate);
+  const label = normalizeNullableString(record.label);
+  if (
+    zone === null
+    && minHeartRate === null
+    && maxHeartRate === null
+    && label === null
+  ) {
+    return null;
+  }
+
+  return {
+    ...(label === null ? {} : { label }),
+    ...(maxHeartRate === null ? {} : { maxHeartRate }),
+    ...(minHeartRate === null ? {} : { minHeartRate }),
+    ...(zone === null ? {} : { zone }),
+    durationMinutes,
+  };
+}
+
+function mergeHeartRateZoneAggregates(
+  zones: readonly WearableHeartRateZoneAggregate[],
+): WearableHeartRateZoneAggregate[] {
+  const merged = new Map<string, WearableHeartRateZoneAggregate>();
+
+  for (const zone of zones) {
+    const key = [
+      zone.zone ?? "",
+      zone.label ?? "",
+      zone.minHeartRate ?? "",
+      zone.maxHeartRate ?? "",
+    ].join("|");
+    const existing = merged.get(key);
+    if (existing) {
+      existing.durationMinutes += zone.durationMinutes;
+      continue;
+    }
+    merged.set(key, { ...zone });
+  }
+
+  return [...merged.values()].sort(compareHeartRateZoneAggregate);
+}
+
+function compareHeartRateZoneAggregate(
+  left: WearableHeartRateZoneAggregate,
+  right: WearableHeartRateZoneAggregate,
+): number {
+  return (left.zone ?? Number.MAX_SAFE_INTEGER) - (right.zone ?? Number.MAX_SAFE_INTEGER)
+    || (left.minHeartRate ?? Number.MAX_SAFE_INTEGER) - (right.minHeartRate ?? Number.MAX_SAFE_INTEGER)
+    || (left.maxHeartRate ?? Number.MAX_SAFE_INTEGER) - (right.maxHeartRate ?? Number.MAX_SAFE_INTEGER)
+    || (left.label ?? "").localeCompare(right.label ?? "");
 }
 
 function mapSleepStageToMetric(stage: string): WearableMetricKey | null {

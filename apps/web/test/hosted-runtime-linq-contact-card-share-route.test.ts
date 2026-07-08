@@ -1,8 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  assertHostedLinqRouteEgressAuthority: vi.fn(),
-  assertHostedThreadRouteEgressAuthority: vi.fn(),
   getPrisma: vi.fn(),
   hostedLinqContactCardShare: {
     create: vi.fn(),
@@ -21,11 +19,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   shareHostedLinqContactCard: mocks.shareHostedLinqContactCard,
 }));
 
-vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
-  assertHostedLinqRouteEgressAuthority: mocks.assertHostedLinqRouteEgressAuthority,
-  assertHostedThreadRouteEgressAuthority: mocks.assertHostedThreadRouteEgressAuthority,
-}));
-
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -36,13 +29,6 @@ type LinqContactCardShareRouteModule = typeof import(
 
 let route: LinqContactCardShareRouteModule;
 
-const AUTHORITY = {
-  accountLookupKey: "hbidx:phone:v1:account",
-  channel: "linq",
-  containerMemberId: "member_123",
-  threadId: "linq_chat_123",
-} as const;
-
 describe("hosted runtime Linq contact-card share callback route", () => {
   beforeAll(async () => {
     route = await import(
@@ -52,8 +38,6 @@ describe("hosted runtime Linq contact-card share callback route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue(undefined);
-    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue(undefined);
     mocks.getPrisma.mockReturnValue({
       hostedLinqContactCardShare: mocks.hostedLinqContactCardShare,
     });
@@ -68,9 +52,14 @@ describe("hosted runtime Linq contact-card share callback route", () => {
     vi.restoreAllMocks();
   });
 
-  it("asserts authority and shares the contact card through the shared helper", async () => {
+  it("authenticates stale runtime callbacks and returns success without sharing", async () => {
     const response = await route.POST(buildRequest({
-      authority: AUTHORITY,
+      authority: {
+        accountLookupKey: "hbidx:phone:v1:account",
+        channel: "linq",
+        containerMemberId: "member_123",
+        threadId: "linq_chat_123",
+      },
       chatId: "linq_chat_123",
       service: "iMessage",
       threadIsDirect: true,
@@ -80,61 +69,13 @@ describe("hosted runtime Linq contact-card share callback route", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
     });
-    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
-      authority: AUTHORITY,
-      prisma: {
-        hostedLinqContactCardShare: mocks.hostedLinqContactCardShare,
-      },
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(expect.any(Request), {
+      maxBodyBytes: 4096,
     });
-    expect(mocks.hostedLinqContactCardShare.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        memberId: "member_123",
-      }),
-    });
-    expect(mocks.shareHostedLinqContactCard).toHaveBeenCalledWith({
-      chatId: "linq_chat_123",
-    });
-  });
-
-  it("rejects callbacks whose authority is bound to a different runtime user", async () => {
-    const response = await route.POST(buildRequest({
-      authority: {
-        ...AUTHORITY,
-        containerMemberId: "member_other",
-      },
-      chatId: "linq_chat_123",
-      service: "iMessage",
-      threadIsDirect: true,
-    }));
-
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "HOSTED_LINQ_CONTACT_CARD_SHARE_BOUND_USER_MISMATCH",
-      },
-    });
-    expect(mocks.assertHostedThreadRouteEgressAuthority).not.toHaveBeenCalled();
-    expect(mocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
-  });
-
-  it("rejects callbacks whose authority thread does not match the requested chat", async () => {
-    const response = await route.POST(buildRequest({
-      authority: {
-        ...AUTHORITY,
-        threadId: "linq_chat_other",
-      },
-      chatId: "linq_chat_123",
-      service: "iMessage",
-      threadIsDirect: true,
-    }));
-
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "HOSTED_LINQ_CONTACT_CARD_SHARE_THREAD_MISMATCH",
-      },
-    });
-    expect(mocks.assertHostedThreadRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.hostedLinqContactCardShare.create).not.toHaveBeenCalled();
+    expect(mocks.hostedLinqContactCardShare.findMany).not.toHaveBeenCalled();
+    expect(mocks.hostedLinqContactCardShare.updateMany).not.toHaveBeenCalled();
     expect(mocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
   });
 

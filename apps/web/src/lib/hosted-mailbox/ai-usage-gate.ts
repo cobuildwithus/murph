@@ -13,6 +13,7 @@ export interface HostedMailboxAiUsageGateConsumedSeq {
 }
 
 export interface HostedMailboxAiUsageGateItem {
+  consumedAt?: string | null;
   kind: string;
   lane: string;
   laneSeq: bigint | number | string;
@@ -46,6 +47,9 @@ export function hostedMailboxItemsRequireAiUsageAccess(input: {
     }
 
     if (item.lane !== "conversation") {
+      return false;
+    }
+    if (hasNonEmptyString(item.consumedAt)) {
       return false;
     }
 

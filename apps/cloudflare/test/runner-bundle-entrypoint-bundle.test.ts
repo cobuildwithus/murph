@@ -8,10 +8,159 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assertRunnerEntrypointBundleWithinBudgets,
   bundleRunnerContainerEntrypoint,
+  collectLazyRunnerEntrypointOutputPaths,
+  resolveRunnerEntrypointBundleBudgets,
   RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME,
 } from "../scripts/runner-bundle/bundle-entrypoint.js";
 
+// A metafile with a single container-entrypoint.js output sized to `entryBytes`
+// and no other chunks, so the total equals the entry size. Used to prove the
+// production budgets gate the entry chunk at the ratchet boundary.
+function entryOnlyMetafile(entryBytes: number): Metafile {
+  return {
+    inputs: { "dist/container-entrypoint.js": { bytes: 10, imports: [] } },
+    outputs: {
+      "dist-bundled/container-entrypoint.js": {
+        bytes: entryBytes,
+        entryPoint: "dist/container-entrypoint.js",
+        exports: [],
+        imports: [],
+        inputs: {},
+      },
+    },
+  };
+}
+
+function staticBootClosureBytesMetafile(staticClosureBytes: number): Metafile {
+  const entryBytes = 1_000;
+  const staticChunkBytes = staticClosureBytes - entryBytes;
+  if (staticChunkBytes < 0) {
+    throw new Error("static closure bytes must include the entry chunk");
+  }
+
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 100, imports: [] },
+      "dist/static-heavy.js": { bytes: staticChunkBytes, imports: [] },
+    },
+    outputs: {
+      "dist-bundled/container-entrypoint.js": {
+        bytes: entryBytes,
+        entryPoint: "dist/container-entrypoint.js",
+        exports: [],
+        imports: [
+          { kind: "import-statement", path: "dist-bundled/static-heavy.js" },
+        ],
+        inputs: {
+          "dist/container-entrypoint.js": { bytesInOutput: 100 },
+        },
+      },
+      "dist-bundled/static-heavy.js": {
+        bytes: staticChunkBytes,
+        entryPoint: undefined,
+        exports: [],
+        imports: [],
+        inputs: {
+          "dist/static-heavy.js": { bytesInOutput: staticChunkBytes },
+        },
+      },
+    },
+  };
+}
+
+function staticBootClosureMetafile(inputPath: string): Metafile {
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 600, imports: [] },
+      [inputPath]: { bytes: 5_000, imports: [] },
+    },
+    outputs: {
+      "dist-bundled/container-entrypoint.js": {
+        bytes: 2_000,
+        entryPoint: "dist/container-entrypoint.js",
+        exports: [],
+        imports: [{ kind: "import-statement", path: "./chunk-STATIC.js" }],
+        inputs: {
+          "dist/container-entrypoint.js": { bytesInOutput: 600 },
+        },
+      },
+      "dist-bundled/chunk-STATIC.js": {
+        bytes: 4_000,
+        entryPoint: undefined,
+        exports: [],
+        imports: [],
+        inputs: {
+          [inputPath]: { bytesInOutput: 4_000 },
+        },
+      },
+    },
+  };
+}
+
+function dynamicOnlyChunkMetafile(dynamicChunkBytes: number): Metafile {
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 100, imports: [] },
+      "dist/lazy-heavy.js": { bytes: dynamicChunkBytes, imports: [] },
+    },
+    outputs: {
+      "dist-bundled/container-entrypoint.js": {
+        bytes: 1_000,
+        entryPoint: "dist/container-entrypoint.js",
+        exports: [],
+        imports: [{ kind: "dynamic-import", path: "./lazy-heavy.js" }],
+        inputs: {
+          "dist/container-entrypoint.js": { bytesInOutput: 100 },
+        },
+      },
+      "dist-bundled/lazy-heavy.js": {
+        bytes: dynamicChunkBytes,
+        entryPoint: "dist/lazy-heavy.js",
+        exports: [],
+        imports: [],
+        inputs: {
+          "dist/lazy-heavy.js": { bytesInOutput: dynamicChunkBytes },
+        },
+      },
+    },
+  };
+}
+
+function dynamicImportMetafile(inputPath: string): Metafile {
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 600, imports: [] },
+      [inputPath]: { bytes: 5_000, imports: [] },
+    },
+    outputs: {
+      "dist-bundled/container-entrypoint.js": {
+        bytes: 2_000,
+        entryPoint: "dist/container-entrypoint.js",
+        exports: [],
+        imports: [{ kind: "dynamic-import", path: "./device-sync-LAZY.js" }],
+        inputs: {
+          "dist/container-entrypoint.js": { bytesInOutput: 600 },
+        },
+      },
+      "dist-bundled/device-sync-LAZY.js": {
+        bytes: 4_000,
+        entryPoint: "dist/device-sync.js",
+        exports: [],
+        imports: [],
+        inputs: {
+          [inputPath]: { bytesInOutput: 4_000 },
+        },
+      },
+    },
+  };
+}
+
 const temporaryDirectories: string[] = [];
+const ROOMY_TEST_BUDGETS = {
+  entryBytes: 10_000,
+  staticClosureBytes: 10_000,
+  totalBytes: 10_000,
+};
 
 afterEach(async () => {
   await Promise.all(
@@ -129,6 +278,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     expect(() =>
       assertRunnerEntrypointBundleWithinBudgets(metafile, {
         entryBytes: 1_000,
+        staticClosureBytes: 10_000,
         totalBytes: 3_000,
       }),
     ).toThrow(
@@ -136,11 +286,299 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     );
 
     expect(
-      assertRunnerEntrypointBundleWithinBudgets(metafile, {
-        entryBytes: 10_000,
-        totalBytes: 10_000,
-      }),
-    ).toEqual({ entryBytes: 2_000, totalBytes: 6_000 });
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
+    ).toEqual({
+      entryBytes: 2_000,
+      staticClosureBytes: 2_000,
+      totalBytes: 6_000,
+    });
+  });
+
+  it("rejects provider connector inputs from the static boot closure", () => {
+    const metafile = staticBootClosureMetafile("node_modules/grammy/out/mod.js");
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
+    ).toThrow(/forbidden inputs in the static boot closure[\s\S]*node_modules\/grammy\/out\/mod\.js/);
+  });
+
+  it("rejects staged @murphai/inboxd connector inputs from the static boot closure", () => {
+    const inputPath =
+      ".deploy/runner-bundle/node_modules/@murphai/inboxd/dist/connectors/hosted-conversation.js";
+    const metafile = staticBootClosureMetafile(inputPath);
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
+    ).toThrow(
+      /forbidden inputs in the static boot closure[\s\S]*\.deploy\/runner-bundle\/node_modules\/@murphai\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
+    );
+  });
+
+  it("rejects workspace @murphai/inboxd connector inputs from the static boot closure", () => {
+    const metafile = staticBootClosureMetafile(
+      "packages/inboxd/dist/connectors/hosted-conversation.js",
+    );
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
+    ).toThrow(
+      /forbidden inputs in the static boot closure[\s\S]*packages\/inboxd\/dist\/connectors\/hosted-conversation\.js/,
+    );
+  });
+
+  it.each([
+    [
+      "staged device-sync service",
+      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/service.js",
+      /node_modules\/@murphai\/device-syncd\/dist\/service\.js/,
+    ],
+    [
+      "workspace device-sync service",
+      "packages/device-syncd/dist/service.js",
+      /packages\/device-syncd\/dist\/service\.js/,
+    ],
+    [
+      "device-sync registry",
+      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/registry.js",
+      /node_modules\/@murphai\/device-syncd\/dist\/registry\.js/,
+    ],
+    [
+      "device-sync provider graph",
+      ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/providers/oura.js",
+      /node_modules\/@murphai\/device-syncd\/dist\/providers\/oura\.js/,
+    ],
+    [
+      "importers",
+      ".deploy/runner-bundle/node_modules/@murphai/importers/dist/index.js",
+      /node_modules\/@murphai\/importers\/dist\/index\.js/,
+    ],
+    [
+      "Junction SDK",
+      ".deploy/runner-bundle/node_modules/@junction-api/sdk/index.js",
+      /node_modules\/@junction-api\/sdk\/index\.js/,
+    ],
+    [
+      "staged Murph Age health-metrics calculator",
+      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age.js",
+      /node_modules\/@murphai\/health-metrics\/dist\/murph-age\.js/,
+    ],
+    [
+      "staged Murph Age health-metrics source routes",
+      ".deploy/runner-bundle/node_modules/@murphai/health-metrics/dist/murph-age-source-routes.js",
+      /node_modules\/@murphai\/health-metrics\/dist\/murph-age-source-routes\.js/,
+    ],
+    [
+      "workspace Murph Age query runtime",
+      "packages/query/dist/murph-age.js",
+      /packages\/query\/dist\/murph-age\.js/,
+    ],
+    [
+      "workspace Murph Age browser replica",
+      "packages/query/dist/browser-replica/murph-age.js",
+      /packages\/query\/dist\/browser-replica\/murph-age\.js/,
+    ],
+  ])("rejects %s inputs from the static boot closure", (_label, inputPath, expected) => {
+    const metafile = staticBootClosureMetafile(inputPath);
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
+    ).toThrow(expected);
+  });
+
+  it("allows provider connector inputs behind dynamic imports", () => {
+    const metafile: Metafile = {
+      inputs: {
+        "dist/container-entrypoint.js": { bytes: 600, imports: [] },
+        "node_modules/grammy/out/mod.js": { bytes: 5_000, imports: [] },
+      },
+      outputs: {
+        "dist-bundled/container-entrypoint.js": {
+          bytes: 2_000,
+          entryPoint: "dist/container-entrypoint.js",
+          exports: [],
+          imports: [{ kind: "dynamic-import", path: "./conversation-LAZY.js" }],
+          inputs: {
+            "dist/container-entrypoint.js": { bytesInOutput: 600 },
+          },
+        },
+        "dist-bundled/conversation-LAZY.js": {
+          bytes: 4_000,
+          entryPoint: "dist/conversation.js",
+          exports: [],
+          imports: [],
+          inputs: {
+            "node_modules/grammy/out/mod.js": { bytesInOutput: 4_000 },
+          },
+        },
+      },
+    };
+
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
+    ).toEqual({
+      entryBytes: 2_000,
+      staticClosureBytes: 2_000,
+      totalBytes: 6_000,
+    });
+  });
+
+  it.each([
+    ".deploy/runner-bundle/node_modules/@murphai/device-syncd/dist/service.js",
+    ".deploy/runner-bundle/node_modules/@murphai/importers/dist/index.js",
+    ".deploy/runner-bundle/node_modules/@junction-api/sdk/index.js",
+  ])("allows %s behind dynamic imports", (inputPath) => {
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(
+        dynamicImportMetafile(inputPath),
+        ROOMY_TEST_BUDGETS,
+      ),
+    ).toEqual({
+      entryBytes: 2_000,
+      staticClosureBytes: 2_000,
+      totalBytes: 6_000,
+    });
+  });
+
+  it("collects output chunks reachable only through dynamic imports", () => {
+    const metafile: Metafile = {
+      inputs: {
+        "dist/container-entrypoint.js": { bytes: 10, imports: [] },
+        "dist/static.js": { bytes: 10, imports: [] },
+        "dist/lazy.js": { bytes: 10, imports: [] },
+      },
+      outputs: {
+        "dist-bundled/container-entrypoint.js": {
+          bytes: 100,
+          entryPoint: "dist/container-entrypoint.js",
+          exports: [],
+          imports: [
+            { kind: "import-statement", path: "./static-STATIC.js" },
+            { kind: "dynamic-import", path: "./lazy-LAZY.js" },
+          ],
+          inputs: {
+            "dist/container-entrypoint.js": { bytesInOutput: 10 },
+          },
+        },
+        "dist-bundled/static-STATIC.js": {
+          bytes: 100,
+          entryPoint: undefined,
+          exports: [],
+          imports: [
+            { kind: "import-statement", path: "./static-shared-STATIC.js" },
+          ],
+          inputs: {
+            "dist/static.js": { bytesInOutput: 10 },
+          },
+        },
+        "dist-bundled/static-shared-STATIC.js": {
+          bytes: 100,
+          entryPoint: undefined,
+          exports: [],
+          imports: [],
+          inputs: {},
+        },
+        "dist-bundled/lazy-LAZY.js": {
+          bytes: 100,
+          entryPoint: "dist/lazy.js",
+          exports: [],
+          imports: [
+            { kind: "import-statement", path: "./lazy-shared-LAZY.js" },
+          ],
+          inputs: {
+            "dist/lazy.js": { bytesInOutput: 10 },
+          },
+        },
+        "dist-bundled/lazy-shared-LAZY.js": {
+          bytes: 100,
+          entryPoint: undefined,
+          exports: [],
+          imports: [],
+          inputs: {},
+        },
+      },
+    };
+
+    expect([...collectLazyRunnerEntrypointOutputPaths(
+      metafile,
+      "dist-bundled/container-entrypoint.js",
+    )].sort()).toEqual([
+      "dist-bundled/lazy-LAZY.js",
+      "dist-bundled/lazy-shared-LAZY.js",
+    ]);
+  });
+
+  it("resolves the production budgets as the ratcheted baselines plus tolerance", () => {
+    const budgets = resolveRunnerEntrypointBundleBudgets();
+
+    // Entry = measured baseline (1,319,436B on 2026-07-07) + 48,000B noise
+    // band. Static closure = measured CI baseline (6,487,522B on 2026-07-07)
+    // + 96,000B noise band. Locking exact values makes any silent change to a
+    // ratchet a failing, reviewed diff.
+    expect(budgets).toEqual({
+      entryBytes: 1_319_436 + 48_000,
+      staticClosureBytes: 6_487_522 + 96_000,
+      totalBytes: 9_300_000,
+    });
+    // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling
+    // it replaced, so real boot-path creep can no longer hide in headroom.
+    expect(budgets.entryBytes).toBeLessThan(2_900_000);
+    expect(budgets.staticClosureBytes).toBeLessThan(6_600_000);
+  });
+
+  it("gates the entry chunk at the production ratchet boundary", () => {
+    const { entryBytes } = resolveRunnerEntrypointBundleBudgets();
+
+    // At the boundary the default (production) budgets accept the bundle.
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(entryOnlyMetafile(entryBytes)),
+    ).toEqual({
+      entryBytes,
+      staticClosureBytes: entryBytes,
+      totalBytes: entryBytes,
+    });
+
+    // One byte over the baseline + tolerance trips the assembly.
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(
+        entryOnlyMetafile(entryBytes + 1),
+      ),
+    ).toThrow(/entry chunk .* exceeds budget/);
+  });
+
+  it("gates the static boot closure at the production ratchet boundary", () => {
+    const { staticClosureBytes } = resolveRunnerEntrypointBundleBudgets();
+
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(
+        staticBootClosureBytesMetafile(staticClosureBytes),
+      ),
+    ).toEqual({
+      entryBytes: 1_000,
+      staticClosureBytes,
+      totalBytes: staticClosureBytes,
+    });
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(
+        staticBootClosureBytesMetafile(staticClosureBytes + 1),
+      ),
+    ).toThrow(/static boot closure .* exceeds budget/);
+  });
+
+  it("does not count dynamic-only chunks toward the static boot closure budget", () => {
+    const { staticClosureBytes, totalBytes } = resolveRunnerEntrypointBundleBudgets();
+    const dynamicChunkBytes = staticClosureBytes + 500_000;
+    expect(dynamicChunkBytes + 1_000).toBeLessThan(totalBytes);
+
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(
+        dynamicOnlyChunkMetafile(dynamicChunkBytes),
+      ),
+    ).toEqual({
+      entryBytes: 1_000,
+      staticClosureBytes: 1_000,
+      totalBytes: dynamicChunkBytes + 1_000,
+    });
   });
 
   it("rejects metafiles without a container-entrypoint.js entry output", () => {

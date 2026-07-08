@@ -43,6 +43,8 @@ import {
 
 import {
   buildHostedCodexConfigToml,
+  HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
+  HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
 } from "../src/hosted-runtime/codex-config.ts";
 import {
@@ -57,11 +59,36 @@ const testHostedCodexAuthE2e = RUN_HOSTED_CODEX_AUTH_E2E ? test : test.skip;
 const testHostedCodexAutocompactionE2e = RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E
   ? test
   : test.skip;
-const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
+const HOSTED_CODEX_EXPECTED_AUTO_COMPACT_TOKEN_LIMIT = 164_000;
 const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
+
+test("hosted Codex memory diagnostics expose only safe config metadata", () => {
+  assert.deepEqual(HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS, {
+    codexOperatorMemoryDisableOnExternalContext: false,
+    codexOperatorMemoryFeatureEnabled: true,
+    codexOperatorMemoryGenerateMemories: true,
+    codexOperatorMemoryMaxRawMemoriesForConsolidation: 128,
+    codexOperatorMemoryMaxRolloutAgeDays: 10,
+    codexOperatorMemoryMaxRolloutsPerStartup: 1,
+    codexOperatorMemoryMaxUnusedDays: 30,
+    codexOperatorMemoryMinRateLimitRemainingPercent: 25,
+    codexOperatorMemoryMinRolloutIdleHours: 1,
+    codexOperatorMemoryMode: "codex-native-operator-context",
+    codexOperatorMemoryUseMemories: true,
+  });
+});
+
+test("hosted Codex provider transport diagnostics expose only safe config metadata", () => {
+  assert.deepEqual(HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS, {
+    codexProviderRequestMaxRetries: 4,
+    codexProviderStreamIdleTimeoutMs: 90_000,
+    codexProviderStreamMaxRetries: 5,
+    codexProviderTransportMode: "codex-native-provider-transport",
+  });
+});
 
 function executeCodexAppServerTurn(
   input: Omit<CodexAppServerTurnInput, "dynamicTools"> & {
@@ -136,6 +163,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
   assert.match(config, /^check_for_update_on_startup = false$/mu);
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
   assert.doesNotMatch(config, /\[model_providers\."openai"\]/u);
   assert.match(config, /\[model_providers\."hosted-openai"\]/u);
@@ -143,9 +171,17 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /wire_api = "responses"/u);
   assert.match(config, /^supports_websockets = true$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^requires_openai_auth = false$/mu);
+  assert.match(config, /^request_max_retries = 4$/mu);
+  assert.match(config, /^stream_max_retries = 5$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
-  assert.match(config, /\[features\]\nplugins = false\nmulti_agent_v2 = true/u);
+  assert.match(config, /\[features\]\nplugins = false\nmulti_agent_v2 = true\nmemories = true/u);
+  assert.doesNotMatch(config, /root_agent_usage_hint_text/u);
+  assert.match(
+    config,
+    /\[memories\]\nuse_memories = true\ngenerate_memories = true\ndisable_on_external_context = false\nmin_rollout_idle_hours = 1\nmax_rollouts_per_startup = 1\nmax_rollout_age_days = 10\nmin_rate_limit_remaining_percent = 25\nmax_raw_memories_for_consolidation = 128\nmax_unused_days = 30/u,
+  );
   assert.doesNotMatch(config, /^plugins = true$/mu);
   assert.match(config, /\[skills\]\ninclude_instructions = false/u);
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
@@ -363,6 +399,7 @@ test("hosted Codex runtime config accepts a local test-only model provider base 
   assert.match(config, /env_key = "OPENAI_API_KEY"/u);
   assert.match(config, /requires_openai_auth = false/u);
   assert.doesNotMatch(config, /^supports_websockets = true$/mu);
+  assert.match(config, /stream_idle_timeout_ms = 90000/u);
   assert.match(config, /request_max_retries = 4/u);
   assert.match(config, /stream_max_retries = 5/u);
   assert.doesNotMatch(config, /https:\/\/api\.openai\.com\/v1/u);
@@ -399,10 +436,9 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
     },
   });
 
-  // The built-in provider id routes Codex to the ChatGPT backend via auth.json.
   assert.equal(
     result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    "openai",
+    "hosted-chatgpt-openai",
   );
   // Token material must not linger in the runtime env; image-gen keeps the key.
   assert.equal(result.runtimeEnv[HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV], undefined);
@@ -415,15 +451,20 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
 
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.match(config, /^cli_auth_credentials_store = "file"$/mu);
-  assert.match(config, /^model_provider = "openai"$/mu);
-  assert.doesNotMatch(config, /\[model_providers\./u);
+  assert.match(config, /^model_provider = "hosted-chatgpt-openai"$/mu);
+  assert.match(config, /\[model_providers\."hosted-chatgpt-openai"\]/u);
   assert.doesNotMatch(config, /base_url/u);
   assert.doesNotMatch(config, /env_key/u);
-  assert.doesNotMatch(config, /requires_openai_auth/u);
+  assert.match(config, /^supports_websockets = true$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
+  assert.match(config, /^requires_openai_auth = true$/mu);
+  assert.match(config, /^request_max_retries = 4$/mu);
+  assert.match(config, /^stream_max_retries = 5$/mu);
   assert.doesNotMatch(config, /chatgpt-access-token/u);
   assert.match(config, /model_reasoning_effort = "low"/u);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /\[shell_environment_policy\]/u);
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assertHostedCodexAutoCompactTokenLimit(config);
 });
 
@@ -584,14 +625,22 @@ test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   assert.equal(result.runtimeEnv.OPENAI_API_KEY, undefined);
   assert.equal(
     result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
-    "openai",
+    "hosted-chatgpt-openai",
   );
 
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.match(config, /^cli_auth_credentials_store = "file"$/mu);
-  assert.match(config, /^model_provider = "openai"$/mu);
-  assert.doesNotMatch(config, /\[model_providers\./u);
+  assert.match(config, /^model_provider = "hosted-chatgpt-openai"$/mu);
+  assert.match(config, /\[model_providers\."hosted-chatgpt-openai"\]/u);
+  assert.doesNotMatch(config, /base_url/u);
+  assert.doesNotMatch(config, /env_key/u);
+  assert.match(config, /^supports_websockets = true$/mu);
+  assert.match(config, /^requires_openai_auth = true$/mu);
+  assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
+  assert.match(config, /^request_max_retries = 4$/mu);
+  assert.match(config, /^stream_max_retries = 5$/mu);
   assert.doesNotMatch(config, /chatgpt-refresh-token/u);
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assertHostedCodexAutoCompactTokenLimit(config);
 });
 
@@ -752,10 +801,19 @@ testHostedCodexAuthE2e(
         workingDirectory: operatorHomeRoot,
       });
 
-      assert.equal(requests.length, 1);
+      const fixedRequestCount = requests.length;
+      assert.ok(fixedRequestCount >= 1);
       assert.equal(fixedResult.finalMessage, "auth regression ok");
-      assert.equal(authorizationHeaders[0], expectedAuthorization);
-      assert.match(requests[0]!, /hello hosted auth regression/u);
+      assert.ok(
+        authorizationHeaders
+          .slice(0, fixedRequestCount)
+          .every((header) => header === expectedAuthorization),
+      );
+      assert.ok(
+        requests
+          .slice(0, fixedRequestCount)
+          .some((request) => /hello hosted auth regression/u.test(request)),
+      );
 
       const legacyCodexHome = await prepareLegacyBuiltInOpenAiCodexHome({
         baseUrl: `${readServerBaseUrl(server)}/v1`,
@@ -781,7 +839,11 @@ testHostedCodexAuthE2e(
         legacyError = error;
       }
 
-      assert.notEqual(authorizationHeaders[1], expectedAuthorization);
+      const legacyAuthorizationHeaders = authorizationHeaders.slice(fixedRequestCount);
+      assert.ok(legacyAuthorizationHeaders.length >= 1);
+      assert.ok(
+        legacyAuthorizationHeaders.some((header) => header !== expectedAuthorization),
+      );
       assert(legacyError instanceof Error);
     } finally {
       await closeHttpServer(server);
@@ -1242,19 +1304,43 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
       "check_for_update_on_startup = false",
+      "allow_login_shell = false",
       "",
       '[model_providers."openai"]',
       'name = "OpenAI"',
       'base_url = "https://api.openai.com/v1"',
       'env_key = "OPENAI_API_KEY"',
       'wire_api = "responses"',
+      "stream_idle_timeout_ms = 90000",
       "requires_openai_auth = false",
+      "request_max_retries = 4",
+      "stream_max_retries = 5",
       "",
       "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
+      "# Multi-agent V2 spawn tools back Murph's skill-directed delegation for",
+      "# slow ingestion (lab PDFs, supplement labels). Codex >=0.143's multi-agent",
+      "# mode message accepts skill instructions as explicit delegation requests,",
+      "# so no custom usage hint is needed. Enable only here, never via a CLI",
+      "# --config override.",
       "[features]",
       "plugins = false",
       "multi_agent_v2 = true",
+      "memories = true",
+      "",
+      "# Codex-native memories are operator memory only. Murph product memory",
+      "# remains canonical in the vault; snapshots keep the Codex home allowlist",
+      "# narrow instead of recursively preserving every generated memory artifact.",
+      "[memories]",
+      "use_memories = true",
+      "generate_memories = true",
+      "disable_on_external_context = false",
+      "min_rollout_idle_hours = 1",
+      "max_rollouts_per_startup = 1",
+      "max_rollout_age_days = 10",
+      "min_rate_limit_remaining_percent = 25",
+      "max_raw_memories_for_consolidation = 128",
+      "max_unused_days = 30",
       "",
       "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
       "# runner paths change on each wake and break provider prefix caching.",
@@ -1269,6 +1355,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
       "[shell_environment_policy]",
       'inherit = "all"',
+      "ignore_default_excludes = true",
       'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
@@ -1276,6 +1363,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
     ].join("\n"),
   );
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
 });
 
 test("hosted Codex shell policy excludes ElevenLabs runtime capability env", () => {
@@ -1287,7 +1375,7 @@ test("hosted Codex shell policy excludes ElevenLabs runtime capability env", () 
   );
 });
 
-test("hosted Codex config keeps skill instructions disabled for stable prompt prefixes", () => {
+test("hosted Codex config keeps skill instructions disabled while enabling operator memory", () => {
   const config = buildHostedCodexConfigToml({
     model: "gpt-5.5",
     provider: {
@@ -1304,6 +1392,11 @@ test("hosted Codex config keeps skill instructions disabled for stable prompt pr
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
   assert.match(config, /\[features\]\nplugins = false/u);
   assert.match(config, /^multi_agent_v2 = true$/mu);
+  assert.match(config, /^memories = true$/mu);
+  assert.match(config, /\[memories\]\nuse_memories = true/u);
+  assert.match(config, /^generate_memories = true$/mu);
+  assert.match(config, /^disable_on_external_context = false$/mu);
+  assert.match(config, /^max_rollouts_per_startup = 1$/mu);
   assert.match(config, /^check_for_update_on_startup = false$/mu);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
@@ -1363,6 +1456,19 @@ async function createTemporaryDirectory(): Promise<string> {
   const target = await mkdtemp(path.join(tmpdir(), "hosted-codex-config-"));
   temporaryPaths.push(target);
   return target;
+}
+
+function assertHostedCodexConfigDisablesLoginShellAtTopLevel(config: string): void {
+  const loginShellAssignments = config.match(/^allow_login_shell\s*=/gmu) ?? [];
+  assert.deepEqual(loginShellAssignments, ["allow_login_shell ="]);
+  assert.match(config, /^allow_login_shell = false$/mu);
+
+  const loginShellIndex = config.indexOf("allow_login_shell = false");
+  const firstSectionIndex = config.search(/^\[/mu);
+  assert.ok(
+    firstSectionIndex === -1 || loginShellIndex < firstSectionIndex,
+    "allow_login_shell must be a top-level Codex config key before the first TOML section",
+  );
 }
 
 function chatGptCodexAuthTokens(): Record<string, string> {

@@ -10,6 +10,7 @@ import { hasMatchingLoopbackControlBearerToken } from "@murphai/runtime-state/no
 
 import {
   buildDeviceSyncCallbackErrorRedirectLocation,
+  buildDeviceSyncCallbackReturnLocation,
   buildDeviceSyncCallbackSuccessRedirectLocation,
 } from "./callback-redirect.ts";
 import { buildPublicDeviceSyncErrorPayload, deviceSyncError, isDeviceSyncError } from "./errors.ts";
@@ -832,6 +833,16 @@ function redirect(response: ServerResponse, location: string): void {
 function sendCallbackErrorResponse(response: ServerResponse, fallbackProvider: string, error: DeviceSyncError): void {
   const provider = error.details ? readStringField(error.details, "provider") ?? fallbackProvider : fallbackProvider;
   const returnTo = error.details ? readStringField(error.details, "returnTo") : null;
+
+  if (error.code === "OAUTH_STATE_REPLAYED") {
+    // An earlier delivery of this callback already owns the outcome; send the
+    // user back without asserting a status, matching the hosted route.
+    const replayLocation = buildDeviceSyncCallbackReturnLocation(returnTo);
+    if (replayLocation) {
+      redirect(response, replayLocation);
+      return;
+    }
+  }
 
   const redirectLocation = buildDeviceSyncCallbackErrorRedirectLocation({
     returnTo,

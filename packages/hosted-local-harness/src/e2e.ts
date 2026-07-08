@@ -66,9 +66,9 @@ export type HostedLocalE2eScenarioName =
 export interface HostedLocalE2eScenario {
   aliases?: readonly HostedLocalE2eScenarioName[];
   file: string;
+  dedicatedVitestProcess?: boolean;
   manualOnly?: boolean;
   name: Exclude<HostedLocalE2eScenarioName, "all">;
-  processIsolation?: boolean;
   requiresParserToolchain?: boolean;
   /**
    * Normal hosted E2E scenarios run the production Worker/Runner/UserRunner
@@ -129,7 +129,7 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-device-sync-junction-wearable-direct-resource-replay-e2e.test.ts",
     manualOnly: true,
     name: "device-sync-junction-wearable-direct-resource-replay",
-    processIsolation: true,
+    dedicatedVitestProcess: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-direct-r2-presigned-put-e2e.test.ts",
@@ -176,32 +176,32 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-onboarding-followup-e2e.test.ts",
     name: "linq-onboarding-followup",
-    processIsolation: true,
+    dedicatedVitestProcess: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-openai-egress-authority-e2e.test.ts",
     name: "openai-egress-authority",
-    processIsolation: true,
+    dedicatedVitestProcess: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-provider-egress-token-bridge-e2e.test.ts",
     name: "provider-egress-token-bridge",
-    processIsolation: true,
+    dedicatedVitestProcess: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-warm-reuse-egress-e2e.test.ts",
     name: "warm-reuse-egress",
-    processIsolation: true,
+    dedicatedVitestProcess: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-linq-scheduled-reminder-e2e.test.ts",
     name: "linq-scheduled-reminder",
-    processIsolation: true,
+    dedicatedVitestProcess: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-telegram-scheduled-reminder-e2e.test.ts",
     name: "telegram-scheduled-reminder",
-    processIsolation: true,
+    dedicatedVitestProcess: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-linq-webhook-audio-e2e.test.ts",
@@ -498,7 +498,7 @@ function buildHostedLocalVitestBatches(
   let currentBatch: HostedLocalE2eScenario[] = [];
 
   for (const scenario of scenarios) {
-    if (scenario.processIsolation || scenario.testControls === true) {
+    if (scenario.dedicatedVitestProcess || scenario.testControls === true) {
       if (currentBatch.length > 0) {
         batches.push(currentBatch);
         currentBatch = [];
@@ -545,7 +545,7 @@ function buildHostedLocalVitestBatchEnv(input: {
   scenarios: readonly HostedLocalE2eScenario[];
 }): NodeJS.ProcessEnv {
   if (!input.scenarios.some((scenario) =>
-    scenario.processIsolation || scenario.testControls === true
+    scenario.dedicatedVitestProcess || scenario.testControls === true
   )) {
     return input.env;
   }

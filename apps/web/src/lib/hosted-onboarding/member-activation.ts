@@ -22,9 +22,10 @@ import {
 } from "../hosted-mailbox/store";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import {
-  deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,
+  isHostedMemberSuspended,
 } from "./entitlement";
+import { readActiveHostedMemberAccess } from "./member-access";
 import {
   clearHostedMemberPendingActivationTimeZone,
   composeHostedMemberSnapshot,
@@ -61,9 +62,6 @@ export type HostedMemberActivationResult = {
 type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
   core: HostedMemberActivationCoreState;
 };
-
-export const MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE =
-  "You are in. Your Murph access is paid through a Family plan, but your Murph conversations, health data, vault data, exports, and deletion controls stay private to you. The Family owner cannot see them.";
 
 export async function activateHostedMemberForPositiveSourceTx(input: {
   dispatchContext: HostedStripeDispatchContext;
@@ -110,19 +108,21 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
       sourceEventId: input.sourceEventId,
       sourceType: "hosted.family.sponsorship",
     },
-    familyAccessActive: true,
     memberId: input.memberId,
     preserveBillingStatus: true,
     prisma: input.prisma,
     skipIfPreviouslyActivated: true,
-    welcomeMessage: MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE,
+    welcomeMessage: renderUserFacingMessage({
+      context: {},
+      key: "assistant.family_welcome",
+      seed: input.memberId,
+    }).text,
   });
 }
 
 async function activateHostedMemberForPositiveSourceTxInner(input: {
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
-  familyAccessActive?: boolean;
   memberId: string;
   preserveBillingStatus?: boolean;
   prisma: Prisma.TransactionClient;
@@ -131,7 +131,6 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
   welcomeMessage?: string;
 }): Promise<HostedMemberActivationResult> {
   const currentMember = await readActivationReadyHostedMemberTx({
-    familyAccessActive: input.familyAccessActive ?? false,
     memberId: input.memberId,
     prisma: input.prisma,
   });
@@ -304,8 +303,7 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
     || input.member.routing?.pendingLinqChatId,
   );
   const hasTelegramRoute = Boolean(
-    input.member.routing?.telegramThreadId
-    || input.member.routing?.telegramUserId,
+    input.member.routing?.telegramThreadId,
   );
 
   if (
@@ -336,7 +334,6 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
 }
 
 async function readActivationReadyHostedMemberTx(input: {
-  familyAccessActive?: boolean;
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationSnapshot | null> {
@@ -347,23 +344,24 @@ async function readActivationReadyHostedMemberTx(input: {
     prisma: input.prisma,
   });
 
+  if (!currentMember || isHostedMemberSuspended(currentMember.core.suspendedAt)) {
+    return null;
+  }
+
+  // A hard-blocked own billing status (canceled/paused/unpaid) only bars
+  // activation when no sponsorship covers the member; a family-sponsored
+  // member with a stale own status is still activation-ready.
   if (
-    !currentMember ||
-    (
-      input.familyAccessActive !== true &&
-      isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)
-    )
+    isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)
+    && !(await readActiveHostedMemberAccess({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }))
   ) {
     return null;
   }
 
-  const entitlement = deriveHostedEntitlement({
-    billingStatus: currentMember.core.billingStatus,
-    familyAccessActive: input.familyAccessActive ?? false,
-    suspendedAt: currentMember.core.suspendedAt,
-  });
-
-  return entitlement.activationReady ? currentMember : null;
+  return currentMember;
 }
 
 async function readHostedMemberActivationSnapshotTx(input: {

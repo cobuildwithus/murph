@@ -431,7 +431,7 @@ export function useHostedPhoneAuthController({
       }
 
       setErrorMessage(
-        toErrorMessage(error, "We could not continue with your Privy session."),
+        toErrorMessage(error, "We couldn't finish signing you in. Try again."),
       );
     }
   }
@@ -499,7 +499,7 @@ export function useHostedPhoneAuthController({
     authenticatedSessionDescription: effectiveRequiresAuthenticatedSessionRestart
       ? "This browser is signed into a different Murph account. Sign out, then verify the phone number you want to use."
       : authenticatedSessionMissingPhone
-        ? "Your current Privy session is missing a verified phone number. Sign out and continue with SMS."
+        ? "Your sign-in doesn't have a verified phone number yet. Sign out, then verify your number by text."
         : "Sign out and request a fresh code to continue.",
     authenticatedView,
     errorMessage,

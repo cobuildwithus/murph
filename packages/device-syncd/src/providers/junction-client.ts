@@ -765,25 +765,29 @@ function parseJunctionProviderConnection(value: unknown): JunctionProviderConnec
   }
 
   const record = value as Record<string, unknown>;
-  const origin = resolveJunctionOrigin(record);
+  const rawOrigin = resolveJunctionOrigin(record);
   const slug =
     normalizeSourceSlug(record.slug)
     ?? normalizeSourceSlug(record.sourceProviderSlug)
     ?? normalizeSourceSlug(record.source_provider_slug)
     ?? normalizeSourceSlug(record.provider_slug)
     ?? normalizeSourceSlug(record.provider)
-    ?? normalizeSourceSlug(origin.sourceProviderSlug);
+    ?? normalizeSourceSlug(rawOrigin.sourceProviderSlug);
 
   if (!slug) {
     return null;
   }
+  const source = readJunctionProviderConnectionSource(record);
+  const origin = resolveJunctionOrigin(record, {
+    sourceProviderSlug: rawOrigin.sourceProviderSlug ?? slug,
+  });
 
   return {
     id: readJunctionProviderConnectionId(record),
     slug,
     name: normalizeString(record.name) ?? normalizeString(record.display_name) ?? null,
     status: normalizeString(record.status) ?? "unknown",
-    source: readJunctionProviderConnectionSource(record),
+    source,
     origin: {
       sourceProviderSlug: origin.sourceProviderSlug,
       sourceInstanceId: origin.sourceInstanceId,

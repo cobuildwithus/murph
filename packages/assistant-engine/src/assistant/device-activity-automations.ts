@@ -5,16 +5,21 @@ import {
   deviceActivityCoverageKeyIsAfterCursor,
   listAutomations,
   readVaultRawTolerant,
+  resolveAdherenceObservationActivityKind,
   resolveNextDeviceActivityCoverageCursor,
   type AutomationQueryRecord,
   type VaultReadModel,
 } from '@murphai/query'
-import type { AutomationSchedule } from '@murphai/contracts'
 import {
   assistantCronJobSchema,
   assistantCronTargetSchema,
   type AssistantCronJob,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  activityTextMatchesKind,
+  normalizeActivityKindToken,
+  type AutomationSchedule,
+} from '@murphai/contracts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from './automation-tags.js'
 import { withAssistantCronWriteLock } from './cron/locking.js'
 import {
@@ -34,6 +39,12 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 
 const DEVICE_ACTIVITY_AUTOMATION_MAX_MATCHES_PER_PASS = 25
 
+// Suppress the summary for a device activity that finished long before the sync that surfaced it
+// (e.g. a WHOOP/Junction backfill after the device was offline for a day or more). Last night's
+// sleep and this morning's workout are always well under this bound; a record from an earlier day
+// is not.
+const DEVICE_ACTIVITY_MAX_STALENESS_MS = 24 * 60 * 60_000
+
 type DeviceActivitySchedule = Extract<AutomationSchedule, { kind: 'deviceActivity' }>
 type DeviceActivityAutomation = AutomationQueryRecord & { schedule: DeviceActivitySchedule }
 type ActivityEntity = VaultReadModel['events'][number]
@@ -41,6 +52,7 @@ type DeviceActivityEventKind = 'activity_session' | 'sleep_session'
 
 interface DeviceActivityCandidate {
   activityKind: string
+  activityKindSource: 'structured' | 'title' | 'generic'
   durationMinutes: number | null
   entityId: string
   occurredAt: string
@@ -110,7 +122,7 @@ async function scheduleDeviceActivityTriggeredAutomationsAt(
   }
 
   const vault = await readVaultRawTolerant(input.vault)
-  const activityCandidates = listDeviceActivityCandidates(vault)
+  const activityCandidates = listDeviceActivityCandidates(vault, input.nowIso)
   let matched = 0
   let moreMatchesRemain = false
   let scheduled = 0
@@ -204,15 +216,18 @@ async function hasDueAssistantRequireSendCronJob(input: {
   )
 }
 
-function listDeviceActivityCandidates(vault: VaultReadModel): DeviceActivityCandidate[] {
+function listDeviceActivityCandidates(vault: VaultReadModel, nowIso: string): DeviceActivityCandidate[] {
   return vault.events
     .filter(isDeviceActivityEventEntity)
+    .filter((entity) => !isStaleDeviceActivity(entity, nowIso))
     .flatMap((entity) => {
       const occurredAt = resolveActivityOccurredAt(entity)
       const triggeredAt = resolveDeviceActivityTriggeredAt(entity)
+      const activityKind = resolveDeviceActivityKind(entity)
       return occurredAt && triggeredAt
         ? [{
-            activityKind: resolveDeviceActivityKind(entity),
+            activityKind: activityKind.kind,
+            activityKindSource: activityKind.source,
             durationMinutes: readActivityDurationMinutes(entity),
             entityId: entity.entityId,
             occurredAt,
@@ -307,42 +322,40 @@ function isDeviceActivityEventEntity(
   return entity.kind === 'activity_session' || entity.kind === 'sleep_session'
 }
 
-function resolveDeviceActivityKind(entity: ActivityEntity & { kind: DeviceActivityEventKind }): string {
-  if (entity.kind === 'sleep_session') {
-    return 'sleep'
+function isStaleDeviceActivity(entity: ActivityEntity, nowIso: string): boolean {
+  // Anchor on when the activity ended. Sleep carries an explicit endAt (it runs for hours, so its
+  // start can look stale while it is genuinely last night); activity sessions have no endAt and are
+  // short, so their start time is a fine anchor.
+  const endedAt = normalizeTimestamp(readString(entity.attributes.endAt)) ?? resolveActivityOccurredAt(entity)
+  if (endedAt === null) {
+    return false
   }
-
-  for (const candidate of listActivityKindTextCandidates(entity)) {
-    const normalized = normalizeDeviceActivityKindToken(candidate)
-    if (normalized) {
-      return normalized
-    }
+  const endedAtMs = Date.parse(endedAt)
+  const nowMs = Date.parse(nowIso)
+  if (!Number.isFinite(endedAtMs) || !Number.isFinite(nowMs)) {
+    return false
   }
-
-  return 'activity'
+  return nowMs - endedAtMs > DEVICE_ACTIVITY_MAX_STALENESS_MS
 }
 
-function listActivityKindTextCandidates(entity: ActivityEntity): string[] {
-  const workout = readRecord(entity.attributes.workout)
-  const sport = readRecord(entity.attributes.sport)
-  const workoutSport = readRecord(workout?.sport)
-  return [
-    readString(entity.attributes.activityType),
-    readString(entity.attributes.type),
-    readString(entity.attributes.sport),
-    readString(sport?.slug),
-    readString(sport?.name),
-    readString(sport?.type),
-    readString(entity.attributes.name),
-    readString(workout?.activityType),
-    readString(workout?.type),
-    readString(workout?.sport),
-    readString(workoutSport?.slug),
-    readString(workoutSport?.name),
-    readString(workoutSport?.type),
-    readString(workout?.name),
-    readEntityTitle(entity),
-  ].filter((entry): entry is string => entry !== null)
+function resolveDeviceActivityKind(
+  entity: ActivityEntity & { kind: DeviceActivityEventKind },
+): { kind: string; source: DeviceActivityCandidate['activityKindSource'] } {
+  if (entity.kind === 'sleep_session') {
+    return { kind: 'sleep', source: 'structured' }
+  }
+
+  const structuredKind = resolveAdherenceObservationActivityKind({
+    attributes: entity.attributes,
+  })
+  if (structuredKind) {
+    return { kind: structuredKind, source: 'structured' }
+  }
+
+  const titleKind = normalizeActivityKindToken(readEntityTitle(entity))
+  return titleKind
+    ? { kind: titleKind, source: 'title' }
+    : { kind: 'activity', source: 'generic' }
 }
 
 function deviceActivityKindMatches(
@@ -353,15 +366,15 @@ function deviceActivityKindMatches(
     return true
   }
 
-  const requested = normalizeDeviceActivityKindToken(activityKind)
+  const requested = normalizeActivityKindToken(activityKind)
   if (!requested) {
     return false
   }
 
   if (isSleepActivityKind(requested)) {
     return candidate.recordKind === 'sleep_session'
-      || deviceActivityTextMatchesKind(candidate.activityKind, requested)
-      || deviceActivityTextMatchesKind(candidate.title, requested)
+      || activityTextMatchesKind(candidate.activityKind, requested)
+      || activityTextMatchesKind(candidate.title, requested)
   }
 
   if (requested === 'activity') {
@@ -372,8 +385,12 @@ function deviceActivityKindMatches(
     return candidate.recordKind === 'activity_session'
   }
 
-  return deviceActivityTextMatchesKind(candidate.activityKind, requested)
-    || deviceActivityTextMatchesKind(candidate.title, requested)
+  if (candidate.activityKindSource === 'structured') {
+    return activityTextMatchesKind(candidate.activityKind, requested)
+  }
+
+  return activityTextMatchesKind(candidate.activityKind, requested)
+    || activityTextMatchesKind(candidate.title, requested)
 }
 
 function deviceActivitySourceMatches(
@@ -748,63 +765,6 @@ function normalizeSourceToken(value: string | null | undefined): string | null {
   return normalized && normalized.length > 0 ? normalized : null
 }
 
-function normalizeDeviceActivityKindToken(value: string | null | undefined): string | null {
-  const normalized = value
-    ?.trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-  return normalized && normalized.length > 0 ? normalized : null
-}
-
-function deviceActivityTextMatchesKind(
-  text: string | null | undefined,
-  requested: string,
-): boolean {
-  const normalized = normalizeDeviceActivityKindToken(text)
-  if (!normalized) {
-    return false
-  }
-
-  if (deviceActivityKindsEquivalent(normalized, requested)) {
-    return true
-  }
-
-  const requestedAliases = deviceActivityKindAliasSet(requested)
-  return normalized.split('-').some((part) => requestedAliases.has(part))
-}
-
-function deviceActivityKindsEquivalent(left: string, right: string): boolean {
-  return left === right
-    || deviceActivityKindAliasSet(left).has(right)
-    || deviceActivityKindAliasSet(right).has(left)
-}
-
 function isSleepActivityKind(value: string): boolean {
-  return deviceActivityKindAliasSet('sleep').has(value)
+  return activityTextMatchesKind('sleep', value)
 }
-
-function deviceActivityKindAliasSet(value: string): Set<string> {
-  const aliases = new Set([value])
-  for (const group of deviceActivityKindAliasGroups) {
-    if ((group as readonly string[]).includes(value)) {
-      for (const alias of group) {
-        aliases.add(alias)
-      }
-    }
-  }
-  return aliases
-}
-
-const deviceActivityKindAliasGroups = [
-  ['walk', 'walking'],
-  ['run', 'running'],
-  ['bike', 'biking', 'cycle', 'cycling'],
-  ['dance', 'dancing'],
-  ['surf', 'surfing'],
-  ['swim', 'swimming'],
-  ['hike', 'hiking'],
-  ['row', 'rowing'],
-  ['strength', 'strength-training', 'weightlifting', 'weights'],
-  ['sleep', 'sleep-session', 'sleep-summary', 'sleep-cycle'],
-] as const satisfies readonly (readonly string[])[]

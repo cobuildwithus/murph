@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-06-23
+Last verified: 2026-07-07
 
 ## Decision
 
@@ -148,6 +148,72 @@ compatibility shims, not lifecycle policy, and must be deleted after
 2026-05-25. Live lifecycle control is the runtime write fence plus explicit
 execution cleanup.
 
+### Vault-Share Selector-Scope Deploy Skew
+
+Selector-scoped vault-share additions span two independent surfaces:
+
+- The runner-facing `murph.group` schema can create/read group join policies
+  containing the new scope keys.
+- The runner reads active vault-share projection scopes through web's signed
+  `/api/internal/hosted-runtime/vault-share/active-kinds` callback.
+
+The group-tool schema is bundled into the runner and parsed by web. Scope
+registry widenings on that path are therefore web-first deploys: web must know
+how to parse the new group-tool request/response scopes before a runner bundle
+exposes them to the model. New runners must also send repeated
+`supportedProjectionScope` query params on the group-tool callback. Web filters
+`requestedVaultShareProjectionScopes`, `grantedVaultShareProjectionScopes`, and
+the legacy projection-kind arrays in group summaries to the declared exact scope
+set. Warm old runners that omit `supportedProjectionScope` receive only the
+pre-distance/count response scope set, so `container_rollout=immediate` is not
+required for parser safety on the group-summary path.
+
+The active-scope delivery callback is separately capability-negotiated. New
+runner bundles must send repeated `supportedProjectionScope` query params for
+every exact projection-scope key they can parse, using the same key format as
+`buildHostedVaultShareProjectionScopeKey`. Web filters returned active scopes
+to that declared exact set before serializing the response.
+
+Warm old runner bundles omit `supportedProjectionScope`; web must treat that as
+support for the pre-distance/count scope set: fixed projection scopes plus
+`activity-minutes-days.v1`. This protects the grantor-facing active-scope read:
+newly granted `activity-distance-days.v1` and
+`activity-session-count-days.v1` scopes are hidden from old grantor runners on
+that callback rather than making active-scope parsing fail or suppressing
+existing vault-share offers.
+
+This omitted-capability fallback is temporary compatibility owned by `apps/web`.
+It may be removed after the selector-scope runner bundle has been deployed with
+`container_rollout=immediate`, production logs show current runners send exact
+`supportedProjectionScope` values on the group-tool and active-scope callbacks,
+and the rollback window to a runner bundle without exact scope support has
+closed. Until removal, the fallback scope set must stay frozen to the
+pre-distance/count protocol and must not derive support for future projection
+kinds from the live registry.
+
+That callback negotiation does not protect the destination mailbox importer.
+Vault-share delivery wakes are appended by web directly into the destination
+member mailbox, and the destination runner does not declare projection-scope
+capability while importing mailbox rows. Therefore the runner bundle that first
+exposes distance/count selector grants must be deployed with
+`container_rollout=immediate` before selector-scoped offers are created or
+accepted. Gradual Cloudflare container rollout is unsafe for this selector
+expansion: a warm old destination runner could import a selector delivery wake
+whose exact scope key it cannot preserve.
+Until that rollout window is closed, production Cloudflare deploy preflight must
+reject explicit `HOSTED_EXECUTION_CONTAINER_ROLLOUT=gradual`, and the manual
+production deploy workflow/default helper path must default missing rollout
+input to `immediate`.
+
+Rollback floor: after web has accepted distance/count grants, rolling web behind
+the projection-scope parser that knows those rows can make old web code unable
+to read or serve the stored scope keys. Roll back web to a build with this
+parser and group-summary filtering or newer, or remove the new grants before
+rolling web behind it. Runner rollback behind the selector-scope bundle is not
+allowed while selector grants or pending selector delivery wakes exist; first
+disable/revert the selector-producing web paths and drain, revoke, or remove the
+new selector grants.
+
 ## Current Protocol
 
 ### Foreground Priority Rule
@@ -234,16 +300,18 @@ the same transaction as the product/control-plane mutation that made work
 necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
 uses `HostedMailboxLaneCounter`.
 `HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
-watermark: after a foreground assistant pass finishes with zero failed replies
-and no pending foreground assistant input, the runtime acks the conversation
-watermark through the runner-allowlisted `/api/internal/hosted-mailbox/consume`
-callback (monotonic max, clamped to the lane append high-water, best-effort).
-The mailbox fetch response returns `consumedSeqByLane`; replayed items at or
-below the watermark are re-staged as conversation context with a null reply
-target, never as fresh reply candidates, so a workspace restore from a stale
-snapshot cannot re-reply to an already-handled message. A container rollout
-SIGTERM additionally makes the runtime treat the idle window as elapsed and run
-its normal `idle_shutdown` checkpoint inside the termination grace period.
+checkpoint replay floor. Accepted Linq reply delivery carries the finer
+delivery-time consume authority: the runtime reports
+`answeredMailboxItemIds`, and the signed delivery callback stamps matching
+same-user `conversation.message` rows with `HostedMailboxItem.consumedAt`.
+The mailbox fetch response returns both `consumedSeqByLane` and each item's
+`consumedAt`; replayed conversation items at or below the checkpoint replay
+floor, or with `consumedAt != null`, are re-staged as conversation context with
+a null reply target, never as fresh reply candidates. This keeps a workspace
+restore or restart from re-replying to an already-handled message without a
+side table or lane high-water advance past gaps. A container rollout SIGTERM
+additionally makes the runtime treat the idle window as elapsed and run its
+normal `idle_shutdown` checkpoint inside the termination grace period.
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
@@ -263,17 +331,24 @@ provider secrets, and decrypted mailbox payloads must not be Temporal workflow
 inputs, outputs, or history payloads. The pointer signal only wakes durable
 orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
-adapter. There is no
-webhook-to-Cloudflare runner nudge path, no direct web-to-Cloudflare message
-path, and no second wake authority. If the
-Temporal signal cannot be accepted after the mailbox row exists, the failure is
-logged as a post-commit best-effort handoff failure and does not make provider
-ingress fail. Web does not run a mailbox-lag cron backstop: missed post-commit
-workflow signal recovery remains future hardening for a DB-backed
-pending-handoff reconciler or Temporal-owned reconciler. Repeated dirty hints
-while the same connection is already dirty do not append or signal another
-device-sync wake; dirty coalescing remains the work-queue invariant, and any
-stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
+adapter. Linq webhook ingress may additionally fire one best-effort direct
+`ensure-processing` request (Vercel OIDC, fire and forget, no retries, no
+message payload) after the unconditional Temporal signal is accepted. This is a
+latency hint only, not a second durable wake authority: it is Linq-only because
+accepted Linq reply delivery stamps `HostedMailboxItem.consumedAt`, so a racing
+ensure may import an already-consumed row but it stages with a null reply target
+and cannot be answered again. Do not add workflow-side direct-wake flags,
+derived-floor SQL, or lag netting merely to avoid harmless post-delivery no-op
+ensures. There is no direct web-to-Cloudflare message path and no second durable
+wake authority. If the Temporal signal cannot be accepted after the mailbox row
+exists, the failure is logged as a post-commit best-effort handoff failure and
+does not make provider ingress fail; direct Linq ensure is not fired without
+the accepted Temporal signal. Web does not run a mailbox-lag cron backstop:
+missed post-commit workflow signal recovery remains future hardening for a
+DB-backed pending-handoff reconciler or Temporal-owned reconciler. Repeated
+dirty hints while the same connection is already dirty do not append or signal
+another device-sync wake; dirty coalescing remains the work-queue invariant,
+and any stronger signal-delivery repair must be mailbox-wide. Redacted runtime logs
 remain diagnostic evidence only; they must not be merged into checkpointed
 import status for workflow completion or status projection. The narrow liveness
 exception is the exact `runner.accepted_attempt_failed` event: after web has
@@ -340,11 +415,13 @@ stops on the first signal failure. It is not a scheduler, queue, or generic
 admin job framework.
 
 The same ops page may also expose narrow hosted-runtime setup actions that reuse
-existing source-of-truth services, such as manually ensuring a Linq
-external-thread route through `/api/ops/thread-routes`. Those actions must use
-the same hosted app-session, allowlist, and same-origin mutation gate, and must
-delegate to the owning service primitive rather than hand-writing persisted
-runtime rows.
+existing source-of-truth services. Those actions must use the same hosted
+app-session, allowlist, and same-origin mutation gate, and must delegate to the
+owning service primitive rather than hand-writing persisted runtime rows. Linq
+group-thread containers are no longer operator-provisioned: the Linq webhook
+planner auto-provisions the thread-container route through
+`ensureHostedThreadContainerRouteTx` when an attested group message arrives from
+an active member texting their own home line.
 
 For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
 runtime parser must understand the new mailbox kind before web emits it. After
@@ -440,6 +517,8 @@ recheck instead of being cleared from the pointer alone; only the wake path may
 then replace the fence after it explicitly reports no active child. Inactive
 liveness is explicit no-active-child proof, so the controller clears and
 replaces that fence directly instead of asking web status to complete it first.
+For the active-wake probe, a verifiably stopped container shell
+(`ctx.container.running === false`) is the same explicit no-active-child proof.
 Committed-progress recovery stays in the transport-failure adapter, where the
 transport outcome is the thing being reconciled. Mismatched liveness probes
 clear the fence because they prove the active child is not the fenced attempt;
@@ -557,8 +636,12 @@ projection metadata. These projection updates must not request an additional
 workspace checkpoint. Linq inbound message deletion is still eventual, but it is
 queued only after terminal handling evidence is durable under
 `.runtime/operations/assistant/auto-reply/evidence/<captureId>.json` and is
-drained through the hosted provider-cleanup retry state after the next successful
-runtime-owned idle or scheduled-wake workspace checkpoint.
+drained through hosted provider-cleanup after the next successful runtime-owned
+idle or scheduled-wake workspace checkpoint. The first deferred cleanup wake is
+scheduled after the configured idle-checkpoint horizon so cleanup cannot shorten
+the warm idle window; actual cleanup failures use the provider-cleanup retry
+delay. Post-checkpoint delivery and provider-cleanup drains recompute cleanup
+wakes from the post-side-effect state, not from a pre-side-effect base wake.
 
 The hosted workspace checkpoint ref may be a v2 direct-R2 snapshot ref, a
 legacy full/base workspace bundle, a legacy working `{base, delta}` ref, or a
@@ -664,6 +747,15 @@ response that interrupts idle checkpointing so the same invocation can import
 fresh foreground mailbox input; Cloudflare may retire the upload session as an
 orphan candidate, but it must not collapse that response into a generic HTTP
 conflict before `packages/assistant-runtime` handles it.
+Checkpoint-required wake metadata must still respect the configured idle
+checkpoint delay. Due or projected assistant wakes, mailbox budget exhaustion,
+and deferred durable checkpoint follow-ups preserve their invocation-local wake
+candidate for the next `idle_shutdown`, but they do not pull checkpointing
+earlier than the idle timer. If fresh foreground input interrupts checkpoint
+publication with `foreground_pending`, the runtime imports that input in the
+same invocation and then retries the checkpoint so the follow-up wake is durably
+preserved before it is serviced; this does not create another snapshot reason or
+foreground-bypass flag.
 Web must evaluate the workspace-version CAS before returning
 `foreground_pending`: pending conversation input may interrupt only a checkpoint
 whose locked workspace version still equals the request's expected version.

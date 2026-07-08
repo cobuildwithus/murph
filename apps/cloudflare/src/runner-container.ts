@@ -600,6 +600,10 @@ export class RunnerContainer extends Container {
       }
     }
 
+    if (!active && this.isPlatformContainerDefinitelyStopped()) {
+      return { kind: "not-wakeable", reason: "no-active-child" };
+    }
+
     this.noteRunnerActivity("runtime-wake");
     try {
       const runtimeWakeSignal = AbortSignal.timeout(DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS);
@@ -691,6 +695,10 @@ export class RunnerContainer extends Container {
       }
       return { kind: "unknown", reason: "container-rpc-error" };
     }
+  }
+
+  private isPlatformContainerDefinitelyStopped(): boolean {
+    return this.ctx.container?.running === false;
   }
 
   async smokeHealth(input: HostedExecutionContainerSmokeHealthInput = {}): Promise<HostedExecutionContainerSmokeHealthResult> {

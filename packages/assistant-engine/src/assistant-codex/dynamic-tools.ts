@@ -1,11 +1,38 @@
 import { z } from 'zod'
+import { loadVault } from '@murphai/core'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_KINDS,
+  HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
+  HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
+  HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeFamilyPlanToolRequest,
+  type HostedRuntimeGroupToolRequest,
+  type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeNewsletterParticipantSummary,
+  type HostedRuntimeNewsletterScheduledAuthority,
+  type HostedRuntimeNewsletterToolRequest,
+  type HostedRuntimeNewsletterToolResponse,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
+import {
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareProjectionScopeKey,
+  parseHostedVaultShareProjectionScope,
+  type HostedVaultShareSelectableProjectionScope,
+} from '@murphai/hosted-execution/vault-share'
+import type { OverviewWeeklyStat } from '@murphai/query'
 import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
@@ -29,6 +56,7 @@ import {
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 import type {
+  AssistantGeneratedImageContentType,
   AssistantHostedGeneratedImageUploader,
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
@@ -54,6 +82,10 @@ import {
   executeGenerateImageTool,
   type GenerateImageToolArgs,
 } from './generate-image-tool.js'
+import {
+  resolveGenerateImageReferences,
+  type ResolvedGenerateImageReference,
+} from './image-reference-resolver.js'
 import {
   type GenerateSongToolArgs,
   type GenerateVoiceMemoToolArgs,
@@ -81,6 +113,12 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
+import {
+  buildGroupNewsletterSharedWeeklyStats,
+  GroupNewsletterSharedProjectionUnavailableError,
+  readGroupNewsletterSharedMemberDailyRecords,
+  type GroupNewsletterSharedMemberDailyRecords,
+} from './group-newsletter-shared-stats.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step'
@@ -89,7 +127,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send a brief, natural user-visible progress update to the current conversation only when longer, tool-heavy, or substantial user-content-inspection work would otherwise leave the user waiting. Use as the first assistant action for genuinely long tasks that require multiple tool steps, involve research or long vault scans, or recover substantial data from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. For work likely to finish in about a minute or less, send at most one progress update. If the turn becomes unusually long-running after substantial tool work, you may send one more brief update so the user is not left hanging; never send a third. Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage unless the update materially improves UX. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
+    'Send a brief, natural user-visible progress update to the current conversation only when longer, tool-heavy, or substantial user-content-inspection work would otherwise leave the user waiting. Use as the first assistant action for genuinely long tasks that require multiple tool steps, involve research or long vault scans, or recover substantial data from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. For work likely to finish in about a minute or less, send at most one progress update. If the turn becomes unusually long-running after substantial tool work, you may send up to two more brief updates so the user is not left hanging; never send a fourth. Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage unless the update materially improves UX. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -98,7 +136,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
         type: 'string',
         minLength: 1,
         description:
-          'Prefer one short conversational first-person sentence about the immediate next step; use two only when needed to keep the quick note clear. Use contractions when natural. Avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works. No markdown links, final answers, lab interpretations, abnormalities, diagnoses, treatment recommendations, or claims not yet verified.',
+          'Prefer one short conversational first-person sentence about the immediate next step; use two only when needed to keep the quick note clear. Use contractions when natural. Avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works. Write it the way a person would text: everyday words about what the user cares about, never internal mechanics or instruction vocabulary such as "preserving the source", "structured import", "parse", "canonical records", or "delegating" — "Got your labs, pulling the numbers in now" beats "starting the structured lab import". No markdown links, final answers, lab interpretations, abnormalities, diagnoses, treatment recommendations, or claims not yet verified.',
       },
     },
     required: ['text'],
@@ -197,7 +235,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
         maxItems: 16,
         default: [],
         description:
-          'Optional ordered vault-relative JPG, PNG, or WebP image refs to use as visual references (up to 16). Use only refs the user attached as part of the current turn (other vault paths are rejected as unauthorized). Describe in the prompt how image 1, image 2, etc. should be used.',
+          'Optional ordered vault-relative JPG, PNG, or WebP image refs to use as visual references (up to 16). Refs must be user-sent media under raw/inbox/** or captured media under raw/captures/** (other vault paths are rejected as unauthorized). Describe in the prompt how image 1, image 2, etc. should be used.',
         items: {
           type: 'string',
           minLength: 1,
@@ -305,11 +343,265 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
+const GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
+    },
+  },
+} as const
+
+const GROUP_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind', 'selector'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND],
+    },
+    selector: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['activityKind'],
+      properties: {
+        activityKind: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS],
+        },
+      },
+      description:
+        'Required for activity-minutes-days.v1.',
+    },
+  },
+} as const
+
+const GROUP_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind', 'selector'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND],
+    },
+    selector: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['activityKind'],
+      properties: {
+        activityKind: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS],
+        },
+      },
+      description:
+        'Required for activity-distance-days.v1.',
+    },
+  },
+} as const
+
+const GROUP_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_SCOPE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['projectionKind', 'selector'],
+  properties: {
+    projectionKind: {
+      type: 'string',
+      enum: [HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND],
+    },
+    selector: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['activityKind'],
+      properties: {
+        activityKind: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS],
+        },
+      },
+      description:
+        'Required for activity-session-count-days.v1.',
+    },
+  },
+} as const
+
+const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
+  oneOf: [
+    GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA,
+    GROUP_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_SCOPE_SCHEMA,
+    GROUP_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_SCOPE_SCHEMA,
+    GROUP_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_SCOPE_SCHEMA,
+  ],
+} as const
+
+export const MURPH_GROUP_TOOL = {
+  namespace: 'murph',
+  name: 'group',
+  description:
+    'Read the current hosted group and its member roster (member ids, chat handles, and each member\'s granted share kinds) with action="read_current", request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned react-to-join offer into the current group chat with action="post_join_offer". update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL. A join link grants membership and shares the joiner\'s profile display name with this group runtime; optional permissions stay individually selected on the join page. A join offer uses your short natural messageTemplate to state what reacting shares with {{share_scope}} and include the customize link with {{join_url}} so people can share more or less. Pass displayName on create_join_link or post_join_offer only when it is the name the group chose. Reactions grant membership plus only the posted permission snapshot. Do not use a fixed script. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: [
+          'read_current',
+          'update_display_name',
+          'create_join_link',
+          'post_join_offer',
+          'read_chat_participants',
+          'set_chat_avatar',
+          'share_contact_card',
+          'revoke_own_email_share',
+        ],
+      },
+      displayName: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+        description:
+          'Group display name. Required for action="update_display_name", which requests the iMessage group chat title update and stores the same hosted group label; optional for action="create_join_link" or action="post_join_offer" only when it is the name the group chose.',
+      },
+      avatarSource: {
+        type: 'string',
+        enum: ['generate', 'image_ref'],
+        description:
+          'Required for action="set_chat_avatar". Use "generate" to create a new square avatar from prompt, or "image_ref" to reuse one user-sent JPG, PNG, or WebP image ref.',
+      },
+      prompt: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 4000,
+        description:
+          'Required for action="set_chat_avatar" with avatarSource="generate". Prompt for one square group chat avatar image.',
+      },
+      imageRef: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 1024,
+        description:
+          'Required for action="set_chat_avatar" with avatarSource="image_ref". A user-sent JPG, PNG, or WebP ref under raw/inbox/** or raw/captures/**.',
+      },
+      size: {
+        type: 'string',
+        enum: ['1024x1024'],
+        default: '1024x1024',
+        description: 'For generated group avatars. Group avatars are square.',
+      },
+      quality: {
+        type: 'string',
+        enum: ['low', 'medium', 'high'],
+        default: 'medium',
+      },
+      outputFormat: {
+        type: 'string',
+        enum: ['webp', 'png', 'jpeg'],
+        default: 'webp',
+      },
+      alt: {
+        anyOf: [
+          { type: 'string', minLength: 1, maxLength: 500 },
+          { type: 'null' },
+        ],
+        default: null,
+        description: 'Optional alt text for the generated or reused avatar image.',
+      },
+      referenceImageRefs: {
+        type: 'array',
+        maxItems: 16,
+        default: [],
+        description:
+          'Optional ordered JPG, PNG, or WebP image refs to use as visual references when action="set_chat_avatar" and avatarSource="generate".',
+        items: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 1024,
+        },
+      },
+      kind: {
+        type: 'string',
+        enum: [...HOSTED_RUNTIME_GROUP_KINDS],
+        description: 'Optional group kind when creating a join link.',
+      },
+      requestedVaultShareProjectionScopes: {
+        type: 'array',
+        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
+        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
+        description:
+          'Optional bounded health projection scopes the join page may offer joining members. Joining never shares them automatically; each member approves their own selection. Use activity-minutes-days.v1 with a recognized activity alias, activity-distance-days.v1 with a distance-capable movement alias for daily distance plus session count, or activity-session-count-days.v1 with a recognized activity/intervention alias.',
+      },
+      projectionScopes: {
+        type: 'array',
+        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
+        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
+        description:
+          'Optional bounded health projections that reacting to the server-owned offer message will grant as a fixed snapshot. The server-filled {{share_scope}} placeholder always states that profile display name is shared too.',
+      },
+      messageTemplate: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
+        description:
+          'Required for action="post_join_offer". Write one short natural group-chat message, not a fixed script. Lead with reacting to this message to join. Include {{share_scope}} exactly once where the server inserts the exact shared-scope phrase. Include {{join_url}} exactly once as the customize link so members can share more or less. Do not include any other URL.',
+      },
+    },
+    required: ['action'],
+  },
+} as const
+
+export const MURPH_NEWSLETTER_TOOL = {
+  namespace: 'murph',
+  name: 'newsletter',
+  description:
+    'Read or send the current hosted group health newsletter. Use action="read_stats" with a groupId to get opted-in participants only, each participant\'s member id, display name, hasEmail flag, shared weekly health rollups, group superlatives, and participants without a verified email. Use action="send" only during the scheduled newsletter run after the setup notice and opt-out window have elapsed; never send the first edition immediately after creating or editing the newsletter automation. It sends one shared email thread to participants who granted email authorization and have a verified email. This tool never returns raw email addresses and does not create or edit the cron automation.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['read_stats', 'send'],
+      },
+      groupId: {
+        type: 'string',
+        minLength: 1,
+      },
+      subject: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
+      },
+      html: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
+      },
+      text: {
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+          },
+          { type: 'null' },
+        ],
+        default: null,
+      },
+    },
+    required: ['action', 'groupId'],
+  },
+} as const
+
 export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, this attaches the exact approved file to your normal reply. It does not reveal file bytes to the model, does not queue a separate delivery, and does not support arbitrary recipients.",
+    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.",
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -510,6 +802,8 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
+  MURPH_GROUP_TOOL,
+  MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
@@ -541,6 +835,8 @@ export interface MurphDynamicToolAvailability {
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
+  groupAvailable?: boolean | null
+  newsletterAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
@@ -570,6 +866,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
+    [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
+    [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
@@ -623,6 +921,175 @@ const generateImageArgumentsSchema = z
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
   })
   .strict()
+
+const GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = '{{join_url}}'
+const GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = '{{share_scope}}'
+
+function hasUsableGroupJoinOfferPlaceholders(messageTemplate: string): boolean {
+  return hasPlaceholderExactlyOnce(
+    messageTemplate,
+    GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+  ) && hasPlaceholderExactlyOnce(
+    messageTemplate,
+    GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
+  )
+}
+
+function hasPlaceholderExactlyOnce(messageTemplate: string, placeholder: string): boolean {
+  return (
+    messageTemplate.includes(placeholder)
+    && messageTemplate.indexOf(placeholder) === messageTemplate.lastIndexOf(placeholder)
+  )
+}
+
+const selectableVaultShareProjectionScopeByKey =
+  new Map<string, HostedVaultShareSelectableProjectionScope>(
+    HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) => [
+      buildHostedVaultShareProjectionScopeKey(scope),
+      scope,
+    ]),
+  )
+
+const groupVaultShareProjectionScopeSchema = z.unknown().transform((value, context) => {
+  let parsedScope: ReturnType<typeof parseHostedVaultShareProjectionScope>
+  try {
+    parsedScope = parseHostedVaultShareProjectionScope(
+      value,
+      'murph.group vault share projection scope',
+    )
+  } catch (error) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: error instanceof Error
+        ? error.message
+        : 'Vault share projection scope is not supported.',
+    })
+    return z.NEVER
+  }
+  const scope = selectableVaultShareProjectionScopeByKey.get(
+    buildHostedVaultShareProjectionScopeKey(parsedScope),
+  )
+  if (!scope) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Vault share projection scope is not selectable.',
+    })
+    return z.NEVER
+  }
+  return scope
+})
+
+const groupArgumentsSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('read_current'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('update_display_name'),
+      displayName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('set_chat_avatar'),
+      alt: z.string().trim().min(1).max(500).nullable().default(null),
+      avatarSource: z.enum(['generate', 'image_ref']),
+      imageRef: z.string().trim().min(1).max(1024).optional(),
+      outputFormat: z.enum(['webp', 'png', 'jpeg']).default('webp'),
+      prompt: z.string().trim().min(1).max(4000).optional(),
+      quality: z.enum(['low', 'medium', 'high']).default('medium'),
+      referenceImageRefs: z
+        .array(z.string().trim().min(1).max(1024))
+        .max(16)
+        .default([]),
+      size: z.literal('1024x1024').default('1024x1024'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('read_chat_participants'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('share_contact_card'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('post_join_offer'),
+      displayName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
+        .optional(),
+      messageTemplate: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH)
+        .refine(hasUsableGroupJoinOfferPlaceholders, {
+          message:
+            'post_join_offer messageTemplate must contain {{share_scope}} exactly once and {{join_url}} exactly once',
+        }),
+      projectionScopes: z
+        .array(groupVaultShareProjectionScopeSchema)
+        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('revoke_own_email_share'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('create_join_link'),
+      displayName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
+        .optional(),
+      kind: z.enum(HOSTED_RUNTIME_GROUP_KINDS).optional(),
+      requestedVaultShareProjectionScopes: z
+        .array(groupVaultShareProjectionScopeSchema)
+        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
+        .optional(),
+    })
+    .strict(),
+])
+
+const newsletterArgumentsSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('read_stats'),
+      groupId: z.string().trim().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('send'),
+      groupId: z.string().trim().min(1),
+      html: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH),
+      subject: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH),
+      text: z
+        .string()
+        .trim()
+        .max(HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH)
+        .nullable()
+        .optional(),
+    })
+    .strict(),
+])
 
 const sendVaultFileArgumentsSchema = z
   .object({
@@ -873,6 +1340,22 @@ interface ParsedDynamicToolCallRequest {
   tool: string | null
 }
 
+type MurphGroupToolRequest =
+  | HostedRuntimeGroupToolRequest
+  | {
+      action: 'set_chat_avatar'
+      avatar:
+        | {
+            source: 'generate'
+            args: GenerateImageToolArgs
+          }
+        | {
+            source: 'image_ref'
+            alt: string | null
+            imageRef: string
+          }
+    }
+
 export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
   | {
@@ -961,8 +1444,24 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-group-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-newsletter-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
+    }
+  | {
+      kind: 'group'
+      request: MurphGroupToolRequest
+    }
+  | {
+      kind: 'newsletter'
+      request: HostedRuntimeNewsletterToolRequest
     }
   | {
       kind: 'submit-product-feedback'
@@ -1131,6 +1630,32 @@ export function readMurphDynamicToolRequest(
         request: parsed.request,
       }
     }
+    case MURPH_GROUP_TOOL.name: {
+      const parsed = parseGroupArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-group-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'group',
+        request: parsed.request,
+      }
+    }
+    case MURPH_NEWSLETTER_TOOL.name: {
+      const parsed = parseNewsletterArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-newsletter-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'newsletter',
+        request: parsed.request,
+      }
+    }
     case MURPH_FINISH_WITHOUT_REPLY_TOOL.name: {
       const parsed = parseFinishWithoutReplyArguments(request.arguments)
       if (!parsed.ok) {
@@ -1282,9 +1807,6 @@ function currentHostedMailboxItemId(
 
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
-  loadAuthorizedReferenceImageRefs?:
-    | (() => Promise<ReadonlyMap<string, { sha256: string }>>)
-    | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
@@ -1330,6 +1852,10 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
       return toolTextResult(false, 'invalid family plan arguments')
+    case 'invalid-group-arguments':
+      return toolTextResult(false, 'invalid group arguments')
+    case 'invalid-newsletter-arguments':
+      return toolTextResult(false, 'invalid newsletter arguments')
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-media-arguments':
@@ -1402,7 +1928,10 @@ export async function executeMurphDynamicToolRequest(input: {
               ...toolTextResult(
                 true,
                 JSON.stringify({
+                  deliveryStatus: 'queued_with_reply',
                   filename: result.filename,
+                  note:
+                    'Approval succeeded. Attach this file through your normal reply path. Do not quote this note or claim final iMessage delivery unless later delivery evidence confirms it.',
                   status: result.status,
                 }),
               ),
@@ -1464,6 +1993,24 @@ export async function executeMurphDynamicToolRequest(input: {
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
       })
+    case 'group':
+      return await executeGroupTool({
+        abortSignal: input.abortSignal ?? null,
+        env: input.env,
+        fetchImpl: input.fetchImpl,
+        hostedToolContext: input.hostedToolContext ?? null,
+        hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+        nextUsageOrdinal: input.nextUsageOrdinal,
+        request: input.request.request,
+        vaultRoot: input.vaultRoot ?? null,
+      })
+    case 'newsletter':
+      return await executeNewsletterTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
+        vaultRoot: input.vaultRoot ?? null,
+      })
     case 'finish-without-reply':
       return {
         ...toolTextResult(true, 'finished without reply'),
@@ -1489,20 +2036,9 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
 
-      // Only resolve the per-turn authority allowlist when the model is
-      // actually requesting reference images. A plain no-refs generate_image
-      // call must keep working even if the accepted-input journal is
-      // transiently unreadable; gating the loader keeps the existing
-      // /v1/images/generations path independent of attachment-runtime state.
-      const requestedRefs = input.request.args.referenceImageRefs ?? []
-      const authorizedRefs =
-        requestedRefs.length > 0 && input.loadAuthorizedReferenceImageRefs
-          ? await input.loadAuthorizedReferenceImageRefs()
-          : null
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
-        authorizedReferenceImageRefs: authorizedRefs,
         codexHome: input.codexHome ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
@@ -1690,6 +2226,469 @@ async function executeFamilyPlanTool(input: {
   }
 }
 
+function groupAvatarUnavailableToolResult(
+  unavailableReason: string,
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(true, safeToolPayloadText({
+    action: 'set_chat_avatar',
+    result: {
+      status: 'unavailable',
+      unavailableReason,
+    },
+  }))
+}
+
+async function executeGroupTool(input: {
+  abortSignal: AbortSignal | null
+  env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
+  hostedToolContext: AssistantHostedToolContext | null
+  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
+  materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
+  nextUsageOrdinal: () => number
+  request: MurphGroupToolRequest
+  vaultRoot: string | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  const groupTool = input.hostedToolContext?.groupTool ?? null
+  if (!groupTool) {
+    return toolTextResult(false, 'group tools are unavailable for this turn')
+  }
+
+  let request: HostedRuntimeGroupToolRequest
+  let usageDraft: AssistantProviderUsageDraft | null = null
+  if (isPreparedGroupAvatarRequest(input.request)) {
+    let preflight: Extract<HostedRuntimeGroupToolResponse, { action: 'preflight_set_chat_avatar' }>
+    try {
+      const preflightResult = await groupTool.request({ action: 'preflight_set_chat_avatar' })
+      if (preflightResult.action !== 'preflight_set_chat_avatar') {
+        return groupAvatarUnavailableToolResult('group_avatar_preflight_unavailable')
+      }
+      preflight = preflightResult
+    } catch {
+      return groupAvatarUnavailableToolResult('group_avatar_preflight_unavailable')
+    }
+    if (preflight.result.status !== 'ok') {
+      return toolTextResult(true, safeToolPayloadText({
+        action: 'set_chat_avatar',
+        result: preflight.result,
+      }))
+    }
+
+    const prepared = await prepareGroupAvatarRuntimeRequest({
+      abortSignal: input.abortSignal,
+      env: input.env,
+      fetchImpl: input.fetchImpl,
+      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      nextUsageOrdinal: input.nextUsageOrdinal,
+      request: input.request,
+      vaultRoot: input.vaultRoot,
+    })
+    if (!prepared.rpcSuccess) {
+      return {
+        rpcResult: {
+          success: false,
+          contentItems: [{ type: 'inputText', text: prepared.rpcText }],
+        },
+        usageDraft: prepared.usageDraft ?? null,
+      }
+    }
+    request = prepared.request
+    usageDraft = prepared.usageDraft ?? null
+  } else {
+    request = input.request
+  }
+
+  try {
+    const result = await groupTool.request(request)
+    return {
+      ...toolTextResult(true, safeToolPayloadText(result)),
+      ...(usageDraft ? { usageDraft } : {}),
+    }
+  } catch {
+    return {
+      ...toolTextResult(false, 'group tool request failed'),
+      ...(usageDraft ? { usageDraft } : {}),
+    }
+  }
+}
+
+function isPreparedGroupAvatarRequest(
+  request: MurphGroupToolRequest,
+): request is Extract<MurphGroupToolRequest, { action: 'set_chat_avatar'; avatar: unknown }> {
+  return request.action === 'set_chat_avatar' && 'avatar' in request
+}
+
+async function prepareGroupAvatarRuntimeRequest(input: {
+  abortSignal: AbortSignal | null
+  env: NodeJS.ProcessEnv
+  fetchImpl: typeof fetch
+  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
+  materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
+  nextUsageOrdinal: () => number
+  request: Extract<MurphGroupToolRequest, { action: 'set_chat_avatar'; avatar: unknown }>
+  vaultRoot: string | null
+}): Promise<
+  | {
+      request: Extract<HostedRuntimeGroupToolRequest, { action: 'set_chat_avatar' }>
+      rpcSuccess: true
+      usageDraft?: AssistantProviderUsageDraft | null
+    }
+  | {
+      rpcSuccess: false
+      rpcText: string
+      usageDraft?: AssistantProviderUsageDraft | null
+    }
+> {
+  const avatar = input.request.avatar
+  if (avatar.source === 'generate') {
+    const generated = await executeGenerateImageTool({
+      abortSignal: input.abortSignal,
+      args: avatar.args,
+      env: input.env,
+      fetchImpl: input.fetchImpl,
+      hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      providerRequestOrdinal: input.nextUsageOrdinal(),
+      requireHostedGeneratedImageUploader: true,
+      vaultRoot: input.vaultRoot,
+    })
+    if (!generated.rpcSuccess) {
+      return {
+        rpcSuccess: false,
+        rpcText: generated.rpcText,
+        usageDraft: generated.usageDraft ?? null,
+      }
+    }
+    const media = generated.responseMedia?.[0] ?? null
+    if (media?.kind !== 'image') {
+      return {
+        rpcSuccess: false,
+        rpcText: 'generated group avatar did not produce a hosted image URL',
+        usageDraft: generated.usageDraft ?? null,
+      }
+    }
+    return {
+      request: { action: 'set_chat_avatar', groupChatIconUrl: media.url },
+      rpcSuccess: true,
+      usageDraft: generated.usageDraft ?? null,
+    }
+  }
+
+  const uploaded = await uploadGroupAvatarImageReference({
+    alt: avatar.alt,
+    hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
+    imageRef: avatar.imageRef,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    vaultRoot: input.vaultRoot,
+  })
+  if (!uploaded.rpcSuccess) {
+    return uploaded
+  }
+  return {
+    request: { action: 'set_chat_avatar', groupChatIconUrl: uploaded.url },
+    rpcSuccess: true,
+  }
+}
+
+async function uploadGroupAvatarImageReference(input: {
+  alt: string | null
+  hostedGeneratedImageUploader: AssistantHostedGeneratedImageUploader | null
+  imageRef: string
+  materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
+  vaultRoot: string | null
+}): Promise<
+  | { rpcSuccess: true; url: string }
+  | { rpcSuccess: false; rpcText: string }
+> {
+  if (!input.hostedGeneratedImageUploader) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'hosted image upload is not available for this turn',
+    }
+  }
+  if (!normalizeNullableString(input.vaultRoot)) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'image references are unavailable for this turn',
+    }
+  }
+
+  let references: ResolvedGenerateImageReference[]
+  try {
+    references = await resolveGenerateImageReferences({
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      refs: [input.imageRef],
+      vaultRoot: input.vaultRoot ?? '',
+    })
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+    return {
+      rpcSuccess: false,
+      rpcText: 'group avatar image reference could not be loaded',
+    }
+  }
+
+  const reference = references[0] ?? null
+  if (!reference) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'group avatar image reference could not be loaded',
+    }
+  }
+
+  try {
+    const media = await input.hostedGeneratedImageUploader.uploadGeneratedImage({
+      alt: input.alt ?? 'Group chat avatar',
+      bytes: reference.bytes,
+      contentType: groupAvatarReferenceContentType(reference.mediaType),
+      filename: groupAvatarReferenceFilename(reference.mediaType),
+      metadata: {
+        imageSha256: reference.sha256,
+        schema: 'murph.group-avatar.v1',
+        sourceRefSha256: reference.sourceRefSha256,
+      },
+      source: 'murph.group-avatar',
+    })
+    if (media.kind !== 'image') {
+      return {
+        rpcSuccess: false,
+        rpcText: 'group avatar upload did not produce a hosted image URL',
+      }
+    }
+    return { rpcSuccess: true, url: media.url }
+  } catch {
+    return {
+      rpcSuccess: false,
+      rpcText: 'group avatar image upload failed',
+    }
+  }
+}
+
+function groupAvatarReferenceContentType(
+  mediaType: ResolvedGenerateImageReference['mediaType'],
+): AssistantGeneratedImageContentType {
+  return mediaType
+}
+
+function groupAvatarReferenceFilename(
+  mediaType: ResolvedGenerateImageReference['mediaType'],
+): string {
+  switch (mediaType) {
+    case 'image/jpeg':
+      return 'group-avatar.jpg'
+    case 'image/png':
+      return 'group-avatar.png'
+    case 'image/webp':
+      return 'group-avatar.webp'
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+interface GroupNewsletterParticipantStats {
+  displayName: string | null
+  hasEmail: boolean
+  memberId: string
+  weeklyStats: OverviewWeeklyStat[]
+}
+
+interface GroupNewsletterSuperlative {
+  displayName: string | null
+  kind: 'top_current_week'
+  memberId: string
+  stream: string
+  unit: string | null
+  value: number
+}
+
+async function executeNewsletterTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeNewsletterToolRequest
+  vaultRoot: string | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  const newsletterTool = input.hostedToolContext?.newsletterTool ?? null
+  if (!newsletterTool) {
+    return toolTextResult(false, 'newsletter tools are unavailable for this turn')
+  }
+  try {
+    if (input.request.action === 'send') {
+      await ensureGroupNewsletterSharedProjectionAvailable(input.vaultRoot)
+    }
+
+    const scheduledAutomationAuthority =
+      input.hostedToolContext?.currentScheduledAutomationAuthority?.() ??
+      null
+    const request: HostedRuntimeNewsletterToolRequest =
+      input.request.action === 'send'
+        ? {
+            ...input.request,
+            scheduledAutomationAuthority,
+          }
+        : input.request
+    const result = await newsletterTool.request(request)
+    if (result.action === 'send') {
+      input.hostedToolContext?.recordNewsletterSendResult?.(result)
+    }
+    const toolSucceeded = !isNewsletterAllRecipientSendFailure(result)
+    if (
+      input.request.action !== 'read_stats'
+      || result.action !== 'read_stats'
+      || result.result.status !== 'ok'
+    ) {
+      return toolTextResult(toolSucceeded, safeToolPayloadText(result))
+    }
+
+    const statsContext = await resolveGroupNewsletterStatsContext({
+      scheduledAutomationAuthority,
+      vaultRoot: input.vaultRoot,
+    })
+    const participants = await readGroupNewsletterParticipantStats({
+      participants: result.result.participants,
+      referenceDate: statsContext.referenceDate,
+      timeZone: statsContext.timeZone,
+      vaultRoot: input.vaultRoot,
+    })
+    return toolTextResult(true, safeToolPayloadText({
+      action: 'read_stats',
+      result: {
+        groupId: result.result.groupId,
+        missingEmailParticipants: participants.filter((participant) => !participant.hasEmail),
+        participants,
+        status: 'ok',
+        superlatives: buildGroupNewsletterSuperlatives(participants),
+      },
+    }))
+  } catch (error) {
+    if (error instanceof GroupNewsletterSharedProjectionUnavailableError) {
+      return groupNewsletterSharedProjectionUnavailableResult(input.request.action)
+    }
+    return toolTextResult(false, 'newsletter tool request failed')
+  }
+}
+
+function isNewsletterAllRecipientSendFailure(
+  result: HostedRuntimeNewsletterToolResponse,
+): boolean {
+  return (
+    result.action === 'send' &&
+    result.result.status === 'unavailable' &&
+    result.result.unavailableReason === 'send_failed'
+  )
+}
+
+async function ensureGroupNewsletterSharedProjectionAvailable(
+  vaultRoot: string | null,
+): Promise<void> {
+  if (!vaultRoot) {
+    return
+  }
+  await readGroupNewsletterSharedMemberDailyRecords({ vaultRoot })
+}
+
+function groupNewsletterSharedProjectionUnavailableResult(
+  action: HostedRuntimeNewsletterToolRequest['action'],
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(true, safeToolPayloadText({
+    action,
+    result: {
+      status: 'unavailable',
+      unavailableReason: 'shared_projection_unavailable',
+    },
+  }))
+}
+
+async function readGroupNewsletterParticipantStats(input: {
+  participants: readonly HostedRuntimeNewsletterParticipantSummary[]
+  referenceDate?: string
+  timeZone?: string | null
+  vaultRoot: string | null
+}): Promise<GroupNewsletterParticipantStats[]> {
+  const sharedByGrantor = new Map<string, GroupNewsletterSharedMemberDailyRecords>()
+  if (input.vaultRoot) {
+    for (const entry of await readGroupNewsletterSharedMemberDailyRecords({
+      vaultRoot: input.vaultRoot,
+    })) {
+      sharedByGrantor.set(entry.memberId, entry)
+    }
+  }
+
+  return input.participants.map((participant) => {
+    const shared = sharedByGrantor.get(participant.memberId) ?? null
+    return {
+      displayName: shared?.displayName ?? participant.displayName,
+      hasEmail: participant.hasEmail,
+      memberId: participant.memberId,
+      weeklyStats: buildGroupNewsletterSharedWeeklyStats({
+        dailySampleSummaries: shared?.dailySampleSummaries ?? [],
+        referenceDate: input.referenceDate,
+        timeZone: input.timeZone,
+      }),
+    }
+  })
+}
+
+async function resolveGroupNewsletterStatsContext(input: {
+  scheduledAutomationAuthority: HostedRuntimeNewsletterScheduledAuthority | null
+  vaultRoot: string | null
+}): Promise<{
+  referenceDate?: string
+  timeZone: string | null
+}> {
+  let timeZone: string | null = null
+  if (input.vaultRoot) {
+    try {
+      const vault = await loadVault({ vaultRoot: input.vaultRoot })
+      timeZone = vault.metadata.timezone
+    } catch {
+      timeZone = null
+    }
+  }
+
+  return {
+    referenceDate: input.scheduledAutomationAuthority?.occurrenceAt,
+    timeZone,
+  }
+}
+
+function buildGroupNewsletterSuperlatives(
+  participants: readonly GroupNewsletterParticipantStats[],
+): GroupNewsletterSuperlative[] {
+  const topByMetric = new Map<string, GroupNewsletterSuperlative>()
+  for (const participant of participants) {
+    for (const stat of participant.weeklyStats) {
+      if (stat.currentWeekAvg === null) {
+        continue
+      }
+      const candidate = {
+        displayName: participant.displayName,
+        kind: 'top_current_week',
+        memberId: participant.memberId,
+        stream: stat.stream,
+        unit: stat.unit,
+        value: stat.currentWeekAvg,
+      } satisfies GroupNewsletterSuperlative
+      const key = `${candidate.stream}:${candidate.unit ?? ''}`
+      const existing = topByMetric.get(key)
+      if (!existing || candidate.value > existing.value) {
+        topByMetric.set(key, candidate)
+      }
+    }
+  }
+
+  return [...topByMetric.values()]
+    .sort((left, right) =>
+      left.stream === right.stream
+        ? left.memberId.localeCompare(right.memberId)
+        : left.stream.localeCompare(right.stream),
+    )
+    .slice(0, 3)
+}
+
 async function executeProgressUpdateTool(input: {
   progressDelivery: AssistantProgressDelivery | null
   text: string
@@ -1707,9 +2706,6 @@ async function executeProgressUpdateTool(input: {
     }
     if (result.reason === 'limit') {
       return toolTextResult(false, 'progress update skipped: progress update limit reached')
-    }
-    if (result.reason === 'too-soon') {
-      return toolTextResult(false, 'progress update skipped: progress update sent too recently')
     }
     if (result.reason === 'duplicate') {
       return toolTextResult(false, 'progress update skipped: duplicate progress update')
@@ -2345,6 +3341,195 @@ function parseFamilyPlanArguments(
         targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
         targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
       },
+    },
+  }
+}
+
+function parseGroupArguments(
+  value: unknown,
+):
+  | {
+      request: MurphGroupToolRequest
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = groupArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.group.input',
+        schemaRootKeys: ['action'],
+        toolName: 'murph.group',
+      }),
+    }
+  }
+  if (parsed.data.action === 'create_join_link') {
+    const joinLink = {
+      ...(parsed.data.displayName !== undefined
+        ? { displayName: parsed.data.displayName }
+        : {}),
+      ...(parsed.data.kind !== undefined ? { kind: parsed.data.kind } : {}),
+      ...(parsed.data.requestedVaultShareProjectionScopes !== undefined
+        ? {
+            requestedVaultShareProjectionScopes:
+              parsed.data.requestedVaultShareProjectionScopes,
+          }
+        : {}),
+    }
+    return {
+      ok: true,
+      request:
+        Object.keys(joinLink).length > 0
+          ? { action: 'create_join_link', joinLink }
+          : { action: 'create_join_link' },
+    }
+  }
+  if (parsed.data.action === 'update_display_name') {
+    return {
+      ok: true,
+      request: {
+        action: 'update_display_name',
+        updateDisplayName: {
+          displayName: parsed.data.displayName,
+        },
+      },
+    }
+  }
+  if (parsed.data.action === 'set_chat_avatar') {
+    if (parsed.data.avatarSource === 'generate') {
+      if (!parsed.data.prompt) {
+        return {
+          ok: false,
+          validationDigest: buildDynamicToolValidationDigest({
+            error: new z.ZodError([
+              {
+                code: z.ZodIssueCode.custom,
+                message: 'set_chat_avatar with avatarSource="generate" requires prompt',
+                path: ['prompt'],
+              },
+            ]),
+            rawInput: value,
+            schemaName: 'murph.group.input',
+            schemaRootKeys: ['action'],
+            toolName: 'murph.group',
+          }),
+        }
+      }
+      return {
+        ok: true,
+        request: {
+          action: 'set_chat_avatar',
+          avatar: {
+            source: 'generate',
+            args: {
+              alt: parsed.data.alt,
+              outputFormat: parsed.data.outputFormat,
+              prompt: parsed.data.prompt,
+              quality: parsed.data.quality,
+              referenceImageRefs: parsed.data.referenceImageRefs,
+              size: parsed.data.size,
+            },
+          },
+        },
+      }
+    }
+    if (!parsed.data.imageRef) {
+      return {
+        ok: false,
+        validationDigest: buildDynamicToolValidationDigest({
+          error: new z.ZodError([
+            {
+              code: z.ZodIssueCode.custom,
+              message: 'set_chat_avatar with avatarSource="image_ref" requires imageRef',
+              path: ['imageRef'],
+            },
+          ]),
+          rawInput: value,
+          schemaName: 'murph.group.input',
+          schemaRootKeys: ['action'],
+          toolName: 'murph.group',
+        }),
+      }
+    }
+    return {
+      ok: true,
+      request: {
+        action: 'set_chat_avatar',
+        avatar: {
+          alt: parsed.data.alt,
+          imageRef: parsed.data.imageRef,
+          source: 'image_ref',
+        },
+      },
+    }
+  }
+  if (parsed.data.action === 'post_join_offer') {
+    const joinOffer = {
+      ...(parsed.data.displayName !== undefined
+        ? { displayName: parsed.data.displayName }
+        : {}),
+      messageTemplate: parsed.data.messageTemplate,
+      ...(parsed.data.projectionScopes !== undefined
+        ? { projectionScopes: parsed.data.projectionScopes }
+        : {}),
+    }
+    return {
+      ok: true,
+      request: { action: 'post_join_offer', joinOffer },
+    }
+  }
+  if (
+    parsed.data.action === 'read_chat_participants'
+    || parsed.data.action === 'share_contact_card'
+    || parsed.data.action === 'revoke_own_email_share'
+  ) {
+    return { ok: true, request: { action: parsed.data.action } }
+  }
+  return { ok: true, request: { action: 'read_current' } }
+}
+
+function parseNewsletterArguments(
+  value: unknown,
+):
+  | {
+      request: HostedRuntimeNewsletterToolRequest
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = newsletterArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.newsletter.input',
+        schemaRootKeys: ['action', 'groupId'],
+        toolName: 'murph.newsletter',
+      }),
+    }
+  }
+  if (parsed.data.action === 'read_stats') {
+    return {
+      ok: true,
+      request: {
+        action: 'read_stats',
+        groupId: parsed.data.groupId,
+      },
+    }
+  }
+
+  return {
+    ok: true,
+    request: {
+      action: 'send',
+      groupId: parsed.data.groupId,
+      html: parsed.data.html,
+      subject: parsed.data.subject,
+      ...(parsed.data.text === undefined ? {} : { text: parsed.data.text }),
     },
   }
 }

@@ -2451,7 +2451,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:10.000Z",
+      retryAt: "2026-04-27T00:00:03.000Z",
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
@@ -2462,6 +2462,14 @@ describe("HostedUserRunner execution coordination", () => {
       backoff_until: null,
       wake_at: null,
     });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimeProcessingRetryReason: "starting_fence_preserved",
+        }),
+        message: "Hosted runner runtime processing could not be accepted yet.",
+      }),
+    );
   });
 
   it("replaces a non-wakeable write fence after startup grace elapses", async () => {
@@ -2610,6 +2618,14 @@ describe("HostedUserRunner execution coordination", () => {
       active_attempt_id: null,
       wake_at: null,
     });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimeProcessingRetryReason: "command_budget_exhausted",
+        }),
+        message: "Hosted runner runtime processing could not be accepted yet.",
+      }),
+    );
   });
 
   it("returns retry_later when active child wake cannot be confirmed", async () => {

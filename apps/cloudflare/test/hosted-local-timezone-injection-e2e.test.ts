@@ -82,7 +82,9 @@ describe("hosted local timezone injection e2e", () => {
 
     const baselineSendCount = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequestCount = countAssistantProviderResponsesApiRequests();
-    requireScenario().queueAssistantResponses([replyText]);
+    requireScenario().queueAssistantResponses([replyText], {
+      matchInputContains: userText,
+    });
 
     const webhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {

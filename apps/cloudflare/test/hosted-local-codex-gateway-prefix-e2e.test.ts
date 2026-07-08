@@ -95,7 +95,9 @@ describe("hosted local Codex Gateway prefix e2e", () => {
 
     for (const [index, turn] of turns.entries()) {
       const responseRequestCountBeforeTurn = countAssistantProviderResponsesApiRequests();
-      requireScenario().queueAssistantResponses([turn.replyText]);
+      requireScenario().queueAssistantResponses([turn.replyText], {
+        matchInputContains: turn.inboundText,
+      });
       const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
         userId,
         linqChatId,

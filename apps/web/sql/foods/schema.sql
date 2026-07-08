@@ -44,6 +44,10 @@ CREATE INDEX IF NOT EXISTS foods_search_idx
   ON foods
   USING GIN (to_tsvector('simple', search_text));
 
+CREATE INDEX IF NOT EXISTS foods_search_english_idx
+  ON foods
+  USING GIN (to_tsvector('english', search_text));
+
 CREATE INDEX IF NOT EXISTS foods_name_trgm_idx
   ON foods
   USING GIN (name gin_trgm_ops);

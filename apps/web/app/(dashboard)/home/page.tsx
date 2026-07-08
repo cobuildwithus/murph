@@ -124,7 +124,7 @@ export default async function HomePage({
       <PageHeader
         eyebrow="Live Well"
         title="Welcome to Murph"
-        description="Sync your signals, pick an experiment, and see what actually makes you healthier."
+        description="Connect your health data, pick an experiment, and see what actually makes you healthier."
       />
 
       {completionDialog ? (

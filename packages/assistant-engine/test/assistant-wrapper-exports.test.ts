@@ -146,7 +146,6 @@ const wrapperCases = [
     'codex-lifecycle',
     codexLifecycle,
     [
-      'snapshotExpectedCodexRootProcess',
       'stopWarmCodexAppServer',
     ],
   ],

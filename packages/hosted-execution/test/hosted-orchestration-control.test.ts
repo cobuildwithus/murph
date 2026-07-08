@@ -161,6 +161,21 @@ describe("hosted orchestration control contracts", () => {
       mailboxLag,
       workspace: null,
     });
+    expect(parseHostedRuntimeReconciliationFacts({
+      blocked: {
+        reason: "automation_engagement_paused",
+        retryAt: "2026-05-21T12:00:00.000Z",
+      },
+      mailboxLag,
+      workspace: null,
+    })).toEqual({
+      blocked: {
+        reason: "automation_engagement_paused",
+        retryAt: "2026-05-21T12:00:00.000Z",
+      },
+      mailboxLag,
+      workspace: null,
+    });
   });
 
   it("rejects raw payload-shaped fields in reconciliation facts contracts", () => {
