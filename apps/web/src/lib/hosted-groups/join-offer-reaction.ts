@@ -10,8 +10,8 @@ import {
   type CallCircleNotificationAppendResult,
 } from "../call-circle/notifications";
 import {
+  acceptCallCircleOfferEnrollment,
   canAppendCallCircleSetupNotification,
-  enrollCallCircleParticipant,
 } from "../call-circle/participant-store";
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
@@ -46,6 +46,8 @@ export type HostedGroupJoinOfferReactionResult =
 type HostedGroupJoinOfferReactionAcceptanceResult = {
   callCircleSetupSignal: CallCircleNotificationSignal | null;
 };
+
+const HOSTED_GROUP_JOIN_OFFER_BINDING_GRACE_MS = 5 * 60 * 1000;
 
 export async function handleHostedGroupJoinOfferReaction(input: {
   event: ParsedHostedLinqProviderEvent;
@@ -123,6 +125,7 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     if (
       reason === "no_offer_match"
       && await hasUnboundHostedGroupJoinOfferForReactionThread({
+        now: input.event.providerCreatedAt,
         prisma: input.prisma,
         threadIdentityLookupKeyReadCandidates,
       })
@@ -166,6 +169,7 @@ async function acceptHostedGroupJoinOfferReactionForMember(input: {
       groupId: offerAcceptance.groupId,
       memberId: input.memberId,
       now: input.now,
+      offerPostedAt: offerAcceptance.offerPostedAt,
       tx,
     });
     const callCircleSetupSignal = callCircleSetupNotification
@@ -179,6 +183,7 @@ async function acceptHostedGroupJoinOfferReactionForMember(input: {
 }
 
 async function hasUnboundHostedGroupJoinOfferForReactionThread(input: {
+  now: Date;
   prisma: PrismaClient;
   threadIdentityLookupKeyReadCandidates: readonly string[];
 }): Promise<boolean> {
@@ -198,6 +203,20 @@ async function hasUnboundHostedGroupJoinOfferForReactionThread(input: {
   if (!route) {
     return false;
   }
+  const activeCutoff = new Date(
+    input.now.getTime() - HOSTED_GROUP_JOIN_OFFER_BINDING_GRACE_MS,
+  );
+  await input.prisma.hostedGroupJoinOffer.updateMany({
+    data: { revokedAt: input.now },
+    where: {
+      group: {
+        runtimeMemberId: route.containerMemberId,
+      },
+      messageLookupKey: null,
+      postedAt: { lt: activeCutoff },
+      revokedAt: null,
+    },
+  });
   const offer = await input.prisma.hostedGroupJoinOffer.findFirst({
     select: { id: true },
     where: {
@@ -205,6 +224,7 @@ async function hasUnboundHostedGroupJoinOfferForReactionThread(input: {
         runtimeMemberId: route.containerMemberId,
       },
       messageLookupKey: null,
+      postedAt: { gte: activeCutoff },
       revokedAt: null,
     },
   });
@@ -216,15 +236,17 @@ async function applyHostedGroupOfferFeatureActivationsTx(input: {
   groupId: string;
   memberId: string;
   now: Date;
+  offerPostedAt: Date;
   tx: Prisma.TransactionClient;
 }): Promise<CallCircleNotificationAppendResult | null> {
   if (!input.featureActivations.includes("call-circle.enroll.v0")) {
     return null;
   }
-  await enrollCallCircleParticipant({
+  await acceptCallCircleOfferEnrollment({
     groupId: input.groupId,
     memberId: input.memberId,
     now: input.now,
+    offerPostedAt: input.offerPostedAt,
     prisma: input.tx,
   });
   if (!await canAppendCallCircleSetupNotification({

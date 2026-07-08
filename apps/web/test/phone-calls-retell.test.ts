@@ -12,6 +12,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createRetellPhoneCallRuntime,
 } from "@/src/lib/phone-calls/retell-runtime";
+import {
+  isPhoneCallRuntimeStartRejectedError,
+} from "@/src/lib/phone-calls/types";
 import { consultPhoneCall } from "@/src/lib/phone-calls/consult";
 import {
   buildPhoneCallResultNotificationInstructions,
@@ -160,6 +163,35 @@ describe("Retell phone-call runtime", () => {
         opening_line: "Hi, this is Murph connecting a Call Circle call.",
       },
     });
+  });
+
+  it("classifies definite Retell create-call rejections as provider start rejection", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_VERSION", "prod");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    const fetchImpl: typeof fetch = async () =>
+      new Response(JSON.stringify({ message: "Invalid phone number." }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 422,
+      });
+
+    let thrown: unknown;
+    try {
+      await createRetellPhoneCallRuntime({ fetchImpl }).start({
+        brief: VALID_BRIEF,
+        id: "hpc_123",
+        memberId: "member_123",
+        transferNumber: "+12125550000",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(isPhoneCallRuntimeStartRejectedError(thrown)).toBe(true);
   });
 
   it("passes a configured Retell webhook public base as a per-call agent override", async () => {

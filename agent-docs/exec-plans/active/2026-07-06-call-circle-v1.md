@@ -324,6 +324,27 @@ Focused follow-up verification:
 
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts`
 
+## ReviewGPT Follow-Up 23 2026-07-08
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- Failed provider sends, missing provider message ids, and binding failures
+  now revoke only the matching unbound durable offer reservation. Stale
+  unbound reservations also self-expire on reaction after a short binding
+  grace window, so thread-level reaction retry cannot be permanently poisoned.
+- Call Circle offer acceptance now uses the accepted offer's posted time to
+  resume a previously paused participant only when the pause predates the
+  fresh offer. Older reaction replays still leave the paused state intact.
+- Definite Retell create-call rejections now fail the local unstarted call row
+  immediately through the existing phone-call owner path. Ambiguous start
+  failures remain `starting` and continue to avoid duplicate provider starts.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/phone-calls-service.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/call-circle-connector-call.test.ts`
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/phone-calls-call-circle-result.test.ts apps/web/test/phone-calls-service.test.ts apps/web/test/phone-calls-retell.test.ts apps/web/test/phone-calls-retell-real-consult-route.test.ts apps/web/test/call-circle-cron-route.test.ts apps/web/test/hosted-retention-cleanup.test.ts apps/web/test/hosted-retention-cron-route.test.ts apps/web/test/production-migration-guard.test.ts apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts apps/web/test/hosted-onboarding-webhook-idempotency.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+
 ## ReviewGPT Follow-Up 5 2026-07-07
 
 Accepted findings from the fifth PR ReviewGPT pass:

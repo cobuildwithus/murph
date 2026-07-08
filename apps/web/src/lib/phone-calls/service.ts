@@ -19,7 +19,10 @@ import {
 } from "./notification-route";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
 import { resolveVerifiedMemberTransferNumber } from "./transfer";
-import type { PhoneCallRuntime } from "./types";
+import {
+  isPhoneCallRuntimeStartRejectedError,
+  type PhoneCallRuntime,
+} from "./types";
 
 const HOSTED_PHONE_CALL_UNSTARTED_REPLAY_GRACE_MS = 2 * 60 * 1_000;
 
@@ -250,6 +253,16 @@ async function startHostedPhoneCallReservation(input: {
     started = await input.runtime.start(runtimeRecord);
   } catch (error) {
     if (hasProviderStartAttemptMarker(call)) {
+      if (isPhoneCallRuntimeStartRejectedError(error)) {
+        const failed = await failDefiniteUnstartedPhoneCallReservation({
+          call,
+          prisma: input.prisma,
+        });
+        return {
+          phoneCallId: failed.id,
+          status: toStartResponseStatus(failed.status),
+        };
+      }
       return {
         phoneCallId: call.id,
         status: toStartResponseStatus(call.status),
@@ -309,6 +322,34 @@ async function startHostedPhoneCallReservation(input: {
   return {
     phoneCallId: call.id,
     status: "calling",
+  };
+}
+
+async function failDefiniteUnstartedPhoneCallReservation(input: {
+  call: HostedPhoneCall;
+  prisma: HostedPhoneCallStore;
+}): Promise<HostedPhoneCall> {
+  const resultJson: HostedPhoneCallResult = {
+    outcome: "not_completed",
+    summary: "Murph could not start the phone call.",
+  };
+  const updated = await input.prisma.hostedPhoneCall.updateMany({
+    data: {
+      resultJson,
+      status: "failed",
+    },
+    where: hostedPhoneCallUnstartedWhere(input.call.id),
+  });
+  if (updated.count === 0) {
+    return await input.prisma.hostedPhoneCall.findUniqueOrThrow({
+      where: { id: input.call.id },
+    });
+  }
+
+  return {
+    ...input.call,
+    resultJson,
+    status: "failed",
   };
 }
 
@@ -418,19 +459,27 @@ async function failStaleUnstartedPhoneCallReservation(input: {
 
 function hostedPhoneCallUnstartedAndUnattemptedWhere(
   callId: string,
-): PhoneCallUnstartedAndUnattemptedWhere {
+): PhoneCallUpdateManyWhere {
+  return {
+    ...hostedPhoneCallUnstartedWhere(callId),
+    providerStartAttemptedAt: null,
+  };
+}
+
+function hostedPhoneCallUnstartedWhere(
+  callId: string,
+): PhoneCallUpdateManyWhere {
   return {
     analyzedAt: null,
     endedAt: null,
     id: callId,
     provider: "retell",
     providerCallId: null,
-    providerStartAttemptedAt: null,
     status: "starting",
   };
 }
 
-type PhoneCallUnstartedAndUnattemptedWhere =
+type PhoneCallUpdateManyWhere =
   Parameters<HostedPhoneCallStore["hostedPhoneCall"]["updateMany"]>[0]["where"];
 
 function isRequestKeyUniqueConstraintError(error: unknown): boolean {

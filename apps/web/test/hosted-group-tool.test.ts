@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
   revokeHostedGroupMemberEmailShareTx: vi.fn(),
+  revokeUnboundHostedGroupJoinOfferTx: vi.fn(),
   resolveMurphHostedLinqContactCardBackupPhoneNumber: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   sendHostedLinqAttachmentMessage: vi.fn(),
@@ -92,6 +93,7 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   readHostedGroupByRuntimeMemberId: mocks.readHostedGroupByRuntimeMemberId,
   reserveHostedGroupJoinOfferTx: mocks.reserveHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
+  revokeUnboundHostedGroupJoinOfferTx: mocks.revokeUnboundHostedGroupJoinOfferTx,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -197,6 +199,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         vaultShareProjectionKinds: ["sleep-times.v0"],
       },
     });
+    mocks.revokeUnboundHostedGroupJoinOfferTx.mockResolvedValue(true);
   });
 
   it("classifies group-tool actions by access authority", () => {
@@ -796,6 +799,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "offer_binding_failed",
       },
     });
+    expect(mocks.revokeUnboundHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      now: expect.any(Date),
+      offerId: "hgrpjo_1",
+      tx: fakeTx,
+    });
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request,
@@ -818,6 +827,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.reserveHostedGroupJoinOfferTx.mock.calls.map(([input]) => input.offerFingerprint))
       .toEqual(["offer_fingerprint_1", "offer_fingerprint_1"]);
     expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenCalledTimes(2);
+    expect(mocks.revokeUnboundHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
     expect(mocks.bindHostedGroupJoinOfferTx).toHaveBeenLastCalledWith({
       groupId: GROUP_SUMMARY.id,
       messageId: "msg_offer_1",
@@ -1009,6 +1019,43 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       tx: fakeTx,
     });
     expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.revokeUnboundHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      now: expect.any(Date),
+      offerId: "hgrpjo_1",
+      tx: fakeTx,
+    });
+  });
+
+  it("revokes the reserved offer when the offer send fails before binding", async () => {
+    mocks.sendHostedLinqChatMessage.mockRejectedValue(new Error("send failed"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "send_failed",
+      },
+    });
+
+    expect(mocks.bindHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.revokeUnboundHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      groupId: GROUP_SUMMARY.id,
+      now: expect.any(Date),
+      offerId: "hgrpjo_1",
+      tx: fakeTx,
+    });
   });
 
   it("rejects an authority that does not match the bound runtime member", async () => {

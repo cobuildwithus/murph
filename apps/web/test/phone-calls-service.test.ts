@@ -13,7 +13,10 @@ import { describe, expect, it } from "vitest";
 import {
   createHostedPhoneCall as createHostedPhoneCallImpl,
 } from "@/src/lib/phone-calls/service";
-import type { PhoneCallRuntime } from "@/src/lib/phone-calls/types";
+import {
+  PhoneCallRuntimeStartRejectedError,
+  type PhoneCallRuntime,
+} from "@/src/lib/phone-calls/types";
 
 type CreateHostedPhoneCallInput = Parameters<typeof createHostedPhoneCallImpl>[0];
 type PhoneCallStore = NonNullable<CreateHostedPhoneCallInput["prisma"]>;
@@ -834,6 +837,57 @@ describe("createHostedPhoneCall", () => {
         summary: "Booked despite the local timeout.",
       },
       status: "completed",
+    });
+  });
+
+  it("fails the local call immediately when the runtime proves the provider rejected start", async () => {
+    const created = buildHostedPhoneCall();
+    const store = createPhoneCallStore({ created });
+    const runtime = createPhoneCallRuntime({
+      error: new PhoneCallRuntimeStartRejectedError("Retell rejected create call."),
+      providerCallId: "retell_unused",
+    });
+
+    const response = await createHostedPhoneCall({
+      brief: VALID_BRIEF,
+      memberId: created.memberId,
+      prisma: store.prisma,
+      requestKey: created.requestKey,
+      runtime: runtime.runtime,
+      transferNumberResolver: createTransferNumberResolver("+12125550000"),
+    });
+
+    const createdCallId = store.createCalls[0]!.data.id;
+    expect(response).toEqual({
+      phoneCallId: createdCallId,
+      status: "failed",
+    });
+    expectProviderStartAttemptUpdate(store.updateManyCalls[0], {
+      callId: createdCallId,
+    });
+    expect(store.updateManyCalls[1]).toEqual({
+      data: {
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        endedAt: null,
+        id: createdCallId,
+        provider: "retell",
+        providerCallId: null,
+        status: "starting",
+      },
+    });
+    expect(store.currentCall()).toMatchObject({
+      resultJson: {
+        outcome: "not_completed",
+        summary: "Murph could not start the phone call.",
+      },
+      status: "failed",
     });
   });
 

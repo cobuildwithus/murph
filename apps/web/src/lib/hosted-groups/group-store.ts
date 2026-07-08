@@ -122,6 +122,7 @@ export interface HostedGroupJoinOfferAcceptanceTxResult
   joinCode: string;
   offerScope: HostedGroupOfferScope;
   messageLookupKey: string;
+  offerPostedAt: Date;
   featureActivations: HostedGroupFeatureActivationKind[];
   selectedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
 }
@@ -505,6 +506,28 @@ export async function reserveHostedGroupJoinOfferTx(input: {
         offerScope: normalizeHostedGroupOfferScope(existing.offerScopeJson),
       };
     }
+    if (
+      existing.groupId === input.groupId
+      && existing.messageLookupKey === null
+      && existing.revokedAt !== null
+    ) {
+      await input.tx.hostedGroupJoinOffer.update({
+        data: {
+          offerScopeJson: toHostedGroupOfferScopeJson(offerScope),
+          postedAt: input.postedAt,
+          revokedAt: null,
+        },
+        where: { id: existing.id },
+      });
+      return {
+        groupId: existing.groupId,
+        id: existing.id,
+        messageIdSuffix: null,
+        messageLookupKey: null,
+        offerFingerprint: existing.offerFingerprint,
+        offerScope,
+      };
+    }
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
       httpStatus: 410,
@@ -648,6 +671,25 @@ export async function bindHostedGroupJoinOfferTx(input: {
   };
 }
 
+export async function revokeUnboundHostedGroupJoinOfferTx(input: {
+  groupId: string;
+  now: Date;
+  offerId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  await lockHostedGroupRow(input.tx, input.groupId);
+  const revoked = await input.tx.hostedGroupJoinOffer.updateMany({
+    data: { revokedAt: input.now },
+    where: {
+      groupId: input.groupId,
+      id: input.offerId,
+      messageLookupKey: null,
+      revokedAt: null,
+    },
+  });
+  return revoked.count > 0;
+}
+
 export function createHostedGroupJoinOfferFingerprint(input: {
   groupId: string;
   message: string;
@@ -725,6 +767,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
       groupId: true,
       messageLookupKey: true,
       offerScopeJson: true,
+      postedAt: true,
       revokedAt: true,
       group: {
         select: {
@@ -805,6 +848,7 @@ export async function acceptHostedGroupJoinOfferTx(input: {
     joinCode: group.joinCode,
     messageLookupKey: offer.messageLookupKey,
     offerScope,
+    offerPostedAt: offer.postedAt,
     selectedVaultShareProjectionKinds,
   };
 }

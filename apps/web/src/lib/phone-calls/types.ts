@@ -20,3 +20,16 @@ export interface PhoneCallRuntime {
   validateStart?(call: HostedPhoneCallRuntimeRecord): Promise<void> | void;
   start(call: HostedPhoneCallRuntimeRecord): Promise<PhoneCallRuntimeStartResult>;
 }
+
+export class PhoneCallRuntimeStartRejectedError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "PhoneCallRuntimeStartRejectedError";
+  }
+}
+
+export function isPhoneCallRuntimeStartRejectedError(
+  error: unknown,
+): error is PhoneCallRuntimeStartRejectedError {
+  return error instanceof PhoneCallRuntimeStartRejectedError;
+}

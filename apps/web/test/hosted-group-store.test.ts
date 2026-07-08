@@ -47,6 +47,7 @@ import {
   createHostedGroupJoinOfferFingerprint,
   normalizeHostedGroupOfferScope,
   reserveHostedGroupJoinOfferTx,
+  revokeUnboundHostedGroupJoinOfferTx,
 } from "@/src/lib/hosted-groups/group-store";
 import {
   normalizeHostedVaultShareProjectionKinds,
@@ -596,6 +597,56 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
+  it("reactivates a revoked unbound offer reservation for idempotent post retry", async () => {
+    const tx = buildStatefulJoinOfferTx();
+    const firstPostedAt = new Date("2026-07-01T00:00:00.000Z");
+    const retryPostedAt = new Date("2026-07-01T00:01:00.000Z");
+
+    const reserved = await reserveHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      offerFingerprint: "0123456789abcdef0123456789abcdef",
+      offerScope: {
+        vaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+      postedAt: firstPostedAt,
+      tx,
+    });
+    await expect(revokeUnboundHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      now: new Date("2026-07-01T00:00:30.000Z"),
+      offerId: reserved.id,
+      tx,
+    })).resolves.toBe(true);
+
+    await expect(reserveHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      offerFingerprint: "0123456789abcdef0123456789abcdef",
+      offerScope: {
+        featureActivations: ["call-circle.enroll.v0"],
+        vaultShareProjectionKinds: [],
+      },
+      postedAt: retryPostedAt,
+      tx,
+    })).resolves.toMatchObject({
+      id: reserved.id,
+      messageLookupKey: null,
+      offerScope: {
+        featureActivations: ["call-circle.enroll.v0"],
+        vaultShareProjectionKinds: [],
+      },
+    });
+
+    expect(tx.hostedGroupJoinOffer.create).toHaveBeenCalledTimes(1);
+    expect(tx.hostedGroupJoinOffer.update).toHaveBeenCalledWith({
+      data: {
+        offerScopeJson: ["call-circle.enroll.v0"],
+        postedAt: retryPostedAt,
+        revokedAt: null,
+      },
+      where: { id: reserved.id },
+    });
+  });
+
   it("accepts a live join offer additively without revoking unselected group shares", async () => {
     const tx = buildTx({
       activeGroupGrantCount: 0,
@@ -1099,6 +1150,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     messageLookupKey: string | null;
     offerFingerprint: string;
     offerScopeJson: Prisma.InputJsonValue;
+    postedAt: Date;
     revokedAt: Date | null;
   }> = [];
 
@@ -1123,6 +1175,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
           messageLookupKey?: string | null;
           offerFingerprint: string;
           offerScopeJson: Prisma.InputJsonValue;
+          postedAt?: Date;
         };
       }) => {
         if (offers.some((entry) => entry.offerFingerprint === args.data.offerFingerprint)) {
@@ -1141,6 +1194,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
           messageLookupKey: args.data.messageLookupKey ?? null,
           offerFingerprint: args.data.offerFingerprint,
           offerScopeJson: args.data.offerScopeJson,
+          postedAt: args.data.postedAt ?? new Date("2026-07-01T00:00:00.000Z"),
           revokedAt: null,
         });
         return {};
@@ -1160,6 +1214,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
               messageLookupKey: offer.messageLookupKey,
               offerFingerprint: offer.offerFingerprint,
               offerScopeJson: offer.offerScopeJson,
+              postedAt: offer.postedAt,
               revokedAt: offer.revokedAt,
               group,
             }
@@ -1194,12 +1249,19 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
           messageLookupKey: offer.messageLookupKey,
           offerFingerprint: offer.offerFingerprint,
           offerScopeJson: offer.offerScopeJson,
+          postedAt: offer.postedAt,
           revokedAt: offer.revokedAt,
           group,
         };
       }),
       update: vi.fn(async (args: {
-        data: { messageIdSuffix?: string | null; messageLookupKey?: string };
+        data: {
+          messageIdSuffix?: string | null;
+          messageLookupKey?: string;
+          offerScopeJson?: Prisma.InputJsonValue;
+          postedAt?: Date;
+          revokedAt?: Date | null;
+        };
         where: { id: string };
       }) => {
         const offer = offers.find((entry) => entry.id === args.where.id);
@@ -1215,6 +1277,11 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
         }
         offer.messageIdSuffix = args.data.messageIdSuffix ?? offer.messageIdSuffix;
         offer.messageLookupKey = args.data.messageLookupKey ?? offer.messageLookupKey;
+        offer.offerScopeJson = args.data.offerScopeJson ?? offer.offerScopeJson;
+        offer.postedAt = args.data.postedAt ?? offer.postedAt;
+        if ("revokedAt" in args.data) {
+          offer.revokedAt = args.data.revokedAt ?? null;
+        }
         return {};
       }),
       updateMany: vi.fn(async (args: {
@@ -1222,7 +1289,7 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
         where?: {
           groupId?: string;
           id?: string;
-          messageLookupKey?: string;
+          messageLookupKey?: string | null;
           revokedAt?: null;
         };
       }) => {
@@ -1238,7 +1305,9 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
           if (!matches) {
             continue;
           }
-          offer.revokedAt = args.data?.revokedAt ?? offer.revokedAt;
+          if (args.data && "revokedAt" in args.data) {
+            offer.revokedAt = args.data.revokedAt ?? null;
+          }
           count += 1;
         }
         return { count };

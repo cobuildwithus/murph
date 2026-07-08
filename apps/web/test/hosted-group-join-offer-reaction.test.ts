@@ -12,10 +12,10 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
+  acceptCallCircleOfferEnrollment: vi.fn(),
   acceptHostedGroupJoinOfferTx: vi.fn(),
   appendCallCircleSetupNotificationTx: vi.fn(),
   canAppendCallCircleSetupNotification: vi.fn(),
-  enrollCallCircleParticipant: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readCallCircleNotificationSignal: vi.fn(),
@@ -30,8 +30,8 @@ vi.mock("@/src/lib/call-circle/notifications", () => ({
 }));
 
 vi.mock("@/src/lib/call-circle/participant-store", () => ({
+  acceptCallCircleOfferEnrollment: mocks.acceptCallCircleOfferEnrollment,
   canAppendCallCircleSetupNotification: mocks.canAppendCallCircleSetupNotification,
-  enrollCallCircleParticipant: mocks.enrollCallCircleParticipant,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -69,7 +69,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       status: "sent",
     });
     mocks.canAppendCallCircleSetupNotification.mockResolvedValue(true);
-    mocks.enrollCallCircleParticipant.mockResolvedValue({
+    mocks.acceptCallCircleOfferEnrollment.mockResolvedValue({
       id: "hccp_1",
     });
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -113,7 +113,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
-    expect(mocks.enrollCallCircleParticipant).not.toHaveBeenCalled();
+    expect(mocks.acceptCallCircleOfferEnrollment).not.toHaveBeenCalled();
     expect(mocks.appendCallCircleSetupNotificationTx).not.toHaveBeenCalled();
     expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
   });
@@ -189,11 +189,12 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       status: "accepted",
     });
 
-    expect(mocks.enrollCallCircleParticipant).toHaveBeenCalledWith(
+    expect(mocks.acceptCallCircleOfferEnrollment).toHaveBeenCalledWith(
       expect.objectContaining({
         groupId: "group_1",
         memberId: "member_reactor",
         now: event.providerCreatedAt,
+        offerPostedAt: new Date("2026-03-26T11:59:00.000Z"),
       }),
     );
     expect(mocks.canAppendCallCircleSetupNotification).toHaveBeenCalledWith(
@@ -243,7 +244,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       status: "accepted",
     });
 
-    expect(mocks.enrollCallCircleParticipant).toHaveBeenCalled();
+    expect(mocks.acceptCallCircleOfferEnrollment).toHaveBeenCalled();
     expect(mocks.canAppendCallCircleSetupNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         groupId: "group_1",
@@ -320,6 +321,51 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
   });
 
+  it("revokes stale unbound reservations before ignoring a no-offer match", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This group offer is no longer active.",
+      retryable: false,
+    }));
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub({
+      routeContainerMemberId: "member_group_runtime",
+      unboundOffer: false,
+    });
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "no_offer_match",
+      status: "ignored",
+    });
+
+    const bindingGraceCutoff = new Date(event.providerCreatedAt.getTime() - 5 * 60 * 1000);
+    expect(prisma.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
+      data: { revokedAt: event.providerCreatedAt },
+      where: {
+        group: { runtimeMemberId: "member_group_runtime" },
+        messageLookupKey: null,
+        postedAt: { lt: bindingGraceCutoff },
+        revokedAt: null,
+      },
+    });
+    expect(prisma.hostedGroupJoinOffer.findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        group: { runtimeMemberId: "member_group_runtime" },
+        messageLookupKey: null,
+        postedAt: { gte: bindingGraceCutoff },
+        revokedAt: null,
+      },
+    });
+    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
+  });
+
   it("throws retryably when the thread has an unbound offer reservation", async () => {
     mocks.acceptHostedGroupJoinOfferTx.mockRejectedValueOnce(hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
@@ -343,6 +389,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       retryable: true,
     });
 
+    const bindingGraceCutoff = new Date(event.providerCreatedAt.getTime() - 5 * 60 * 1000);
     expect(prisma.hostedThreadRoute.findFirst).toHaveBeenCalledWith({
       select: { containerMemberId: true },
       where: {
@@ -355,11 +402,21 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         },
       },
     });
+    expect(prisma.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
+      data: { revokedAt: event.providerCreatedAt },
+      where: {
+        group: { runtimeMemberId: "member_group_runtime" },
+        messageLookupKey: null,
+        postedAt: { lt: bindingGraceCutoff },
+        revokedAt: null,
+      },
+    });
     expect(prisma.hostedGroupJoinOffer.findFirst).toHaveBeenCalledWith({
       select: { id: true },
       where: {
         group: { runtimeMemberId: "member_group_runtime" },
         messageLookupKey: null,
+        postedAt: { gte: bindingGraceCutoff },
         revokedAt: null,
       },
     });
@@ -438,6 +495,7 @@ function buildAcceptedJoinOffer(input: {
   featureActivations?: string[];
   grantedVaultShareProjectionKinds?: string[];
   messageLookupKey?: string;
+  offerPostedAt?: Date;
   selectedVaultShareProjectionKinds?: string[];
 } = {}) {
   const featureActivations = input.featureActivations ?? [];
@@ -452,6 +510,7 @@ function buildAcceptedJoinOffer(input: {
     joinCode: "join_1",
     membershipId: "membership_1",
     messageLookupKey: input.messageLookupKey ?? "hbidx:linq-message:v1:offer",
+    offerPostedAt: input.offerPostedAt ?? new Date("2026-03-26T11:59:00.000Z"),
     offerScope: {
       featureActivations,
       schema: "murph.hosted-group.offer-scope.v1",
@@ -469,6 +528,7 @@ function createPrismaStub(input: {
 } = {}): PrismaClient & {
   hostedGroupJoinOffer: {
     findFirst: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
   };
   hostedThreadRoute: {
     findFirst: ReturnType<typeof vi.fn>;
@@ -485,6 +545,7 @@ function createPrismaStub(input: {
   };
   const hostedGroupJoinOffer = {
     findFirst: vi.fn(async () => input.unboundOffer ? { id: "hgrpjo_reserved" } : null),
+    updateMany: vi.fn(async () => ({ count: input.unboundOffer ? 0 : 1 })),
   };
   const tx = {} as Prisma.TransactionClient;
   Object.defineProperty(prisma, "hostedThreadRoute", {
@@ -503,6 +564,7 @@ function createPrismaStub(input: {
   return prisma as PrismaClient & {
     hostedGroupJoinOffer: {
       findFirst: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
     };
     hostedThreadRoute: {
       findFirst: ReturnType<typeof vi.fn>;

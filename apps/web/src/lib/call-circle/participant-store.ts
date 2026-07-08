@@ -62,11 +62,38 @@ export async function enrollCallCircleParticipant(input: {
   });
 }
 
+export async function acceptCallCircleOfferEnrollment(input: {
+  groupId: string;
+  memberId: string;
+  now: Date;
+  offerPostedAt: Date;
+  prisma?: CallCirclePrismaClient;
+}): Promise<CallCircleParticipantRow> {
+  const prisma = input.prisma ?? getPrisma();
+  if (hasPrismaTransactionMethod(prisma)) {
+    return await prisma.$transaction(async (tx) => enrollCallCircleParticipantInLockedGroup({
+      groupId: input.groupId,
+      memberId: input.memberId,
+      now: input.now,
+      prisma: tx,
+      resumePausedAfter: input.offerPostedAt,
+    }));
+  }
+  return await enrollCallCircleParticipantInLockedGroup({
+    groupId: input.groupId,
+    memberId: input.memberId,
+    now: input.now,
+    prisma,
+    resumePausedAfter: input.offerPostedAt,
+  });
+}
+
 async function enrollCallCircleParticipantInLockedGroup(input: {
   groupId: string;
   memberId: string;
   now: Date;
   prisma: CallCirclePrismaClient;
+  resumePausedAfter?: Date;
 }): Promise<CallCircleParticipantRow> {
   const prisma = input.prisma;
   const existing = await prisma.hostedCallCircleParticipant.findUnique({
@@ -77,7 +104,10 @@ async function enrollCallCircleParticipantInLockedGroup(input: {
       },
     },
   });
-  if (existing) {
+  if (existing && !shouldResumePausedParticipant({
+    offerPostedAt: input.resumePausedAfter,
+    participant: existing,
+  })) {
     return existing;
   }
   await lockHostedCallCircleParticipantGroup(prisma, input.groupId);
@@ -90,6 +120,34 @@ async function enrollCallCircleParticipantInLockedGroup(input: {
     },
   });
   if (existingAfterLock) {
+    const resumePausedAfter = input.resumePausedAfter;
+    if (resumePausedAfter && shouldResumePausedParticipant({
+      offerPostedAt: resumePausedAfter,
+      participant: existingAfterLock,
+    })) {
+      const resumed = await prisma.hostedCallCircleParticipant.updateMany({
+        data: {
+          status: "enrolled",
+          updatedAt: input.now,
+        },
+        where: {
+          groupId: input.groupId,
+          memberId: input.memberId,
+          status: "paused",
+          updatedAt: { lt: resumePausedAfter },
+        },
+      });
+      if (resumed.count > 0) {
+        return await prisma.hostedCallCircleParticipant.findUniqueOrThrow({
+          where: {
+            groupId_memberId: {
+              groupId: input.groupId,
+              memberId: input.memberId,
+            },
+          },
+        });
+      }
+    }
     return existingAfterLock;
   }
   const participantCount = await prisma.hostedCallCircleParticipant.count({
@@ -127,6 +185,15 @@ async function enrollCallCircleParticipantInLockedGroup(input: {
       },
     });
   }
+}
+
+function shouldResumePausedParticipant(input: {
+  offerPostedAt?: Date;
+  participant: CallCircleParticipantRow;
+}): boolean {
+  return input.offerPostedAt !== undefined
+    && input.participant.status === "paused"
+    && input.participant.updatedAt.getTime() < input.offerPostedAt.getTime();
 }
 
 export async function writeCallCirclePreferences(input: {

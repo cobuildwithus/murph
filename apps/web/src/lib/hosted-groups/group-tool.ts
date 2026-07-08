@@ -70,6 +70,7 @@ import {
   readHostedGroupByRuntimeMemberId,
   reserveHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
+  revokeUnboundHostedGroupJoinOfferTx,
   type HostedGroupFeatureActivationKind,
 } from "./group-store";
 import {
@@ -526,9 +527,21 @@ async function postHostedRuntimeGroupOffer(input: {
       message,
     });
   } catch {
+    await revokeReservedHostedGroupJoinOfferBestEffort({
+      groupId: created.group.id,
+      now,
+      offerId: offerReservation.id,
+      prisma,
+    });
     return unavailable("send_failed");
   }
   if (!sent.messageId) {
+    await revokeReservedHostedGroupJoinOfferBestEffort({
+      groupId: created.group.id,
+      now,
+      offerId: offerReservation.id,
+      prisma,
+    });
     return unavailable("provider_message_unavailable");
   }
 
@@ -542,6 +555,12 @@ async function postHostedRuntimeGroupOffer(input: {
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch {
+    await revokeReservedHostedGroupJoinOfferBestEffort({
+      groupId: created.group.id,
+      now,
+      offerId: offerReservation.id,
+      prisma,
+    });
     return unavailable("offer_binding_failed");
   }
 
@@ -556,6 +575,27 @@ async function postHostedRuntimeGroupOffer(input: {
     action: input.action,
     result: { group: created.group, joinUrl, status: "sent" },
   };
+}
+
+async function revokeReservedHostedGroupJoinOfferBestEffort(input: {
+  groupId: string;
+  now: Date;
+  offerId: string;
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<void> {
+  try {
+    await input.prisma.$transaction(async (tx) => {
+      await revokeUnboundHostedGroupJoinOfferTx({
+        groupId: input.groupId,
+        now: input.now,
+        offerId: input.offerId,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch {
+    // The post already failed; no user-visible offer acceptance should depend
+    // on this best-effort cleanup, and stale reservations expire on reaction.
+  }
 }
 
 function buildHostedGroupJoinOfferMessage(input: {

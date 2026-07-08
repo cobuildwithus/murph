@@ -25,6 +25,7 @@ import {
   readLastCallCirclePartnerMemberIds,
 } from "@/src/lib/call-circle/match-store";
 import {
+  acceptCallCircleOfferEnrollment,
   canAppendCallCircleSetupNotification,
   canUseActiveCallCircleParticipant,
   canUseActiveCallCircleParticipantPair,
@@ -668,6 +669,98 @@ describe("Call Circle conditional mutations", () => {
         },
       },
     });
+  });
+
+  it("resumes a paused participant when a fresh offer is accepted", async () => {
+    const paused = {
+      createdAt: new Date("2026-07-06T14:00:00.000Z"),
+      groupId: "hgrp_123",
+      id: "hccp_123",
+      lastMatchedAt: null,
+      memberId: "member_123",
+      preferencesJson: null,
+      status: "paused",
+      updatedAt: new Date("2026-07-06T14:30:00.000Z"),
+    };
+    const resumed = {
+      ...paused,
+      status: "enrolled",
+      updatedAt: new Date("2026-07-06T15:00:00.000Z"),
+    };
+    const create = vi.fn();
+    const findUnique = vi.fn(async () => paused);
+    const findUniqueOrThrow = vi.fn(async () => resumed);
+    const updateManyParticipant = vi.fn(async () => ({ count: 1 }));
+    const queryRaw = vi.fn(async () => []);
+    const prisma = {
+      $queryRaw: queryRaw,
+      hostedCallCircleParticipant: {
+        create,
+        findUnique,
+        findUniqueOrThrow,
+        updateMany: updateManyParticipant,
+      },
+    };
+    const now = new Date("2026-07-06T15:00:00.000Z");
+    const offerPostedAt = new Date("2026-07-06T14:45:00.000Z");
+
+    await expect(acceptCallCircleOfferEnrollment({
+      groupId: "hgrp_123",
+      memberId: "member_123",
+      now,
+      offerPostedAt,
+      prisma: prisma as never,
+    })).resolves.toBe(resumed);
+
+    expect(queryRaw).toHaveBeenCalled();
+    expect(updateManyParticipant).toHaveBeenCalledWith({
+      data: {
+        status: "enrolled",
+        updatedAt: now,
+      },
+      where: {
+        groupId: "hgrp_123",
+        memberId: "member_123",
+        status: "paused",
+        updatedAt: { lt: offerPostedAt },
+      },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("leaves a paused participant paused when an older offer reaction replays", async () => {
+    const paused = {
+      createdAt: new Date("2026-07-06T14:00:00.000Z"),
+      groupId: "hgrp_123",
+      id: "hccp_123",
+      lastMatchedAt: null,
+      memberId: "member_123",
+      preferencesJson: null,
+      status: "paused",
+      updatedAt: new Date("2026-07-06T14:30:00.000Z"),
+    };
+    const updateManyParticipant = vi.fn();
+    const queryRaw = vi.fn();
+    const prisma = {
+      $queryRaw: queryRaw,
+      hostedCallCircleParticipant: {
+        create: vi.fn(),
+        findUnique: vi.fn(async () => paused),
+        findUniqueOrThrow: vi.fn(),
+        updateMany: updateManyParticipant,
+      },
+    };
+
+    await expect(acceptCallCircleOfferEnrollment({
+      groupId: "hgrp_123",
+      memberId: "member_123",
+      now: new Date("2026-07-06T15:00:00.000Z"),
+      offerPostedAt: new Date("2026-07-06T14:00:00.000Z"),
+      prisma: prisma as never,
+    })).resolves.toBe(paused);
+
+    expect(queryRaw).not.toHaveBeenCalled();
+    expect(updateManyParticipant).not.toHaveBeenCalled();
   });
 
   it("rejects new enrollment once the group participant cap is reached", async () => {

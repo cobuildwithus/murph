@@ -13,9 +13,10 @@ import type {
 
 import type {
   HostedPhoneCallRuntimeRecord,
-  PhoneCallRuntime,
   PhoneCallRuntimeStartResult,
+  PhoneCallRuntime,
 } from "./types";
+import { PhoneCallRuntimeStartRejectedError } from "./types";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 const RETELL_API_BASE_URL = "https://api.retellai.com";
@@ -42,11 +43,18 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
   async start(call: HostedPhoneCallRuntimeRecord): Promise<PhoneCallRuntimeStartResult> {
     const params = buildRetellCreatePhoneCallRequest(call);
     const client = this.buildClient();
-    const response = await client.call.createPhoneCall(params);
+    let response: Awaited<ReturnType<Retell["call"]["createPhoneCall"]>>;
+    try {
+      response = await client.call.createPhoneCall(params);
+    } catch (error) {
+      throw classifyRetellCreatePhoneCallError(error);
+    }
 
     const providerCallId = readRetellProviderCallId(response.call_id);
     if (!providerCallId) {
-      throw new TypeError("Retell create phone call returned no call_id.");
+      throw new PhoneCallRuntimeStartRejectedError(
+        "Retell create phone call returned no call_id.",
+      );
     }
     const storageSetting = readRetellDataStorageSetting(response.data_storage_setting);
     if (storageSetting !== RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING) {
@@ -97,6 +105,24 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
       };
     }
   }
+}
+
+function classifyRetellCreatePhoneCallError(error: unknown): unknown {
+  if (
+    error instanceof APIError
+    && typeof error.status === "number"
+    && isDefiniteRetellCreatePhoneCallRejectionStatus(error.status)
+  ) {
+    return new PhoneCallRuntimeStartRejectedError(
+      `Retell rejected create phone call with HTTP ${error.status}.`,
+      { cause: error },
+    );
+  }
+  return error;
+}
+
+function isDefiniteRetellCreatePhoneCallRejectionStatus(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408;
 }
 
 interface RetellStopCallFailure {
