@@ -49,6 +49,7 @@ import {
   type HostedMailboxImportCheckpointResult,
 } from "./mailbox-checkpoint.ts";
 import type {
+  HostedMailboxAssistantInputRecord,
   HostedMailboxConversationDeferral,
   HostedMailboxItemImportOutcome,
   HostedMailboxPrefixPrefetch,
@@ -1289,8 +1290,10 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
   current: HostedWorkspaceRunnerAssistantInputBatch | null;
   result: HostedMailboxImportCheckpointResult;
 }): HostedWorkspaceRunnerAssistantInputBatch | null {
-  const assistantInputIds = input.result.importResult.assistantInputIds ?? [];
-  if (assistantInputIds.length === 0) {
+  const assistantInputRecords = readHostedMailboxAssistantInputRecords(
+    input.result.importResult,
+  );
+  if (assistantInputRecords.length === 0) {
     return input.current;
   }
 
@@ -1298,13 +1301,15 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
     input.assistantInputBatchLimit,
   );
   if (input.current === null) {
+    const acceptedRecords = assistantInputRecords.slice(0, limit);
     return {
-      assistantInputIds: assistantInputIds.slice(0, limit),
-      emailDeliveryContexts: (input.result.importResult.emailDeliveryContexts ?? [])
-        .slice(0, limit),
-      linqDeliveryContexts: readHostedMailboxImportLinqDeliveryContexts(
-        input.result.importResult,
-      ).slice(0, limit),
+      assistantInputIds: acceptedRecords.map((record) => record.assistantInputId),
+      emailDeliveryContexts: acceptedRecords.flatMap((record) =>
+        record.emailDeliveryContext ? [record.emailDeliveryContext] : []
+      ),
+      linqDeliveryContexts: acceptedRecords.flatMap((record) =>
+        record.linqDeliveryContext ? [record.linqDeliveryContext] : []
+      ),
     };
   }
 
@@ -1313,18 +1318,19 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
   ];
   const seenAssistantInputIds = new Set(mergedAssistantInputIds);
   let changed = false;
-  const acceptedResultIndexes: number[] = [];
-  for (const [index, assistantInputId] of assistantInputIds.entries()) {
+  const acceptedRecords: HostedMailboxAssistantInputRecord[] = [];
+  for (const record of assistantInputRecords) {
     if (mergedAssistantInputIds.length >= limit) {
       break;
     }
+    const assistantInputId = record.assistantInputId;
     if (seenAssistantInputIds.has(assistantInputId)) {
       continue;
     }
     seenAssistantInputIds.add(assistantInputId);
     mergedAssistantInputIds.push(assistantInputId);
     changed = true;
-    acceptedResultIndexes.push(index);
+    acceptedRecords.push(record);
   }
 
   if (!changed) {
@@ -1333,16 +1339,14 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
 
   const mergedLinqDeliveryContexts = [
     ...input.current.linqDeliveryContexts,
-    ...selectHostedWorkspaceRunnerAssistantInputBatchContexts(
-      readHostedMailboxImportLinqDeliveryContexts(input.result.importResult),
-      acceptedResultIndexes,
+    ...acceptedRecords.flatMap((record) =>
+      record.linqDeliveryContext ? [record.linqDeliveryContext] : []
     ),
   ];
   const mergedEmailDeliveryContexts = [
     ...input.current.emailDeliveryContexts,
-    ...selectHostedWorkspaceRunnerAssistantInputBatchContexts(
-      input.result.importResult.emailDeliveryContexts ?? [],
-      acceptedResultIndexes,
+    ...acceptedRecords.flatMap((record) =>
+      record.emailDeliveryContext ? [record.emailDeliveryContext] : []
     ),
   ];
 
@@ -1353,18 +1357,29 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
   };
 }
 
-function selectHostedWorkspaceRunnerAssistantInputBatchContexts<T>(
-  contexts: readonly T[],
-  acceptedResultIndexes: readonly number[],
-): T[] {
-  const acceptedContexts: T[] = [];
-  for (const index of acceptedResultIndexes) {
-    const context = contexts[index];
-    if (context !== undefined) {
-      acceptedContexts.push(context);
-    }
+function readHostedMailboxAssistantInputRecords(
+  result: HostedMailboxImportCheckpointResult["importResult"],
+): HostedMailboxAssistantInputRecord[] {
+  if (result.assistantInputRecords && result.assistantInputRecords.length > 0) {
+    return result.assistantInputRecords;
   }
-  return acceptedContexts;
+
+  const assistantInputIds = result.assistantInputIds ?? [];
+  if (assistantInputIds.length === 0) {
+    return [];
+  }
+
+  const emailDeliveryContexts = result.emailDeliveryContexts ?? [];
+  const linqDeliveryContexts = readHostedMailboxImportLinqDeliveryContexts(result);
+  return assistantInputIds.map((assistantInputId, index) => {
+    const emailDeliveryContext = emailDeliveryContexts[index];
+    const linqDeliveryContext = linqDeliveryContexts[index];
+    return {
+      assistantInputId,
+      ...(emailDeliveryContext ? { emailDeliveryContext } : {}),
+      ...(linqDeliveryContext ? { linqDeliveryContext } : {}),
+    };
+  });
 }
 
 function hostedWorkspaceRunnerAssistantInputBatchHasWork(

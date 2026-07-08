@@ -12431,6 +12431,260 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("foreground rerun batch keeps fresh context after consumed replay", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-context-replay-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const consumedSeqByLane: NonNullable<HostedMailboxFetchResponse["consumedSeqByLane"]> = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_foreground_context_replay_system",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    const freshImportedInputIds: string[] = [];
+    const assistantPhaseInputIds: string[][] = [];
+    const assistantPhaseLinqContextTargets: string[][] = [];
+    const assistantPhaseLinqContextRouteThreadIds: string[][] = [];
+    const assistantPhaseLinqContextInboundItemIds: string[][] = [];
+    let assistantPhaseCalls = 0;
+
+    const createLinqContext = (item: HostedMailboxItem, target: string) => ({
+      currentInbound: {
+        dedupeKey: item.dedupeKey,
+        eventId: item.dedupeKey,
+        mailboxItemId: item.id,
+        occurredAt: item.occurredAt,
+        replyToMessageId: `msg_${item.id}`,
+        target,
+      },
+      directRecipientPhoneNumber: "+15550000001",
+      fromPhoneNumber: null,
+      replyToMessageId: `msg_${item.id}`,
+      routeAuthority: {
+        accountLookupKey: `hbidx:${target}`,
+        channel: "linq" as const,
+        containerMemberId: `member_${target}`,
+        threadId: target,
+      },
+      service: "iMessage",
+      target,
+      threadIsDirect: true,
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_foreground_context_replay",
+            budget: {
+              maxMailboxItems: 2,
+            },
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-foreground-context-replay.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            const replayKind = item.durablyConsumed === true ? "consumed" : "fresh";
+            events.push(`mailbox.importItem:${item.item.id}:${replayKind}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            const target = `thread_${item.item.laneSeq}`;
+            const linqDeliveryContext = createLinqContext(item.item, target);
+            if (item.durablyConsumed === true) {
+              return {
+                linqDeliveryContext,
+                status: "imported",
+              };
+            }
+
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              threadId: target,
+              vaultRoot,
+            });
+            freshImportedInputIds.push(inputId);
+            return {
+              assistantInputId: inputId,
+              linqDeliveryContext,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              consumedSeqByLane,
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(phaseInput) {
+            assistantPhaseCalls += 1;
+            const phaseLinqContexts = [
+              ...(phaseInput.initialAssistantInputBatch?.linqDeliveryContexts
+                ?? phaseInput.initialMailboxImport.importResult.linqDeliveryContexts
+                ?? []),
+            ];
+            assistantPhaseInputIds.push([
+              ...(phaseInput.initialAssistantInputBatch?.assistantInputIds
+                ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
+                ?? []),
+            ]);
+            assistantPhaseLinqContextTargets.push(
+              phaseLinqContexts.map((context) => context.target ?? ""),
+            );
+            assistantPhaseLinqContextRouteThreadIds.push(
+              phaseLinqContexts.map((context) => context.routeAuthority?.threadId ?? ""),
+            );
+            assistantPhaseLinqContextInboundItemIds.push(
+              phaseLinqContexts.map((context) => context.currentInbound?.mailboxItemId ?? ""),
+            );
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              const systemRedactedStatus: HostedRuntimeRedactedJson = {
+                hostedSystemMailboxRecorded: 1,
+              };
+              return {
+                afterCheckpoint: async () => {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_foreground_context_replay_conversation_1",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:01.000Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                  await waitUntil(() => {
+                    assert.equal(freshImportedInputIds.length, 1);
+                  });
+                  return {
+                    checkpointReason: "system_mailbox_receipt" as const,
+                    nextWakeAt: "2099-04-27T00:10:00.000Z",
+                    nextWakeReason: "device-sync.reconcile",
+                    redactedStatus: systemRedactedStatus,
+                  };
+                },
+                afterCheckpointKeepsForegroundImportLoop: true,
+                checkpointReason: "system_mailbox_receipt" as const,
+                nextWakeAt: "2099-04-27T00:10:00.000Z",
+                nextWakeReason: "device-sync.reconcile",
+                progressed: true,
+                redactedStatus: systemRedactedStatus,
+              };
+            }
+
+            if (assistantPhaseCalls === 2) {
+              consumedSeqByLane.splice(0, consumedSeqByLane.length, {
+                consumedSeq: "2",
+                lane: "conversation",
+              });
+              mailboxItems.push(
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_foreground_context_replay_consumed_2",
+                  laneSeq: "2",
+                  occurredAt: "2026-04-27T00:00:02.000Z",
+                }),
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_foreground_context_replay_conversation_3",
+                  laneSeq: "3",
+                  occurredAt: "2026-04-27T00:00:03.000Z",
+                }),
+              );
+              runtimeWakeSignal.notify();
+              await waitUntil(() => {
+                assert.equal(freshImportedInputIds.length, 2);
+              });
+            }
+
+            const assistantRedactedStatus: HostedRuntimeRedactedJson = {
+              hostedAssistantProgressed: true,
+            };
+            const deviceSyncMaintenanceRan = assistantPhaseCalls === 2;
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              ...(deviceSyncMaintenanceRan ? { deviceSyncMaintenanceRan: true as const } : {}),
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: assistantRedactedStatus,
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+      await waitUntil(() => {
+        assert.equal(assistantPhaseCalls, 3);
+      });
+      const result = await resultPromise;
+
+      assert.deepEqual(assistantPhaseInputIds[1], [freshImportedInputIds[0]]);
+      assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1"]);
+      assert.deepEqual(assistantPhaseLinqContextRouteThreadIds[1], ["thread_1"]);
+      assert.deepEqual(assistantPhaseLinqContextInboundItemIds[1], [
+        "mailbox_item_entrypoint_foreground_context_replay_conversation_1",
+      ]);
+      assert.deepEqual(assistantPhaseInputIds[2], [freshImportedInputIds[1]]);
+      assert.deepEqual(assistantPhaseLinqContextTargets[2], ["thread_3"]);
+      assert.deepEqual(assistantPhaseLinqContextRouteThreadIds[2], ["thread_3"]);
+      assert.deepEqual(assistantPhaseLinqContextInboundItemIds[2], [
+        "mailbox_item_entrypoint_foreground_context_replay_conversation_3",
+      ]);
+      assert.ok(events.includes(
+        "mailbox.importItem:mailbox_item_entrypoint_foreground_context_replay_consumed_2:consumed",
+      ));
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_foreground_context_replay_consumed_2:consumed",
+        ) < requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_foreground_context_replay_conversation_3:fresh",
+        ),
+      );
+      assert.ok(
+        fetchRequests.some((request) =>
+          request.requestId.includes(":runtime-wake:")
+          && request.requestId.includes(":conversation")
+          && request.lanes.some((lane) =>
+            lane.lane === "conversation" && lane.importedSeq === "1"
+          )
+        ),
+      );
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.nextWakeAt, checkpointRequests[0]?.nextWakeAt ?? null);
+    } finally {
+      runtimeAbortController.abort();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("late foreground input during vault-share delivery runs before the delivery completes", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-vault-share-preempt-"));
     const events: string[] = [];

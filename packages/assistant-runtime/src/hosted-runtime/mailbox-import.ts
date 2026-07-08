@@ -84,6 +84,7 @@ export interface HostedMailboxResolvedImportItem {
 
 export interface HostedMailboxImportLoopResult {
   assistantInputIds?: string[];
+  assistantInputRecords?: HostedMailboxAssistantInputRecord[];
   blocked: HostedMailboxImportLoopBlockedItem[];
   conversationImportedCount?: number;
   consumedSeqByLane: Record<HostedMailboxLane, string | null>;
@@ -96,6 +97,12 @@ export interface HostedMailboxImportLoopResult {
   conversationImportTiming?: HostedMailboxConversationImportTiming;
   nextRetryAt?: string | null;
   state: HostedMailboxImportState;
+}
+
+export interface HostedMailboxAssistantInputRecord {
+  assistantInputId: string;
+  emailDeliveryContext?: HostedAssistantEmailDeliveryContext;
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext;
 }
 
 export interface HostedMailboxImportLoopBlockedItem {
@@ -200,6 +207,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const consumedSeqByLane = consumedSeqState.seqByLane;
   let nextState = input.state;
   const assistantInputIds: string[] = [];
+  const assistantInputRecords: HostedMailboxAssistantInputRecord[] = [];
   let conversationImportedCount = 0;
   let importedCount = 0;
   const importedSystemMailboxItemIds: string[] = [];
@@ -466,6 +474,15 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       }
       if (foregroundAssistantInput && outcome.assistantInputId) {
         assistantInputIds.push(outcome.assistantInputId);
+        assistantInputRecords.push({
+          assistantInputId: outcome.assistantInputId,
+          ...(outcome.emailDeliveryContext
+            ? { emailDeliveryContext: outcome.emailDeliveryContext }
+            : {}),
+          ...(outcome.linqDeliveryContext
+            ? { linqDeliveryContext: outcome.linqDeliveryContext }
+            : {}),
+        });
       }
     }
     if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.linqDeliveryContext) {
@@ -496,6 +513,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
   return {
     assistantInputIds,
+    ...(assistantInputRecords.length > 0 ? { assistantInputRecords } : {}),
     blocked,
     conversationImportedCount,
     consumedSeqByLane: serializeHostedMailboxConsumedSeqByLane(consumedSeqState),
