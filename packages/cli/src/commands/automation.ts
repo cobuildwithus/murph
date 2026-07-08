@@ -110,15 +110,27 @@ export const automationRecordSchema = z
   })
   .strict();
 
+export const automationListItemSchema = automationRecordSchema
+  .omit({
+    instructions: true,
+    markdown: true,
+  })
+  .extend({
+    instructions: z.string().min(1).optional(),
+    markdown: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const automationListResultSchema = z.object({
   vault: pathSchema,
   filters: z.object({
     status: z.array(z.enum(automationStatusValues)).nullable(),
     text: z.string().nullable(),
     limit: z.number().int().positive().max(200),
+    includeBody: z.boolean(),
   }),
   count: z.number().int().nonnegative(),
-  items: z.array(automationRecordSchema),
+  items: z.array(automationListItemSchema),
 });
 
 export const automationShowResultSchema = z.object({
@@ -144,6 +156,20 @@ export function createAutomationScaffoldPayload(): z.infer<
   typeof automationScaffoldResultSchema
 >["payload"] {
   return automationScaffoldPayloadSchema.parse(scaffoldAutomationPayload());
+}
+
+function automationListItem(
+  record: z.infer<typeof automationRecordSchema>,
+  includeBody: boolean,
+): z.infer<typeof automationListItemSchema> {
+  if (includeBody) {
+    return record;
+  }
+
+  const { instructions, markdown, ...item } = record;
+  void instructions;
+  void markdown;
+  return item;
 }
 
 function invalidAutomationOption(message: string): never {
@@ -855,6 +881,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         .optional()
         .describe("Optional lexical filter across title, instructions, route, and metadata."),
       limit: z.number().int().positive().max(200).default(50),
+      includeBody: z
+        .boolean()
+        .default(false)
+        .describe("Include full automation instructions and markdown in each list item."),
     }),
     output: automationListResultSchema,
     async run(context) {
@@ -870,9 +900,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           status: context.options.status ?? null,
           text: context.options.text ?? null,
           limit: context.options.limit,
+          includeBody: context.options.includeBody,
         },
         count: items.length,
-        items,
+        items: items.map((item) => automationListItem(item, context.options.includeBody)),
       };
     },
   });

@@ -1605,6 +1605,11 @@
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 200
+                        },
+                        "includeBody": {
+                          "default": false,
+                          "description": "Include full automation instructions and markdown in each list item.",
+                          "type": "boolean"
                         }
                       }
                     }

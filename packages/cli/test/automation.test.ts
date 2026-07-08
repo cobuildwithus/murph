@@ -386,6 +386,10 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.deepEqual(setStatusSchema.args.required, ["lookup"]);
   assert.equal("status" in setStatusSchema.options.properties, true);
   assert.equal(setStatusSchema.options.required?.includes("status") ?? false, true);
+
+  const listSchema = await readCommandSchema(cli, ["automation", "list"]);
+  assert.equal("includeBody" in listSchema.options.properties, true);
+  assert.equal(listSchema.options.required?.includes("includeBody") ?? false, true);
 });
 
 test("automation save and edit manage assistant target overrides from typed fields", async () => {
@@ -1910,6 +1914,39 @@ test("automation commands round-trip save, import-json, show, and list through t
       importedPayload.slug,
     ]);
     assert.equal(listedData.items[0]?.automationId, savedData.automationId);
+    assert.equal("instructions" in (listedData.items[0] ?? {}), false);
+    assert.equal("markdown" in (listedData.items[0] ?? {}), false);
+
+    const listedWithBody = await runInProcessJsonCli<{
+      count: number;
+      filters: {
+        includeBody: boolean;
+        limit: number;
+        status: string[] | null;
+        text: string | null;
+      };
+      items: Array<{
+        instructions?: string;
+        markdown?: string;
+        slug: string;
+      }>;
+      vault: string;
+    }>(cli, [
+      "automation",
+      "list",
+      "--limit",
+      "10",
+      "--include-body",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(listedWithBody.exitCode, null);
+    assert.equal(listedWithBody.envelope.ok, true);
+    assert.equal(listedWithBody.envelope.data?.filters.includeBody, true);
+    assert.equal(listedWithBody.envelope.data?.count, 2);
+    assert.equal(listedWithBody.envelope.data?.items[0]?.slug, payload.slug);
+    assert.equal(listedWithBody.envelope.data?.items[0]?.instructions, payload.instructions);
+    assert.match(listedWithBody.envelope.data?.items[0]?.markdown ?? "", /Check mobility work/u);
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

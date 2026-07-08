@@ -1833,6 +1833,18 @@ test('automation save and edit schemas expose typed automation fields and a sepa
 
   assert.equal('input' in importJsonSchema.options.properties, true)
   assert.deepEqual(importJsonSchema.options.required, ['input'])
+
+  const listSchema = JSON.parse(
+    await runSourceCliRaw(['automation', 'list', '--schema', '--format', 'json']),
+  ) as {
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('includeBody' in listSchema.options.properties, true)
+  assert.equal(listSchema.options.required?.includes('includeBody') ?? false, true)
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
 test('automation show schema accepts an id-or-slug lookup', async () => {
