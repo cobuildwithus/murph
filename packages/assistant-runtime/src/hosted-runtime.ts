@@ -3317,6 +3317,7 @@ function buildHostedWorkspaceRunnerRedactedStatus(
     ...(result.assistantPhaseResult?.progressed === true
       ? result.assistantPhaseResult.redactedStatus ?? {}
       : {}),
+    ...(result.runtimeRedactedStatus ?? {}),
     hostedMailboxConversationImportedSeq:
       mailboxRedactedStatus["hostedMailboxConversationImportedSeq"],
     hostedMailboxSystemImportedSeq:

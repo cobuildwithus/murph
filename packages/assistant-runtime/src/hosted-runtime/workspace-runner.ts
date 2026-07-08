@@ -87,6 +87,10 @@ import {
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
 import {
+  appendHostedCanonicalWriteReceiptToArtifactLog,
+  hostedCanonicalWriteReceiptLogStatusFields,
+} from "./canonical-write-receipt-log.ts";
+import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "./workspace-restore.ts";
 
@@ -345,6 +349,7 @@ export interface HostedWorkspaceRunnerResult {
   latestWorkspace: HostedWorkspaceState | null;
   mailboxPostCheckpointEffectsFinished: Promise<void> | null;
   mailboxRetryAt: string | null;
+  runtimeRedactedStatus: HostedRuntimeRedactedJson | null;
   runtimeStateDirty: boolean;
 }
 
@@ -595,6 +600,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         ?? input.workspace,
       mailboxPostCheckpointEffectsFinished: null,
       mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
+      runtimeRedactedStatus: null,
       runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
     };
   }
@@ -768,6 +774,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     workspace: input.workspace,
   };
   let assistantContextSnapshotDirty = false;
+  let runtimeRedactedStatus: HostedRuntimeRedactedJson | null = null;
+  const mergeRuntimeRedactedStatus = (status: HostedRuntimeRedactedJson): void => {
+    runtimeRedactedStatus = {
+      ...(runtimeRedactedStatus ?? {}),
+      ...status,
+    };
+  };
   let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
   let postCheckpointWakeMerged = false;
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
@@ -777,6 +790,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     onAssistantContextSnapshotDirty: () => {
       assistantContextSnapshotDirty = true;
     },
+    readPreviousRedactedStatus: () =>
+      mergeHostedRuntimeRedactedStatusValues(
+        input.workspace?.redactedStatus ?? null,
+        checkpointRequestSession.latestWorkspace()?.redactedStatus ?? null,
+        runtimeRedactedStatus,
+      ),
+    recordRedactedStatus: mergeRuntimeRedactedStatus,
   });
   let assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
   let runnerError: unknown = null;
@@ -926,6 +946,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       ?? input.workspace,
     mailboxPostCheckpointEffectsFinished,
     mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
+    runtimeRedactedStatus,
     runtimeStateDirty: checkpointRequestSession.hasRuntimeStateDirty(),
   };
 }
@@ -1864,9 +1885,28 @@ function createHostedWorkspaceCanonicalWritePort(input: {
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   input: HostedWorkspaceRunnerInput;
   onAssistantContextSnapshotDirty?: (() => void) | null;
+  readPreviousRedactedStatus: () => HostedRuntimeRedactedJson | null;
+  recordRedactedStatus: (status: HostedRuntimeRedactedJson) => void;
 }): HostedCanonicalWritePort {
   return {
     async persistCanonicalWrite(writeInput) {
+      await Promise.all(writeInput.payloads.map(async (payload) => {
+        if (payload.bytes.byteLength !== payload.byteLength) {
+          throw new TypeError("Hosted canonical write payload length does not match its receipt.");
+        }
+        await input.input.platform.artifactStore.put({
+          bytes: payload.bytes,
+          sha256: payload.sha256,
+        });
+      }));
+      const receiptLogUpdate = await appendHostedCanonicalWriteReceiptToArtifactLog({
+        artifactStore: input.input.platform.artifactStore,
+        previousStatus: input.readPreviousRedactedStatus(),
+        receipt: writeInput.receipt,
+      });
+      input.recordRedactedStatus(
+        hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate),
+      );
       input.checkpointRequestBuilder.markRuntimeStateDirty();
       const snapshotDirtyDomains =
         listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(
@@ -2639,4 +2679,20 @@ function cloneHostedRuntimeRedactedJson(
   value: HostedRuntimeRedactedJson | null,
 ): HostedRuntimeRedactedJson | null {
   return value ? { ...value } : null;
+}
+
+function mergeHostedRuntimeRedactedStatusValues(
+  ...values: Array<HostedRuntimeRedactedJson | null | undefined>
+): HostedRuntimeRedactedJson | null {
+  let merged: HostedRuntimeRedactedJson | null = null;
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
+    merged = {
+      ...(merged ?? {}),
+      ...value,
+    };
+  }
+  return merged;
 }

@@ -15488,7 +15488,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("keeps exact hosted canonical writes local until the idle workspace checkpoint", async () => {
+  test("persists hosted canonical write receipts before the idle workspace checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -15553,13 +15553,38 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "mailbox.fetch",
+        "artifact.put:unlabeled-artifact",
+        "artifact.put:unlabeled-artifact",
+        "artifact.put:unlabeled-artifact",
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
       ]);
-      assert.equal(artifactPutCalls.length, 0);
+      assert.equal(artifactPutCalls.length, 3);
+      const expectedPayloadBytes = Buffer.from("exact hosted note\n", "utf8");
+      const expectedPayloadSha256 = sha256Hex(expectedPayloadBytes);
+      assert.deepEqual(
+        artifactPutCalls.find((call) => call.sha256 === expectedPayloadSha256),
+        {
+          byteLength: expectedPayloadBytes.byteLength,
+          sha256: expectedPayloadSha256,
+        },
+      );
+      const checkpointRedactedStatus = checkpointRequests[0]?.redactedStatus ?? {};
+      assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogEntryCount, 1);
+      const receiptLogSha256 = checkpointRedactedStatus.hostedCanonicalWriteReceiptLogSha256;
+      const receiptLogByteSize = checkpointRedactedStatus.hostedCanonicalWriteReceiptLogByteSize;
+      assert.ok(typeof receiptLogSha256 === "string");
+      assert.ok(typeof receiptLogByteSize === "number");
+      assert.deepEqual(
+        artifactPutCalls.find((call) => call.sha256 === receiptLogSha256),
+        {
+          byteLength: receiptLogByteSize,
+          sha256: receiptLogSha256,
+        },
+      );
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "2026-04-27.md"), "utf8"),
         "exact hosted note\n",
@@ -17087,12 +17112,12 @@ describe("hosted workspace runtime entrypoint", () => {
       const receiptLogBytes = Buffer.from(`${JSON.stringify({
         entries: [
           {
-            byteSize: receiptBytes.byteLength,
-            sha256: receiptHash,
-          },
-          {
             byteSize: olderReceiptBytes.byteLength,
             sha256: olderReceiptHash,
+          },
+          {
+            byteSize: receiptBytes.byteLength,
+            sha256: receiptHash,
           },
         ],
         schema: "murph.hosted-canonical-write-receipt-log.v1",
@@ -17200,9 +17225,9 @@ describe("hosted workspace runtime entrypoint", () => {
         baseHash,
         hotHash,
         receiptLogHash,
-        receiptHash,
         olderReceiptHash,
         olderPayloadHash,
+        receiptHash,
         exactPayloadHash,
       ]);
       assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
@@ -20188,17 +20213,26 @@ function createPlatform(input: {
   workspacePort: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimePlatform["workspaceSnapshotPort"] | null;
 }): HostedRuntimePlatform {
+  const uploadedArtifactBytesByHash = new Map<string, Uint8Array>();
   return {
     artifactStore: {
       async get(sha256) {
         return await measureStage(input.stageSamples, "artifact.get", async () => {
           input.artifactGetCalls?.push(sha256);
           input.events?.push(`artifact.get:${readArtifactEventLabel(input.artifactLabelsByHash, sha256)}`);
-          return input.artifactBytesByHash?.get(sha256) ?? null;
+          return input.artifactBytesByHash?.get(sha256)
+            ?? uploadedArtifactBytesByHash.get(sha256)
+            ?? null;
         });
       },
       async put(artifact) {
         await measureStage(input.stageSamples, "artifact.put", async () => {
+          const storedBytes = new Uint8Array(artifact.bytes.byteLength);
+          storedBytes.set(artifact.bytes);
+          uploadedArtifactBytesByHash.set(artifact.sha256, storedBytes);
+          if (input.artifactBytesByHash instanceof Map) {
+            input.artifactBytesByHash.set(artifact.sha256, storedBytes);
+          }
           input.artifactPutCalls?.push({
             byteLength: artifact.bytes.byteLength,
             sha256: artifact.sha256,
