@@ -88,6 +88,11 @@ export function isIntegrationIngestJsonlAppendTarget(relativePath: string): bool
     && relativePath.endsWith(".jsonl");
 }
 
+export function isIntegrationIngestArchiveTarget(relativePath: string): boolean {
+  return relativePath.startsWith(`${VAULT_LAYOUT.integrationIngestLedgerDirectory}/`)
+    && INTEGRATION_INGEST_ARCHIVE_SUFFIXES.some((suffix) => relativePath.endsWith(`.jsonl${suffix}`));
+}
+
 export async function assertJsonlAppendTargetCanAppend(target: ResolvedVaultPath): Promise<void> {
   if (!isIntegrationIngestJsonlAppendTarget(target.relativePath)) {
     return;
@@ -140,6 +145,14 @@ export function assertWriteTargetPolicy(
     }
 
     return;
+  }
+
+  if (isIntegrationIngestArchiveTarget(relativePath)) {
+    throw new VaultError(
+      "VAULT_APPEND_ONLY_PATH",
+      "Integration ingest archives are immutable append-only shard representations.",
+      { relativePath },
+    );
   }
 
   if (

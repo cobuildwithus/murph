@@ -729,7 +729,7 @@ function selectZippedIntegrationIngestJsonlEntry(
   source: IntegrationIngestRowSource,
 ): ZipCentralDirectoryEntry {
   const entries = readZipCentralDirectory(archive, source.sourcePath)
-    .filter((entry) => !entry.name.endsWith("/") && !entry.name.startsWith("__MACOSX/"));
+    .filter((entry) => !entry.name.endsWith("/"));
   const expectedName = source.logicalPath.split("/").at(-1) ?? "";
   if (entries.length === 1 && zipEntryBaseName(entries[0]?.name ?? "") === expectedName) {
     return entries[0] as ZipCentralDirectoryEntry;

@@ -10,6 +10,7 @@ import type { IntegrationIngestRecord } from "@murphai/contracts";
 
 import {
   appendJsonlRecord,
+  applyCanonicalWriteBatch,
   applyHostedCanonicalWriteReceipt,
   buildIntegrationEvidencePart,
   buildIntegrationIngestAppendPlan,
@@ -296,6 +297,37 @@ test("integration ingest zip archive reader rejects extra archive entries", asyn
   );
 });
 
+test("integration ingest zip archive reader rejects hidden macOS archive entries", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-macos-zip-entry");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-10.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_ArchivedZipMacos1",
+    eventId: "evt_ArchivedZipMacos1",
+    importedAt: "2025-10-12T09:00:00.000Z",
+  });
+  const content = `${JSON.stringify(archivedRecord)}\n`;
+  await fs.mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
+  await fs.writeFile(
+    path.join(vaultRoot, `${logicalPath}.zip`),
+    createZip([
+      { fileName: path.basename(logicalPath), content },
+      { fileName: "__MACOSX/raw-provider-payload.json", content: "{}\n" },
+    ]),
+  );
+
+  await assert.rejects(
+    readIntegrationIngestEntries(vaultRoot),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ARCHIVE_INVALID");
+      assert.equal((error as VaultError).details.entryCount, 2);
+      return true;
+    },
+  );
+});
+
 test("integration ingest readers reject live and archived copies of the same shard", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-representation-conflict");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
@@ -562,6 +594,80 @@ test("hosted JSONL receipt replay refuses archived integration ingest shards", a
     },
   );
   await assert.rejects(fs.access(path.join(vaultRoot, logicalPath)));
+});
+
+test("generic canonical writes cannot overwrite or delete integration ingest archives", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-archive-write-policy");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const zipLogicalPath = "ledger/integration-ingests/2024/2024-10.jsonl";
+  const zipArchivePath = `${zipLogicalPath}.zip`;
+  const zipArchivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_ArchiveWritePolicy1",
+    eventId: "evt_ArchiveWritePolicy1",
+    importedAt: "2024-10-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestZipArchive(vaultRoot, zipLogicalPath, [zipArchivedRecord]);
+
+  const gzipLogicalPath = "ledger/integration-ingests/2024/2024-09.jsonl";
+  const gzipArchivePath = `${gzipLogicalPath}.gz`;
+  const gzipArchivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_ArchiveWritePolicy2",
+    eventId: "evt_ArchiveWritePolicy2",
+    importedAt: "2024-09-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestGzipArchive(vaultRoot, gzipLogicalPath, [gzipArchivedRecord]);
+
+  for (const archivePath of [zipArchivePath, gzipArchivePath]) {
+    await assert.rejects(
+      applyCanonicalWriteBatch({
+        vaultRoot,
+        operationType: "integration_ingest_archive_overwrite",
+        summary: "reject integration ingest archive overwrite",
+        audit: {
+          action: "jsonl_append",
+          commandName: "test.integrationIngestArchiveOverwrite",
+          summary: "Reject integration ingest archive overwrite.",
+        },
+        textWrites: [{
+          relativePath: archivePath,
+          content: "not an archive",
+          overwrite: true,
+        }],
+      }),
+      (error) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, "VAULT_APPEND_ONLY_PATH");
+        return true;
+      },
+    );
+
+    await assert.rejects(
+      applyCanonicalWriteBatch({
+        vaultRoot,
+        operationType: "integration_ingest_archive_delete",
+        summary: "reject integration ingest archive delete",
+        audit: {
+          action: "jsonl_append",
+          commandName: "test.integrationIngestArchiveDelete",
+          summary: "Reject integration ingest archive delete.",
+        },
+        deletes: [{ relativePath: archivePath }],
+      }),
+      (error) => {
+        assert.equal(error instanceof VaultError, true);
+        assert.equal((error as VaultError).code, "VAULT_APPEND_ONLY_PATH");
+        return true;
+      },
+    );
+  }
+
+  const entry = await readIntegrationIngestById(vaultRoot, "xfm_ArchiveWritePolicy1");
+  assert.equal(entry?.record.id, "xfm_ArchiveWritePolicy1");
+  const gzipEntry = await readIntegrationIngestById(vaultRoot, "xfm_ArchiveWritePolicy2");
+  assert.equal(gzipEntry?.record.id, "xfm_ArchiveWritePolicy2");
+  await assert.rejects(fs.access(path.join(vaultRoot, zipLogicalPath)));
+  await assert.rejects(fs.access(path.join(vaultRoot, gzipLogicalPath)));
 });
 
 test("hosted JSONL receipt replay treats exact archived integration ingest duplicates as no-ops", async () => {
