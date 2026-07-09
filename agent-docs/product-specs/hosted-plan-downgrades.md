@@ -28,6 +28,29 @@ scheduled switch:
 The app-owned Edge-to-Pulse path is intentionally narrow; arbitrary plan
 transitions still stay out of scope.
 
+## Edge Assistant Model Choice
+
+The current paid Edge plan also unlocks an explicit assistant-model choice in
+Settings:
+
+- Terra remains the default for every member, including Edge members who do
+  nothing.
+- Only an active, unsuspended member whose own current billing state is paid
+  Edge can opt into Sol. Sponsored Family access, Pulse, trials, and synthetic
+  thread-container members do not qualify.
+- Postgres stores only the nullable Sol intent. Terra is the absence of an
+  override, so the platform fleet model remains the default and rollback
+  authority.
+- A scheduled switch to Pulse keeps Sol available until Stripe applies the
+  Pulse phase and reconciliation changes the current billing state. After that
+  boundary, Terra is effective while the stored Sol intent remains available
+  for a later Edge reactivation.
+- The existing signed workspace read projects an eligible Sol intent to the
+  runner at the next hosted invocation boundary. An already-active invocation
+  can retain its model snapshot through its bounded 180-second idle window.
+- Changing the preference does not create a mailbox item, wake, queue, or a
+  second copy in the vault or hosted workspace snapshot.
+
 ## First-Version Scope
 
 Keep the implemented first version intentionally narrow.

@@ -6,6 +6,11 @@ import {
   parseHostedRuntimeLogResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+  type HostedAssistantModelOverride,
+} from "@murphai/hosted-execution/assistant-model";
+import {
   HOSTED_RUNTIME_LOG_PATH,
 } from "@murphai/hosted-execution/routes";
 import type {
@@ -160,6 +165,8 @@ export class RuntimeInvocationService {
     });
     const workspaceRunnerInvocation = await this.prepareWorkspaceRunnerInvocation({
       commandBudget: input.commandBudget,
+      hostedAssistantModelOverride:
+        workspaceRead.hostedAssistantModelOverride ?? null,
       processingMode: input.input.processingMode ?? null,
       token,
       userId: input.input.userId,
@@ -516,6 +523,7 @@ export class RuntimeInvocationService {
 
   private async prepareWorkspaceRunnerInvocation(input: {
     commandBudget?: RuntimeProcessingCommandBudget;
+    hostedAssistantModelOverride: HostedAssistantModelOverride | null;
     processingMode?: "default" | "inbox_media_retention" | null;
     token: RunnerWriteFenceToken;
     userId: string;
@@ -532,6 +540,10 @@ export class RuntimeInvocationService {
     const forwardedEnv = buildHostedRunnerContainerEnv(
       this.input.runnerRuntimeEnvSource,
     );
+    applyHostedAssistantModelOverride({
+      forwardedEnv,
+      hostedAssistantModelOverride: input.hostedAssistantModelOverride,
+    });
     const configSource = this.input.runnerStoreCache.readRuntimeConfigSource();
     const webControlTimeoutMs = input.commandBudget
       ? readRuntimeProcessingCommandStepTimeoutMs({
@@ -876,6 +888,18 @@ export class RuntimeInvocationService {
     } catch {
       return true;
     }
+  }
+}
+
+function applyHostedAssistantModelOverride(input: {
+  forwardedEnv: Record<string, string>;
+  hostedAssistantModelOverride: HostedAssistantModelOverride | null;
+}): void {
+  if (
+    input.hostedAssistantModelOverride === HOSTED_ASSISTANT_SOL_MODEL &&
+    input.forwardedEnv.HOSTED_ASSISTANT_MODEL === HOSTED_ASSISTANT_TERRA_MODEL
+  ) {
+    input.forwardedEnv.HOSTED_ASSISTANT_MODEL = HOSTED_ASSISTANT_SOL_MODEL;
   }
 }
 

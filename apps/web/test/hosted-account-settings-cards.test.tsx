@@ -178,6 +178,8 @@ describe("HostedAccountSettingsCards", () => {
         account: {
           ...makeAccountSnapshot({ phoneNumber: null }),
           assistant: {
+            model: "gpt-5.6-terra",
+            solAvailable: false,
             tone: "formal",
             voice: "upbeat",
           },

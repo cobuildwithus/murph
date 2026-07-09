@@ -5,6 +5,10 @@ import {
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import { getPrisma } from "@/src/lib/prisma";
+import {
+  readHostedMemberAssistantModelPreference,
+} from "@/src/lib/hosted-onboarding/assistant-model-preference";
 import { readHostedWorkspace } from "@/src/lib/hosted-workspace/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
@@ -19,10 +23,22 @@ export const GET = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_WORKSPACE_READ_CALLBACK_BODY_LIMIT_BYTES,
   });
-  const workspace = await readHostedWorkspace({ userId });
+  const [workspace, assistantModel] = await Promise.all([
+    readHostedWorkspace({ userId }),
+    readHostedMemberAssistantModelPreference({
+      memberId: userId,
+      prisma: getPrisma(),
+    }).catch(() => null),
+  ]);
 
   return jsonOk(parseHostedWorkspaceReadResponse({
     fetchedAt: new Date().toISOString(),
+    ...(assistantModel?.hostedAssistantModelOverride
+      ? {
+          hostedAssistantModelOverride:
+            assistantModel.hostedAssistantModelOverride,
+        }
+      : {}),
     workspace: workspace
       ? {
           browserVaultReplicaRef: workspace.browserVaultReplicaRef,

@@ -7,6 +7,9 @@ import {
   parseAssistantUsageRecord,
 } from "../assistant-usage.ts";
 import {
+  parseHostedAssistantModelOverride,
+} from "../assistant-model.ts";
+import {
   parseAssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
 import {
@@ -2752,9 +2755,15 @@ export function parseHostedWorkspaceState(value: unknown): HostedWorkspaceState 
 
 export function parseHostedWorkspaceReadResponse(value: unknown): HostedWorkspaceReadResponse {
   const record = requireObject(value, "Hosted workspace read response");
+  const hostedAssistantModelOverride = parseHostedAssistantModelOverride(
+    record.hostedAssistantModelOverride,
+  );
 
   return {
     fetchedAt: requireString(record.fetchedAt, "Hosted workspace read response fetchedAt"),
+    ...(hostedAssistantModelOverride
+      ? { hostedAssistantModelOverride }
+      : {}),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };
 }

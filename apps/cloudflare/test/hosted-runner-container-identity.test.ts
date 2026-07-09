@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_TERRA_MODEL,
+  type HostedAssistantModelOverride,
+} from "@murphai/hosted-execution/assistant-model";
 
 import {
   readHostedRunnerContainerIdentity,
@@ -252,6 +257,69 @@ describe("hosted runner container identity", () => {
     expect(invokedContainerNames).toEqual(["member_123--v-version_1"]);
   });
 
+  it.each([
+    {
+      expectedModel: HOSTED_ASSISTANT_SOL_MODEL,
+      fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
+      name: "applies Sol over the Terra fleet default",
+    },
+    {
+      expectedModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      fleetModel: HOSTED_ASSISTANT_TERRA_MODEL,
+      hostedAssistantModelOverride: null,
+      name: "preserves Terra without an override",
+    },
+    {
+      expectedModel: "gpt-5.5",
+      fleetModel: "gpt-5.5",
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
+      name: "preserves a non-Terra fleet rollback",
+    },
+  ] as const)("$name", async ({
+    expectedModel,
+    fleetModel,
+    hostedAssistantModelOverride,
+  }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const service = createRuntimeInvocationService({
+      ...(hostedAssistantModelOverride
+        ? { hostedAssistantModelOverride }
+        : {}),
+      invokedContainerNames: [],
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: {
+          id: "version_1",
+        },
+        HOSTED_ASSISTANT_MODEL: fleetModel,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = await service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_model_override",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+
+    expect(prepared.job.runtime?.forwardedEnv?.HOSTED_ASSISTANT_MODEL)
+      .toBe(expectedModel);
+  });
+
   it("wakes an active runtime through the write fence's stored runner container name", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -443,6 +511,7 @@ class EmptyRunnerSecretsService extends RunnerSecretsService {
 }
 
 function createRuntimeInvocationService(input: {
+  hostedAssistantModelOverride?: HostedAssistantModelOverride;
   invokedContainerNames: string[];
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   state: DurableObjectStateLike;
@@ -463,6 +532,9 @@ function createRuntimeInvocationService(input: {
     readHostedWebControlBaseUrl: () => "https://web.example.test",
     readHostedWorkspaceFromWeb: async () => ({
       fetchedAt: FIXED_NOW,
+      ...(input.hostedAssistantModelOverride
+        ? { hostedAssistantModelOverride: input.hostedAssistantModelOverride }
+        : {}),
       workspace: null,
     }),
     runnerContainerNamespace: createRunnerContainerNamespace({

@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
+  readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
@@ -54,6 +55,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", () => ({
+  readHostedMemberAssistantModelPreference:
+    mocks.readHostedMemberAssistantModelPreference,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOriginal) => ({
@@ -160,6 +166,10 @@ describe("hosted runtime internal web routes", () => {
       lane,
     }))));
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
+      model: "gpt-5.6-terra",
+      solAvailable: false,
+    });
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(null);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
@@ -1312,6 +1322,11 @@ describe("hosted runtime internal web routes", () => {
 
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce({
+      hostedAssistantModelOverride: "gpt-5.6-sol",
+      model: "gpt-5.6-sol",
+      solAvailable: true,
+    });
     mocks.checkpointHostedWorkspace
       .mockResolvedValueOnce({
         replacedSnapshotRef: createBundleRef("snapshot_1"),
@@ -1338,11 +1353,18 @@ describe("hosted runtime internal web routes", () => {
       "https://join.example.test/api/internal/hosted-workspace",
       { method: "GET" },
     ));
-    expect(parseHostedWorkspaceReadResponse(await readResponse.json()).workspace)
+    expect(parseHostedWorkspaceReadResponse(await readResponse.json()))
       .toMatchObject({
+        hostedAssistantModelOverride: "gpt-5.6-sol",
+        workspace: {
         userId: "member_routes_1",
         version: "4",
+        },
       });
+    expect(mocks.readHostedMemberAssistantModelPreference).toHaveBeenCalledWith({
+      memberId: "member_routes_1",
+      prisma: expect.any(Object),
+    });
 
     const checkpointResponse = await workspaceCheckpointRoute.POST(jsonRequest(
       "/api/internal/hosted-workspace/checkpoint",
@@ -1657,6 +1679,9 @@ describe("hosted runtime internal web routes", () => {
       inboxMediaRetentionWakeAt: "2026-04-25T23:59:00.000Z",
       version: "7",
     }));
+    mocks.readHostedMemberAssistantModelPreference.mockRejectedValueOnce(
+      new Error("optional model preference read unavailable"),
+    );
 
     const response = await workspaceRoute.GET(new Request(
       "https://example.test/api/internal/hosted-workspace",
@@ -1672,8 +1697,9 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.readHostedWorkspace).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
-    // The route no longer consults member entitlement; that owner lives in
-    // reconciliation/runtime invocation.
+    expect(payload.hostedAssistantModelOverride).toBeUndefined();
+    // The route avoids the unrelated core-state admission read. Model
+    // entitlement is isolated behind the optional preference owner above.
     expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 

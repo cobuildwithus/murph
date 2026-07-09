@@ -41,6 +41,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMember: [
     "id String @id",
+    'assistantModelPreference String? @map("assistant_model_preference")',
     'assistantTone String? @map("assistant_tone")',
     'assistantVoice String? @map("assistant_voice")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
@@ -531,6 +532,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedMemberAssistantModelPreferenceMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260709120000_hosted_member_assistant_model_preference/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -616,6 +624,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260707170000_drop_stale_linq_recency_columns",
       "20260707180000_hosted_vault_share_projection_scopes",
       "20260708120000_hosted_member_assistant_preferences",
+      "20260709120000_hosted_member_assistant_model_preference",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -779,6 +788,18 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(staleLinqRecencyDropMigrationSql).toContain(
       'DROP COLUMN IF EXISTS "last_inbound_at"',
+    );
+    expect(hostedMemberAssistantModelPreferenceMigrationSql).toContain(
+      'ALTER TABLE "hosted_member"',
+    );
+    expect(hostedMemberAssistantModelPreferenceMigrationSql).toContain(
+      'ADD COLUMN "assistant_model_preference" TEXT',
+    );
+    expect(hostedMemberAssistantModelPreferenceMigrationSql).not.toContain(
+      "NOT NULL",
+    );
+    expect(hostedMemberAssistantModelPreferenceMigrationSql).not.toContain(
+      "DEFAULT",
     );
     expect(hostedLinqObservabilityMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
     expect(hostedLinqObservabilityMigrationSql).toContain('"skip_reason" TEXT');
