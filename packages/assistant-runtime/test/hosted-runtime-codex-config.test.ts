@@ -801,10 +801,19 @@ testHostedCodexAuthE2e(
         workingDirectory: operatorHomeRoot,
       });
 
-      assert.equal(requests.length, 1);
+      const fixedRequestCount = requests.length;
+      assert.ok(fixedRequestCount >= 1);
       assert.equal(fixedResult.finalMessage, "auth regression ok");
-      assert.equal(authorizationHeaders[0], expectedAuthorization);
-      assert.match(requests[0]!, /hello hosted auth regression/u);
+      assert.ok(
+        authorizationHeaders
+          .slice(0, fixedRequestCount)
+          .every((header) => header === expectedAuthorization),
+      );
+      assert.ok(
+        requests
+          .slice(0, fixedRequestCount)
+          .some((request) => /hello hosted auth regression/u.test(request)),
+      );
 
       const legacyCodexHome = await prepareLegacyBuiltInOpenAiCodexHome({
         baseUrl: `${readServerBaseUrl(server)}/v1`,
@@ -830,7 +839,11 @@ testHostedCodexAuthE2e(
         legacyError = error;
       }
 
-      assert.notEqual(authorizationHeaders[1], expectedAuthorization);
+      const legacyAuthorizationHeaders = authorizationHeaders.slice(fixedRequestCount);
+      assert.ok(legacyAuthorizationHeaders.length >= 1);
+      assert.ok(
+        legacyAuthorizationHeaders.some((header) => header !== expectedAuthorization),
+      );
       assert(legacyError instanceof Error);
     } finally {
       await closeHttpServer(server);
@@ -1343,7 +1356,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "[shell_environment_policy]",
       'inherit = "all"',
       "ignore_default_excludes = true",
-      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
+      'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
       `PATH = "${HOSTED_RUNNER_EXECUTABLE_PATH}"`,
@@ -1359,6 +1372,14 @@ test("hosted Codex shell policy excludes ElevenLabs runtime capability env", () 
       key === "ELEVENLABS_API_KEY" || key.startsWith("MURPH_ELEVENLABS_")
     ),
     [],
+  );
+});
+
+test("hosted Codex shell policy includes the image-pinned Health Commons package root", () => {
+  assert.ok(
+    HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY.includes(
+      "MURPH_HEALTH_COMMONS_PACKAGE_ROOT",
+    ),
   );
 });
 

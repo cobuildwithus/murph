@@ -353,10 +353,10 @@ describe("deliverHostedVaultShareRecords", () => {
     expect(eventIds[3]).toMatch(/^vault-share:share_1:2026-07-01:[A-Za-z0-9_-]{32}$/u);
   });
 
-  it("derives profile-name revision identity from content alone, ignoring occurredAt drift", async () => {
+  it("dedupes profile-name retries without losing a later change back to the same value", async () => {
     // Current-state kind: the same unchanged name re-offered with a different
-    // occurredAt must dedupe instead of minting a fresh mailbox dedupe key, while a
-    // changed name still appends a new revision.
+    // occurredAt but the same sourceRevision must dedupe, while a real value
+    // change back to a previous payload must still append a replacement.
     const prisma = fakePrisma([
       shareAuthorityRow({
         ...SHARE,
@@ -369,18 +369,20 @@ describe("deliverHostedVaultShareRecords", () => {
       inserted: true,
       item: { id: "mailbox_item_1" },
     });
-    const record = (occurredAt: string, displayName: string) => ({
+    const record = (occurredAt: string, displayName: string, sourceRevision: string) => ({
       data: { displayName },
       occurredAt,
       recordKey: "profile-name",
+      sourceRevision,
     });
 
     await deliverHostedVaultShareRecords({
       prisma,
       records: [
-        record("2026-01-01T00:00:00.000Z", "Theo"),
-        record("2026-03-15T12:34:56.000Z", "Theo"),
-        record("2026-03-15T12:34:56.000Z", "Odin"),
+        record("2026-01-01T00:00:00.000Z", "Theo", "sourceRevisionA0000000000000001"),
+        record("2026-03-15T12:34:56.000Z", "Theo", "sourceRevisionA0000000000000001"),
+        record("2026-03-15T12:34:56.000Z", "Ari", "sourceRevisionB0000000000000002"),
+        record("2026-04-01T00:00:00.000Z", "Theo", "sourceRevisionC0000000000000003"),
       ],
       share: {
         ...SHARE,
@@ -395,6 +397,8 @@ describe("deliverHostedVaultShareRecords", () => {
     );
     expect(eventIds[0]).toBe(eventIds[1]);
     expect(eventIds[2]).not.toBe(eventIds[0]);
+    expect(eventIds[3]).not.toBe(eventIds[0]);
+    expect(eventIds[3]).not.toBe(eventIds[2]);
     expect(eventIds[0]).toMatch(/^vault-share:share_1:profile-name:[A-Za-z0-9_-]{32}$/u);
   });
 

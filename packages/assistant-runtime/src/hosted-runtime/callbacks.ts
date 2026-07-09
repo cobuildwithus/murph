@@ -74,6 +74,7 @@ import type {
   HostedRuntimeActionApprovalPort,
   HostedRuntimeEffectsPort,
   HostedRuntimeLinqDeliveryOutcomeRequest,
+  HostedRuntimeLinqRecentInboundEngagementResult,
   HostedRuntimeLinqSendResponse,
   HostedRuntimePlatform,
   HostedRuntimeProviderTargetKind,
@@ -93,7 +94,6 @@ import {
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
   resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest,
-  resolveHostedAssistantLinqDeliveryContextForRequest,
   resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
@@ -930,17 +930,22 @@ function resolveHostedAssistantOutboxIntentWakeAt(
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryPreparation> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const preparedDispatches: HostedAssistantDeliveryPreparedDispatch[] = [];
+  const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
+    context: input.linqDeliveryContext ?? null,
+    contexts: input.linqDeliveryContexts ?? null,
+  });
   for (const effect of input.assistantDeliveryEffects) {
     if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
       continue;
     }
     const linqDeliveryContext = resolveHostedAssistantLinqDeliveryContextForEffect({
-      context: input.linqDeliveryContext ?? null,
+      contexts: linqDeliveryContexts,
       effect,
     });
     const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
@@ -1000,12 +1005,12 @@ function hasHostedAssistantVaultFileMedia(
 }
 
 function resolveHostedAssistantLinqDeliveryContextForEffect(input: {
-  context: HostedAssistantLinqDeliveryContext | null;
+  contexts: readonly HostedAssistantLinqDeliveryContext[];
   effect: HostedAssistantDeliveryEffect;
 }): HostedAssistantLinqDeliveryContext | null {
   for (const target of readHostedAssistantDeliveryPayloadTargets(input.effect.payload)) {
-    const context = resolveHostedAssistantLinqDeliveryContextForRequest({
-      context: input.context,
+    const context = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+      contexts: input.contexts,
       replyToMessageId: input.effect.payload.replyToMessageId,
       target: target.target,
       targetKind: target.targetKind,
@@ -1918,6 +1923,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
             effectsPort: input.effectsPort,
             fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+            homeRouteFallbackAllowed: false,
             idempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
             intentId: input.assistantDeliveryEffect.effectId,
             linqEgressLatencyTrace: input.linqEgressLatencyTrace,
@@ -2231,13 +2237,13 @@ function createHostedAssistantLinqSendDependency(input: {
     const fromPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
-    const providerTarget = deliveryContext?.target ?? request.target;
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
-    await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+    const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
       deliveryContext,
       directRecipientPhoneNumber,
       effectsPort: input.effectsPort ?? null,
       fromPhoneNumber,
+      homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
       idempotencyKey: request.idempotencyKey ?? null,
       intentId: input.intentId ?? null,
       linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
@@ -2246,6 +2252,10 @@ function createHostedAssistantLinqSendDependency(input: {
       target: request.target,
       targetKind: request.targetKind ?? null,
     });
+    const providerTarget =
+      engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
+    const providerTargetKind =
+      engagement.targetOverride?.targetKind ?? request.targetKind ?? null;
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
       fetchImplementation: input.providerFetch,
@@ -2271,7 +2281,7 @@ function createHostedAssistantLinqSendDependency(input: {
         message: request.message,
         replyToMessageId: request.replyToMessageId ?? null,
         target: providerTarget,
-        targetKind: request.targetKind ?? null,
+        targetKind: providerTargetKind,
       }, {
         ...dependencies,
         ...(input.publicInternetFetch
@@ -2310,8 +2320,8 @@ function createHostedAssistantLinqSendDependency(input: {
           providerTarget,
           providerThreadId: null,
           result: null,
-          target: request.target,
-          targetKind: request.targetKind ?? null,
+          target: providerTarget,
+          targetKind: providerTargetKind,
           threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
         }),
       });
@@ -2330,8 +2340,8 @@ function createHostedAssistantLinqSendDependency(input: {
         providerTarget,
         providerThreadId: result.providerThreadId ?? null,
         result,
-        target: request.target,
-        targetKind: request.targetKind ?? null,
+        target: providerTarget,
+        targetKind: providerTargetKind,
         threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
       }),
     });
@@ -2481,26 +2491,29 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       target: request.target,
       targetKind: request.targetKind ?? null,
     });
-    const providerTarget = deliveryContext?.target ?? request.target;
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
       fetchImplementation: input.providerFetch,
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq voice memo delivery");
-    await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+    const engagement = await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
       deliveryContext,
       directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
       effectsPort: input.effectsPort ?? null,
       fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+      homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
       idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
       intentId: input.intentId ?? null,
       linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
-      replyToMessageId: deliveryContext?.replyToMessageId ?? null,
+      replyToMessageId:
+        request.replyToMessageId ?? deliveryContext?.replyToMessageId ?? null,
       signal: signal ?? null,
-      target: providerTarget,
+      target: request.target,
       targetKind: "thread",
     });
+    const providerTarget =
+      engagement.targetOverride?.target ?? deliveryContext?.target ?? request.target;
     await assertHostedDeliveryCanEnterProvider(input);
     const attemptedAt = new Date();
     input.onProviderDispatchEntered?.();
@@ -2789,6 +2802,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   directRecipientPhoneNumber: string | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
   fromPhoneNumber: string | null;
+  homeRouteFallbackAllowed: boolean;
   idempotencyKey: string | null;
   intentId: string | null;
   linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
@@ -2796,7 +2810,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   signal: AbortSignal | null;
   target: string;
   targetKind: string | null;
-}): Promise<void> {
+}): Promise<HostedRuntimeLinqRecentInboundEngagementResult> {
   const assertRecentInbound = input.effectsPort?.assertLinqRecentInboundEngagement;
   if (!assertRecentInbound) {
     throw new VaultCliError(
@@ -2808,12 +2822,14 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   const targetKind = normalizeHostedAssistantLinqTargetKind(input.targetKind);
   const currentInbound = input.deliveryContext?.currentInbound ?? null;
   const startedAtMs = Date.now();
-  await assertRecentInbound({
+  const result = await assertRecentInbound({
     ...(currentInbound ? { currentInbound } : {}),
     directRecipientPhoneNumber: input.directRecipientPhoneNumber,
     fromPhoneNumber: input.fromPhoneNumber,
+    homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
     idempotencyKey: input.idempotencyKey,
     intentId: input.intentId,
+    replyToMessageId: input.replyToMessageId,
     routeAuthority: input.deliveryContext?.routeAuthority ?? null,
     target: input.deliveryContext?.target ?? input.target,
     targetKind,
@@ -2824,6 +2840,21 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     durationMs: Math.max(0, Date.now() - startedAtMs),
     latencyTrace: input.linqEgressLatencyTrace ?? null,
   });
+  return normalizeHostedAssistantLinqEngagementResult(result);
+}
+
+function normalizeHostedAssistantLinqEngagementResult(
+  result: HostedRuntimeLinqRecentInboundEngagementResult | void,
+): HostedRuntimeLinqRecentInboundEngagementResult {
+  const targetOverride = result?.targetOverride ?? null;
+  return targetOverride?.target && targetOverride.targetKind === "thread"
+    ? {
+        targetOverride: {
+          target: targetOverride.target,
+          targetKind: "thread",
+        },
+      }
+    : {};
 }
 
 function recordHostedAssistantLinqEgressGuardLatencyBestEffort(input: {

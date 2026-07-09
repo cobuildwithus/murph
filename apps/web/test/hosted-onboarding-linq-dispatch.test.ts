@@ -1,10 +1,7 @@
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  buildHostedAiUsageGateNoticeIdempotencyKey,
-  type HostedAiUsageGateDecision,
-} from "@/src/lib/hosted-execution/usage-allowance";
+import type { HostedAiUsageGateDecision } from "@/src/lib/hosted-execution/usage-allowance";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -27,43 +24,10 @@ import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/lin
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { hostedLinqFirstContactContainsBlockedContent } from "@/src/lib/hosted-onboarding/webhook-provider-linq-shared";
-import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
-
-const HOME_URL = "https://withmurph.ai/home";
-
-function buildPulseUpgradeEdgeMessage(input: {
-  memberId: string;
-  periodStart: Date;
-}): string {
-  return renderUserFacingMessage({
-    context: {
-      homeUrl: HOME_URL,
-    },
-    key: "linq.ai_usage.pulse_upgrade_edge",
-    seed: `linq.ai_usage:${input.memberId}:pulse_upgrade_edge:${input.periodStart.toISOString()}`,
-  }).text;
-}
-
-function buildTrialConversionPendingMessage(input: {
-  memberId: string;
-  periodStart: Date;
-}): string {
-  return renderUserFacingMessage({
-    context: {
-      homeUrl: HOME_URL,
-    },
-    key: "linq.ai_usage.trial_conversion_pending",
-    seed: `linq.ai_usage:${input.memberId}:trial_conversion_pending:${input.periodStart.toISOString()}`,
-  }).text;
-}
 
 const mocks = vi.hoisted(() => {
   const state = {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
-    hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx: vi.fn(),
-    hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx: vi.fn(),
-    markHostedAiUsageLimitNoticeSent: vi.fn(),
-    markHostedLinqDeliveryAcceptedTx: vi.fn(),
     claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
@@ -253,11 +217,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   return {
     ...actual,
     claimHostedLinqDeliveryProviderDispatchTx: mocks.claimHostedLinqDeliveryProviderDispatchTx,
-    hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx:
-      mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
-    hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx:
-      mocks.hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
-    markHostedLinqDeliveryAcceptedTx: mocks.markHostedLinqDeliveryAcceptedTx,
   };
 });
 
@@ -278,7 +237,6 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   return {
     ...actual,
     checkHostedAiUsageGate: mocks.checkHostedAiUsageGate,
-    markHostedAiUsageLimitNoticeSent: mocks.markHostedAiUsageLimitNoticeSent,
   };
 });
 
@@ -555,18 +513,9 @@ async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebh
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.markHostedAiUsageLimitNoticeSent.mockResolvedValue(true);
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
       id: "hld_claimed",
-    });
-    mocks.hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx
-      .mockResolvedValue(false);
-    mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx
-      .mockResolvedValue(false);
-    mocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValue({
-      reopenOnboardingLink: null,
-      restoreOnboardingLink: null,
     });
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
@@ -584,6 +533,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
+    mocks.checkHostedAiUsageGate.mockReset();
     mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue(null);
     mocks.buildHostedFamilyInviteAcceptedReplyText.mockReturnValue("Welcome to Murph Family.");
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
@@ -742,10 +692,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         occurredAt: "2026-03-26T12:00:00.000Z",
         prisma,
       });
-      expect(mocks.checkHostedAiUsageGate).toHaveBeenCalledWith({
-        memberId: "member_123",
-        prisma,
-      });
+      expect(mocks.checkHostedAiUsageGate).not.toHaveBeenCalled();
       expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
         "hosted-onboarding.webhook.linq.plan",
         expect.objectContaining({
@@ -6735,26 +6682,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
   });
 
-  it("sends a deterministic Linq quota reply instead of the daily quota reply when the usage gate denies an active member", async () => {
-    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
-      allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 100_000n,
-      memberId: "member_123",
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-04-01T00:00:00.000Z"),
-      spentUsdMicros: 100_000n,
-      userNotice: {
-        code: "pulse_upgrade_edge",
-        message: buildPulseUpgradeEdgeMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        }),
-      },
-    });
+  it("appends active-member Linq input even when the usage gate would deny", async () => {
+    mocks.checkHostedAiUsageGate.mockRejectedValueOnce(
+      new Error("webhook usage gate should not run"),
+    );
     const prisma = asPrismaTransactionClient({
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -6791,153 +6722,36 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "sent-ai-usage-quota-reply",
+      reason: "wake-appended-active-member",
     });
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.checkHostedAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
-      memberId: "member_123",
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-    });
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        chatId: "chat_123",
-        idempotencyKey: expectedIdempotencyKey,
-        message: buildPulseUpgradeEdgeMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        envelope: expect.objectContaining({
+          eventId: "evt_ai_usage_limit",
+          kind: "conversation.message",
+          message: expect.objectContaining({
+            channel: "linq",
+            linqMessage: expect.objectContaining({
+              chatId: "chat_123",
+              messageId: "msg_123",
+            }),
+          }),
+          userId: "member_123",
         }),
-        replyToMessageId: "msg_123",
       }),
     );
-    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith({
-      idempotencyKey: expectedIdempotencyKey,
-      linqChatId: "chat_123",
-      phoneNumber: undefined,
-      prisma,
-      source: "hosted_webhook_side_effect",
-      sourceRef: expectedIdempotencyKey,
-      targetKind: "thread",
-      template: "ai_usage_quota",
-    });
-    expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
-      idempotencyKey: expectedIdempotencyKey,
-      linqChatId: "chat_123",
-      messageId: "provider_msg_123",
-      prisma: expect.anything(),
-    });
-    expect(mocks.markHostedAiUsageLimitNoticeSent).toHaveBeenCalledWith({
-      memberId: "member_123",
-      periodStart: "2026-03-01T00:00:00.000Z",
-      prisma,
-      sentAt: expect.any(String),
-    });
-    const [acceptedOrder] =
-      mocks.markHostedLinqDeliveryAcceptedTx.mock.invocationCallOrder;
-    const [periodOrder] =
-      mocks.markHostedAiUsageLimitNoticeSent.mock.invocationCallOrder;
-    expect(acceptedOrder).toBeLessThan(periodOrder);
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-  });
-
-  it("sends an action-oriented Linq trial-expiry reply without claiming a usage-limit period", async () => {
-    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
-      allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 4_500_000n,
-      memberId: "member_123",
-      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
-      periodStart: new Date("2026-04-01T12:00:00.000Z"),
-      reason: "trial_expired_pending_billing",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-04-08T12:15:00.000Z"),
-      spentUsdMicros: 4_500_000n,
-      userNotice: {
-        code: "trial_conversion_pending",
-        message: buildTrialConversionPendingMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-04-01T12:00:00.000Z"),
-        }),
-      },
-    });
-    const prisma = asPrismaTransactionClient({
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventType: "message.received",
-            receiptAttemptCount: 1,
-            receiptStatus: "processing",
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          accountGroupMemberships: [],
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-          linqChatId: "chat_123",
-          phoneLookupKey: "+15551234567",
-          suspendedAt: null,
-        }),
-      },
-    });
-
-    const response = await handleHostedOnboardingLinqWebhook({
-      prisma,
-      rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_trial_expired",
-      }),
-      signature: null,
-      timestamp: null,
-    });
-
-    expect(response).toMatchObject({
-      ok: true,
-      reason: "sent-ai-usage-quota-reply",
-    });
-    expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        chatId: "chat_123",
-        idempotencyKey: "linq-message:evt_trial_expired",
-        message: buildTrialConversionPendingMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-04-01T12:00:00.000Z"),
-        }),
-        replyToMessageId: "msg_123",
-      }),
-    );
+    expectHostedLinqPointerSignalAccepted("evt_ai_usage_limit");
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expectHostedLinqReadReceiptSent();
   });
 
-  it("sends Linq AI usage quota replies to the current inbound chat when the stored route is stale", async () => {
-    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
-      allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 100_000n,
-      memberId: "member_123",
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-04-01T00:00:00.000Z"),
-      spentUsdMicros: 100_000n,
-      userNotice: {
-        code: "pulse_upgrade_edge",
-        message: buildPulseUpgradeEdgeMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        }),
-      },
-    });
+  it("preserves the current inbound chat in appended Linq input when the stored route is stale", async () => {
+    mocks.checkHostedAiUsageGate.mockRejectedValueOnce(
+      new Error("webhook usage gate should not run"),
+    );
     const staleHomeRoute = {
       linqChatIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-routing.home-linq-chat-id",
@@ -7021,335 +6835,29 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      reason: "sent-ai-usage-quota-reply",
+      reason: "wake-appended-active-member",
     });
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+    expect(mocks.checkHostedAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
-        chatId: "chat_current_inbound",
-        message: buildPulseUpgradeEdgeMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        envelope: expect.objectContaining({
+          eventId: "evt_ai_usage_limit_current_chat",
+          kind: "conversation.message",
+          message: expect.objectContaining({
+            channel: "linq",
+            linqMessage: expect.objectContaining({
+              chatId: "chat_current_inbound",
+              messageId: "msg_123",
+            }),
+          }),
+          userId: "member_123",
         }),
-        replyToMessageId: "msg_123",
       }),
     );
-    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        linqChatId: "chat_current_inbound",
-        template: "ai_usage_quota",
-      }),
-    );
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        chatId: "chat_stale_home",
-      }),
-    );
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-  });
-
-  it("releases the Linq AI usage quota claim when current-chat delivery fails", async () => {
-    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
-      allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 100_000n,
-      memberId: "member_123",
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-04-01T00:00:00.000Z"),
-      spentUsdMicros: 100_000n,
-      userNotice: {
-        code: "pulse_upgrade_edge",
-        message: buildPulseUpgradeEdgeMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        }),
-      },
-    });
-    mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
-    const prisma = asPrismaTransactionClient({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventType: "message.received",
-            receiptAttemptCount: 1,
-            receiptStatus: "processing",
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          accountGroupMemberships: [],
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-          linqChatId: "chat_123",
-          phoneLookupKey: "+15551234567",
-          suspendedAt: null,
-        }),
-      },
-    });
-
-    await expect(handleHostedOnboardingLinqWebhook({
-      prisma,
-      rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_ai_usage_limit_send_failure",
-      }),
-      signature: null,
-      timestamp: null,
-    })).rejects.toThrow("linq send failed");
-    expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
-    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
-    expect(readHostedWebhookReceiptCreateMock(prisma)).not.toHaveBeenCalled();
-    expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();
-  });
-
-  it("sends Linq AI usage quota replies even after the daily quota notice is already marked", async () => {
-    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
-      allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 100_000n,
-      memberId: "member_123",
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-04-01T00:00:00.000Z"),
-      spentUsdMicros: 100_000n,
-      userNotice: {
-        code: "pulse_upgrade_edge",
-        message: buildPulseUpgradeEdgeMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        }),
-      },
-    });
-    const prisma = asPrismaTransactionClient({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventType: "message.received",
-            receiptAttemptCount: 1,
-            receiptStatus: "processing",
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          accountGroupMemberships: [],
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-          linqChatId: "chat_123",
-          phoneLookupKey: "+15551234567",
-          suspendedAt: null,
-        }),
-      },
-    });
-
-    const response = await handleHostedOnboardingLinqWebhook({
-      prisma,
-      rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_ai_usage_limit_repeat",
-      }),
-      signature: null,
-      timestamp: null,
-    });
-
-    expect(response).toMatchObject({
-      ok: true,
-      reason: "sent-ai-usage-quota-reply",
-    });
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
-    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
-      memberId: "member_123",
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-    });
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        chatId: "chat_123",
-        idempotencyKey: expectedIdempotencyKey,
-        message: buildPulseUpgradeEdgeMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        }),
-        replyToMessageId: "msg_123",
-      }),
-    );
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-  });
-
-  it("skips repeat Linq AI usage quota provider dispatch after the delivery row is provider-correlated", async () => {
-    mocks.hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
-    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
-      allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 100_000n,
-      memberId: "member_123",
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-04-01T00:00:00.000Z"),
-      spentUsdMicros: 100_000n,
-      userNotice: {
-        code: "pulse_upgrade_edge",
-        message: buildPulseUpgradeEdgeMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        }),
-      },
-    });
-    const prisma = asPrismaTransactionClient({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventType: "message.received",
-            receiptAttemptCount: 1,
-            receiptStatus: "processing",
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          accountGroupMemberships: [],
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-          linqChatId: "chat_123",
-          phoneLookupKey: "+15551234567",
-          suspendedAt: null,
-        }),
-      },
-    });
-
-    const response = await handleHostedOnboardingLinqWebhook({
-      prisma,
-      rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_ai_usage_limit_repeat_suppressed",
-      }),
-      signature: null,
-      timestamp: null,
-    });
-
-    expect(response).toMatchObject({
-      ignored: true,
-      ok: true,
-      reason: "ai-usage-quota-already-notified",
-    });
-    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-  });
-
-  it("returns a retryable Linq AI usage quota result when the delivery row remains in flight", async () => {
-    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
-      claimed: false,
-      id: "hld_current_in_flight",
-    });
-    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
-      allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 100_000n,
-      memberId: "member_123",
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-04-01T00:00:00.000Z"),
-      spentUsdMicros: 100_000n,
-      userNotice: {
-        code: "pulse_upgrade_edge",
-        message: buildPulseUpgradeEdgeMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        }),
-      },
-    });
-    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
-      allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 100_000n,
-      memberId: "member_123",
-      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
-      periodStart: new Date("2026-03-01T00:00:00.000Z"),
-      reason: "ai_usage_limit_exceeded",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-04-01T00:00:00.000Z"),
-      spentUsdMicros: 100_000n,
-      userNotice: {
-        code: "pulse_upgrade_edge",
-        message: buildPulseUpgradeEdgeMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-03-01T00:00:00.000Z"),
-        }),
-      },
-    });
-    const prisma = asPrismaTransactionClient({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventType: "message.received",
-            receiptAttemptCount: 1,
-            receiptStatus: "processing",
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          accountGroupMemberships: [],
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-          linqChatId: "chat_123",
-          phoneLookupKey: "+15551234567",
-          suspendedAt: null,
-        }),
-      },
-    });
-    const rawBody = buildHostedLinqWebhookBody({
-      eventId: "evt_ai_usage_limit_delivery_in_flight",
-    });
-
-    await expect(handleHostedOnboardingLinqWebhook({
-      prisma,
-      rawBody,
-      signature: null,
-      timestamp: null,
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_AI_USAGE_QUOTA_NOTICE_IN_FLIGHT",
-      httpStatus: 503,
-      retryable: true,
-    });
-    await expect(handleHostedOnboardingLinqWebhook({
-      prisma,
-      rawBody,
-      signature: null,
-      timestamp: null,
-    })).rejects.toMatchObject({
-      code: "HOSTED_LINQ_AI_USAGE_QUOTA_NOTICE_IN_FLIGHT",
-      httpStatus: 503,
-      retryable: true,
-    });
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledTimes(2);
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expectHostedLinqPointerSignalAccepted("evt_ai_usage_limit_current_chat");
+    expectHostedLinqReadReceiptSent("chat_current_inbound");
   });
 
   it("sends non-home-line redirects even when inbound Linq parts exceed mailbox limits", async () => {
@@ -8373,30 +7881,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
-  it("keeps daily quota suppression ahead of repeat trial conversion notices", async () => {
+  it("keeps daily quota suppression ahead of mailbox append", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
       quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
     }));
-    mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
-      allowed: false,
-      billingPlanCode: "launch_monthly",
-      limitUsdMicros: 0n,
-      memberId: "member_123",
-      periodEnd: new Date("2026-03-26T12:15:00.000Z"),
-      periodStart: new Date("2026-03-26T12:00:00.000Z"),
-      reason: "trial_expired_pending_billing",
-      remainingUsdMicros: 0n,
-      retryAfter: new Date("2026-03-26T12:15:00.000Z"),
-      spentUsdMicros: 0n,
-      userNotice: {
-        code: "trial_conversion_pending",
-        message: buildTrialConversionPendingMessage({
-          memberId: "member_123",
-          periodStart: new Date("2026-03-26T12:00:00.000Z"),
-        }),
-      },
-    });
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -8434,6 +7923,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "daily-quota-reached",
     });
+    expect(mocks.checkHostedAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
@@ -8657,7 +8147,14 @@ function buildHostedLinqLinePoolFixture(input: {
           )
         : rows;
 
-      return matchingRows.map(({ phoneNumber: _phoneNumber, ...row }) => row);
+      return matchingRows.map((row) => ({
+        activeMemberLimit: row.activeMemberLimit,
+        assignmentWeight: row.assignmentWeight,
+        maxNewConversationsPerDay: row.maxNewConversationsPerDay,
+        phoneNumberEncrypted: row.phoneNumberEncrypted,
+        phoneNumberHint: row.phoneNumberHint,
+        phoneNumberLookupKey: row.phoneNumberLookupKey,
+      }));
     }),
     findUnique: vi.fn().mockResolvedValue(null),
     update: vi.fn().mockResolvedValue({

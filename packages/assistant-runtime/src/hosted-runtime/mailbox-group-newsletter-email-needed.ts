@@ -9,6 +9,9 @@ import {
   type AssistantInputEventRecord,
   type UpsertAssistantInputEventInput,
 } from "@murphai/assistant-engine";
+import {
+  normalizeAssistantRouteString,
+} from "@murphai/operator-config/assistant/current-delivery-route";
 
 import type {
   HostedMailboxItemImportOutcome,
@@ -27,6 +30,7 @@ const GROUP_NEWSLETTER_EMAIL_NEEDED_NO_ROUTE_REASON =
   "group-newsletter.email-needed.no-direct-route";
 const ASSISTANT_INPUT_EVENT_SAFE_TOKEN_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u;
+const DELIVERY_CHANNELS: readonly string[] = ["linq", "telegram"];
 
 export async function importHostedGroupNewsletterEmailNeededMailboxItem(input: {
   item: HostedMailboxResolvedImportItem;
@@ -56,7 +60,9 @@ export async function importHostedGroupNewsletterEmailNeededMailboxItem(input: {
     };
   }
 
-  const route = await readCurrentDirectAssistantSessionRoute(input.vaultRoot);
+  const route =
+    readGroupNewsletterWakeDirectAssistantRoute(input.wake)
+    ?? await readCurrentDirectAssistantSessionRoute(input.vaultRoot);
   if (!route) {
     return {
       reasonCode: GROUP_NEWSLETTER_EMAIL_NEEDED_NO_ROUTE_REASON,
@@ -88,6 +94,35 @@ export async function importHostedGroupNewsletterEmailNeededMailboxItem(input: {
     ...(input.item.durablyConsumed === true ? {} : { assistantInputId: event.inputId }),
     reasonCode: GROUP_NEWSLETTER_EMAIL_NEEDED_STAGED_REASON,
     status: "imported",
+  };
+}
+
+function readGroupNewsletterWakeDirectAssistantRoute(
+  wake: HostedExecutionGroupNewsletterEmailNeededWake,
+): Pick<AssistantInputEventRecord, "conversation" | "replyTarget"> | null {
+  const channel = normalizeAssistantRouteString(wake.directRoute?.channel);
+  if (!channel || !DELIVERY_CHANNELS.includes(channel)) {
+    return null;
+  }
+  const threadId = normalizeAssistantRouteString(wake.directRoute?.threadId);
+  if (!threadId) {
+    return null;
+  }
+
+  return {
+    conversation: {
+      accountId: null,
+      actorId: null,
+      actorIsSelf: false,
+      source: channel,
+      threadId,
+      threadIsDirect: true,
+    },
+    replyTarget: {
+      channel,
+      messageId: null,
+      threadId,
+    },
   };
 }
 

@@ -5,11 +5,17 @@ import {
 import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+} from "@murphai/hosted-execution/vault-share";
 
 import {
   fetchHostedWebControlPlaneJson,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
+
+const HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM = "supportedProjectionScope";
 
 export function createHostedRuntimeGroupToolPort(input: {
   boundUserId: string;
@@ -24,7 +30,7 @@ export function createHostedRuntimeGroupToolPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted group tool",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_GROUP_TOOL_PATH,
+        path: buildHostedRuntimeGroupToolPath(),
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -36,4 +42,15 @@ export function createHostedRuntimeGroupToolPort(input: {
       }
     },
   };
+}
+
+function buildHostedRuntimeGroupToolPath(): string {
+  const params = new URLSearchParams();
+  for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
+    params.append(
+      HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM,
+      buildHostedVaultShareProjectionScopeKey(projectionScope),
+    );
+  }
+  return `${HOSTED_RUNTIME_GROUP_TOOL_PATH}?${params.toString()}`;
 }

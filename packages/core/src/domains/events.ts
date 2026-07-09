@@ -12,7 +12,9 @@ export {
   addActivitySession,
   addBodyMeasurement,
   addCapture,
+  addCaptureWithLookup,
   addMeasurement,
+  findCaptureByLookup,
 } from "./events/attachment-backed.ts";
 export type {
   AddActivitySessionInput,
@@ -21,8 +23,11 @@ export type {
   AddBodyMeasurementResult,
   AddCaptureInput,
   AddCaptureResult,
+  AddCaptureWithLookupInput,
+  AddCaptureWithLookupResult,
   AddMeasurementInput,
   AddMeasurementResult,
+  FindCaptureByLookupResult,
 } from "./events/attachment-backed.ts";
 export {
   buildActivitySessionEventDraft,

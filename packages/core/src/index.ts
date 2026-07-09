@@ -13,7 +13,6 @@ export { deterministicContractId } from "./ids.ts";
 export * from "./automation.ts";
 export * from "./scheduled-logs.ts";
 export * from "./memory.ts";
-export * from "./profile.ts";
 export {
   readPreferencesDocument,
   resolvePreferencesDocumentPath,
@@ -89,6 +88,7 @@ export {
   addActivitySession,
   addBodyMeasurement,
   addCapture,
+  addCaptureWithLookup,
   addMeasurement,
   addMeal,
   appendImmunization,
@@ -270,6 +270,7 @@ export {
   buildNoteEventDraft,
   buildObservationEventDraft,
   buildPublicEventRecord,
+  findCaptureByLookup,
   findEventByExternalRef,
   buildSleepSessionEventDraft,
   buildSupplementIntakeEventDraft,
@@ -282,9 +283,12 @@ export type {
   AddBodyMeasurementResult,
   AddCaptureInput,
   AddCaptureResult,
+  AddCaptureWithLookupInput,
+  AddCaptureWithLookupResult,
   AddMeasurementInput,
   AddMeasurementResult,
   EventDraftByKind,
+  FindCaptureByLookupResult,
   FindEventByExternalRefInput,
   PublicEventDraft,
   PublicWritableEventKind,

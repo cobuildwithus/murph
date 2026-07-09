@@ -401,11 +401,13 @@ describe("parseHostedExecutionEvent", () => {
 
   it("parses group newsletter email-needed events and wakes", () => {
     expect(parseHostedExecutionEvent({
+      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
       kind: "group-newsletter.email-needed",
       userId: "member_123",
     })).toEqual({
+      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
       kind: "group-newsletter.email-needed",
@@ -413,6 +415,7 @@ describe("parseHostedExecutionEvent", () => {
     });
 
     expect(parseHostedExecutionWake({
+      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
       eventId: "group-newsletter.email-needed:member_123:hgrp_123",
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
@@ -420,6 +423,7 @@ describe("parseHostedExecutionEvent", () => {
       occurredAt: "2026-04-26T00:00:00.000Z",
       userId: "member_123",
     })).toEqual({
+      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
       eventId: "group-newsletter.email-needed:member_123:hgrp_123",
       groupDisplayName: "Tempo Crew",
       groupId: "hgrp_123",
@@ -568,6 +572,14 @@ describe("parseHostedRuntimeGroupTool", () => {
             projectionKind: "activity-minutes-days.v1",
             selector: { activityKind: "running" },
           },
+          {
+            projectionKind: "activity-distance-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-session-count-days.v1",
+            selector: { activityKind: "running" },
+          },
         ],
       },
     })).toEqual({
@@ -580,6 +592,14 @@ describe("parseHostedRuntimeGroupTool", () => {
           { projectionKind: "sleep-times.v0" },
           {
             projectionKind: "activity-minutes-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-distance-days.v1",
+            selector: { activityKind: "running" },
+          },
+          {
+            projectionKind: "activity-session-count-days.v1",
             selector: { activityKind: "running" },
           },
         ],
@@ -687,6 +707,23 @@ describe("parseHostedRuntimeGroupTool", () => {
       parseHostedRuntimeGroupToolRequest({
         action: "create_join_link",
         joinLink: { requestedVaultShareProjectionScopes: [{ projectionKind: "activity-minutes-days.v1" }] },
+      })
+    ).toThrow(/unsupported projection scope/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [{ projectionKind: "activity-distance-days.v1" }] },
+      })
+    ).toThrow(/unsupported projection scope/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: {
+          requestedVaultShareProjectionScopes: [{
+            projectionKind: "activity-session-count-days.v1",
+            selector: { activityKind: "running+walking" },
+          }],
+        },
       })
     ).toThrow(/unsupported projection scope/u);
     // Membership-implied, never requestable: the join-link request contract is closed
@@ -1089,6 +1126,19 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "read_chat_participants",
     });
     expect(parseHostedRuntimeGroupToolRequest({
+      action: "update_display_name",
+      linqThread: LINQ_THREAD,
+      updateDisplayName: {
+        displayName: "  Weekly   Health Crew  ",
+      },
+    })).toEqual({
+      action: "update_display_name",
+      linqThread: LINQ_THREAD,
+      updateDisplayName: {
+        displayName: "Weekly Health Crew",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
       action: "share_contact_card",
       linqThread: LINQ_THREAD,
     })).toEqual({
@@ -1134,6 +1184,13 @@ describe("parseHostedRuntimeGroupTool", () => {
       parseHostedRuntimeGroupToolRequest({
         action: "share_contact_card",
         chatId: "chat_group_1",
+      })
+    ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "update_display_name",
+        chatId: "chat_group_1",
+        updateDisplayName: { displayName: "Weekly Health Crew" },
       })
     ).toThrow(/not allowed/u);
     expect(() =>

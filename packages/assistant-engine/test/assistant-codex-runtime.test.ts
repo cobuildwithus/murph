@@ -706,6 +706,7 @@ describe('assistant codex runtime', () => {
       `sessions/2026/05/06/rollout-2026-05-06T01-02-03-${threadId}.jsonl`
     const imageBytes = Buffer.from([0xff, 0xd8, 0xff])
     const onProgress = vi.fn()
+    const onProviderRequestStarted = vi.fn()
     const onTraceEvent = vi.fn()
 
     codexMocks.spawn.mockImplementation((_command, args, options) => {
@@ -999,6 +1000,7 @@ describe('assistant codex runtime', () => {
           },
         ],
         onProgress,
+        onProviderRequestStarted,
         onTraceEvent,
         approvalPolicy: 'never',
         configOverrides: ['model="gpt-5"'],
@@ -1077,6 +1079,15 @@ describe('assistant codex runtime', () => {
           type: 'assistant.codex.app_server_timing',
         }),
         updates: [],
+      }),
+    )
+    expect(onProviderRequestStarted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codexAppServerInitializeMs: expect.any(Number),
+        codexAppServerPreProviderMs: expect.any(Number),
+        codexAppServerSpawnReadyMs: expect.any(Number),
+        codexAppServerThreadStartMs: expect.any(Number),
+        startedAt: expect.any(String),
       }),
     )
   })

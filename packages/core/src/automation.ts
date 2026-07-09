@@ -181,6 +181,14 @@ function normalizeNullableRouteString(value: unknown): string | null {
   return null;
 }
 
+function normalizeOptionalNullableRouteBoolean(value: unknown): boolean | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === null || typeof value === "boolean" ? value : undefined;
+}
+
 function normalizeAutomationStatus(value: unknown): AutomationStatus {
   return optionalEnum(value, automationStatusValues, "status") ?? "active";
 }
@@ -333,14 +341,19 @@ function normalizeAutomationSchedule(
 
 function normalizeAutomationRoute(value: unknown): AutomationRoute {
   const object = requireObject(value, "route");
+  const threadIsDirect = normalizeOptionalNullableRouteBoolean(object.threadIsDirect);
 
   return {
     channel: normalizeAutomationRouteChannel(object.channel),
+    ...(object.currentRouteSnapshot === true
+      ? { currentRouteSnapshot: true }
+      : {}),
     deliverySource: normalizeAutomationRouteDeliverySource(object.deliverySource),
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),
     participantId: normalizeNullableRouteString(object.participantId),
     threadId: normalizeNullableRouteString(object.threadId),
+    ...(threadIsDirect !== undefined ? { threadIsDirect } : {}),
   };
 }
 
@@ -521,11 +534,17 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
 function buildAutomationRouteFrontmatter(route: AutomationRoute): FrontmatterObject {
   return {
     channel: route.channel,
+    ...(route.currentRouteSnapshot === true
+      ? { currentRouteSnapshot: true }
+      : {}),
     deliverySource: route.deliverySource ?? null,
     deliveryTarget: route.deliveryTarget,
     identityId: route.identityId,
     participantId: route.participantId,
     threadId: route.threadId,
+    ...(route.threadIsDirect !== undefined
+      ? { threadIsDirect: route.threadIsDirect }
+      : {}),
   };
 }
 

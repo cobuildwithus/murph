@@ -47,12 +47,14 @@ export type AssistantCronStore = z.infer<typeof assistantCronStoreSchema>
 export interface AssistantCronTargetInput {
   alias?: string | null
   channel?: string | null
+  currentRouteSnapshot?: boolean | null
   deliverySource?: AssistantCronTarget['deliverySource'] | null
   deliveryTarget?: string | null
   identityId?: string | null
   participantId?: string | null
   sessionId?: string | null
   threadId?: string | null
+  threadIsDirect?: boolean | null
 }
 
 export async function ensureAssistantCronState(
@@ -324,10 +326,16 @@ export function buildAssistantCronTarget(
     sessionId: normalizeNullableString(input.sessionId),
     alias: normalizeNullableString(input.alias),
     channel: normalizeNullableString(input.channel),
+    ...(input.currentRouteSnapshot === true
+      ? { currentRouteSnapshot: true }
+      : {}),
     deliverySource: input.deliverySource ?? null,
     identityId: normalizeNullableString(input.identityId),
     participantId: normalizeNullableString(input.participantId),
     threadId: normalizeNullableString(input.threadId),
+    ...(typeof input.threadIsDirect === 'boolean'
+      ? { threadIsDirect: input.threadIsDirect }
+      : {}),
     deliveryTarget: normalizeNullableString(input.deliveryTarget),
   }
 }

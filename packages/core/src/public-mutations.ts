@@ -64,6 +64,7 @@ import {
   addActivitySession as addActivitySessionInternal,
   addBodyMeasurement as addBodyMeasurementInternal,
   addCapture as addCaptureInternal,
+  addCaptureWithLookup as addCaptureWithLookupInternal,
   addMeasurement as addMeasurementInternal,
   deleteEvent as deleteEventInternal,
   upsertEvent as upsertEventInternal,
@@ -516,6 +517,12 @@ export async function addCapture(
   return hasStableCanonicalId(input.draft.id)
     ? withCanonicalInputWriteLock(input, addCaptureInternal)
     : addCaptureInternal(input);
+}
+
+export async function addCaptureWithLookup(
+  input: Parameters<typeof addCaptureWithLookupInternal>[0],
+): ReturnType<typeof addCaptureWithLookupInternal> {
+  return withCanonicalInputWriteLock(input, addCaptureWithLookupInternal);
 }
 
 export async function addMeasurement(

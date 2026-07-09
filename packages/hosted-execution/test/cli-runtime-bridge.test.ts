@@ -175,6 +175,7 @@ describe("hosted CLI runtime bridge client", () => {
             identityId: "h1_111111111111111111111111",
             participantId: "h1_222222222222222222222222",
             threadId: "h1_333333333333333333333333",
+            threadIsDirect: false,
           },
         }),
         {
@@ -198,6 +199,7 @@ describe("hosted CLI runtime bridge client", () => {
         identityId: "h1_111111111111111111111111",
         participantId: "h1_222222222222222222222222",
         threadId: "h1_333333333333333333333333",
+        threadIsDirect: false,
       },
     });
   });

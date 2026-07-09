@@ -98,6 +98,287 @@ export interface AssistantUsageRecord {
   usageExtractionVersion: string;
 }
 
+export interface AssistantOpenAiImageUsageBasisInput {
+  cachedInputTokens: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  rawUsageJson: Record<string, unknown> | null;
+  totalTokens: number | null;
+}
+
+export interface AssistantOpenAiImageUsageTokenBuckets {
+  billableImageInputTokens: bigint;
+  billableTextInputTokens: bigint;
+  cachedImageInputTokens: bigint;
+  cachedInputTokens: bigint;
+  cachedTextInputTokens: bigint;
+  imageInputTokens: bigint;
+  outputTokens: bigint;
+  textInputTokens: bigint;
+}
+
+export type AssistantOpenAiImageUsageUnpriceableReason =
+  | "inconsistent_provider_usage_tokens"
+  | "missing_provider_usage_tokens";
+
+export type AssistantOpenAiImageUsageBasis =
+  | {
+    priceable: true;
+    tokenBuckets: AssistantOpenAiImageUsageTokenBuckets;
+  }
+  | {
+    priceable: false;
+    reason: AssistantOpenAiImageUsageUnpriceableReason;
+  };
+
+export function classifyAssistantOpenAiImageUsageBasis(
+  input: AssistantOpenAiImageUsageBasisInput,
+): AssistantOpenAiImageUsageBasis {
+  const totalInputTokens = readAssistantOpenAiImageAggregateToken(
+    input,
+    "inputTokens",
+    "input_tokens",
+  );
+  if (totalInputTokens.kind === "invalid") return inconsistentOpenAiImageUsageBasis();
+
+  const totalOutputTokens = readAssistantOpenAiImageAggregateToken(
+    input,
+    "outputTokens",
+    "output_tokens",
+  );
+  if (totalOutputTokens.kind === "invalid") return inconsistentOpenAiImageUsageBasis();
+
+  const totalTokens = readAssistantOpenAiImageAggregateToken(
+    input,
+    "totalTokens",
+    "total_tokens",
+  );
+  if (totalTokens.kind === "invalid") return inconsistentOpenAiImageUsageBasis();
+  if (
+    totalTokens.value !== null
+    && totalInputTokens.value !== null
+    && totalOutputTokens.value !== null
+    && totalTokens.value !== totalInputTokens.value + totalOutputTokens.value
+  ) {
+    return inconsistentOpenAiImageUsageBasis();
+  }
+
+  const detailTextInputTokens = readAssistantOpenAiImageRawDetailToken(
+    input.rawUsageJson,
+    "input_tokens_details",
+    "text_tokens",
+  );
+  const detailImageInputTokens = readAssistantOpenAiImageRawDetailToken(
+    input.rawUsageJson,
+    "input_tokens_details",
+    "image_tokens",
+  );
+  const hasInputDetails =
+    detailTextInputTokens !== null || detailImageInputTokens !== null;
+  if (!hasInputDetails) return missingOpenAiImageUsageBasis();
+
+  const textInputTokens = detailTextInputTokens ?? 0n;
+  const imageInputTokens = detailImageInputTokens ?? 0n;
+  const detailedInputTokens = textInputTokens + imageInputTokens;
+  if (
+    totalInputTokens.value === null
+    || detailedInputTokens !== totalInputTokens.value
+  ) {
+    return inconsistentOpenAiImageUsageBasis();
+  }
+
+  const cachedInputTokens = readAssistantOpenAiImageCachedInputTokens(input);
+  if (cachedInputTokens.kind === "invalid") return inconsistentOpenAiImageUsageBasis();
+  const cachedInputTokenCount = cachedInputTokens.value ?? 0n;
+  if (cachedInputTokenCount > detailedInputTokens) {
+    return inconsistentOpenAiImageUsageBasis();
+  }
+  const detailImageOutputTokens = readAssistantOpenAiImageRawDetailToken(
+    input.rawUsageJson,
+    "output_tokens_details",
+    "image_tokens",
+  );
+  const detailTextOutputTokens = readAssistantOpenAiImageRawDetailToken(
+    input.rawUsageJson,
+    "output_tokens_details",
+    "text_tokens",
+  );
+  const detailReasoningOutputTokens = readAssistantOpenAiImageRawDetailToken(
+    input.rawUsageJson,
+    "output_tokens_details",
+    "reasoning_tokens",
+  );
+  const hasOutputDetails =
+    detailImageOutputTokens !== null
+    || detailTextOutputTokens !== null
+    || detailReasoningOutputTokens !== null;
+  const outputTokens = hasOutputDetails
+    ? (detailImageOutputTokens ?? 0n)
+      + (detailTextOutputTokens ?? 0n)
+      + (detailReasoningOutputTokens ?? 0n)
+    : totalOutputTokens.value ?? 0n;
+  if (
+    hasOutputDetails
+    && (
+      totalOutputTokens.value === null
+      || outputTokens !== totalOutputTokens.value
+    )
+  ) {
+    return inconsistentOpenAiImageUsageBasis();
+  }
+
+  const cachedTextInputTokens =
+    textInputTokens > 0n
+      ? minAssistantOpenAiImageTokenCount(textInputTokens, cachedInputTokenCount)
+      : 0n;
+  const cachedAfterText = cachedInputTokenCount - cachedTextInputTokens;
+  const cachedImageInputTokens =
+    imageInputTokens > 0n
+      ? minAssistantOpenAiImageTokenCount(imageInputTokens, cachedAfterText)
+      : 0n;
+  const tokenBuckets = {
+    billableImageInputTokens:
+      subtractAssistantOpenAiImageTokenCountFloor(
+        imageInputTokens,
+        cachedImageInputTokens,
+      ),
+    billableTextInputTokens:
+      subtractAssistantOpenAiImageTokenCountFloor(
+        textInputTokens,
+        cachedTextInputTokens,
+      ),
+    cachedImageInputTokens,
+    cachedInputTokens: cachedInputTokenCount,
+    cachedTextInputTokens,
+    imageInputTokens,
+    outputTokens,
+    textInputTokens,
+  } satisfies AssistantOpenAiImageUsageTokenBuckets;
+
+  const hasInputPricingBasis =
+    tokenBuckets.textInputTokens > 0n || tokenBuckets.imageInputTokens > 0n;
+  return hasInputPricingBasis && tokenBuckets.outputTokens > 0n
+    ? {
+        priceable: true,
+        tokenBuckets,
+      }
+    : missingOpenAiImageUsageBasis();
+}
+
+type AssistantOpenAiImageTokenReadResult =
+  | {
+    kind: "valid";
+    value: bigint | null;
+  }
+  | {
+    kind: "invalid";
+  };
+
+function missingOpenAiImageUsageBasis(): AssistantOpenAiImageUsageBasis {
+  return {
+    priceable: false,
+    reason: "missing_provider_usage_tokens",
+  };
+}
+
+function inconsistentOpenAiImageUsageBasis(): AssistantOpenAiImageUsageBasis {
+  return {
+    priceable: false,
+    reason: "inconsistent_provider_usage_tokens",
+  };
+}
+
+function readAssistantOpenAiImageAggregateToken(
+  input: AssistantOpenAiImageUsageBasisInput,
+  recordKey: "inputTokens" | "outputTokens" | "totalTokens",
+  rawKey: "input_tokens" | "output_tokens" | "total_tokens",
+): AssistantOpenAiImageTokenReadResult {
+  const recordTokens = readAssistantOpenAiImageRecordToken(input[recordKey]);
+  const rawTokens = readAssistantOpenAiImageRawTopLevelToken(
+    input.rawUsageJson,
+    rawKey,
+  );
+  if (
+    recordTokens !== null
+    && rawTokens !== null
+    && recordTokens !== rawTokens
+  ) {
+    return { kind: "invalid" };
+  }
+
+  return {
+    kind: "valid",
+    value: recordTokens ?? rawTokens,
+  };
+}
+
+function readAssistantOpenAiImageCachedInputTokens(
+  input: AssistantOpenAiImageUsageBasisInput,
+): AssistantOpenAiImageTokenReadResult {
+  const recordTokens = readAssistantOpenAiImageRecordToken(input.cachedInputTokens);
+  const rawTokens = readAssistantOpenAiImageRawDetailToken(
+    input.rawUsageJson,
+    "input_tokens_details",
+    "cached_tokens",
+  );
+  if (
+    recordTokens !== null
+    && rawTokens !== null
+    && recordTokens !== rawTokens
+  ) {
+    return { kind: "invalid" };
+  }
+
+  return {
+    kind: "valid",
+    value: recordTokens ?? rawTokens ?? 0n,
+  };
+}
+
+function readAssistantOpenAiImageRawDetailToken(
+  rawUsageJson: Record<string, unknown> | null,
+  detailKey: "input_tokens_details" | "output_tokens_details",
+  tokenKey: string,
+): bigint | null {
+  const detail = rawUsageJson?.[detailKey];
+  if (typeof detail !== "object" || detail === null || Array.isArray(detail)) {
+    return null;
+  }
+
+  const value = (detail as Record<string, unknown>)[tokenKey];
+  return readAssistantOpenAiImageNumberToken(value);
+}
+
+function readAssistantOpenAiImageRecordToken(value: number | null): bigint | null {
+  return readAssistantOpenAiImageNumberToken(value);
+}
+
+function readAssistantOpenAiImageRawTopLevelToken(
+  rawUsageJson: Record<string, unknown> | null,
+  tokenKey: "input_tokens" | "output_tokens" | "total_tokens",
+): bigint | null {
+  return readAssistantOpenAiImageNumberToken(rawUsageJson?.[tokenKey]);
+}
+
+function readAssistantOpenAiImageNumberToken(value: unknown): bigint | null {
+  return typeof value === "number"
+      && Number.isSafeInteger(value)
+      && value >= 0
+    ? BigInt(value)
+    : null;
+}
+
+function minAssistantOpenAiImageTokenCount(left: bigint, right: bigint): bigint {
+  return left < right ? left : right;
+}
+
+function subtractAssistantOpenAiImageTokenCountFloor(
+  value: bigint,
+  subtract: bigint,
+): bigint {
+  return value > subtract ? value - subtract : 0n;
+}
+
 export function createAssistantUsageId(input: {
   attemptCount: number;
   providerRequestOrdinal?: number;

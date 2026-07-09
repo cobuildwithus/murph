@@ -20,6 +20,7 @@ import {
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
 } from "../src/config/junction-connect-sources.ts";
+import { resolveDeviceConnectSourceIdForJunctionProviderSlug } from "../src/config/connect-routes.ts";
 import {
   isAllowedJunctionLinkHost,
   JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
@@ -540,7 +541,7 @@ test("Junction provider exposes primitive handlers without OAuth compatibility m
 });
 
 test("Junction default provider filter covers hosted Link connect routes", () => {
-  assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 32);
+  assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 33);
 
   assert.deepEqual(
     JUNCTION_LINK_PROVIDER_SLUGS,
@@ -558,6 +559,7 @@ test("Junction default provider filter covers hosted Link connect routes", () =>
     "accuchek_ble",
     "contour_ble",
     "onetouch_ble",
+    "apple_health_kit",
   ]) {
     assert.equal(JUNCTION_DEFAULT_PROVIDER_FILTER.includes(providerSlug), false);
   }
@@ -567,13 +569,19 @@ test("Junction default provider filter covers hosted Link connect routes", () =>
   assert.equal(resolveJunctionTarget("accuchek_ble")?.connectMode, "junction_sdk");
   assert.equal(resolveJunctionTarget("contour_ble")?.connectMode, "junction_sdk");
   assert.equal(resolveJunctionTarget("onetouch_ble")?.connectMode, "junction_sdk");
+  assert.equal(resolveJunctionTarget("apple_health_kit")?.connectMode, "junction_sdk");
 
   assert.equal(resolveJunctionConnectTargetForSourceId("dexcom-g6-and-older"), "dexcom");
   assert.equal(resolveJunctionConnectTargetForSourceId("dexcom"), "dexcom_v3");
   assert.equal(resolveJunctionConnectTargetForSourceId("mapmyfitness"), "map_my_fitness");
   assert.equal(resolveJunctionConnectTargetForSourceId("accuchek"), "accuchek_ble");
   assert.equal(resolveJunctionConnectTargetForSourceId("onetouch"), "onetouch_ble");
+  assert.equal(resolveJunctionConnectTargetForSourceId("apple-health"), "apple_health_kit");
   assert.equal(resolveJunctionConnectSourceLabel("accuchek_ble"), "Accu-Chek");
+  for (const providerSlug of ["apple_health_kit", "apple_health", "apple-healthkit"]) {
+    assert.equal(resolveDeviceConnectSourceIdForJunctionProviderSlug(providerSlug), "apple-health");
+    assert.equal(resolveJunctionConnectSourceLabel(providerSlug), "Apple Health");
+  }
 });
 
 test("Junction empty historical backfill records progress and stores the retry wake in metadata", async () => {
@@ -2822,7 +2830,7 @@ test("Junction provider source keys are stable provider-level opaque ids", () =>
   assert.doesNotMatch(garminKey ?? "", /acct|junction|garmin/u);
 });
 
-test("Junction provider revokes connected remote provider slugs", async () => {
+test("Junction provider revokes remote provider slugs unless Junction already reports them disconnected", async () => {
   const requests: Array<{ method: string; url: string }> = [];
   const provider = createJunctionProvider(async (input, init) => {
     const request = {
@@ -2836,6 +2844,7 @@ test("Junction provider revokes connected remote provider slugs", async () => {
         data: [
           { slug: "garmin", status: "connected" },
           { slug: "Garmin", status: "active" },
+          { slug: "apple_health_kit", status: "error" },
           { slug: "fitbit", status: "revoked" },
           { provider: "Oura", status: "unknown" },
         ],
@@ -2860,6 +2869,14 @@ test("Junction provider revokes connected remote provider slugs", async () => {
     {
       method: "DELETE",
       url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/garmin",
+    },
+    {
+      method: "DELETE",
+      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/apple_health_kit",
+    },
+    {
+      method: "DELETE",
+      url: "https://api.sandbox.us.junction.com/v2/user/junction-user-1/oura",
     },
   ]);
 });

@@ -23,6 +23,9 @@ export const HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY = [
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+  // Health Commons owns this env-name contract from @murphai/health-commons/runtime.
+  // Keep it literal here so assistant-runtime does not gain that dependency edge.
+  "MURPH_HEALTH_COMMONS_PACKAGE_ROOT",
   "LANG",
   "LC_ALL",
   "LC_CTYPE",

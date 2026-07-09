@@ -118,9 +118,9 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       const linqDeliveryContexts = input.linqDeliveryContexts ?? [];
       const deliveryContext = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
         contexts: linqDeliveryContexts,
-        replyToMessageId: null,
+        replyToMessageId: request.replyToMessageId ?? null,
         target: request.target,
-        targetKind: "thread",
+        targetKind: request.targetKind ?? "thread",
       });
       if (!deliveryContext) {
         return undefined;

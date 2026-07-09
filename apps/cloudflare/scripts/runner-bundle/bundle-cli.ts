@@ -5,6 +5,9 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { build, type Metafile } from "esbuild";
+import {
+  MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
+} from "@murphai/health-commons/runtime";
 
 import {
   RUNNER_BUNDLE_SHARED_EXTERNALS,
@@ -94,8 +97,8 @@ const VAULT_CLI_BUNDLE_PARITY_PROBES: ReadonlyArray<readonly string[]> = [
   ["--llms-full", "--format", "json"],
   ["wearables", "day", "2026-01-01", "--format", "json"],
   ["meal", "totals", "--from", "2026-01-01", "--to", "2026-01-01", "--format", "json"],
-  // Reads health-commons generated artifacts through the external runtime
-  // package; catches asset-relative resolution breaking inside the bundle.
+  // Reads Health Commons generated artifacts through the image-pinned package
+  // root; catches asset-root resolution drift inside the bundled graph.
   ["commons", "protocol", "list", "--query", "sauna", "--limit", "3", "--format", "json"],
 ];
 
@@ -137,8 +140,24 @@ export async function bundleInstalledVaultCliBinary(
   console.log(
     `vault-cli bundle size: total ${bundleBytes.totalBytes}B of ${VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget`,
   );
-  assertVaultCliBundleParity({ bundleOutDir, cliPackageDir, entryPath });
-  await assertVaultCliJsonImportSurface({ bundleOutDir, cliPackageDir, entryPath });
+  const healthCommonsPackageRoot = path.join(
+    bundleDir,
+    "node_modules",
+    "@murphai",
+    "health-commons",
+  );
+  assertVaultCliBundleParity({
+    bundleOutDir,
+    cliPackageDir,
+    entryPath,
+    healthCommonsPackageRoot,
+  });
+  await assertVaultCliJsonImportSurface({
+    bundleOutDir,
+    cliPackageDir,
+    entryPath,
+    healthCommonsPackageRoot,
+  });
   await retargetVaultCliBinWrappers(bundleDir, cliPackageDir);
 }
 
@@ -262,15 +281,26 @@ function assertVaultCliBundleParity(input: {
   bundleOutDir: string;
   cliPackageDir: string;
   entryPath: string;
+  healthCommonsPackageRoot: string;
 }): void {
   const bundledEntryPath = path.join(input.bundleOutDir, "bin.js");
 
   for (const probe of VAULT_CLI_BUNDLE_PARITY_PROBES) {
     const unbundledStartedAt = performance.now();
-    const expected = runVaultCliParityProbe(input.entryPath, probe, input.cliPackageDir);
+    const expected = runVaultCliParityProbe({
+      args: probe,
+      cwd: input.cliPackageDir,
+      entryPath: input.entryPath,
+      healthCommonsPackageRoot: input.healthCommonsPackageRoot,
+    });
     const unbundledDurationMs = Math.round(performance.now() - unbundledStartedAt);
     const bundledStartedAt = performance.now();
-    const actual = runVaultCliParityProbe(bundledEntryPath, probe, input.cliPackageDir);
+    const actual = runVaultCliParityProbe({
+      args: probe,
+      cwd: input.cliPackageDir,
+      entryPath: bundledEntryPath,
+      healthCommonsPackageRoot: input.healthCommonsPackageRoot,
+    });
     const bundledDurationMs = Math.round(performance.now() - bundledStartedAt);
 
     // Warn-only longitudinal trend signal in the assembly log. Never turn
@@ -311,19 +341,21 @@ function assertVaultCliBundleParity(input: {
   }
 }
 
-function runVaultCliParityProbe(
-  entryPath: string,
-  args: readonly string[],
-  cwd: string,
-): { status: number; stderr: string; stdout: string } {
-  const result = spawnSync(process.execPath, [entryPath, ...args], {
-    cwd,
+function runVaultCliParityProbe(input: {
+  args: readonly string[];
+  cwd: string;
+  entryPath: string;
+  healthCommonsPackageRoot: string;
+}): { status: number; stderr: string; stdout: string } {
+  const result = spawnSync(process.execPath, [input.entryPath, ...input.args], {
+    cwd: input.cwd,
     encoding: "utf8",
     env: {
       ...process.env,
       // Keep probes hermetic: no operator config or vault may leak in from
       // the assembling machine.
-      HOME: path.join(cwd, ".parity-probe-home"),
+      HOME: path.join(input.cwd, ".parity-probe-home"),
+      [MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]: input.healthCommonsPackageRoot,
       VAULT: "",
     },
     // The full `--llms-full` manifest exceeds the 1MiB default; a too-small
@@ -340,7 +372,7 @@ function runVaultCliParityProbe(
   // posing as a parity result.
   if (result.error || result.signal !== null || typeof result.status !== "number") {
     throw new Error(
-      `vault-cli parity probe \`${args.join(" ")}\` did not exit cleanly (${
+      `vault-cli parity probe \`${input.args.join(" ")}\` did not exit cleanly (${
         result.error?.message ?? `signal ${result.signal ?? "unknown"}`
       }).`,
     );
@@ -353,6 +385,7 @@ async function assertVaultCliJsonImportSurface(input: {
   bundleOutDir: string;
   cliPackageDir: string;
   entryPath: string;
+  healthCommonsPackageRoot: string;
 }): Promise<void> {
   const probeDir = await mkdtemp(path.join(tmpdir(), "murph-runner-vault-cli-imports-"));
   const hookPath = path.join(probeDir, "import-surface-hook.mjs");
@@ -363,6 +396,7 @@ async function assertVaultCliJsonImportSurface(input: {
       assertVaultCliJsonImportSurfaceForEntry({
         cwd: input.cliPackageDir,
         entryPath: input.entryPath,
+        healthCommonsPackageRoot: input.healthCommonsPackageRoot,
         hookPath,
         label: "unbundled",
         logPath: path.join(probeDir, "unbundled-resolved-imports.log"),
@@ -370,6 +404,7 @@ async function assertVaultCliJsonImportSurface(input: {
       assertVaultCliJsonImportSurfaceForEntry({
         cwd: input.cliPackageDir,
         entryPath: path.join(input.bundleOutDir, "bin.js"),
+        healthCommonsPackageRoot: input.healthCommonsPackageRoot,
         hookPath,
         label: "bundled",
         logPath: path.join(probeDir, "bundled-resolved-imports.log"),
@@ -383,6 +418,7 @@ async function assertVaultCliJsonImportSurface(input: {
 async function assertVaultCliJsonImportSurfaceForEntry(input: {
   cwd: string;
   entryPath: string;
+  healthCommonsPackageRoot: string;
   hookPath: string;
   label: string;
   logPath: string;
@@ -402,6 +438,7 @@ async function assertVaultCliJsonImportSurfaceForEntry(input: {
         ...process.env,
         HOME: path.join(input.cwd, ".parity-probe-home"),
         MURPH_IMPORT_SURFACE_LOG: input.logPath,
+        [MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]: input.healthCommonsPackageRoot,
         VAULT: "",
       },
       maxBuffer: 64 * 1024 * 1024,

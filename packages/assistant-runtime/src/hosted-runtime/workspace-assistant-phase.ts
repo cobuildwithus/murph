@@ -86,9 +86,6 @@ import {
   isHostedDeviceSyncMaintenanceModuleLoadError,
   loadHostedDeviceSyncMaintenanceModule,
 } from "./device-sync-maintenance-import.ts";
-import type {
-  HostedMailboxImportLoopResult,
-} from "./mailbox-import.ts";
 import {
   buildHostedDeviceSyncStatusPrompt,
   type HostedDeviceSyncStatusPromptReconnectTarget,
@@ -243,6 +240,7 @@ export function createHostedGroupToolWithLinqThreadContext(input: {
       }
       if (
         request.action !== "read_chat_participants"
+        && request.action !== "update_display_name"
         && request.action !== "post_join_offer"
         && request.action !== "preflight_set_chat_avatar"
         && request.action !== "set_chat_avatar"
@@ -466,9 +464,13 @@ function resolveHostedGroupToolLinqThreadContext(
   return [...eligible.values()][0] ?? null;
 }
 
-function resolveHostedInitialMailboxLinqDeliveryContexts(
-  importResult: HostedMailboxImportLoopResult,
+function resolveHostedInitialLinqDeliveryContexts(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): readonly HostedAssistantLinqDeliveryContext[] {
+  if (input.initialAssistantInputBatch) {
+    return input.initialAssistantInputBatch.linqDeliveryContexts;
+  }
+  const importResult = input.initialMailboxImport.importResult;
   if (importResult.linqDeliveryContexts && importResult.linqDeliveryContexts.length > 0) {
     return importResult.linqDeliveryContexts;
   }
@@ -477,17 +479,27 @@ function resolveHostedInitialMailboxLinqDeliveryContexts(
     : [];
 }
 
-function resolveHostedInitialMailboxEmailDeliveryContexts(
-  importResult: HostedMailboxImportLoopResult,
+function resolveHostedInitialEmailDeliveryContexts(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): readonly HostedAssistantEmailDeliveryContext[] {
-  return importResult.emailDeliveryContexts ?? [];
+  return input.initialAssistantInputBatch?.emailDeliveryContexts
+    ?? input.initialMailboxImport.importResult.emailDeliveryContexts
+    ?? [];
+}
+
+function readHostedInitialAssistantInputIds(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): readonly string[] {
+  return input.initialAssistantInputBatch?.assistantInputIds
+    ?? input.initialMailboxImport.importResult.assistantInputIds
+    ?? [];
 }
 
 function buildHostedAssistantLinqEgressLatencyTrace(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): HostedAssistantLinqEgressLatencyTrace | null {
   const latencyTracePort = input.runtime.platform.latencyTracePort ?? null;
-  const assistantInputIds = input.initialMailboxImport.importResult.assistantInputIds ?? [];
+  const assistantInputIds = readHostedInitialAssistantInputIds(input);
   if (!latencyTracePort || assistantInputIds.length === 0) {
     return null;
   }
@@ -519,12 +531,8 @@ export async function runHostedWorkspaceAssistantPhase(
     deviceConnectProviders,
     input,
   });
-  const initialLinqDeliveryContexts = resolveHostedInitialMailboxLinqDeliveryContexts(
-    input.initialMailboxImport.importResult,
-  );
-  const initialEmailDeliveryContexts = resolveHostedInitialMailboxEmailDeliveryContexts(
-    input.initialMailboxImport.importResult,
-  );
+  const initialLinqDeliveryContexts = resolveHostedInitialLinqDeliveryContexts(input);
+  const initialEmailDeliveryContexts = resolveHostedInitialEmailDeliveryContexts(input);
   const linqEgressLatencyTrace = buildHostedAssistantLinqEgressLatencyTrace(input);
   const recordDeferredUsage = (record: AssistantUsageRecord): Promise<void> => {
     input.recordDeferredUsage?.(record);
@@ -689,8 +697,7 @@ export async function runHostedWorkspaceAssistantPhase(
         deviceSyncMaintenanceRan,
       );
 
-    const freshAssistantInputIds =
-      input.initialMailboxImport.importResult.assistantInputIds ?? [];
+    const freshAssistantInputIds = readHostedInitialAssistantInputIds(input);
     const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
     const shouldReadDeviceSyncStatusPromptForBackgroundWork = async (options: {
       managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
@@ -1039,9 +1046,7 @@ export async function runHostedWorkspaceAssistantPhase(
     });
     const deliveryEffectsPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: deliveryEffects,
-      ...(input.initialMailboxImport.importResult.latestLinqDeliveryContext
-        ? { linqDeliveryContext: input.initialMailboxImport.importResult.latestLinqDeliveryContext }
-        : {}),
+      linqDeliveryContexts: initialLinqDeliveryContexts,
       vaultRoot: input.restored.vaultRoot,
     });
 
@@ -1278,7 +1283,7 @@ export async function runHostedWorkspaceAssistantPhase(
 function hasFreshHostedConversationInput(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): boolean {
-  return (input.initialMailboxImport.importResult.assistantInputIds?.length ?? 0) > 0
+  return readHostedInitialAssistantInputIds(input).length > 0
     || (input.initialMailboxImport.importResult.conversationImportedCount ?? 0) > 0;
 }
 
@@ -1456,8 +1461,7 @@ function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
 }): HostedWorkspaceRunnerAssistantPhaseResult {
-  const assistantInputIds =
-    input.input.initialMailboxImport.importResult.assistantInputIds ?? [];
+  const assistantInputIds = readHostedInitialAssistantInputIds(input.input);
   if (assistantInputIds.length === 0 || input.result.progressed !== true) {
     return input.result;
   }
@@ -1542,8 +1546,7 @@ async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
 async function resolveHostedManagedAutomationDefaultRouteBestEffort(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): Promise<AutomationRoute | null> {
-  const assistantInputIds =
-    input.input.initialMailboxImport.importResult.assistantInputIds ?? [];
+  const assistantInputIds = readHostedInitialAssistantInputIds(input.input);
   if (assistantInputIds.length === 0) {
     return null;
   }
@@ -1585,11 +1588,15 @@ async function resolveHostedManagedAutomationDefaultRouteBestEffort(input: {
 
   return {
     channel: route.channel,
+    currentRouteSnapshot: true,
     deliverySource: null,
     deliveryTarget: route.deliveryTarget,
     identityId: route.identityId ?? null,
     participantId: route.participantId ?? null,
     threadId: route.threadId ?? null,
+    ...(typeof route.threadIsDirect === "boolean"
+      ? { threadIsDirect: route.threadIsDirect }
+      : {}),
   };
 }
 
@@ -3470,9 +3477,7 @@ function resolveHostedSystemMailboxMetricsWakeAt(input: {
 
 async function collectForegroundDeliveryEffects(input: {
   actionApprovalPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"];
-  linqDeliveryContext?: Parameters<
-    typeof prepareHostedAssistantDeliveryEffectsForDispatch
-  >[0]["linqDeliveryContext"];
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   preferredIntentIds: readonly string[];
   vaultRoot: string;
 }): Promise<HostedPreparedAssistantDeliveryEffects> {
@@ -3484,9 +3489,7 @@ async function collectForegroundDeliveryEffects(input: {
   });
   const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
     assistantDeliveryEffects: deliveryEffects,
-    ...(input.linqDeliveryContext
-      ? { linqDeliveryContext: input.linqDeliveryContext }
-      : {}),
+    linqDeliveryContexts: input.linqDeliveryContexts ?? null,
     vaultRoot: input.vaultRoot,
   });
   return {
@@ -3510,8 +3513,7 @@ async function runForegroundAssistantReplyPhase(input: {
   const foregroundReplyFailed = input.assistantMetrics.assistantAutomationReplyFailed ?? 0;
   const preparedDeliveryEffects = await collectForegroundDeliveryEffects({
     actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
-    linqDeliveryContext:
-      input.input.initialMailboxImport.importResult.latestLinqDeliveryContext ?? null,
+    linqDeliveryContexts: input.linqDeliveryContexts,
     preferredIntentIds: input.currentTurnDeliveryIntentIds,
     vaultRoot: input.input.restored.vaultRoot,
   });

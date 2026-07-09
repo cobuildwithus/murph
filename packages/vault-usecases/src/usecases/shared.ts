@@ -48,6 +48,11 @@ const DEFAULT_GENERIC_LIST_EXCLUDED_FAMILIES = new Set([
 ])
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES)
 const LEGACY_RAW_MANIFEST_BASENAME = "manifest.json"
+const LIST_DATA_MAX_STRING_LENGTH = 180
+const LIST_DATA_MAX_ARRAY_ITEMS = 6
+const LIST_DATA_MAX_ARRAY_JSON_LENGTH = 600
+const LIST_DATA_MAX_OBJECT_JSON_LENGTH = 600
+const LIST_LINK_MAX_ITEMS = 8
 
 interface SharedCoreRuntime {
   parseRawImportManifest(value: unknown): RawImportManifest
@@ -624,7 +629,7 @@ export function summarizeListMarkdown(
     return normalized
   }
 
-  return `${normalized.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`
+  return `${normalized.slice(0, Math.max(1, maxLength - 3)).trimEnd()}...`
 }
 
 export function toListEntity(input: {
@@ -638,14 +643,19 @@ export function toListEntity(input: {
   links: ListEntity["links"]
   excerpt?: string | null
 }): ListEntity {
+  const data = compactListEntityData(input.data)
+  if (input.links.length > LIST_LINK_MAX_ITEMS && data.linksCount === undefined) {
+    data.linksCount = input.links.length
+  }
+
   const entity: ListEntity = {
     id: input.id,
     kind: input.kind,
     title: input.title,
     occurredAt: input.occurredAt,
     path: input.path,
-    data: input.data,
-    links: input.links,
+    data,
+    links: input.links.slice(0, LIST_LINK_MAX_ITEMS),
   }
 
   const normalizedExplicitExcerpt =
@@ -664,6 +674,120 @@ export function toListEntity(input: {
   }
 
   return entity
+}
+
+export function compactListEntityData(data: Record<string, unknown>): Record<string, unknown> {
+  const compact: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(data)) {
+    const compactValue = compactListEntityValue(value)
+    if (compactValue !== undefined) {
+      compact[key] = compactValue
+    } else {
+      addListEntityCollectionSummary(compact, key, value)
+    }
+  }
+
+  return compact
+}
+
+function compactListEntityValue(value: unknown, depth = 0): unknown {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+
+  if (
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return value
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim()
+    if (normalized.length === 0) {
+      return undefined
+    }
+
+    return normalized.length <= LIST_DATA_MAX_STRING_LENGTH
+      ? normalized
+      : `${normalized.slice(0, LIST_DATA_MAX_STRING_LENGTH - 3).trimEnd()}...`
+  }
+
+  if (Array.isArray(value)) {
+    const compactItems = value
+      .slice(0, LIST_DATA_MAX_ARRAY_ITEMS)
+      .map((entry) => compactListEntityScalarValue(entry, 120))
+      .filter((entry): entry is string | number | boolean | null => entry !== undefined)
+
+    return compactItems.length > 0 && JSON.stringify(compactItems).length <= LIST_DATA_MAX_ARRAY_JSON_LENGTH
+      ? compactItems
+      : undefined
+  }
+
+  if (isPlainObject(value) && depth < 2) {
+    const compactObject: Record<string, unknown> = {}
+
+    for (const [key, child] of Object.entries(value)) {
+      const compactChild = compactListEntityValue(child, depth + 1)
+      if (compactChild !== undefined) {
+        compactObject[key] = compactChild
+      } else {
+        addListEntityCollectionSummary(compactObject, key, child)
+      }
+    }
+
+    if (Object.keys(compactObject).length === 0) {
+      return undefined
+    }
+
+    return JSON.stringify(compactObject).length <= LIST_DATA_MAX_OBJECT_JSON_LENGTH
+      ? compactObject
+      : undefined
+  }
+
+  return undefined
+}
+
+function compactListEntityScalarValue(
+  value: unknown,
+  maxStringLength: number,
+): string | number | boolean | null | undefined {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return value
+  }
+
+  if (typeof value !== "string") {
+    return undefined
+  }
+
+  const normalized = value.trim()
+  if (normalized.length === 0) {
+    return undefined
+  }
+
+  return normalized.length <= maxStringLength
+    ? normalized
+    : `${normalized.slice(0, maxStringLength - 3).trimEnd()}...`
+}
+
+function addListEntityCollectionSummary(
+  compact: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  if (Array.isArray(value)) {
+    compact[`${key}Count`] = value.length
+    return
+  }
+
+  if (isPlainObject(value)) {
+    compact[`${key}KeyCount`] = Object.keys(value).length
+  }
 }
 
 export function toGenericShowEntity(entity: QueryEntity) {

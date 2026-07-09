@@ -103,11 +103,12 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   assert.notEqual(normalized.userEnv, userEnv);
 });
 
-test("hosted runtime config rejects platform-owned assistant asset-root env overrides from every producer", () => {
+test("hosted runtime config rejects platform-owned asset-root env overrides from every producer", () => {
   const platform = createHostedRuntimePlatformStub();
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       forwardedEnv: {
+        MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/attacker-health-commons",
         MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
         MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
         OPENAI_API_KEY: "secret",
@@ -115,6 +116,7 @@ test("hosted runtime config rejects platform-owned assistant asset-root env over
       resolvedConfig: createHostedRuntimeResolvedConfig(),
       userEnv: {
         ANTHROPIC_API_KEY: "anthropic-secret",
+        MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/attacker-health-commons",
         MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
         MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
       },
@@ -122,7 +124,7 @@ test("hosted runtime config rejects platform-owned assistant asset-root env over
     platform,
   );
 
-  // The runtime boundary guards code-location-sensitive asset roots for all
+  // The runtime boundary guards code-location-sensitive package roots for all
   // job producers, not only the Cloudflare runner-secret policy.
   assert.deepEqual(normalized.forwardedEnv, { OPENAI_API_KEY: "secret" });
   assert.deepEqual(normalized.userEnv, { ANTHROPIC_API_KEY: "anthropic-secret" });
@@ -514,6 +516,24 @@ test("hosted runtime process env projects image-owned Codex model catalog path f
   assert.deepEqual(childEnv, {
     [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
       "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
+    NODE_ENV: "production",
+    PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
+  });
+});
+
+test("hosted runtime process env projects image-owned Health Commons package root from ambient env", () => {
+  const childEnv = projectHostedRuntimeProcessEnv({
+    ambientEnv: {
+      MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/app/node_modules/@murphai/health-commons",
+    },
+    forwardedEnv: {
+      MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/spoofed-health-commons",
+      NODE_ENV: "production",
+    },
+  });
+
+  assert.deepEqual(childEnv, {
+    MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/app/node_modules/@murphai/health-commons",
     NODE_ENV: "production",
     PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
   });

@@ -406,10 +406,17 @@ export interface WearableActivitySessionAggregate {
 
 export interface WearableDataset {
   activitySessionAggregates: readonly WearableActivitySessionAggregate[];
+  metricSuppressionEvidence: readonly WearableMetricSuppressionEvidence[];
   metricCandidates: readonly WearableMetricCandidate[];
   provenanceDiagnostics: readonly WearableProvenanceDiagnostic[];
   rawMetricCandidates: readonly WearableMetricCandidate[];
   sleepWindows: readonly WearableSleepWindowCandidate[];
+}
+
+export interface WearableMetricSuppressionEvidence {
+  date: string;
+  metricKey: string;
+  recordIds: readonly string[];
 }
 
 export interface WearableProvenanceDiagnostic {

@@ -20,6 +20,7 @@ import {
 import type {
   AssistantProviderServiceTier,
   AssistantProviderAttemptMetadata,
+  AssistantProviderRequestStartTiming,
   AssistantProviderRequestOutcome,
   AssistantProviderUsage,
   AssistantProviderUsageDraft,
@@ -171,7 +172,7 @@ export async function executeCodexTurnWithRecovery(input: {
   onProviderRequestStarted?: (event: {
     providerRequestOrdinal: number | null
     startedAt: string
-  }) => Promise<void> | void
+  } & AssistantProviderRequestStartTiming) => Promise<void> | void
   plan: AssistantTurnSharedPlan
   profile?: AssistantCodexTurnThreadScopeProfile | null
   providerRequestOrdinal?: number | null
@@ -345,7 +346,7 @@ async function executeAssistantCodexAttempt(input: {
   onProviderRequestStarted?: ((event: {
     providerRequestOrdinal: number | null
     startedAt: string
-  }) => Promise<void> | void) | null
+  } & AssistantProviderRequestStartTiming) => Promise<void> | void) | null
   providerRequestOrdinal: number | null
 }): Promise<AssistantCodexAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
@@ -471,8 +472,8 @@ async function executeAssistantCodexAttempt(input: {
         onProviderRequestStarted: (event) => {
           notifyProviderRequestStartedBestEffort({
             event: {
+              ...event,
               providerRequestOrdinal: input.providerRequestOrdinal,
-              startedAt: event.startedAt,
             },
             hook: input.onProviderRequestStarted ?? null,
           })
@@ -664,11 +665,11 @@ function notifyProviderRequestStartedBestEffort(input: {
   event: {
     providerRequestOrdinal: number | null
     startedAt: string
-  }
+  } & AssistantProviderRequestStartTiming
   hook?: ((event: {
     providerRequestOrdinal: number | null
     startedAt: string
-  }) => Promise<void> | void) | null
+  } & AssistantProviderRequestStartTiming) => Promise<void> | void) | null
 }): void {
   if (!input.hook) {
     return

@@ -21,7 +21,7 @@ type HostedIngressLatencyPrismaReadClient = {
 
 type HostedIngressLatencyPrismaClient = Pick<
   PrismaClient,
-  "$queryRaw" | "$transaction" | "hostedIngressLatencyTrace"
+  "$executeRaw" | "$queryRaw" | "$transaction" | "hostedIngressLatencyTrace"
 >;
 
 type HostedIngressLatencyPrismaTransactionClient = Pick<
@@ -30,7 +30,7 @@ type HostedIngressLatencyPrismaTransactionClient = Pick<
 >;
 
 type HostedIngressLatencyTraceRow = Awaited<
-  ReturnType<PrismaClient["hostedIngressLatencyTrace"]["findFirst"]>
+  ReturnType<PrismaClient["hostedIngressLatencyTrace"]["findUnique"]>
 >;
 
 type HostedIngressLatencyRuntimeMilestoneField =
@@ -651,21 +651,39 @@ async function upsertHostedIngressLatencyTraceFromMailboxItem(
     source: HostedIngressLatencySource;
   },
 ) {
-  return await prisma.hostedIngressLatencyTrace.upsert({
-    create: {
-      acceptedAt: input.mailboxItem.acceptedAt,
-      id: randomUUID(),
-      mailboxItemId: input.mailboxItem.id,
-      mailboxLane: input.mailboxItem.lane,
-      mailboxLaneSeq: input.mailboxItem.laneSeq,
-      source: input.source,
-      userId: input.mailboxItem.userId,
-    },
-    update: {},
-    where: {
-      mailboxItemId: input.mailboxItem.id,
-    },
+  await prisma.$executeRaw`
+    INSERT INTO hosted_ingress_latency_trace (
+      id,
+      user_id,
+      source,
+      mailbox_item_id,
+      mailbox_lane,
+      mailbox_lane_seq,
+      accepted_at,
+      created_at,
+      updated_at
+    )
+    VALUES (
+      ${randomUUID()},
+      ${input.mailboxItem.userId},
+      ${input.source},
+      ${input.mailboxItem.id},
+      ${input.mailboxItem.lane},
+      ${input.mailboxItem.laneSeq},
+      ${input.mailboxItem.acceptedAt},
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    )
+    ON CONFLICT (mailbox_item_id) DO NOTHING
+  `;
+
+  const trace = await prisma.hostedIngressLatencyTrace.findUnique({
+    where: { mailboxItemId: input.mailboxItem.id },
   });
+  if (!trace) {
+    throw new Error("Hosted ingress latency trace insert did not produce a readable row.");
+  }
+  return trace;
 }
 
 async function updateHostedIngressLatencyRuntimeMilestone(

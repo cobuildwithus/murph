@@ -5,6 +5,9 @@ import {
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
+import {
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
+} from "@/src/lib/hosted-groups/group-newsletter";
 import { acceptHostedGroupJoinCodeTx } from "@/src/lib/hosted-groups/group-store";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -23,7 +26,7 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
-const BODY_LIMIT_BYTES = 4_096;
+const BODY_LIMIT_BYTES = 16_384;
 
 const SELECTABLE_SCOPE_KEYS = new Set(
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((scope) =>
@@ -65,6 +68,14 @@ export const POST = withJsonError(async (
     } catch {
       // Durable join/grants already committed; the runtime will offer projections later.
     }
+  }
+
+  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
+    await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+      groupId: result.groupId,
+      memberId: auth.member.id,
+      prisma,
+    });
   }
 
   await signalVaultShareCleanupRuntimesBestEffort(vaultShareCleanupSignals);

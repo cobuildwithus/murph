@@ -55,12 +55,8 @@ import {
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
 import {
-  checkHostedAiUsageGate,
-} from "../hosted-execution/usage-allowance";
-import {
   bindHostedMemberHomeLinqChatAndTrackInbound,
   bindHostedMemberPendingLinqChatAndTrackInbound,
-  buildAiUsageQuotaReplyResponse,
   buildActiveMemberDirectPlan,
   buildConversationHomeRedirectResponse,
   buildFallbackSignupLinkResponse,
@@ -125,7 +121,6 @@ type HostedLinqExistingMemberMatch =
   | "phone-identity"
   | "verified-email";
 type HostedLinqDailyState = Awaited<ReturnType<typeof incrementHostedLinqInboundDailyState>>;
-type HostedLinqUsageGate = Awaited<ReturnType<typeof checkHostedAiUsageGate>>;
 
 export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
@@ -565,36 +560,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
       return buildUnassignableHomeLinePlan("active-member-ignored-unassignable-home-line");
     }
 
-    // Read-first: the webhook only needs the gate decision for quota notices;
-    // authoritative period bookkeeping happens at turn admission.
-    const usageGate = await checkHostedAiUsageGate({
-      memberId: existingMember.id,
-      prisma: input.prisma,
-    });
-
-    const aiUsageAdmissionPlan = await planHostedLinqInboundAdmissionDenied({
-      context,
-      dailyState: null,
-      event: input.event,
-      logDetails: {
-        existingMemberActive: true,
-        existingMemberMatch,
-        routeDecision: bindingResult.kind,
-      },
-      memberId: existingMember.id,
-      prisma: input.prisma,
-      routeStages: {
-        aiUsageDenied: "active-member-ai-usage-denied",
-        aiUsageReply: "active-member-ai-usage-reply",
-        dailyQuotaReached: "active-member-daily-quota-reached",
-        dailyQuotaReply: "active-member-daily-quota-reply",
-      },
-      usageGate,
-    });
-    if (aiUsageAdmissionPlan) {
-      return aiUsageAdmissionPlan;
-    }
-
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
       chatId: summary.chatId,
       homeLineAssignedAt: bindingResult.homeLineAssignedAt,
@@ -604,7 +569,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
       recipientPhone: bindingResult.recipientPhone,
     });
 
-    const admissionPlan = await planHostedLinqInboundAdmissionDenied({
+    // Subscription/AI usage and its limit notice are gated after mailbox append,
+    // so pending user input survives upgrades and allowance resets.
+    const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
       context,
       dailyState,
       event: input.event,
@@ -614,14 +581,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
         routeDecision: bindingResult.kind,
       },
       memberId: existingMember.id,
-      prisma: input.prisma,
       routeStages: {
-        aiUsageDenied: "active-member-ai-usage-denied",
-        aiUsageReply: "active-member-ai-usage-reply",
         dailyQuotaReached: "active-member-daily-quota-reached",
         dailyQuotaReply: "active-member-daily-quota-reply",
       },
-      usageGate,
     });
     if (admissionPlan) {
       return admissionPlan;
@@ -1135,41 +1098,15 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
     );
   }
 
-  const usageGate = await checkHostedAiUsageGate({
-    memberId: input.route.containerMemberId,
-    prisma: input.prisma,
-  });
-
-  const aiUsageAdmissionPlan = await planHostedLinqInboundAdmissionDenied({
-    context: input.context,
-    dailyState: null,
-    event: input.event,
-    logDetails: {
-      existingMemberActive: true,
-      existingMemberMatch: "none",
-    },
-    memberId: input.route.containerMemberId,
-    prisma: input.prisma,
-    routeStages: {
-      aiUsageDenied: "thread-route-ai-usage-denied",
-      aiUsageReply: "thread-route-ai-usage-reply",
-      dailyQuotaReached: "thread-route-daily-quota-reached",
-      dailyQuotaReply: "thread-route-daily-quota-reply",
-    },
-    routeAuthority,
-    usageGate,
-  });
-  if (aiUsageAdmissionPlan) {
-    return aiUsageAdmissionPlan;
-  }
-
   const dailyState = await incrementHostedLinqInboundDailyState({
     memberId: input.route.containerMemberId,
     occurredAt,
     prisma: input.prisma,
   });
 
-  const admissionPlan = await planHostedLinqInboundAdmissionDenied({
+  // Subscription/AI usage and its limit notice are gated after mailbox append,
+  // so pending user input survives upgrades and allowance resets.
+  const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
     context: input.context,
     dailyState,
     event: input.event,
@@ -1178,15 +1115,11 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       existingMemberMatch: "none",
     },
     memberId: input.route.containerMemberId,
-    prisma: input.prisma,
     routeStages: {
-      aiUsageDenied: "thread-route-ai-usage-denied",
-      aiUsageReply: "thread-route-ai-usage-reply",
       dailyQuotaReached: "thread-route-daily-quota-reached",
       dailyQuotaReply: "thread-route-daily-quota-reply",
     },
     routeAuthority,
-    usageGate,
   });
   if (admissionPlan) {
     return admissionPlan;
@@ -1409,83 +1342,18 @@ async function planHostedLinqGroupChatWebhook(input: {
   return plan;
 }
 
-async function planHostedLinqInboundAdmissionDenied(input: {
+async function planHostedLinqDailyQuotaAdmissionDenied(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   dailyState: HostedLinqDailyState | null;
   event: HostedLinqWebhookEvent;
   logDetails: HostedOnboardingStructuredLogDetails;
   memberId: string;
-  prisma: Prisma.TransactionClient;
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   routeStages: {
-    aiUsageDenied: string;
-    aiUsageReply: string;
     dailyQuotaReached: string;
     dailyQuotaReply: string;
   };
-  usageGate: HostedLinqUsageGate;
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
-  const buildUsageGateDeniedPlan = async (
-    deniedUsageGate: Extract<HostedLinqUsageGate, { allowed: false }>,
-  ) => {
-    if (!deniedUsageGate.userNotice) {
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildIgnoredLinqWebhookPlan("ai-usage-gate-denied"),
-        buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-          ...input.logDetails,
-          reason: "ai-usage-gate-denied",
-          routeStage: input.routeStages.aiUsageDenied,
-        }),
-      );
-    }
-
-    let usageLimitNoticeClaim: {
-      periodStart: Date;
-      sentAt: Date;
-    } | null = null;
-    if (deniedUsageGate.reason === "ai_usage_limit_exceeded") {
-      usageLimitNoticeClaim = {
-        periodStart: deniedUsageGate.periodStart,
-        sentAt: new Date(),
-      };
-    }
-
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildAiUsageQuotaReplyResponse({
-        chatId: input.context.summary.chatId,
-        claimToken: usageLimitNoticeClaim
-          ? {
-              periodStart: usageLimitNoticeClaim.periodStart.toISOString(),
-              sentAt: usageLimitNoticeClaim.sentAt.toISOString(),
-            }
-          : null,
-        memberId: input.memberId,
-        message: deniedUsageGate.userNotice.message,
-        messageId: input.context.summary.messageId,
-        noticeCode: deniedUsageGate.userNotice.code,
-        occurredAt: input.context.occurredAt,
-        routeAuthority: input.routeAuthority ?? null,
-        sourceEventId: input.event.event_id,
-      }),
-      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-        ...input.logDetails,
-        reason: "sent-ai-usage-quota-reply",
-        routeStage: input.routeStages.aiUsageReply,
-      }),
-    );
-  };
-
-  if (
-    !input.usageGate.allowed
-    && input.usageGate.reason === "ai_usage_limit_exceeded"
-  ) {
-    return buildUsageGateDeniedPlan(input.usageGate);
-  }
-
-  if (!input.dailyState) {
-    return null;
-  }
-
   if (input.dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
     if (input.dailyState.quotaReplySentAt) {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
@@ -1515,10 +1383,6 @@ async function planHostedLinqInboundAdmissionDenied(input: {
         routeStage: input.routeStages.dailyQuotaReply,
       }),
     );
-  }
-
-  if (!input.usageGate.allowed) {
-    return buildUsageGateDeniedPlan(input.usageGate);
   }
 
   return null;

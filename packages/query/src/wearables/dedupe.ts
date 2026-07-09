@@ -2,7 +2,7 @@ import type {
   WearableMetricCandidate,
   WearableSleepWindowCandidate,
 } from "./types.ts";
-import { latestIsoTimestamp, uniqueStrings } from "./shared.ts";
+import { latestIsoTimestamp, normalizeLowercaseString, uniqueStrings } from "./shared.ts";
 import { wearableDataOriginKey } from "./origin.ts";
 
 export function dedupeExactMetricCandidates(
@@ -72,10 +72,12 @@ export function dedupeSleepWindowCandidates(
 
 export function buildCandidateExactKey(candidate: WearableMetricCandidate): string {
   const originKey = wearableDataOriginKey(candidate.dataOrigin);
+  const normalizerVersion = normalizeLowercaseString(candidate.dataOrigin?.normalizerVersion) ?? "";
 
   return [
     candidate.provider,
     ...(originKey ? [originKey] : []),
+    ...(normalizerVersion ? [`normalizer:${normalizerVersion}`] : []),
     candidate.date,
     candidate.metric,
     candidate.unit ?? "",

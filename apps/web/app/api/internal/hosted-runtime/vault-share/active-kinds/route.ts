@@ -14,6 +14,10 @@ import {
   readDeliverableHostedVaultShareProjectionScopes,
 } from "@/src/lib/hosted-mailbox/vault-share-store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import {
+  filterHostedVaultShareProjectionScopesBySupportedKeys,
+  readHostedVaultShareSupportedProjectionScopeKeysFromRequest,
+} from "@/src/lib/hosted-vault-share/supported-projection-scopes";
 import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_VAULT_SHARE_ACTIVE_KINDS_BODY_LIMIT_BYTES = 0;
@@ -36,10 +40,15 @@ export const GET = withJsonError(async (request: Request) => {
     throw error;
   }
 
-  const projectionScopes = await readDeliverableHostedVaultShareProjectionScopes({
-    grantorMemberId,
-    prisma,
-  });
+  const supportedProjectionScopeKeys =
+    readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
+  const projectionScopes = filterHostedVaultShareProjectionScopesBySupportedKeys(
+    await readDeliverableHostedVaultShareProjectionScopes({
+      grantorMemberId,
+      prisma,
+    }),
+    supportedProjectionScopeKeys,
+  );
 
   return jsonOk({
     projectionKinds: [...new Set(projectionScopes.map((scope) => scope.projectionKind))],

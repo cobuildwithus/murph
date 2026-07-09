@@ -47,14 +47,13 @@ vault-cli assistant stop --vault <path> [--request-id <id>]
 vault-cli status --vault <path> [--session <id>] [--limit <n>] [--request-id <id>]
 vault-cli doctor --vault <path> [--repair] [--request-id <id>]
 vault-cli stop --vault <path> [--request-id <id>]
-vault-cli assistant session list --vault <path> [--request-id <id>]
+vault-cli assistant session list --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
 vault-cli memory show [memoryId] --vault <path>
+vault-cli memory set-name <displayName> --vault <path>
 vault-cli memory upsert <text> --vault <path> --section <section>
 vault-cli memory update <memoryId> <text> --vault <path> [--section <section>]
 vault-cli memory forget <memoryId> --vault <path>
-vault-cli profile show --vault <path>
-vault-cli profile set-name <displayName> --vault <path>
 vault-cli automation scaffold --vault <path>
 vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> [--channel <channel>] [...]
 vault-cli automation show <lookup> --vault <path>
@@ -109,7 +108,7 @@ vault-cli event list --vault <path> [--kind <kind>] [--from <date>] [--to <date>
 vault-cli document import <file> --vault <path> [--title <title>] [--occurred-at <ts>] [--note "..."] [--source <source>] [--request-id <id>]
 vault-cli document edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli document show <id> --vault <path> [--request-id <id>]
-vault-cli document list --vault <path> [--from <date>] [--to <date>] [--request-id <id>]
+vault-cli document list --vault <path> [--from <date>] [--to <date>] [--limit <n>] [--request-id <id>]
 vault-cli document manifest <id> --vault <path> [--request-id <id>]
 vault-cli capture add --vault <path> [--media <path> ...] [--label <text>] [--body-site <text>] [--collection <text>] [--related-id <id> ...] [--note <text>] [--title <title>] [--occurred-at <ts>] [--source <source>] [--tag <tag> ...] [--request-id <id>]
 vault-cli capture import-json --vault <path> --input @file.json|- [--request-id <id>]
@@ -312,8 +311,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `export` exposes `create | show | list | materialize | prune`.
 - `audit` exposes `show | list | tail`.
 - `assistant` is a Codex App Server-backed orchestration noun for local chat turns, outbound delivery, session inspection, runtime diagnostics, and always-on inbox triage; it stores only runtime metadata under `vault/.runtime/operations/assistant/**`, uses explicit conversation bindings for session reuse, coalesces adjacent pending inbound messages from the same conversation lane into one auto-reply turn before advancing the reply cursor, can opt into self-authored auto-reply plus age-based session rollover for dedicated self-chat threads, treats `--deliveryTarget` as a one-send override, only fires due canonical automations while `assistant run` is active for the vault, and delegates canonical promotions back through inbox/core boundaries.
-- `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show` and mutate individual records with `upsert`, `update`, or `forget`. `memoryId` arguments use `mem_<ULID>` ids.
-- `profile` is a canonical product noun backed by the single typed `bank/profile.md` document. It holds structured profile facts with a deterministic read shape; today that is the user's preferred display name (`set-name`), which group runtimes receive through the consented vault-share projection instead of parsing freeform memory.
+- `memory` is a canonical product noun backed by the single curated `bank/memory.md` document; operators inspect the whole document with `show`, save the user's preferred display name with the typed `set-name` command, and mutate individual records with `upsert`, `update`, or `forget`. `memoryId` arguments use `mem_<ULID>` ids. Group runtimes receive the preferred display name through the consented `profile-name.v0` vault-share projection from memory.
 - `automation` is a canonical product noun backed by `bank/automations/*.md` and exposes typed `save`, explicit `import-json`, readable/list, and scaffold surfaces.
 - Top-level `chat` is a shorthand alias for `assistant chat`; it shares the same prompt/options/output contract so installed `murph chat` discovery stays truthful.
 - Top-level `status` is a shorthand alias for `assistant status`; it shares the same option/output contract so installed `murph status` discovery stays truthful.
@@ -342,6 +340,8 @@ Read surfaces intentionally separate summary from detail:
 - `show` returns the full canonical read entity, including `markdown` when that noun owns body text.
 - `list` returns summary rows, not many embedded `show` payloads.
 - List rows never include full `markdown`; when a family owns first-class body text, list rows may carry a compact `excerpt` instead.
+- Default read/status/list/tail pages are model-facing summaries and should fit under roughly 15k characters with `--full-output --format json` on representative oversized fixtures.
+- Assistant timelines, raw provenance, import manifests, full nested telemetry arrays, and long instruction/body text require an explicit detail/export/schema path or an explicitly raised `--limit`; `--full-output` is an envelope selector, not an uncompression switch.
 - Callers that need the full body must follow a list result with `show`.
 
 ## Shared Option Rules

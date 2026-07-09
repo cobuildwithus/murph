@@ -399,7 +399,6 @@ export async function createHostedGroupJoinLinkForOwnedThreadContainerTx(input: 
     now: input.now,
     tx: input.tx,
   });
-
   return {
     group,
     joinCode: link.joinCode,
@@ -769,7 +768,7 @@ async function acceptHostedGroupJoinTx(input: {
     });
   }
   await assertHostedGroupRuntimeDestinationTx(input.tx, group.runtimeMemberId);
-  // Joining always shares the typed profile display name, so the launch consent
+  // Joining always shares the memory-backed preferred display name, so the launch consent
   // gate applies to every join, not only joins that select health projections.
   await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: input.tx });
 
@@ -1004,8 +1003,8 @@ function parseHostedGroupVaultShareRowProjectionScope(row: {
 }
 
 /**
- * Group membership implies exactly one automatic share: the member's typed profile
- * display name, so the group runtime can introduce members without re-asking anyone.
+ * Group membership implies exactly one automatic share: the member's memory-backed
+ * preferred display name, so the group runtime can introduce members without re-asking anyone.
  * Health projections stay individually selected on the join page.
  */
 async function grantHostedGroupMembershipProfileNameTx(

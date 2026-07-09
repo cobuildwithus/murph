@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   signalHostedMailboxAppendRuntime: vi.fn(),
   updateHostedGroupDisplayNameByRuntimeMemberIdTx: vi.fn(),
   updateHostedLinqChatAvatar: vi.fn(),
+  updateHostedLinqChatDisplayName: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
@@ -65,6 +67,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   sendHostedLinqAttachmentMessage: mocks.sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
   updateHostedLinqChatAvatar: mocks.updateHostedLinqChatAvatar,
+  updateHostedLinqChatDisplayName: mocks.updateHostedLinqChatDisplayName,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", () => ({
@@ -93,6 +96,11 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   revokeHostedGroupMemberEmailShareTx: mocks.revokeHostedGroupMemberEmailShareTx,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx:
     mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort:
+    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -130,8 +138,13 @@ import {
   reconcileHostedThreadContainerParticipants,
 } from "@/src/lib/hosted-groups/group-tool";
 import {
+  filterHostedRuntimeGroupToolResponseProjectionScopes,
+} from "@/src/lib/hosted-groups/group-tool-scope-filter";
+import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  buildHostedVaultShareActivityDistanceProjectionScope,
   buildHostedVaultShareActivityMinutesProjectionScope,
+  buildHostedVaultShareActivitySessionCountProjectionScope,
   buildHostedVaultShareProjectionScopeKey,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -157,6 +170,21 @@ const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
 });
+const RUNNING_DISTANCE_SCOPE = buildHostedVaultShareActivityDistanceProjectionScope({
+  activityKind: "running",
+});
+const RUNNING_SESSION_COUNT_SCOPE = buildHostedVaultShareActivitySessionCountProjectionScope({
+  activityKind: "running",
+});
+const GROUP_RUNTIME_LINQ_THREAD = {
+  authority: {
+    accountLookupKey: "hplk_group_runtime",
+    channel: "linq" as const,
+    containerMemberId: "member_group_runtime",
+    threadId: "chat_group_runtime",
+  },
+  chatId: "chat_group_runtime",
+};
 const NEWSLETTER_DEFAULT_SCOPES = [
   { projectionKind: "group-email.v0" },
   { projectionKind: "sleep-times.v0" },
@@ -165,6 +193,18 @@ const NEWSLETTER_DEFAULT_SCOPES = [
   { projectionKind: "resting-heart-rate-days.v0" },
   { projectionKind: "hrv-days.v0" },
 ] as const;
+
+function groupSummaryWithOwnerEmailGrant() {
+  return {
+    ...GROUP_SUMMARY,
+    members: [{
+      grantedVaultShareProjectionKinds: ["profile-name.v0" as const, "group-email.v0" as const],
+      handle: "+15551110000",
+      memberId: "member_owner",
+      role: "owner",
+    }],
+  };
+}
 
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
@@ -180,6 +220,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
     mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx
       .mockResolvedValue(RENAMED_GROUP_SUMMARY);
+    mocks.updateHostedLinqChatDisplayName.mockResolvedValue(undefined);
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
     mocks.hostedThreadContainerFindUnique.mockResolvedValue({
       member: { suspendedAt: null },
@@ -192,6 +233,9 @@ describe("handleHostedRuntimeGroupTool", () => {
       group: GROUP_SUMMARY,
       joinCode: "abc123",
     });
+    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
+      undefined,
+    );
     mocks.recordHostedGroupJoinOfferTx.mockResolvedValue({
       groupId: GROUP_SUMMARY.id,
       messageIdSuffix: "offer_msg",
@@ -210,7 +254,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
       share_contact_card: "owner_active",
-      update_display_name: "participant_aware",
+      update_display_name: "owner_active",
     });
   });
 
@@ -269,8 +313,9 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
         updateDisplayName: {
-          displayName: "Weekly Health Crew",
+          displayName: "  Weekly   Health Crew  ",
         },
       },
     })).resolves.toEqual({
@@ -281,24 +326,40 @@ describe("handleHostedRuntimeGroupTool", () => {
       },
     });
 
-    expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledWith(
-      "member_group_runtime",
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
+      expect.objectContaining({ authority: GROUP_RUNTIME_LINQ_THREAD.authority }),
     );
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: "member_owner",
+    }));
+    expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
+      chatId: "chat_group_runtime",
+      displayName: "Weekly Health Crew",
+    });
     expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx)
       .toHaveBeenCalledWith(expect.objectContaining({
         displayName: "Weekly Health Crew",
         runtimeMemberId: "member_group_runtime",
         tx: fakeTx,
       }));
+    expect(
+      mocks.updateHostedLinqChatDisplayName.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mock.invocationCallOrder[0],
+    );
   });
 
   it("does not update the group display name when runtime access is inactive", async () => {
-    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue({
+      member: { suspendedAt: new Date("2026-07-06T12:00:00Z") },
+      ownerMemberId: "member_owner",
+    });
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: {
         action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
         updateDisplayName: { displayName: "Blocked name" },
       },
     })).resolves.toEqual({
@@ -310,16 +371,18 @@ describe("handleHostedRuntimeGroupTool", () => {
       },
     });
 
+    expect(mocks.updateHostedLinqChatDisplayName).not.toHaveBeenCalled();
     expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
   });
 
   it("reports group_not_found when the active runtime has no hosted group to rename", async () => {
-    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValue(null);
+    mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(null);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: {
         action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
         updateDisplayName: { displayName: "Unattached group" },
       },
     })).resolves.toEqual({
@@ -330,9 +393,39 @@ describe("handleHostedRuntimeGroupTool", () => {
         unavailableReason: "group_not_found",
       },
     });
+
+    expect(mocks.updateHostedLinqChatDisplayName).not.toHaveBeenCalled();
+    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
+  });
+
+  it("does not update the hosted group display name when the provider rejects the chat rename", async () => {
+    mocks.updateHostedLinqChatDisplayName.mockRejectedValue(new Error("linq down"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
+        updateDisplayName: { displayName: "Provider blocked name" },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+
+    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
   });
 
   it("creates a join link bound to the runtime member's thread container owner", async () => {
+    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
+      group: groupSummaryWithOwnerEmailGrant(),
+      joinCode: "abc123",
+    });
+
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: {
@@ -346,7 +439,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     })).resolves.toEqual({
       action: "create_join_link",
       result: {
-        group: GROUP_SUMMARY,
+        group: groupSummaryWithOwnerEmailGrant(),
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
         status: "ok",
       },
@@ -374,6 +467,12 @@ describe("handleHostedRuntimeGroupTool", () => {
         requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
       }),
     );
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .toHaveBeenCalledWith({
+        groupId: GROUP_SUMMARY.id,
+        memberId: "member_owner",
+        prisma: expect.any(Object),
+      });
   });
 
   it("does not mint a join link when the owner lacks active access even if participant-aware access is active", async () => {
@@ -610,6 +709,77 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 });
 
+describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
+  const groupWithSelectorScopes = {
+    ...GROUP_SUMMARY,
+    members: [{
+      grantedVaultShareProjectionKinds: [
+        "sleep-times.v0" as const,
+        RUNNING_DISTANCE_SCOPE.projectionKind,
+      ],
+      grantedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
+      handle: "+15551234567",
+      memberId: "member_runner",
+      role: "member",
+    }],
+    requestedVaultShareProjectionKinds: [
+      "sleep-times.v0" as const,
+      RUNNING_DISTANCE_SCOPE.projectionKind,
+    ],
+    requestedVaultShareProjectionScopes: [SLEEP_SCOPE, RUNNING_DISTANCE_SCOPE],
+  };
+
+  it("hides unsupported selector scopes from legacy group-tool callers", () => {
+    const filtered = filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "read_current",
+      result: {
+        group: groupWithSelectorScopes,
+        status: "ok",
+      },
+    }, new Set([buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE)]));
+
+    expect(filtered).toEqual({
+      action: "read_current",
+      result: {
+        group: {
+          ...groupWithSelectorScopes,
+          members: [{
+            ...groupWithSelectorScopes.members[0],
+            grantedVaultShareProjectionKinds: ["sleep-times.v0"],
+            grantedVaultShareProjectionScopes: [SLEEP_SCOPE],
+          }],
+          requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+          requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+        },
+        status: "ok",
+      },
+    });
+  });
+
+  it("keeps selector scopes for current group-tool callers", () => {
+    const filtered = filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "create_join_link",
+      result: {
+        group: groupWithSelectorScopes,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "ok",
+      },
+    }, new Set([
+      buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE),
+      buildHostedVaultShareProjectionScopeKey(RUNNING_DISTANCE_SCOPE),
+    ]));
+
+    expect(filtered).toEqual({
+      action: "create_join_link",
+      result: {
+        group: groupWithSelectorScopes,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "ok",
+      },
+    });
+  });
+});
+
 describe("hosted group join policy", () => {
   it("keeps email and optional health sharing on the closed projection registry", () => {
     expect(readHostedGroupJoinPolicy({
@@ -648,47 +818,61 @@ describe("hosted group join policy", () => {
       { projectionKind: "sleep-times.v0" },
       { projectionKind: "activity-days.v0" },
       RUNNING_SCOPE,
+      RUNNING_DISTANCE_SCOPE,
+      RUNNING_SESSION_COUNT_SCOPE,
       { projectionKind: "heart-rate-zones-days.v0" },
     ])).toEqual([
       {
         description:
-          "Share your email so this group's Murph can send the newsletter. Your email is visible to the group.",
+          "Shares your email so the group's Murph can send the newsletter. Visible to the group.",
         label: "Email address",
         projectionKind: "group-email.v0",
         projectionScope: { projectionKind: "group-email.v0" },
         projectionScopeKey: "group-email.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of sleep start and end times.",
+        description: "Shares your last 7 days of sleep start and end times.",
         label: "Sleep timing",
         projectionKind: "sleep-times.v0",
         projectionScope: { projectionKind: "sleep-times.v0" },
         projectionScopeKey: "sleep-times.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of daily active minutes.",
+        description: "Shares your last 7 days of active minutes.",
         label: "Activity minutes",
         projectionKind: "activity-days.v0",
         projectionScope: { projectionKind: "activity-days.v0" },
         projectionScopeKey: "activity-days.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of workout heart-rate zone minutes.",
+        description: "Shares your last 7 days of heart-rate zone minutes.",
         label: "Heart-rate zones",
         projectionKind: "heart-rate-zones-days.v0",
         projectionScope: { projectionKind: "heart-rate-zones-days.v0" },
         projectionScopeKey: "heart-rate-zones-days.v0",
       },
       {
-        description:
-          "Lets this group see your 7 most recent days of daily running minutes.",
+        description: "Shares your last 7 days of running minutes.",
         label: "Running minutes",
         projectionKind: "activity-minutes-days.v1",
         projectionScope: RUNNING_SCOPE,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_SCOPE),
+      },
+      {
+        description:
+          "Shares daily total distance and session count for running activities. Does not share routes, GPS, pace, timestamps, heart rate, calories, or individual workouts.",
+        label: "Recent running distance and session count",
+        projectionKind: "activity-distance-days.v1",
+        projectionScope: RUNNING_DISTANCE_SCOPE,
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_DISTANCE_SCOPE),
+      },
+      {
+        description:
+          "Shares daily count of running activity sessions. Does not share duration, distance, routes, GPS, timestamps, heart rate, calories, or individual workouts.",
+        label: "Recent running session count",
+        projectionKind: "activity-session-count-days.v1",
+        projectionScope: RUNNING_SESSION_COUNT_SCOPE,
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(RUNNING_SESSION_COUNT_SCOPE),
       },
     ]);
 
@@ -748,6 +932,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       messageId: "msg_offer_1",
     });
     mocks.updateHostedLinqChatAvatar.mockResolvedValue(undefined);
+    mocks.updateHostedLinqChatDisplayName.mockResolvedValue(undefined);
   });
 
   it("fails closed when the runtime supplied no linq thread context", async () => {
@@ -867,6 +1052,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
   });
 
   it("posts a newsletter react-to-join offer whose disclosed scope matches the stored snapshot", async () => {
+    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValueOnce({
+      group: groupSummaryWithOwnerEmailGrant(),
+      joinCode: "abc123",
+    });
+
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {
@@ -889,7 +1079,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     })).resolves.toEqual({
       action: "post_join_offer",
       result: {
-        group: GROUP_SUMMARY,
+        group: groupSummaryWithOwnerEmailGrant(),
         joinUrl: "https://www.withmurph.ai/groups/join/abc123",
         status: "sent",
       },
@@ -929,6 +1119,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       projectionScopes: NEWSLETTER_DEFAULT_SCOPES,
       tx: fakeTx,
     });
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .toHaveBeenCalledWith({
+        groupId: GROUP_SUMMARY.id,
+        memberId: "member_owner",
+        prisma: expect.any(Object),
+      });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
@@ -1041,6 +1237,40 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.recordHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("discloses session count in distance-scope join offer copy", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+          projectionScopes: [RUNNING_DISTANCE_SCOPE],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://www.withmurph.ai/groups/join/abc123",
+        status: "sent",
+      },
+    });
+
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedVaultShareProjectionScopes: [RUNNING_DISTANCE_SCOPE],
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Like this to join. It shares your Murph profile name and recent running distance and session count with the group. Join page: https://www.withmurph.ai/groups/join/abc123.",
+      }),
+    );
   });
 
   it("does not create or send a join offer without the required message template", async () => {

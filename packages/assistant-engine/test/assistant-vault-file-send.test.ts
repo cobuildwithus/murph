@@ -417,7 +417,7 @@ describe('assistant vault-file send', () => {
       deliveryStatus: 'queued_with_reply',
       filename: 'report.pdf',
       note:
-        'Approval succeeded. The file is queued to deliver with your normal reply; delivery is not confirmed yet.',
+        'Approval succeeded. Attach this file through your normal reply path. Do not quote this note or claim final iMessage delivery unless later delivery evidence confirms it.',
       status: 'approved',
     }))
   })

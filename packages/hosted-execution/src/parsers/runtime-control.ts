@@ -713,11 +713,19 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "update_display_name") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "updateDisplayName"]),
+      new Set(["action", "updateDisplayName", "linqThread"]),
       "Hosted runtime group tool update_display_name request",
     );
     return {
       action,
+      ...(record.linqThread === undefined || record.linqThread === null
+        ? {}
+        : {
+            linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+              record.linqThread,
+              "Hosted runtime group tool update_display_name request linqThread",
+            ),
+          }),
       updateDisplayName: parseHostedRuntimeGroupUpdateDisplayNameRequest(
         record.updateDisplayName,
       ),
@@ -2586,6 +2594,12 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       providerLabel,
     );
     breakdown.provider = {
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerInitializeMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerPreProviderMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerSpawnReadyMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadResumeMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadStartMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexAppServerWarmReuseMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "turnLockWaitMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "sessionResolveMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "promptBuildMs", providerLabel),
@@ -2809,6 +2823,14 @@ export function parseHostedWorkspaceCheckpointRequest(
           redactedStatus: parseHostedRuntimeRedactedJson(
             record.redactedStatus,
             "Hosted workspace checkpoint request redactedStatus",
+          ),
+        }),
+    ...(record.runtimeWakePendingAtCheckpoint === undefined
+      ? {}
+      : {
+          runtimeWakePendingAtCheckpoint: requireBoolean(
+            record.runtimeWakePendingAtCheckpoint,
+            "Hosted workspace checkpoint request runtimeWakePendingAtCheckpoint",
           ),
         }),
     snapshotRef: parseHostedExecutionSnapshotRef(

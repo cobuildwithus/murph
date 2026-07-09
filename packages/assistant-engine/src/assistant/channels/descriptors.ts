@@ -12,6 +12,7 @@ import {
   resolveLinqWebhookSecret,
 } from '@murphai/operator-config/linq-runtime'
 import {
+  type AssistantBindingDelivery,
   type AssistantDeliverySource,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -27,6 +28,7 @@ import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantChannelAdapter,
   inferBindingDeliveryForChannel,
+  normalizeOptionalText,
   readDeliveredCleanupMessages,
   readDeliveredCleanupTargetAliases,
   readDeliveredProviderMessageId,
@@ -401,24 +403,34 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   supportedResponseMediaKinds: ['image', 'voice_memo', 'vault_file'],
   targetRequiredMessage:
     'iMessage delivery requires an explicit chat id or a stored thread binding.',
-  async startTypingIndicator({ candidate, dependencies }) {
-    const startTyping = dependencies.startLinqTyping ?? startLinqTypingIndicator
-    return (await startTyping({
+  async startTypingIndicator({ candidate, dependencies, replyToMessageId }) {
+    if (dependencies.startLinqTyping) {
+      return (await dependencies.startLinqTyping({
+        replyToMessageId,
+        target: candidate.target,
+        targetKind: candidate.kind,
+      })) ?? null
+    }
+
+    return (await startLinqTypingIndicator({
       target: candidate.target,
     })) ?? null
   },
-  async sendMessage({ actorId, answeredMailboxItemIds, candidate, deliverySource, dependencies, idempotencyKey, media, message, replyToMessageId }) {
+  async sendMessage({ actorId, answeredMailboxItemIds, bindingDelivery, candidate, deliverySource, dependencies, explicitTarget, idempotencyKey, media, message, replyToMessageId, threadIsDirect }) {
     if (hasVoiceMemoMedia(media)) {
       return await sendLinqVoiceMemoDelivery({
         actorId,
         answeredMailboxItemIds,
+        bindingDelivery,
         candidate,
         deliverySource,
         dependencies,
+        explicitTarget,
         idempotencyKey,
         media,
         message,
         replyToMessageId,
+        threadIsDirect,
       })
     }
 
@@ -440,6 +452,12 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
             ...request,
             answeredMailboxItemIds: answeredMailboxItemIds ?? [],
             directRecipientPhoneNumber: normalizeDirectLinqRecipient(actorId),
+            homeRouteFallbackAllowed: shouldAllowLinqHomeRouteFallback({
+              bindingDelivery,
+              candidate,
+              explicitTarget,
+              threadIsDirect,
+            }),
             ...(mediaInput ? { media: mediaInput } : {}),
           })
         : await sendLinqMessage(request, dependencies.signal ? { signal: dependencies.signal } : {})
@@ -501,13 +519,16 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
 async function sendLinqVoiceMemoDelivery(input: {
   actorId: string | null
   answeredMailboxItemIds?: readonly string[] | null
+  bindingDelivery: AssistantBindingDelivery | null
   candidate: AssistantDeliveryCandidate
   deliverySource?: AssistantDeliverySource | null
   dependencies: AssistantChannelDependencies
+  explicitTarget: string | null
   idempotencyKey?: string | null
   media: readonly AssistantResponseMedia[]
   message: string
   replyToMessageId?: string | null
+  threadIsDirect: boolean | null
 }): Promise<{
   providerMessageId?: string | null
   providerMessageIds?: string[] | null
@@ -540,6 +561,12 @@ async function sendLinqVoiceMemoDelivery(input: {
 
   const providerMessageIds: string[] = []
   const text = messageTextOrNull(input.message)
+  const homeRouteFallbackAllowed = shouldAllowLinqHomeRouteFallback({
+    bindingDelivery: input.bindingDelivery,
+    candidate: input.candidate,
+    explicitTarget: input.explicitTarget,
+    threadIsDirect: input.threadIsDirect,
+  })
   if (!text && input.candidate.kind === 'participant') {
     throw new VaultCliError(
       'ASSISTANT_LINQ_VOICE_MEMO_CHAT_REQUIRED',
@@ -566,6 +593,7 @@ async function sendLinqVoiceMemoDelivery(input: {
               input.deliverySource?.kind === 'linq'
                 ? input.deliverySource.fromPhoneNumber
                 : null,
+            homeRouteFallbackAllowed,
             idempotencyKey: input.idempotencyKey ?? null,
             target: input.candidate.target,
             targetKind: input.candidate.kind,
@@ -634,6 +662,7 @@ async function sendLinqVoiceMemoDelivery(input: {
       ? await input.dependencies.sendLinqVoiceMemo({
           answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
           attachmentId,
+          homeRouteFallbackAllowed,
           replyToMessageId: input.replyToMessageId ?? null,
           target: voiceMemoTarget,
           targetKind: voiceMemoTargetKind,
@@ -840,6 +869,21 @@ function inferDeliveredLinqTargetKind(
   const providerThreadId = readDeliveredProviderThreadId(delivered)
   const deliveredTarget = readDeliveredTarget(delivered)
   return providerThreadId || deliveredTarget ? 'thread' : null
+}
+
+function shouldAllowLinqHomeRouteFallback(input: {
+  bindingDelivery: AssistantBindingDelivery | null
+  candidate: AssistantDeliveryCandidate
+  explicitTarget: string | null
+  threadIsDirect: boolean | null
+}): boolean {
+  return (
+    input.threadIsDirect === true &&
+    input.explicitTarget === null &&
+    input.candidate.kind === 'thread' &&
+    input.bindingDelivery?.kind === 'thread' &&
+    normalizeOptionalText(input.bindingDelivery.target) === input.candidate.target
+  )
 }
 
 const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({

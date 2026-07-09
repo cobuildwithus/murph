@@ -43,6 +43,188 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "grounded-health-advice": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "how do I improve my deep sleep?" },
+        {
+          from: "murph",
+          body: "Your deep sleep averaged 48m the last two weeks, down from 1h 12m in May.",
+        },
+        {
+          from: "murph",
+          body: "The drop lines up with your 10:40pm bedtime slipping past midnight on weeknights. Want to start there?",
+        },
+      ]}
+    />
+  ),
+  "weekly-improvement-coach": (
+    <PhoneMock
+      channel="iMessage · Tuesday"
+      messages={[
+        {
+          from: "murph",
+          body: "You haven't lifted in 3 weeks, and it's the one gap in an otherwise strong month.",
+        },
+        {
+          from: "murph",
+          body: "Want to put two 20-minute sessions on the calendar this week? I'll write them.",
+        },
+      ]}
+    />
+  ),
+  "generated-images-saved-to-vault": (
+    <PhoneMock
+      channel="iMessage · Sunday crew"
+      messages={[
+        { from: "user", body: "make the group photo, but at sunrise" },
+        {
+          from: "murph",
+          bare: true,
+          body: (
+            <ImagePreview
+              alt="Regenerated group chat photo at sunrise"
+              caption="Variation on the saved group photo"
+            />
+          ),
+        },
+      ]}
+    />
+  ),
+  "quieter-weekly-messages": (
+    <StatBlock
+      label="Weekly digest"
+      before="Every week"
+      after="When it matters"
+      caption="ordinary weeks stay silent"
+    />
+  ),
+  "apple-health-connect-card": (
+    <DeviceList
+      devices={[
+        {
+          name: "Apple Health",
+          initial: "A",
+          color: "#2d3436",
+          status: "connected",
+        },
+        { name: "WHOOP", initial: "W", color: "#2d3436", status: "connected" },
+        { name: "Oura", initial: "O", color: "#5a6e32", status: "reconnect" },
+      ]}
+    />
+  ),
+  "whoop-sleep-beats-empty-copies": (
+    <StatBlock
+      label="Deep sleep, same night"
+      before="0m"
+      after="1h 24m"
+      caption="WHOOP record, not the empty copy"
+    />
+  ),
+  "songs-fit-their-length": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "30-second song to get me out of bed" },
+        {
+          from: "murph",
+          body: (
+            <SongBubble
+              title="Up and out"
+              artist="Murph · ElevenLabs"
+              duration="0:30"
+            />
+          ),
+        },
+      ]}
+    />
+  ),
+  "group-bursts-reach-murph": (
+    <StatBlock
+      label="Messages in a group burst"
+      before="First 10"
+      after="All of them"
+      caption="no waiting for the next wake-up"
+    />
+  ),
+  "reply-message-bubbles": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "how'd my week go?" },
+        { from: "murph", body: "Four runs, 22 miles. Best week since April." },
+        {
+          from: "murph",
+          body: "Sleep held above 7 hours every night but Friday.",
+        },
+        { from: "murph", body: "Want to push for five runs next week?" },
+      ]}
+    />
+  ),
+  "group-rename-and-avatar": (
+    <PhoneMock
+      channel="iMessage · Sunday crew"
+      messages={[
+        { from: "user", body: "rename us to Sunday Crew and make a group pic" },
+        {
+          from: "murph",
+          bare: true,
+          body: (
+            <ImagePreview
+              alt="Generated group chat photo"
+              caption="Sunday Crew · set as group photo"
+            />
+          ),
+        },
+      ]}
+    />
+  ),
+  "challenge-score-sharing": (
+    <ChecklistMock
+      label="Sunday Crew asks to score"
+      items={[
+        { label: "Running distance, daily total", done: true },
+        { label: "Strength sessions, daily count", done: true },
+        { label: "Routes and raw workouts", done: false },
+      ]}
+    />
+  ),
+  "weekly-note-alternates-features": (
+    <CalendarMock
+      label="Your weekly note"
+      entries={[
+        { day: "Week 1", time: "Sun", what: "What shipped in Murph" },
+        { day: "Week 2", time: "Sun", what: "A feature you haven't tried" },
+      ]}
+    />
+  ),
+  "small-fixes-july-eight": (
+    <ChecklistMock
+      label="Fixed this week"
+      items={[
+        { label: "Replies stop quoting your text back", done: true },
+        { label: "Typing bubble works in group chats", done: true },
+        { label: "Image generation waits before giving up", done: true },
+        { label: "A skipped device sync retries", done: true },
+      ]}
+    />
+  ),
+  "vault-files-actually-send": (
+    <PdfPreview
+      title="Bloodwork — Jun 2026"
+      meta="Delivered · 2 pages"
+      lines={5}
+    />
+  ),
+  "faster-recovery-from-stalled-replies": (
+    <StatBlock
+      label="Recovery from a silent connection"
+      before="5 min"
+      after="90s"
+      caption="then it reconnects and answers"
+    />
+  ),
   "experiments-track-themselves": (
     <ChecklistMock
       label="How Murph scores it"

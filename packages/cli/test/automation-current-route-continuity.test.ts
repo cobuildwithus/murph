@@ -29,6 +29,7 @@ interface AssistantCurrentRouteBridgeResponse {
     identityId: string | null;
     participantId: string | null;
     threadId: string | null;
+    threadIsDirect?: boolean | null;
   };
 }
 
@@ -99,6 +100,7 @@ test("automation save preserves hosted iMessage current-route continuity locator
         identityId: "h1_111111111111111111111111",
         participantId: "h1_222222222222222222222222",
         threadId: "h1_333333333333333333333333",
+        threadIsDirect: true,
       },
     },
     token: "test-bridge-token",
@@ -144,10 +146,12 @@ test("automation save preserves hosted iMessage current-route continuity locator
       automation: {
         route: {
           channel: string;
+          currentRouteSnapshot?: boolean | null;
           deliveryTarget: string | null;
           identityId: string | null;
           participantId: string | null;
           threadId: string | null;
+          threadIsDirect?: boolean | null;
         };
       } | null;
       vault: string;
@@ -161,6 +165,7 @@ test("automation save preserves hosted iMessage current-route continuity locator
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.equal(shown.envelope.data?.automation?.route.channel, "linq");
+    assert.equal(shown.envelope.data?.automation?.route.currentRouteSnapshot, true);
     assert.equal(
       shown.envelope.data?.automation?.route.deliveryTarget,
       "linq_chat_real",
@@ -177,6 +182,7 @@ test("automation save preserves hosted iMessage current-route continuity locator
       shown.envelope.data?.automation?.route.threadId,
       "h1_333333333333333333333333",
     );
+    assert.equal(shown.envelope.data?.automation?.route.threadIsDirect, true);
     assert.deepEqual(bridge.requests, [
       HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
     ]);
@@ -201,6 +207,7 @@ test("automation save enriches an explicit same-conversation target with blinded
         identityId: "hid_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         participantId: "hid_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         threadId: "hid_cccccccccccccccccccccccccccccccc",
+        threadIsDirect: false,
       },
     },
     token: "test-bridge-token",
@@ -254,10 +261,12 @@ test("automation save enriches an explicit same-conversation target with blinded
       automation: {
         route: {
           channel: string;
+          currentRouteSnapshot?: boolean | null;
           deliveryTarget: string | null;
           identityId: string | null;
           participantId: string | null;
           threadId: string | null;
+          threadIsDirect?: boolean | null;
         };
       } | null;
       vault: string;
@@ -271,6 +280,10 @@ test("automation save enriches an explicit same-conversation target with blinded
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.equal(shown.envelope.data?.automation?.route.channel, "linq");
+    assert.equal(
+      shown.envelope.data?.automation?.route.currentRouteSnapshot,
+      undefined,
+    );
     assert.equal(
       shown.envelope.data?.automation?.route.deliveryTarget,
       "linq_chat_real",
@@ -287,6 +300,7 @@ test("automation save enriches an explicit same-conversation target with blinded
       shown.envelope.data?.automation?.route.threadId,
       "hid_cccccccccccccccccccccccccccccccc",
     );
+    assert.equal(shown.envelope.data?.automation?.route.threadIsDirect, false);
     assert.deepEqual(bridge.requests, [
       HOSTED_CLI_BRIDGE_ASSISTANT_CURRENT_ROUTE_PATH,
     ]);

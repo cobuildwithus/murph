@@ -1,8 +1,10 @@
 import "server-only";
 
+import type { PrismaClient } from "@prisma/client";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
@@ -13,7 +15,10 @@ import {
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
-import type { HostedVaultShareProjectionScope } from "@murphai/hosted-execution/vault-share";
+import type {
+  HostedVaultShareProjectionKind,
+  HostedVaultShareProjectionScope,
+} from "@murphai/hosted-execution/vault-share";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
@@ -29,6 +34,7 @@ import {
   sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage,
   updateHostedLinqChatAvatar,
+  updateHostedLinqChatDisplayName,
 } from "../hosted-onboarding/linq-client";
 import {
   buildMurphHostedLinqContactCardVcf,
@@ -61,6 +67,9 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
+  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
+} from "./group-newsletter";
+import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   readHostedGroupByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
@@ -91,7 +100,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
   share_contact_card: "owner_active",
-  update_display_name: "participant_aware",
+  update_display_name: "owner_active",
 } as const satisfies Record<
   HostedRuntimeGroupToolAction,
   HostedRuntimeGroupToolAccessClassification
@@ -110,6 +119,7 @@ export async function handleHostedRuntimeGroupTool(input: {
 
   if (input.request.action === "update_display_name") {
     return handleHostedRuntimeGroupUpdateDisplayName({
+      linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
       updateDisplayName: input.request.updateDisplayName,
     });
@@ -183,6 +193,7 @@ export async function handleHostedRuntimeGroupTool(input: {
 }
 
 async function handleHostedRuntimeGroupUpdateDisplayName(input: {
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
   updateDisplayName: { displayName: string };
 }): Promise<HostedRuntimeGroupToolResponse> {
@@ -191,14 +202,41 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     result: { group: null, status: "unavailable", unavailableReason },
   });
 
-  if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
-    return unavailable("runtime_inactive");
+  const access = await checkHostedRuntimeGroupLinqChatMutationAccess({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if (access.status !== "ok") {
+    return unavailable(access.unavailableReason);
+  }
+
+  const displayName = normalizeHostedGroupDisplayName(
+    input.updateDisplayName.displayName,
+  );
+  if (!displayName) {
+    return unavailable("display_name_unavailable");
+  }
+
+  const existing = await readHostedGroupByRuntimeMemberId({
+    runtimeMemberId: input.memberId,
+  });
+  if (!existing) {
+    return unavailable("group_not_found");
+  }
+
+  try {
+    await updateHostedLinqChatDisplayName({
+      chatId: access.chatId,
+      displayName,
+    });
+  } catch {
+    return unavailable("provider_unavailable");
   }
 
   const prisma = getPrisma();
   const updated = await prisma.$transaction(async (tx) =>
     updateHostedGroupDisplayNameByRuntimeMemberIdTx({
-      displayName: input.updateDisplayName.displayName,
+      displayName,
       runtimeMemberId: input.memberId,
       tx,
     }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -403,6 +441,11 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     // Durable grant already committed; the owner's runtime offers the
     // projection on a later wake if this best-effort signal fails.
   }
+  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
+    group: created.group,
+    ownerMemberId: created.ownerMemberId,
+    prisma,
+  });
 
   return {
     action: "create_join_link",
@@ -517,6 +560,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     // The group and offer binding are durable; owner runtime maintenance can
     // catch up on its next organic wake.
   }
+  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
+    group: created.group,
+    ownerMemberId: created.ownerMemberId,
+    prisma,
+  });
 
   return {
     action: "post_join_offer",
@@ -534,7 +582,7 @@ async function handleHostedRuntimeGroupSetChatAvatar(input: {
     result: { status: "unavailable", unavailableReason },
   });
 
-  const access = await checkHostedRuntimeGroupSetChatAvatarAccess({
+  const access = await checkHostedRuntimeGroupLinqChatMutationAccess({
     linqThread: input.linqThread,
     memberId: input.memberId,
   });
@@ -566,7 +614,7 @@ async function handleHostedRuntimeGroupSetChatAvatarPreflight(input: {
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
-  const access = await checkHostedRuntimeGroupSetChatAvatarAccess(input);
+  const access = await checkHostedRuntimeGroupLinqChatMutationAccess(input);
   if (access.status !== "ok") {
     return {
       action: "preflight_set_chat_avatar",
@@ -580,14 +628,14 @@ async function handleHostedRuntimeGroupSetChatAvatarPreflight(input: {
   };
 }
 
-type HostedRuntimeGroupSetChatAvatarAccess =
+type HostedRuntimeGroupLinqChatMutationAccess =
   | { status: "ok"; chatId: string }
   | { status: "unavailable"; unavailableReason: string };
 
-async function checkHostedRuntimeGroupSetChatAvatarAccess(input: {
+async function checkHostedRuntimeGroupLinqChatMutationAccess(input: {
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
   memberId: string;
-}): Promise<HostedRuntimeGroupSetChatAvatarAccess> {
+}): Promise<HostedRuntimeGroupLinqChatMutationAccess> {
   const authorized = await authorizeHostedRuntimeGroupLinqThread({
     linqThread: input.linqThread,
     memberId: input.memberId,
@@ -618,6 +666,31 @@ function buildHostedGroupJoinOfferMessage(input: {
       renderHostedGroupJoinOfferScopeSentence(input.projectionScopes),
     )
     .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, input.joinUrl);
+}
+
+async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
+  group: {
+    id: string;
+    members: readonly {
+      grantedVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
+      memberId: string;
+    }[];
+  };
+  ownerMemberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  if (!input.group.members.some((member) =>
+    member.memberId === input.ownerMemberId
+    && member.grantedVaultShareProjectionKinds.includes("group-email.v0")
+  )) {
+    return;
+  }
+
+  await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+    groupId: input.group.id,
+    memberId: input.ownerMemberId,
+    prisma: input.prisma,
+  });
 }
 
 function normalizeHostedGroupJoinOfferMessageTemplate(
@@ -655,6 +728,17 @@ function normalizeHostedGroupChatIconUrl(value: string): string | null {
     return null;
   }
   return parsed.toString();
+}
+
+function normalizeHostedGroupDisplayName(value: string): string | null {
+  const normalized = value.trim().replace(/\s+/gu, " ");
+  if (
+    !normalized
+    || normalized.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH
+  ) {
+    return null;
+  }
+  return normalized;
 }
 
 function isHostedGroupChatIconDeliveryUrl(url: URL): boolean {

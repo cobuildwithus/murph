@@ -46,6 +46,7 @@ import type {
 import {
   workspaceSnapshotUploadSessionCurrentStorageKey,
   workspaceSnapshotOrphanCandidateStorageKey,
+  workspaceSnapshotOrphanCandidateStoragePrefix,
 } from "../src/user-runner/workspace-snapshot-sessions.ts";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
@@ -180,10 +181,7 @@ describe("HostedUserRunner execution coordination", () => {
       last_invocation_at: expect.any(String),
       wake_at: null,
     });
-    const scheduledAlarms = alarms.filter((alarm) => alarm !== "deleted");
-    expect(scheduledAlarms).toEqual([]);
-    expect(alarms).toContain("deleted");
-    expect(alarms).not.toContain(WORKSPACE_NEXT_WAKE_AT);
+    expect(alarms).toEqual([]);
   });
 
   it("passes a runner-scoped OpenAI provider credential to hosted runtime jobs", async () => {
@@ -337,12 +335,12 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
-    let runtimeLogSawDeletedAlarm = false;
+    let runtimeLogSawAlarmCleanup = false;
     let harness: ReturnType<typeof createRunnerHarness>;
     harness = createRunnerHarness({
       invocationResults: [invocationResult.promise],
       runtimeLogResponse: () => {
-        runtimeLogSawDeletedAlarm = harness.alarms.includes("deleted");
+        runtimeLogSawAlarmCleanup = harness.alarms.length > 0;
         return jsonResponse({
           loggedCount: 1,
         });
@@ -382,7 +380,7 @@ describe("HostedUserRunner execution coordination", () => {
       failure_count: 0,
       last_invocation_at: null,
     });
-    expect(runtimeLogSawDeletedAlarm).toBe(true);
+    expect(runtimeLogSawAlarmCleanup).toBe(false);
     const runtimeLogCalls = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls
       .filter((call) => call[0].path === HOSTED_RUNTIME_LOG_PATH);
     expect(runtimeLogCalls).toHaveLength(1);
@@ -2357,20 +2355,32 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("uses the active write fence alarmCoordinator for accepted processing wakes", async () => {
+  it("does not resync snapshot orphan alarms while waking an active runtime", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const storageList = vi.fn();
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
         action: "woken" as const,
         kind: "accepted" as const,
       }),
     );
-    const { invoke, runner, sql } = createRunnerHarness({
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
+      onStorageList: storageList,
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
+    await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
+      createdAt: "2026-04-26T00:00:00.000Z",
+      objectKey: "users/snapshots/member_123/snapshot_runtime_alarm.snapshot.enc",
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: "snapshot_runtime_alarm",
+      userId: TEST_USER_ID,
+    });
+    expect(alarms).toContain("2026-04-26T01:05:00.000Z");
+    alarms.length = 0;
+    storageList.mockClear();
     const token = writeRuntimeFenceForTest(sql, {
       workspaceVersion: "7",
     });
@@ -2387,6 +2397,12 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual([]);
+    expect(storageList).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        prefix: workspaceSnapshotOrphanCandidateStoragePrefix(),
+      }),
+    );
   });
 
   it("does not replace active write fences because wall-clock time advanced", async () => {
@@ -3146,7 +3162,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("does not read web status while syncing write-fence alarms", async () => {
+  it("does not read web status while handling runner alarms", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const onStatusRead = vi.fn(() => {
@@ -3198,7 +3214,7 @@ describe("HostedUserRunner execution coordination", () => {
       active_expires_at: null,
       active_started_at: "2026-04-26T23:59:25.000Z",
     });
-    expect(alarms.at(-1)).toBe("deleted");
+    expect(alarms).toEqual([]);
   });
 
   it("uses runtime processing recovery for hosted-local run-until-idle behind an active fence", async () => {
@@ -3826,6 +3842,7 @@ function createRunnerHarness(input: {
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onStatusRead?: () => Promise<void> | void;
+  onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   runtimeLogResponse?: () => Promise<Response> | Response;
@@ -3836,6 +3853,7 @@ function createRunnerHarness(input: {
 } = {}) {
   const durable = createDurableObjectState({
     alarmDeleteError: input.alarmDeleteError,
+    onStorageList: input.onStorageList,
   });
   const invocationResults = [...(input.invocationResults ?? [])];
   const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
@@ -4054,6 +4072,7 @@ class DelayedGetMemoryEncryptedR2Bucket extends MemoryEncryptedR2Bucket {
 
 function createDurableObjectState(input: {
   alarmDeleteError?: Error;
+  onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
 } = {}): {
   alarms: string[];
   state: DurableObjectStateLike;
@@ -4076,6 +4095,7 @@ function createDurableObjectState(input: {
     get: async <T>(key: string): Promise<T | undefined> => values.get(key) as T | undefined,
     getAlarm: async () => null,
     list: async <T>(options: { prefix?: string } = {}): Promise<Map<string, T>> => {
+      await input.onStorageList?.(options);
       const result = new Map<string, T>();
       for (const [key, value] of values) {
         if (!options.prefix || key.startsWith(options.prefix)) {

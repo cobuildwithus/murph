@@ -128,22 +128,9 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
   for (const record of records) {
     const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
     const limitNoticeCandidate = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
-      const storedRecord = await tx.hostedAiUsage.upsert({
-        where: {
-          id: record.usageId,
-        },
-        create: buildHostedAiUsageCreateData(record, memberId),
-        update: {},
-        select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
-      });
-
-      assertStoredHostedAiUsageMatchesRecord({
+      await persistHostedAiUsageRecordTx({
         memberId,
         record,
-        storedRecord,
-      });
-      await markHostedAiUsageStripeExportSkippedTx({
-        id: storedRecord.id,
         tx,
       });
 
@@ -157,6 +144,7 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
 
       return null;
     });
+
     if (limitNoticeCandidate) {
       limitNoticeCandidates.push(limitNoticeCandidate);
     }
@@ -243,6 +231,31 @@ function logHostedAiUsageLimitNoticeAtCrossing(
   }
 
   console.warn("Hosted AI usage-limit notice at crossing failed.", details);
+}
+
+async function persistHostedAiUsageRecordTx(input: {
+  memberId: string;
+  record: AssistantUsageRecord;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const storedRecord = await input.tx.hostedAiUsage.upsert({
+    where: {
+      id: input.record.usageId,
+    },
+    create: buildHostedAiUsageCreateData(input.record, input.memberId),
+    update: {},
+    select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
+  });
+
+  assertStoredHostedAiUsageMatchesRecord({
+    memberId: input.memberId,
+    record: input.record,
+    storedRecord,
+  });
+  await markHostedAiUsageStripeExportSkippedTx({
+    id: storedRecord.id,
+    tx: input.tx,
+  });
 }
 
 async function runHostedAiUsageRecordTransaction<T>(
