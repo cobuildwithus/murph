@@ -5,11 +5,14 @@ import {
   memoryDocumentRelativePath,
   parseMemoryDocument,
   renderMemoryDocument,
+  setMemoryDisplayName as setMemoryDocumentDisplayName,
   type ForgetMemoryRecordInput,
   type MemoryDocument,
+  type MemoryDisplayNameResolution,
   type MemoryDocumentSnapshot,
   type MemoryRecord,
   type MemorySection,
+  type SetMemoryDisplayNameInput,
   type UpsertMemoryRecordInput,
   upsertMemoryRecord,
 } from "@murphai/contracts";
@@ -33,9 +36,11 @@ import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 export type {
   ForgetMemoryRecordInput,
   MemoryDocument,
+  MemoryDisplayNameResolution,
   MemoryDocumentSnapshot,
   MemoryRecord,
   MemorySection,
+  SetMemoryDisplayNameInput,
   UpsertMemoryRecordInput,
 } from "@murphai/contracts";
 
@@ -99,6 +104,50 @@ export async function upsertMemory(
   return await withLockedMemoryDocument(vaultRoot, async () => {
     const snapshot = await readMemoryDocument(vaultRoot);
     return await persistUpsertMemory(vaultRoot, snapshot, input);
+  });
+}
+
+export async function setMemoryDisplayName(
+  vaultRoot: string,
+  input: SetMemoryDisplayNameInput,
+): Promise<{
+  created: boolean;
+  document: MemoryDocumentSnapshot;
+  record: MemoryRecord;
+}> {
+  return await withLockedMemoryDocument(vaultRoot, async () => {
+    const snapshot = await readMemoryDocument(vaultRoot);
+    const next = setMemoryDocumentDisplayName(snapshot, input);
+    if (next.document === snapshot) {
+      return {
+        created: false,
+        document: snapshot,
+        record: next.record,
+      };
+    }
+    await writeCanonicalMarkdownDocument({
+      vaultRoot,
+      operationType: "memory_upsert",
+      summary: `Set memory display name ${next.record.id}`,
+      target: resolveSingletonMarkdownDocumentTarget({
+        relativePath: memoryDocumentRelativePath,
+        created: !snapshot.exists,
+      }),
+      markdown: renderMemoryDocument({ document: next.document }),
+      audit: {
+        action: "memory_upsert",
+        commandName: "core.setMemoryDisplayName",
+        summary: "Set memory display name.",
+        targetIds: [next.record.id],
+      },
+    });
+    const persisted = await readPersistedMemoryRecord(vaultRoot, next.record.id, "upsert");
+
+    return {
+      created: next.created,
+      document: persisted.document,
+      record: persisted.record,
+    };
   });
 }
 

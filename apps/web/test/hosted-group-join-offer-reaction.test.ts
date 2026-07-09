@@ -156,6 +156,30 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
   });
 
+  it("accepts the reaction when the best-effort runtime wake fails", async () => {
+    mocks.signalHostedRuntimeMaintenanceRuntime.mockRejectedValueOnce(
+      new Error("runtime unavailable"),
+    );
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
+    });
+
+    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
+      .not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
+      userId: "member_reactor",
+    });
+  });
+
   it("uses read candidates for rotated offer lookup", async () => {
     restoreKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",

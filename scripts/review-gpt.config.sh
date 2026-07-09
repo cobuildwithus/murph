@@ -31,13 +31,58 @@ review_gpt_browser_lane_port() {
   esac
 }
 
+review_gpt_browser_lane_data_dir() {
+  local review_gpt_lane_display
+  review_gpt_lane_display="$(review_gpt_browser_lane_display_name "$1")" || return 1
+  printf '%s\n' "$HOME/Library/Application Support/MurphReviewGPT/$review_gpt_lane_display"
+}
+
+review_gpt_browser_lane_has_cdp() {
+  local review_gpt_lane_port
+
+  if ! command -v curl >/dev/null 2>&1; then
+    return 1
+  fi
+
+  review_gpt_lane_port="$(review_gpt_browser_lane_port "$1")" || return 1
+  curl --silent --show-error --fail --max-time 1 \
+    "http://127.0.0.1:$review_gpt_lane_port/json/version" >/dev/null 2>&1
+}
+
+review_gpt_browser_lane_is_usable() {
+  local review_gpt_lane_data_dir
+  local review_gpt_lane_lock
+
+  review_gpt_lane_data_dir="$(review_gpt_browser_lane_data_dir "$1")" || return 1
+  review_gpt_lane_lock="$review_gpt_lane_data_dir/SingletonLock"
+
+  if review_gpt_browser_lane_has_cdp "$1"; then
+    return 0
+  fi
+
+  [[ ! -e "$review_gpt_lane_lock" && ! -L "$review_gpt_lane_lock" ]]
+}
+
 review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-random}}}"
 review_gpt_requested_browser_lane="$(printf '%s' "$review_gpt_requested_browser_lane" | tr '[:upper:]' '[:lower:]')"
 
 case "$review_gpt_requested_browser_lane" in
   "" | auto | random)
     review_gpt_browser_lanes=(eragon phlebas mountain)
-    review_gpt_selected_browser_lane="${review_gpt_browser_lanes[$((RANDOM % ${#review_gpt_browser_lanes[@]}))]}"
+    review_gpt_usable_browser_lanes=()
+
+    for review_gpt_candidate_browser_lane in "${review_gpt_browser_lanes[@]}"; do
+      if review_gpt_browser_lane_is_usable "$review_gpt_candidate_browser_lane"; then
+        review_gpt_usable_browser_lanes+=("$review_gpt_candidate_browser_lane")
+      fi
+    done
+
+    if [[ "${#review_gpt_usable_browser_lanes[@]}" -gt 0 ]]; then
+      review_gpt_selected_browser_lane="${review_gpt_usable_browser_lanes[$((RANDOM % ${#review_gpt_usable_browser_lanes[@]}))]}"
+    else
+      echo "Warning: no unlocked ReviewGPT browser lanes found; falling back to random lane." >&2
+      review_gpt_selected_browser_lane="${review_gpt_browser_lanes[$((RANDOM % ${#review_gpt_browser_lanes[@]}))]}"
+    fi
     ;;
   aragon | eragon)
     review_gpt_selected_browser_lane="eragon"
@@ -74,7 +119,7 @@ if [[ -x "$review_gpt_selected_browser_binary" ]]; then
 else
   browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
 fi
-managed_browser_user_data_dir="${managed_browser_user_data_dir:-$HOME/Library/Application Support/MurphReviewGPT/$review_gpt_selected_browser_display}"
+managed_browser_user_data_dir="${managed_browser_user_data_dir:-$(review_gpt_browser_lane_data_dir "$review_gpt_selected_browser_lane")}"
 managed_browser_profile="${managed_browser_profile:-Default}"
 managed_browser_port="${managed_browser_port:-$review_gpt_selected_browser_port}"
 export REVIEW_GPT_SELECTED_BROWSER_LANE="$review_gpt_selected_browser_lane"
@@ -93,6 +138,7 @@ package_script="scripts/package-audit-context-full.sh"
 # context must come from the guarded ZIP and repomix attachments.
 app_connector="current"
 model="gpt-5.5-pro"
+thinking="current"
 snapshot_attachment_name="repo.snapshot.zip"
 repomix_attachment_format="zip"
 

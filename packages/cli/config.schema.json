@@ -1666,7 +1666,7 @@
                           "maxLength": 128
                         },
                         "kind": {
-                          "description": "Optional fixed projection-kind filter. Repeat --kind for fixed metrics such as --kind steps-days.v0. Use --scope for selector-scoped activity minutes.",
+                          "description": "Optional fixed projection-kind filter. Repeat --kind for fixed metrics such as --kind steps-days.v0. Use --scope for selector-scoped activity challenge data.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -1692,7 +1692,7 @@
                           }
                         },
                         "scope": {
-                          "description": "Optional exact projection-scope filter. Use activity-minutes-days.v1.activityKind.running for a running-minutes leaderboard.",
+                          "description": "Optional exact projection-scope filter. Use activity-minutes-days.v1.activityKind.running, activity-distance-days.v1.activityKind.running, or activity-session-count-days.v1.activityKind.running for activity-specific challenge data.",
                           "type": "array",
                           "items": {
                             "type": "string"
@@ -4007,6 +4007,10 @@
                   "type": "object",
                   "additionalProperties": false
                 },
+                "set-name": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
                 "upsert": {
                   "type": "object",
                   "additionalProperties": false,
@@ -4052,26 +4056,6 @@
                   }
                 },
                 "forget": {
-                  "type": "object",
-                  "additionalProperties": false
-                }
-              }
-            }
-          }
-        },
-        "profile": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "commands": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "show": {
-                  "type": "object",
-                  "additionalProperties": false
-                },
-                "set-name": {
                   "type": "object",
                   "additionalProperties": false
                 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import {
@@ -8,11 +9,13 @@ import {
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
+import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
 import { Button } from "@/src/components/ui/button";
+import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { cn } from "@/src/lib/utils";
 
 export interface GroupJoinPermissionDisplay {
@@ -43,6 +46,42 @@ export function GroupJoinSignInButton() {
         description="Create or open your private Murph account, then we'll bring you back here."
       />
     </>
+  );
+}
+
+export function GroupJoinLegalConsentGate({
+  initialStatus,
+}: {
+  initialStatus: HostedConsentStatus | null;
+}) {
+  const router = useRouter();
+
+  function refreshRoute() {
+    router.refresh();
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <HostedLegalConsentCard
+        acceptedPendingLabel="Continuing..."
+        initialStatus={initialStatus}
+        mode="compact"
+        onAccepted={refreshRoute}
+        onRequirementChange={(required) => {
+          if (!required) {
+            refreshRoute();
+          }
+        }}
+        preferredScope="launch.legal"
+        source="group-join"
+      />
+      <Link
+        href="/home"
+        className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+      >
+        Not now
+      </Link>
+    </div>
   );
 }
 

@@ -106,6 +106,62 @@ test("memory command module registers without throwing", () => {
   assert.ok(cli);
 });
 
+test("memory set-name stores the preferred display name in canonical memory", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-name-cli-");
+  cleanupPaths.push(parentRoot);
+
+  const cli = Cli.create("vault-cli", {
+    description: "memory test cli",
+    version: "0.0.0-test",
+  });
+
+  registerMemoryCommands(cli);
+
+  const saved = await runInProcessJsonCli(cli, [
+    "memory",
+    "set-name",
+    "Theo",
+    "--vault",
+    vaultRoot,
+  ]);
+  assert.equal(saved.exitCode, null);
+  assert.equal(saved.envelope.ok, true);
+  assert.equal(
+    (
+      saved.envelope.data as {
+        created: boolean;
+        memory: {
+          section: string;
+          text: string;
+        };
+      }
+    ).created,
+    true,
+  );
+  assert.equal(
+    (
+      saved.envelope.data as {
+        memory: {
+          section: string;
+          text: string;
+        };
+      }
+    ).memory.section,
+    "Identity",
+  );
+  assert.equal(
+    (
+      saved.envelope.data as {
+        memory: {
+          section: string;
+          text: string;
+        };
+      }
+    ).memory.text,
+    "Preferred display name: Theo",
+  );
+});
+
 test("memory commands round-trip upsert, update, show, and forget through the registered CLI", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-cli-");
   cleanupPaths.push(parentRoot);

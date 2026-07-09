@@ -103,11 +103,12 @@ test("hosted runtime config copies user and forwarded env maps", () => {
   assert.notEqual(normalized.userEnv, userEnv);
 });
 
-test("hosted runtime config rejects platform-owned assistant asset-root env overrides from every producer", () => {
+test("hosted runtime config rejects platform-owned asset-root env overrides from every producer", () => {
   const platform = createHostedRuntimePlatformStub();
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       forwardedEnv: {
+        MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/attacker-health-commons",
         MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
         MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
         OPENAI_API_KEY: "secret",
@@ -115,6 +116,7 @@ test("hosted runtime config rejects platform-owned assistant asset-root env over
       resolvedConfig: createHostedRuntimeResolvedConfig(),
       userEnv: {
         ANTHROPIC_API_KEY: "anthropic-secret",
+        MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/attacker-health-commons",
         MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH: "/tmp/attacker-contract.json",
         MURPH_ASSISTANT_SKILLS_ROOT: "/tmp/attacker-skills",
       },
@@ -122,7 +124,7 @@ test("hosted runtime config rejects platform-owned assistant asset-root env over
     platform,
   );
 
-  // The runtime boundary guards code-location-sensitive asset roots for all
+  // The runtime boundary guards code-location-sensitive package roots for all
   // job producers, not only the Cloudflare runner-secret policy.
   assert.deepEqual(normalized.forwardedEnv, { OPENAI_API_KEY: "secret" });
   assert.deepEqual(normalized.userEnv, { ANTHROPIC_API_KEY: "anthropic-secret" });
