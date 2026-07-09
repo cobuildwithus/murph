@@ -1216,10 +1216,17 @@ describe("runHostedAssistantAutomation", () => {
       input.onTraceEvent?.({
         codexThreadId: null,
         rawEvent: {
+          deliveryIntentPresent: true,
+          deliveryOutcomeKind: "queued",
+          finalReplySelected: true,
+          providerRequestOrdinal: 0,
           schema: "murph.assistant-turn-timing.v1",
           type: "assistant.turn.timing",
           turnTimingElapsedMs: 17,
-          turnTimingStage: "usage-recorded",
+          turnTimingDeliveryIntentId: "intent_timing_123",
+          turnTimingProviderRequestElapsedMs: 12,
+          turnTimingSinceProviderResultMs: 5,
+          turnTimingStage: "reply-dispatched",
         },
         updates: [],
       });
@@ -1258,7 +1265,10 @@ describe("runHostedAssistantAutomation", () => {
         redacted: expect.objectContaining({
           schema: "murph.assistant-turn-timing.v1",
           turnTimingElapsedMs: 17,
-          turnTimingStage: "usage-recorded",
+          turnTimingDeliveryIntentId: "intent_timing_123",
+          turnTimingProviderRequestElapsedMs: 12,
+          turnTimingSinceProviderResultMs: 5,
+          turnTimingStage: "reply-dispatched",
         }),
       }),
       expect.objectContaining({

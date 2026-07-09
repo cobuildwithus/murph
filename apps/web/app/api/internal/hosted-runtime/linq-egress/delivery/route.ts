@@ -30,7 +30,7 @@ import {
 } from "@/src/lib/hosted-onboarding/http";
 import {
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
-} from "@/src/lib/hosted-runtime-latency/delivery-link";
+} from "@/src/lib/hosted-runtime-latency/store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -175,7 +175,8 @@ function scheduleHostedIngressLatencyDeliveryLinkAfterResponse(input: {
   try {
     after(task);
   } catch {
-    void task();
+    // Observability must never add delivery-path work when the post-response
+    // scheduler is unavailable.
   }
 }
 

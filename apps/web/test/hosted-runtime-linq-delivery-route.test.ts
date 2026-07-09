@@ -25,7 +25,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   recordHostedLinqRuntimeDeliveryOutcomeTx: mocks.recordHostedLinqRuntimeDeliveryOutcomeTx,
 }));
 
-vi.mock("@/src/lib/hosted-runtime-latency/delivery-link", () => ({
+vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
   linkHostedIngressLatencyTracesToAcceptedLinqDelivery:
     mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
 }));
@@ -204,6 +204,26 @@ describe("hosted runtime Linq delivery route", () => {
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("runtime_attempt_123");
 
     consoleError.mockRestore();
+  });
+
+  it("drops latency linking when post-response scheduling is unavailable", async () => {
+    mocks.after.mockImplementationOnce(() => {
+      throw new Error("Synthetic scheduler failure.");
+    });
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredMailboxItemIds: ["mailbox_item_accepted_1"],
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.linkHostedIngressLatencyTracesToAcceptedLinqDelivery).not.toHaveBeenCalled();
   });
 
   it("rejects malformed thread directness flags", async () => {

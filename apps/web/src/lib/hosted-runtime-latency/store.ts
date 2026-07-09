@@ -12,6 +12,9 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
+import {
+  createHostedLinqDeliverySourceRefLookupKey,
+} from "../hosted-onboarding/linq-observability-identifiers";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
@@ -47,11 +50,17 @@ const HOSTED_INGRESS_LATENCY_MAX_SLOW_LIMIT = 100;
 const HOSTED_INGRESS_LATENCY_IN_FLIGHT_GRACE_MS = 2 * 60_000;
 const HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT = 20_000;
 const HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT = 100_000;
+const HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS = 5 * 60_000;
 
 export interface HostedIngressLatencyWriteResult {
   matchedCount: number;
   recorded: boolean;
   unmatchedCount: number;
+}
+
+export interface HostedIngressLatencyDeliveryLinkResult {
+  matchedCount: number;
+  recorded: boolean;
 }
 
 export interface HostedIngressLatencyDashboardInput {
@@ -397,6 +406,103 @@ export async function recordHostedIngressRuntimeMilestone(input: {
   };
 }
 
+export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input: {
+  authenticatedUserId: string;
+  answeredMailboxItemIds: readonly string[];
+  linqDeliveryId: string;
+  prisma?: HostedIngressLatencyPrismaClient;
+  replyRuntimeAttemptId: string;
+}): Promise<HostedIngressLatencyDeliveryLinkResult> {
+  const authenticatedUserId = requireSafeLatencyIdentifier(
+    input.authenticatedUserId,
+    "Hosted ingress latency delivery-link user id",
+  );
+  const linqDeliveryId = requireSafeLatencyIdentifier(
+    input.linqDeliveryId,
+    "Hosted ingress latency Linq delivery id",
+  );
+  const replyRuntimeAttemptId = requireSafeLatencyIdentifier(
+    input.replyRuntimeAttemptId,
+    "Hosted ingress latency reply runtime attempt id",
+  );
+  const answeredMailboxItemIds = [
+    ...new Set(input.answeredMailboxItemIds.map((mailboxItemId) =>
+      requireSafeLatencyIdentifier(
+        mailboxItemId,
+        "Hosted ingress latency answered mailbox item id",
+      )
+    )),
+  ];
+
+  if (answeredMailboxItemIds.length === 0) {
+    return { matchedCount: 0, recorded: false };
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const candidates = Prisma.join(
+    answeredMailboxItemIds.map((mailboxItemId) =>
+      Prisma.sql`(CAST(${randomUUID()} AS text), CAST(${mailboxItemId} AS text))`
+    ),
+  );
+  const linkedRows = await prisma.$queryRaw<Array<{ mailboxItemId: string }>>(Prisma.sql`
+    INSERT INTO hosted_ingress_latency_trace (
+      id,
+      user_id,
+      source,
+      mailbox_item_id,
+      mailbox_lane,
+      mailbox_lane_seq,
+      runtime_attempt_id,
+      reply_runtime_attempt_id,
+      linq_delivery_id,
+      accepted_at,
+      created_at,
+      updated_at
+    )
+    SELECT
+      candidate.trace_id,
+      mailbox.user_id,
+      'linq',
+      mailbox.id,
+      mailbox.lane,
+      mailbox.lane_seq,
+      ${replyRuntimeAttemptId},
+      ${replyRuntimeAttemptId},
+      ${linqDeliveryId},
+      mailbox.created_at,
+      CURRENT_TIMESTAMP,
+      CURRENT_TIMESTAMP
+    FROM (VALUES ${candidates}) AS candidate(trace_id, mailbox_item_id)
+    INNER JOIN hosted_mailbox_item AS mailbox
+      ON mailbox.id = candidate.mailbox_item_id
+    WHERE mailbox.user_id = ${authenticatedUserId}
+      AND mailbox.lane = 'conversation'
+      AND mailbox.kind = 'conversation.message'
+    ON CONFLICT (mailbox_item_id) DO UPDATE SET
+      runtime_attempt_id = COALESCE(
+        hosted_ingress_latency_trace.runtime_attempt_id,
+        EXCLUDED.runtime_attempt_id
+      ),
+      reply_runtime_attempt_id = EXCLUDED.reply_runtime_attempt_id,
+      linq_delivery_id = EXCLUDED.linq_delivery_id,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE hosted_ingress_latency_trace.user_id = EXCLUDED.user_id
+      AND hosted_ingress_latency_trace.source = EXCLUDED.source
+      AND hosted_ingress_latency_trace.reply_runtime_attempt_id IS NULL
+      AND hosted_ingress_latency_trace.linq_delivery_id IS NULL
+      AND (
+        hosted_ingress_latency_trace.runtime_attempt_id IS NULL
+        OR hosted_ingress_latency_trace.runtime_attempt_id = EXCLUDED.runtime_attempt_id
+      )
+    RETURNING mailbox_item_id AS "mailboxItemId"
+  `);
+
+  return {
+    matchedCount: linkedRows.length,
+    recorded: linkedRows.length > 0,
+  };
+}
+
 export async function readHostedIngressLatencyDashboard(
   input: HostedIngressLatencyDashboardInput = {},
 ): Promise<HostedIngressLatencyDashboard> {
@@ -421,6 +527,7 @@ export async function readHostedIngressLatencyDashboard(
           acceptedAt: true,
           attemptedAt: true,
           deliveredAt: true,
+          sourceRef: true,
         },
       },
       phaseBreakdownJson: true,
@@ -449,24 +556,30 @@ export async function readHostedIngressLatencyDashboard(
   const timingLogRows = runtimeAttemptIds.length === 0
     ? []
     : await prisma.hostedRuntimeLog.findMany({
-        orderBy: { at: "asc" },
+        orderBy: { at: "desc" },
         select: {
           attemptId: true,
           redactedJson: true,
         },
         take: HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT + 1,
         where: {
+          at: {
+            gte: new Date(
+              windowStart.getTime() - HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS,
+            ),
+            lte: new Date(
+              now.getTime() + HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS,
+            ),
+          },
           attemptId: { in: runtimeAttemptIds },
           eventCode: "assistant.automation_detail",
         },
       });
   const timingLogTruncated =
     timingLogRows.length > HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT;
-  const turnTimingIndex = buildHostedTurnTimingIndex(
-    timingLogTruncated
-      ? timingLogRows.slice(0, HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT)
-      : timingLogRows,
-  );
+  const turnTimingIndex = timingLogTruncated
+    ? new Map<string, HostedTurnTimingIndexEntry[]>()
+    : buildHostedTurnTimingIndex(timingLogRows);
   const completedDurations: number[] = [];
   const acceptedToSignalDurations: number[] = [];
   const acceptedToStagedDurations: number[] = [];
@@ -728,6 +841,7 @@ export async function readHostedIngressLatencyDashboard(
     const turnTiming = readUnambiguousHostedTurnTiming(
       turnTimingIndex,
       providerRow?.runtimeAttemptId ?? row.runtimeAttemptId,
+      row.linqDelivery.sourceRef,
       providerRow?.providerRequestOrdinal ?? null,
     );
     if (!turnTiming || providerStartAtMs === null) {
@@ -826,11 +940,12 @@ export async function readHostedIngressLatencyDashboard(
 }
 
 type HostedTurnTimingIndexEntry = {
-  providerRequestElapsedMs: number[];
-  sinceProviderResultMs: number[];
+  providerRequestElapsedMs: number;
+  providerRequestOrdinal: number;
+  sinceProviderResultMs: number;
 };
 
-type HostedTurnTimingIndex = Map<string, HostedTurnTimingIndexEntry>;
+type HostedTurnTimingIndex = Map<string, HostedTurnTimingIndexEntry[]>;
 
 function buildHostedTurnTimingIndex(
   rows: readonly { attemptId: string | null; redactedJson: unknown }[],
@@ -844,17 +959,14 @@ function buildHostedTurnTimingIndex(
     if (!timing) {
       continue;
     }
-    const key = buildHostedTurnTimingIndexKey(row.attemptId, timing.providerRequestOrdinal);
-    const entry = index.get(key) ?? {
-      providerRequestElapsedMs: [],
-      sinceProviderResultMs: [],
-    };
-    if (timing.stage === "provider-result-returned") {
-      entry.providerRequestElapsedMs.push(timing.durationMs);
-    } else {
-      entry.sinceProviderResultMs.push(timing.durationMs);
-    }
-    index.set(key, entry);
+    const key = buildHostedTurnTimingIndexKey(row.attemptId, timing.deliverySourceRef);
+    const entries = index.get(key) ?? [];
+    entries.push({
+      providerRequestElapsedMs: timing.providerRequestElapsedMs,
+      providerRequestOrdinal: timing.providerRequestOrdinal,
+      sinceProviderResultMs: timing.sinceProviderResultMs,
+    });
+    index.set(key, entries);
   }
   return index;
 }
@@ -862,38 +974,37 @@ function buildHostedTurnTimingIndex(
 function readUnambiguousHostedTurnTiming(
   index: HostedTurnTimingIndex,
   runtimeAttemptId: string,
+  deliverySourceRef: string | null,
   providerRequestOrdinal: number | null,
 ): { providerRequestElapsedMs: number; sinceProviderResultMs: number } | null {
-  if (providerRequestOrdinal === null) {
+  if (!deliverySourceRef || providerRequestOrdinal === null) {
     return null;
   }
-  const entry = index.get(
-    buildHostedTurnTimingIndexKey(runtimeAttemptId, providerRequestOrdinal),
+  const entries = index.get(
+    buildHostedTurnTimingIndexKey(runtimeAttemptId, deliverySourceRef),
   );
   if (
-    !entry
-    || entry.providerRequestElapsedMs.length !== 1
-    || entry.sinceProviderResultMs.length !== 1
+    !entries
+    || entries.length !== 1
+    || entries[0]?.providerRequestOrdinal !== providerRequestOrdinal
   ) {
     return null;
   }
-  return {
-    providerRequestElapsedMs: entry.providerRequestElapsedMs[0]!,
-    sinceProviderResultMs: entry.sinceProviderResultMs[0]!,
-  };
+  return entries[0]!;
 }
 
 function buildHostedTurnTimingIndexKey(
   runtimeAttemptId: string,
-  providerRequestOrdinal: number,
+  deliverySourceRef: string,
 ): string {
-  return `${runtimeAttemptId}:${providerRequestOrdinal}`;
+  return `${runtimeAttemptId}\0${deliverySourceRef}`;
 }
 
 function readHostedTurnTimingLog(value: unknown): {
-  durationMs: number;
+  deliverySourceRef: string;
+  providerRequestElapsedMs: number;
   providerRequestOrdinal: number;
-  stage: "provider-result-returned" | "reply-dispatched";
+  sinceProviderResultMs: number;
 } | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -905,41 +1016,48 @@ function readHostedTurnTimingLog(value: unknown): {
   ) {
     return null;
   }
+  if (
+    record.turnTimingStage !== "reply-dispatched"
+    || record.deliveryIntentPresent !== true
+    || record.deliveryOutcomeKind !== "queued"
+    || record.finalReplySelected !== true
+  ) {
+    return null;
+  }
+  const deliveryIntentId = readHostedTurnTimingIdentifier(
+    record.turnTimingDeliveryIntentId,
+  );
+  const deliverySourceRef = createHostedLinqDeliverySourceRefLookupKey(deliveryIntentId);
+  const providerRequestElapsedMs = readHostedTurnTimingSafeInteger(
+    record.turnTimingProviderRequestElapsedMs,
+  );
   const providerRequestOrdinal = readHostedTurnTimingSafeInteger(
     record.providerRequestOrdinal,
   );
-  if (providerRequestOrdinal === null) {
-    return null;
-  }
-  if (
-    record.turnTimingStage === "provider-result-returned"
-    && record.providerOutcomeKind === "succeeded"
-  ) {
-    const durationMs = readHostedTurnTimingSafeInteger(
-      record.turnTimingProviderRequestElapsedMs,
-    );
-    return durationMs === null
-      ? null
-      : { durationMs, providerRequestOrdinal, stage: "provider-result-returned" };
-  }
-  if (
-    record.turnTimingStage === "reply-dispatched"
-    && record.deliveryIntentPresent === true
-    && record.deliveryOutcomeKind === "queued"
-    && record.finalReplySelected === true
-  ) {
-    const durationMs = readHostedTurnTimingSafeInteger(
-      record.turnTimingSinceProviderResultMs,
-    );
-    return durationMs === null
-      ? null
-      : { durationMs, providerRequestOrdinal, stage: "reply-dispatched" };
-  }
-  return null;
+  const sinceProviderResultMs = readHostedTurnTimingSafeInteger(
+    record.turnTimingSinceProviderResultMs,
+  );
+  return deliverySourceRef === null
+      || providerRequestElapsedMs === null
+      || providerRequestOrdinal === null
+      || sinceProviderResultMs === null
+    ? null
+    : {
+        deliverySourceRef,
+        providerRequestElapsedMs,
+        providerRequestOrdinal,
+        sinceProviderResultMs,
+      };
 }
 
 function readHostedTurnTimingSafeInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function readHostedTurnTimingIdentifier(value: unknown): string | null {
+  return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,256}$/u.test(value)
     ? value
     : null;
 }
