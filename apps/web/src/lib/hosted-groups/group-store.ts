@@ -503,7 +503,7 @@ export async function reserveHostedGroupJoinOfferTx(input: {
         id: existing.id,
         messageIdSuffix: existing.messageIdSuffix,
         messageLookupKey: existing.messageLookupKey,
-        offerFingerprint: existing.offerFingerprint,
+        offerFingerprint,
         offerScope: normalizeHostedGroupOfferScope(existing.offerScopeJson),
       };
     }
@@ -525,7 +525,7 @@ export async function reserveHostedGroupJoinOfferTx(input: {
         id: existing.id,
         messageIdSuffix: null,
         messageLookupKey: null,
-        offerFingerprint: existing.offerFingerprint,
+        offerFingerprint,
         offerScope,
       };
     }
@@ -601,6 +601,7 @@ export async function bindHostedGroupJoinOfferTx(input: {
       retryable: false,
     });
   }
+  const offerFingerprint = requireHostedGroupJoinOfferFingerprint(offer.offerFingerprint);
   if (offer.messageLookupKey) {
     if (offer.messageLookupKey === messageLookupKey) {
       return {
@@ -608,7 +609,7 @@ export async function bindHostedGroupJoinOfferTx(input: {
         id: offer.id,
         messageIdSuffix: offer.messageIdSuffix,
         messageLookupKey: offer.messageLookupKey,
-        offerFingerprint: offer.offerFingerprint,
+        offerFingerprint,
         offerScope: normalizeHostedGroupOfferScope(offer.offerScopeJson),
       };
     }
@@ -650,12 +651,14 @@ export async function bindHostedGroupJoinOfferTx(input: {
       && existing.messageLookupKey
       && existing.revokedAt === null
     ) {
+      const existingOfferFingerprint =
+        requireHostedGroupJoinOfferFingerprint(existing.offerFingerprint);
       return {
         groupId: existing.groupId,
         id: existing.id,
         messageIdSuffix: existing.messageIdSuffix,
         messageLookupKey: existing.messageLookupKey,
-        offerFingerprint: existing.offerFingerprint,
+        offerFingerprint: existingOfferFingerprint,
         offerScope: normalizeHostedGroupOfferScope(existing.offerScopeJson),
       };
     }
@@ -667,9 +670,20 @@ export async function bindHostedGroupJoinOfferTx(input: {
     id: input.offerId,
     messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
     messageLookupKey,
-    offerFingerprint: offer.offerFingerprint,
+    offerFingerprint,
     offerScope: normalizeHostedGroupOfferScope(offer.offerScopeJson),
   };
+}
+
+function requireHostedGroupJoinOfferFingerprint(value: string | null): string {
+  const fingerprint = value ? normalizeHostedGroupJoinOfferFingerprint(value) : null;
+  if (fingerprint) return fingerprint;
+  throw hostedOnboardingError({
+    code: "HOSTED_GROUP_JOIN_OFFER_FINGERPRINT_REQUIRED",
+    httpStatus: 409,
+    message: "This group offer is missing its reservation fingerprint.",
+    retryable: true,
+  });
 }
 
 export async function revokeUnboundHostedGroupJoinOfferTx(input: {

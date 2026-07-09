@@ -63,6 +63,7 @@ import {
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
+import { isHostedCallCircleOffersEnabled } from "./call-circle-offer-gate";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
   bindHostedGroupJoinOfferTx,
@@ -81,7 +82,6 @@ import {
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
-const HOSTED_CALL_CIRCLE_OFFERS_ENABLED_ENV = "HOSTED_CALL_CIRCLE_OFFERS_ENABLED";
 
 const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
 
@@ -686,12 +686,6 @@ function renderHostedGroupJoinOfferShareScope(
   return labels.length > 0
     ? `your Murph profile name and ${formatHumanList(labels)}`
     : "your Murph profile name";
-}
-
-function isHostedCallCircleOffersEnabled(
-  source: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return source[HOSTED_CALL_CIRCLE_OFFERS_ENABLED_ENV]?.trim() === "1";
 }
 
 function formatHumanList(values: readonly string[]): string {

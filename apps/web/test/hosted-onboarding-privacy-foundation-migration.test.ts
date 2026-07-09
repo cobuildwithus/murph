@@ -689,10 +689,10 @@ describe("hosted Prisma baseline migration", () => {
       "md5('legacy-hosted-group-join-offer:' || \"id\")",
     );
     expect(hostedGroupJoinOfferFingerprintMigrationSql).toContain(
-      'ALTER COLUMN "offer_fingerprint" SET NOT NULL',
+      'ALTER TABLE "hosted_group_join_offer"\n  ALTER COLUMN "message_lookup_key" DROP NOT NULL',
     );
-    expect(hostedGroupJoinOfferFingerprintMigrationSql).toContain(
-      'ALTER COLUMN "message_lookup_key" DROP NOT NULL',
+    expect(hostedGroupJoinOfferFingerprintMigrationSql).not.toContain(
+      'ALTER COLUMN "offer_fingerprint" SET NOT NULL',
     );
     expect(hostedGroupJoinOfferFingerprintMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_group_join_offer_offer_fingerprint_key"',

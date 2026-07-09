@@ -86,6 +86,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
   afterEach(() => {
     restoreKeyring?.();
     restoreKeyring = null;
+    vi.unstubAllEnvs();
   });
 
   it("accepts a live liked offer without sending a confirmation reply", async () => {
@@ -171,6 +172,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
   });
 
   it("enrolls the liker when the accepted offer activates Call Circle", async () => {
+    vi.stubEnv("HOSTED_CALL_CIRCLE_OFFERS_ENABLED", "1");
     mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue(buildAcceptedJoinOffer({
       featureActivations: ["call-circle.enroll.v0"],
       grantedVaultShareProjectionKinds: ["profile-name.v0"],
@@ -225,7 +227,34 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     }]);
   });
 
+  it("skips Call Circle offer activation when the rollout gate is disabled", async () => {
+    mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue(buildAcceptedJoinOffer({
+      featureActivations: ["call-circle.enroll.v0"],
+      grantedVaultShareProjectionKinds: ["profile-name.v0"],
+      selectedVaultShareProjectionKinds: [],
+    }));
+    const event = parseReactionEvent({
+      reactionType: "like",
+    });
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event,
+      prisma,
+    })).resolves.toEqual({
+      reason: "accepted",
+      status: "accepted",
+    });
+
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
+    expect(mocks.acceptCallCircleOfferEnrollment).not.toHaveBeenCalled();
+    expect(mocks.canAppendCallCircleSetupNotification).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleSetupNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
+  });
+
   it("does not append Call Circle setup when active authority fails after enrollment", async () => {
+    vi.stubEnv("HOSTED_CALL_CIRCLE_OFFERS_ENABLED", "1");
     mocks.acceptHostedGroupJoinOfferTx.mockResolvedValue(buildAcceptedJoinOffer({
       featureActivations: ["call-circle.enroll.v0"],
       grantedVaultShareProjectionKinds: ["profile-name.v0"],

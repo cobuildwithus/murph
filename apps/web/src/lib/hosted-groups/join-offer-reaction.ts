@@ -28,6 +28,7 @@ import {
   acceptHostedGroupJoinOfferTx,
   type HostedGroupFeatureActivationKind,
 } from "./group-store";
+import { isHostedCallCircleOffersEnabled } from "./call-circle-offer-gate";
 
 type HostedGroupJoinOfferReactionSkipReason =
   | "launch_consent_missing"
@@ -176,6 +177,9 @@ async function applyHostedGroupOfferFeatureActivationsTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<CallCircleNotificationAppendResult | null> {
   if (!input.featureActivations.includes("call-circle.enroll.v0")) {
+    return null;
+  }
+  if (!isHostedCallCircleOffersEnabled()) {
     return null;
   }
   await acceptCallCircleOfferEnrollment({

@@ -922,6 +922,27 @@ Focused follow-up verification:
 - `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-response-service.test.ts apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts`
 - `pnpm --filter @murphai/hosted-web typecheck`
 
+## ReviewGPT Follow-Up 33 2026-07-08
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- The new `offer_fingerprint` migration was forward-only but not deploy-skew
+  safe because it immediately made the column non-null. The PR now keeps
+  `HostedGroupJoinOffer.offerFingerprint` nullable, backfills existing rows,
+  and keeps the unique index while requiring only the new reserve/bind path to
+  operate on non-null fingerprints.
+- The Call Circle offer rollout gate only protected new offer posting; already
+  posted Call Circle offers could still activate enrollment and setup asks
+  through the reaction path after the gate was disabled. The environment gate
+  now lives in a shared helper used by both offer posting and reaction-side
+  Call Circle activation. Group joining remains accepted, but Call Circle
+  participant creation and setup notifications are skipped while disabled.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-group-store.test.ts apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+
 ## ReviewGPT Follow-Up 4 2026-07-07
 
 Accepted findings from the fourth PR ReviewGPT pass:

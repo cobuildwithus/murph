@@ -1148,7 +1148,7 @@ model HostedGroup {
 model HostedGroupJoinOffer {
   id                  String      @id
   groupId             String      @map("group_id")
-  offerFingerprint    String      @unique @map("offer_fingerprint")
+  offerFingerprint    String?     @unique @map("offer_fingerprint")
   messageLookupKey    String?     @unique @map("message_lookup_key")
   messageIdSuffix     String?     @map("message_id_suffix")
   offerScopeJson      Json        @map("projection_kinds_json")

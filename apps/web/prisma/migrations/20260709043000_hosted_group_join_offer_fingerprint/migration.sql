@@ -6,7 +6,6 @@ SET "offer_fingerprint" = md5('legacy-hosted-group-join-offer:' || "id")
 WHERE "offer_fingerprint" IS NULL;
 
 ALTER TABLE "hosted_group_join_offer"
-  ALTER COLUMN "offer_fingerprint" SET NOT NULL,
   ALTER COLUMN "message_lookup_key" DROP NOT NULL;
 
 CREATE UNIQUE INDEX "hosted_group_join_offer_offer_fingerprint_key"
