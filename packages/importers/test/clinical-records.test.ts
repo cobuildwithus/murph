@@ -217,6 +217,69 @@ describe("buildClinicalImportPlan", () => {
     ]);
   });
 
+  it("rejects ambiguous vital CodeableConcepts", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "Observation",
+          relativePath: "Observation/page-1.json",
+          count: 2,
+        },
+      ],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            resourceType: "Observation",
+            id: "bp-ambiguous-top-level",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            code: {
+              coding: [
+                { system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" },
+                { system: "http://loinc.org", code: "8462-4", display: "Diastolic blood pressure" },
+              ],
+            },
+            valueQuantity: { value: 128, unit: "mmHg" },
+          },
+          {
+            resourceType: "Observation",
+            id: "bp-ambiguous-component",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:01:00.000Z",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "85354-9", display: "Blood pressure panel" }],
+            },
+            component: [
+              {
+                code: {
+                  coding: [
+                    { system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" },
+                    { system: "http://loinc.org", code: "8462-4", display: "Diastolic blood pressure" },
+                  ],
+                },
+                valueQuantity: { value: 128, unit: "mmHg" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toEqual([
+      expect.objectContaining({
+        resourceId: "bp-ambiguous-top-level",
+        reason: "vital code is ambiguous",
+      }),
+      expect.objectContaining({
+        resourceId: "bp-ambiguous-component",
+        reason: "vital code is ambiguous",
+      }),
+    ]);
+  });
+
   it("requires trusted lab category and result status coding systems", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
@@ -2094,13 +2157,13 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
-  it("does not import global no-known allergies with contradictory canonical allergy statuses", async () => {
+  it("does not import global no-known allergies with contradictory or mixed allergy statuses", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
           resourceType: "AllergyIntolerance",
           relativePath: "AllergyIntolerance/page-1.json",
-          count: 2,
+          count: 4,
         },
       ],
       pages: {
@@ -2150,6 +2213,51 @@ describe("buildClinicalImportPlan", () => {
               coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
             },
           },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-negative-local-clinical-inactive",
+            recordedDate: "2026-07-02T09:10:00.000Z",
+            clinicalStatus: {
+              coding: [
+                { system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" },
+                { system: "urn:vendor:allergy-status", code: "inactive" },
+              ],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+          },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-negative-local-verification-refuted",
+            recordedDate: "2026-07-02T09:15:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [
+                {
+                  system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                  code: "confirmed",
+                },
+                {
+                  system: "urn:vendor:allergy-status",
+                  code: "refuted",
+                },
+              ],
+            },
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+          },
         ],
       },
     });
@@ -2165,6 +2273,14 @@ describe("buildClinicalImportPlan", () => {
         }),
         expect.objectContaining({
           resourceId: "allergy-negative-active-inactive",
+          reason: "allergy status is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-negative-local-clinical-inactive",
+          reason: "allergy status is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-negative-local-verification-refuted",
           reason: "allergy status is not importable",
         }),
       ]),

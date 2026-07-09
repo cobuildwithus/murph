@@ -66,6 +66,10 @@ type VitalDefinition = {
   title: string;
   unit: string;
 };
+type VitalConceptDecision =
+  | { status: "ambiguous" }
+  | { status: "matched"; vital: VitalDefinition }
+  | { status: "unmatched" };
 
 const VITAL_LOINC_BY_CODE = new Map<string, VitalDefinition>([
   ["8480-6", { facet: "bp-systolic", metric: "systolic-blood-pressure", title: "Systolic blood pressure", unit: "mmHg" }],
@@ -424,7 +428,12 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   const emittedVitalFacets = new Set<string>();
 
   for (const component of components) {
-    const vital = vitalForCodeableConcept(component.code);
+    const vitalDecision = vitalDecisionForCodeableConcept(component.code);
+    if (vitalDecision.status === "ambiguous") {
+      unsupported.push(unsupportedResource(context, "vital code is ambiguous"));
+      continue;
+    }
+    const vital = vitalDecision.status === "matched" ? vitalDecision.vital : null;
     if (!vital && codeableConceptHasCodeWithUnexpectedSystem(component.code, FHIR_SYSTEM_LOINC, VITAL_LOINC_CODES)) {
       unsupported.push(unsupportedResource(context, "vital coding system is not importable"));
       continue;
@@ -478,7 +487,11 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     return { candidates, unsupported };
   }
 
-  const vital = vitalForCodeableConcept(context.resource.code);
+  const vitalDecision = vitalDecisionForCodeableConcept(context.resource.code);
+  if (vitalDecision.status === "ambiguous") {
+    return unsupportedOnly(context, "vital code is ambiguous");
+  }
+  const vital = vitalDecision.status === "matched" ? vitalDecision.vital : null;
   if (!vital && codeableConceptHasCodeWithUnexpectedSystem(context.resource.code, FHIR_SYSTEM_LOINC, VITAL_LOINC_CODES)) {
     return unsupportedOnly(context, "vital coding system is not importable");
   }
@@ -955,14 +968,25 @@ function extractFhirResources(
   return resources;
 }
 
-function vitalForCodeableConcept(value: CodeableConcept | undefined): VitalDefinition | null {
+function vitalDecisionForCodeableConcept(value: CodeableConcept | undefined): VitalConceptDecision {
+  const vitalDefinitionsByFacet = new Map<string, VitalDefinition>();
   for (const coding of codingsForCodeableConcept(value)) {
-    if (coding.system === FHIR_SYSTEM_LOINC && coding.code && VITAL_LOINC_BY_CODE.has(coding.code)) {
-      return VITAL_LOINC_BY_CODE.get(coding.code) ?? null;
+    const code = coding.code?.toLowerCase();
+    const vital = coding.system === FHIR_SYSTEM_LOINC && code ? VITAL_LOINC_BY_CODE.get(code) : undefined;
+    if (vital) {
+      vitalDefinitionsByFacet.set(vital.facet, vital);
     }
   }
 
-  return null;
+  if (vitalDefinitionsByFacet.size === 0) {
+    return { status: "unmatched" };
+  }
+  if (vitalDefinitionsByFacet.size > 1) {
+    return { status: "ambiguous" };
+  }
+
+  const vital = vitalDefinitionsByFacet.values().next().value;
+  return vital === undefined ? { status: "unmatched" } : { status: "matched", vital };
 }
 
 function isLaboratoryObservation(resource: Observation): boolean {
@@ -1015,12 +1039,12 @@ function isNoKnownAllergyConceptText(value: string | undefined): boolean {
 
 function hasImportableAllergyStatus(resource: AllergyIntolerance): boolean {
   return (
-    codeableConceptHasOnlyImportableSystemCodes(
+    codeableConceptHasOnlyImportableCodings(
       resource.clinicalStatus,
       FHIR_SYSTEM_ALLERGY_CLINICAL_STATUS,
       IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES,
     )
-    && codeableConceptHasOnlyImportableSystemCodes(
+    && codeableConceptHasOnlyImportableCodings(
       resource.verificationStatus,
       FHIR_SYSTEM_ALLERGY_VERIFICATION_STATUS,
       IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES,
@@ -1053,15 +1077,15 @@ function codeableConceptHasSystemCode(
   });
 }
 
-function codeableConceptHasOnlyImportableSystemCodes(
+function codeableConceptHasOnlyImportableCodings(
   value: CodeableConcept | undefined,
   system: string,
   codes: ReadonlySet<string>,
 ): boolean {
-  const codings = codingsForCodeableConcept(value).filter((coding) => coding.system === system);
+  const codings = codingsForCodeableConcept(value);
   return codings.length > 0 && codings.every((coding) => {
     const code = coding.code?.toLowerCase();
-    return code !== undefined && codes.has(code);
+    return coding.system === system && code !== undefined && codes.has(code);
   });
 }
 
