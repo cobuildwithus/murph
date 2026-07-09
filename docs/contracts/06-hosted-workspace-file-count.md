@@ -163,7 +163,7 @@ landing; record the chosen posture here so the decision is reviewable.
   marker. The steady-state file bound for the provider-cleanup family is
   asserted by the provider-cleanup unit tests.
 
-- `bank/habitat/*.md` (`murph.habitat-frontmatter.v1`) is canonical product
+- `bank/habitat/*.md` (`murph.frontmatter.habitat.v1`) is canonical product
   truth included in hosted workspace snapshots. It stores one optional Markdown
   document per versioned habitat catalog aspect, and a habitat save creates at
   most one aspect file before later saves overwrite that same document. File
