@@ -345,6 +345,9 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
 
   return {
     channel: normalizeAutomationRouteChannel(object.channel),
+    ...(object.currentRouteSnapshot === true
+      ? { currentRouteSnapshot: true }
+      : {}),
     deliverySource: normalizeAutomationRouteDeliverySource(object.deliverySource),
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),
@@ -531,6 +534,9 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
 function buildAutomationRouteFrontmatter(route: AutomationRoute): FrontmatterObject {
   return {
     channel: route.channel,
+    ...(route.currentRouteSnapshot === true
+      ? { currentRouteSnapshot: true }
+      : {}),
     deliverySource: route.deliverySource ?? null,
     deliveryTarget: route.deliveryTarget,
     identityId: route.identityId,

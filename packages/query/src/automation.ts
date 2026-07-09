@@ -275,6 +275,9 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
   const threadIsDirect = normalizeOptionalNullableRouteBoolean(object.threadIsDirect);
   return {
     channel: requireStringValue(object.channel, "route.channel"),
+    ...(object.currentRouteSnapshot === true
+      ? { currentRouteSnapshot: true }
+      : {}),
     deliverySource: normalizeAutomationRouteDeliverySource(object.deliverySource),
     deliveryTarget: normalizeNullableRouteString(object.deliveryTarget),
     identityId: normalizeNullableRouteString(object.identityId),

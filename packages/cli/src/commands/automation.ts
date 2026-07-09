@@ -266,6 +266,21 @@ function buildAutomationRouteFromOptions(
     resolveAssistantDeliveryRouteWithCurrentRoute(explicit, currentRoute),
   );
 
+  if (
+    currentRoute &&
+    explicit.deliveryTarget === null &&
+    explicit.identityId === null &&
+    explicit.participantId === null &&
+    explicit.threadId === null &&
+    parsed.deliveryTarget === normalizeAutomationRouteOption(currentRoute.deliveryTarget) &&
+    parsed.channel === normalizeAutomationRouteOption(currentRoute.channel)
+  ) {
+    return {
+      ...parsed,
+      currentRouteSnapshot: true,
+    };
+  }
+
   return parsed;
 }
 

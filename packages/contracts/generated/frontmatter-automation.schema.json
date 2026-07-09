@@ -245,6 +245,16 @@
               "type": "null"
             }
           ]
+        },
+        "currentRouteSnapshot": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

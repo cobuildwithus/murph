@@ -146,6 +146,7 @@ test("automation save preserves hosted iMessage current-route continuity locator
       automation: {
         route: {
           channel: string;
+          currentRouteSnapshot?: boolean | null;
           deliveryTarget: string | null;
           identityId: string | null;
           participantId: string | null;
@@ -164,6 +165,7 @@ test("automation save preserves hosted iMessage current-route continuity locator
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.equal(shown.envelope.data?.automation?.route.channel, "linq");
+    assert.equal(shown.envelope.data?.automation?.route.currentRouteSnapshot, true);
     assert.equal(
       shown.envelope.data?.automation?.route.deliveryTarget,
       "linq_chat_real",
@@ -259,6 +261,7 @@ test("automation save enriches an explicit same-conversation target with blinded
       automation: {
         route: {
           channel: string;
+          currentRouteSnapshot?: boolean | null;
           deliveryTarget: string | null;
           identityId: string | null;
           participantId: string | null;
@@ -277,6 +280,10 @@ test("automation save enriches an explicit same-conversation target with blinded
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.equal(shown.envelope.data?.automation?.route.channel, "linq");
+    assert.equal(
+      shown.envelope.data?.automation?.route.currentRouteSnapshot,
+      undefined,
+    );
     assert.equal(
       shown.envelope.data?.automation?.route.deliveryTarget,
       "linq_chat_real",

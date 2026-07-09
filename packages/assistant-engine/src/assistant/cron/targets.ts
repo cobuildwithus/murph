@@ -44,6 +44,7 @@ export async function resolveAssistantCronTargetDefaults<
   return {
     ...input,
     channel: resolvedRoute.channel ?? undefined,
+    currentRouteSnapshot: input.currentRouteSnapshot === true ? true : undefined,
     deliverySource: input.deliverySource ?? undefined,
     identityId: resolvedRoute.identityId ?? undefined,
     participantId: resolvedRoute.participantId ?? undefined,
@@ -74,6 +75,7 @@ export function validateAssistantCronDeliveryTarget(
 
   const normalizedRoute = stripPrivateAssistantRoutePlaceholders({
     channel,
+    currentRouteSnapshot: input.currentRouteSnapshot === true ? true : undefined,
     identityId: normalizeNullableString(input.identityId),
     participantId: normalizeNullableString(input.participantId),
     threadId: normalizeNullableString(input.threadId),
@@ -122,6 +124,9 @@ export function validateAssistantCronDeliveryTarget(
   return buildAssistantCronTarget({
     ...input,
     channel,
+    currentRouteSnapshot: normalizedRoute.currentRouteSnapshot === true
+      ? true
+      : undefined,
     deliverySource,
     identityId,
     participantId,
@@ -148,6 +153,9 @@ export function buildCanonicalAutomationRoute(
 ): AutomationRoute {
   return {
     channel: target.channel ?? '',
+    ...(target.currentRouteSnapshot === true
+      ? { currentRouteSnapshot: true }
+      : {}),
     deliverySource: target.deliverySource,
     deliveryTarget: target.deliveryTarget,
     identityId: target.identityId,
@@ -257,7 +265,11 @@ function resolveAssistantCronLinqCurrentRouteBindingTarget(
   target: AssistantCronTarget,
 ): string | null {
   const deliveryTarget = normalizeNullableString(target.deliveryTarget)
-  if (target.channel !== 'linq' || !deliveryTarget) {
+  if (
+    target.channel !== 'linq' ||
+    !deliveryTarget ||
+    target.currentRouteSnapshot !== true
+  ) {
     return null
   }
 
