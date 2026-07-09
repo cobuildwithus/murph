@@ -776,6 +776,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   let hostAbortObserved = false;
   let canonicalWritePersistenceDepth = 0;
   let hostAbortDuringCanonicalWritePersistence = false;
+  const abortRuntimeFromObservedHostAbort = () => {
+    if (runtimeAbortController.signal.aborted || !hostAbortObserved) {
+      return;
+    }
+    runtimeAbortController.abort(hostAbortReason);
+  };
   const withCanonicalWritePersistence = async <T>(
     run: () => Promise<T>,
   ): Promise<T> => {
@@ -784,6 +790,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       return await run();
     } finally {
       canonicalWritePersistenceDepth -= 1;
+      if (canonicalWritePersistenceDepth === 0) {
+        abortRuntimeFromObservedHostAbort();
+      }
     }
   };
   const abortFromHost = () => {
@@ -794,8 +803,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     hostAbortObserved = true;
     if (canonicalWritePersistenceDepth > 0) {
       hostAbortDuringCanonicalWritePersistence = true;
+      return;
     }
-    runtimeAbortController.abort(hostAbortReason);
+    abortRuntimeFromObservedHostAbort();
   };
   if (hostAbortSignal?.aborted) {
     abortFromHost();
