@@ -395,7 +395,7 @@ test("Junction omitted timeseries config defaults to compact resources only", as
   assert.equal(importedSnapshots.length, 1);
 });
 
-test("Junction stale dense timeseries config is accepted and dropped", async () => {
+test("Junction stale dense timeseries config falls back to compact daily defaults", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -416,17 +416,38 @@ test("Junction stale dense timeseries config is accepted and dropped", async () 
             slug: "garmin",
             name: "Garmin",
             status: "connected",
-            resource_availability: {
-              activity: true,
-              steps: true,
-              heartrate: true,
-            },
+            resource_availability: Object.fromEntries([
+              "activity",
+              ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+              "steps",
+              "heartrate",
+            ].map((resource) => [resource, true])),
           }],
         });
       }
 
       if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
         return createJsonResponse({ data: [] });
+      }
+
+      const timeseriesResource = new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
+      if (timeseriesResource) {
+        assert.ok(
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          `Unexpected default timeseries resource: ${timeseriesResource}`,
+        );
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [{
+                timestamp: "2026-04-02T12:00:00.000Z",
+                unit: timeseriesResource === "blood_oxygen" ? "%" : "count",
+                value: timeseriesResource === "blood_oxygen" ? 97 : 24,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
       }
 
       throw new Error(`Unexpected request: ${url}`);
@@ -444,13 +465,30 @@ test("Junction stale dense timeseries config is accepted and dropped", async () 
         return { imported: true };
       },
     }),
-    createJob("reconcile", {
+    createJob("backfill", {
       windowStart: "2026-04-02T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
-  assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
+  const requestedTimeseriesResources = requests
+    .map((url) => new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1])
+    .filter((resource): resource is string => Boolean(resource));
+
+  assert.deepEqual(
+    [...new Set(requestedTimeseriesResources)].sort(),
+    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
+  );
+  assert.equal(
+    requests.every((url) =>
+      !url.includes("heartrate") &&
+      !url.includes("steps") &&
+      !url.includes("distance") &&
+      !url.includes("calories_active") &&
+      !url.includes("weight")
+    ),
+    true,
+  );
   assert.equal(importedSnapshots.length, 1);
 });
 

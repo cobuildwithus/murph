@@ -90,6 +90,7 @@ describe("prepareAssistantDirectCliEnv", () => {
       [HOSTED_CLI_BRIDGE_URL_ENV]: "http://127.0.0.1:43123/",
       [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "/tmp/murph-home/.codex-hosted/bin/codex",
       [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: path.join("/tmp", "stale-skills"),
+      MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/app/node_modules/@murphai/health-commons",
       MURPH_ASSISTANT_ACTIVE_SESSION_ID: "session_hosted_active",
       MURPH_ASSISTANT_ACTIVE_TURN_ID: "turn_hosted_active",
       MURPH_PRODUCT_BASE_URL: "https://app.example.test",
@@ -134,6 +135,9 @@ describe("prepareAssistantDirectCliEnv", () => {
     );
     expect(env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]).toBe(
       "/tmp/murph-home/.codex-hosted/bin/codex",
+    );
+    expect(env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT).toBe(
+      "/app/node_modules/@murphai/health-commons",
     );
     expect(env.OPENAI_API_KEY).toBe("openai-secret");
     expect(env.ALL_PROXY).toBe("http://platform-all-proxy.example.test:8080");

@@ -279,8 +279,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.97')
-    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.97')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.98')
+    expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.98')
     expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
       'incur@0.4.5: patches/incur@0.4.5.patch',
     )
@@ -326,6 +326,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('does **not** run the local Codex')
+    const completionWorkflow = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
+      'utf8',
+    )
+    expect(completionWorkflow).toContain('not complete until the PR branch has no merge conflicts')
+    expect(completionWorkflow).toContain('fetch the latest `main`')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)

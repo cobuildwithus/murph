@@ -2343,8 +2343,7 @@ describe("cloudflare worker routes", () => {
         failure_count: 0,
         wake_at: null,
       });
-      expect(alarms).toContain("deleted");
-      expect(alarms).not.toContain(runtimeNextWakeAt);
+      expect(alarms).toEqual([]);
     });
 
     it("sends activation diagnostics for an active fence wake", async () => {

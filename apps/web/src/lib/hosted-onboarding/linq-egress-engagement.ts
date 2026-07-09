@@ -15,6 +15,9 @@ import {
 import {
   readActiveHostedMemberAccess,
 } from "./member-access";
+import {
+  readHostedMemberRoutingPrivateState,
+} from "./member-private-codecs";
 import { normalizePhoneNumber } from "./phone";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
@@ -25,6 +28,13 @@ type HostedLinqLegacyCurrentInboundProof = {
   occurredAt: string;
   replyToMessageId: string;
   target: string;
+};
+export type HostedLinqRuntimeEgressTargetOverride = {
+  target: string;
+  targetKind: "thread";
+};
+export type HostedLinqRuntimeEgressAssertionResult = {
+  targetOverride: HostedLinqRuntimeEgressTargetOverride | null;
 };
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
@@ -62,13 +72,15 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
+  homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   memberId: string;
   prisma: HostedLinqEngagementClient;
+  replyToMessageId?: string | null;
   routeAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: string | null;
-}): Promise<void> {
+}): Promise<HostedLinqRuntimeEgressAssertionResult> {
   const routeAuthority = normalizeHostedLinqRouteAuthorityForEgress({
     memberId: input.memberId,
     routeAuthority: input.routeAuthority ?? null,
@@ -83,6 +95,9 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       retryable: false,
     });
   }
+  if (input.routeAuthority && !routeAuthority) {
+    throwHostedLinqRouteAuthorityMismatch();
+  }
 
   if (normalizeNullable(input.targetKind) === "participant") {
     await assertHostedLinqSignupWelcomeParticipantEgressAuthority({
@@ -94,7 +109,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       target: input.target,
       targetKind: input.targetKind,
     });
-    return;
+    return { targetOverride: null };
   }
 
   if (routeAuthority) {
@@ -102,7 +117,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       memberId: input.memberId,
       prisma: input.prisma,
     });
-    return;
+    return { targetOverride: null };
   }
 
   if (legacyCurrentInboundMatchesRequestedTarget({
@@ -112,22 +127,31 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     // Temporary CF-rollout follow-up compatibility: old warm runner bundles
     // sent currentInbound before external thread routeAuthority existed. Delete
     // this with the egress authority callback route after that rollout window is gone.
-    return;
+    return { targetOverride: null };
   }
 
-  await assertHostedMemberLinqRouteMatchesEgressTarget({
+  return await assertHostedMemberLinqRouteMatchesEgressTarget({
     chatId: input.target,
+    currentInbound: input.currentInbound ?? null,
     memberId: input.memberId,
     prisma: input.prisma,
+    recipientPhone: input.directRecipientPhoneNumber,
+    replyToMessageId: input.replyToMessageId,
+    targetKind: input.targetKind,
+    homeRouteFallbackAllowed: input.homeRouteFallbackAllowed === true,
   });
 }
 
 async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   chatId?: string | null;
+  currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
+  homeRouteFallbackAllowed: boolean;
   memberId: string;
   prisma: HostedLinqEngagementClient;
   recipientPhone?: string | null;
-}): Promise<void> {
+  replyToMessageId?: string | null;
+  targetKind?: string | null;
+}): Promise<HostedLinqRuntimeEgressAssertionResult> {
   const chatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.chatId);
   const recipientPhoneLookupKeys =
     createHostedPhoneLookupKeyReadCandidates(input.recipientPhone);
@@ -138,10 +162,17 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   const routing = await input.prisma.hostedMemberRouting.findUnique({
     where: { memberId: input.memberId },
     select: {
+      linqChatIdEncrypted: true,
       linqChatLookupKey: true,
+      linqRecipientPhoneEncrypted: true,
       linqRecipientPhoneLookupKey: true,
+      memberId: true,
+      pendingLinqChatIdEncrypted: true,
       pendingLinqChatLookupKey: true,
+      pendingLinqParticipantContactEncrypted: true,
+      pendingLinqRecipientPhoneEncrypted: true,
       pendingLinqRecipientPhoneLookupKey: true,
+      telegramUserIdEncrypted: true,
     },
   });
 
@@ -152,28 +183,60 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
     routing.linqChatLookupKey
     && chatLookupKeys.includes(routing.linqChatLookupKey)
   ) {
-    return;
+    return { targetOverride: null };
   }
   if (
     routing.pendingLinqChatLookupKey
     && chatLookupKeys.includes(routing.pendingLinqChatLookupKey)
   ) {
-    return;
+    return { targetOverride: null };
   }
   if (
     routing.linqRecipientPhoneLookupKey
     && recipientPhoneLookupKeys.includes(routing.linqRecipientPhoneLookupKey)
   ) {
-    return;
+    return { targetOverride: null };
   }
   if (
     routing.pendingLinqRecipientPhoneLookupKey
     && recipientPhoneLookupKeys.includes(routing.pendingLinqRecipientPhoneLookupKey)
   ) {
-    return;
+    return { targetOverride: null };
+  }
+
+  if (canResolveHostedLinqHomeRouteOverride(input)) {
+    const privateState = await readHostedMemberRoutingPrivateState(routing, input.prisma);
+    const homeChatId = normalizeNullable(privateState.linqChatId);
+    if (homeChatId) {
+      return {
+        targetOverride: {
+          target: homeChatId,
+          targetKind: "thread",
+        },
+      };
+    }
   }
 
   throwHostedLinqRouteAuthorityMismatch();
+}
+
+function canResolveHostedLinqHomeRouteOverride(input: {
+  chatId?: string | null;
+  currentInbound?: HostedLinqLegacyCurrentInboundProof | null;
+  homeRouteFallbackAllowed?: boolean | null;
+  recipientPhone?: string | null;
+  replyToMessageId?: string | null;
+  targetKind?: string | null;
+}): boolean {
+  const targetKind = normalizeNullable(input.targetKind);
+  return (
+    input.homeRouteFallbackAllowed === true
+    && normalizeNullable(input.chatId) !== null
+    && input.currentInbound === null
+    && normalizeNullable(input.recipientPhone) === null
+    && normalizeNullable(input.replyToMessageId) === null
+    && (targetKind === null || targetKind === "explicit" || targetKind === "thread")
+  );
 }
 
 function legacyCurrentInboundMatchesRequestedTarget(input: {

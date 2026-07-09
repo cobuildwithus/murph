@@ -17,7 +17,7 @@ export {
   readPreferencesDocument,
   resolvePreferencesDocumentPath,
 } from "./preferences.ts";
-export type { PreferencesDocumentSnapshot } from "./preferences.ts";
+export type { AssistantPreferencesUpdate, PreferencesDocumentSnapshot } from "./preferences.ts";
 export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,
@@ -88,6 +88,7 @@ export {
   addActivitySession,
   addBodyMeasurement,
   addCapture,
+  addCaptureWithLookup,
   addMeasurement,
   addMeal,
   appendImmunization,
@@ -122,6 +123,7 @@ export {
   stopRegimen,
   unlinkJournalEventIds,
   unlinkJournalStreams,
+  updateAssistantPreferences,
   updateWorkoutUnitPreferences,
   updateWearablePreferences,
   updateExperiment,
@@ -279,6 +281,7 @@ export {
   buildNoteEventDraft,
   buildObservationEventDraft,
   buildPublicEventRecord,
+  findCaptureByLookup,
   findEventByExternalRef,
   buildSleepSessionEventDraft,
   buildSupplementIntakeEventDraft,
@@ -291,9 +294,12 @@ export type {
   AddBodyMeasurementResult,
   AddCaptureInput,
   AddCaptureResult,
+  AddCaptureWithLookupInput,
+  AddCaptureWithLookupResult,
   AddMeasurementInput,
   AddMeasurementResult,
   EventDraftByKind,
+  FindCaptureByLookupResult,
   FindEventByExternalRefInput,
   PublicEventDraft,
   PublicWritableEventKind,

@@ -469,12 +469,15 @@ function resolveHostedCliBridgeCurrentDeliveryRoute(
   const identityId = normalizeAssistantRouteString(value?.identityId);
   const participantId = normalizeAssistantRouteString(value?.participantId);
   const threadId = normalizeAssistantRouteString(value?.threadId);
+  const threadIsDirect =
+    typeof value?.threadIsDirect === "boolean" ? value.threadIsDirect : null;
   return {
     channel,
     deliveryTarget,
     ...(identityId ? { identityId } : {}),
     ...(participantId ? { participantId } : {}),
     ...(threadId ? { threadId } : {}),
+    ...(threadIsDirect !== null ? { threadIsDirect } : {}),
   };
 }
 

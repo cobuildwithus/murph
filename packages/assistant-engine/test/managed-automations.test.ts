@@ -507,6 +507,17 @@ describe('applyMurphManagedAutomations', () => {
       title: 'Weekly health digest',
     })
     expect(digestRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.digest)
+    expect(digestRecord?.tags).toContain('murph-managed:weekly-health-digest')
+    expect(digestRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(digestRecord?.instructions).toContain('still remember ten seconds after reading')
+    expect(digestRecord?.instructions).toContain('New data alone is not substance')
+    expect(digestRecord?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
+    expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
+    expect(digestRecord?.instructions).toContain('what was probably noise')
+    expect(digestRecord?.instructions).toContain('Never restate single-day metric values')
+    expect(digestRecord?.instructions).toContain(
+      '{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}',
+    )
 
     const insightRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
@@ -666,10 +677,18 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.instructions).toContain('do not create one lane per tag')
     expect(researchScoutRecord?.instructions).toContain('vault-cli research scout-batch-payload-schema --format json')
     expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout-batch` once')
+    expect(researchScoutRecord?.instructions).toContain('If none exists, suppress the scheduled message without calling `vault-cli research scout-batch`')
     expect(researchScoutRecord?.instructions).not.toContain('Use `vault-cli research scout` once')
     expect(researchScoutRecord?.instructions).toContain('`topics`, `biomarkers`, `behaviors`, `supplements`, `conditionsOrConcerns`, `goals`, and `activeExperiments`')
     expect(researchScoutRecord?.instructions).toContain('do not use a generic `tags` field')
     expect(researchScoutRecord?.instructions).toContain('Example body: `{"lanes":[{"label":"evening light and sleep"')
+    expect(researchScoutRecord?.instructions).toContain('late meals and glucose')
+    expect(researchScoutRecord?.instructions).toContain('zone 2 training and resting heart rate')
+    expect(researchScoutRecord?.instructions).toContain('device and measurement meta-commentary')
+    expect(researchScoutRecord?.instructions).toContain('a trend in their own wearable data')
+    expect(researchScoutRecord?.instructions).toContain('ignore a metric their own data shows is noisy for them')
+    expect(researchScoutRecord?.instructions).not.toContain('wearable hrv reliability')
+    expect(researchScoutRecord?.instructions).not.toContain('wearable tracking')
     expect(researchScoutRecord?.instructions).toContain('YYYY-MM-DD dates or full ISO timestamps are accepted')
     expect(researchScoutRecord?.instructions).toContain('cap `--maxCandidatesPerLane` at 8')
     expect(researchScoutRecord?.instructions).not.toContain('capping `--maxCandidates` at 5')
@@ -682,6 +701,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.instructions).toContain('Recent conversation and automation/regimen changes are veto context')
     expect(researchScoutRecord?.instructions).toContain('stale vault tags')
     expect(researchScoutRecord?.instructions).toContain('incremental value beyond known basics')
+    expect(researchScoutRecord?.instructions).toContain('still remember the point ten seconds after reading')
+    expect(researchScoutRecord?.instructions).toContain('Hard provenance gate: if the note could have been written without this run\'s retrieved sources')
+    expect(researchScoutRecord?.instructions).toContain('Skipping is the expected outcome')
     expect(researchScoutRecord?.instructions).toContain('Do not reuse the provider candidate\'s `actionOrQuestion` as advice')
     expect(researchScoutRecord?.instructions).toContain('Automatically skip generic health news, obvious habit advice')
     expect(researchScoutRecord?.instructions).toContain('`do more support work`, `be consistent`, `sleep better`, `eat protein`, `manage stress`')
@@ -911,6 +933,62 @@ describe('applyMurphManagedAutomations', () => {
     expect(productUpdatesRecord?.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
     expect(productUpdatesRecord?.instructions).toContain('Do not append again and do not switch kinds')
     expect(productUpdatesRecord?.instructions).not.toContain('OLD weekly product updates instructions')
+  })
+
+  it('removes the legacy require-send tag from an existing active weekly digest', async () => {
+    const existingSchedule = { kind: 'cron', expression: '0 9 * * 1' } as const
+    managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      instructions: 'OLD weekly digest instructions with require-send behavior.',
+      route: defaultRoute,
+      schedule: existingSchedule,
+      slug: 'weekly-health-digest',
+      status: 'active',
+      summary: 'A weekly summary of your recent health data.',
+      tags: [
+        'assistant',
+        'scheduled',
+        'murph-managed',
+        'murph-managed:weekly-health-digest',
+        ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
+      ],
+      title: 'Weekly health digest',
+    })
+
+    const digestSeed = MURPH_MANAGED_AUTOMATIONS.find((seed) =>
+      seed.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID
+    )
+    if (!digestSeed) {
+      throw new Error('Expected weekly health digest managed seed to exist.')
+    }
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-20T12:00:00.000Z'),
+      seeds: [digestSeed],
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 0,
+      skipped: 0,
+      updated: 1,
+    })
+    const digestRecord = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+    )
+    expect(digestRecord?.schedule).toBe(existingSchedule)
+    expect(digestRecord?.tags).toEqual([
+      'assistant',
+      'scheduled',
+      'murph-managed',
+      'murph-managed:weekly-health-digest',
+    ])
+    expect(digestRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(digestRecord?.instructions).toContain('On this scheduled weekly run')
+    expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
+    expect(digestRecord?.instructions).not.toContain('OLD weekly digest instructions')
   })
 
   it('preserves an existing device activity cadence on managed reconciliation', async () => {

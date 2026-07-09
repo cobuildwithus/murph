@@ -44,10 +44,6 @@ import {
   buildRunnerWriteFenceValidationRejectedDetails,
 } from "./diagnostics.js";
 import {
-  RunnerAlarmCoordinator,
-  readRunnerNextAlarmAt,
-} from "./alarm-coordinator.js";
-import {
   createWorkspaceSnapshotSessionService,
   type WorkspaceSnapshotSessionService,
 } from "./workspace-snapshot-sessions.js";
@@ -92,7 +88,6 @@ export class HostedUserRunner {
       env,
       runnerRuntimeEnvSource,
     });
-    const alarmCoordinator = new RunnerAlarmCoordinator(state);
     const runtimeInvocation = new RuntimeInvocationService({
       env,
       runnerContainerNamespace,
@@ -105,7 +100,6 @@ export class HostedUserRunner {
       readHostedRuntimeStatusFromWeb: async (userId) => await this.readHostedRuntimeStatusFromWeb(userId),
       readHostedWebControlBaseUrl: () => this.readHostedWebControlBaseUrl(),
       readHostedWorkspaceFromWeb: async (userId, input) => await this.readHostedWorkspaceFromWeb(userId, input),
-      alarmCoordinator,
     });
     this.runtimeInvocation = runtimeInvocation;
     const runtimeProcessing = new RuntimeProcessingController({
@@ -115,7 +109,6 @@ export class HostedUserRunner {
       runnerRuntimeEnvSource,
       state,
       stateStore: this.stateStore,
-      alarmCoordinator,
     });
     this.runtimeProcessing = runtimeProcessing;
     this.userDataDeletionInput = {
@@ -151,7 +144,6 @@ export class HostedUserRunner {
   async alarm(): Promise<void> {
     const record = await this.stateStore.readState();
     await this.workspaceSnapshotSessions.cleanupOrphanCandidates(record.userId);
-    await this.runtimeProcessing.alarm();
   }
 
   async runnerStatus(input: { logLimit?: number } = {}): Promise<HostedRunnerStatusResponse> {
@@ -170,7 +162,7 @@ export class HostedUserRunner {
       ...(record.lastErrorAt ? { lastErrorAt: record.lastErrorAt } : {}),
       ...(record.lastErrorCode ? { lastErrorCode: record.lastErrorCode } : {}),
       ...(record.lastInvocationAt ? { lastInvocationAt: record.lastInvocationAt } : {}),
-      nextAlarmAt: readRunnerNextAlarmAt(record),
+      nextAlarmAt: null,
       mailboxLag: webStatus.mailboxLag,
       userId: record.userId,
       workspace: webStatus.workspace,

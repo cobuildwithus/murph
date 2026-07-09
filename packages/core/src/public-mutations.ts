@@ -65,6 +65,7 @@ import {
   addActivitySession as addActivitySessionInternal,
   addBodyMeasurement as addBodyMeasurementInternal,
   addCapture as addCaptureInternal,
+  addCaptureWithLookup as addCaptureWithLookupInternal,
   addMeasurement as addMeasurementInternal,
   deleteEvent as deleteEventInternal,
   upsertEvent as upsertEventInternal,
@@ -74,6 +75,7 @@ import {
   repairJunctionWorkoutHeartRateZones as repairJunctionWorkoutHeartRateZonesInternal,
 } from "./junction-hr-zone-repair.ts";
 import {
+  updateAssistantPreferences as updateAssistantPreferencesInternal,
   updateWearablePreferences as updateWearablePreferencesInternal,
   updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
 } from "./preferences.ts";
@@ -519,6 +521,12 @@ export async function addCapture(
     : addCaptureInternal(input);
 }
 
+export async function addCaptureWithLookup(
+  input: Parameters<typeof addCaptureWithLookupInternal>[0],
+): ReturnType<typeof addCaptureWithLookupInternal> {
+  return withCanonicalInputWriteLock(input, addCaptureWithLookupInternal);
+}
+
 export async function addMeasurement(
   input: Parameters<typeof addMeasurementInternal>[0],
 ): ReturnType<typeof addMeasurementInternal> {
@@ -615,6 +623,12 @@ export async function updateWearablePreferences(
   input: Parameters<typeof updateWearablePreferencesInternal>[0],
 ): ReturnType<typeof updateWearablePreferencesInternal> {
   return updateWearablePreferencesInternal(input);
+}
+
+export async function updateAssistantPreferences(
+  input: Parameters<typeof updateAssistantPreferencesInternal>[0],
+): ReturnType<typeof updateAssistantPreferencesInternal> {
+  return updateAssistantPreferencesInternal(input);
 }
 
 export async function appendHistoryEvent(

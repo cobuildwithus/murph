@@ -32,14 +32,14 @@ const AUTHORIZED_REFERENCE_IMAGE_PATH_PREFIXES = [
 ] as const
 
 export const MAX_GENERATE_IMAGE_REFERENCE_COUNT = 16
-// Sized so the maximum 16-image total stays inside the hosted runner Worker
-// proxy budget. createHostedRunnerUpstreamRequest currently buffers the request
-// body through ArrayBuffer + a new Request copy, so a single hosted call could
-// hold the multipart body twice in memory. Keep the per-file and total caps
-// small enough that 2x the total fits comfortably inside one Worker request,
-// and keep HOSTED_OPENAI_IMAGES_EDITS_MAX_BODY_BYTES in sync above this total
-// plus multipart overhead.
-export const MAX_GENERATE_IMAGE_REFERENCE_BYTES = 2 * 1024 * 1024
+// The per-file cap matches the generated-image output cap so a saved
+// raw/captures/** generated image can be reused as an exact reference. The
+// aggregate cap remains sized for the hosted runner Worker proxy budget:
+// createHostedRunnerUpstreamRequest currently buffers the request body through
+// ArrayBuffer + a new Request copy, so a single hosted call could hold the
+// multipart body twice in memory. Keep HOSTED_OPENAI_IMAGES_EDITS_MAX_BODY_BYTES
+// in sync above this total plus multipart overhead.
+export const MAX_GENERATE_IMAGE_REFERENCE_BYTES = 10 * 1024 * 1024
 export const MAX_GENERATE_IMAGE_REFERENCE_TOTAL_BYTES = 32 * 1024 * 1024
 
 export type GenerateImageReferenceMediaType =

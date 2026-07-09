@@ -336,6 +336,83 @@ describe("hosted runtime abort guard", () => {
       });
     }
   });
+
+  test("preserves image-owned Health Commons package root for hosted Codex runtime env", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-health-commons-env-"));
+    const previousPackageRoot = process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+    const observedRuntimeEnvs: Array<string | undefined> = [];
+
+    process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT =
+      "/app/node_modules/@murphai/health-commons";
+
+    try {
+      await initializeVault({
+        createdAt: new Date(TEST_NOW),
+        timezone: "UTC",
+        title: "Hosted Runtime Health Commons Env Test Vault",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess({
+        request: {
+          attemptId: "attempt_synthetic_health_commons_env",
+          idleCheckpointDelayMs: 1,
+          leaseGeneration: "1",
+          userId: TEST_USER_ID,
+          workspace: createWorkspaceState(),
+          workspaceVersion: "0",
+        },
+        runtime: {
+          forwardedEnv: {
+            HOSTED_ASSISTANT_MODEL: "gpt-synthetic",
+            HOSTED_ASSISTANT_PROVIDER: "openai",
+            MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/spoofed-health-commons",
+            OPENAI_API_KEY: "test-api-key",
+          },
+          userEnv: {
+            MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/user-health-commons",
+          },
+        },
+      }, {
+        async createCheckpointSnapshot() {
+          return {
+            snapshotRef: {
+              hash: "e".repeat(64),
+              key: "users/bundles/member-synthetic/health-commons-env.bundle.json",
+              size: 512,
+              updatedAt: TEST_NOW,
+            },
+          };
+        },
+        async importItem() {
+          throw new Error("Health Commons env test should not import mailbox items.");
+        },
+        platform: createPlatform(vi.fn<typeof fetch>()),
+        async runAssistantPhase(input) {
+          observedRuntimeEnvs.push(input.runtimeEnv.MURPH_HEALTH_COMMONS_PACKAGE_ROOT);
+          return {
+            progressed: false,
+          };
+        },
+        vaultRoot,
+      });
+
+      expect(result.status).toBe("idle");
+      expect(observedRuntimeEnvs).toEqual([
+        "/app/node_modules/@murphai/health-commons",
+      ]);
+    } finally {
+      if (typeof previousPackageRoot === "string") {
+        process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = previousPackageRoot;
+      } else {
+        delete process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+      }
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
 });
 
 function createPlatform(

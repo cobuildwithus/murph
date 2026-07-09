@@ -368,6 +368,7 @@ export async function deliverAssistantMessageOverBinding(
       message: input.message,
       replyToMessageId: input.replyToMessageId ?? null,
       subject,
+      threadIsDirect: binding.threadIsDirect,
     },
     dependencies,
   )

@@ -150,6 +150,8 @@ async function renderJoinResumePage() {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    assistantTone: null,
+    assistantVoice: null,
     billingStatus: HostedBillingStatus.active,
     createdAt: new Date("2026-06-01T00:00:00.000Z"),
     id: "member_123",

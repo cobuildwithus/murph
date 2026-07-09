@@ -8,10 +8,13 @@ import {
   addActivitySession,
   addBodyMeasurement,
   addCapture,
+  addCaptureWithLookup,
   addMeasurement,
   deleteEvent,
+  findCaptureByLookup,
   initializeVault,
   readJsonlRecords,
+  upsertEvent,
 } from '@murphai/core'
 
 const cleanupPaths: string[] = []
@@ -338,6 +341,140 @@ describe('workout primitive core mutations', () => {
           path: result.ledgerFile,
         }),
       ]),
+    )
+  })
+
+  it('resolves capture lookup records through the live event spine', async () => {
+    const vaultRoot = await createTempVault('murph-core-capture-lookup-')
+    const sourcePath = await createSourceFile(vaultRoot, 'lookup-photo.jpg', 'lookup-photo')
+
+    const result = await addCaptureWithLookup({
+      vaultRoot,
+      lookupAttachmentRole: 'media_1',
+      lookupKey: 'test.capture.lookup:one',
+      draft: {
+        occurredAt: '2026-04-08T08:30:00.000Z',
+        source: 'manual',
+        title: 'Lookup-backed capture',
+        note: 'Reference photo with a stable lookup.',
+      },
+      attachments: [{
+        role: 'media_1',
+        sourcePath,
+      }],
+    })
+
+    expect(result.created).toBe(true)
+    expect(result.lookupPath).toBe('derived/captures/generated-image-lookups.json')
+    expect(result.event.tags).toEqual(
+      expect.arrayContaining(['capture', 'capture-lookup-backed']),
+    )
+
+    const live = await findCaptureByLookup({
+      vaultRoot,
+      lookupKey: 'test.capture.lookup:one',
+    })
+    expect(live).toMatchObject({
+      status: 'live',
+      eventId: result.eventId,
+      ledgerFile: result.ledgerFile,
+      attachmentRef: result.event.attachments?.[0]?.relativePath,
+    })
+
+    await expect(
+      addCapture({
+        vaultRoot,
+        draft: {
+          id: result.eventId,
+          occurredAt: '2026-05-08T08:30:00.000Z',
+          source: 'manual',
+          title: 'Lookup-backed capture moved',
+          note: 'Moving this capture would stale the lookup ledger shard.',
+        },
+        attachments: [{
+          role: 'media_2',
+          sourcePath,
+        }],
+      }),
+    ).rejects.toMatchObject({ code: 'CAPTURE_LOOKUP_IMMUTABLE' })
+
+    await expect(
+      upsertEvent({
+        vaultRoot,
+        draft: {
+          id: result.eventId,
+          kind: 'note',
+          occurredAt: '2026-05-08T08:30:00.000Z',
+          source: 'manual',
+          title: 'Lookup-backed capture moved',
+          note: 'Moving this capture would stale the lookup ledger shard.',
+          tags: ['capture'],
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'CAPTURE_LOOKUP_IMMUTABLE' })
+
+    await deleteEvent({
+      vaultRoot,
+      eventId: result.eventId,
+    })
+
+    const deleted = await findCaptureByLookup({
+      vaultRoot,
+      lookupKey: 'test.capture.lookup:one',
+    })
+    expect(deleted).toMatchObject({
+      status: 'deleted',
+      eventId: result.eventId,
+      ledgerFile: result.ledgerFile,
+    })
+  })
+
+  it('preserves concurrent capture lookup index entries', async () => {
+    const vaultRoot = await createTempVault('murph-core-capture-lookup-concurrent-')
+    const writes = await Promise.all(
+      Array.from({ length: 6 }, async (_, index) => {
+        const sourcePath = await createSourceFile(
+          vaultRoot,
+          `lookup-concurrent-${index}.jpg`,
+          `lookup-concurrent-${index}`,
+        )
+
+        return addCaptureWithLookup({
+          vaultRoot,
+          lookupAttachmentRole: 'media_1',
+          lookupKey: `test.capture.lookup.concurrent:${index}`,
+          draft: {
+            occurredAt: '2026-04-08T09:30:00.000Z',
+            source: 'manual',
+            title: `Concurrent lookup-backed capture ${index}`,
+            note: 'Concurrent generated-image retry identity.',
+          },
+          attachments: [{
+            role: 'media_1',
+            sourcePath,
+          }],
+        })
+      }),
+    )
+
+    const lookupIndex = JSON.parse(
+      await readFile(path.join(vaultRoot, 'derived/captures/generated-image-lookups.json'), 'utf8'),
+    ) as { entries: Record<string, unknown> }
+    expect(Object.keys(lookupIndex.entries)).toHaveLength(writes.length)
+
+    await Promise.all(
+      writes.map(async (result, index) => {
+        await expect(
+          findCaptureByLookup({
+            vaultRoot,
+            lookupKey: `test.capture.lookup.concurrent:${index}`,
+          }),
+        ).resolves.toMatchObject({
+          status: 'live',
+          eventId: result.eventId,
+          ledgerFile: result.ledgerFile,
+        })
+      }),
     )
   })
 

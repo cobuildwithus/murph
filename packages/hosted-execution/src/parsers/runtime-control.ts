@@ -2825,6 +2825,14 @@ export function parseHostedWorkspaceCheckpointRequest(
             "Hosted workspace checkpoint request redactedStatus",
           ),
         }),
+    ...(record.runtimeWakePendingAtCheckpoint === undefined
+      ? {}
+      : {
+          runtimeWakePendingAtCheckpoint: requireBoolean(
+            record.runtimeWakePendingAtCheckpoint,
+            "Hosted workspace checkpoint request runtimeWakePendingAtCheckpoint",
+          ),
+        }),
     snapshotRef: parseHostedExecutionSnapshotRef(
       record.snapshotRef === undefined ? null : record.snapshotRef,
       "Hosted workspace checkpoint request snapshotRef",

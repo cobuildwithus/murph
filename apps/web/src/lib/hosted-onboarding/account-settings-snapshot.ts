@@ -1,8 +1,14 @@
 import "server-only";
 
+import type {
+  AssistantTonePreference,
+  AssistantVoiceOptionId,
+} from "@murphai/contracts";
+
 import { getPrisma } from "../prisma";
 import { createHostedMemberReplyAliasRouteFromLookupKey } from "./hosted-email-reply-alias";
 import { readHostedMemberSnapshot } from "./hosted-member-store";
+import { readHostedMemberAssistantPreferences } from "./member-preferences";
 import {
   extractHostedPrivyEmailAccount,
   extractHostedPrivyTelegramAccount,
@@ -10,6 +16,10 @@ import {
 } from "./privy-shared";
 
 export interface HostedAccountSettingsSnapshot {
+  assistant?: {
+    tone: AssistantTonePreference | null;
+    voice: AssistantVoiceOptionId | null;
+  };
   email: {
     address: string | null;
     murphEmailAddress?: string | null;
@@ -35,10 +45,17 @@ export interface HostedAccountSettingsSnapshot {
 export async function readHostedAccountSettingsSnapshot(input: {
   memberId: string;
 }): Promise<HostedAccountSettingsSnapshot> {
-  const snapshot = await readHostedMemberSnapshot({
-    memberId: input.memberId,
-    prisma: getPrisma(),
-  });
+  const prisma = getPrisma();
+  const [snapshot, assistant] = await Promise.all([
+    readHostedMemberSnapshot({
+      memberId: input.memberId,
+      prisma,
+    }),
+    readHostedMemberAssistantPreferences({
+      memberId: input.memberId,
+      prisma,
+    }),
+  ]);
   const verifiedEmail = snapshot?.emailAuthorization?.verifiedEmail ?? null;
   const murphEmailRoute = verifiedEmail
     ? await createHostedMemberReplyAliasRouteFromLookupKey({
@@ -48,6 +65,7 @@ export async function readHostedAccountSettingsSnapshot(input: {
   const telegramUserId = snapshot?.routing?.telegramUserId ?? null;
 
   return {
+    assistant,
     email: {
       address: verifiedEmail?.address
         ?? snapshot?.emailAuthorization?.stripeCheckoutEmail?.address

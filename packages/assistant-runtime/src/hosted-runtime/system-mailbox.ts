@@ -25,6 +25,7 @@ import type {
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
 import {
+  compareHostedSystemMailboxPendingItemMailboxSequence,
   findNextHostedSystemMailboxQueueItem,
   mergeHostedSystemMailboxRollbackItems,
   readHostedSystemMailboxState,
@@ -117,6 +118,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
     lastErrorCode: null,
     lastErrorMessage: null,
     mailboxDedupeKey: input.item.item.dedupeKey,
+    mailboxLaneSeq: input.item.item.laneSeq,
     nextAttemptAt: null,
     occurredAt: input.item.item.occurredAt,
     postCheckpointRecord: null,
@@ -126,9 +128,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
     wake: input.wake,
   };
   await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
-    pending: state.pending.some((item) => item.itemId === nextItem.itemId)
-      ? state.pending.map((item) => item.itemId === nextItem.itemId ? nextItem : item)
-      : [...state.pending, nextItem],
+    pending: upsertHostedSystemMailboxPendingItem(state.pending, nextItem),
   }));
 
   return {
@@ -175,7 +175,19 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       return {
         result: nextItem,
         state: {
-          pending: state.pending.map((item) => item.itemId === pending.itemId ? nextItem : item),
+          pending: state.pending.flatMap((item) => {
+            if (item.itemId === pending.itemId) {
+              return [nextItem];
+            }
+            if (
+              pending.routeAction === "apply-member-preferences"
+              && item.status === "pending"
+              && item.routeAction === "apply-member-preferences"
+            ) {
+              return [];
+            }
+            return [item];
+          }),
         },
       };
     },
@@ -252,6 +264,44 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       status: "retryable_failed",
     };
   }
+}
+
+function upsertHostedSystemMailboxPendingItem(
+  pending: readonly HostedSystemMailboxPendingItem[],
+  nextItem: HostedSystemMailboxPendingItem,
+): HostedSystemMailboxPendingItem[] {
+  const supersedesPendingMemberPreferences =
+    nextItem.routeAction === "apply-member-preferences";
+  const next: HostedSystemMailboxPendingItem[] = [];
+  let inserted = false;
+  let shouldInsertNext = true;
+
+  for (const item of pending) {
+    if (item.itemId === nextItem.itemId) {
+      next.push(nextItem);
+      inserted = true;
+      continue;
+    }
+    if (
+      supersedesPendingMemberPreferences
+      && item.status === "pending"
+      && item.routeAction === "apply-member-preferences"
+    ) {
+      const order = compareHostedSystemMailboxPendingItemMailboxSequence(nextItem, item);
+      if (order >= 0) {
+        continue;
+      }
+      shouldInsertNext = false;
+      next.push(item);
+      continue;
+    }
+    next.push(item);
+  }
+
+  if (!inserted && shouldInsertNext) {
+    next.push(nextItem);
+  }
+  return next;
 }
 
 export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
@@ -406,6 +456,7 @@ function readHostedSystemMailboxRouteAction(
   if (
     item.route.action === "apply-member-activation"
     || item.route.action === "apply-member-channels-update"
+    || item.route.action === "apply-member-preferences"
     || item.route.action === "dispatch-assistant-notification"
     || item.route.action === "run-device-sync-wake"
     || item.route.action === "apply-runtime-control-request"

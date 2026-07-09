@@ -145,6 +145,7 @@ export interface AssistantProviderTurn {
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
+  assistantPreferredElevenLabsVoiceId?: string | null
   voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
   vaultRoot?: string | null
   workingDirectory: string

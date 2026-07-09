@@ -4,8 +4,12 @@ import path from "node:path";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
+  updateAssistantPreferences,
+} from "@murphai/core";
+import {
   emitHostedExecutionStructuredLog,
   type HostedExecutionMemberChannels,
+  type HostedExecutionMemberPreferencesUpdatedWake,
   type HostedExecutionWake,
   type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
@@ -220,6 +224,23 @@ export async function bootstrapHostedMemberContext(
   return {
     vaultCreated,
   };
+}
+
+export async function applyHostedMemberPreferences(
+  vaultRoot: string,
+  wake: HostedExecutionMemberPreferencesUpdatedWake,
+): Promise<void> {
+  if (!existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata))) {
+    throw new Error(
+      "Hosted member preferences require member.activated bootstrap first.",
+    );
+  }
+
+  await updateAssistantPreferences({
+    preferences: wake.preferences,
+    updatedAt: wake.occurredAt,
+    vaultRoot,
+  });
 }
 
 async function bootstrapHostedAssistantRuntimeState(
