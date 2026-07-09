@@ -40,10 +40,16 @@ const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
   "provider_dispatch_started";
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_FAILURE_CODE =
   "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError";
+const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_UNAVAILABLE_FAILURE_CODE =
+  "HostedRuntimeTelegramUsageLimitNoticeUnavailableError";
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_UNKNOWN_FAILURE_CODE =
   "HostedRuntimeTelegramUsageLimitNoticeUnknownError";
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_STALE_DISPATCH_FAILURE_REASON =
   "Hosted Telegram usage-limit notice delivery could not be confirmed after dispatch started.";
+const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRYABLE_FAILURE_CODES = new Set([
+  HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_FAILURE_CODE,
+  HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_UNAVAILABLE_FAILURE_CODE,
+]);
 
 export type HostedLinqAiUsageLimitNoticeDeliveryClaimResolution =
   | {
@@ -1520,7 +1526,9 @@ function isHostedLinqTerminalTelegramUsageLimitFailure(input: {
 }): boolean {
   return input.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
     && (input.failedAt !== null || input.status === "failed")
-    && input.failureCode !== HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_FAILURE_CODE;
+    && !HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRYABLE_FAILURE_CODES.has(
+      input.failureCode ?? "",
+    );
 }
 
 function resolveHostedLinqDeliveryInFlightState(input: {
@@ -1618,7 +1626,9 @@ function readHostedLinqTelegramUsageLimitRetryAt(input: {
 }): Date | null {
   return input.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
     && input.failedAt !== null
-    && input.failureCode === HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_FAILURE_CODE
+    && HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRYABLE_FAILURE_CODES.has(
+      input.failureCode ?? "",
+    )
     ? input.attemptedAt
     : null;
 }
@@ -1654,7 +1664,9 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     input.delivery.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
     && input.delivery.failedAt !== null
     && input.delivery.failureCode
-      === HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_FAILURE_CODE
+    && HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRYABLE_FAILURE_CODES.has(
+      input.delivery.failureCode,
+    )
       ? input.delivery.attemptedAt
       : null;
   if (telegramRetryAfterAt && telegramRetryAfterAt > input.attemptedAt) {

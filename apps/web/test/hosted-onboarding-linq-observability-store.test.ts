@@ -1531,6 +1531,43 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
   });
 
+  it("does not reclaim unavailable failed Telegram usage notice rows before their not-before time", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:30.000Z");
+    const retryAt = new Date("2026-03-26T12:01:00.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: retryAt,
+      deliveredAt: null,
+      failureCode: "HostedRuntimeTelegramUsageLimitNoticeUnavailableError",
+      failedAt: new Date("2026-03-26T12:00:01.000Z"),
+      id: "hld_unavailable_telegram_notice",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      status: "failed",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      prisma: fixture.prisma as never,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "telegram_event_runtime_denied",
+      targetKind: "telegram_thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_unavailable_telegram_notice",
+      retryAt,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("reclaims retry-after failed Telegram usage notice rows after their not-before time", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:01:00.000Z");
@@ -1628,12 +1665,19 @@ describe("hosted Linq observability stores", () => {
     });
   });
 
-  it("does not treat retry-after Telegram usage notice failures as terminal", async () => {
+  it("does not treat retryable Telegram usage notice failures as terminal", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
       {
         failedAt: new Date("2026-03-26T12:00:01.000Z"),
         failureCode: "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
+        source: "hosted_runtime_ai_usage_limit_notice",
+        status: "failed",
+      },
+      {
+        failedAt: new Date("2026-03-26T12:00:02.000Z"),
+        failureCode: "HostedRuntimeTelegramUsageLimitNoticeUnavailableError",
+        source: "hosted_runtime_ai_usage_limit_notice",
         status: "failed",
       },
     ]);

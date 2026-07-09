@@ -1827,7 +1827,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
-  it("does not claim the Telegram usage-limit notice when Telegram delivery is unconfigured", async () => {
+  it("claims a retryable Telegram usage-limit notice when Telegram delivery is unconfigured", async () => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
     const deniedDecision = buildDeniedUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -1863,8 +1863,33 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
-      retryAt: "2026-07-01T00:00:00.000Z",
+      retryAt: "2026-05-20T12:15:00.000Z",
     });
+    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: MEMBER_ID,
+      periodStart: deniedDecision.periodStart,
+    });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith({
+      attemptedAt: new Date(FIXED_NOW),
+      idempotencyKey: expectedIdempotencyKey,
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "telegram_event_runtime_denied",
+      targetKind: "telegram_thread",
+      template: "ai_usage_quota",
+    });
+    expect(mocks.markHostedLinqDeliverySendFailedTx).toHaveBeenCalledWith({
+      failedAt: new Date(FIXED_NOW),
+      failureCode: "HostedRuntimeTelegramUsageLimitNoticeUnavailableError",
+      failureReason: "Hosted Telegram usage-limit notice delivery is unavailable in hosted web.",
+      idempotencyKey: expectedIdempotencyKey,
+      nextAttemptAt: new Date("2026-05-20T12:15:00.000Z"),
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
+    expect(mocks.markHostedLinqDeliveryProviderDispatchStartedTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedAiUsageLimitNoticeSent).not.toHaveBeenCalled();
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
