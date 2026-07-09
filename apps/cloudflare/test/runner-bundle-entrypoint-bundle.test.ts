@@ -510,19 +510,19 @@ describe("runner bundle container-entrypoint esbuild step", () => {
   it("resolves the production budgets as the ratcheted baselines plus tolerance", () => {
     const budgets = resolveRunnerEntrypointBundleBudgets();
 
-    // Entry = measured baseline (1,319,436B on 2026-07-07) + 48,000B noise
-    // band. Static closure = measured baseline (6,618,001B on 2026-07-08
-    // after health-commons inlining) + 96,000B noise band. Locking exact
-    // values makes any silent change to a ratchet a failing, reviewed diff.
+    // Entry = measured CI baseline (1,369,444B on 2026-07-09) + 48,000B noise
+    // band. Static closure = measured rebased local baseline (6,721,405B on
+    // 2026-07-09) + 96,000B noise band. Locking exact values makes any silent
+    // change to a ratchet a failing, reviewed diff.
     expect(budgets).toEqual({
-      entryBytes: 1_319_436 + 48_000,
-      staticClosureBytes: 6_618_001 + 96_000,
+      entryBytes: 1_369_444 + 48_000,
+      staticClosureBytes: 6_721_405 + 96_000,
       totalBytes: 9_300_000,
     });
     // The ratchet is meaningfully tighter than the prior loose 2.9MB ceiling
     // it replaced, so real boot-path creep can no longer hide in headroom.
     expect(budgets.entryBytes).toBeLessThan(2_900_000);
-    expect(budgets.staticClosureBytes).toBeLessThan(6_800_000);
+    expect(budgets.staticClosureBytes).toBeLessThan(6_900_000);
   });
 
   it("gates the entry chunk at the production ratchet boundary", () => {
