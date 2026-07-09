@@ -31,6 +31,24 @@ const DELETED_COMMONS_COMMANDS = [
   'vault-cli commons source list',
 ] as const
 
+const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
+  'sleep-improvement',
+  'circadian-rhythm',
+  'energy-fatigue',
+  'substance-load',
+  'cognitive-focus',
+  'hrv-resting-heart-rate',
+  'aerobic-fitness',
+  'recovery-modalities',
+  'daily-activity',
+  'mobility-posture',
+  'cardiometabolic-health',
+  'micronutrients-supplements',
+  'body-composition',
+  'cycle-hormonal-health',
+  'gut-digestion',
+] as const
+
 type AssistantSkillMetadata = {
   readonly description: string
   readonly name: string
@@ -157,6 +175,36 @@ describe('assistant skill assets', () => {
       slugs.add(skill.slug)
       names.add(skill.name)
     }
+  })
+
+  it('registers researched health topic skills with stable file references', async () => {
+    const registeredSkillSlugs: ReadonlySet<string> = new Set(
+      ASSISTANT_SKILLS.map((skill) => skill.slug),
+    )
+
+    for (const slug of RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS) {
+      expect(registeredSkillSlugs.has(slug)).toBe(true)
+      expect(buildAssistantSkillFileRef(slug)).toBe(
+        `$MURPH_ASSISTANT_SKILLS_ROOT/${slug}/SKILL.md`,
+      )
+
+      const skill = ASSISTANT_SKILLS.find(
+        (candidate) => candidate.slug === slug,
+      )
+      expect(skill).toBeTruthy()
+      if (!skill) {
+        continue
+      }
+
+      expect(skill.triggerHint.length).toBeGreaterThan(0)
+      const raw = await readSkillFile(skill)
+      expect(raw).toContain('Use this as Murph operating guidance')
+      expect(raw).toContain('## Research Guidance')
+      expect(raw).not.toContain('MODEL_CONFIRMATION')
+      expect(raw).not.toContain('RESEARCH_COMPLETE')
+    }
+
+    expect(registeredSkillSlugs.has('red-light-therapy')).toBe(false)
   })
 
   it('keeps group newsletter setup and opt-out behavior in the group-chat skill', async () => {
@@ -455,19 +503,19 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('.codex-hosted')
   })
 
-  it('keeps red light device seeds parseable and manufacturer-claim scoped', async () => {
-    const redLightSkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'red-light-therapy',
+  it('keeps recovery modality red light device seeds parseable and manufacturer-claim scoped', async () => {
+    const recoverySkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'recovery-modalities',
     )
-    expect(redLightSkill).toBeTruthy()
-    if (!redLightSkill) {
+    expect(recoverySkill).toBeTruthy()
+    if (!recoverySkill) {
       return
     }
 
     const raw = await readFile(
       path.join(
         resolveAssistantSkillsRoot(),
-        redLightSkill.slug,
+        recoverySkill.slug,
         'device-seeds.json',
       ),
       'utf8',
