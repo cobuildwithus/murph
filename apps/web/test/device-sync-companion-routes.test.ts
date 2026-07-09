@@ -1,4 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
+} from "@murphai/device-syncd/hosted-runtime";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { createBearerRequest, createJsonPostRequest } from "./route-test-helpers";
@@ -625,9 +628,41 @@ describe("device sync companion routes", () => {
       });
       expect(input.resource.payload).toMatchObject({
         eventType: "companion.health_metadata.v1",
+        occurredAt: "2026-07-09T12:00:00.000Z",
         resource: "companion_health_metadata",
         sourceProviderSlug: "apple-health-kit",
       });
+    });
+
+    it("keeps durable batch identity stable across receipt-time retries", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "active",
+      }]);
+      mocks.listConnectionSources.mockResolvedValue([{
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected",
+      }]);
+      const body = {
+        records: [healthMetadataRecord()],
+        schemaVersion: 1,
+      };
+
+      const firstResponse = await healthMetadataRoute.POST(healthMetadataRequest(body));
+      vi.setSystemTime(new Date("2026-07-09T12:05:00.000Z"));
+      const retryResponse = await healthMetadataRoute.POST(healthMetadataRequest(body));
+
+      expect(firstResponse.status).toBe(200);
+      expect(retryResponse.status).toBe(200);
+      const firstInput = mocks.persistHostedDeviceSyncCompanionMetadata.mock.calls[0]?.[0];
+      const retryInput = mocks.persistHostedDeviceSyncCompanionMetadata.mock.calls[1]?.[0];
+      expect(firstInput.occurredAt).not.toBe(retryInput.occurredAt);
+      expect(firstInput.resource.payload.occurredAt).toBe(firstInput.occurredAt);
+      expect(retryInput.resource.payload.occurredAt).toBe(retryInput.occurredAt);
+      expect(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(firstInput.resource.payload))
+        .toBe(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(retryInput.resource.payload));
     });
 
     it("accepts closed value, sync-version, history, and future-skew boundaries", async () => {

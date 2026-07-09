@@ -670,7 +670,7 @@ describe("hosted device-sync wakes", () => {
       dirty,
       shouldRequestWake: true,
     });
-    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(15);
+    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(16);
     const webhookDataJson = JSON.stringify({
       records: [{
         endAt: "2026-07-08T12:00:00.000Z",
@@ -790,7 +790,7 @@ describe("hosted device-sync wakes", () => {
       sourceProviderSlug: "apple_health_kit",
       status: "connected",
     }]);
-    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(16);
+    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(17);
 
     await expect(persistHostedDeviceSyncCompanionMetadata({
       connectionId: connection.id,
@@ -815,7 +815,51 @@ describe("hosted device-sync wakes", () => {
       retryable: true,
     });
 
-    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("accepts an exact replay at the backlog cap after the store no-ops it", async () => {
+    const connection = buildHostedConnection({ provider: "junction" });
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockResolvedValue([{
+      sourceProviderSlug: "apple_health_kit",
+      status: "connected",
+    }]);
+    mocks.upsertDirtyConnection.mockResolvedValue({
+      dirty: buildDirtyConnectionRecord({ provider: "junction" }),
+      shouldRequestWake: false,
+    });
+    mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(16);
+
+    await expect(persistHostedDeviceSyncCompanionMetadata({
+      connectionId: connection.id,
+      occurredAt: "2026-07-09T12:05:00.000Z",
+      resource: {
+        count: 1,
+        jobKind: "resource",
+        payload: {
+          eventType: "companion.health_metadata.v1",
+          occurredAt: "2026-07-09T12:05:00.000Z",
+          resource: "companion_health_metadata",
+          resourceCategory: "summary",
+          sourceProviderSlug: "apple-health-kit",
+          webhookDataJson: "{}",
+        },
+        resource: "companion_health_metadata",
+        resourceCategory: "summary",
+        sourceProviderSlug: "apple-health-kit",
+        windowEnd: "2026-07-08T12:00:00.000Z",
+        windowStart: "2026-07-08T04:00:00.000Z",
+      },
+      store: new PrismaDeviceSyncControlPlaneStore({
+        prisma: getPrisma(),
+      }),
+      userId: "user-123",
+    })).resolves.toBeUndefined();
+
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });

@@ -499,21 +499,6 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
         });
       }
 
-      const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
-        where: {
-          connectionId: connection.id,
-          userId: input.userId,
-        },
-      });
-      if (pendingPayloadCount >= COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS) {
-        throw deviceSyncError({
-          code: "COMPANION_HEALTH_BACKLOG_FULL",
-          message: "Apple Health sync is still processing. Retry this batch later.",
-          retryable: true,
-          httpStatus: 429,
-        });
-      }
-
       const dirtyUpdate = await input.store.upsertDirtyConnection({
         connectionId: connection.id,
         dirtyAt: input.occurredAt,
@@ -524,6 +509,23 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
         tx,
         userId: input.userId,
       });
+      // Insert/no-op first so an exact replay at the cap remains a successful
+      // no-op. A net-new 17th payload makes this transaction throw and roll
+      // back the insert, preserving the bounded queue.
+      const pendingPayloadCount = await tx.deviceSyncDirtyPayload.count({
+        where: {
+          connectionId: connection.id,
+          userId: input.userId,
+        },
+      });
+      if (pendingPayloadCount > COMPANION_HEALTH_METADATA_MAX_PENDING_PAYLOADS) {
+        throw deviceSyncError({
+          code: "COMPANION_HEALTH_BACKLOG_FULL",
+          message: "Apple Health sync is still processing. Retry this batch later.",
+          retryable: true,
+          httpStatus: 429,
+        });
+      }
       if (!dirtyUpdate.shouldRequestWake) {
         return { wakeMailboxItemId: null };
       }

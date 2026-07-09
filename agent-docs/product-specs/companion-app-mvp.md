@@ -206,6 +206,17 @@ verification (existing `@privy-io/node`):
    with an unverified WHOOP-metadata source hint, and `packages/importers` plus
    `packages/core` remain the only canonical write path.
 
+### Deployment order and rollback floor
+
+Current companion volume is low, so runner-first operational ordering is the
+proportionate deploy-skew control for this slice; do not add a runtime feature
+flag or capability handshake. Deploy the Cloudflare/device-syncd bundle first
+with `container_rollout=immediate` and verify the managed-container smoke is
+running the feature-aware bundle. Then deploy the Vercel/web ingestion route,
+and release the iOS app last. Once web accepts companion metadata, do not roll
+the runner below the feature-aware bundle unless web ingestion is first
+disabled or reverted and all pending companion payloads are drained.
+
 ### Why the account-ensure step is load-bearing (verified in repo)
 
 Webhook ingestion resolves the account via

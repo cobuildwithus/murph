@@ -17,7 +17,44 @@ import {
   resolveHostedDeviceSyncWakeContext,
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
+  serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "../src/hosted-runtime.ts";
+
+describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
+  const companionPayload = {
+    eventType: "companion.health_metadata.v1",
+    occurredAt: "2026-07-09T12:00:00.000Z",
+    resource: "companion_health_metadata",
+    resourceCategory: "summary",
+    sourceProviderSlug: "apple-health-kit",
+    webhookDataJson: JSON.stringify({ records: [{ recordId: "a".repeat(64) }] }),
+  };
+
+  it("ignores receipt time only for an exact companion health payload", () => {
+    const retry = {
+      ...companionPayload,
+      occurredAt: "2026-07-09T12:05:00.000Z",
+    };
+
+    expect(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(companionPayload))
+      .toBe(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(retry));
+    expect(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity({
+      ...companionPayload,
+      eventType: "daily.data.steps.created",
+    })).not.toBe(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity({
+      ...retry,
+      eventType: "daily.data.steps.created",
+    }));
+  });
+
+  it("keeps companion batch content in the identity", () => {
+    expect(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(companionPayload))
+      .not.toBe(serializeHostedExecutionDeviceSyncDirtyPayloadIdentity({
+        ...companionPayload,
+        webhookDataJson: JSON.stringify({ records: [{ recordId: "b".repeat(64) }] }),
+      }));
+  });
+});
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
   it("preserves newer unpublished local Junction retry metadata", () => {
