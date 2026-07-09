@@ -1147,6 +1147,7 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
       return {
         kind: "delete",
         ...base,
+        allowRaw: record.allowRaw === true,
         backupRelativePath,
         effect: record.effect === "delete" ? record.effect : undefined,
       };
