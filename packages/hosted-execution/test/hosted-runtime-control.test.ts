@@ -1347,6 +1347,7 @@ describe("hosted runtime control contracts", () => {
         importedConversationSeq: "11",
         importedSystemSeq: "4",
       },
+      runtimeWakePendingAtCheckpoint: false,
       snapshotRef: null,
     })).toEqual({
       attemptId: "attempt_1",
@@ -1362,6 +1363,7 @@ describe("hosted runtime control contracts", () => {
         importedConversationSeq: "11",
         importedSystemSeq: "4",
       },
+      runtimeWakePendingAtCheckpoint: false,
       snapshotRef: null,
     });
     for (const key of [
@@ -1439,6 +1441,15 @@ describe("hosted runtime control contracts", () => {
       reason: "idle_shutdown",
       snapshotRef: null,
     })).toThrow(/Hosted idle checkpoint trigger/u);
+
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      reason: "idle_shutdown",
+      runtimeWakePendingAtCheckpoint: "false",
+      snapshotRef: null,
+    })).toThrow(/runtimeWakePendingAtCheckpoint must be a boolean/u);
 
     expect(() => parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
