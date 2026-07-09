@@ -28,7 +28,7 @@ import {
 import {
   decodeHostedMailboxStoredPayload,
   readHostedMailboxConsumedSeqByLane,
-  readHostedMailboxFirstPendingConversationItem,
+  readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload,
@@ -79,7 +79,6 @@ type HostedRuntimeReconciliationDecisionSource = "workflow" | "status";
 const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.v1";
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS = 15_000;
-const HOSTED_RUNTIME_USAGE_NOTICE_PENDING_SCAN_LIMIT = 10;
 const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
   24 * 60 * 60 * 1000;
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
@@ -494,38 +493,40 @@ async function readHostedRuntimePendingUsageNoticeWake(input: {
   prisma: NonNullable<Parameters<typeof readHostedMailboxPayload>[0]["prisma"]>;
   userId: string;
 }): Promise<HostedExecutionWake | null> {
-  let afterSeq = readHostedConversationFreshWorkFloor({
+  const afterSeq = readHostedConversationFreshWorkFloor({
     consumedSeqByLane: input.consumedSeqByLane,
     mailboxLag: input.mailboxLag,
   }).toString();
 
-  for (let scanned = 0; scanned < HOSTED_RUNTIME_USAGE_NOTICE_PENDING_SCAN_LIMIT; scanned += 1) {
-    const pendingItem = await readHostedMailboxFirstPendingConversationItem({
-      afterSeq,
-      prisma: input.prisma,
-      userId: input.userId,
-    });
-    if (!pendingItem) {
-      return null;
-    }
-
-    const wake = await readHostedRuntimePendingConversationWake({
-      item: pendingItem,
-      prisma: input.prisma,
-    });
-    if (
-      wake
-      && canSendHostedRuntimeUsageNoticeForConversationWake({
-        decision: input.decision,
-        wake,
-      })
-    ) {
-      return wake;
-    }
-
-    afterSeq = pendingItem.laneSeq;
+  // Usage notices are best-effort for the current pending input. Older rows stay
+  // pending for replay after allowance returns; do not decode an unbounded backlog here.
+  const pendingItem = await readHostedMailboxLatestPendingConversationItem({
+    afterSeq,
+    prisma: input.prisma,
+    userId: input.userId,
+  });
+  if (!pendingItem) {
+    return null;
+  }
+  const pendingSeq = parseHostedMailboxReconciliationSeq(pendingItem.laneSeq);
+  const cursorSeq = parseHostedMailboxReconciliationSeq(afterSeq);
+  if (pendingSeq === null || cursorSeq === null || pendingSeq <= cursorSeq) {
+    return null;
   }
 
+  const wake = await readHostedRuntimePendingConversationWake({
+    item: pendingItem,
+    prisma: input.prisma,
+  });
+  if (
+    wake
+    && canSendHostedRuntimeUsageNoticeForConversationWake({
+      decision: input.decision,
+      wake,
+    })
+  ) {
+    return wake;
+  }
   return null;
 }
 
@@ -733,7 +734,7 @@ async function releaseHostedRuntimeAiUsageNoticeClaimBestEffort(input: {
 }
 
 async function readHostedRuntimePendingConversationWake(input: {
-  item: Awaited<ReturnType<typeof readHostedMailboxFirstPendingConversationItem>>;
+  item: Awaited<ReturnType<typeof readHostedMailboxLatestPendingConversationItem>>;
   prisma: NonNullable<Parameters<typeof readHostedMailboxPayload>[0]["prisma"]>;
 }): Promise<HostedExecutionWake | null> {
   if (!input.item) {
