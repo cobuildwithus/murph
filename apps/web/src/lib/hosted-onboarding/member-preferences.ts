@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import {
   buildHostedExecutionMemberPreferencesUpdatedWake,
@@ -96,8 +97,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
   const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
     eventId: buildHostedMemberPreferencesUpdatedEventId({
       memberId: input.memberId,
-      occurredAt: input.occurredAt,
-      sourceType: input.sourceType,
+      updateId: randomUUID(),
     }),
     memberId: input.memberId,
     occurredAt: input.occurredAt,
@@ -107,6 +107,14 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
     envelope: wake,
     tx: input.prisma,
   });
+  if (append.dedupeConflict) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_PREFERENCES_WAKE_DEDUPE_CONFLICT",
+      httpStatus: 503,
+      message: "Assistant preference update conflicted with an existing wake identity.",
+      retryable: true,
+    });
+  }
 
   return {
     assistantTone: normalizeStoredAssistantTone(updatedMember.assistantTone),
@@ -143,14 +151,12 @@ export async function readHostedMemberAssistantPreferences(input: {
 
 export function buildHostedMemberPreferencesUpdatedEventId(input: {
   memberId: string;
-  occurredAt: string;
-  sourceType: string;
+  updateId: string;
 }): string {
   return [
     "member.preferences.updated",
-    input.sourceType,
     input.memberId,
-    input.occurredAt,
+    input.updateId,
   ].join(":");
 }
 

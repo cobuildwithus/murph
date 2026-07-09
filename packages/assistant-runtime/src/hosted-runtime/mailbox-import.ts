@@ -295,17 +295,33 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     }
 
     if (route.state === "quarantine") {
+      const reasonCode = `route.${route.quarantineCode}`;
+      if (route.quarantineCode === "unsupported_kind") {
+        blocked.push({
+          itemId: item.id,
+          lane,
+          reasonCode,
+          retryable: true,
+          seq: item.laneSeq,
+        });
+        nextRetryAt = earliestHostedMailboxRetryAt(
+          nextRetryAt,
+          computeHostedMailboxRetryAt(now()),
+        );
+        stoppedLanes.add(lane);
+        continue;
+      }
       nextState = recordHostedMailboxImportQuarantine(nextState, {
         itemKind: item.kind,
         lane,
         occurredAt: now(),
-        reasonCode: `route.${route.quarantineCode}`,
+        reasonCode,
         seq: normalizeSeqForStatus(item.laneSeq),
       });
       blocked.push({
         itemId: item.id,
         lane,
-        reasonCode: `route.${route.quarantineCode}`,
+        reasonCode,
         retryable: false,
         seq: item.laneSeq,
       });

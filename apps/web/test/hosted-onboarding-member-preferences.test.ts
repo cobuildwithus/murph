@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 
 const mocks = vi.hoisted(() => ({
@@ -22,10 +22,16 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 });
 
 import {
+  buildHostedMemberPreferencesUpdatedEventId,
   upsertHostedMemberAssistantPreferencesTx,
 } from "@/src/lib/hosted-onboarding/member-preferences";
 
 describe("hosted member assistant preferences", () => {
+  beforeEach(() => {
+    mocks.appendHostedMailboxEnvelopeTx.mockReset();
+    mocks.lockHostedMemberRow.mockReset();
+  });
+
   it("updates changed preferences and appends a member preferences wake", async () => {
     const member = {
       assistantTone: null as string | null,
@@ -34,6 +40,7 @@ describe("hosted member assistant preferences", () => {
     };
     const prisma = createPreferencesPrismaDouble(member);
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
       item: {
         id: "mailbox_item_123",
       },
@@ -58,8 +65,10 @@ describe("hosted member assistant preferences", () => {
     });
 
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
-      envelope: {
-        eventId: "member.preferences.updated:settings.assistant-style:member_123:2026-07-08T12:00:00.000Z",
+      envelope: expect.objectContaining({
+        eventId: expect.stringMatching(
+          /^member\.preferences\.updated:member_123:[0-9a-f-]{36}$/u,
+        ),
         kind: "member.preferences.updated",
         occurredAt: "2026-07-08T12:00:00.000Z",
         preferences: {
@@ -67,7 +76,7 @@ describe("hosted member assistant preferences", () => {
           voice: "warm",
         },
         userId: "member_123",
-      },
+      }),
       tx: prisma,
     });
 
@@ -87,6 +96,96 @@ describe("hosted member assistant preferences", () => {
       updated: false,
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("uses a durable unique wake identity for same-millisecond preference writes", async () => {
+    const member = {
+      assistantTone: null as string | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      item: {
+        id: "mailbox_item_123",
+      },
+    });
+
+    await upsertHostedMemberAssistantPreferencesTx({
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: {
+        voice: "warm",
+      },
+      prisma,
+      sourceType: "settings.assistant-style",
+    });
+    await upsertHostedMemberAssistantPreferencesTx({
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: {
+        voice: "deep-calm",
+      },
+      prisma,
+      sourceType: "settings.assistant-style",
+    });
+
+    const firstEnvelope =
+      mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    const secondEnvelope =
+      mocks.appendHostedMailboxEnvelopeTx.mock.calls[1]?.[0]?.envelope;
+
+    expect(firstEnvelope.eventId).toMatch(
+      /^member\.preferences\.updated:member_123:[0-9a-f-]{36}$/u,
+    );
+    expect(secondEnvelope.eventId).toMatch(
+      /^member\.preferences\.updated:member_123:[0-9a-f-]{36}$/u,
+    );
+    expect(secondEnvelope.eventId).not.toBe(firstEnvelope.eventId);
+    expect(secondEnvelope.preferences).toEqual({
+      voice: "deep-calm",
+    });
+    expect(member.assistantVoice).toBe("deep-calm");
+  });
+
+  it("fails retryably when the preference wake identity conflicts", async () => {
+    const member = {
+      assistantTone: null as string | null,
+      assistantVoice: null as string | null,
+      id: "member_123",
+    };
+    const prisma = createPreferencesPrismaDouble(member);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: true,
+      item: {
+        id: "mailbox_item_existing",
+      },
+    });
+
+    await expect(upsertHostedMemberAssistantPreferencesTx({
+      memberId: "member_123",
+      occurredAt: "2026-07-08T12:00:00.000Z",
+      preferences: {
+        tone: "casual",
+      },
+      prisma,
+      sourceType: "settings.assistant-style",
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_PREFERENCES_WAKE_DEDUPE_CONFLICT",
+      retryable: true,
+    });
+  });
+
+  it("builds member preference event ids from a per-write update id", () => {
+    expect(buildHostedMemberPreferencesUpdatedEventId({
+      memberId: "member_123",
+      updateId: "update_a",
+    })).toBe("member.preferences.updated:member_123:update_a");
+    expect(buildHostedMemberPreferencesUpdatedEventId({
+      memberId: "member_123",
+      updateId: "update_b",
+    })).toBe("member.preferences.updated:member_123:update_b");
   });
 });
 

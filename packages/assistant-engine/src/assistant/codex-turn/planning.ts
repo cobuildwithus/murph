@@ -68,6 +68,7 @@ import type {
 } from '../hosted-tool-context.js'
 import {
   buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
+  buildAssistantStyleSettingsDynamicPrompt,
   buildAssistantSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
   type AssistantPromptCacheMetadata,
@@ -464,9 +465,17 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // domains) and hosted dynamic context prompts must not reach their system
   // prompt, or the prompt itself would hand the model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
-  const assistantDynamicContextPrompts = maintenanceTurn
+  const hostedDynamicContextPrompts = maintenanceTurn
     ? []
     : input.executionContext?.hosted?.dynamicContextPrompts ?? []
+  const assistantStyleSettingsPrompt =
+    !maintenanceTurn && input.profile.promptProfile === 'conversation'
+      ? buildAssistantStyleSettingsDynamicPrompt(input.input.prompt)
+      : null
+  const assistantDynamicContextPrompts = [
+    ...hostedDynamicContextPrompts,
+    ...(assistantStyleSettingsPrompt ? [assistantStyleSettingsPrompt] : []),
+  ]
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })

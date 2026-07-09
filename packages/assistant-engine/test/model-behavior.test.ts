@@ -6,11 +6,12 @@ import {
   resolveAssistantModelBehaviorProfile,
 } from '../src/assistant/model-behavior.js'
 import {
-  buildAssistantNotificationDecisionSystemPromptLayers,
-  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
+  buildAssistantStyleSettingsDynamicPrompt,
   buildAssistantSystemPrompt,
   buildAssistantSystemPromptLayers,
   buildAssistantSystemPromptWithCacheMetadata,
+  buildAssistantNotificationDecisionSystemPromptLayers,
+  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
   type AssistantNotificationDecisionSystemPromptInput,
   type AssistantSystemPromptInput,
@@ -146,14 +147,47 @@ describe('assistant execution prompt contract', () => {
     expect(formalLayers.threadContextPrompt).toContain('no slang')
   })
 
-  it('mentions the settings voice deep link only when users ask about style changes', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+  it('keeps the settings voice deep link out of the default stable prompt', () => {
+    const layers = buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
 
-    expect(prompt).toContain(
-      "If the member asks to change Murph's voice, tone, or texting style",
+    expect(layers.prompt).not.toContain('/settings?voice=true')
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      '/settings?voice=true',
     )
-    expect(prompt).toContain('/settings?voice=true')
-    expect(prompt).toContain('Do not push the setting or bring it up unprompted.')
+    expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
+  })
+
+  it('mentions the settings voice deep link through dynamic context for current style-change asks', () => {
+    const stylePrompt = buildAssistantStyleSettingsDynamicPrompt(
+      'Can you change your voice?',
+    )
+    if (!stylePrompt) {
+      throw new Error('Expected assistant style settings prompt.')
+    }
+
+    expect(stylePrompt).toContain('/settings?voice=true')
+    expect(
+      buildAssistantStyleSettingsDynamicPrompt('What happened to my HRV?'),
+    ).toBeNull()
+
+    const baseline = buildAssistantSystemPromptWithCacheMetadata(
+      createCommonCodexPromptInput(),
+    )
+    const withStylePrompt = buildAssistantSystemPromptWithCacheMetadata(
+      createCommonCodexPromptInput({
+        assistantDynamicContextPrompts: [stylePrompt],
+      }),
+    )
+
+    expect(withStylePrompt.layers.dynamicTurnContextPrompt).toContain(
+      '/settings?voice=true',
+    )
+    expect(withStylePrompt.layers.stableRouteCapabilityPrompt).not.toContain(
+      '/settings?voice=true',
+    )
+    expect(
+      withStylePrompt.cacheMetadata.stableRouteCapabilityPromptHash,
+    ).toBe(baseline.cacheMetadata.stableRouteCapabilityPromptHash)
   })
 
   it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
