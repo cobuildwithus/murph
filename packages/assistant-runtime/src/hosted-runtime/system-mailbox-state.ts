@@ -261,6 +261,11 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
   if (input.allowedRouteActions) {
+    if (systemMailboxAllowedRouteActionsOnlyMemberPreferences(input.allowedRouteActions)) {
+      const item = findLatestPendingHostedMemberPreferencesItem(input.state);
+      return item && systemMailboxItemIsDue(item, input.now) ? item : null;
+    }
+
     const item = input.state.pending.find((pending) =>
       systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
     ) ?? null;
@@ -542,6 +547,11 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem[] {
   if (input.allowedRouteActions) {
+    if (systemMailboxAllowedRouteActionsOnlyMemberPreferences(input.allowedRouteActions)) {
+      const item = findLatestPendingHostedMemberPreferencesItem(input.state);
+      return item ? [item] : [];
+    }
+
     const item = input.state.pending.find((pending) =>
       systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
     ) ?? null;
@@ -565,6 +575,51 @@ function systemMailboxItemRouteActionAllowed(
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null,
 ): boolean {
   return !allowedRouteActions || allowedRouteActions.includes(item.routeAction);
+}
+
+function systemMailboxAllowedRouteActionsOnlyMemberPreferences(
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[],
+): boolean {
+  return allowedRouteActions.length === 1
+    && allowedRouteActions[0] === "apply-member-preferences";
+}
+
+function findLatestPendingHostedMemberPreferencesItem(
+  state: HostedSystemMailboxState,
+): HostedSystemMailboxPendingItem | null {
+  let latest: HostedSystemMailboxPendingItem | null = null;
+  for (const item of state.pending) {
+    if (
+      item.status !== "pending"
+      || item.routeAction !== "apply-member-preferences"
+    ) {
+      continue;
+    }
+    if (!latest || compareHostedSystemMailboxPendingItemRecency(item, latest) > 0) {
+      latest = item;
+    }
+  }
+  return latest;
+}
+
+function compareHostedSystemMailboxPendingItemRecency(
+  left: HostedSystemMailboxPendingItem,
+  right: HostedSystemMailboxPendingItem,
+): number {
+  const occurredAtComparison = compareIsoTimestampStrings(left.occurredAt, right.occurredAt);
+  if (occurredAtComparison !== 0) {
+    return occurredAtComparison;
+  }
+  return left.itemId.localeCompare(right.itemId);
+}
+
+function compareIsoTimestampStrings(left: string, right: string): number {
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) {
+    return leftMs < rightMs ? -1 : 1;
+  }
+  return left.localeCompare(right);
 }
 
 function systemMailboxItemIsDue(

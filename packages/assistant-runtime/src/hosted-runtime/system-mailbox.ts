@@ -126,9 +126,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
     wake: input.wake,
   };
   await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
-    pending: state.pending.some((item) => item.itemId === nextItem.itemId)
-      ? state.pending.map((item) => item.itemId === nextItem.itemId ? nextItem : item)
-      : [...state.pending, nextItem],
+    pending: upsertHostedSystemMailboxPendingItem(state.pending, nextItem),
   }));
 
   return {
@@ -175,7 +173,19 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       return {
         result: nextItem,
         state: {
-          pending: state.pending.map((item) => item.itemId === pending.itemId ? nextItem : item),
+          pending: state.pending.flatMap((item) => {
+            if (item.itemId === pending.itemId) {
+              return [nextItem];
+            }
+            if (
+              pending.routeAction === "apply-member-preferences"
+              && item.status === "pending"
+              && item.routeAction === "apply-member-preferences"
+            ) {
+              return [];
+            }
+            return [item];
+          }),
         },
       };
     },
@@ -252,6 +262,37 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       status: "retryable_failed",
     };
   }
+}
+
+function upsertHostedSystemMailboxPendingItem(
+  pending: readonly HostedSystemMailboxPendingItem[],
+  nextItem: HostedSystemMailboxPendingItem,
+): HostedSystemMailboxPendingItem[] {
+  const supersedesPendingMemberPreferences =
+    nextItem.routeAction === "apply-member-preferences";
+  const next: HostedSystemMailboxPendingItem[] = [];
+  let inserted = false;
+
+  for (const item of pending) {
+    if (item.itemId === nextItem.itemId) {
+      next.push(nextItem);
+      inserted = true;
+      continue;
+    }
+    if (
+      supersedesPendingMemberPreferences
+      && item.status === "pending"
+      && item.routeAction === "apply-member-preferences"
+    ) {
+      continue;
+    }
+    next.push(item);
+  }
+
+  if (!inserted) {
+    next.push(nextItem);
+  }
+  return next;
 }
 
 export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {

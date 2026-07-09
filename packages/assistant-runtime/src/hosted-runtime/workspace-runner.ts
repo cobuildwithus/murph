@@ -566,20 +566,15 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     && !initialAssistantInputBatchHasWork
     && !initialMailboxImportHasForegroundConversationWork
   ) {
-    initialMailboxImport = await importHostedMailboxForWorkspaceRunner({
-      checkpointRequestBuilder: checkpointRequestSession,
-      checkpointReason: "import",
-      deferCheckpoint: true,
-      importItemContext: input.initialMailboxImportContext ?? null,
-      input,
-      lanes: ["system"],
-      requestId: input.requestId,
-      signal: input.signal ?? null,
-    });
-    checkpointRequestSession.recordCheckpointResult(initialMailboxImport, {
-      captureAssistantInputBatch: false,
-    });
-    markHostedMailboxImportDirtyIfNeeded(checkpointRequestSession, initialMailboxImport);
+    const preAssistantSystemImport =
+      await importHostedPreAssistantSystemMailboxForWorkspaceRunner({
+        checkpointRequestBuilder: checkpointRequestSession,
+        importItemContext: input.initialMailboxImportContext ?? null,
+        input,
+        requestId: input.requestId,
+        signal: input.signal ?? null,
+      });
+    initialMailboxImport = preAssistantSystemImport ?? initialMailboxImport;
   }
 
   if (!input.runAssistantPhase) {
@@ -1348,7 +1343,8 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
   input: HostedWorkspaceRunnerInput;
   requestId: string;
   signal: AbortSignal | null;
-}): Promise<void> {
+}): Promise<HostedMailboxImportCheckpointResult | null> {
+  let latestImport: HostedMailboxImportCheckpointResult | null = null;
   let previousSystemSeq: string | null = null;
   for (let importPage = 1; importPage <= HOSTED_PRE_ASSISTANT_SYSTEM_IMPORT_MAX_PAGES; importPage += 1) {
     const result = await importHostedMailboxForWorkspaceRunner({
@@ -1363,6 +1359,7 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
       suppressNoopRuntimeLog: true,
     });
     if (!hostedMailboxImportCheckpointResultIsNoop(result)) {
+      latestImport = result;
       input.checkpointRequestBuilder.recordCheckpointResult(result, {
         captureAssistantInputBatch: false,
       });
@@ -1374,15 +1371,17 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
       !nextRetryAt
       || !hostedWorkspaceRunnerWakeIsImmediate(nextRetryAt, input.input.now)
     ) {
-      return;
+      return latestImport;
     }
 
     const systemSeq = result.state.watermarks.system;
     if (systemSeq === previousSystemSeq) {
-      return;
+      return latestImport;
     }
     previousSystemSeq = systemSeq;
   }
+
+  return latestImport;
 }
 
 function hostedMailboxImportCheckpointResultIsNoop(

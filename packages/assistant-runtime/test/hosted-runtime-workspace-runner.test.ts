@@ -822,6 +822,86 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("imports paged member preference system work before a background assistant phase", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const events: string[] = [];
+    const { mailboxPort } = createMailboxPort({
+      fetchRequests,
+      items: [
+        ...Array.from({ length: 10 }, (_, index) => createMailboxItem({
+          id: `mailbox_item_runner_background_notification_${index + 1}`,
+          kind: "assistant.notification.requested",
+          lane: "system",
+          laneSeq: `${index + 1}`,
+        })),
+        createMailboxItem({
+          id: "mailbox_item_runner_background_preferences_update",
+          kind: "member.preferences.updated",
+          lane: "system",
+          laneSeq: "11",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_background_preferences_barrier",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`import:${item.route.action}`);
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_background_preferences_barrier",
+        async runAssistantPhase(input) {
+          events.push("assistant");
+          assert.equal(input.initialMailboxImport.state.watermarks.conversation, "0");
+          assert.equal(input.initialMailboxImport.state.watermarks.system, "11");
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+        [
+          { importedSeq: "10", lane: "system" },
+        ],
+      ]);
+      assert.equal(events.at(-2), "import:apply-member-preferences");
+      assert.equal(events.at(-1), "assistant");
+      assert.equal(events.filter((event) => event === "import:dispatch-assistant-notification").length, 10);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "0");
+      assert.equal(result.latestMailboxImport.state.watermarks.system, "11");
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("pre-auto-reply delivery preparation imports pending system-lane work after fresh conversation input", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];
