@@ -1,4 +1,11 @@
-import { CheckCircle2, Clock3, ShieldAlert, XCircle, type LucideIcon } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  Clock3,
+  ShieldAlert,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { ActionApprovalAuthRequiredState } from "@/src/components/sensitive-actions/action-approval-auth-required";
@@ -8,6 +15,7 @@ import { HostedPrivyBoundary } from "@/src/components/hosted-onboarding/hosted-p
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
+import { Separator } from "@/src/components/ui/separator";
 import {
   readHostedActionApproval,
   requireHostedActionApprovalId,
@@ -82,6 +90,8 @@ async function ActionApprovalTerminalState({
     redirect(contactOptions[0].href);
   }
 
+  const contactOption = contactOptions[0] ?? null;
+
   return (
     <ActionApprovalScreen
       badgeIcon={content.icon}
@@ -89,29 +99,29 @@ async function ActionApprovalTerminalState({
       body={content.description}
       title={content.title}
     >
-      {contactOptions.length > 0 ? (
-        <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-          {contactOptions.map((option) => (
-            <MurphContactLink
-              actionLabel="Return to Murph"
-              className={cn(buttonVariants({ size: "lg" }), "w-full sm:w-auto")}
-              key={`${option.kind}:${option.href}`}
-              option={option}
-            >
-              Return in {option.label}
-            </MurphContactLink>
-          ))}
-        </div>
-      ) : (
-        <div className="mt-7">
-          <p className="text-sm text-muted-foreground">
-            Return to your Murph thread and reply with:
-          </p>
-          <p className="mt-3 break-words rounded-lg bg-muted/40 px-4 py-3 font-mono text-sm text-foreground">
-            {content.replyBody}
-          </p>
-        </div>
-      )}
+      <div className="mt-7 flex flex-col gap-6">
+        <Separator />
+        {contactOption ? (
+          <MurphContactLink
+            actionLabel={content.actionLabel}
+            className={cn(buttonVariants({ size: "lg" }), "w-full sm:w-fit")}
+            option={contactOption}
+          >
+            {content.actionLabel}
+            <ArrowRight aria-hidden="true" data-icon="inline-end" />
+          </MurphContactLink>
+        ) : (
+          <div>
+            <p className="text-sm text-muted-foreground">
+              Return to the Murph conversation where this request started and
+              send:
+            </p>
+            <p className="mt-3 break-words rounded-lg bg-muted/40 px-4 py-3 font-mono text-sm text-foreground">
+              {content.replyBody}
+            </p>
+          </div>
+        )}
+      </div>
     </ActionApprovalScreen>
   );
 }
@@ -128,6 +138,7 @@ function ActionApprovalUnavailableState() {
 }
 
 interface TerminalContent {
+  actionLabel: string;
   description: string;
   icon: LucideIcon;
   replyBody: string;
@@ -140,6 +151,7 @@ function terminalContent(
   switch (status) {
     case "approved":
       return {
+        actionLabel: "Return to Murph",
         description: "You approved this action. Head back to Murph to continue.",
         icon: CheckCircle2,
         replyBody: "I approved the request.",
@@ -147,6 +159,7 @@ function terminalContent(
       };
     case "denied":
       return {
+        actionLabel: "Return to Murph",
         description: "Murph will not continue with this action.",
         icon: XCircle,
         replyBody: "I denied the request.",
@@ -154,10 +167,12 @@ function terminalContent(
       };
     case "expired":
       return {
-        description: "This link expired. Ask Murph to send a new approval link.",
+        actionLabel: "Request a new link",
+        description:
+          "Approval links expire after a short time for your security. Nothing was approved or changed.",
         icon: Clock3,
         replyBody: "That approval link expired. Please send a new one.",
-        title: "This request expired",
+        title: "Approval link expired",
       };
   }
 }
