@@ -109,18 +109,21 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('one shared email thread only')
   })
 
-  it('distinguishes solo group join-link setup from in-chat join offers', () => {
+  it('keeps group challenge offers inside group chats', () => {
     const section = getPromptSection(
       buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
         .stableRouteCapabilityPrompt,
       CAPABILITY_OFFERS_HEADER,
     )
 
-    expect(section).toContain('in a 1:1 conversation')
-    expect(section).toContain('mint a join link the user can share')
-    expect(section).toContain('inside a group chat')
-    expect(section).toContain('react-to-join offer message')
+    expect(section).toContain('Offer one only inside a group chat')
+    expect(section).toContain('reacting to a server-owned offer message')
+    expect(section).toContain(
+      'In a 1:1 conversation, do not pitch a group challenge or a join link',
+    )
     expect(section).toContain('Do not imply Murph can create the group chat itself')
+    // The setup-trigger list must not reintroduce a 1:1 group pitch.
+    expect(section).not.toContain('mint a join link')
   })
 
   it('keeps internal primitives out of proactive offers', () => {
