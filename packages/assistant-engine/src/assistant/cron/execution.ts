@@ -37,6 +37,7 @@ import {
 import { readAssistantOnboardingState } from '../onboarding-state.js'
 import { runExperimentLifecycleOutcomePrecondition } from '../experiment-support-automations.js'
 import {
+  isAssistantOutboxRetryableError,
   markAssistantOutboxIntentMirrorTerminalById,
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
@@ -97,7 +98,7 @@ import {
   resolveAssistantCronNextRunAfterSuccess,
 } from './finalization.js'
 import {
-  resolveAssistantCronTargetBindingDelivery,
+  resolveAssistantCronNotificationDeliveryRoute,
   validateAssistantCronDeliveryTarget,
 } from './targets.js'
 
@@ -442,6 +443,7 @@ export async function executeClaimedAssistantCronJob(input: {
   let response: string | null = null
   let errorText: string | null = null
   let errorCode: string | null = null
+  let failureConsumesOccurrence = false
   let foregroundYielded = false
   let outcome: AssistantCronRunOutcome = 'failed'
   let reason = 'unhandled'
@@ -594,7 +596,7 @@ export async function executeClaimedAssistantCronJob(input: {
           turnEnvironment: input.turnEnvironment ?? null,
           turnTrigger: 'automation-cron',
         })
-        const bindingDelivery = resolveAssistantCronTargetBindingDelivery(
+        const deliveryRoute = resolveAssistantCronNotificationDeliveryRoute(
           claimedJob.target,
         )
         // Run lifecycle-owned deterministic eligibility + persistence BEFORE
@@ -692,12 +694,13 @@ export async function executeClaimedAssistantCronJob(input: {
             turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
             threadId: claimedJob.target.threadId,
-            bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
+            bindingDeliveryTarget: deliveryRoute.bindingDelivery?.target ?? undefined,
             deferCommitUntilDeliveryAccepted:
               input.deliveryDispatchMode === 'queue-only',
-            deliveryKind: bindingDelivery?.kind ?? undefined,
+            deliveryKind: deliveryRoute.bindingDelivery?.kind ?? undefined,
             deliverySource: claimedJob.target.deliverySource,
-            deliveryTarget: claimedJob.target.deliveryTarget,
+            deliveryTarget: deliveryRoute.deliveryTarget,
+            threadIsDirect: deliveryRoute.threadIsDirect,
             operatorAuthority: 'direct-operator',
             workingDirectory: input.vault,
           })
@@ -801,7 +804,8 @@ export async function executeClaimedAssistantCronJob(input: {
         reason = 'foreground_yielded'
       } else {
         errorText = errorMessage(error)
-        errorCode = error instanceof VaultCliError ? error.code : null
+        errorCode = readAssistantCronErrorCode(error)
+        failureConsumesOccurrence = assistantCronDeliveryFailureConsumesOccurrence(error)
         reason = errorCode ?? 'error'
       }
       outcome = 'failed'
@@ -850,13 +854,21 @@ export async function executeClaimedAssistantCronJob(input: {
         job: current,
         finishedAt,
         foregroundYielded,
+        failureConsumesOccurrence,
         responseSessionId: sessionId,
         pendingDeliveryIntentId,
         run,
       })
       let removedAfterRun = false
 
-      if (shouldRemoveAssistantCronJobAfterRun(current, run, pendingDeliveryIntentId)) {
+      if (
+        shouldRemoveAssistantCronJobAfterRun(
+          current,
+          run,
+          pendingDeliveryIntentId,
+          failureConsumesOccurrence,
+        )
+      ) {
         store.jobs.splice(index, 1)
         removedAfterRun = true
       } else {
@@ -893,6 +905,7 @@ export async function executeClaimedAssistantCronJob(input: {
     const updatedRuntimeState = finalizeCanonicalAssistantCronRuntimeAfterRun({
       finishedAt,
       foregroundYielded,
+      failureConsumesOccurrence,
       run,
       runtimeState: currentRuntimeState,
       responseSessionId: usesSessionPin ? sessionId : null,
@@ -918,7 +931,14 @@ export async function executeClaimedAssistantCronJob(input: {
     })
     let removedAfterRun = false
 
-    if (shouldRemoveAssistantCronJobAfterRun(finalizedJob, run, pendingDeliveryIntentId)) {
+    if (
+      shouldRemoveAssistantCronJobAfterRun(
+        finalizedJob,
+        run,
+        pendingDeliveryIntentId,
+        failureConsumesOccurrence,
+      )
+    ) {
       if (input.job.source.kind === 'automation') {
         await upsertAutomation(
           buildCanonicalAutomationUpsertInput({
@@ -1145,6 +1165,7 @@ function listAssistantCronNotificationTags(
 }
 
 function finalizeAssistantCronJobAfterRun(input: {
+  failureConsumesOccurrence: boolean
   finishedAt: string
   foregroundYielded: boolean
   job: AssistantCronJob
@@ -1172,11 +1193,41 @@ function finalizeAssistantCronJobAfterRun(input: {
     })
   }
 
-  if (assistantCronRunConsumedOccurrence(input.run, input.pendingDeliveryIntentId)) {
+  if (
+    assistantCronRunConsumedOccurrence(
+      input.run,
+      input.pendingDeliveryIntentId,
+      input.failureConsumesOccurrence,
+    )
+  ) {
     const nextRunAt = resolveAssistantCronNextRunAfterSuccess(
       input.job,
       new Date(input.finishedAt),
     )
+
+    if (input.run.outcome === 'failed') {
+      return assistantCronJobSchema.parse({
+        ...input.job,
+        enabled:
+          input.job.schedule.kind === 'at' && input.job.keepAfterRun
+            ? false
+            : input.job.enabled,
+        target: shouldAutoBindSession
+          ? {
+              ...input.job.target,
+              sessionId: input.responseSessionId,
+            }
+          : input.job.target,
+        updatedAt: input.finishedAt,
+        state: {
+          ...runningClearedState,
+          nextRunAt,
+          lastFailedAt: input.finishedAt,
+          lastError: input.run.error,
+          consecutiveFailures: 0,
+        },
+      })
+    }
 
     return assistantCronJobSchema.parse({
       ...input.job,
@@ -1244,30 +1295,66 @@ function shouldRemoveAssistantCronJobAfterRun(
   job: AssistantCronJob,
   run: AssistantCronRunRecord,
   pendingDeliveryIntentId: string | null,
+  failureConsumesOccurrence = false,
 ): boolean {
   return (
     job.schedule.kind === 'at' &&
     !job.keepAfterRun &&
-    assistantCronRunConsumedOccurrence(run, pendingDeliveryIntentId)
+    assistantCronRunConsumedOccurrence(
+      run,
+      pendingDeliveryIntentId,
+      failureConsumesOccurrence,
+    )
   )
 }
 
 // A stale-skipped wake consumes its occurrence like a success so one-shots
 // archive and recurring schedules advance; a delivery-queued skip keeps the
-// occurrence pending until the outbound delivery confirms.
+// occurrence pending until the outbound delivery confirms. Terminal delivery
+// failures also consume the occurrence while remaining failed for observability.
 function assistantCronRunConsumedOccurrence(
   run: AssistantCronRunRecord,
   pendingDeliveryIntentId: string | null,
+  failureConsumesOccurrence = false,
 ): boolean {
   return (
     run.outcome === 'delivered' ||
     run.outcome === 'no_op' ||
     run.outcome === 'expired' ||
-    run.outcome === 'skipped_gate'
+    run.outcome === 'skipped_gate' ||
+    (failureConsumesOccurrence && run.outcome === 'failed')
   )
 }
 
+function assistantCronDeliveryFailureConsumesOccurrence(error: unknown): boolean {
+  return assistantCronErrorHasNotificationDeliveryStage(error) &&
+    !isAssistantOutboxRetryableError(error)
+}
+
+function assistantCronErrorHasNotificationDeliveryStage(error: unknown): boolean {
+  const details = readAssistantCronErrorRecord(readAssistantCronErrorRecord(error)?.details)
+  return details?.assistantNotificationStage === 'delivery'
+}
+
+function readAssistantCronErrorCode(error: unknown): string | null {
+  if (error instanceof VaultCliError) {
+    return error.code
+  }
+  const code = readAssistantCronErrorRecord(error)?.code
+  const normalized = typeof code === 'string' ? code.trim() : ''
+  return normalized.length > 0 ? normalized : null
+}
+
+function readAssistantCronErrorRecord(
+  value: unknown,
+): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
 function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
+  failureConsumesOccurrence: boolean
   finishedAt: string
   foregroundYielded: boolean
   pendingDeliveryIntentId: string | null
@@ -1298,7 +1385,29 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
     }
   }
 
-  if (assistantCronRunConsumedOccurrence(input.run, input.pendingDeliveryIntentId)) {
+  if (
+    assistantCronRunConsumedOccurrence(
+      input.run,
+      input.pendingDeliveryIntentId,
+      input.failureConsumesOccurrence,
+    )
+  ) {
+    if (input.run.outcome === 'failed') {
+      return {
+        ...input.runtimeState,
+        sessionId: input.responseSessionId ?? input.runtimeState.sessionId,
+        updatedAt: input.finishedAt,
+        state: {
+          ...runningClearedState,
+          pendingOccurrenceAt: null,
+          retryAfterAt: null,
+          lastFailedAt: input.finishedAt,
+          lastError: input.run.error,
+          consecutiveFailures: 0,
+        },
+      }
+    }
+
     return {
       ...input.runtimeState,
       sessionId: input.responseSessionId ?? input.runtimeState.sessionId,

@@ -948,7 +948,9 @@ async function persistAssistantExactTextNotificationSession(input: {
 }
 
 type AssistantNotificationAnnotatedError = Error & {
+  code?: string | null
   details?: Record<string, unknown>
+  retryable?: boolean
 }
 
 function annotateAssistantNotificationError(
@@ -964,13 +966,34 @@ function annotateAssistantNotificationError(
     return annotatedError
   }
 
+  const deliveryError = normalizeAssistantDeliveryError(error)
   const wrapped = new Error(
-    typeof error === 'string' && error.trim().length > 0
-      ? error
-      : 'Assistant notification execution failed.',
+    deliveryError.message || 'Assistant notification execution failed.',
   ) as AssistantNotificationAnnotatedError
+  wrapped.code = deliveryError.code ?? null
+  const retryable = readAssistantNotificationRetryableFlag(error)
+  if (retryable !== null) {
+    wrapped.retryable = retryable
+  }
   wrapped.details = { ...details }
   return wrapped
+}
+
+function readAssistantNotificationRetryableFlag(error: unknown): boolean | null {
+  const record = readAssistantNotificationRecord(error)
+  if (typeof record?.retryable === 'boolean') {
+    return record.retryable
+  }
+  const context = readAssistantNotificationRecord(record?.context)
+  return typeof context?.retryable === 'boolean' ? context.retryable : null
+}
+
+function readAssistantNotificationRecord(
+  value: unknown,
+): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 function mergeAssistantNotificationErrorDetails(

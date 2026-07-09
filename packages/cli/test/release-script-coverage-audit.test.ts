@@ -326,6 +326,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('does **not** run the local Codex')
+    const completionWorkflow = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
+      'utf8',
+    )
+    expect(completionWorkflow).toContain('not complete until the PR branch has no merge conflicts')
+    expect(completionWorkflow).toContain('fetch the latest `main`')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)

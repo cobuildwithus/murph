@@ -1588,11 +1588,15 @@ async function resolveHostedManagedAutomationDefaultRouteBestEffort(input: {
 
   return {
     channel: route.channel,
+    currentRouteSnapshot: true,
     deliverySource: null,
     deliveryTarget: route.deliveryTarget,
     identityId: route.identityId ?? null,
     participantId: route.participantId ?? null,
     threadId: route.threadId ?? null,
+    ...(typeof route.threadIsDirect === "boolean"
+      ? { threadIsDirect: route.threadIsDirect }
+      : {}),
   };
 }
 

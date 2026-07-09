@@ -646,6 +646,7 @@ test("automation save injects the current private iMessage delivery route", asyn
       automation: {
         route: {
           channel: string;
+          currentRouteSnapshot?: boolean | null;
           deliveryTarget: string | null;
           participantId: string | null;
           threadId: string | null;
@@ -662,6 +663,7 @@ test("automation save injects the current private iMessage delivery route", asyn
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.equal(shown.envelope.data?.automation?.route.channel, "linq");
+    assert.equal(shown.envelope.data?.automation?.route.currentRouteSnapshot, true);
     assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
     assert.equal(shown.envelope.data?.automation?.route.participantId, null);
     assert.equal(shown.envelope.data?.automation?.route.threadId, null);
@@ -714,6 +716,7 @@ test("automation save injects a hosted current messaging route without target fl
       automation: {
         route: {
           channel: string;
+          currentRouteSnapshot?: boolean | null;
           deliveryTarget: string | null;
           threadId: string | null;
         };
@@ -729,6 +732,7 @@ test("automation save injects a hosted current messaging route without target fl
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.equal(shown.envelope.data?.automation?.route.channel, "telegram");
+    assert.equal(shown.envelope.data?.automation?.route.currentRouteSnapshot, true);
     assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "telegram_thread_real");
     assert.equal(shown.envelope.data?.automation?.route.threadId, null);
   } finally {

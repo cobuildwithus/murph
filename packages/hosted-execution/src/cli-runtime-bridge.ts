@@ -49,6 +49,7 @@ const hostedCliAssistantCurrentRouteSchema = z.object({
   identityId: z.string().trim().min(1).nullable().optional(),
   participantId: z.string().trim().min(1).nullable().optional(),
   threadId: z.string().trim().min(1).nullable().optional(),
+  threadIsDirect: z.boolean().nullable().optional(),
 }).strict();
 
 const hostedCliAssistantCurrentRouteResponseSchema = z.object({

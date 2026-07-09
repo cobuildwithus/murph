@@ -30,13 +30,15 @@ export const POST = withJsonError(async (request: Request) => {
   const body = await readOptionalJsonObject(request);
   const routeAuthority = parseHostedLinqEgressRouteAuthority(body.routeAuthority);
 
-  await assertHostedLinqRecentInboundEngagementForRuntime({
+  const assertion = await assertHostedLinqRecentInboundEngagementForRuntime({
     currentInbound: parseHostedLinqLegacyCurrentInboundProof(body.currentInbound),
     directRecipientPhoneNumber: readOptionalBodyString(body.directRecipientPhoneNumber),
     fromPhoneNumber: readOptionalBodyString(body.fromPhoneNumber),
+    homeRouteFallbackAllowed: body.homeRouteFallbackAllowed === true,
     idempotencyKey: readOptionalBodyString(body.idempotencyKey),
     memberId: userId,
     prisma: getPrisma(),
+    replyToMessageId: readOptionalBodyString(body.replyToMessageId),
     routeAuthority,
     target: readOptionalBodyString(body.target),
     targetKind: readOptionalBodyString(body.targetKind),
@@ -44,6 +46,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({
     ok: true,
+    ...(assertion.targetOverride ? { targetOverride: assertion.targetOverride } : {}),
   });
 });
 

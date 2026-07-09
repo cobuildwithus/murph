@@ -1,4 +1,7 @@
-import type { HostedRuntimeEffectsPort } from "@murphai/assistant-runtime/hosted-runtime-contracts";
+import type {
+  HostedRuntimeEffectsPort,
+  HostedRuntimeLinqRecentInboundEngagementResult,
+} from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import type {
   HostedEmailDeliverySummary,
 } from "@murphai/assistant-runtime/hosted-email";
@@ -126,7 +129,7 @@ export function createCloudflareEffectsPort(input: {
     ...(webControlTransport
       ? {
           async assertLinqRecentInboundEngagement(request, context) {
-            await fetchHostedWebControlPlaneJson({
+            const payload = await fetchHostedWebControlPlaneJson({
               body: request,
               boundUserId: input.boundUserId,
               description: "Hosted Linq egress authority assertion",
@@ -140,6 +143,7 @@ export function createCloudflareEffectsPort(input: {
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
             });
+            return parseHostedRuntimeLinqRecentInboundEngagementResult(payload);
           },
           async recordLinqDeliveryOutcome(request, context) {
             await fetchHostedWebControlPlaneJson({
@@ -181,6 +185,34 @@ export function createCloudflareEffectsPort(input: {
       return target ? { delivery, target } : undefined;
     },
   };
+}
+
+function parseHostedRuntimeLinqRecentInboundEngagementResult(
+  value: unknown,
+): HostedRuntimeLinqRecentInboundEngagementResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const targetOverride = (value as { targetOverride?: unknown }).targetOverride;
+  if (
+    !targetOverride ||
+    typeof targetOverride !== "object" ||
+    Array.isArray(targetOverride)
+  ) {
+    return {};
+  }
+
+  const target = readOptionalStringField(targetOverride, "target");
+  const targetKind = readOptionalStringField(targetOverride, "targetKind");
+  return target && targetKind === "thread"
+    ? {
+        targetOverride: {
+          target,
+          targetKind,
+        },
+      }
+    : {};
 }
 
 function readOptionalHostedEmailDeliverySummary(

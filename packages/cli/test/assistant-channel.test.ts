@@ -532,6 +532,7 @@ test('deliverAssistantMessage uses stored Linq thread bindings so one assistant 
   assertAssistantOutboxDispatch(sent[0], {
     directRecipientPhoneNumber: '+15551234567',
     fromPhoneNumber: null,
+    homeRouteFallbackAllowed: true,
     target: 'chat_123',
     targetKind: 'thread',
     message: 'Linq thread reply.',
@@ -584,6 +585,7 @@ test('deliverAssistantMessage forwards Linq reply anchors when one is available'
   assertAssistantOutboxDispatch(sent[0], {
     directRecipientPhoneNumber: '+15551234567',
     fromPhoneNumber: null,
+    homeRouteFallbackAllowed: true,
     target: 'chat_123',
     targetKind: 'thread',
     message: 'Anchored Linq reply.',

@@ -8,6 +8,7 @@ import type { AutomationRoute } from '@murphai/contracts'
 import {
   type AssistantAutomationRouteValidationProfile,
   getAssistantAutomationRouteDeliverabilityIssue,
+  looksLikePrivateAssistantRoutePlaceholder,
   resolveAssistantDeliveryRouteWithCurrentRoute,
   stripPrivateAssistantRoutePlaceholders,
 } from '@murphai/operator-config/assistant/current-delivery-route'
@@ -43,10 +44,12 @@ export async function resolveAssistantCronTargetDefaults<
   return {
     ...input,
     channel: resolvedRoute.channel ?? undefined,
+    currentRouteSnapshot: input.currentRouteSnapshot === true ? true : undefined,
     deliverySource: input.deliverySource ?? undefined,
     identityId: resolvedRoute.identityId ?? undefined,
     participantId: resolvedRoute.participantId ?? undefined,
     threadId: resolvedRoute.threadId ?? undefined,
+    threadIsDirect: resolvedRoute.threadIsDirect ?? undefined,
     deliveryTarget: resolvedRoute.deliveryTarget ?? undefined,
   }
 }
@@ -72,9 +75,13 @@ export function validateAssistantCronDeliveryTarget(
 
   const normalizedRoute = stripPrivateAssistantRoutePlaceholders({
     channel,
+    currentRouteSnapshot: input.currentRouteSnapshot === true ? true : undefined,
     identityId: normalizeNullableString(input.identityId),
     participantId: normalizeNullableString(input.participantId),
     threadId: normalizeNullableString(input.threadId),
+    ...(typeof input.threadIsDirect === 'boolean'
+      ? { threadIsDirect: input.threadIsDirect }
+      : {}),
     deliveryTarget: normalizeNullableString(input.deliveryTarget),
   })
   const identityId = normalizedRoute.identityId
@@ -117,10 +124,16 @@ export function validateAssistantCronDeliveryTarget(
   return buildAssistantCronTarget({
     ...input,
     channel,
+    currentRouteSnapshot: normalizedRoute.currentRouteSnapshot === true
+      ? true
+      : undefined,
     deliverySource,
     identityId,
     participantId,
     threadId,
+    ...(typeof normalizedRoute.threadIsDirect === 'boolean'
+      ? { threadIsDirect: normalizedRoute.threadIsDirect }
+      : {}),
     deliveryTarget,
   })
 }
@@ -140,11 +153,17 @@ export function buildCanonicalAutomationRoute(
 ): AutomationRoute {
   return {
     channel: target.channel ?? '',
+    ...(target.currentRouteSnapshot === true
+      ? { currentRouteSnapshot: true }
+      : {}),
     deliverySource: target.deliverySource,
     deliveryTarget: target.deliveryTarget,
     identityId: target.identityId,
     participantId: target.participantId,
     threadId: target.threadId,
+    ...(typeof target.threadIsDirect === 'boolean'
+      ? { threadIsDirect: target.threadIsDirect }
+      : {}),
   }
 }
 
@@ -182,6 +201,15 @@ export function buildAssistantCronTargetSnapshot(
 export function resolveAssistantCronTargetBindingDelivery(
   target: AssistantCronTarget,
 ): AssistantBindingDelivery | null {
+  const linqCurrentRouteTarget =
+    resolveAssistantCronLinqCurrentRouteBindingTarget(target)
+  if (linqCurrentRouteTarget) {
+    return {
+      kind: 'thread',
+      target: linqCurrentRouteTarget,
+    }
+  }
+
   if (normalizeNullableString(target.deliveryTarget) !== null) {
     return null
   }
@@ -199,6 +227,61 @@ export function resolveAssistantCronTargetBindingDelivery(
     threadId: target.threadId,
     deliveryTarget: target.deliveryTarget,
   })
+}
+
+export function resolveAssistantCronNotificationDeliveryRoute(
+  target: AssistantCronTarget,
+): {
+  bindingDelivery: AssistantBindingDelivery | null
+  deliveryTarget: string | null
+  threadIsDirect: boolean | null
+} {
+  const bindingDelivery = resolveAssistantCronTargetBindingDelivery(target)
+  const linqCurrentRouteTarget =
+    resolveAssistantCronLinqCurrentRouteBindingTarget(target)
+  return {
+    bindingDelivery,
+    deliveryTarget: linqCurrentRouteTarget
+      ? null
+      : normalizeNullableString(target.deliveryTarget),
+    threadIsDirect: resolveAssistantCronNotificationThreadIsDirect({
+      linqCurrentRouteTarget,
+      target,
+    }),
+  }
+}
+
+function resolveAssistantCronNotificationThreadIsDirect(input: {
+  linqCurrentRouteTarget: string | null
+  target: AssistantCronTarget
+}): boolean | null {
+  if (typeof input.target.threadIsDirect === 'boolean') {
+    return input.target.threadIsDirect
+  }
+  return input.linqCurrentRouteTarget ? true : null
+}
+
+function resolveAssistantCronLinqCurrentRouteBindingTarget(
+  target: AssistantCronTarget,
+): string | null {
+  const deliveryTarget = normalizeNullableString(target.deliveryTarget)
+  if (
+    target.channel !== 'linq' ||
+    !deliveryTarget ||
+    target.currentRouteSnapshot !== true
+  ) {
+    return null
+  }
+
+  if (
+    !looksLikePrivateAssistantRoutePlaceholder(target.identityId) &&
+    !looksLikePrivateAssistantRoutePlaceholder(target.participantId) &&
+    !looksLikePrivateAssistantRoutePlaceholder(target.threadId)
+  ) {
+    return null
+  }
+
+  return deliveryTarget
 }
 
 function isLinqParticipantMaterializationTarget(
@@ -225,6 +308,7 @@ export function assistantCronTargetAudienceEquals(
     | 'identityId'
     | 'participantId'
     | 'threadId'
+    | 'threadIsDirect'
   >,
   right: Pick<
     AssistantCronTarget | AutomationRoute,
@@ -234,6 +318,7 @@ export function assistantCronTargetAudienceEquals(
     | 'identityId'
     | 'participantId'
     | 'threadId'
+    | 'threadIsDirect'
   >,
 ): boolean {
   return (
@@ -245,6 +330,7 @@ export function assistantCronTargetAudienceEquals(
     left.identityId === right.identityId &&
     left.participantId === right.participantId &&
     left.threadId === right.threadId &&
+    (left.threadIsDirect ?? null) === (right.threadIsDirect ?? null) &&
     left.deliveryTarget === right.deliveryTarget
   )
 }
