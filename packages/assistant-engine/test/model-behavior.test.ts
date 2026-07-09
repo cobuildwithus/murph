@@ -6,11 +6,12 @@ import {
   resolveAssistantModelBehaviorProfile,
 } from '../src/assistant/model-behavior.js'
 import {
-  buildAssistantNotificationDecisionSystemPromptLayers,
-  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
+  buildAssistantStyleSettingsDynamicPrompt,
   buildAssistantSystemPrompt,
   buildAssistantSystemPromptLayers,
   buildAssistantSystemPromptWithCacheMetadata,
+  buildAssistantNotificationDecisionSystemPromptLayers,
+  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
   type AssistantNotificationDecisionSystemPromptInput,
   type AssistantSystemPromptInput,
@@ -81,6 +82,11 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'do the work in this turn instead of asking for extra permission',
     )
+    expect(prompt).toContain('Lead the final reply with the result')
+    expect(prompt).toContain(
+      'trim introductions, repetition, reassurance, and optional background first',
+    )
+    expect(prompt).not.toContain('Final replies should briefly state')
     expect(prompt).toContain('It does not mean inventing extra health interventions')
     expect(
       buildAssistantExecutionBehaviorText({ profile: 'gpt5-agentic' }),
@@ -107,6 +113,86 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       "Work and life context may still be relevant when it affects the user's health, schedule, stress, travel, or routines.",
     )
+  })
+
+  it('adds assistant tone preference only when a saved tone exists', () => {
+    const defaultLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+    expect(defaultLayers.threadContextPrompt).not.toContain(
+      'Assistant tone preference:',
+    )
+
+    const casualLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantTone: 'casual',
+      }),
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'Assistant tone preference:',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'relaxed and conversational',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'lowercase is okay',
+    )
+
+    const formalLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantTone: 'formal',
+      }),
+    )
+    expect(formalLayers.threadContextPrompt).toContain(
+      'Assistant tone preference:',
+    )
+    expect(formalLayers.threadContextPrompt).toContain(
+      'complete sentences',
+    )
+    expect(formalLayers.threadContextPrompt).toContain('no slang')
+  })
+
+  it('keeps the settings voice deep link out of the default stable prompt', () => {
+    const layers = buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
+
+    expect(layers.prompt).not.toContain('/settings?voice=true')
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      '/settings?voice=true',
+    )
+    expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
+  })
+
+  it('mentions the settings voice deep link through dynamic context for current style-change asks', () => {
+    const stylePrompt = buildAssistantStyleSettingsDynamicPrompt(
+      'Can you change your voice?',
+    )
+    if (!stylePrompt) {
+      throw new Error('Expected assistant style settings prompt.')
+    }
+
+    expect(stylePrompt).toContain('/settings?voice=true')
+    expect(
+      buildAssistantStyleSettingsDynamicPrompt('What happened to my HRV?'),
+    ).toBeNull()
+
+    const baseline = buildAssistantSystemPromptWithCacheMetadata(
+      createCommonCodexPromptInput(),
+    )
+    const withStylePrompt = buildAssistantSystemPromptWithCacheMetadata(
+      createCommonCodexPromptInput({
+        assistantDynamicContextPrompts: [stylePrompt],
+      }),
+    )
+
+    expect(withStylePrompt.layers.dynamicTurnContextPrompt).toContain(
+      '/settings?voice=true',
+    )
+    expect(withStylePrompt.layers.stableRouteCapabilityPrompt).not.toContain(
+      '/settings?voice=true',
+    )
+    expect(
+      withStylePrompt.cacheMetadata.stableRouteCapabilityPromptHash,
+    ).toBe(baseline.cacheMetadata.stableRouteCapabilityPromptHash)
   })
 
   it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
@@ -267,7 +353,9 @@ describe('assistant execution prompt contract', () => {
     expect(linqPrompt).toContain(
       'Use Markdown-style text markers only where later channel guidance explicitly allows native text-style conversion',
     )
-    expect(linqPrompt).toContain('No Markdown tables, Markdown headers, fenced code blocks')
+    expect(linqPrompt).toContain(
+      "Follow the channel's existing rules for tables, headers, code blocks, and text styling",
+    )
     expect(linqPrompt).not.toContain(
       'Do not wrap text in `**`, `*`, `_`, `~~`, or `++` style markers',
     )
@@ -577,7 +665,7 @@ describe('assistant local PDF evidence guidance', () => {
     )
     expect(prompt).toContain('PDF evidence was not available')
     expect(prompt).toContain(
-      'before reading, parsing, rendering, importing, saving, or reasoning over the content',
+      'follow the progress-update rules in the execution guidance before beginning the long work',
     )
   })
 
@@ -591,13 +679,13 @@ describe('assistant local PDF evidence guidance', () => {
       'When the user sends or references a file, image, screenshot, PDF, CSV, audio/video file, large pasted text, lab report',
     )
     expect(prompt).toContain(
-      'If the current task requires substantial non-audio content inspection or multiple parse/import steps, use the progress-update budget above',
+      'For substantial non-audio content inspection or multiple parse/import steps, follow the progress-update rules in the execution guidance',
     )
     expect(prompt).toContain(
-      'at most one for ordinary long work, up to two more only after multi-minute delays, and none when the final reply should be available shortly',
+      'then continue immediately',
     )
     expect(prompt).toContain(
-      'Do not use it for straightforward one-shot logging or capture writes',
+      'Skip progress updates for straightforward one-shot logging or capture writes',
     )
     expect(prompt).toContain(
       'For voice memos and audio/video, use transcript fragments directly when ingestion provides them',
@@ -678,10 +766,10 @@ describe('assistant consumption lookup guidance', () => {
       'When meal logging or food-pattern context is central, follow the food-journal skill',
     )
     expect(prompt).toContain(
-      'For forward-looking nutrition advice, including meal structure, protein, body-composition direction, training fuel, hydration, appetite or under-fueling, GI comfort, or realistic food-system changes, read `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md` before recommending what to eat or change.',
+      'For forward-looking nutrition advice about meal structure, protein, training fuel, recovery eating, hydration, appetite or under-fueling, or realistic food-system execution, read `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md` before recommending what to eat or change.',
     )
     expect(prompt).toContain(
-      'Use food-journal for capture and retrospective observation; use experiment-onboarding only after the user chooses a bounded change to test.',
+      'Use food-journal for capture and retrospective observation, body-composition for fat-loss, muscle-gain, recomposition, weight, waist, or plateau strategy, gut-digestion for digestive symptom strategy, and experiment-onboarding only after the user chooses a bounded change to test.',
     )
     expect(prompt).toContain(
       'Ask one targeted follow-up only when missing detail materially changes the user\'s chosen focus, safety, or whether the record will be useful',
@@ -1002,7 +1090,7 @@ describe('assistant user-facing wording guidance', () => {
       'Never include Markdown links in `text`; use raw URLs only when the URL itself is the deliverable or the user asks for links',
     )
     expect(prompt).toContain(
-      'Do not include Markdown fences, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text`. Use text-style markers only when the bound channel guidance explicitly allows native conversion',
+      'Do not include Markdown tables, headers, fences, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text`. Use text-style markers only when the bound channel guidance explicitly allows native conversion',
     )
     expect(prompt).toContain(
       'No Markdown link syntax such as `[text](url)`',
@@ -1118,6 +1206,33 @@ Execution context:
     )
   })
 
+  it('applies assistant tone preference to notification decision prompts', () => {
+    const prompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({
+          assistantTone: 'casual',
+        }),
+      ).prompt
+
+    expect(prompt).toContain('Assistant tone preference:')
+    expect(prompt).toContain('The user chose casual.')
+
+    const defaultPrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput(),
+      ).prompt
+    expect(defaultPrompt).not.toContain('Assistant tone preference:')
+
+    const maintenancePrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({
+          assistantTone: 'formal',
+          maintenanceTurn: true,
+        }),
+      ).prompt
+    expect(maintenancePrompt).not.toContain('Assistant tone preference:')
+  })
+
   it('renders current date context with natural user-facing date guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       currentLocalDate: '2026-04-03',
@@ -1215,7 +1330,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '0f7cc7aab31fb3287761de872693ab8cb00c3208ee7f8fdc7911354a2e9382f7',
+      '6a0d767009f89c87b360ae44db95021499a71bdfdf6fb936cdf701dd20004436',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

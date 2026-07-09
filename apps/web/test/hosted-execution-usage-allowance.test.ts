@@ -302,7 +302,7 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("prices GPT-5.6 model slugs with official preview standard and flex accounting", () => {
+  it("prices GPT-5.6 model slugs with official standard and flex accounting", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       requestedModel: "gpt-5.6-terra",
@@ -313,7 +313,7 @@ describe("hosted AI usage allowance pricing", () => {
       pricingSnapshot: {
         model: "gpt-5.6-terra",
         modelSource: "served",
-        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        pricingSource: "https://developers.openai.com/api/docs/pricing",
         ratesUsdMicrosPerMillionTokens: {
           cachedInput: "250000",
           cacheWrite: "3125000",
@@ -324,7 +324,7 @@ describe("hosted AI usage allowance pricing", () => {
         servedModel: "openai/gpt-5.6-terra-2026-07-08",
         tokenPricingBasis: "standard",
       },
-      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-standard",
+      pricingVersion: "openai-api-pricing-2026-07-09-gpt-5.6-standard",
     });
 
     expect(priceHostedAiUsageForAllowance({
@@ -338,7 +338,7 @@ describe("hosted AI usage allowance pricing", () => {
       counted: true,
       pricingSnapshot: {
         model: "gpt-5.6-luna",
-        pricingSource: "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna",
+        pricingSource: "https://developers.openai.com/api/docs/pricing",
         ratesUsdMicrosPerMillionTokens: {
           cachedInput: "100000",
           cacheWrite: "1250000",
@@ -351,11 +351,11 @@ describe("hosted AI usage allowance pricing", () => {
         },
         tokenPricingBasis: "openai-flex",
       },
-      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-openai-flex",
+      pricingVersion: "openai-api-pricing-2026-07-09-gpt-5.6-openai-flex",
     });
   });
 
-  it("prices GPT-5.6 cache-write tokens at the official preview write rate", () => {
+  it("prices GPT-5.6 cache-write tokens at the official write rate", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
       cacheWriteTokens: 1_000,
@@ -386,7 +386,7 @@ describe("hosted AI usage allowance pricing", () => {
           output: "0",
         },
       },
-      pricingVersion: "openai-gpt-5.6-preview-pricing-2026-07-08-standard",
+      pricingVersion: "openai-api-pricing-2026-07-09-gpt-5.6-standard",
     });
   });
 
@@ -2040,7 +2040,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("raises the current period limit on upgrade without lowering spend or reopening the period notice", async () => {
+  it("raises the current period limit without lowering spend or clearing the sent notice", async () => {
     const priorNoticeSentAt = new Date("2026-03-28T12:00:00.000Z");
     const update = vi.fn(async (args?: unknown) => {
       void args;
@@ -2075,16 +2075,16 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
-        limitNoticeSentAt: priorNoticeSentAt,
         limitUsdMicros: 25_000_000n,
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
+    expect(updateData).not.toHaveProperty("limitNoticeSentAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
-  it("preserves sent usage-limit notice markers on later same-period normalization", async () => {
+  it("does not rewrite sent usage-limit notice markers during same-period normalization", async () => {
     const priorBlockedAt = new Date("2026-03-28T11:59:00.000Z");
     const priorNoticeSentAt = new Date("2026-03-28T12:00:00.000Z");
     const update = vi.fn(async (args?: unknown) => {
@@ -2123,11 +2123,11 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
-        limitNoticeSentAt: priorNoticeSentAt,
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
+    expect(updateData).not.toHaveProperty("limitNoticeSentAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
@@ -2243,11 +2243,11 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
-        limitNoticeSentAt: new Date("2026-04-20T12:01:00.000Z"),
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
+    expect(updateData).not.toHaveProperty("limitNoticeSentAt");
     expect(updateData).not.toHaveProperty("lastUsageAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
@@ -2902,8 +2902,8 @@ function createGatePrisma(input: {
     periodStart: Date;
     spentUsdMicros: bigint;
   } | null;
-  limitUsdMicros?: bigint;
   limitNoticeSentAt?: Date | null;
+  limitUsdMicros?: bigint;
   periodEnd?: Date;
   periodStart?: Date;
   pulseTrialPolicyVersion?: string | null;

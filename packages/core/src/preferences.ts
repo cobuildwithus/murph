@@ -1,9 +1,15 @@
 import {
+  assistantPreferencesSchema,
+  assistantTonePreferenceSchema,
+  assistantVoiceOptionIdSchema,
   isWearablePreferenceProvider,
   normalizeWearablePreferenceProviders,
   preferencesDocumentRelativePath,
   preferencesDocumentSchema,
   preferencesDocumentSchemaVersion,
+  type AssistantPreferences,
+  type AssistantTonePreference,
+  type AssistantVoiceOptionId,
   type PreferencesDocument,
   type WearablePreferences,
   type WorkoutUnitPreferences,
@@ -22,10 +28,18 @@ import { commitAuditedCanonicalWrite } from "./audited-write.ts";
 import { isPlainRecord } from "./types.ts";
 
 export type {
+  AssistantPreferences,
+  AssistantTonePreference,
+  AssistantVoiceOptionId,
   PreferencesDocument,
   WearablePreferences,
   WorkoutUnitPreferences,
 } from "@murphai/contracts";
+
+export interface AssistantPreferencesUpdate {
+  tone?: AssistantTonePreference;
+  voice?: AssistantVoiceOptionId;
+}
 
 export interface PreferencesDocumentSnapshot extends Omit<PreferencesDocument, "updatedAt"> {
   exists: boolean;
@@ -49,6 +63,67 @@ function normalizeWearablePreferencesForRead(value: unknown): WearablePreference
   return { desiredProviders };
 }
 
+function normalizeAssistantPreferencesForRead(value: unknown): AssistantPreferences | undefined {
+  if (!isPlainRecord(value)) {
+    return undefined;
+  }
+
+  const parsedPreferences = assistantPreferencesSchema.parse(value);
+  return Object.keys(parsedPreferences).length > 0 ? parsedPreferences : undefined;
+}
+
+function normalizeAssistantPreferencesForWrite(
+  preferences: AssistantPreferencesUpdate,
+): AssistantPreferences {
+  const nextPreferences: AssistantPreferences = {};
+
+  if (preferences.tone !== undefined) {
+    nextPreferences.tone = assistantTonePreferenceSchema.parse(preferences.tone);
+  }
+  if (preferences.voice !== undefined) {
+    nextPreferences.voice = assistantVoiceOptionIdSchema.parse(preferences.voice);
+  }
+
+  return nextPreferences;
+}
+
+function mergeAssistantPreferences(
+  current: AssistantPreferences | undefined,
+  preferences: AssistantPreferences,
+): AssistantPreferences | undefined {
+  const nextPreferences: AssistantPreferences = {
+    ...(current ?? {}),
+  };
+
+  if (preferences.tone !== undefined) {
+    nextPreferences.tone = preferences.tone;
+  }
+  if (preferences.voice !== undefined) {
+    nextPreferences.voice = preferences.voice;
+  }
+
+  return Object.keys(nextPreferences).length > 0
+    ? assistantPreferencesSchema.parse(nextPreferences)
+    : undefined;
+}
+
+function buildPreferencesDocument(input: {
+  assistant?: AssistantPreferences;
+  updatedAt: string;
+  wearablePreferences: WearablePreferences;
+  workoutUnitPreferences: WorkoutUnitPreferences;
+}): PreferencesDocument {
+  const document: PreferencesDocument = {
+    schemaVersion: preferencesDocumentSchemaVersion,
+    updatedAt: input.updatedAt,
+    ...(input.assistant ? { assistant: input.assistant } : {}),
+    workoutUnitPreferences: input.workoutUnitPreferences,
+    wearablePreferences: input.wearablePreferences,
+  };
+
+  return preferencesDocumentSchema.parse(document);
+}
+
 export async function readPreferencesDocument(
   vaultRoot: string,
 ): Promise<PreferencesDocumentSnapshot> {
@@ -70,12 +145,15 @@ export async function readPreferencesDocument(
   const parsedDocument = preferencesDocumentSchema.parse(
     await readJsonFile(vaultRoot, resolved.relativePath),
   );
-  const document: PreferencesDocument = {
-    ...parsedDocument,
+  const assistantPreferences = normalizeAssistantPreferencesForRead(parsedDocument.assistant);
+  const document = buildPreferencesDocument({
+    ...(assistantPreferences ? { assistant: assistantPreferences } : {}),
+    updatedAt: parsedDocument.updatedAt,
+    workoutUnitPreferences: parsedDocument.workoutUnitPreferences,
     wearablePreferences: normalizeWearablePreferencesForRead(
       parsedDocument.wearablePreferences,
     ),
-  };
+  });
 
   return {
     ...document,
@@ -109,13 +187,12 @@ export async function updateWorkoutUnitPreferences(input: {
       };
     }
 
-    const document: PreferencesDocument = {
-      schemaVersion: preferencesDocumentSchemaVersion,
+    const validatedDocument = buildPreferencesDocument({
+      ...(current.assistant ? { assistant: current.assistant } : {}),
       updatedAt: input.updatedAt ?? new Date().toISOString(),
       workoutUnitPreferences: nextPreferences,
       wearablePreferences: current.wearablePreferences,
-    };
-    const validatedDocument = preferencesDocumentSchema.parse(document);
+    });
 
     await commitAuditedCanonicalWrite({
       vaultRoot: input.vaultRoot,
@@ -176,13 +253,12 @@ export async function updateWearablePreferences(input: {
       };
     }
 
-    const document: PreferencesDocument = {
-      schemaVersion: preferencesDocumentSchemaVersion,
+    const validatedDocument = buildPreferencesDocument({
+      ...(current.assistant ? { assistant: current.assistant } : {}),
       updatedAt: input.updatedAt ?? new Date().toISOString(),
       workoutUnitPreferences: current.workoutUnitPreferences,
       wearablePreferences: nextPreferences,
-    };
-    const validatedDocument = preferencesDocumentSchema.parse(document);
+    });
 
     await commitAuditedCanonicalWrite({
       vaultRoot: input.vaultRoot,
@@ -193,6 +269,84 @@ export async function updateWearablePreferences(input: {
         action: "preferences_update",
         commandName: "core.updateWearablePreferences",
         summary: "Updated canonical wearable preferences.",
+      },
+      mutate: async ({ batch }) => {
+        await batch.stageTextWrite(
+          preferencesDocumentRelativePath,
+          `${JSON.stringify(validatedDocument, null, 2)}\n`,
+          { overwrite: true },
+        );
+
+        return {
+          result: null,
+          changes: [
+            {
+              path: preferencesDocumentRelativePath,
+              op: current.exists ? "update" : "create",
+            },
+          ],
+        };
+      },
+    });
+
+    return {
+      created: !current.exists,
+      updated: true,
+      document: await readPreferencesDocument(input.vaultRoot),
+    };
+  });
+}
+
+export async function updateAssistantPreferences(input: {
+  vaultRoot: string;
+  preferences: AssistantPreferencesUpdate;
+  updatedAt?: string;
+}): Promise<{
+  created: boolean;
+  updated: boolean;
+  document: PreferencesDocumentSnapshot;
+}> {
+  return await withLockedPreferencesDocument(input.vaultRoot, async () => {
+    const requestedPreferences = normalizeAssistantPreferencesForWrite(input.preferences);
+    if (
+      requestedPreferences.tone === undefined &&
+      requestedPreferences.voice === undefined
+    ) {
+      throw new TypeError("At least one assistant preference is required.");
+    }
+
+    const current = await readPreferencesDocument(input.vaultRoot);
+    const nextPreferences = mergeAssistantPreferences(
+      current.assistant,
+      requestedPreferences,
+    );
+    const hasChanges =
+      JSON.stringify(current.assistant ?? {}) !== JSON.stringify(nextPreferences ?? {});
+
+    if (!hasChanges && current.exists) {
+      return {
+        created: false,
+        updated: false,
+        document: current,
+      };
+    }
+
+    const validatedDocument = buildPreferencesDocument({
+      ...(nextPreferences ? { assistant: nextPreferences } : {}),
+      updatedAt: input.updatedAt ?? new Date().toISOString(),
+      workoutUnitPreferences: current.workoutUnitPreferences,
+      wearablePreferences: current.wearablePreferences,
+    });
+
+    await commitAuditedCanonicalWrite({
+      vaultRoot: input.vaultRoot,
+      operationType: "preferences_update",
+      summary: "Update canonical assistant preferences",
+      occurredAt: validatedDocument.updatedAt,
+      audit: {
+        action: "preferences_update",
+        commandName: "core.updateAssistantPreferences",
+        summary: "Updated canonical assistant preferences.",
       },
       mutate: async ({ batch }) => {
         await batch.stageTextWrite(

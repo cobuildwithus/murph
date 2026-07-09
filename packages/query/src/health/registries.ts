@@ -1,4 +1,5 @@
 import {
+  isExpectedHabitatAspectRelativePath,
   requireBankEntityRegistryDefinition,
   type BankEntityDefinitionWithRegistry,
   type BankEntityKind,
@@ -58,6 +59,7 @@ export interface RegistryListOptions {
 type ProjectedRegistryFamily = BankEntityKind;
 
 interface RegistryDefinition<TEntity extends RegistryQueryEntity> {
+  acceptRecord?: (record: RegistryStoredDocument<TEntity>) => boolean;
   compare?: (left: TEntity, right: TEntity) => number;
   registry: BankEntityDefinitionWithRegistry["registry"];
   transform(
@@ -174,7 +176,7 @@ export function toRegistryRecord<TEntity extends RegistryQueryEntity>(
     definition,
   );
 
-  return {
+  const record: RegistryStoredDocument<TEntity> = {
     entity,
     document: {
       relativePath: document.relativePath,
@@ -183,6 +185,12 @@ export function toRegistryRecord<TEntity extends RegistryQueryEntity>(
       attributes: document.attributes,
     },
   };
+
+  if (definition.acceptRecord && !definition.acceptRecord(record)) {
+    return null;
+  }
+
+  return record;
 }
 
 export function sortRegistryRecords<TEntity extends RegistryQueryEntity>(
@@ -550,6 +558,32 @@ export type ProviderQueryRecord = RegistryStoredDocument<ProviderQueryEntity>;
 export const providerRegistryDefinition: RegistryDefinition<ProviderQueryEntity> =
   createBankEntityRegistryDefinition("provider");
 
+export interface HabitatQueryEntity extends RegistryQueryEntity {
+  domain: string | null;
+  aspect: string | null;
+  indicators: Record<string, unknown> | null;
+  indicatorRecordedAt: Record<string, unknown> | null;
+  note: string | null;
+}
+
+export type HabitatQueryRecord = RegistryStoredDocument<HabitatQueryEntity>;
+
+export const habitatRegistryDefinition: RegistryDefinition<HabitatQueryEntity> = {
+  ...createBankEntityRegistryDefinition("habitat"),
+  acceptRecord: isExpectedHabitatRegistryRecord,
+};
+
+function isExpectedHabitatRegistryRecord(
+  record: RegistryStoredDocument<HabitatQueryEntity>,
+): boolean {
+  const aspect = record.entity.aspect;
+
+  return (
+    typeof aspect === "string" &&
+    isExpectedHabitatAspectRelativePath(aspect, record.document.relativePath)
+  );
+}
+
 export interface WorkoutFormatQueryEntity extends RegistryQueryEntity {
   summary: string | null;
   activityType: string | null;
@@ -686,6 +720,10 @@ export function providerRecordFromEntity(
   entity: CanonicalEntity,
 ): ProviderQueryRecord | null {
   return projectRegistryRecordFromEntity(entity, "provider", providerRegistryDefinition);
+}
+
+export function habitatRecordFromEntity(entity: CanonicalEntity): HabitatQueryRecord | null {
+  return projectRegistryRecordFromEntity(entity, "habitat", habitatRegistryDefinition);
 }
 
 export function workoutFormatRecordFromEntity(

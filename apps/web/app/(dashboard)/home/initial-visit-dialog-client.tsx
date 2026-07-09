@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { MessageCircleIcon } from "lucide-react";
 
 import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-card-picker";
+import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
@@ -28,10 +29,10 @@ export function HomeInitialVisitDialogClient({
   contactAction: HomeInitialVisitContactAction | null;
 }) {
   // Members on a text line meet the add-to-contacts step first; everyone
-  // else (Telegram or email only, or no channel yet) goes straight to the
-  // welcome dialog since there is no phone contact card to save.
-  const [stage, setStage] = useState<"contact" | "welcome">(
-    contactAction?.kind === "text" ? "contact" : "welcome",
+  // else (Telegram or email only, or no channel yet) starts with assistant
+  // style before the welcome dialog.
+  const [stage, setStage] = useState<"contact" | "tone" | "welcome">(
+    contactAction?.kind === "text" ? "contact" : "tone",
   );
   const [open, setOpen] = useState(true);
 
@@ -42,13 +43,28 @@ export function HomeInitialVisitDialogClient({
   if (stage === "contact") {
     return (
       <MurphContactCardPicker
-        onAddToContacts={() => setStage("welcome")}
+        onAddToContacts={() => setStage("tone")}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setStage("tone");
+          }
+        }}
+        onSkip={() => setStage("tone")}
+        open
+      />
+    );
+  }
+
+  if (stage === "tone") {
+    return (
+      <MurphAssistantStylePicker
+        initialStep="tone"
+        onComplete={() => setStage("welcome")}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) {
             setStage("welcome");
           }
         }}
-        onSkip={() => setStage("welcome")}
         open
       />
     );

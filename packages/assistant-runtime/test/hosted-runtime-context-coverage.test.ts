@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionMemberPreferencesUpdatedWake,
 } from "@murphai/hosted-execution";
+import { readPreferencesDocument } from "@murphai/core";
 import type {
   AssistantInputCursor,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -74,6 +76,7 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 });
 
 import {
+  applyHostedMemberPreferences,
   ensureHostedInboxSidecarReady,
   invalidateHostedInboxSidecarReady,
   isHostedInboxSidecarReady,
@@ -720,6 +723,64 @@ describe("hosted runtime context coverage", () => {
           }),
         ),
       ).resolves.toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("rejects member preference updates before member activation bootstrap", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+
+    try {
+      await expect(
+        applyHostedMemberPreferences(
+          vaultRoot,
+          buildHostedExecutionMemberPreferencesUpdatedWake({
+            eventId: "evt_preferences_before_activation",
+            memberId: "member_123",
+            occurredAt: "2026-04-08T00:20:00.000Z",
+            preferences: {
+              tone: "formal",
+              voice: "warm",
+            },
+          }),
+        ),
+      ).rejects.toThrow(/member\.activated bootstrap/u);
+
+      const preferences = await readPreferencesDocument(vaultRoot);
+      assert.equal(preferences.exists, false);
+      assert.equal(preferences.assistant, undefined);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("applies member preference updates through core after activation bootstrap and replays idempotently", async () => {
+    const { cleanup, vaultRoot } = await createWorkspace();
+
+    try {
+      await writeFile(path.join(vaultRoot, "vault.json"), "{}", "utf8");
+      const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
+        eventId: "evt_preferences_after_activation",
+        memberId: "member_123",
+        occurredAt: "2026-04-08T00:25:00.000Z",
+        preferences: {
+          tone: "formal",
+          voice: "warm",
+        },
+      });
+
+      await applyHostedMemberPreferences(vaultRoot, wake);
+      const first = await readPreferencesDocument(vaultRoot);
+      assert.equal(first.exists, true);
+      assert.equal(first.updatedAt, "2026-04-08T00:25:00.000Z");
+      assert.deepEqual(first.assistant, {
+        tone: "formal",
+        voice: "warm",
+      });
+
+      await applyHostedMemberPreferences(vaultRoot, wake);
+      await expect(readPreferencesDocument(vaultRoot)).resolves.toEqual(first);
     } finally {
       await cleanup();
     }

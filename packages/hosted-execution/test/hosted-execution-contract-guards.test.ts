@@ -4,6 +4,7 @@ import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEmailConversationMessageWake,
   buildHostedExecutionLinqConversationMessageWake,
+  buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
   buildHostedExecutionWhatsAppConversationMessageWake,
@@ -17,11 +18,15 @@ import {
   isHostedTelegramConversationMessageWake,
   isHostedWhatsAppConversationMessageWake,
 } from "../src/contracts.ts";
+import {
+  parseHostedExecutionWake,
+} from "../src/parsers.ts";
 
 describe("hosted execution wake guards", () => {
   it("accepts canonical wake kinds only", () => {
     expect(isHostedExecutionWakeKind("conversation.message")).toBe(true);
     expect(isHostedExecutionWakeKind("member.activated")).toBe(true);
+    expect(isHostedExecutionWakeKind("member.preferences.updated")).toBe(true);
     expect(isHostedExecutionWakeKind("runtime.manual-requested")).toBe(true);
     expect(isHostedExecutionWakeKind("runtime.maintenance-requested")).toBe(true);
     expect(isHostedExecutionWakeKind("unsupported.kind")).toBe(false);
@@ -91,6 +96,15 @@ describe("hosted execution wake guards", () => {
       occurredAt: "2026-04-18T00:00:00.000Z",
       userId: "user_guard",
     });
+    const preferencesWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      eventId: "member-preferences-wake-1",
+      memberId: "user_guard",
+      occurredAt: "2026-07-08T00:00:00.000Z",
+      preferences: {
+        tone: "casual",
+        voice: "warm",
+      },
+    });
 
     expect(isHostedConversationMessageWake(linqWake)).toBe(true);
     expect(isHostedConversationMessageWake(telegramWake)).toBe(true);
@@ -117,6 +131,51 @@ describe("hosted execution wake guards", () => {
 
     expect(isHostedSystemWake(systemWake)).toBe(true);
     expect(isHostedSystemWake(controlWake)).toBe(true);
+    expect(isHostedSystemWake(preferencesWake)).toBe(true);
     expect(isHostedSystemWake(emailWake)).toBe(false);
+  });
+
+  it("parses member preferences updated wakes with strict shared preference ids", () => {
+    const wake = parseHostedExecutionWake({
+      eventId: "member-preferences-wake-1",
+      kind: "member.preferences.updated",
+      occurredAt: "2026-07-08T00:00:00.000Z",
+      preferences: {
+        tone: "formal",
+        voice: "upbeat",
+      },
+      userId: "user_guard",
+    });
+
+    expect(wake).toEqual({
+      eventId: "member-preferences-wake-1",
+      kind: "member.preferences.updated",
+      occurredAt: "2026-07-08T00:00:00.000Z",
+      preferences: {
+        tone: "formal",
+        voice: "upbeat",
+      },
+      userId: "user_guard",
+    });
+    expect(() =>
+      parseHostedExecutionWake({
+        eventId: "member-preferences-wake-empty",
+        kind: "member.preferences.updated",
+        occurredAt: "2026-07-08T00:00:00.000Z",
+        preferences: {},
+        userId: "user_guard",
+      }),
+    ).toThrow(/tone or voice/u);
+    expect(() =>
+      parseHostedExecutionWake({
+        eventId: "member-preferences-wake-invalid",
+        kind: "member.preferences.updated",
+        occurredAt: "2026-07-08T00:00:00.000Z",
+        preferences: {
+          voice: "not-a-roster-id",
+        },
+        userId: "user_guard",
+      }),
+    ).toThrow(/voice/u);
   });
 });

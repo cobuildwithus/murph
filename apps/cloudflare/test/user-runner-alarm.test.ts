@@ -3666,6 +3666,44 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms.at(-1)).toBe("deleted");
   });
 
+  it("does not scan orphan candidates when deleting an upload session", async () => {
+    const currentObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_delete_no_scan_session.snapshot.enc`;
+    const storageList = vi.fn();
+    const { runner, storageValues } = createRunnerHarness({
+      onStorageList: storageList,
+    });
+    storageValues.set(
+      workspaceSnapshotUploadSessionCurrentStorageKey(),
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: currentObjectKey,
+        snapshotId: "snapshot_delete_no_scan_session",
+      }),
+    );
+    const userPrefix = await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID });
+    for (let i = 0; i < 1_500; i += 1) {
+      const snapshotId = `snapshot_delete_no_scan_orphan_${i}`;
+      storageValues.set(
+        workspaceSnapshotOrphanCandidateStorageKey(snapshotId),
+        {
+          createdAt: "2026-04-26T00:00:00.000Z",
+          objectKey: `${userPrefix}${snapshotId}.snapshot.enc`,
+          schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+          snapshotId,
+          userId: TEST_USER_ID,
+        },
+      );
+    }
+
+    await expect(runner.deleteHostedWorkspaceSnapshotUploadSession({
+      snapshotId: "snapshot_delete_no_scan_session",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({ deleted: true });
+
+    expect(storageValues.get(workspaceSnapshotUploadSessionCurrentStorageKey())).toBeUndefined();
+    expect(storageList).not.toHaveBeenCalled();
+  });
+
   it("cleans replaced workspace snapshots retained on the current upload session", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -4081,6 +4119,7 @@ function createDurableObjectState(input: {
   sql: TestSqlStorageLike;
 } {
   const alarms: string[] = [];
+  let activeAlarm: number | null = null;
   const sql = createTestSqlStorage();
   const waitUntilPromises: Promise<unknown>[] = [];
   const values = new Map<string, unknown>();
@@ -4090,10 +4129,11 @@ function createDurableObjectState(input: {
       if (input.alarmDeleteError) {
         throw input.alarmDeleteError;
       }
+      activeAlarm = null;
       alarms.push("deleted");
     },
     get: async <T>(key: string): Promise<T | undefined> => values.get(key) as T | undefined,
-    getAlarm: async () => null,
+    getAlarm: async () => activeAlarm,
     list: async <T>(options: { prefix?: string } = {}): Promise<Map<string, T>> => {
       await input.onStorageList?.(options);
       const result = new Map<string, T>();
@@ -4111,6 +4151,7 @@ function createDurableObjectState(input: {
       const date = scheduledTime instanceof Date
         ? scheduledTime
         : new Date(scheduledTime);
+      activeAlarm = date.getTime();
       alarms.push(date.toISOString());
     },
     sql,

@@ -2,6 +2,12 @@ import * as z from "zod";
 
 import { withContractMetadata } from "./schema-metadata.ts";
 import {
+  getHabitatAspectDefinition,
+  getHabitatIndicatorDefinition,
+  validateHabitatIndicatorValue,
+  HABITAT_DOMAIN_IDS,
+} from "./habitat-catalog.ts";
+import {
   ADVERSE_EFFECT_SEVERITIES,
   ALLERGY_CRITICALITIES,
   ALLERGY_STATUSES,
@@ -2553,6 +2559,118 @@ export const workoutFormatFrontmatterSchema = withContractMetadata(
   "Murph Workout Format Frontmatter",
 );
 
+const HABITAT_INDICATOR_ID_PATTERN = "^[a-z0-9]+(?:_[a-z0-9]+)*$";
+
+const habitatStoredIndicatorValueSchema = z.union([
+  z.string().max(400),
+  z.number(),
+  z.boolean(),
+]);
+
+export const habitatFrontmatterSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.habitatFrontmatter),
+      docType: z.literal(FRONTMATTER_DOC_TYPES.habitat),
+      habitatId: idSchema(ID_PREFIXES.habitat),
+      slug: patternedString(SLUG_PATTERN),
+      title: boundedString(1, 160),
+      status: z.literal("active"),
+      domain: z.enum(HABITAT_DOMAIN_IDS),
+      aspect: patternedString(SLUG_PATTERN),
+      indicators: z.record(
+        patternedString(HABITAT_INDICATOR_ID_PATTERN),
+        habitatStoredIndicatorValueSchema,
+      ),
+      indicatorRecordedAt: z
+        .record(patternedString(HABITAT_INDICATOR_ID_PATTERN), isoDateString())
+        .optional(),
+      note: boundedString(1, 4000).optional(),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      const aspect = getHabitatAspectDefinition(value.aspect);
+
+      if (!aspect) {
+        context.addIssue({
+          code: "custom",
+          path: ["aspect"],
+          message: `Unknown habitat aspect "${value.aspect}".`,
+        });
+        return;
+      }
+
+      if (value.slug !== value.aspect) {
+        context.addIssue({
+          code: "custom",
+          path: ["slug"],
+          message: `Habitat slug must match aspect "${value.aspect}".`,
+        });
+      }
+
+      if (aspect.domain !== value.domain) {
+        context.addIssue({
+          code: "custom",
+          path: ["domain"],
+          message: `Habitat aspect "${value.aspect}" belongs to domain "${aspect.domain}".`,
+        });
+      }
+
+      for (const [indicatorId, indicatorValue] of Object.entries(value.indicators)) {
+        const definition = getHabitatIndicatorDefinition(value.aspect, indicatorId);
+
+        if (!definition) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicators", indicatorId],
+            message: `Indicator "${indicatorId}" is not part of habitat aspect "${value.aspect}".`,
+          });
+          continue;
+        }
+
+        if (!value.indicatorRecordedAt?.[indicatorId]) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicatorRecordedAt", indicatorId],
+            message: `Indicator "${indicatorId}" requires a recordedAt date.`,
+          });
+        }
+
+        const issue = validateHabitatIndicatorValue(definition, indicatorValue);
+        if (issue) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicators", indicatorId],
+            message: issue,
+          });
+        }
+      }
+
+      for (const indicatorId of Object.keys(value.indicatorRecordedAt ?? {})) {
+        const definition = getHabitatIndicatorDefinition(value.aspect, indicatorId);
+
+        if (!definition) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicatorRecordedAt", indicatorId],
+            message: `Indicator timestamp "${indicatorId}" is not part of habitat aspect "${value.aspect}".`,
+          });
+          continue;
+        }
+
+        if (!(indicatorId in value.indicators)) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicatorRecordedAt", indicatorId],
+            message: `Indicator timestamp "${indicatorId}" has no stored indicator value.`,
+          });
+        }
+      }
+    }),
+  "@murphai/contracts/frontmatter-habitat.schema.json",
+  "Murph Habitat Frontmatter",
+);
+
 export const assessmentResponseSchema = withContractMetadata(
   z
     .object({
@@ -2939,6 +3057,7 @@ export type ExperimentProgressSnapshot = z.infer<typeof experimentProgressSnapsh
 export type ExperimentOutcome = z.infer<typeof experimentOutcomeSchema>;
 export type ExperimentFrontmatter = z.infer<typeof experimentFrontmatterSchema>;
 export type ProviderFrontmatter = z.infer<typeof providerFrontmatterSchema>;
+export type HabitatFrontmatter = z.infer<typeof habitatFrontmatterSchema>;
 export type FoodFrontmatter = z.infer<typeof foodFrontmatterSchema>;
 export type RecipeFrontmatter = z.infer<typeof recipeFrontmatterSchema>;
 export type WorkoutFormatFrontmatter = z.infer<typeof workoutFormatFrontmatterSchema>;

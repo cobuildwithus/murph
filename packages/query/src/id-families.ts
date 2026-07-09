@@ -73,6 +73,12 @@ export const ID_FAMILY_REGISTRY = Object.freeze<IdFamilyDefinition[]>([
     queryable: true,
   },
   {
+    family: "habitat",
+    entityKind: "habitat",
+    prefix: "hab_",
+    queryable: true,
+  },
+  {
     family: "recipe",
     entityKind: "recipe",
     prefix: "rcp_",

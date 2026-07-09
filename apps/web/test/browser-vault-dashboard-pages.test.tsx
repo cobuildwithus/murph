@@ -23,6 +23,8 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
 
 import { metadata as experimentsMetadata } from "../app/(dashboard)/experiments/page";
 import { ExperimentsPageClient } from "../app/(dashboard)/experiments/experiments-page-client";
+import { metadata as environmentMetadata } from "../app/(dashboard)/environment/page";
+import EnvironmentPage from "../app/(dashboard)/environment/page";
 import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
 import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
 import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
@@ -62,11 +64,17 @@ test("dashboard routes define page-specific metadata with the shared preview ima
     experimentsMetadata.description,
     "Browse evidence-backed health experiments and compare what changes against your own baseline.",
   );
+  assert.equal(environmentMetadata.title, "Environment — Murph");
+  assert.equal(
+    environmentMetadata.description,
+    "The living-context facts Murph knows about your home, bedroom, light, and workspace.",
+  );
 
   for (const routeMetadata of [
     overviewMetadata,
     historyMetadata,
     experimentsMetadata,
+    environmentMetadata,
   ]) {
     assert.deepEqual(routeMetadata.openGraph?.images, [
       {
@@ -170,6 +178,18 @@ test("HistoryPage renders recent timeline entries", () => {
   assert.match(markup, /Recent notes, events, assessments, and daily summaries/);
   assert.match(markup, /sleep_duration_minutes daily summary/);
   assert.doesNotMatch(markup, /history\/sample\/sample_1\.md/);
+});
+
+test("EnvironmentPage renders the habitat catalog mock", () => {
+  const markup = renderToStaticMarkup(createElement(EnvironmentPage));
+
+  assert.match(markup, /Environment/);
+  assert.match(markup, /Mock preview/);
+  assert.match(markup, /Bedroom &amp; sleep/);
+  assert.match(markup, /Night temperature/);
+  assert.match(markup, /Desk ergonomics/);
+  assert.match(markup, /skipped/);
+  assert.match(markup, /unknown/);
 });
 
 test("ExperimentsPage renders the public library with private browser-vault overlays", () => {
@@ -432,6 +452,24 @@ async function createFixtureClient(input: {
           stream: "sleep_duration_minutes",
           title: "Sleep duration",
         }),
+        createEntity("regimen", "regimen_creatine", {
+          body: "Creatine monohydrate 5 g daily.\n",
+          date: "2026-04-17",
+          kind: "supplement",
+          occurredAt: "2026-04-17T08:00:00.000Z",
+          status: "active",
+          tags: ["supplement"],
+          title: "Creatine monohydrate",
+        }),
+        createEntity("goal", "goal_rhr", {
+          body: "Bring resting heart rate under 45 bpm.\n",
+          date: "2026-04-16",
+          kind: "metric_goal",
+          occurredAt: "2026-04-16T08:00:00.000Z",
+          status: "active",
+          tags: ["cardio"],
+          title: "Improve resting heart rate",
+        }),
         ...(input.extraEntities ?? []),
       ],
       metadata: {
@@ -447,6 +485,8 @@ async function createFixtureClient(input: {
 function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultEntity["recordClass"] {
   switch (family) {
     case "experiment":
+    case "goal":
+    case "regimen":
       return "bank";
     case "journal":
       return "ledger";

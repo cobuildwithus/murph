@@ -584,7 +584,16 @@ beforeEach(() => {
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
-  mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async () => {
+  mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async (input) => {
+    if (
+      input?.allowedRouteActions?.length === 1
+      && input.allowedRouteActions[0] === "apply-member-preferences"
+    ) {
+      return {
+        at: null,
+        reason: null,
+      };
+    }
     const at = await mocks.resolveHostedSystemMailboxNextWakeAt();
     return {
       at,
@@ -2429,21 +2438,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       skipped: 0,
       updated: 0,
     });
-    mocks.getAssistantCronStatus
-      .mockResolvedValueOnce({
-        dueJobs: 0,
-        enabledJobs: 0,
-        nextRunAt: null,
-        runningJobs: 0,
-        totalJobs: 0,
-      })
-      .mockResolvedValueOnce({
-        dueJobs: 0,
-        enabledJobs: 1,
-        nextRunAt: seededNextWakeAt,
-        runningJobs: 0,
-        totalJobs: 1,
-      });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: seededNextWakeAt,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
@@ -2482,6 +2483,81 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         murphManagedAutomationUpdated: 0,
       }),
     }));
+  });
+
+  it("does not wait on fresh managed automation cron status after foreground yield starts", async () => {
+    vi.useFakeTimers();
+    try {
+      let shouldYield = false;
+      const retryWakeAt = "2026-04-27T00:00:30.000Z";
+      const defaultRoute = {
+        channel: "linq",
+        currentRouteSnapshot: true,
+        deliverySource: null,
+        deliveryTarget: "chat_synthetic_seed_route",
+        identityId: "identity_synthetic_seed_route",
+        participantId: "participant_synthetic_seed_route",
+        threadIsDirect: true,
+        threadId: "thread_synthetic_seed_route",
+      };
+      mocks.readAssistantInputEvent.mockResolvedValueOnce({
+        conversation: {
+          accountId: defaultRoute.identityId,
+          actorId: defaultRoute.participantId,
+          actorIsSelf: false,
+          source: defaultRoute.channel,
+          threadId: defaultRoute.threadId,
+          threadIsDirect: true,
+        },
+        replyTarget: {
+          channel: defaultRoute.channel,
+          messageId: "message_synthetic_seed_route",
+          threadId: defaultRoute.deliveryTarget,
+        },
+      });
+      mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+        created: 1,
+        skipped: 0,
+        updated: 0,
+      });
+      mocks.getAssistantCronStatus.mockImplementationOnce(() => {
+        setTimeout(() => {
+          shouldYield = true;
+        }, 0);
+        return new Promise(() => undefined);
+      });
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 1,
+        now: () => "2026-04-27T00:00:00.000Z",
+        shouldYieldBackgroundMaintenance: () => shouldYield,
+      }));
+
+      expect(result.afterCheckpoint).toEqual(expect.any(Function));
+      const postCheckpointPromise = result.afterCheckpoint?.();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(150);
+      const postCheckpoint = await postCheckpointPromise;
+
+      expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "assistant_runtime_commit",
+        nextWakeAt: retryWakeAt,
+        redactedStatus: expect.objectContaining({
+          murphManagedAutomationCreated: 1,
+          murphManagedAutomationSkipped: 0,
+          murphManagedAutomationUpdated: 0,
+        }),
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the recorded provider-cleanup wake when fresh managed automation seeding replaces the phase wake", async () => {
@@ -2525,21 +2601,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       skipped: 0,
       updated: 0,
     });
-    mocks.getAssistantCronStatus
-      .mockResolvedValueOnce({
-        dueJobs: 0,
-        enabledJobs: 0,
-        nextRunAt: null,
-        runningJobs: 0,
-        totalJobs: 0,
-      })
-      .mockResolvedValueOnce({
-        dueJobs: 0,
-        enabledJobs: 3,
-        nextRunAt: cronNextWakeAt,
-        runningJobs: 0,
-        totalJobs: 3,
-      });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 3,
+      nextRunAt: cronNextWakeAt,
+      runningJobs: 0,
+      totalJobs: 3,
+    });
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
@@ -2600,21 +2668,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       skipped: 0,
       updated: 0,
     });
-    mocks.getAssistantCronStatus
-      .mockResolvedValueOnce({
-        dueJobs: 0,
-        enabledJobs: 0,
-        nextRunAt: null,
-        runningJobs: 0,
-        totalJobs: 0,
-      })
-      .mockResolvedValueOnce({
-        dueJobs: 0,
-        enabledJobs: 3,
-        nextRunAt: cronNextWakeAt,
-        runningJobs: 0,
-        totalJobs: 3,
-      });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 3,
+      nextRunAt: cronNextWakeAt,
+      runningJobs: 0,
+      totalJobs: 3,
+    });
     // Persisted owner state is stale: pending ids with a null checkpoint.
     mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
       nextWakeAt: null,
@@ -7307,10 +7367,164 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       hostedOutboxDeliverySent: 1,
       nextWakeAt: postDeliveryAssistantWakeAt,
     }));
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.getAssistantCronStatus.mock.invocationCallOrder[0]);
+  });
+
+  it("delivers fast-dispatch foreground replies before a stalled cron status read", async () => {
+    const postDeliveryAssistantWakeAt = "2026-05-08T16:02:00.000Z";
+    let resolveCronStatus: ((status: {
+      dueJobs: number;
+      enabledJobs: number;
+      nextRunAt: string;
+      runningJobs: number;
+      totalJobs: number;
+    }) => void) | null = null;
+    const cronStatusPromise = new Promise<{
+      dueJobs: number;
+      enabledJobs: number;
+      nextRunAt: string;
+      runningJobs: number;
+      totalJobs: number;
+    }>((resolve) => {
+      resolveCronStatus = resolve;
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.getAssistantCronStatus.mockReturnValueOnce(cronStatusPromise);
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+      expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+      resolveCronStatus?.({
+        dueJobs: 0,
+        enabledJobs: 1,
+        nextRunAt: postDeliveryAssistantWakeAt,
+        runningJobs: 0,
+        totalJobs: 1,
+      });
+      return [createSentDeliveryOutcome()];
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-05-08T16:00:00.000Z",
+    }));
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries)
+      .toHaveBeenCalledTimes(1);
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.getAssistantCronStatus.mock.invocationCallOrder[0]);
+    expect(result.nextWakeAt).toBe(postDeliveryAssistantWakeAt);
+  });
+
+  it("skips post-delivery assistant cron status when foreground delivery yields maintenance", async () => {
+    let shouldYield = false;
+    const retryWakeAt = "2026-05-08T16:00:30.000Z";
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+      shouldYield = true;
+      return [createSentDeliveryOutcome()];
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-05-08T16:00:00.000Z",
+      shouldYieldBackgroundMaintenance: () => shouldYield,
+    }));
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries)
+      .toHaveBeenCalledTimes(1);
+    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: retryWakeAt,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: retryWakeAt,
+        hostedOutboxDeliverySent: 1,
+        nextWakeAt: retryWakeAt,
+      }),
+    }));
+  });
+
+  it("stops waiting for post-delivery assistant cron status when foreground yield starts during the read", async () => {
+    vi.useFakeTimers();
+    try {
+      let shouldYield = false;
+      const retryWakeAt = "2026-05-08T16:00:30.000Z";
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: null,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      });
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        createDeliveryEffect(),
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+        createSentDeliveryOutcome(),
+      ]);
+      mocks.getAssistantCronStatus.mockImplementationOnce(() => {
+        setTimeout(() => {
+          shouldYield = true;
+        }, 0);
+        return new Promise(() => undefined);
+      });
+
+      const resultPromise = runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 1,
+        now: () => "2026-05-08T16:00:00.000Z",
+        shouldYieldBackgroundMaintenance: () => shouldYield,
+      }));
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(150);
+
+      const result = await resultPromise;
+
+      expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: retryWakeAt,
+        redactedStatus: expect.objectContaining({
+          hostedAssistantNextWakeAt: retryWakeAt,
+          hostedOutboxDeliverySent: 1,
+          nextWakeAt: retryWakeAt,
+        }),
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("arms the post-pass assistant cron wake before deferred foreground delivery drains", async () => {
     const postPassAssistantWakeAt = "2026-05-08T16:02:00.000Z";
+    const reconciliationWakeAt = "2026-05-08T16:00:00.000Z";
     const existingDeviceSyncWakeAt = "2026-05-08T16:05:00.000Z";
     const baseDeliveryEffect = createDeliveryEffect();
     const deliveryEffect = {
@@ -7334,17 +7548,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
     ]);
-    mocks.getAssistantCronStatus.mockResolvedValueOnce({
-      dueJobs: 0,
-      enabledJobs: 1,
-      nextRunAt: postPassAssistantWakeAt,
-      runningJobs: 0,
-      totalJobs: 1,
-    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
-      now: () => "2026-05-08T16:00:00.000Z",
+      now: () => reconciliationWakeAt,
       workspace: {
         checkpointedAt: "2026-05-08T15:59:00.000Z",
         createdAt: "2026-05-08T15:00:00.000Z",
@@ -7358,18 +7565,74 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       afterCheckpoint: expect.any(Function),
       checkpointReason: "outbox_sending",
-      nextWakeAt: postPassAssistantWakeAt,
+      nextWakeAt: reconciliationWakeAt,
       progressed: true,
       redactedStatus: expect.objectContaining({
-        hostedAssistantNextWakeAt: postPassAssistantWakeAt,
+        hostedAssistantNextWakeAt: reconciliationWakeAt,
         hostedOutboxPendingDeliveryEffects: 1,
       }),
     }));
     expect(result).not.toHaveProperty("nextWakeReason");
+
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createSentDeliveryOutcome(),
+    ]);
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: postPassAssistantWakeAt,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: postPassAssistantWakeAt,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: postPassAssistantWakeAt,
+        hostedOutboxDeliverySent: 1,
+        nextWakeAt: postPassAssistantWakeAt,
+      }),
+    }));
+  });
+
+  it("arms foreground cron reconciliation without status reads when no delivery effects are produced", async () => {
+    const reconciliationWakeAt = "2026-05-08T16:00:00.000Z";
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCronStatusDeferred: true,
+      assistantAutomationCurrentTurnDeliveryIntentIds: ["intent_missing"],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => reconciliationWakeAt,
+    }));
+
+    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: reconciliationWakeAt,
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: reconciliationWakeAt,
+        hostedOutboxPendingDeliveryEffects: 0,
+      }),
+    }));
   });
 
   it("preserves a due assistant cron wake found after clean fast dispatch", async () => {
@@ -7419,7 +7682,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => dueAt,
     }));
 
-    expect(mocks.getAssistantCronStatus).toHaveBeenCalled();
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.getAssistantCronStatus.mock.invocationCallOrder[0]);
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
       nextWakeAt: dueAt,
@@ -10389,6 +10655,198 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("applies member preference mailbox work before planning fresh conversation input", async () => {
+    const callOrder: string[] = [];
+    mocks.resolveHostedSystemMailboxNextWakeCandidate
+      .mockResolvedValueOnce({
+        at: "2026-04-27T00:00:00.000Z",
+        reason: "assistant",
+      })
+      .mockResolvedValueOnce({
+        at: null,
+        reason: null,
+      });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(
+      async (input) => {
+        callOrder.push("member-preferences");
+        expect(input.allowedRouteActions).toEqual(["apply-member-preferences"]);
+        return {
+          item: createMemberPreferencesSystemMailboxItem(),
+          itemId: "system_mailbox_item_member_preferences",
+          metrics: {
+            bootstrapResult: null,
+            conversationMetrics: null,
+            mailboxLane: "member-preferences-updated",
+            redactedLogEntries: [],
+          },
+          status: "processed",
+        };
+      },
+    );
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      callOrder.push("assistant");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(callOrder).toEqual(["member-preferences", "assistant"]);
+    expect(result).toEqual(expect.objectContaining({
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedMemberPreferencesPrePlanningProcessed: 1,
+      }),
+    }));
+  });
+
+  it("applies member preference mailbox work before background notification work", async () => {
+    const callOrder: string[] = [];
+    let preferenceWakeChecks = 0;
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async (input) => {
+      if (
+        input?.allowedRouteActions?.length === 1
+        && input.allowedRouteActions[0] === "apply-member-preferences"
+      ) {
+        preferenceWakeChecks += 1;
+        return preferenceWakeChecks === 1
+          ? {
+              at: "2026-04-27T00:00:00.000Z",
+              reason: "assistant",
+            }
+          : {
+              at: null,
+              reason: null,
+            };
+      }
+
+      return {
+        at: null,
+        reason: null,
+      };
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(async (input) => {
+      if (
+        input.allowedRouteActions?.length === 1
+        && input.allowedRouteActions[0] === "apply-member-preferences"
+      ) {
+        callOrder.push("member-preferences");
+        return {
+          item: createMemberPreferencesSystemMailboxItem(),
+          itemId: "system_mailbox_item_member_preferences",
+          metrics: {
+            bootstrapResult: null,
+            conversationMetrics: null,
+            mailboxLane: "member-preferences-updated",
+            redactedLogEntries: [],
+          },
+          status: "processed",
+        };
+      }
+
+      callOrder.push("assistant-notification");
+      expect(input.allowedRouteActions).toBeUndefined();
+      return {
+        item: createSystemMailboxItem(),
+        itemId: "system_mailbox_item_notification",
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(callOrder).toEqual(["member-preferences", "assistant-notification"]);
+    expect(result).toEqual(expect.objectContaining({
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedMemberPreferencesPrePlanningProcessed: 1,
+        hostedSystemMailboxPrepared: 1,
+      }),
+    }));
+  });
+
+  it("continues fresh conversation planning while member preferences are waiting to retry", async () => {
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockResolvedValueOnce({
+      at: "2026-04-27T00:01:00.000Z",
+      reason: "assistant",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:01:00.000Z",
+      progressed: false,
+      redactedStatus: expect.objectContaining({
+        hostedMemberPreferencesPrePlanningPending: 1,
+        hostedMemberPreferencesPrePlanningProcessed: 0,
+      }),
+    }));
+  });
+
+  it("continues fresh conversation planning when member preferences fail retryably", async () => {
+    const callOrder: string[] = [];
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockResolvedValueOnce({
+      at: "2026-04-27T00:00:00.000Z",
+      reason: "assistant",
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
+      callOrder.push("member-preferences");
+      return {
+        errorCode: "synthetic_preferences_retry",
+        errorMessage: "Synthetic preferences retry.",
+        itemId: "system_mailbox_item_member_preferences",
+        nextWakeAt: "2026-04-27T00:01:00.000Z",
+        status: "retryable_failed",
+      };
+    });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      callOrder.push("assistant");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(callOrder).toEqual(["member-preferences", "assistant"]);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:01:00.000Z",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedMemberPreferencesPrePlanningErrorCode: "synthetic_preferences_retry",
+        hostedMemberPreferencesPrePlanningProcessed: 0,
+        hostedMemberPreferencesPrePlanningRetryableFailed: 1,
+      }),
+    }));
+  });
+
   it("leaves due system mailbox work pending when assistant input is ready", async () => {
     const callOrder: string[] = [];
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
@@ -12190,6 +12648,7 @@ function createSystemMailboxItem() {
     lastErrorCode: null,
     lastErrorMessage: null,
     mailboxDedupeKey: "dedupe_system_mailbox_item_processed",
+    mailboxLaneSeq: null,
     nextAttemptAt: null,
     occurredAt: "2026-04-27T00:00:00.000Z",
     postCheckpointRecord: null,
@@ -12201,6 +12660,24 @@ function createSystemMailboxItem() {
       notification: {
         delivery: null,
       },
+    },
+  };
+}
+
+function createMemberPreferencesSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_member_preferences",
+    mailboxDedupeKey: "dedupe_system_mailbox_item_member_preferences",
+    routeAction: "apply-member-preferences" as const,
+    wake: {
+      eventId: "member.preferences.updated:member_synthetic_phase:update_synthetic",
+      kind: "member.preferences.updated" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      preferences: {
+        tone: "formal" as const,
+      },
+      userId: "member_synthetic_phase",
     },
   };
 }

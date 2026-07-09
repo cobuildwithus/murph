@@ -41,6 +41,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMember: [
     "id String @id",
+    'assistantTone String? @map("assistant_tone")',
+    'assistantVoice String? @map("assistant_voice")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
     "linqContactCardShares HostedLinqContactCardShare[]",
@@ -620,6 +622,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260706130000_hosted_growth_daily_snapshot",
       "20260707170000_drop_stale_linq_recency_columns",
       "20260707180000_hosted_vault_share_projection_scopes",
+      "20260708120000_hosted_member_assistant_preferences",
       "20260709120000_hosted_linq_delivery_retry_after_at",
       "migration_lock.toml",
     ]);

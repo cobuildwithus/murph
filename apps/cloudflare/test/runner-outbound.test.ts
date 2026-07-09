@@ -4790,17 +4790,8 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
-    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
-      createdAt: expect.stringMatching(/^20/u),
-      objectKey: replacedObjectKey,
-      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-      snapshotId: replacedSnapshotId,
-      userId: "member_123",
-    });
-    expect(runner.workspaceSnapshotOrphanCandidates.get(replacedSnapshotId)).toMatchObject({
-      objectKey: replacedObjectKey,
-      snapshotId: replacedSnapshotId,
-    });
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotOrphanCandidates.has(replacedSnapshotId)).toBe(false);
   });
 
   it("deletes replaced legacy workspace snapshot bundles and artifacts after checkpoint CAS", async () => {
@@ -4914,19 +4905,8 @@ describe("handleRunnerOutboundRequest", () => {
       legacyDeltaRef.key,
       legacyArtifactKey,
     ]));
-    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
-      createdAt: expect.stringMatching(/^20/u),
-      kind: "legacy_workspace_snapshot",
-      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-      snapshotId: `legacy-${snapshotId}`,
-      snapshotRef: replacedSnapshotRef,
-      userId: "member_123",
-    });
-    expect(runner.workspaceSnapshotOrphanCandidates.get(`legacy-${snapshotId}`)).toMatchObject({
-      kind: "legacy_workspace_snapshot",
-      snapshotId: `legacy-${snapshotId}`,
-      snapshotRef: replacedSnapshotRef,
-    });
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotOrphanCandidates.has(`legacy-${snapshotId}`)).toBe(false);
     expect(fixture.fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -5301,13 +5281,7 @@ describe("handleRunnerOutboundRequest", () => {
       }),
     }));
     expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
-    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
-      createdAt: expect.stringMatching(/^20/u),
-      objectKey: replacedObjectKey,
-      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-      snapshotId: replacedSnapshotId,
-      userId: "member_123",
-    });
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith({
       snapshotId,
       userId: "member_123",
@@ -5838,6 +5812,69 @@ describe("handleRunnerOutboundRequest", () => {
     expect(deleteObject).toHaveBeenCalledWith(objectKey);
   });
 
+  it("retains uploaded snapshot cleanup before deleting an aborted session when object deletion fails", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_abort_delete_failure";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    const deleteObject = vi.fn(async () => {
+      throw new Error("R2 delete failed");
+    });
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({ key, size: 4 }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotAbortRequest({
+        objectKey,
+        snapshotId,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      aborted: true,
+      ok: true,
+    });
+    expect(deleteObject).toHaveBeenCalledWith(objectKey);
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
+      createdAt: expect.stringMatching(/^20/u),
+      objectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId,
+      userId: "member_123",
+    });
+    expect(runner.workspaceSnapshotOrphanCandidates.get(snapshotId)).toEqual(
+      expect.objectContaining({
+        objectKey,
+        snapshotId,
+        userId: "member_123",
+      }),
+    );
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+  });
+
   it("lets a stale invocation abort its own active workspace snapshot upload session", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       leaseGeneration: "10",
@@ -6189,7 +6226,404 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("retires workspace snapshot upload sessions when complete sees a replaced active write fence", async () => {
+  it("retains expired non-current completion object cleanup instead of deleting inline", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_expired_non_current_cleanup";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(
+      snapshotId,
+      createWorkspaceSnapshotUploadSession(snapshotRef, {
+        expiresAt: "2000-01-01T00:00:00.000Z",
+      }),
+    );
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: null,
+      onCheckpoint: () => {
+        throw new Error("expired completion should not checkpoint again");
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(410);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot upload session expired.",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
+      createdAt: expect.stringMatching(/^20/u),
+      objectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId,
+      userId: "member_123",
+    });
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith({
+      snapshotId,
+      userId: "member_123",
+    });
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+  });
+
+  it("does not delete the current workspace snapshot object when an expired completion retry cleans up replaced state", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_expired_current_retry";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotId = "snapshot_complete_expired_current_replaced";
+    const replacedObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 5,
+      encryptedObjectSha256: "b".repeat(64),
+      objectKey: replacedObjectKey,
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(
+      snapshotId,
+      createWorkspaceSnapshotUploadSession(snapshotRef, {
+        expiresAt: "2000-01-01T00:00:00.000Z",
+        replacedSnapshotRef,
+      }),
+    );
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: snapshotRef,
+      currentWorkspaceVersion: "5",
+      onCheckpoint: () => {
+        throw new Error("expired current retry should not checkpoint again");
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    const responseBody = requireTestObject(await response.json(), "expired current retry response");
+    expect(response.status).toBe(200);
+    expect(responseBody.checkpoint).toEqual(expect.objectContaining({
+      checkpointed: true,
+      replacedSnapshotRef,
+      workspace: expect.objectContaining({
+        snapshotRef: expect.objectContaining({
+          objectKey,
+          snapshotId,
+        }),
+      }),
+    }));
+    expect(responseBody.snapshotRef).toEqual(expect.objectContaining({
+      objectKey,
+      snapshotId,
+    }));
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
+    expect(deleteObject).not.toHaveBeenCalledWith(objectKey);
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith({
+      snapshotId,
+      userId: "member_123",
+    });
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+  });
+
+  it("keeps an expired current workspace snapshot retry when the active write fence moved", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner({
+      leaseGeneration: "10",
+    });
+    const snapshotId = "snapshot_complete_expired_current_moved_fence";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(
+      snapshotId,
+      createWorkspaceSnapshotUploadSession(snapshotRef, {
+        expiresAt: "2000-01-01T00:00:00.000Z",
+      }),
+    );
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: snapshotRef,
+      currentWorkspaceVersion: "5",
+      onCheckpoint: () => {
+        throw new Error("expired current retry should not checkpoint again");
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot upload session is stale.",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      userId: "member_123",
+    });
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
+  });
+
+  it("keeps an expired current workspace snapshot retry when web has not advanced past the session version", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_expired_current_pre_checkpoint";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    runner.workspaceSnapshotUploadSessions.set(
+      snapshotId,
+      createWorkspaceSnapshotUploadSession(snapshotRef, {
+        expiresAt: "2000-01-01T00:00:00.000Z",
+      }),
+    );
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: snapshotRef,
+      currentWorkspaceVersion: "4",
+      onCheckpoint: () => {
+        throw new Error("expired current retry should not checkpoint again");
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot upload session is stale.",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(runner.validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
+  });
+
+  it("keeps an expired current workspace snapshot retry when replaced cleanup still fails", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_expired_current_retry_cleanup_fails";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotId = "snapshot_complete_expired_current_replaced_cleanup_fails";
+    const replacedObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    const replacedSnapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 5,
+      encryptedObjectSha256: "b".repeat(64),
+      objectKey: replacedObjectKey,
+      snapshotId: replacedSnapshotId,
+      userId: "member_123",
+    });
+    runner.recordHostedWorkspaceSnapshotOrphanCandidate.mockImplementationOnce(async () => {
+      throw new Error("orphan recording failed");
+    });
+    runner.workspaceSnapshotUploadSessions.set(
+      snapshotId,
+      createWorkspaceSnapshotUploadSession(snapshotRef, {
+        expiresAt: "2000-01-01T00:00:00.000Z",
+        replacedSnapshotRef,
+      }),
+    );
+    const deleteObject = vi.fn(async () => {
+      throw new Error("R2 delete failed");
+    });
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: snapshotRef,
+      currentWorkspaceVersion: "5",
+      onCheckpoint: () => {
+        throw new Error("expired current retry should not checkpoint again");
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace replaced snapshot cleanup failed.",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(deleteObject).toHaveBeenCalledWith(replacedObjectKey);
+    expect(deleteObject).not.toHaveBeenCalledWith(objectKey);
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledOnce();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      replacedSnapshotRef,
+      snapshotId,
+    });
+  });
+
+  it("defers snapshot object cleanup when complete sees a replaced active write fence", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       leaseGeneration: "10",
     });
@@ -6246,7 +6680,14 @@ describe("handleRunnerOutboundRequest", () => {
     });
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
-    expect(deleteObject).toHaveBeenCalledWith(objectKey);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).toHaveBeenCalledWith({
+      createdAt: expect.stringMatching(/^20/u),
+      objectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId,
+      userId: "member_123",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -8781,6 +9222,7 @@ function createHostedWorkspaceCheckpointResponseWithSnapshotRef(
 
 function createHostedWorkspaceReadResponse(
   snapshotRef: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"] = null,
+  version = "4",
 ): HostedWorkspaceReadResponse {
   return {
     fetchedAt: "2026-04-26T00:00:05.000Z",
@@ -8794,15 +9236,16 @@ function createHostedWorkspaceReadResponse(
       snapshotRef,
       updatedAt: "2026-04-26T00:00:05.000Z",
       userId: "member_123",
-      version: "4",
+      version,
     },
   };
 }
 
 function createHostedWorkspaceReadFetchResponse(
   snapshotRef: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"] = null,
+  version = "4",
 ): Response {
-  return new Response(JSON.stringify(createHostedWorkspaceReadResponse(snapshotRef)), {
+  return new Response(JSON.stringify(createHostedWorkspaceReadResponse(snapshotRef, version)), {
     headers: {
       "content-type": "application/json; charset=utf-8",
     },
@@ -8819,11 +9262,15 @@ function isHostedWorkspaceReadFetch(args: Parameters<typeof fetch>): boolean {
 
 function createWorkspaceSnapshotCompleteWebFetchMock(input: {
   currentSnapshotRef?: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"];
+  currentWorkspaceVersion?: string;
   onCheckpoint(args: Parameters<typeof fetch>): Promise<Response> | Response;
 }): ReturnType<typeof vi.fn<typeof fetch>> {
   return vi.fn<typeof fetch>(async (...args: Parameters<typeof fetch>): Promise<Response> => {
     if (isHostedWorkspaceReadFetch(args)) {
-      return createHostedWorkspaceReadFetchResponse(input.currentSnapshotRef ?? null);
+      return createHostedWorkspaceReadFetchResponse(
+        input.currentSnapshotRef ?? null,
+        input.currentWorkspaceVersion ?? "4",
+      );
     }
     return await input.onCheckpoint(args);
   });

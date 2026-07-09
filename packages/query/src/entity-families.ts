@@ -12,6 +12,7 @@ export const ALL_QUERY_ENTITY_FAMILIES = [
   "food",
   "genetics",
   "goal",
+  "habitat",
   "journal",
   "protocol",
   "provider",

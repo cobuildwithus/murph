@@ -48,6 +48,36 @@ vi.mock("@/src/components/murph/murph-contact-card-picker", () => ({
   },
 }));
 
+vi.mock("@/src/components/murph/murph-assistant-style-picker", () => ({
+  MurphAssistantStylePicker({
+    onComplete,
+    onOpenChange,
+    open,
+  }: {
+    onComplete?: () => void;
+    onOpenChange: (open: boolean) => void;
+    open: boolean;
+  }) {
+    return open
+      ? createElement(
+          "section",
+          { "data-murph-assistant-style-picker": "open" },
+          createElement("p", null, "Pick Murph's tone"),
+          createElement(
+            "button",
+            { onClick: () => onComplete?.(), type: "button" },
+            "Complete assistant style",
+          ),
+          createElement(
+            "button",
+            { onClick: () => onOpenChange(false), type: "button" },
+            "Dismiss assistant style",
+          ),
+        )
+      : null;
+  },
+}));
+
 vi.mock("@/src/components/ui/dialog", () => ({
   Dialog: ({
     children,
@@ -101,6 +131,18 @@ test("HomeInitialVisitDialogClient shows the contact-card picker first for text 
 
     await act(async () => {
       addContactButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+
+    assert.match(container.textContent ?? "", /Pick Murph's tone/);
+    assert.doesNotMatch(container.textContent ?? "", /Welcome to Murph/);
+
+    const completeStyleButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Complete assistant style",
+    );
+    assert.ok(completeStyleButton);
+
+    await act(async () => {
+      completeStyleButton.dispatchEvent(new window.Event("click", { bubbles: true }));
     });
 
     assert.match(container.textContent ?? "", /Welcome to Murph/);
@@ -157,7 +199,7 @@ test("HomeInitialVisitDialogClient advances from the contact-card picker on skip
         stageButton.dispatchEvent(new window.Event("click", { bubbles: true }));
       });
 
-      assert.match(container.textContent ?? "", /Welcome to Murph/);
+      assert.match(container.textContent ?? "", /Pick Murph's tone/);
       assert.equal(container.querySelector("[data-murph-contact-card-picker='open']"), null);
     } finally {
       await cleanup();
@@ -188,6 +230,18 @@ test("HomeInitialVisitDialogClient closes after launching Telegram", async () =>
 
   try {
     assert.doesNotMatch(container.textContent ?? "", /Add Murph to your contacts/);
+    assert.match(container.textContent ?? "", /Pick Murph's tone/);
+    assert.doesNotMatch(container.textContent ?? "", /Welcome to Murph/);
+
+    const completeStyleButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Complete assistant style",
+    );
+    assert.ok(completeStyleButton);
+
+    await act(async () => {
+      completeStyleButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+
     assert.match(container.textContent ?? "", /Welcome to Murph/);
 
     const link = container.querySelector("a");
@@ -227,6 +281,18 @@ test("HomeInitialVisitDialogClient starts at the welcome dialog when no contact 
 
   try {
     assert.doesNotMatch(container.textContent ?? "", /Add Murph to your contacts/);
+    assert.match(container.textContent ?? "", /Pick Murph's tone/);
+    assert.doesNotMatch(container.textContent ?? "", /Welcome to Murph/);
+
+    const completeStyleButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Complete assistant style",
+    );
+    assert.ok(completeStyleButton);
+
+    await act(async () => {
+      completeStyleButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+
     assert.match(container.textContent ?? "", /Welcome to Murph/);
     assert.equal(container.querySelector("a")?.getAttribute("href"), "/settings");
   } finally {

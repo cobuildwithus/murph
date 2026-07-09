@@ -356,6 +356,7 @@ function buildHealthCollection(): CanonicalHealthEntityCollection {
     familyMembers,
     geneticVariants,
     foods: [],
+    habitatAspects: [],
     recipes: [],
     providers: [],
     workoutFormats: [],

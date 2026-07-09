@@ -11,6 +11,7 @@ import {
   isHostedConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
+  applyHostedMemberPreferences,
   hydrateHostedExecutionDefaultTarget,
   prepareHostedWakeContext,
 } from "./context.ts";
@@ -169,6 +170,12 @@ async function executeHostedSystemWake(input: {
       return createNoopMailboxEffect({
         conversationMetrics: null,
         mailboxLane: "member-channels-updated",
+      });
+    case "member.preferences.updated":
+      await applyHostedMemberPreferences(input.vaultRoot, input.wake);
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        mailboxLane: "member-preferences-updated",
       });
     case "assistant.notification.requested":
       return executeHostedAssistantNotificationWake({

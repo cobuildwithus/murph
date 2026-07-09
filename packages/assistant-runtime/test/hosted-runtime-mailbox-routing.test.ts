@@ -38,6 +38,11 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
+        action: "apply-member-preferences",
+        kind: "member.preferences.updated",
+        lane: "system",
+      },
+      {
         action: "dispatch-assistant-notification",
         kind: "assistant.notification.requested",
         lane: "system",
@@ -103,6 +108,7 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("conversation.message"), "conversation");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.activated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.channels.updated"), "system");
+    assert.equal(resolveExpectedLaneForHostedMailboxKind("member.preferences.updated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.notification.requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("device-sync.wake"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("group-newsletter.email-needed"), "system");

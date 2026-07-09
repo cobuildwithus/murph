@@ -30,6 +30,7 @@ import { upsertAllergy as upsertAllergyInternal } from "./bank/allergies.ts";
 import { upsertCondition as upsertConditionInternal } from "./bank/conditions.ts";
 import { deleteFood as deleteFoodInternal, upsertFood as upsertFoodInternal } from "./bank/foods.ts";
 import { upsertGoal as upsertGoalInternal } from "./bank/goals.ts";
+import { upsertHabitatAspect as upsertHabitatAspectInternal } from "./bank/habitat.ts";
 import { deleteProvider as deleteProviderInternal, upsertProvider as upsertProviderInternal } from "./bank/providers.ts";
 import { deleteRecipe as deleteRecipeInternal, upsertRecipe as upsertRecipeInternal } from "./bank/recipes.ts";
 import { upsertWorkoutFormat as upsertWorkoutFormatInternal } from "./bank/workout-formats.ts";
@@ -74,6 +75,7 @@ import {
   repairJunctionWorkoutHeartRateZones as repairJunctionWorkoutHeartRateZonesInternal,
 } from "./junction-hr-zone-repair.ts";
 import {
+  updateAssistantPreferences as updateAssistantPreferencesInternal,
   updateWearablePreferences as updateWearablePreferencesInternal,
   updateWorkoutUnitPreferences as updateWorkoutUnitPreferencesInternal,
 } from "./preferences.ts";
@@ -545,6 +547,12 @@ export async function upsertProvider(
   return withCanonicalInputWriteLock(input, upsertProviderInternal);
 }
 
+export async function upsertHabitatAspect(
+  input: Parameters<typeof upsertHabitatAspectInternal>[0],
+): ReturnType<typeof upsertHabitatAspectInternal> {
+  return withCanonicalInputWriteLock(input, upsertHabitatAspectInternal);
+}
+
 export async function deleteProvider(
   input: Parameters<typeof deleteProviderInternal>[0],
 ): ReturnType<typeof deleteProviderInternal> {
@@ -615,6 +623,12 @@ export async function updateWearablePreferences(
   input: Parameters<typeof updateWearablePreferencesInternal>[0],
 ): ReturnType<typeof updateWearablePreferencesInternal> {
   return updateWearablePreferencesInternal(input);
+}
+
+export async function updateAssistantPreferences(
+  input: Parameters<typeof updateAssistantPreferencesInternal>[0],
+): ReturnType<typeof updateAssistantPreferencesInternal> {
+  return updateAssistantPreferencesInternal(input);
 }
 
 export async function appendHistoryEvent(

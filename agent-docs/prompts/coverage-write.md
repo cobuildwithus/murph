@@ -9,10 +9,10 @@ The parent implementation agent should hand you this prompt explicitly. This pas
 This prompt is for a local spawned worker only, not `review:gpt`, not an external ChatGPT thread, and not any autosend or `thread wake` flow.
 
 Goal:
-Use the provided coverage-bearing command and its current output to add the smallest high-value tests or direct-proof scaffolding needed to get that lane passing or materially closer without widening the implementation.
+Establish truthful executable proof of the changed behavior at the highest stable boundary. Treat the coverage command as a validation signal, not the objective, and add only the smallest missing proof without widening the implementation.
 
 Model/Scope expectation:
-- Codex-native parent agents run this pass as a spawned local subagent. Non-Codex parent agents such as Claude run this pass on Codex `gpt-5.5` through the local Codex CLI. Use high reasoning by default, or xhigh reasoning when the parent workflow classifies the change as large or complex.
+- Follow the model and reasoning-effort routing in `agent-docs/operations/completion-workflow.md` § Audit Worker Rules. Codex-native parents use a spawned local subagent; non-Codex parents use the local Codex CLI route defined there.
 - Do not silently substitute a mini model, a different model family, or a lower/different reasoning effort for this pass unless the parent agent has also updated the durable workflow docs in the same landing.
 - Keep the write scope narrow: tests, fixtures, or direct-proof scaffolding only.
 - Do not widen into production refactors, cleanup work, or architecture changes.
@@ -37,7 +37,7 @@ Priorities:
 - Reuse existing helpers, fixtures, and test patterns before creating new scaffolding.
 - Add only the proof needed for the changed behavior and its realistic edge cases.
 - Avoid snapshot-heavy proof when a direct assertion is clearer.
-- Let the current coverage-command output drive the work; prefer closing real red branches or thresholds over speculative proof additions.
+- Use the current coverage output to locate missing proof, then judge success by whether tests exercise the changed behavior rather than by test-count or line-count growth.
 
 Constraints:
 - Do not modify production code unless the parent agent explicitly widens the write scope.
@@ -50,7 +50,5 @@ Output requirements:
 - If you made changes, summarize the files changed and the behavior covered.
 - If you found no worthwhile additions, say so explicitly and explain the remaining residual risk or blocker briefly.
 
-Thoroughness bias:
-- Assume there is at least one real coverage or direct-proof gap in scope until you have tried hard to disprove it.
-- Identify every meaningful in-scope proof gap and fix all of them with the smallest tests, fixtures, or proof scaffolding allowed by this prompt.
-- If no changes are warranted, explain what you checked and why no meaningful proof gap remains.
+Stop rule:
+- Stop without edits when existing tests already prove the changed behavior at a stable boundary. Otherwise stop when the scoped proof is truthful and the provided lane passes or an out-of-scope blocker is established; do not churn tests to make the pass look productive.
