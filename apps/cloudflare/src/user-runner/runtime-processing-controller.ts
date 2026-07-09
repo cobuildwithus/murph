@@ -52,6 +52,8 @@ import {
 } from "./runtime-invocation.js";
 import {
   RunnerWriteFenceAlreadyActiveError,
+  runnerWriteFenceIdentityMatches,
+  runnerWriteFenceTokensMatch,
   type RunnerStateStore,
   type RunnerWriteFenceToken,
 } from "./runner-state-store.js";
@@ -60,11 +62,6 @@ import type {
   RunnerRuntimeProcessingMode,
   RunnerStateRecord,
 } from "./types.js";
-import {
-  RunnerAlarmCoordinator,
-  runnerWriteFenceIdentityMatches,
-  runnerWriteFenceTokensMatch,
-} from "./alarm-coordinator.js";
 
 const RUNTIME_PROCESSING_STARTUP_GRACE_MS = 30_000;
 const RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS = 8_000;
@@ -123,25 +120,8 @@ export class RuntimeProcessingController {
       runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
       state: DurableObjectStateLike;
       stateStore: RunnerStateStore;
-      alarmCoordinator: RunnerAlarmCoordinator;
     },
   ) {}
-
-  async alarm(): Promise<void> {
-    try {
-      await this.syncRunnerAlarm(await this.input.stateStore.readState());
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "hosted.runner",
-        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
-        level: "warn",
-        message: "Hosted runner alarm maintenance failed.",
-        phase: "failed",
-        userId: await this.tryReadBoundUserId(),
-      });
-      throw error;
-    }
-  }
 
   async ensureForUser(
     input: RuntimeProcessingInput,
@@ -173,10 +153,6 @@ export class RuntimeProcessingController {
     });
   }
 
-  async syncRunnerAlarm(record: RunnerStateRecord): Promise<void> {
-    await this.input.alarmCoordinator.sync(record);
-  }
-
   computeRuntimeProcessingRetryAt(reason: RuntimeProcessingRetryReason): string {
     return computeRuntimeProcessingRetryAtValue(reason);
   }
@@ -205,7 +181,6 @@ export class RuntimeProcessingController {
 
     const activeFence = record.writeFence;
     if (activeFence.kind !== "runtime") {
-      await this.syncRunnerAlarm(record);
       return createRuntimeProcessingRetryLater({
         reason: "container_busy",
         userId: input.input.userId,
@@ -243,7 +218,6 @@ export class RuntimeProcessingController {
         });
       }
 
-      await this.syncRunnerAlarm(record);
       return createRuntimeProcessingRetryLater({
         reason: "container_busy",
         userId: input.input.userId,
@@ -267,14 +241,12 @@ export class RuntimeProcessingController {
         });
       }
       if (activeRuntimeState.outcome !== "exact-active") {
-        await this.syncRunnerAlarm(record);
         return createRuntimeProcessingRetryLater({
           reason: "container_rpc_error",
           userId: input.input.userId,
         });
       }
 
-      await this.syncRunnerAlarm(record);
       return {
         action: "already_running",
         kind: "runtime_processing_accepted",
@@ -310,7 +282,6 @@ export class RuntimeProcessingController {
     });
 
     if (containerResult.kind === "accepted") {
-      await this.syncRunnerAlarm(record);
       const action = containerResult.action === "already_running"
         ? "already_running"
         : "woken";
@@ -349,7 +320,6 @@ export class RuntimeProcessingController {
       });
     }
 
-    await this.syncRunnerAlarm(record);
     return createRuntimeProcessingRetryLater({
       reason: mapRunnerProcessingRetryReason(containerResult.reason),
       userId: input.input.userId,
@@ -369,7 +339,6 @@ export class RuntimeProcessingController {
       input.preserveStartingFence !== false
       && this.shouldPreserveStartingWriteFence(activeFence)
     ) {
-      await this.syncRunnerAlarm(record);
       return createRuntimeProcessingRetryLater({
         reason: "starting_fence_preserved",
         userId: input.input.userId,
@@ -382,7 +351,6 @@ export class RuntimeProcessingController {
       generation: String(activeFence.generation),
       userId: record.userId,
     });
-    await this.syncRunnerAlarm(cleared.record);
     if (!cleared.cleared) {
       return createRuntimeProcessingRetryLater({
         reason: "stale_fence_replacement_race",
@@ -446,7 +414,6 @@ export class RuntimeProcessingController {
       });
     }
     if (activeRuntimeState.outcome === "mismatch") {
-      await this.syncRunnerAlarm(record);
       return createRuntimeProcessingRetryLater({
         reason: "container_rpc_error",
         userId: input.input.userId,
@@ -491,7 +458,6 @@ export class RuntimeProcessingController {
       : input.runnerContainerName;
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace || !containerName) {
-      await this.syncRunnerAlarm(input.record);
       return {
         aborted: false,
         response: createRuntimeProcessingRetryLater({
@@ -503,7 +469,6 @@ export class RuntimeProcessingController {
 
     const container = namespace.getByName(containerName);
     if (!container.abortWorkspaceInvocation) {
-      await this.syncRunnerAlarm(input.record);
       return {
         aborted: false,
         response: createRuntimeProcessingRetryLater({
@@ -531,7 +496,6 @@ export class RuntimeProcessingController {
       ) {
         return { aborted: true };
       }
-      await this.syncRunnerAlarm(input.record);
       return {
         aborted: false,
         response: createRuntimeProcessingRetryLater({
@@ -550,7 +514,6 @@ export class RuntimeProcessingController {
         phase: "scheduled",
         userId: input.record.userId,
       });
-      await this.syncRunnerAlarm(input.record);
       return {
         aborted: false,
         response: createRuntimeProcessingRetryLater({
@@ -669,7 +632,6 @@ export class RuntimeProcessingController {
       if (!(error instanceof RunnerWriteFenceAlreadyActiveError)) {
         throw error;
       }
-      await this.syncRunnerAlarm(error.record);
       return await this.ensureExistingRuntimeProcessing({
         commandBudget: input.commandBudget,
         input: processingInput,
@@ -677,8 +639,6 @@ export class RuntimeProcessingController {
         runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
     }
-
-    await this.syncRunnerAlarm(await this.input.stateStore.readState());
 
     const preparation = await this.prepareFreshRuntimeStart({
       commandBudget: input.commandBudget,
@@ -868,8 +828,6 @@ export class RuntimeProcessingController {
       return true;
     }
 
-    const record = await this.input.stateStore.readState();
-    await this.syncRunnerAlarm(record);
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
@@ -993,7 +951,6 @@ export class RuntimeProcessingController {
       finishedAt: new Date().toISOString(),
       token: input.token,
     });
-    await this.syncRunnerAlarm(failed.record);
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
@@ -1024,14 +981,6 @@ export class RuntimeProcessingController {
       return false;
     }
     return Date.now() - startedAtMs < RUNTIME_PROCESSING_STARTUP_GRACE_MS;
-  }
-
-  private async tryReadBoundUserId(): Promise<string | null> {
-    try {
-      return (await this.input.stateStore.readState()).userId;
-    } catch {
-      return null;
-    }
   }
 }
 
