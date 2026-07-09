@@ -103,14 +103,14 @@ Examples:
 
 If the user gave only an outcome, propose a low-burden behavior and let them edit it.
 
-### 3. Capture the reason only if it helps
+### 3. Capture the reason
 
-If the user's reason is already clear, use it. If it is missing and would improve the loop, ask one narrow question:
+For a new goal or behavior, get the user's reason in their own words by default. If it is already clear or self-evident, use it without asking. Otherwise ask one narrow question:
 - "What do you want this to unlock?"
 - "What would make this worth doing even when you're busy?"
 - "Is this mostly about energy, pain, sleep, mood, discipline, or proving the routine can stick?"
 
-Do not block setup on a deep motivation interview.
+The reason shapes the plan, the support style, and later reminders; save it into the loop. Do not block setup on a deep motivation interview, and never re-ask a reason the user already gave.
 
 If the user is ambivalent, do not schedule repeated support yet. Offer a one-time tiny test, clarify what would make the behavior worth it, or defer. Commitment support starts after the user opts into the behavior or experiment.
 
