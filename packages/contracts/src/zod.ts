@@ -2601,6 +2601,14 @@ export const habitatFrontmatterSchema = withContractMetadata(
         return;
       }
 
+      if (value.slug !== value.aspect) {
+        context.addIssue({
+          code: "custom",
+          path: ["slug"],
+          message: `Habitat slug must match aspect "${value.aspect}".`,
+        });
+      }
+
       if (aspect.domain !== value.domain) {
         context.addIssue({
           code: "custom",

@@ -20,6 +20,7 @@ import {
   resolveMarkdownRegistryUpsertTarget,
   writeMarkdownRegistryRecord,
 } from "../registry/markdown.ts";
+import { VaultError } from "../errors.ts";
 import {
   acquireCanonicalWriteLock,
   withCanonicalWriteLockScope,
@@ -77,12 +78,36 @@ function validateHabitatFrontmatter(
   );
 }
 
+function expectedHabitatRelativePath(aspect: string): string {
+  return `${VAULT_LAYOUT.habitatDirectory}/${aspect}.md`;
+}
+
+function assertHabitatPathOwnership(
+  frontmatter: HabitatFrontmatter,
+  relativePath: string,
+): void {
+  const expectedRelativePath = expectedHabitatRelativePath(frontmatter.aspect);
+
+  if (relativePath !== expectedRelativePath) {
+    throw new VaultError(
+      "HABITAT_FRONTMATTER_INVALID",
+      `Habitat aspect "${frontmatter.aspect}" must be stored at ${expectedRelativePath}.`,
+      {
+        aspect: frontmatter.aspect,
+        expectedRelativePath,
+        relativePath,
+      },
+    );
+  }
+}
+
 function parseHabitatRecord(
   attributes: FrontmatterObject,
   relativePath: string,
   markdown: string,
 ): HabitatRecord {
   const frontmatter = validateHabitatFrontmatter(attributes, relativePath);
+  assertHabitatPathOwnership(frontmatter, relativePath);
   const document = parseFrontmatterDocument(markdown);
   return {
     ...frontmatter,

@@ -88,3 +88,48 @@ test("habitat upsert rejects unknown aspects and foreign indicators", async () =
       error instanceof VaultError && error.code === "HABITAT_FRONTMATTER_INVALID",
   );
 });
+
+test("habitat upsert rejects aspect records stored at another aspect path", async () => {
+  const vaultRoot = await makeTempDirectory("murph-habitat-path-mismatch");
+  await initializeVault({ vaultRoot });
+  const habitatPath = path.join(vaultRoot, "bank/habitat/sleep-environment.md");
+
+  await fs.mkdir(path.dirname(habitatPath), { recursive: true });
+  await fs.writeFile(
+    habitatPath,
+    [
+      "---",
+      "schemaVersion: murph.frontmatter.habitat.v1",
+      "docType: habitat",
+      "habitatId: hab_01JNV422Y2M5ZBV64ZP4N1DRB1",
+      "slug: home-location",
+      "title: Location & climate",
+      "status: active",
+      "domain: environment",
+      "aspect: home-location",
+      "indicators:",
+      "  location: Boston",
+      "---",
+      "# Location & climate",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertHabitatAspect({
+        vaultRoot,
+        aspect: "sleep-environment",
+        indicators: { night_temp_c: 19 },
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "HABITAT_FRONTMATTER_INVALID" &&
+      error.message.includes("must be stored at bank/habitat/home-location.md"),
+  );
+
+  const storedMarkdown = await fs.readFile(habitatPath, "utf8");
+  assert.match(storedMarkdown, /aspect: home-location/);
+  assert.doesNotMatch(storedMarkdown, /night_temp_c/);
+});

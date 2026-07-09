@@ -81,6 +81,9 @@ describe("habitat frontmatter schema", () => {
       habitatFrontmatterSchema.safeParse({ ...validFrontmatter, domain: "workspace" }).success,
     ).toBe(false);
     expect(
+      habitatFrontmatterSchema.safeParse({ ...validFrontmatter, slug: "home-location" }).success,
+    ).toBe(false);
+    expect(
       habitatFrontmatterSchema.safeParse({
         ...validFrontmatter,
         indicators: { ...validFrontmatter.indicators, standing_desk: "fixed" },
