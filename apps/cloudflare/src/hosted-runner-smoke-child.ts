@@ -63,6 +63,9 @@ const PDF_SMOKE_RELATIVE_PATH = "raw/smoke/hosted-runner.pdf";
 const CODEX_VAULT_CLI_SMOKE_MEASUREMENT_METRIC = "strict-pull-ups";
 const CODEX_VAULT_CLI_SMOKE_MEASUREMENT_NOTE =
   "max strict pull-up baseline, dead hang";
+const CODEX_VAULT_CLI_SMOKE_MEASUREMENT_OCCURRED_AT =
+  "2026-07-09T12:00:00.000Z";
+const CODEX_VAULT_CLI_SMOKE_MEASUREMENT_DATE = "2026-07-09";
 const CODEX_VAULT_CLI_SMOKE_EXPLICIT_VAULT_ID =
   "vault_01K11111111111111111111111";
 const CODEX_VAULT_CLI_SMOKE_SCHEDULED_LOG_SLUG =
@@ -1130,6 +1133,8 @@ async function runCodexVaultCliProof(input: {
       "reps",
       "--measurement-note",
       CODEX_VAULT_CLI_SMOKE_MEASUREMENT_NOTE,
+      "--occurred-at",
+      CODEX_VAULT_CLI_SMOKE_MEASUREMENT_OCCURRED_AT,
       "--format",
       "json",
     ]),
@@ -1143,11 +1148,19 @@ async function runCodexVaultCliProof(input: {
     "measurement-add.measurements",
   );
   assertMeasurementProof(createdMeasurement, "measurement-add.measurements[0]");
+  const createdMeasurementEventId = readString(
+    measurementAdd.eventId,
+    "measurement-add.eventId",
+  );
   vaultWriteProofCount += 1;
 
   const measurementList = await runVaultJson("measurement-list", [
     "measurement",
     "list",
+    "--from",
+    CODEX_VAULT_CLI_SMOKE_MEASUREMENT_DATE,
+    "--to",
+    CODEX_VAULT_CLI_SMOKE_MEASUREMENT_DATE,
     "--limit",
     "10",
     "--format",
@@ -1156,6 +1169,7 @@ async function runCodexVaultCliProof(input: {
   assertMeasurementListIncludesProof(
     measurementList,
     "measurement-list",
+    createdMeasurementEventId,
   );
 
   const scheduledLogSave = readObject(
@@ -1303,12 +1317,16 @@ function assertMeasurementProof(record: Record<string, unknown>, label: string):
   }
 }
 
-function assertMeasurementListIncludesProof(value: unknown, label: string): void {
+function assertMeasurementListIncludesProof(
+  value: unknown,
+  label: string,
+  expectedEventId: string,
+): void {
   const record = readObject(value, label);
   const items = readArray(record.items, `${label}.items`);
   if (
     !items.some((item, index) =>
-      objectHasMeasurementProof(item, `${label}.items[${index}]`)
+      objectHasListEntityId(item, `${label}.items[${index}]`, expectedEventId)
     )
   ) {
     throw new Error(`Codex app-server vault-cli proof ${label} did not include the measurement write.`);
@@ -1320,24 +1338,7 @@ function assertScheduledLogListIncludesProof(value: unknown, label: string): voi
   const items = readArray(record.items, `${label}.items`);
   for (const [index, itemValue] of items.entries()) {
     const item = readObject(itemValue, `${label}.items[${index}]`);
-    if (item.slug !== CODEX_VAULT_CLI_SMOKE_SCHEDULED_LOG_SLUG) {
-      continue;
-    }
-
-    const action = readObject(item.action, `${label}.items[${index}].action`);
-    if (action.kind !== "measurement.add") {
-      continue;
-    }
-
-    if (
-      readArray(action.measurements, `${label}.items[${index}].action.measurements`)
-        .some((measurement, measurementIndex) =>
-          objectHasMeasurementProof(
-            measurement,
-            `${label}.items[${index}].action.measurements[${measurementIndex}]`,
-          )
-        )
-    ) {
+    if (item.slug === CODEX_VAULT_CLI_SMOKE_SCHEDULED_LOG_SLUG) {
       return;
     }
   }
@@ -1361,6 +1362,27 @@ function objectHasMeasurementProof(value: unknown, label: string): boolean {
       && measurement.note === CODEX_VAULT_CLI_SMOKE_MEASUREMENT_NOTE
     );
   });
+}
+
+function objectHasListEntityId(
+  value: unknown,
+  label: string,
+  expectedEventId: string,
+): boolean {
+  const record = readObject(value, label);
+  if (
+    record.id === expectedEventId ||
+    record.entityId === expectedEventId ||
+    record.lookupId === expectedEventId
+  ) {
+    return true;
+  }
+
+  if (record.data && typeof record.data === "object" && !Array.isArray(record.data)) {
+    return objectHasListEntityId(record.data, `${label}.data`, expectedEventId);
+  }
+
+  return false;
 }
 
 function assertListProof(value: unknown, label: string): void {

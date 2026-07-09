@@ -887,7 +887,13 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain('"vault-show-default"');
     expect(hostedRunnerSmokeChild).toContain('"vault-show-explicit"');
     expect(hostedRunnerSmokeChild).toContain('"measurement-add"');
+    expect(hostedRunnerSmokeChild).toContain("measurement-add.eventId");
+    expect(hostedRunnerSmokeChild).toContain('"--occurred-at"');
+    expect(hostedRunnerSmokeChild).toContain('"measurement-list"');
+    expect(hostedRunnerSmokeChild).toContain('"--from"');
+    expect(hostedRunnerSmokeChild).toContain('"--to"');
     expect(hostedRunnerSmokeChild).toContain('"scheduled-log-save"');
+    expect(hostedRunnerSmokeChild).toContain('"scheduled-log-list"');
     expect(hostedRunnerSmokeChild).toContain("codexHostedCliVaultCommandProofCount");
     expect(hostedRunnerSmokeChild).toContain("codexHostedCliVaultWriteProofCount");
     expect(hostedRunnerSmokeChild).toContain("codexHostedShellPythonVersion");
