@@ -859,11 +859,6 @@ describe("hosted Linq webhook transport", () => {
     });
 
     expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
-      expect.not.objectContaining({
-        reclaimFreshPreProviderAttempt: true,
-      }),
-    );
-    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
       expect.objectContaining({
         reclaimStalePreProviderAttempt: true,
       }),

@@ -6,7 +6,6 @@ import {
   applyHostedLinqDeliveryReceiptTx,
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
-  hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliveryProviderDispatchStartedTx,
@@ -1207,106 +1206,14 @@ describe("hosted Linq observability stores", () => {
               attemptedAt: {
                 lte: new Date("2026-03-26T11:45:30.000Z"),
               },
-              status: "attempted",
+              status: {
+                in: ["attempted", "provider_dispatch_started"],
+              },
             }),
           ]),
         }),
       }),
     );
-  });
-
-  it("reclaims fresh pre-provider delivery rows when the caller opts in", async () => {
-    const fixture = createObservabilityPrismaFixture();
-    const attemptedAt = new Date("2026-03-26T12:00:30.000Z");
-    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
-      acceptedAt: null,
-      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
-      deliveredAt: null,
-      failedAt: null,
-      id: "hld_fresh_attempt",
-      lastReceiptAt: null,
-      messageLookupKey: null,
-      phoneNumberLookupKey: null,
-      skippedAt: null,
-      source: "hosted_webhook_side_effect",
-      status: "attempted",
-    });
-    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
-
-    await expect(claimHostedLinqDeliveryProviderDispatchTx({
-      attemptedAt,
-      idempotencyKey: "ai-usage-gate:member_123:2026-03",
-      linqChatId: "chat_123",
-      prisma: fixture.prisma as never,
-      reclaimFreshPreProviderAttempt: true,
-      source: "hosted_webhook_side_effect",
-      sourceRef: "ai-usage-gate:member_123:2026-03",
-      targetKind: "thread",
-      template: "ai_usage_quota",
-    })).resolves.toEqual({
-      claimed: true,
-      id: "hld_fresh_attempt",
-    });
-
-    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          attemptedAt,
-          failedAt: null,
-          skippedAt: null,
-          status: "attempted",
-        }),
-        where: expect.objectContaining({
-          id: "hld_fresh_attempt",
-          OR: expect.arrayContaining([
-            {
-              source: "hosted_webhook_side_effect",
-              status: "attempted",
-            },
-          ]),
-        }),
-      }),
-    );
-  });
-
-  it("does not reclaim fresh pre-provider delivery rows from another source", async () => {
-    const fixture = createObservabilityPrismaFixture();
-    const attemptedAt = new Date("2026-03-26T12:00:30.000Z");
-    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
-      acceptedAt: null,
-      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
-      deliveredAt: null,
-      failedAt: null,
-      id: "hld_fresh_telegram_attempt",
-      lastReceiptAt: null,
-      messageLookupKey: null,
-      phoneNumberLookupKey: null,
-      skippedAt: null,
-      source: "hosted_runtime_ai_usage_limit_notice",
-      status: "attempted",
-    });
-    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
-
-    await expect(claimHostedLinqDeliveryProviderDispatchTx({
-      attemptedAt,
-      idempotencyKey: "ai-usage-gate:member_123:2026-03",
-      linqChatId: "chat_123",
-      prisma: fixture.prisma as never,
-      reclaimFreshPreProviderAttempt: true,
-      source: "hosted_webhook_side_effect",
-      sourceRef: "ai-usage-gate:member_123:2026-03",
-      targetKind: "thread",
-      template: "ai_usage_quota",
-    })).resolves.toEqual({
-      claimed: false,
-      id: "hld_fresh_telegram_attempt",
-    });
-
-    const updateWhere = fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0]?.where;
-    expect(updateWhere).toEqual(expect.objectContaining({
-      id: "hld_fresh_telegram_attempt",
-    }));
-    expect(updateWhere?.OR).not.toContainEqual({ status: "attempted" });
   });
 
   it("marks provider dispatch started before an external send leaves the pre-provider state", async () => {
@@ -1338,6 +1245,63 @@ describe("hosted Linq observability stores", () => {
         status: "attempted",
       },
     });
+  });
+
+  it("reclaims stale webhook dispatch-started AI usage rows with the same idempotency key", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_started_webhook_notice",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      source: "hosted_webhook_side_effect",
+      status: "provider_dispatch_started",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "ai-usage-gate:member_123:2026-03",
+      targetKind: "thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_started_webhook_notice",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt,
+          failedAt: null,
+          skippedAt: null,
+          status: "attempted",
+        }),
+        where: expect.objectContaining({
+          id: "hld_started_webhook_notice",
+          OR: expect.arrayContaining([
+            {
+              attemptedAt: {
+                lte: new Date("2026-03-26T12:15:00.000Z"),
+              },
+              status: {
+                in: ["attempted", "provider_dispatch_started"],
+              },
+            },
+          ]),
+        }),
+      }),
+    );
   });
 
   it("terminalizes stale Telegram dispatch-started rows as unknown outcomes", async () => {
@@ -1720,60 +1684,6 @@ describe("hosted Linq observability stores", () => {
         },
       },
     });
-  });
-
-  it("detects fresh pre-provider deliveries for legacy idempotency keys", async () => {
-    const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
-      {
-        acceptedAt: null,
-        attemptedAt: new Date("2026-03-26T12:20:00.000Z"),
-        deliveredAt: null,
-        failedAt: null,
-        id: "hld_fresh_legacy_usage_notice",
-        lastReceiptAt: null,
-        messageLookupKey: null,
-        phoneNumberLookupKey: null,
-        skippedAt: null,
-        source: "hosted_webhook_side_effect",
-        status: "attempted",
-      },
-    ]);
-
-    await expect(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
-      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
-      idempotencyKeys: [
-        "ai-usage-gate:legacy_key",
-      ],
-      prisma: fixture.prisma as never,
-    })).resolves.toBe(true);
-  });
-
-  it("ignores stale pre-provider deliveries for legacy idempotency keys", async () => {
-    const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
-      {
-        acceptedAt: null,
-        attemptedAt: new Date("2026-03-26T12:14:59.999Z"),
-        deliveredAt: null,
-        failedAt: null,
-        id: "hld_stale_legacy_usage_notice",
-        lastReceiptAt: null,
-        messageLookupKey: null,
-        phoneNumberLookupKey: null,
-        skippedAt: null,
-        source: "hosted_webhook_side_effect",
-        status: "attempted",
-      },
-    ]);
-
-    await expect(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
-      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
-      idempotencyKeys: [
-        "ai-usage-gate:legacy_key",
-      ],
-      prisma: fixture.prisma as never,
-    })).resolves.toBe(false);
   });
 
   it("resolves stale same-source legacy AI usage rows as claimable legacy keys", async () => {

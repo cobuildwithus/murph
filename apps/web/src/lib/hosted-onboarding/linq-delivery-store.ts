@@ -242,7 +242,6 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   linqChatId?: string | null;
   phoneNumber?: string | null;
   prisma: HostedLinqDeliveryClient;
-  reclaimFreshPreProviderAttempt?: boolean;
   reclaimStalePreProviderAttempt?: boolean;
   source: string;
   sourceRef?: string | null;
@@ -301,8 +300,6 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       data,
       delivery: existing,
       prisma: input.prisma,
-      reclaimFreshPreProviderAttempt: input.reclaimFreshPreProviderAttempt ?? false,
-      reclaimFreshPreProviderAttemptSource: input.source,
       reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
     });
   }
@@ -332,8 +329,6 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       data,
       delivery: concurrent,
       prisma: input.prisma,
-      reclaimFreshPreProviderAttempt: input.reclaimFreshPreProviderAttempt ?? false,
-      reclaimFreshPreProviderAttemptSource: input.source,
       reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
     });
   }
@@ -477,50 +472,6 @@ export async function resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx(input: 
     idempotencyKey: input.currentIdempotencyKey,
     status: "claimable",
   };
-}
-
-export async function hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx(
-  input: {
-    attemptedAt?: Date;
-    idempotencyKeys: readonly string[];
-    prisma: HostedLinqDeliveryClient;
-  },
-): Promise<boolean> {
-  const attemptedAt = input.attemptedAt ?? new Date();
-  const staleAttemptBefore = new Date(
-    attemptedAt.getTime() - HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS,
-  );
-  const idempotencyKeys = [
-    ...new Set(input.idempotencyKeys
-      .map((key) => createHostedLinqDeliveryIdempotencyLookupKey(key))
-      .filter((key): key is string => Boolean(key))),
-  ];
-  if (idempotencyKeys.length === 0) {
-    return false;
-  }
-
-  const deliveries = await input.prisma.hostedLinqDelivery.findMany({
-    where: {
-      idempotencyKey: {
-        in: idempotencyKeys,
-      },
-    },
-    select: hostedLinqDeliveryLifecycleSelect,
-  });
-
-  return deliveries.some((delivery) =>
-    isHostedLinqDeliveryProviderCorrelated(delivery)
-    || (
-      delivery.acceptedAt === null
-      && delivery.deliveredAt === null
-      && delivery.failedAt === null
-      && delivery.lastReceiptAt === null
-      && delivery.messageLookupKey === null
-      && delivery.skippedAt === null
-      && delivery.status === "attempted"
-      && delivery.attemptedAt > staleAttemptBefore
-    )
-  );
 }
 
 export async function markHostedLinqDeliveryProviderDispatchStartedTx(input: {
@@ -1602,9 +1553,7 @@ function resolveHostedLinqDeliveryInFlightState(input: {
   }
 
   return {
-    inFlight: input.delivery.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
-      && input.delivery.status === HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS
-      && input.delivery.attemptedAt > staleAttemptBefore,
+    inFlight: input.delivery.attemptedAt > staleAttemptBefore,
   };
 }
 
@@ -1689,8 +1638,6 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     status: string;
   };
   prisma: HostedLinqDeliveryClient;
-  reclaimFreshPreProviderAttempt: boolean;
-  reclaimFreshPreProviderAttemptSource: string;
   reclaimStalePreProviderAttempt?: boolean;
 }): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
@@ -1756,6 +1703,10 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   const canReclaimStalePreProviderAttempt =
     input.reclaimStalePreProviderAttempt
     ?? input.delivery.source !== HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE;
+  const stalePreProviderReclaimStatus =
+    input.delivery.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
+      ? "attempted" as const
+      : { in: ["attempted", HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS] };
   const canReclaimRetryAfterTelegramAttempt =
     telegramRetryAfterAt !== null && telegramRetryAfterAt <= input.attemptedAt;
   const terminalPreProviderReclaimPredicates =
@@ -1796,15 +1747,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
                 attemptedAt: {
                   lte: staleAttemptBefore,
                 },
-                status: "attempted",
-              },
-            ]
-          : []),
-        ...(input.reclaimFreshPreProviderAttempt
-          ? [
-              {
-                source: input.reclaimFreshPreProviderAttemptSource,
-                status: "attempted",
+                status: stalePreProviderReclaimStatus,
               },
             ]
           : []),
