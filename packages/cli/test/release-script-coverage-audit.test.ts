@@ -326,12 +326,46 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
     expect(prReviewGptLoop).toContain('does **not** run the local Codex')
+    expect(prReviewGptLoop).toContain('replaces the default local `deep-review` pass')
+    expect(prReviewGptLoop).toContain(
+      'specialist `prompt-review`, `security-privacy-review`, `frontend-review`, or',
+    )
     const completionWorkflow = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
       'utf8',
     )
     expect(completionWorkflow).toContain('not complete until the PR branch has no merge conflicts')
     expect(completionWorkflow).toContain('fetch the latest `main`')
+    expect(completionWorkflow).toContain('still runs every specialist pass triggered')
+    expect(completionWorkflow).not.toContain(
+      'may skip the individual required local audit subagent passes',
+    )
+    expect(completionWorkflow).toContain('gpt-5.6-sol')
+    expect(completionWorkflow).toContain('prompt-guidance-gpt-5p6.md')
+    expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.5')
+
+    const completionAuditPrompts = [
+      'prompt-review.md',
+      'frontend-review.md',
+      'security-privacy-review.md',
+      'coverage-write.md',
+    ].map((fileName) =>
+      readFileSync(
+        path.join(repoRoot, 'agent-docs', 'prompts', fileName),
+        'utf8',
+      ),
+    )
+    for (const auditPrompt of completionAuditPrompts) {
+      expect(auditPrompt).not.toContain('Assume there is at least one')
+      expect(auditPrompt).toContain('Stop rule:')
+    }
+    expect(completionAuditPrompts[0]).toContain('prompt-guidance-gpt-5p6.md')
+    expect(completionAuditPrompts[0]).toContain('latest-model.md')
+    expect(completionAuditPrompts[0]).toContain('upgrading-to-gpt-5p6-sol.md')
+    expect(completionAuditPrompts[1]).toContain('render and inspect')
+    expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
+    expect(completionAuditPrompts[2]).toContain('trace the changed source to its sink')
+    expect(completionAuditPrompts[3]).toContain('completion-workflow.md` § Audit Worker Rules')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)

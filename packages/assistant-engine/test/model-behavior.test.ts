@@ -82,6 +82,11 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       'do the work in this turn instead of asking for extra permission',
     )
+    expect(prompt).toContain('Lead the final reply with the result')
+    expect(prompt).toContain(
+      'trim introductions, repetition, reassurance, and optional background first',
+    )
+    expect(prompt).not.toContain('Final replies should briefly state')
     expect(prompt).toContain('It does not mean inventing extra health interventions')
     expect(
       buildAssistantExecutionBehaviorText({ profile: 'gpt5-agentic' }),
@@ -348,7 +353,9 @@ describe('assistant execution prompt contract', () => {
     expect(linqPrompt).toContain(
       'Use Markdown-style text markers only where later channel guidance explicitly allows native text-style conversion',
     )
-    expect(linqPrompt).toContain('No Markdown tables, Markdown headers, fenced code blocks')
+    expect(linqPrompt).toContain(
+      "Follow the channel's existing rules for tables, headers, code blocks, and text styling",
+    )
     expect(linqPrompt).not.toContain(
       'Do not wrap text in `**`, `*`, `_`, `~~`, or `++` style markers',
     )
@@ -658,7 +665,7 @@ describe('assistant local PDF evidence guidance', () => {
     )
     expect(prompt).toContain('PDF evidence was not available')
     expect(prompt).toContain(
-      'before reading, parsing, rendering, importing, saving, or reasoning over the content',
+      'follow the progress-update rules in the execution guidance before beginning the long work',
     )
   })
 
@@ -672,13 +679,13 @@ describe('assistant local PDF evidence guidance', () => {
       'When the user sends or references a file, image, screenshot, PDF, CSV, audio/video file, large pasted text, lab report',
     )
     expect(prompt).toContain(
-      'If the current task requires substantial non-audio content inspection or multiple parse/import steps, use the progress-update budget above',
+      'For substantial non-audio content inspection or multiple parse/import steps, follow the progress-update rules in the execution guidance',
     )
     expect(prompt).toContain(
-      'at most one for ordinary long work, up to two more only after multi-minute delays, and none when the final reply should be available shortly',
+      'then continue immediately',
     )
     expect(prompt).toContain(
-      'Do not use it for straightforward one-shot logging or capture writes',
+      'Skip progress updates for straightforward one-shot logging or capture writes',
     )
     expect(prompt).toContain(
       'For voice memos and audio/video, use transcript fragments directly when ingestion provides them',
@@ -1083,7 +1090,7 @@ describe('assistant user-facing wording guidance', () => {
       'Never include Markdown links in `text`; use raw URLs only when the URL itself is the deliverable or the user asks for links',
     )
     expect(prompt).toContain(
-      'Do not include Markdown fences, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text`. Use text-style markers only when the bound channel guidance explicitly allows native conversion',
+      'Do not include Markdown tables, headers, fences, citations, source paths, CLI narration, delivery confirmations, or operator meta in `text`. Use text-style markers only when the bound channel guidance explicitly allows native conversion',
     )
     expect(prompt).toContain(
       'No Markdown link syntax such as `[text](url)`',

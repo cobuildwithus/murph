@@ -1,6 +1,6 @@
 # PR ReviewGPT Loop
 
-Last verified: 2026-07-08
+Last verified: 2026-07-09
 
 Required post-completion ReviewGPT loop for non-trivial PR-lane work. It runs
 the repo-local `pr-review` preset through `pnpm review:gpt`, using one of the
@@ -10,12 +10,12 @@ across signed-in browser profiles without selecting a profile that is already
 locked without remote debugging. It does **not** run the local Codex
 `deep-review` pass.
 
-For PR-lane patch implementation, this loop is the audit gate: the worktree /
-PR-lane skip in `agent-docs/operations/completion-workflow.md` lets the parent
-agent default-skip the individual local required audit subagent passes and rely
-on this consolidated ReviewGPT loop. For current-checkout work it stays
-additive and does not satisfy, replace, or reorder the local required
-completion audits in that document.
+For PR-lane patch implementation, this loop is the final cross-cutting audit
+gate and replaces the default local `deep-review` pass. It does not replace the
+specialist `prompt-review`, `security-privacy-review`, `frontend-review`, or
+write-capable `coverage-write` passes triggered by
+`agent-docs/operations/completion-workflow.md`. For current-checkout work it is
+additive and does not satisfy, replace, or reorder any required local pass.
 
 For non-trivial PR-lane work, do not call the PR good to merge until this loop
 has reached zero accepted findings and PR CI is green on the final head.
