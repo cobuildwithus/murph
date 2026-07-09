@@ -948,6 +948,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       workspace: workspaceRead.workspace,
     });
     assertRuntimeNotAborted();
+    if (restored.inboxSidecarNeedsRebuild) {
+      invalidateHostedInboxSidecarReady(restored.vaultRoot);
+    }
     const workspaceRestoreDoneAt = new Date().toISOString();
     initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
     // Attach the in-memory cold-start phase breakdown to the SAME staged-milestone
@@ -1323,14 +1326,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     ) {
       return await returnInitialMailboxImportBeforeForeground();
     }
-    if (restored.inboxSidecarNeedsRebuild) {
-      invalidateHostedInboxSidecarReady(restored.vaultRoot);
-    }
     const inboxReady = isHostedInboxSidecarReady(restored.vaultRoot);
+    const inboxRebuild = !inboxReady && restored.inboxSidecarNeedsRebuild;
     emitPhaseLog({
       details: {
         inboxReady,
-        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
+        rebuild: inboxRebuild,
         restoreWasCold: restored.restoreWasCold,
       },
       input,
@@ -1338,18 +1339,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "inbox.sidecar",
       status: "start",
     });
-    await raceHostedRuntimeCancellation(
-      ensureHostedInboxSidecarReady({
-        bestEffort: true,
-        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
-        requestId,
-        vaultRoot: restored.vaultRoot,
-      }),
-      runtimeAbortController.signal,
-    );
+    if (!inboxReady) {
+      await raceHostedRuntimeCancellation(
+        ensureHostedInboxSidecarReady({
+          bestEffort: true,
+          rebuild: inboxRebuild,
+          requestId,
+          vaultRoot: restored.vaultRoot,
+        }),
+        runtimeAbortController.signal,
+      );
+    }
     emitPhaseLog({
       details: {
-        rebuild: !inboxReady && restored.inboxSidecarNeedsRebuild,
+        rebuild: inboxRebuild,
       },
       input,
       requestId,
