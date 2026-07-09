@@ -737,7 +737,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("imports member preference system work before a fresh conversation assistant phase", async () => {
+  test("imports paged member preference system work before a fresh conversation assistant phase", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const events: string[] = [];
@@ -748,11 +748,17 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           id: "mailbox_item_runner_preferences_conversation",
           laneSeq: "1",
         }),
+        ...Array.from({ length: 10 }, (_, index) => createMailboxItem({
+          id: `mailbox_item_runner_preferences_channel_${index + 1}`,
+          kind: "member.channels.updated",
+          lane: "system",
+          laneSeq: `${index + 1}`,
+        })),
         createMailboxItem({
           id: "mailbox_item_runner_preferences_update",
           kind: "member.preferences.updated",
           lane: "system",
-          laneSeq: "1",
+          laneSeq: "11",
         }),
       ],
     });
@@ -797,14 +803,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         [
           { importedSeq: "0", lane: "system" },
         ],
+        [
+          { importedSeq: "10", lane: "system" },
+        ],
       ]);
-      assert.deepEqual(events, [
-        "import:import-conversation-message",
-        "import:apply-member-preferences",
-        "assistant",
-      ]);
+      assert.equal(events.at(0), "import:import-conversation-message");
+      assert.equal(events.at(-2), "import:apply-member-preferences");
+      assert.equal(events.at(-1), "assistant");
+      assert.equal(events.filter((event) => event === "import:apply-member-channels-update").length, 10);
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
-      assert.equal(result.latestMailboxImport.state.watermarks.system, "1");
+      assert.equal(result.latestMailboxImport.state.watermarks.system, "11");
       assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
@@ -884,6 +892,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ],
         [
           { importedSeq: "1", lane: "system" },
+        ],
+        [
+          { importedSeq: "2", lane: "system" },
         ],
       ]);
       assert.deepEqual(importedRoutes, [
@@ -1129,6 +1140,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ],
         [
           { importedSeq: "0", lane: "system" },
+        ],
+        [
+          { importedSeq: "1", lane: "system" },
         ],
       ]);
       assert.deepEqual(importedRoutes, [

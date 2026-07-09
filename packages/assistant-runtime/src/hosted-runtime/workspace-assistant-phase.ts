@@ -2836,10 +2836,10 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
     }
     if (!hostedAssistantPhaseWakeIsDueAt(pendingWake.at, now)) {
       return {
-        continueAssistantLane: false,
+        continueAssistantLane: true,
         result: mergeHostedAssistantPhaseResults(
           result,
-          buildPrePlanningMemberPreferencesMailboxBarrierResult({
+          buildPrePlanningMemberPreferencesMailboxPendingResult({
             nextWakeAt: pendingWake.at,
             processed,
             redactedStatus: {
@@ -2869,7 +2869,7 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
 
     if (preparation.status === "retryable_failed") {
       return {
-        continueAssistantLane: false,
+        continueAssistantLane: true,
         result: mergeHostedAssistantPhaseResults(
           result,
           buildPrePlanningMemberPreferencesMailboxRetryResult({
@@ -2906,10 +2906,10 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
   }
 
   return {
-    continueAssistantLane: false,
+    continueAssistantLane: true,
     result: mergeHostedAssistantPhaseResults(
       result,
-      buildPrePlanningMemberPreferencesMailboxBarrierResult({
+      buildPrePlanningMemberPreferencesMailboxPendingResult({
         nextWakeAt: pendingWake.at,
         processed,
         redactedStatus: {
@@ -2975,7 +2975,7 @@ function buildPrePlanningMemberPreferencesMailboxRetryResult(input: {
   };
 }
 
-function buildPrePlanningMemberPreferencesMailboxBarrierResult(input: {
+function buildPrePlanningMemberPreferencesMailboxPendingResult(input: {
   nextWakeAt: string;
   processed: number;
   redactedStatus: HostedRuntimeRedactedObject;

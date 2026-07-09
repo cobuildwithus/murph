@@ -10450,7 +10450,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("defers fresh conversation planning while member preferences are retrying", async () => {
+  it("continues fresh conversation planning while member preferences are waiting to retry", async () => {
     mocks.resolveHostedSystemMailboxNextWakeCandidate.mockResolvedValueOnce({
       at: "2026-04-27T00:01:00.000Z",
       reason: "assistant",
@@ -10462,14 +10462,56 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-27T00:01:00.000Z",
-      nextWakeReason: "assistant",
       progressed: false,
       redactedStatus: expect.objectContaining({
         hostedMemberPreferencesPrePlanningPending: 1,
         hostedMemberPreferencesPrePlanningProcessed: 0,
+      }),
+    }));
+  });
+
+  it("continues fresh conversation planning when member preferences fail retryably", async () => {
+    const callOrder: string[] = [];
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockResolvedValueOnce({
+      at: "2026-04-27T00:00:00.000Z",
+      reason: "assistant",
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
+      callOrder.push("member-preferences");
+      return {
+        errorCode: "synthetic_preferences_retry",
+        errorMessage: "Synthetic preferences retry.",
+        itemId: "system_mailbox_item_member_preferences",
+        nextWakeAt: "2026-04-27T00:01:00.000Z",
+        status: "retryable_failed",
+      };
+    });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      callOrder.push("assistant");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(callOrder).toEqual(["member-preferences", "assistant"]);
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:01:00.000Z",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedMemberPreferencesPrePlanningErrorCode: "synthetic_preferences_retry",
+        hostedMemberPreferencesPrePlanningProcessed: 0,
+        hostedMemberPreferencesPrePlanningRetryableFailed: 1,
       }),
     }));
   });
