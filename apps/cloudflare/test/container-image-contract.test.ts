@@ -558,7 +558,7 @@ describe("hosted runner container image contract", () => {
     // The CMD runs the esbuild-bundled entrypoint: boot evaluates ~27 chunk
     // files instead of the unbundled graph's ~960 module files, which was the
     // dominant cold-start nodeStartupMs cost on lazily pulled image layers.
-    // The two engine resolvers that derive asset paths from their own module
+    // Package resolvers that derive asset paths from their own module
     // location are pinned to the installed package copies via env.
     expect(finalDockerfile).toContain('CMD ["node", "dist-bundled/container-entrypoint.js"]');
     expect(finalDockerfile).toContain(
@@ -566,6 +566,9 @@ describe("hosted runner container image contract", () => {
     );
     expect(finalDockerfile).toContain(
       'ENV MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH="/app/node_modules/@murphai/assistant-engine/dist/assistant/cli-surface-contract.generated.json"',
+    );
+    expect(finalDockerfile).toContain(
+      'ENV MURPH_HEALTH_COMMONS_PACKAGE_ROOT="/app/node_modules/@murphai/health-commons"',
     );
     expect(finalDockerfile).not.toContain("apt-get install");
     expect(finalDockerfile).not.toContain("@openai/codex");
