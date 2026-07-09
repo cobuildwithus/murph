@@ -33,10 +33,20 @@ import {
   type UserWorkspaceConfig,
 } from "vitest/config";
 
-import { resolveMurphVitestConcurrency } from "./config/vitest-parallelism.js";
+import {
+  resolveMurphVitestConcurrency,
+  resolveMurphVitestMaxWorkers,
+} from "./config/vitest-parallelism.js";
 import { murphVitestStandardTimeouts } from "./config/vitest-timeouts.js";
 
 const rootRepoVitestConcurrency = resolveMurphVitestConcurrency();
+const rootRepoVitestMaxWorkers = resolveMurphVitestMaxWorkers();
+const ROOT_PARALLEL_CLI_PROJECTS = new Set([
+  "cli-health-tail",
+  "cli-read-model",
+  "cli-assistant",
+  "cli-expansions",
+]);
 
 type RootRepoProject = {
   config: UserWorkspaceConfig;
@@ -172,13 +182,15 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   },
 ];
 
-const rootRepoCliProjects: UserWorkspaceConfig[] = cliVitestProjectSpecs.map(
-  ({ fileNames, name }) => createCliVitestProject(name, fileNames),
-);
+const rootRepoCliProjects = cliVitestProjectSpecs.map(({ fileNames, name }) => ({
+  config: createCliVitestProject(name, fileNames),
+  name,
+}));
 
 export default defineConfig({
   test: {
     ...murphVitestStandardTimeouts,
+    maxWorkers: rootRepoVitestMaxWorkers,
     // apps/web and apps/cloudflare stay in their dedicated verify lanes so the
     // root multi-project run does not execute them twice.
     projects: [
@@ -201,17 +213,19 @@ export default defineConfig({
           },
         ),
       ),
-      ...rootRepoCliProjects.map((project, index) =>
+      ...rootRepoCliProjects.map(({ config: project, name }, index) =>
         mergeConfig(
           project,
           {
             test: {
               sequence: {
                 ...project.test?.sequence,
-                // The CLI buckets share the prepared runtime-artifact lock
-                // and persistent command harness, so they stay serialized
-                // after the package group, preserving their bucket order.
-                groupOrder: 1 + index,
+                // Match the package-local CLI workspace: independent buckets
+                // share the worker pool, while explicit fileParallelism:false
+                // smoke buckets retain distinct serial phases.
+                groupOrder: ROOT_PARALLEL_CLI_PROJECTS.has(name)
+                  ? 1
+                  : 2 + index,
               },
             },
           },

@@ -108,6 +108,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Test repo verification tools
+        run: pnpm test:repo-tools
+
       - name: Artifact hygiene
         run: pnpm no-js
 

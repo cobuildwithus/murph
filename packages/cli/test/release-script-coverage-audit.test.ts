@@ -158,6 +158,7 @@ function readWorkspaceDiffScope(...changedFiles: string[]) {
   return JSON.parse(result.stdout) as {
     affectedWorkspaceDirs: string[]
     repoInternalFastPath: boolean
+    runRepoToolsTests: boolean
     runVerifyCli: boolean
     testDirs: string[]
     typecheckDirs: string[]
@@ -397,6 +398,13 @@ describe('monorepo release flow coverage audit', () => {
 
     expect(summary.repoInternalFastPath).toBe(true)
     expect(summary.runVerifyCli).toBe(true)
+  })
+
+  it('runs repo-tool regressions for config-only verification changes', () => {
+    const summary = readWorkspaceDiffScope('config/vitest-parallelism.ts')
+
+    expect(summary.repoInternalFastPath).toBe(true)
+    expect(summary.runRepoToolsTests).toBe(true)
   })
 
   it('keeps active execution plans aligned with live coordination-ledger state', () => {
@@ -785,7 +793,7 @@ Updated: 2026-04-24
       'delay App verification ${acceptance_app_verify_delay_seconds}s to preserve package coverage throughput',
     )
     expect(workspaceVerify).toContain(
-      'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 75%)"',
+      'readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$package_coverage_concurrency_limit" 1)"',
     )
     expect(workspaceVerify).toContain(
       'readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"',
