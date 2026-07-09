@@ -584,7 +584,16 @@ beforeEach(() => {
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
-  mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async () => {
+  mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async (input) => {
+    if (
+      input?.allowedRouteActions?.length === 1
+      && input.allowedRouteActions[0] === "apply-member-preferences"
+    ) {
+      return {
+        at: null,
+        reason: null,
+      };
+    }
     const at = await mocks.resolveHostedSystemMailboxNextWakeAt();
     return {
       at,
@@ -10389,6 +10398,82 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("applies member preference mailbox work before planning fresh conversation input", async () => {
+    const callOrder: string[] = [];
+    mocks.resolveHostedSystemMailboxNextWakeCandidate
+      .mockResolvedValueOnce({
+        at: "2026-04-27T00:00:00.000Z",
+        reason: "assistant",
+      })
+      .mockResolvedValueOnce({
+        at: null,
+        reason: null,
+      });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(
+      async (input) => {
+        callOrder.push("member-preferences");
+        expect(input.allowedRouteActions).toEqual(["apply-member-preferences"]);
+        return {
+          item: createMemberPreferencesSystemMailboxItem(),
+          itemId: "system_mailbox_item_member_preferences",
+          metrics: {
+            bootstrapResult: null,
+            conversationMetrics: null,
+            mailboxLane: "member-preferences-updated",
+            redactedLogEntries: [],
+          },
+          status: "processed",
+        };
+      },
+    );
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      callOrder.push("assistant");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(callOrder).toEqual(["member-preferences", "assistant"]);
+    expect(result).toEqual(expect.objectContaining({
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedMemberPreferencesPrePlanningProcessed: 1,
+      }),
+    }));
+  });
+
+  it("defers fresh conversation planning while member preferences are retrying", async () => {
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockResolvedValueOnce({
+      at: "2026-04-27T00:01:00.000Z",
+      reason: "assistant",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:01:00.000Z",
+      nextWakeReason: "assistant",
+      progressed: false,
+      redactedStatus: expect.objectContaining({
+        hostedMemberPreferencesPrePlanningPending: 1,
+        hostedMemberPreferencesPrePlanningProcessed: 0,
+      }),
+    }));
+  });
+
   it("leaves due system mailbox work pending when assistant input is ready", async () => {
     const callOrder: string[] = [];
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
@@ -12201,6 +12286,24 @@ function createSystemMailboxItem() {
       notification: {
         delivery: null,
       },
+    },
+  };
+}
+
+function createMemberPreferencesSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    itemId: "system_mailbox_item_member_preferences",
+    mailboxDedupeKey: "dedupe_system_mailbox_item_member_preferences",
+    routeAction: "apply-member-preferences" as const,
+    wake: {
+      eventId: "member.preferences.updated:member_synthetic_phase:update_synthetic",
+      kind: "member.preferences.updated" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      preferences: {
+        tone: "formal" as const,
+      },
+      userId: "member_synthetic_phase",
     },
   };
 }

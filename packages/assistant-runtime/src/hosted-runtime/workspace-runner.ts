@@ -529,10 +529,51 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   });
   markHostedMailboxImportDirtyIfNeeded(checkpointRequestSession, initialMailboxImport);
 
+  const initialAssistantInputBatchHasWork =
+    hostedWorkspaceRunnerAssistantInputBatchHasWork(initialAssistantInputBatch);
+  const initialMailboxImportHasForegroundConversationWork =
+    hasHostedMailboxImportForegroundConversationWork(initialMailboxImport);
   if (
     input.runAssistantPhase
-    && !hostedWorkspaceRunnerAssistantInputBatchHasWork(initialAssistantInputBatch)
-    && !hasHostedMailboxImportForegroundConversationWork(initialMailboxImport)
+    && (initialAssistantInputBatchHasWork || initialMailboxImportHasForegroundConversationWork)
+    && !hostedMailboxImportFetchedSystemLane(initialMailboxImport)
+  ) {
+    try {
+      const preAssistantSystemMailboxImport = await importHostedMailboxForWorkspaceRunner({
+        checkpointRequestBuilder: checkpointRequestSession,
+        checkpointReason: "import",
+        deferCheckpoint: true,
+        importItemContext: input.initialMailboxImportContext ?? null,
+        input,
+        lanes: ["system"],
+        requestId: input.requestId,
+        signal: input.signal ?? null,
+        suppressNoopRuntimeLog: true,
+      });
+      if (!hostedMailboxImportCheckpointResultIsNoop(preAssistantSystemMailboxImport)) {
+        checkpointRequestSession.recordCheckpointResult(preAssistantSystemMailboxImport, {
+          captureAssistantInputBatch: false,
+        });
+        markHostedMailboxImportDirtyIfNeeded(
+          checkpointRequestSession,
+          preAssistantSystemMailboxImport,
+        );
+      }
+    } catch (error) {
+      if (isHostedWorkspaceRunnerAbortError(error, input.signal ?? null)) {
+        throw error;
+      }
+      await writeHostedPreAssistantSystemMailboxImportFailureRuntimeLog({
+        error,
+        input,
+      });
+      // Foreground conversation work still owns this pass. The system lane will
+      // retry from its unchanged watermark on the next mailbox/system wake.
+    }
+  } else if (
+    input.runAssistantPhase
+    && !initialAssistantInputBatchHasWork
+    && !initialMailboxImportHasForegroundConversationWork
   ) {
     initialMailboxImport = await importHostedMailboxForWorkspaceRunner({
       checkpointRequestBuilder: checkpointRequestSession,
@@ -1297,6 +1338,22 @@ function hasHostedMailboxImportForegroundConversationWork(
   );
 }
 
+function hostedMailboxImportCheckpointResultIsNoop(
+  result: HostedMailboxImportCheckpointResult,
+): boolean {
+  return result.stateChanged === false
+    && result.importResult.importedCount === 0
+    && result.importResult.fetchedCount === 0
+    && result.importResult.blocked.length === 0
+    && result.importResult.nextRetryAt === null;
+}
+
+function hostedMailboxImportFetchedSystemLane(
+  result: HostedMailboxImportCheckpointResult,
+): boolean {
+  return result.importResult.fetchedLanes?.includes("system") === true;
+}
+
 function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
   assistantInputBatchLimit: number;
   current: HostedWorkspaceRunnerAssistantInputBatch | null;
@@ -1450,6 +1507,7 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
   prefetch?: HostedMailboxPrefixPrefetch | null;
   requestId: string;
   signal?: AbortSignal | null;
+  suppressNoopRuntimeLog?: boolean;
 }): Promise<HostedMailboxImportCheckpointResult> {
   const importItem = input.importItem ?? input.input.importItem;
   const signal = input.signal ?? input.importItemContext?.signal ?? input.input.signal ?? null;
@@ -1485,12 +1543,17 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
     vaultRoot: input.input.vaultRoot,
     workspacePort: input.input.platform.workspacePort,
   });
-  await writeHostedMailboxImportRuntimeLog({
-    checkpointReason: input.checkpointReason,
-    lanes: input.lanes,
-    result,
-    runnerInput: input.input,
-  });
+  if (
+    input.suppressNoopRuntimeLog !== true
+    || !hostedMailboxImportCheckpointResultIsNoop(result)
+  ) {
+    await writeHostedMailboxImportRuntimeLog({
+      checkpointReason: input.checkpointReason,
+      lanes: input.lanes,
+      result,
+      runnerInput: input.input,
+    });
+  }
   if (isDeferredHostedMailboxImportDirty(result)) {
     await markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort({
       snapshotRef: input.input.workspace?.snapshotRef ?? null,
@@ -1655,6 +1718,35 @@ async function writeHostedForegroundMailboxImportFailureRuntimeLog(context: {
       eventCode: "runner.error",
       level: "warn",
       phase: "active_turn_input",
+      redactedJson: {
+        failureCodeDetails: failure.codeDetail ? [failure.codeDetail] : [],
+        failureNames: failure.name ? [failure.name] : [],
+        failureSummaries: failure.summary ? [failure.summary] : [],
+        nestedErrorCode: failure.errorCode,
+      },
+    },
+    now: context.input.now,
+    platform: context.input.platform,
+  });
+}
+
+async function writeHostedPreAssistantSystemMailboxImportFailureRuntimeLog(context: {
+  error: unknown;
+  input: HostedWorkspaceRunnerInput;
+}): Promise<void> {
+  const failure = buildHostedMailboxPostCheckpointEffectFailureLog(context.error);
+  console.warn("Hosted pre-assistant system mailbox import failed.", {
+    errorCode: failure.errorCode,
+    errorName: failure.name ?? (context.error instanceof Error ? context.error.name : typeof context.error),
+  });
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields(context.input.runtimeLogContext),
+      component: "mailbox",
+      errorCode: "pre_assistant_system_mailbox_import_failed",
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "import",
       redactedJson: {
         failureCodeDetails: failure.codeDetail ? [failure.codeDetail] : [],
         failureNames: failure.name ? [failure.name] : [],

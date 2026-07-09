@@ -88,6 +88,7 @@ export interface HostedMailboxImportLoopResult {
   blocked: HostedMailboxImportLoopBlockedItem[];
   conversationImportedCount?: number;
   consumedSeqByLane: Record<HostedMailboxLane, string | null>;
+  fetchedLanes?: readonly HostedMailboxLane[];
   fetchedCount: number;
   importedCount: number;
   importedSystemMailboxItemIds?: string[];
@@ -533,6 +534,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     blocked,
     conversationImportedCount,
     consumedSeqByLane: serializeHostedMailboxConsumedSeqByLane(consumedSeqState),
+    fetchedLanes: [...lanes],
     fetchedCount: fetched.items.length,
     importedCount,
     ...(importedSystemMailboxItemIds.length > 0 ? { importedSystemMailboxItemIds } : {}),
