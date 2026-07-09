@@ -531,15 +531,11 @@ describe("hosted runner container image contract", () => {
     for (const slug of hostedRunnerFlexModelSlugs) {
       expect(finalDockerfile).toContain(`"${slug}"`);
     }
-    expect(finalDockerfile).toContain("ensure_future_gpt_model");
-    expect(finalDockerfile).toContain('slug == "gpt-5.4-nano"');
-    expect(finalDockerfile).toContain('first_model("gpt-5.4-mini")');
-    expect(finalDockerfile).toContain(".supports_search_tool = false");
-    expect(finalDockerfile).toContain(".supports_parallel_tool_calls = false");
-    expect(finalDockerfile).toContain(".use_responses_lite = false");
+    expect(finalDockerfile).not.toContain("ensure_future_gpt_model");
+    expect(finalDockerfile).not.toContain("future_gpt_model_from");
     expect(finalDockerfile).toContain('"id":"flex"');
     expect(finalDockerfile).toContain(
-      'jq -s -e \'length == 1 and (.[0] as $catalog | all(["gpt-5.5","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))) and ($catalog | any(.models[]?; .slug == "gpt-5.4-nano" and .supports_search_tool == false and .supports_parallel_tool_calls == false and .use_responses_lite == false)))\'',
+      'jq -s -e \'length == 1 and (.[0] as $catalog | all(["gpt-5.5","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))))\'',
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
@@ -607,7 +603,7 @@ describe("hosted runner container image contract", () => {
     expect(appBundleIsOwnedByRoot && appBundleIsMadeNonWritable && containerReturnsToRuntimeUser).toBe(true);
   });
 
-  it("proves the final image Codex model catalog patch adds and validates smoke models", async () => {
+  it("adds Flex to native Codex GPT-5.6 models without replacing their metadata", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -617,11 +613,29 @@ describe("hosted runner container image contract", () => {
       models: [
         {
           slug: "gpt-5.5",
-          service_tiers: [{ id: "auto", name: "Auto" }],
+          service_tiers: [{ id: "priority", name: "Priority" }],
         },
         {
           slug: "gpt-5.4-mini",
           service_tiers: [{ id: "auto", name: "Auto" }],
+        },
+        {
+          description: "Flagship agentic coding model for complex professional work.",
+          display_name: "GPT-5.6-Sol",
+          slug: "gpt-5.6-sol",
+          service_tiers: [{ id: "priority", name: "Priority" }],
+        },
+        {
+          description: "Balanced agentic coding model for everyday work.",
+          display_name: "GPT-5.6-Terra",
+          slug: "gpt-5.6-terra",
+          service_tiers: [{ id: "priority", name: "Priority" }],
+        },
+        {
+          description: "Fast, cost-efficient agentic coding model.",
+          display_name: "GPT-5.6-Luna",
+          slug: "gpt-5.6-luna",
+          service_tiers: [{ id: "priority", name: "Priority" }],
         },
       ],
     };
@@ -635,114 +649,33 @@ describe("hosted runner container image contract", () => {
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
-      "gpt-5.4-nano",
     ]);
     for (const slug of hostedRunnerFlexModelSlugs) {
-      expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(["auto", "flex"]);
+      expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(["priority", "flex"]);
     }
     expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-mini")).toEqual(["auto"]);
-    expect(readCodexModelServiceTierIds(patchedCatalog, "gpt-5.4-nano")).toEqual([]);
     expect(readCodexModel(patchedCatalog, "gpt-5.6-sol")).toMatchObject({
-      description: "Future OpenAI model prepared for hosted runtime rollout.",
-      display_name: "GPT-5.6 Sol",
+      description: "Flagship agentic coding model for complex professional work.",
+      display_name: "GPT-5.6-Sol",
     });
     expect(readCodexModel(patchedCatalog, "gpt-5.6-terra")).toMatchObject({
-      description: "Future OpenAI model prepared for hosted runtime rollout.",
-      display_name: "GPT-5.6 Terra",
+      description: "Balanced agentic coding model for everyday work.",
+      display_name: "GPT-5.6-Terra",
     });
     expect(readCodexModel(patchedCatalog, "gpt-5.6-luna")).toMatchObject({
-      description: "Future OpenAI model prepared for hosted runtime rollout.",
-      display_name: "GPT-5.6 Luna",
-    });
-    expect(readCodexModel(patchedCatalog, "gpt-5.4-nano")).toMatchObject({
-      supports_parallel_tool_calls: false,
-      supports_search_tool: false,
-      use_responses_lite: false,
+      description: "Fast, cost-efficient agentic coding model.",
+      display_name: "GPT-5.6-Luna",
     });
     expect(runJqFilter(validationFilter, patchedCatalog, { slurp: true }).trim()).toBe("true");
 
-    const catalogWithDuplicateTemplateModels: CodexModelCatalog = {
-      models: [
-        {
-          slug: "gpt-5.5",
-          service_tiers: [{ id: "auto", name: "Auto" }],
-        },
-        {
-          slug: "gpt-5.4-mini",
-          service_tiers: [{ id: "auto", name: "Auto" }],
-        },
-        {
-          slug: "gpt-5.4-mini",
-          service_tiers: [{ id: "auto", name: "Second Auto" }],
-        },
-      ],
-    };
-    const duplicateTemplatePatchedCatalogJson = runJqFilter(
-      patchFilter,
-      catalogWithDuplicateTemplateModels,
-    );
-    const duplicateTemplatePatchedCatalog = parseCodexModelCatalogJson(
-      duplicateTemplatePatchedCatalogJson,
-    );
-
-    expect(readCodexModelSlugs(duplicateTemplatePatchedCatalog).filter((slug) => slug === "gpt-5.4-nano"))
-      .toHaveLength(1);
-    expect(runJqFilter(validationFilter, duplicateTemplatePatchedCatalog, { slurp: true }).trim())
-      .toBe("true");
     expect(runJqFilter(
       validationFilter,
-      `${duplicateTemplatePatchedCatalogJson}\n${duplicateTemplatePatchedCatalogJson}`,
+      `${patchedCatalogJson}\n${patchedCatalogJson}`,
       { slurp: true },
     ).trim()).toBe("false");
 
-    const catalogWithUnsafeNano: CodexModelCatalog = {
-      models: [
-        {
-          slug: "gpt-5.5",
-          service_tiers: [{ id: "auto", name: "Auto" }],
-        },
-        {
-          slug: "gpt-5.4-mini",
-          service_tiers: [{ id: "auto", name: "Auto" }],
-        },
-        {
-          slug: "gpt-5.4-nano",
-          service_tiers: [{ id: "auto", name: "Auto" }],
-          supports_parallel_tool_calls: true,
-          supports_search_tool: true,
-        },
-      ],
-    };
-    const normalizedNanoCatalog = parseCodexModelCatalogJson(
-      runJqFilter(patchFilter, catalogWithUnsafeNano),
-    );
-    expect(readCodexModelSlugs(normalizedNanoCatalog).filter((slug) => slug === "gpt-5.4-nano"))
-      .toHaveLength(1);
-    expect(readCodexModelServiceTierIds(normalizedNanoCatalog, "gpt-5.4-nano")).toEqual([]);
-    expect(readCodexModel(normalizedNanoCatalog, "gpt-5.4-nano")).toMatchObject({
-      supports_parallel_tool_calls: false,
-      supports_search_tool: false,
-      use_responses_lite: false,
-    });
-    expect(runJqFilter(validationFilter, normalizedNanoCatalog, { slurp: true }).trim()).toBe("true");
-
-    const alreadyPatchedCatalog: CodexModelCatalog = {
-      models: [
-        {
-          slug: "gpt-5.5",
-          service_tiers: [
-            { id: "auto", name: "Auto" },
-            { id: "flex", name: "Existing Flex" },
-          ],
-        },
-        {
-          slug: "gpt-5.4-mini",
-          service_tiers: [{ id: "auto", name: "Auto" }],
-        },
-      ],
-    };
     const repatchedCatalog = parseCodexModelCatalogJson(
-      runJqFilter(patchFilter, alreadyPatchedCatalog),
+      runJqFilter(patchFilter, patchedCatalog),
     );
     const repatchedTargetTierIds = readCodexModelServiceTierIds(repatchedCatalog, "gpt-5.5");
     const twicePatchedCatalog = parseCodexModelCatalogJson(
@@ -754,9 +687,10 @@ describe("hosted runner container image contract", () => {
       expect(readCodexModelServiceTierIds(twicePatchedCatalog, slug).filter((tierId) => tierId === "flex"))
         .toHaveLength(1);
     }
-    expect(readCodexModelSlugs(twicePatchedCatalog).filter((slug) => slug === "gpt-5.4-nano"))
-      .toHaveLength(1);
     expect(runJqFilter(validationFilter, repatchedCatalog, { slurp: true }).trim()).toBe("true");
+    expect(runJqFilter(validationFilter, {
+      models: patchedCatalog.models.filter((model) => model.slug !== "gpt-5.6-terra"),
+    }, { slurp: true }).trim()).toBe("false");
   });
 
   it("pins the checked-in and rendered Wrangler config to an app-local build context", async () => {

@@ -64,7 +64,7 @@ traffic paused during the Web/Worker skew window and finish the Worker deploy
 immediately after the hosted web deploy.
 Normal deploy smoke targets the public Worker banner and health endpoints after deploy, then runs managed-container smoke for both gradual and immediate rollouts: `deploy:smoke` signs `/internal/deploy/container-smoke`, starts the Cloudflare-managed runner container, verifies the deployed assistant CLI surface contract still includes detailed hot-path schemas for onboarding saves and device setup, and compares the reported runner-bundle fingerprint with the freshly rendered `.deploy/runner-bundle` manifest. When the workflow runs with `container_rollout=immediate`, managed-container smoke also runs the direct-R2 upload check.
 
-The production smoke also runs one real `gpt-5.4-nano` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-5.4-nano` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the only otherwise-uncovered boundary (real OpenAI auth, quota, and network on the production egress path) without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: exactly one bounded model turn per production deploy; the flag is never set in per-PR CI or hosted-local E2E, so those paths are byte-for-byte unchanged.
+The production smoke also runs one real `gpt-5.6-terra` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-5.6-terra` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: exactly one bounded model turn per production deploy; the flag is never set in per-PR CI or hosted-local E2E, so those paths are byte-for-byte unchanged.
 
 ## Required GitHub Environment Secrets
 
@@ -142,7 +142,7 @@ Hosted crypto authority metadata:
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Current prepared slugs are `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; production deploys must keep `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs are `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; the target production slug for this rollout is `gpt-5.6-terra`, with `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
@@ -150,15 +150,19 @@ Hosted assistant config:
 When changing hosted assistant model pricing or allowance enforcement, deploy the
 Cloudflare Worker/runner model config before or atomically with the hosted web
 allowance logic so runtime usage callbacks keep using an allowance-priced model.
-For prepared future-model flips, use a two-step production rollout: first deploy
-the web allowance logic plus Worker/runner catalog patch while
-`HOSTED_ASSISTANT_MODEL` remains `gpt-5.5`, then flip
-`HOSTED_ASSISTANT_MODEL` to the future slug only after the managed-container
-smoke has proven the deployed runner-bundle fingerprint. The model-flip deploy
-must set `container_rollout=immediate` /
-`HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate` because a gradual rollout can
-leave warm old-bundle containers without the patched Codex model catalog for the
-future slug. The rollback floor is `HOSTED_ASSISTANT_MODEL=gpt-5.5`.
+For the GPT-5.6 rollout, first merge and deploy the web allowance logic plus
+Worker/runner catalog patch while production remains on
+`HOSTED_ASSISTANT_MODEL=gpt-5.5`. Use `container_rollout=immediate`, leave the
+default live-model smoke enabled, and require that preparatory deploy to report
+`gpt-5.6-terra` and `OK`; this proves the production OpenAI project and deployed
+runner before user turns move. Then set
+`HOSTED_ASSISTANT_MODEL=gpt-5.6-terra` and redeploy Cloudflare with
+`container_rollout=immediate` and the live-model smoke still enabled. Immediate
+rollout is required because a gradual rollout can leave warm old-bundle
+containers without the GPT-5.6 catalog. The rollback floor is
+`HOSTED_ASSISTANT_MODEL=gpt-5.5`; when Terra itself is the reason for rollback,
+set `live_model_turn=false` on that rollback deploy so the Terra-specific smoke
+does not block restoring the floor.
 
 Vault-share selector-scope production deploys must also use
 `container_rollout=immediate` until the distance/count selector-scope runner
@@ -296,7 +300,7 @@ export HOSTED_R2_PRESIGN_BUCKET_NAME=hosted-execution-bundles-staging
 export HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID=cloudflare-automation:v1
 export HOSTED_CRYPTO_ENV=preview
 export HOSTED_ASSISTANT_PROVIDER=openai
-export HOSTED_ASSISTANT_MODEL=gpt-5.5
+export HOSTED_ASSISTANT_MODEL=gpt-5.6-terra
 export HOSTED_ASSISTANT_REASONING_EFFORT=low
 
 # Set required secret-valued variables outside this snippet before running:
@@ -329,7 +333,7 @@ which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex`, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file`, `qpdf`, and MuPDF tools, but no app bundle, worker secrets, or local speech models.
-The final app-layer image generates a patched Codex model catalog from `codex debug models --bundled`, adds OpenAI flex service-tier support for `gpt-5.5` and the prepared future hosted assistant slugs (`gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`), adds the `gpt-5.4-nano` deploy-smoke slug as a Responses-lite/no-search entry, validates those entries with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON` so hosted app-server turns can send OpenAI `service_tier: flex` and deploy smoke can run its bounded nano turn without unsupported hosted search tools. Hosted Codex MultiAgent V2 is enabled by default in generated hosted Codex config, and hosted app-server launches also pass `--config features.multi_agent_v2=true` so warm app-server processes restart after the default changes.
+The final app-layer image generates a patched Codex model catalog from `codex debug models --bundled`, adds OpenAI flex service-tier support for `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, validates those entries with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON` so hosted app-server cron turns can send OpenAI `service_tier: flex` and the deploy smoke can exercise Terra through the same model catalog. Hosted Codex MultiAgent V2 is enabled by default in generated hosted Codex config, and hosted app-server launches also pass `--config features.multi_agent_v2=true` so warm app-server processes restart after the default changes.
 `runner:docker:base` first reuses a GHCR-published base image when its source-fingerprint label matches the checked-out `Dockerfile.cloudflare-hosted-runner-base`; otherwise it rebuilds locally. Pass `-- --force` to rebuild from the checked-out Dockerfile without adopting a GHCR base image; deploy-capable production paths use that forced path so GHCR stays a CI/local cache instead of production image authority. Pull-request hosted-local E2E does not authenticate to GHCR before running PR-controlled code, so the GHCR runner base package must be public for fast anonymous PR cache pulls. The protected-main `.github/workflows/cloudflare-runner-base-image.yml` workflow publishes the base image with `GITHUB_TOKEN`.
 The base image build runs `python3 --version`, `python --version`, `jq --version`, `rg --version`, `zstd --version`, `codex --version`, `codex app-server --help`, and `codex doctor --help` under the runner user, and the Docker smoke repeats the Python and ripgrep checks inside the final image before deploy while also proving `file`, `pdfinfo`, `pdftotext`, `pdftoppm`, `qpdf`, and `mutool` against the restored smoke PDF fixture.
 Run `pnpm --dir apps/cloudflare test:e2e:runner-python:local` when you specifically want the actual final hosted-runner app image `PATH` proof for Python. It assembles the runner bundle, builds the same `linux/amd64` app-layer Dockerfile used by the Cloudflare container, starts the image with its normal entrypoint, waits for `/health`, then checks Python as the non-root `runner` user from immutable `/app` with the baked runner env. Run `pnpm --dir apps/cloudflare runner:docker:smoke` when you want the broader final-image native smoke.
@@ -378,7 +382,7 @@ Gradual deploys run managed-container smoke with a longer retry window so Cloudf
 - `GET /health`
 - if `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, one signed `POST /internal/deploy/container-smoke` that waits until the Cloudflare-managed runner container reports the expected runner-bundle fingerprint and assistant CLI surface hot-path schema proof
 - if `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true`, a managed-container smoke uploads a deterministic payload through a direct R2 presigned `PUT`, verifies it through the Worker R2 binding, and deletes the object
-- if `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, the managed-container smoke runs one real `gpt-5.4-nano` turn via `codex exec` inside the deployed container through the Worker OpenAI egress intercept
+- if `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, the managed-container smoke runs one real `gpt-5.6-terra` turn via `codex exec` inside the deployed container through the Worker OpenAI egress intercept
 - if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`
 
 The GitHub deploy workflow enables `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER` for every Worker deploy and sets a longer managed-container retry window for gradual rollouts. It enables `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT` only when `container_rollout=immediate`, and `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN` per the `live_model_turn` input (default on).
@@ -390,7 +394,7 @@ Optional smoke env:
 - `HOSTED_EXECUTION_SMOKE_OIDC_TOKEN` or `VERCEL_OIDC_TOKEN` for authenticated status auth
 - `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true` to run the deploy-signed managed-container health/fingerprint smoke
 - `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true` to extend the managed-container smoke with the direct R2 presigned upload check; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
-- `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true` to extend the managed-container smoke with one real `gpt-5.4-nano` turn; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
+- `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true` to extend the managed-container smoke with one real `gpt-5.6-terra` turn; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
 - `HOSTED_EXECUTION_SMOKE_VERSION_ID` to pin smoke requests to a version in the active deployment; the deploy workflow passes the freshly deployed version
 - `HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS` and `HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS` to override the managed-container rollout wait
 

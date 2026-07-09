@@ -353,14 +353,14 @@ async function hasHostedAiUsageThreadContainerAccess(input: {
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-05-05-openai-flex";
-const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_VERSION =
-  "openai-gpt-5.6-preview-pricing-2026-07-08-standard";
-const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_OPENAI_FLEX_PRICING_VERSION =
-  "openai-gpt-5.6-preview-pricing-2026-07-08-openai-flex";
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION =
+  "openai-api-pricing-2026-07-09-gpt-5.6-standard";
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
+  "openai-api-pricing-2026-07-09-gpt-5.6-openai-flex";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
-const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_SOURCE =
-  "https://help.openai.com/en/articles/20001325-a-preview-of-gpt-56-sol-terra-and-luna";
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE =
+  "https://developers.openai.com/api/docs/pricing";
 const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
@@ -475,28 +475,28 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_TOKEN_PRICING_BASES = {
   },
 } as const;
 
-const HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES = {
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
   "openai-flex": {
     multiplierDenominator: 2n,
     multiplierNumerator: 1n,
-    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_SOURCE,
-    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_OPENAI_FLEX_PRICING_VERSION,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE,
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION,
     requiredProviderKind: "openai",
   },
   standard: {
     multiplierDenominator: 1n,
     multiplierNumerator: 1n,
-    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_SOURCE,
-    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_PRICING_VERSION,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE,
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION,
     requiredProviderKind: null,
   },
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
   "gpt-5.5": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_TOKEN_PRICING_BASES,
-  "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
-  "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
-  "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_FUTURE_GPT_TOKEN_PRICING_BASES,
+  "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
+  "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
+  "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
 } as const satisfies HostedAiUsageAllowanceTokenPricingBasesByModel;
 
 export function priceHostedAiUsageForAllowance(
