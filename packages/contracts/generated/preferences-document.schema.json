@@ -10,6 +10,23 @@
       "type": "string",
       "minLength": 1
     },
+    "assistant": {
+      "type": "object",
+      "properties": {
+        "tone": {
+          "type": "string",
+          "enum": [
+            "casual",
+            "formal"
+          ]
+        },
+        "voice": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
     "workoutUnitPreferences": {
       "default": {},
       "type": "object",

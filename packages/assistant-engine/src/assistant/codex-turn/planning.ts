@@ -3,11 +3,13 @@ import type {
   AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  resolveAssistantVoiceOptionElevenLabsVoiceId,
+  type AssistantTonePreference,
   normalizeIanaTimeZone,
   resolveSystemTimeZone,
   toLocalDayKey,
 } from '@murphai/contracts'
-import { loadVault } from '@murphai/core'
+import { loadVault, readPreferencesDocument } from '@murphai/core'
 import {
   listGeneratedAssistantProtocolIndexEntries,
 } from '@murphai/health-commons/runtime'
@@ -109,6 +111,7 @@ export interface AssistantRouteTurnPlan {
     binding: AssistantSession['binding']
   }
   promptCacheMetadata: AssistantPromptCacheMetadata | null
+  assistantPreferredElevenLabsVoiceId?: string | null
   systemPrompt: string | null
   turnContextPrompt: string | null
   voiceMemoDeliveryChannel?: AssistantVoiceMemoDeliveryChannel | null
@@ -255,6 +258,7 @@ export interface AssistantCodexTurnExecutionPlan {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
   profile: AssistantCodexTurnResolvedExecutionProfile
+  preferenceContext?: AssistantTurnPreferenceContext
   promptTimeContext: AssistantPromptTimeContext
   route: CodexThreadIdentity
   sharedPlan: AssistantTurnSharedPlan
@@ -268,6 +272,16 @@ export interface AssistantCodexAttemptPlan {
   route: CodexThreadIdentity
   routePlan: AssistantRouteTurnPlan
   session: AssistantSession
+}
+
+export interface AssistantTurnPreferenceContext {
+  assistantTone: AssistantTonePreference | null
+  assistantVoice: string | null
+}
+
+const DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT: AssistantTurnPreferenceContext = {
+  assistantTone: null,
+  assistantVoice: null,
 }
 
 function resolveAssistantCodexTurnExecutionProfile(
@@ -340,6 +354,7 @@ export async function buildCodexTurnExecutionPlan(input: {
     turnTrigger: input.input.turnTrigger,
   })
   const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)
+  const preferenceContext = await resolveAssistantTurnPreferenceContext(input.input.vault)
 
   return {
     acceptedInputItems: input.acceptedInputItems ?? [],
@@ -351,6 +366,7 @@ export async function buildCodexTurnExecutionPlan(input: {
     onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     profile,
+    preferenceContext,
     promptTimeContext,
     route: input.route,
     sharedPlan: input.plan,
@@ -375,6 +391,9 @@ export async function buildCodexTurnAttemptPlan(input: {
       executionContext: input.executionPlan.executionContext,
       input: input.executionPlan.input,
       profile: input.executionPlan.profile,
+      preferenceContext:
+        input.executionPlan.preferenceContext ??
+        DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT,
       promptTimeContext: input.executionPlan.promptTimeContext,
       route,
       session: input.session,
@@ -392,6 +411,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   executionContext: ReturnType<typeof normalizeAssistantExecutionContext> | null
   input: AssistantMessageInput
   profile: AssistantCodexTurnResolvedExecutionProfile
+  preferenceContext?: AssistantTurnPreferenceContext
   promptTimeContext: AssistantPromptTimeContext
   route: CodexThreadIdentity
   session: AssistantSession
@@ -400,6 +420,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   hostedToolContext?: AssistantHostedToolContext | null
 }): Promise<AssistantRouteTurnPlan> {
   const routePlanningStartedAt = Date.now()
+  const preferenceContext =
+    input.preferenceContext ?? DEFAULT_ASSISTANT_TURN_PREFERENCE_CONTEXT
   const routePlanningSpans: AssistantRoutePlanningSpanMetrics = {}
   const workingDirectory = input.sharedPlan.requestedWorkingDirectory
   const resumeBinding = measureRoutePlanningSync(
@@ -526,6 +548,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
               promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
             assistantSupportedExperimentProtocols,
             assistantToolNameAliases,
+            assistantTone: preferenceContext.assistantTone,
             cliAccess: input.sharedPlan.cliAccess,
             channel: resolvedChannel,
             currentLocalDate: input.promptTimeContext.currentLocalDate,
@@ -727,6 +750,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
         }
       : undefined,
     promptCacheMetadata: systemPromptResult.cacheMetadata,
+    assistantPreferredElevenLabsVoiceId:
+      resolveAssistantVoiceOptionElevenLabsVoiceId(
+        preferenceContext.assistantVoice,
+      ),
     voiceMemoDeliveryChannel,
     workingDirectory,
     systemPrompt,
@@ -995,6 +1022,23 @@ export async function resolveAssistantPromptTimeContext(
   return {
     currentLocalDate: toLocalDayKey(new Date(), currentTimeZone),
     currentTimeZone,
+  }
+}
+
+export async function resolveAssistantTurnPreferenceContext(
+  vaultRoot: string,
+): Promise<AssistantTurnPreferenceContext> {
+  try {
+    const preferences = await readPreferencesDocument(vaultRoot)
+    return {
+      assistantTone: preferences.assistant?.tone ?? null,
+      assistantVoice: preferences.assistant?.voice ?? null,
+    }
+  } catch {
+    return {
+      assistantTone: null,
+      assistantVoice: null,
+    }
   }
 }
 

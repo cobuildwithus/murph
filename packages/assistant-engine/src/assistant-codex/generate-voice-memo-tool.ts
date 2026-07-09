@@ -272,6 +272,7 @@ function unavailableVoiceMemoResult(
 export function createVoiceMemoToolRuntimeFromEnv(input: {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
+  preferredVoiceId?: string | null
   publicFetchImpl?: typeof fetch | null
   voiceMemoDeliveryChannel?: VoiceMemoDeliveryChannel | null
 }): VoiceMemoToolRuntime | null {
@@ -288,7 +289,9 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
     modelId: normalizeHostedAiUsageAllowanceElevenLabsTtsModelId(
       resolveElevenLabsModelId(input.env),
     ),
-    voiceId: resolveElevenLabsVoiceId(input.env),
+    voiceId:
+      normalizeNullableString(input.preferredVoiceId) ??
+      resolveElevenLabsVoiceId(input.env),
   }
 
   if (deliveryChannel === 'telegram') {

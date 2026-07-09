@@ -8,7 +8,10 @@ import {
   ASSISTANT_SKILLS,
   buildAssistantSkillFileRef,
 } from "../assistant-skill-assets.js";
-import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
+import {
+  MURPH_PRODUCT_ORIGIN,
+  type AssistantTonePreference,
+} from "@murphai/contracts";
 import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
@@ -36,6 +39,7 @@ export interface AssistantSystemPromptInput {
   assistantKnowledgeToolsAvailable?: boolean;
   assistantSupportedExperimentProtocols?: readonly AssistantSupportedExperimentProtocol[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
+  assistantTone?: AssistantTonePreference | null;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   currentLocalDate: string;
@@ -355,6 +359,7 @@ function buildAssistantHostedGroupGuidanceText(): string {
     "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, health sharing, or email sharing unless the join page or exact offer includes the matching projection kinds. Email sharing requires `group-email.v0`. Joining does share the member's memory-backed preferred display name with this group runtime, and `read_current` returns the member roster (member ids, chat handles, granted share kinds) so you can address participants by name and attribute shared records to the right member.",
     "- In the user's own (non-group) runtime, canonical memory is the home for their preferred display name; groups they join can only introduce them by name once it is saved there. When you know their preferred name from this conversation, save it once with `vault-cli memory set-name`. Never ask the user to repeat a name they already gave.",
     "- If a private `group-newsletter.email-needed` note appears, treat it as a one-time, private, casual reminder: the named group set up an email newsletter, this user granted email sharing, and they have no verified email. If appropriate, mention once that they can add an email at `/settings?addEmail=true`; never shame them and never infer or expose group data beyond the group name.",
+    "- If the member asks to change Murph's voice, tone, or texting style, casually mention once that they can do it at `/settings?voice=true`. Do not push the setting or bring it up unprompted.",
     "- Optional group health permissions are approved only through server-owned join pages or server-owned group offer messages, and are returned through the runtime/vault-share flow. Offer reactions grant only the posted snapshot; changing what people should share requires a new offer or the join page.",
     "- Supported group health permissions are closed projection kinds only: sleep timing, daily active minutes, workout summaries, workout heart-rate zone minutes, steps, observed daily max heart rate, distance, active calories, elevation gain, floors climbed, day strain, workout strain, activity score, estimated VO2 max, resting heart rate, and HRV. Do not claim that personal max-HR profile baselines, raw workouts, provider identity, routes, all health data, or arbitrary categories can be shared unless a closed projection kind exists for that exact data.",
   ].join("\n");
@@ -366,12 +371,32 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
       currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
       currentTimeZone: input.currentTimeZone,
     }),
+    buildAssistantTonePreferenceText(input.assistantTone ?? null),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantOnboardingGuidanceText({
       enabled: input.onboardingGuidance,
     }),
     buildAssistantUserFacingLinkSelfCheckText()
   );
+}
+
+function buildAssistantTonePreferenceText(
+  tone: AssistantTonePreference | null,
+): string | null {
+  switch (tone) {
+    case "casual":
+      return [
+        "Assistant tone preference:",
+        "- The user chose casual. Keep replies relaxed and conversational; lowercase is okay when natural, and light slang is okay when it fits. Stay clear, respectful, and health-safe.",
+      ].join("\n");
+    case "formal":
+      return [
+        "Assistant tone preference:",
+        "- The user chose formal. Use complete sentences, standard capitalization, and no slang. Stay warm and direct.",
+      ].join("\n");
+    default:
+      return null;
+  }
 }
 
 function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): string {

@@ -46,6 +46,7 @@ const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY =
 export type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
   | "apply-member-channels-update"
+  | "apply-member-preferences"
   | "dispatch-assistant-notification"
   | "run-device-sync-wake"
   | "apply-runtime-control-request";
@@ -403,6 +404,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
   if (
     value === "apply-member-activation"
     || value === "apply-member-channels-update"
+    || value === "apply-member-preferences"
     || value === "dispatch-assistant-notification"
     || value === "run-device-sync-wake"
     || value === "apply-runtime-control-request"

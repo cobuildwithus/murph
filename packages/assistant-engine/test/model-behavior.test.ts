@@ -109,6 +109,53 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('adds assistant tone preference only when a saved tone exists', () => {
+    const defaultLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+    expect(defaultLayers.threadContextPrompt).not.toContain(
+      'Assistant tone preference:',
+    )
+
+    const casualLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantTone: 'casual',
+      }),
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'Assistant tone preference:',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'relaxed and conversational',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'lowercase is okay',
+    )
+
+    const formalLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantTone: 'formal',
+      }),
+    )
+    expect(formalLayers.threadContextPrompt).toContain(
+      'Assistant tone preference:',
+    )
+    expect(formalLayers.threadContextPrompt).toContain(
+      'complete sentences',
+    )
+    expect(formalLayers.threadContextPrompt).toContain('no slang')
+  })
+
+  it('mentions the settings voice deep link only when users ask about style changes', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      "If the member asks to change Murph's voice, tone, or texting style",
+    )
+    expect(prompt).toContain('/settings?voice=true')
+    expect(prompt).toContain('Do not push the setting or bring it up unprompted.')
+  })
+
   it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
