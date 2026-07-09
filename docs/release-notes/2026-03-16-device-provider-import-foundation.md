@@ -4,6 +4,8 @@
 
 Runtime-visible package seam plus contract/docs update for normalized device/provider imports. This change adds a provider-agnostic device-batch write path in `@murph/core`, a registry-based adapter seam in `@murph/importers`, and a WHOOP-first normalizer that can be followed by Garmin/Oura-style adapters.
 
+Current storage note: the `raw/integrations/**` layout described in this historical release is legacy migration/repair input only. New device/provider imports retain bounded evidence parts inside `ledger/integration-ingests/YYYY/YYYY-MM.jsonl`, with contract-defined archive representations for closed months.
+
 ## What changed
 
 - Added shared `externalRef` provenance for canonical event and sample records so normalized device/provider imports can carry upstream `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet` metadata.
