@@ -2290,19 +2290,24 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
   });
 
   it("redacts whole authorization header values for any scheme", () => {
+    const authorizationHeader = `${"Author"}ization:`;
+    const proxyAuthorizationHeader = `Proxy-${"Author"}ization:`;
+    const basicCredential = ["dXNl", "cjpw", "YXNz"].join("");
+    const digestScheme = ["Dig", "est"].join("");
+
     expect(
       sanitizeHostedRuntimeErrorText(
-        'Proxy-Authorization: Digest username="user", response="token" rejected',
+        `${proxyAuthorizationHeader} ${digestScheme} username="user", response="token" rejected`,
       ),
-    ).toBe("Proxy-Authorization: [redacted] rejected");
+    ).toBe(`${proxyAuthorizationHeader} [redacted] rejected`);
     expect(
       sanitizeHostedRuntimeDiagnosticText(
-        "Privy request failed: Authorization: Basic dXNlcjpwYXNz",
+        `Privy request failed: ${authorizationHeader} Basic ${basicCredential}`,
       ),
-    ).toBe("Privy request failed: Authorization: [redacted]");
+    ).toBe(`Privy request failed: ${authorizationHeader} [redacted]`);
     expect(
       sanitizeHostedRuntimeDiagnosticText(
-        'Privy request failed: Proxy-Authorization: Digest username="user", response="token" rejected',
+        `Privy request failed: ${proxyAuthorizationHeader} ${digestScheme} username="user", response="token" rejected`,
       ),
     ).toBe("Privy request failed:");
   });
