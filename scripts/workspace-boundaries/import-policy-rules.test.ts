@@ -5,10 +5,29 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { verifyWorkspaceImportPolicy } = require("./import-policy-rules.mjs");
+const {
+  findGovernedTsconfigPaths,
+  verifyWorkspaceImportPolicy,
+} = require("./import-policy-rules.mjs");
 const { repoRoot } = require("./scanner.mjs");
 
 describe("workspace import policy rules", () => {
+  it("discovers tsconfigs only from the governed root, package, and app surfaces", async () => {
+    const tsconfigPaths: string[] = await findGovernedTsconfigPaths();
+    const relativePaths = tsconfigPaths.map((filePath) => path.relative(repoRoot, filePath));
+
+    expect(relativePaths).toContain("tsconfig.json");
+    expect(relativePaths).toContain("tsconfig.base.json");
+    expect(new Set(relativePaths).size).toBe(relativePaths.length);
+    expect(
+      relativePaths.every((filePath) =>
+        !filePath.includes(path.sep)
+        || filePath.startsWith(`packages${path.sep}`)
+        || filePath.startsWith(`apps${path.sep}`),
+      ),
+    ).toBe(true);
+  });
+
   it("rejects empty imports from workspace packages", () => {
     const filePath = path.join(repoRoot, "packages/hosted-execution/src/parsers.ts");
     const failure = verifyWorkspaceImportPolicy({

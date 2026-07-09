@@ -64,6 +64,8 @@ Use this as an episode of care, not a one-time exercise lookup.
 
 Read `references/vault-context-and-progressive-disclosure.md` before asking questions or using stored health context. Read `references/triage-and-referral.md` for every new or materially changed presentation, but apply it as quiet reasoning rather than a mandatory questionnaire. Read `references/clinical-reasoning-and-intake.md` when gathering history or forming hypotheses. Read `references/exercise-selection-and-dosing.md` before building or changing a plan. Use `references/follow-up-progression-and-nonresponse.md` for check-ins and stalled progress. Use `references/remote-observation-and-media.md` before directing a home test or interpreting media.
 
+When presenting a named exercise or movement routine, also read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` and follow its list/show, image-media, progressive-disclosure, and catalog-gap rules. This skill still owns clinical suitability, dose, response rules, and referral.
+
 ## Conversation operating rules
 
 - Before asking a factual or health-history question, inspect the current conversation and retrieve the minimum relevant vault context.
