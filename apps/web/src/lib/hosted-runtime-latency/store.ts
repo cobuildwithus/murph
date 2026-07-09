@@ -125,7 +125,7 @@ export interface HostedIngressLatencyDashboard {
   replyTraceQuality: {
     acceptedMissingReceiptCount: number;
     ambiguousTimingCount: number;
-    attemptMismatchCount: number;
+    deliveryAttemptHandoffCount: number;
     invalidNegativeLatencyCount: number;
     linkedDeliveryCount: number;
     missingAcceptedDeliveryCount: number;
@@ -466,7 +466,7 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
       mailbox.id,
       mailbox.lane,
       mailbox.lane_seq,
-      ${replyRuntimeAttemptId},
+      NULL,
       ${replyRuntimeAttemptId},
       ${linqDeliveryId},
       mailbox.created_at,
@@ -479,10 +479,6 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
       AND mailbox.lane = 'conversation'
       AND mailbox.kind = 'conversation.message'
     ON CONFLICT (mailbox_item_id) DO UPDATE SET
-      runtime_attempt_id = COALESCE(
-        hosted_ingress_latency_trace.runtime_attempt_id,
-        EXCLUDED.runtime_attempt_id
-      ),
       reply_runtime_attempt_id = EXCLUDED.reply_runtime_attempt_id,
       linq_delivery_id = EXCLUDED.linq_delivery_id,
       updated_at = CURRENT_TIMESTAMP
@@ -490,10 +486,6 @@ export async function linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input
       AND hosted_ingress_latency_trace.source = EXCLUDED.source
       AND hosted_ingress_latency_trace.reply_runtime_attempt_id IS NULL
       AND hosted_ingress_latency_trace.linq_delivery_id IS NULL
-      AND (
-        hosted_ingress_latency_trace.runtime_attempt_id IS NULL
-        OR hosted_ingress_latency_trace.runtime_attempt_id = EXCLUDED.runtime_attempt_id
-      )
     RETURNING mailbox_item_id AS "mailboxItemId"
   `);
 
@@ -592,7 +584,6 @@ export async function readHostedIngressLatencyDashboard(
   let recentInFlightCount = 0;
   let stagedButMissingProviderCount = 0;
   let providerRowsWithoutAcceptedDeliveryLinkCount = 0;
-  let attemptMismatchCount = 0;
 
   for (const row of visibleRows) {
     const acceptedAtMs = row.acceptedAt.getTime();
@@ -615,16 +606,6 @@ export async function readHostedIngressLatencyDashboard(
       && !row.linqDeliveryId
     ) {
       providerRowsWithoutAcceptedDeliveryLinkCount += 1;
-    }
-    if (
-      row.linqDeliveryId
-      && (
-        !row.runtimeAttemptId
-        || !row.replyRuntimeAttemptId
-        || row.runtimeAttemptId !== row.replyRuntimeAttemptId
-      )
-    ) {
-      attemptMismatchCount += 1;
     }
     const missingStaged = stagedAtMs === null;
     const hasNegativeSignal = signalAtMs !== null && signalAtMs < acceptedAtMs;
@@ -716,6 +697,10 @@ export async function readHostedIngressLatencyDashboard(
     linqDelivery: NonNullable<DashboardRow["linqDelivery"]>;
     linqDeliveryId: string;
     replyRuntimeAttemptId: string;
+  };
+  type ProviderReplyDashboardRow = LinkedReplyDashboardRow & {
+    providerRequestOrdinal: number;
+    providerStartAt: Date;
     runtimeAttemptId: string;
   };
   const linkedRowsByDeliveryId = new Map<
@@ -724,6 +709,7 @@ export async function readHostedIngressLatencyDashboard(
   >();
   let acceptedMissingReceiptCount = 0;
   let ambiguousTimingCount = 0;
+  let deliveryAttemptHandoffCount = 0;
   let invalidReplyNegativeLatencyCount = 0;
   let missingAcceptedDeliveryCount = 0;
   let unknownColdStateCount = 0;
@@ -733,9 +719,7 @@ export async function readHostedIngressLatencyDashboard(
     if (
       source !== "linq"
       || !deliveryId
-      || !row.runtimeAttemptId
       || !row.replyRuntimeAttemptId
-      || row.runtimeAttemptId !== row.replyRuntimeAttemptId
       || !row.linqDelivery
     ) {
       continue;
@@ -745,7 +729,6 @@ export async function readHostedIngressLatencyDashboard(
       linqDelivery: row.linqDelivery,
       linqDeliveryId: deliveryId,
       replyRuntimeAttemptId: row.replyRuntimeAttemptId,
-      runtimeAttemptId: row.runtimeAttemptId,
     };
     const linkedRows = linkedRowsByDeliveryId.get(deliveryId) ?? [];
     linkedRows.push(linkedRow);
@@ -753,25 +736,26 @@ export async function readHostedIngressLatencyDashboard(
   }
 
   for (const linkedRows of linkedRowsByDeliveryId.values()) {
+    if (linkedRows.some((candidate) =>
+      candidate.runtimeAttemptId
+      && candidate.runtimeAttemptId !== candidate.replyRuntimeAttemptId
+    )) {
+      deliveryAttemptHandoffCount += 1;
+    }
     const row = linkedRows.reduce((oldest, candidate) =>
       candidate.acceptedAt < oldest.acceptedAt ? candidate : oldest
     );
-    const providerRows = linkedRows.filter((candidate) => candidate.providerStartAt);
-    const providerTimingKeys = new Set(providerRows.flatMap((candidate) => {
-      if (
-        typeof candidate.providerRequestOrdinal !== "number"
-        || !candidate.providerStartAt
-      ) {
-        return [];
-      }
-      return [
-        `${candidate.runtimeAttemptId}:${candidate.providerRequestOrdinal}:${candidate.providerStartAt.getTime()}`,
-      ];
-    }));
+    const providerRows = linkedRows.filter(
+      (candidate): candidate is ProviderReplyDashboardRow =>
+        typeof candidate.runtimeAttemptId === "string"
+        && typeof candidate.providerRequestOrdinal === "number"
+        && candidate.providerStartAt instanceof Date,
+    );
+    const providerTimingKeys = new Set(providerRows.map((candidate) =>
+      `${candidate.runtimeAttemptId}:${candidate.providerRequestOrdinal}:${candidate.providerStartAt.getTime()}`
+    ));
     const providerRow = providerTimingKeys.size === 1
-      ? providerRows.find((candidate) =>
-          typeof candidate.providerRequestOrdinal === "number"
-        ) ?? null
+      ? providerRows[0] ?? null
       : null;
 
     const deliveryAcceptedAtMs = row.linqDelivery.acceptedAt?.getTime() ?? null;
@@ -838,13 +822,17 @@ export async function readHostedIngressLatencyDashboard(
       unknownColdStateCount += 1;
     }
 
+    if (!providerRow || providerStartAtMs === null) {
+      ambiguousTimingCount += 1;
+      continue;
+    }
     const turnTiming = readUnambiguousHostedTurnTiming(
       turnTimingIndex,
-      providerRow?.runtimeAttemptId ?? row.runtimeAttemptId,
+      providerRow.runtimeAttemptId,
       row.linqDelivery.sourceRef,
-      providerRow?.providerRequestOrdinal ?? null,
+      providerRow.providerRequestOrdinal,
     );
-    if (!turnTiming || providerStartAtMs === null) {
+    if (!turnTiming) {
       ambiguousTimingCount += 1;
       continue;
     }
@@ -920,7 +908,7 @@ export async function readHostedIngressLatencyDashboard(
     replyTraceQuality: {
       acceptedMissingReceiptCount,
       ambiguousTimingCount,
-      attemptMismatchCount,
+      deliveryAttemptHandoffCount,
       invalidNegativeLatencyCount: invalidReplyNegativeLatencyCount,
       linkedDeliveryCount: linkedRowsByDeliveryId.size,
       missingAcceptedDeliveryCount,

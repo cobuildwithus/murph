@@ -137,7 +137,7 @@ describe("hosted runtime Linq delivery route", () => {
     });
   });
 
-  it("does not schedule a delivery link without the authenticated write-fence attempt", async () => {
+  it("keeps old-runner delivery callbacks working without latency-link headers", async () => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
       answeredMailboxItemIds: ["mailbox_item_accepted_1"],

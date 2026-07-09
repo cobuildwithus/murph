@@ -233,9 +233,10 @@ export default async function RuntimeLatencyOpsPage({
               )}
             />
             <Metric
-              label={metricLabel("attempt mismatch", metricScope)}
-              tone={dashboard.replyTraceQuality.attemptMismatchCount > 0 ? "warning" : "default"}
-              value={formatInteger(dashboard.replyTraceQuality.attemptMismatchCount)}
+              label={metricLabel("delivery attempt handoffs", metricScope)}
+              value={formatInteger(
+                dashboard.replyTraceQuality.deliveryAttemptHandoffCount,
+              )}
             />
             <Metric
               label={metricLabel("ambiguous timing", metricScope)}

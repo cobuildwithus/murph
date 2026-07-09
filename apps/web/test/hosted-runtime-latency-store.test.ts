@@ -233,9 +233,9 @@ describe("hosted runtime latency dashboard store", () => {
           acceptedAt: instant("2026-05-27T12:03:05.000Z"),
           attemptedAt: instant("2026-05-27T12:03:04.000Z"),
           deliveredAt: null,
-          sourceRef: deliverySourceRef("intent_mismatch"),
+          sourceRef: deliverySourceRef("intent_handoff"),
         },
-        linqDeliveryId: "delivery_attempt_mismatch",
+        linqDeliveryId: "delivery_attempt_handoff",
         providerStartAt: instant("2026-05-27T12:03:03.000Z"),
         providerRequestOrdinal: 0,
         replyRuntimeAttemptId: "attempt_other",
@@ -267,6 +267,12 @@ describe("hosted runtime latency dashboard store", () => {
         runtimeAttemptId: "attempt_unknown",
         sinceProviderResultMs: 0,
       }),
+      ...createTurnTimingLogRows({
+        deliveryIntentId: "intent_handoff",
+        providerRequestElapsedMs: 1_000,
+        runtimeAttemptId: "attempt_staged",
+        sinceProviderResultMs: 0,
+      }),
     ]);
 
     const dashboard = await readHostedIngressLatencyDashboard({
@@ -278,9 +284,9 @@ describe("hosted runtime latency dashboard store", () => {
     });
 
     expect(dashboard.replyLatencyMs.acceptedToLinqAccepted).toEqual({
-      count: 3,
-      p50: 9_000,
-      p95: 10_800,
+      count: 4,
+      p50: 7_000,
+      p95: 10_700,
     });
     expect(dashboard.replyLatencyMs.coldAcceptedToLinqAccepted).toEqual({
       count: 1,
@@ -293,12 +299,12 @@ describe("hosted runtime latency dashboard store", () => {
       p95: 9_000,
     });
     expect(dashboard.replyLatencyMs.providerStartToLinqAttempted).toEqual({
-      count: 3,
-      p50: 3_000,
-      p95: 5_700,
+      count: 4,
+      p50: 2_000,
+      p95: 5_550,
     });
     expect(dashboard.replyLatencyMs.linqAttemptedToAccepted).toEqual({
-      count: 3,
+      count: 4,
       p50: 1_000,
       p95: 1_000,
     });
@@ -308,30 +314,30 @@ describe("hosted runtime latency dashboard store", () => {
       p95: 1_000,
     });
     expect(dashboard.replyLatencyMs.providerRequest).toEqual({
-      count: 3,
-      p50: 2_000,
-      p95: 3_800,
+      count: 4,
+      p50: 1_500,
+      p95: 3_700,
     });
     expect(dashboard.replyLatencyMs.providerResultToReplyIntent).toEqual({
-      count: 3,
-      p50: 1_000,
+      count: 4,
+      p50: 500,
       p95: 1_000,
     });
     expect(dashboard.replyLatencyMs.replyIntentToLinqAttempted).toEqual({
-      count: 3,
+      count: 4,
       p50: 0,
-      p95: 900,
+      p95: 850,
     });
     expect(dashboard.replyTraceQuality).toEqual({
-      acceptedMissingReceiptCount: 1,
+      acceptedMissingReceiptCount: 2,
       ambiguousTimingCount: 0,
-      attemptMismatchCount: 1,
+      deliveryAttemptHandoffCount: 1,
       invalidNegativeLatencyCount: 0,
-      linkedDeliveryCount: 3,
+      linkedDeliveryCount: 4,
       missingAcceptedDeliveryCount: 0,
       providerRowsWithoutAcceptedDeliveryLinkCount: 1,
       timingLogTruncated: false,
-      unknownColdStateCount: 1,
+      unknownColdStateCount: 2,
     });
   });
 
@@ -378,6 +384,73 @@ describe("hosted runtime latency dashboard store", () => {
     expect(
       dashboard.replyTraceQuality.providerRowsWithoutAcceptedDeliveryLinkCount,
     ).toBe(0);
+  });
+
+  it("counts retry handoffs per delivery and keeps links without generation diagnostics", async () => {
+    const handoffDelivery = {
+      acceptedAt: instant("2026-05-27T12:00:06.000Z"),
+      attemptedAt: instant("2026-05-27T12:00:05.000Z"),
+      deliveredAt: instant("2026-05-27T12:00:07.000Z"),
+      sourceRef: deliverySourceRef("intent_handoff_grouped"),
+    };
+    const prisma = createLatencyDashboardPrisma([
+      {
+        acceptedAt: instant("2026-05-27T12:00:00.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:00:01.000Z"),
+        linqDelivery: handoffDelivery,
+        linqDeliveryId: "delivery_handoff_grouped",
+        providerRequestOrdinal: 0,
+        providerStartAt: instant("2026-05-27T12:00:02.000Z"),
+        replyRuntimeAttemptId: "attempt_delivery",
+        runtimeAttemptId: "attempt_generation",
+        temporalSignalAcceptedAt: null,
+      },
+      {
+        acceptedAt: instant("2026-05-27T12:00:01.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:00:01.500Z"),
+        linqDelivery: handoffDelivery,
+        linqDeliveryId: "delivery_handoff_grouped",
+        providerRequestOrdinal: 0,
+        providerStartAt: instant("2026-05-27T12:00:02.000Z"),
+        replyRuntimeAttemptId: "attempt_delivery",
+        runtimeAttemptId: "attempt_generation",
+        temporalSignalAcceptedAt: null,
+      },
+      {
+        acceptedAt: instant("2026-05-27T12:01:00.000Z"),
+        assistantInputStagedAt: null,
+        linqDelivery: {
+          acceptedAt: instant("2026-05-27T12:01:05.000Z"),
+          attemptedAt: instant("2026-05-27T12:01:04.000Z"),
+          deliveredAt: instant("2026-05-27T12:01:06.000Z"),
+          sourceRef: deliverySourceRef("intent_without_generation_diagnostics"),
+        },
+        linqDeliveryId: "delivery_without_generation_diagnostics",
+        providerStartAt: null,
+        replyRuntimeAttemptId: "attempt_delivery_only",
+        runtimeAttemptId: null,
+        temporalSignalAcceptedAt: null,
+      },
+    ], createTurnTimingLogRows({
+      deliveryIntentId: "intent_handoff_grouped",
+      providerRequestElapsedMs: 2_000,
+      runtimeAttemptId: "attempt_generation",
+      sinceProviderResultMs: 1_000,
+    }));
+
+    const dashboard = await readHostedIngressLatencyDashboard({
+      inFlightGraceMs: 0,
+      now: instant("2026-05-27T12:05:00.000Z"),
+      prisma,
+      source: "linq",
+      windowHours: 1,
+    });
+
+    expect(dashboard.replyLatencyMs.acceptedToLinqAccepted.count).toBe(2);
+    expect(dashboard.replyLatencyMs.providerRequest.count).toBe(1);
+    expect(dashboard.replyTraceQuality.deliveryAttemptHandoffCount).toBe(1);
+    expect(dashboard.replyTraceQuality.linkedDeliveryCount).toBe(2);
+    expect(dashboard.replyTraceQuality.ambiguousTimingCount).toBe(1);
   });
 
   it("correlates separate reply intents that share one attempt and provider ordinal", async () => {
@@ -499,8 +572,13 @@ describe("hosted runtime latency dashboard store", () => {
       authenticatedUserId: "member_latency_1",
       linqDeliveryId: "delivery_latency_1",
       prisma,
-      replyRuntimeAttemptId: "attempt_latency_1",
+      replyRuntimeAttemptId: "attempt_delivery_1",
     })).resolves.toEqual({ matchedCount: 1, recorded: true });
+    expect(prisma.readTrace()).toEqual(expect.objectContaining({
+      linqDeliveryId: "delivery_latency_1",
+      replyRuntimeAttemptId: "attempt_delivery_1",
+      runtimeAttemptId: null,
+    }));
 
     await expect(recordHostedIngressAssistantInputStaged({
       assistantInputId: "input_latency_1",
@@ -508,7 +586,16 @@ describe("hosted runtime latency dashboard store", () => {
       authenticatedUserId: "member_latency_1",
       mailboxItemId: "mailbox_latency_1",
       prisma,
-      runtimeAttemptId: "attempt_latency_1",
+      runtimeAttemptId: "attempt_generation_1",
+      source: "linq",
+    })).resolves.toEqual({ matchedCount: 1, recorded: true, unmatchedCount: 0 });
+
+    await expect(recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_latency_1"],
+      authenticatedUserId: "member_latency_1",
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_generation_1",
       source: "linq",
     })).resolves.toEqual({ matchedCount: 1, recorded: true, unmatchedCount: 0 });
 
@@ -516,8 +603,9 @@ describe("hosted runtime latency dashboard store", () => {
     expect(linkedTrace).toEqual(expect.objectContaining({
       assistantInputId: "input_latency_1",
       linqDeliveryId: "delivery_latency_1",
-      replyRuntimeAttemptId: "attempt_latency_1",
-      runtimeAttemptId: "attempt_latency_1",
+      providerRequestOrdinal: 0,
+      replyRuntimeAttemptId: "attempt_delivery_1",
+      runtimeAttemptId: "attempt_generation_1",
     }));
     const deliveryLinkSql = prisma.readDeliveryLinkSql();
     for (const guard of [
@@ -528,25 +616,25 @@ describe("hosted runtime latency dashboard store", () => {
       "hosted_ingress_latency_trace.linq_delivery_id IS NULL",
       "hosted_ingress_latency_trace.user_id = EXCLUDED.user_id",
       "hosted_ingress_latency_trace.source = EXCLUDED.source",
-      "hosted_ingress_latency_trace.runtime_attempt_id IS NULL",
-      "hosted_ingress_latency_trace.runtime_attempt_id = EXCLUDED.runtime_attempt_id",
     ]) {
       expect(deliveryLinkSql).toContain(guard);
     }
+    expect(deliveryLinkSql).not.toContain("runtime_attempt_id = COALESCE");
+    expect(deliveryLinkSql).not.toContain("EXCLUDED.runtime_attempt_id");
 
     await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
       answeredMailboxItemIds: ["mailbox_latency_1"],
       authenticatedUserId: "member_latency_1",
       linqDeliveryId: "delivery_latency_competing",
       prisma,
-      replyRuntimeAttemptId: "attempt_latency_1",
+      replyRuntimeAttemptId: "attempt_delivery_1",
     })).resolves.toEqual({ matchedCount: 0, recorded: false });
     expect(prisma.readTrace()?.linqDeliveryId).toBe("delivery_latency_1");
   });
 
-  it("does not link a trace owned by another runtime attempt", async () => {
+  it("links delivery after a restart without replacing the generation attempt", async () => {
     const prisma = createLatencyWritePrisma({
-      deliveryLinkMatches: [false],
+      deliveryLinkMatches: [true],
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T18:36:52.229Z")),
     });
     await recordHostedIngressAssistantInputStaged({
@@ -557,6 +645,14 @@ describe("hosted runtime latency dashboard store", () => {
       runtimeAttemptId: "attempt_other",
       source: "linq",
     });
+    await recordHostedIngressProviderStarted({
+      assistantInputIds: ["input_latency_other"],
+      authenticatedUserId: "member_latency_1",
+      prisma,
+      providerRequestOrdinal: 0,
+      runtimeAttemptId: "attempt_other",
+      source: "linq",
+    });
 
     await expect(linkHostedIngressLatencyTracesToAcceptedLinqDelivery({
       answeredMailboxItemIds: ["mailbox_latency_1"],
@@ -564,10 +660,11 @@ describe("hosted runtime latency dashboard store", () => {
       linqDeliveryId: "delivery_latency_1",
       prisma,
       replyRuntimeAttemptId: "attempt_latency_1",
-    })).resolves.toEqual({ matchedCount: 0, recorded: false });
+    })).resolves.toEqual({ matchedCount: 1, recorded: true });
     expect(prisma.readTrace()).toEqual(expect.objectContaining({
-      linqDeliveryId: null,
-      replyRuntimeAttemptId: null,
+      linqDeliveryId: "delivery_latency_1",
+      providerRequestOrdinal: 0,
+      replyRuntimeAttemptId: "attempt_latency_1",
       runtimeAttemptId: "attempt_other",
     }));
   });
@@ -1375,9 +1472,9 @@ function createLatencyWritePrisma(input: {
           return [];
         }
         const replyRuntimeAttemptId = query.values[0];
-        const linqDeliveryId = query.values[2];
-        const traceId = query.values[3];
-        const mailboxItemId = query.values[4];
+        const linqDeliveryId = query.values[1];
+        const traceId = query.values[2];
+        const mailboxItemId = query.values[3];
         if (
           typeof replyRuntimeAttemptId !== "string"
           || typeof linqDeliveryId !== "string"
@@ -1394,11 +1491,10 @@ function createLatencyWritePrisma(input: {
           mailboxLane: "conversation",
           mailboxLaneSeq: 1n,
           replyRuntimeAttemptId,
-          runtimeAttemptId: replyRuntimeAttemptId,
+          runtimeAttemptId: null,
           source: "linq",
           userId: "member_latency_1",
         });
-        trace.runtimeAttemptId ??= replyRuntimeAttemptId;
         trace.replyRuntimeAttemptId = replyRuntimeAttemptId;
         trace.linqDeliveryId = linqDeliveryId;
         return [{ mailboxItemId }];
