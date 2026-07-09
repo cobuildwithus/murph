@@ -16,3 +16,5 @@ If you are running as Fable, do not write implementation code yourself unless ex
 2. Delegate implementation to the Codex CLI (c1) with the xhigh reasoning model, handing it a thorough, concrete plan — files to touch, approach, edge cases to cover, and how to verify.
 3. Every plan handed to Codex must state: "Our utmost priority is clean, simple, long term maintainable and composable architecture with minimal complexity."
 4. Fable keeps triage, review, verification, and commit duties.
+
+Exception — frontend: user-facing `apps/web` frontend/UI work is implemented by Fable itself (or a Fable subagent), never delegated to Codex. When Fable is itself invoked non-interactively as a delegated frontend implementer, implement in the supplied checkout and leave branching, commits, and pushes to the delegating parent. See `agent-docs/operations/agent-workflow-routing.md` § Workflow Defaults for the routing rule that binds Codex-native agents to the same policy.

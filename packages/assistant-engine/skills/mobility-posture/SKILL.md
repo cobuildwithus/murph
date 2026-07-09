@@ -19,6 +19,8 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 - Use strength-training when the answer is loading, progression, hypertrophy, or performance programming.
 - Use recovery-modalities for massage, foam rolling, compression, heat/cold modality tradeoffs.
 
+When presenting a named drill or routine, read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` and follow its list/show, image-media, progressive-disclosure, and catalog-gap rules. This skill still owns whether the movement fits non-pain mobility work.
+
 ## Data First
 
 - Check whether stiffness is painful, new, asymmetric, neurologic, linked to training, or tied to long static postures.

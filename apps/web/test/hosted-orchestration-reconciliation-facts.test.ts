@@ -887,7 +887,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendHostedAiUsageNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
-  it("releases the Telegram usage-limit notice claim when provider delivery fails", async () => {
+  it("retains the Telegram usage-limit notice claim when provider delivery is ambiguous", async () => {
     const deniedDecision = buildDeniedUsageGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
@@ -914,19 +914,7 @@ describe("hosted orchestration reconciliation facts", () => {
     );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
     mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
-    mocks.fetch.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          description: "Forbidden: bot was blocked by the user",
-          error_code: 403,
-          ok: false,
-        }),
-        {
-          headers: { "content-type": "application/json" },
-          status: 403,
-        },
-      ),
-    );
+    mocks.fetch.mockRejectedValueOnce(new Error("Telegram response was lost."));
 
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const response = await reconciliationRoute.GET(
@@ -936,12 +924,7 @@ describe("hosted orchestration reconciliation facts", () => {
     consoleErrorSpy.mockRestore();
 
     expect(response.status).toBe(500);
-    expect(mocks.releaseHostedAiUsageLimitNotice).toHaveBeenCalledWith({
-      memberId: MEMBER_ID,
-      periodStart: deniedDecision.periodStart,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      sentAt: new Date(FIXED_NOW),
-    });
+    expect(mocks.releaseHostedAiUsageLimitNotice).not.toHaveBeenCalled();
   });
 
   it("does not send a current-chat usage-limit notice for email runtime denial", async () => {

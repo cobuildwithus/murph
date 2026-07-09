@@ -27,31 +27,22 @@ function buildPrompt(): string {
 }
 
 describe('assistant food journal skill', () => {
-  it('routes food journaling without making nutrition estimates the default', () => {
+  it('keeps food journaling discoverable in the compact skill router', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      'food-journal: Use when the user logs meals or asks Murph to notice patterns',
+      'Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements',
     )
     expect(prompt).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md',
     )
     expect(prompt).toContain(
-      'When logging supplements, workouts, or activities, capture the full recoverable structure',
+      'Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution',
     )
     expect(prompt).toContain(
-      'Do not assume calorie or macro tracking is the purpose of a meal log.',
+      'When exact food or supplement identity, ingredients, allergens, dose, or movement instruction matters, follow the owning skill',
     )
-    expect(prompt).toContain(
-      'do not estimate or surface calories or macros unless asked.',
-    )
-    expect(prompt).toContain(
-      'food/performance observation where nutrition detail is not needed',
-    )
-    expect(prompt).toContain(
-      'When a specific food product is looked up because nutrition, ingredients, allergens, or exact identity matter',
-    )
-    expect(prompt).not.toContain('estimate calories first')
+    expect(prompt).not.toContain('vault-cli food search-labels')
   })
 
   it('keeps observation runs bounded and composed from existing surfaces', async () => {
@@ -78,6 +69,24 @@ describe('assistant food journal skill', () => {
     )
     expect(skill).toContain(
       'performance work where nutrition detail materially affects the question',
+    )
+    expect(skill).toContain('vault-cli food search-labels`')
+    expect(skill).toContain('vault-cli food search-labels-batch`')
+    expect(skill).toContain('Use `--generic` for ordinary ingredients')
+    expect(skill).toContain(
+      'For a fridge or pantry photo, enumerate distinct visible products and resolve\nthem in one batch.',
+    )
+    expect(skill).toContain(
+      'preserve serving size and returned label\nnutrition on the meal with label-based provenance',
+    )
+    expect(skill).toContain(
+      'save or update the food record with serving, ingredients,\nnutrition, and the label lookup id in provenance',
+    )
+    expect(skill).toContain(
+      'Treat contaminant observations as exact-product lab context only.',
+    )
+    expect(skill).toContain(
+      'absence of an exact test is not proof that a product is clean or safe',
     )
     expect(skill).toContain('Private is the default.')
     expect(onboarding).toContain(

@@ -12,7 +12,7 @@ fi
 
 command_requires_workspace_artifact_lock() {
   case "${1:-}" in
-    "typecheck" | "typecheck:packages" | "test:packages:coverage" | "test:coverage" | "verify:acceptance" | "verify:cli")
+    "typecheck" | "typecheck:packages" | "test" | "test:packages" | "test:apps" | "test:diff" | "test:packages:coverage" | "test:coverage" | "verify:acceptance" | "verify:cli")
       return 0
       ;;
     *)
@@ -144,6 +144,17 @@ local_concurrency_default() {
   normalize_positive_integer "$cpu_count" "$fallback"
 }
 
+local_worker_budget_default() {
+  local outer_concurrency="$1"
+  local fallback="$2"
+  local cpu_count
+  local worker_budget
+  cpu_count="$(detect_logical_cpu_count)"
+  worker_budget=$((cpu_count / outer_concurrency))
+
+  normalize_positive_integer "$worker_budget" "$fallback"
+}
+
 readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly acceptance_app_verify_with_coverage_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
@@ -156,16 +167,20 @@ readonly acceptance_app_verify_delay_seconds="$(normalize_non_negative_integer "
 readonly acceptance_early_cloudflare_verify="${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-0}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
-readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 6)"
+readonly package_coverage_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || local_concurrency_default 6 4)"
 readonly package_coverage_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")"
 readonly package_coverage_cli_active_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || echo 4)"
 readonly package_coverage_cli_active_concurrency_limit="$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY:-$package_coverage_cli_active_concurrency_default}" "$package_coverage_cli_active_concurrency_default")"
-readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || echo 75%)"
+readonly package_coverage_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$package_coverage_concurrency_limit" 1)"
 readonly package_coverage_vitest_max_workers="${MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS:-$package_coverage_vitest_max_workers_default}"
 readonly typecheck_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 2 || local_concurrency_default 8 4)"
 readonly typecheck_preflight_parallel_default="1"
 readonly typecheck_preflight_parallel="${MURPH_TYPECHECK_PREFLIGHT_PARALLEL:-$typecheck_preflight_parallel_default}"
 readonly typecheck_workspace_concurrency="$(normalize_positive_integer "${MURPH_TYPECHECK_WORKSPACE_CONCURRENCY:-$typecheck_workspace_concurrency_default}" "$typecheck_workspace_concurrency_default")"
+readonly test_diff_workspace_concurrency_default="$([[ -n "${CI:-}" ]] && echo 1 || local_concurrency_default 4 2)"
+readonly test_diff_workspace_concurrency="$(normalize_positive_integer "${MURPH_TEST_DIFF_WORKSPACE_CONCURRENCY:-$test_diff_workspace_concurrency_default}" "$test_diff_workspace_concurrency_default")"
+readonly test_diff_vitest_max_workers_default="$([[ -n "${CI:-}" ]] && echo 50% || local_worker_budget_default "$test_diff_workspace_concurrency" 1)"
+readonly test_diff_vitest_max_workers="${MURPH_TEST_DIFF_VITEST_MAX_WORKERS:-$test_diff_vitest_max_workers_default}"
 readonly verify_retry_count="$(normalize_non_negative_integer "${MURPH_VERIFY_RETRY_COUNT:-0}" "0")"
 readonly sqlite_warning_filter_option="--require=$repo_root/config/sqlite-warning-filter.cjs"
 tracked_background_pids=("")
@@ -304,20 +319,50 @@ run_workspace_boundary_check() {
 }
 
 run_typecheck_packages() {
+  local use_default_package_dirs=0
+  if [[ "$#" -eq 0 ]]; then
+    use_default_package_dirs=1
+  fi
+
+  local package_dirs=("$@")
+  if [[ "$use_default_package_dirs" == "1" ]]; then
+    package_dirs=("${typecheck_package_dirs[@]}")
+  fi
+
   local package_dir
+  local contracts_prerequisite_required=0
+
+  if [[ "$use_default_package_dirs" == "0" ]]; then
+    for package_dir in "${package_dirs[@]}"; do
+      if [[ "$package_dir" == "packages/contracts" ]]; then
+        contracts_prerequisite_required=1
+        break
+      fi
+    done
+  fi
+
+  if [[ "$contracts_prerequisite_required" == "1" ]]; then
+    run_diff_contracts_build_with_workspace_artifact_lock || return $?
+  fi
 
   if [[ "$typecheck_workspace_concurrency" -le 1 ]]; then
-    for package_dir in "${typecheck_package_dirs[@]}"; do
-      run_package_command_with_retry "$package_dir" typecheck
+    for package_dir in "${package_dirs[@]}"; do
+      [[ -n "$package_dir" ]] || continue
+      run_package_command_with_retry "$package_dir" typecheck || return $?
     done
     return 0
   fi
 
   local filter_args=()
 
-  for package_dir in "${typecheck_package_dirs[@]}"; do
+  for package_dir in "${package_dirs[@]}"; do
+    [[ -n "$package_dir" ]] || continue
     filter_args+=("--filter" "./${package_dir}")
   done
+
+  if [[ "${#filter_args[@]}" -eq 0 ]]; then
+    return 0
+  fi
 
   # The package/app typecheck scripts are no-emit: they read sibling sources or
   # already-built dist and produce nothing another package's typecheck consumes.
@@ -408,6 +453,7 @@ run_app_verify_command_with_retry() {
   local app_dir="$1"
   local skip_cloudflare_typecheck="${2:-0}"
   local health_commons_generated_prepared="${3:-0}"
+  local hosted_web_prisma_generated_prepared="${4:-$skip_cloudflare_typecheck}"
   local env_args=(env -u NODE_V8_COVERAGE)
 
   if [[ "$app_dir" == "apps/cloudflare" && "$skip_cloudflare_typecheck" == "1" ]]; then
@@ -416,7 +462,7 @@ run_app_verify_command_with_retry() {
   if [[ "$health_commons_generated_prepared" == "1" ]]; then
     env_args+=(MURPH_HEALTH_COMMONS_GENERATED_PREPARED=1)
   fi
-  if [[ "$app_dir" == "apps/web" && "$skip_cloudflare_typecheck" == "1" ]]; then
+  if [[ "$hosted_web_prisma_generated_prepared" == "1" ]]; then
     env_args+=(MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED=1)
   fi
 
@@ -475,22 +521,33 @@ run_test_packages_common() {
   # multi-project Vitest lane, so the only prerequisite here is the contracts
   # artifact verification, which rebuilds the shared contracts dist that
   # built-runtime consumers import and must finish before that lane starts.
-  run_timed_step "Contracts artifact verification" pnpm --dir "packages/contracts" test:artifacts
+  run_timed_step "Contracts artifact verification" pnpm --dir "packages/contracts" test:artifacts:incremental
 }
 
 run_test_apps() {
   local skip_cloudflare_typecheck="${1:-0}"
   local health_commons_generated_prepared="${2:-0}"
+  local hosted_web_prisma_generated_prepared="${3:-$skip_cloudflare_typecheck}"
+
+  if [[ "$health_commons_generated_prepared" != "1" ]]; then
+    run_timed_step "Health Commons generated artifacts" generate_health_commons_artifacts_with_retry || return $?
+    health_commons_generated_prepared=1
+  fi
+
+  if [[ "$hosted_web_prisma_generated_prepared" != "1" ]]; then
+    run_command_with_retry "Hosted web Prisma client" pnpm --dir "apps/web" prisma:generate || return $?
+    hosted_web_prisma_generated_prepared=1
+  fi
 
   if [[ "$app_verify_parallel" == "1" ]]; then
     local pids=()
 
     # App verification should not emit V8 coverage into the repo coverage workspace.
-    run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" &
+    run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared" &
     local hosted_web_verify_pid="$!"
     pids+=("$hosted_web_verify_pid")
     register_background_pid "$hosted_web_verify_pid"
-    run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" &
+    run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared" &
     local cloudflare_verify_pid="$!"
     pids+=("$cloudflare_verify_pid")
     register_background_pid "$cloudflare_verify_pid"
@@ -502,18 +559,27 @@ run_test_apps() {
     return 0
   fi
 
-  run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared"
-  run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared"
+  run_app_verify_command_with_retry "apps/web" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared" || return $?
+  run_app_verify_command_with_retry "apps/cloudflare" "$skip_cloudflare_typecheck" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared"
+}
+
+run_test_apps_with_workspace_artifact_lock() {
+  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
+    run_test_apps "$@" || return $?
+    return 0
+  fi
+
+  bash "$repo_root/scripts/workspace-verify.sh" test:apps
 }
 
 prepare_repo_vitest_runtime_artifacts() {
   local health_commons_generated_prepared="${1:-0}"
 
-  run_test_runtime_artifact_build_with_retry
+  run_test_runtime_artifact_build_with_retry || return $?
   if [[ "$health_commons_generated_prepared" == "1" ]]; then
     verify_log "skip Health Commons generated artifacts; root acceptance typecheck already prepared them"
   else
-    run_timed_step "Health Commons generated artifacts" generate_health_commons_artifacts_with_retry
+    run_timed_step "Health Commons generated artifacts" generate_health_commons_artifacts_with_retry || return $?
   fi
   run_timed_step "CLI package shape verification" pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
 }
@@ -901,6 +967,90 @@ run_diff_package_boundary_verification() {
   esac
 }
 
+run_diff_contracts_test_with_workspace_artifact_lock() {
+  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
+    run_package_command_with_retry "packages/contracts" test || return $?
+    return 0
+  fi
+
+  run_command_with_retry \
+    "Package command for packages/contracts (test)" \
+    node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "test:diff contracts" -- \
+      pnpm --dir "packages/contracts" test
+}
+
+run_diff_contracts_build_with_workspace_artifact_lock() {
+  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
+    run_command_with_retry \
+      "Incremental contracts prerequisite" \
+      pnpm --dir "packages/contracts" build:incremental || return $?
+    return 0
+  fi
+
+  run_command_with_retry \
+    "Incremental contracts prerequisite" \
+    node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "test:diff contracts build" -- \
+      pnpm --dir "packages/contracts" build:incremental
+}
+
+run_test_diff_package_tests() {
+  local package_dirs=("$@")
+  local filter_args=()
+  local package_dir
+  local contracts_selected=0
+
+  for package_dir in "${package_dirs[@]}"; do
+    [[ -n "$package_dir" ]] || continue
+    if [[ "$package_dir" == "packages/contracts" ]]; then
+      contracts_selected=1
+      continue
+    fi
+    filter_args+=("--filter" "./${package_dir}")
+  done
+
+  # Contracts verification rebuilds shared dist artifacts. Complete it under
+  # the artifact lock before source-first dependents start importing them.
+  if [[ "$contracts_selected" == "1" ]]; then
+    run_diff_contracts_test_with_workspace_artifact_lock || return $?
+  fi
+
+  if [[ "${#filter_args[@]}" -gt 0 ]]; then
+    run_command_with_retry \
+      "Affected package tests" \
+      env MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers" \
+        pnpm -r --no-sort --workspace-concurrency="$test_diff_workspace_concurrency" "${filter_args[@]}" test || return $?
+  fi
+
+  for package_dir in "${package_dirs[@]}"; do
+    [[ -n "$package_dir" ]] || continue
+    run_diff_package_boundary_verification "$package_dir" || return $?
+  done
+}
+
+run_test_diff_app_verification() {
+  local app_dirs=("$@")
+  local app_dir
+  local has_cloudflare=0
+  local has_web=0
+
+  for app_dir in "${app_dirs[@]}"; do
+    case "$app_dir" in
+      "apps/cloudflare") has_cloudflare=1 ;;
+      "apps/web") has_web=1 ;;
+    esac
+  done
+
+  if [[ "$has_cloudflare" == "1" && "$has_web" == "1" ]]; then
+    run_test_apps_with_workspace_artifact_lock || return $?
+    return 0
+  fi
+
+  for app_dir in "${app_dirs[@]}"; do
+    [[ -n "$app_dir" ]] || continue
+    run_package_command_without_node_v8_coverage_with_retry "$app_dir" verify || return $?
+  done
+}
+
 run_typecheck_preflight() {
   run_timed_step "Shell syntax" check_shell_syntax
   run_timed_step "Node syntax" check_node_syntax
@@ -1120,6 +1270,7 @@ run_diff_repo_internal_fast_path() {
   run_timed_step "Node syntax" check_node_syntax
   run_timed_step "Hosted run stale-name guard" pnpm exec tsx "scripts/check-hosted-run-stale-residue.ts"
   run_timed_step "Hosted Temporal orchestration guard" pnpm hosted-temporal:guard
+  run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
   run_timed_step "Raw health log payload guard" pnpm logs:guard
   run_timed_step "Repo TS tools typecheck" pnpm exec tsc -p "tsconfig.tools.json" --pretty false
 }
@@ -1130,9 +1281,19 @@ run_test_diff() {
   fi
 
   load_diff_scope "$@"
-  local typecheck_dirs=("${diff_typecheck_dirs[@]-}")
-  local test_dirs=("${diff_test_dirs[@]-}")
-  local affected_app_dirs=("${diff_affected_app_dirs[@]-}")
+  local typecheck_dirs=()
+  local test_dirs=()
+  local affected_app_dirs=()
+  local scoped_dir
+  for scoped_dir in "${diff_typecheck_dirs[@]-}"; do
+    [[ -n "$scoped_dir" ]] && typecheck_dirs+=("$scoped_dir")
+  done
+  for scoped_dir in "${diff_test_dirs[@]-}"; do
+    [[ -n "$scoped_dir" ]] && test_dirs+=("$scoped_dir")
+  done
+  for scoped_dir in "${diff_affected_app_dirs[@]-}"; do
+    [[ -n "$scoped_dir" ]] && affected_app_dirs+=("$scoped_dir")
+  done
   local run_repo_tools_tests="${diff_run_repo_tools_tests:-0}"
 
   verify_log "diff scope: ${diff_summary}"
@@ -1165,6 +1326,7 @@ run_test_diff() {
     run_timed_step "Workspace boundary checks" run_workspace_boundary_check
     run_timed_step "Hosted run stale-name guard" pnpm exec tsx "scripts/check-hosted-run-stale-residue.ts"
     run_timed_step "Hosted Temporal orchestration guard" pnpm hosted-temporal:guard
+    run_timed_step "Hosted crypto hard-cut guard" pnpm hosted-crypto:guard
     run_timed_step "Raw health log payload guard" pnpm logs:guard
   fi
 
@@ -1176,38 +1338,24 @@ run_test_diff() {
     run_timed_step "Repo tools tests" pnpm test:repo-tools
   fi
 
-  local package_dir
+  if [[ "${#typecheck_dirs[@]}" -gt 0 ]]; then
+    run_timed_step "Affected package/app typechecks" run_typecheck_packages "${typecheck_dirs[@]}"
+  fi
 
-  for package_dir in "${typecheck_dirs[@]}"; do
-    if [[ -z "$package_dir" ]]; then
-      continue
-    fi
-    run_timed_step "${package_dir} typecheck" run_package_command_with_retry "$package_dir" typecheck
-  done
+  if [[ "${#test_dirs[@]}" -gt 0 ]]; then
+    run_timed_step "Affected package tests" run_test_diff_package_tests "${test_dirs[@]}"
+  fi
 
-  for package_dir in "${test_dirs[@]}"; do
-    if [[ -z "$package_dir" ]]; then
-      continue
-    fi
-    run_timed_step "${package_dir} test" run_package_command_with_retry "$package_dir" test
-    run_diff_package_boundary_verification "$package_dir"
-  done
-
-  local app_dir
-
-  for app_dir in "${affected_app_dirs[@]}"; do
-    if [[ -z "$app_dir" ]]; then
-      continue
-    fi
-    run_timed_step "${app_dir} verify" run_package_command_without_node_v8_coverage_with_retry "$app_dir" verify
-  done
+  if [[ "${#affected_app_dirs[@]}" -gt 0 ]]; then
+    run_timed_step "Affected app verification" run_test_diff_app_verification "${affected_app_dirs[@]}"
+  fi
 }
 
 run_verify_cli() {
-  run_timed_step "Assistant CLI typecheck" pnpm --dir "packages/assistant-cli" typecheck
-  run_timed_step "Setup CLI typecheck" pnpm --dir "packages/setup-cli" typecheck
-  run_timed_step "CLI package typecheck" pnpm --dir "packages/cli" typecheck
-  run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts
+  run_timed_step "Assistant CLI typecheck" pnpm --dir "packages/assistant-cli" typecheck || return $?
+  run_timed_step "Setup CLI typecheck" pnpm --dir "packages/setup-cli" typecheck || return $?
+  run_timed_step "CLI package typecheck" pnpm --dir "packages/cli" typecheck || return $?
+  run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts || return $?
   run_timed_step \
     "CLI workspace Vitest" \
     env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
@@ -1215,7 +1363,7 @@ run_verify_cli() {
 
 run_verify_cli_with_workspace_artifact_lock() {
   if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
-    run_verify_cli
+    run_verify_cli || return $?
     return 0
   fi
 
