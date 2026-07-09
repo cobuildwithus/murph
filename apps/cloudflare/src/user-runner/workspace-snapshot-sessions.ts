@@ -180,6 +180,7 @@ export function createWorkspaceSnapshotSessionService(input: {
         ? isWorkspaceSnapshotCleanupCreatedAtEligible(currentSession.createdAt, nowMs)
         : false;
       if (eligibleCandidates.length === 0 && !sessionCleanupEligible) {
+        await service.syncOrphanCandidateAlarm(userId);
         return;
       }
 

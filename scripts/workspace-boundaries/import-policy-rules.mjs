@@ -814,12 +814,15 @@ function isAllowedCloudflareAssistantEngineOwnerImport({
 }
 
 function importsEmptyBindingsFromSpecifier(source, specifier) {
-  const optionalTrivia = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\n\r]*(?:\r?\n|$))*`;
+  if (!source.includes(specifier)) {
+    return false;
+  }
 
+  const commentFreeSource = stripImportBindingComments(source);
   return new RegExp(
-    String.raw`^${optionalTrivia}import${optionalTrivia}(?:type${optionalTrivia})?\{${optionalTrivia}\}${optionalTrivia}from${optionalTrivia}["']${escapeRegExp(specifier)}["']`,
+    String.raw`^\s*import\s+(?:type\s+)?\{\s*\}\s+from\s+["']${escapeRegExp(specifier)}["']`,
     "mu",
-  ).test(source);
+  ).test(commentFreeSource);
 }
 
 function importsNamedBindingsFromSpecifier(source, specifier, bindingNames) {

@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -76,6 +77,21 @@ import /* keep */ {
       source: 'import { parseHostedExecutionBundleRef } from "@murphai/runtime-state";',
       sourceMember: "packages/hosted-execution",
       specifier: "@murphai/runtime-state",
+    });
+
+    expect(failure).toBeNull();
+  });
+
+  it("allows the runner bundle health commons import without pathological scanning", () => {
+    const filePath = path.join(
+      repoRoot,
+      "apps/cloudflare/scripts/runner-bundle/bundle-entrypoint.ts",
+    );
+    const failure = verifyWorkspaceImportPolicy({
+      filePath,
+      source: readFileSync(filePath, "utf8"),
+      sourceMember: "apps/cloudflare",
+      specifier: "@murphai/health-commons/runtime",
     });
 
     expect(failure).toBeNull();

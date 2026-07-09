@@ -12,9 +12,6 @@ import {
 import type {
   DurableObjectStateLike,
 } from "./types.js";
-import {
-  readRunnerNextAlarmAt,
-} from "./alarm-coordinator.js";
 
 export interface HostedRunnerStuckInvocationTestResult {
   attemptId: string;
@@ -57,9 +54,6 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       });
     }
 
-    await this.runtimeProcessing.syncRunnerAlarm(
-      await this.stateStore.readState(),
-    );
     return await this.runtimeInvocation.invokeWithFence({
       input: {
         orchestrationAttemptId,
@@ -99,16 +93,15 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       runnerContainerName: input.userId,
       userId: input.userId,
     });
-    const record = typeof input.startedAgoMs === "number"
-      ? await this.ageActiveInvocationForHostedLocalTest({
-          startedAt: new Date(Date.now() - input.startedAgoMs).toISOString(),
-        })
-      : await this.stateStore.readState();
-    await this.runtimeProcessing.syncRunnerAlarm(record);
+    if (typeof input.startedAgoMs === "number") {
+      await this.ageActiveInvocationForHostedLocalTest({
+        startedAt: new Date(Date.now() - input.startedAgoMs).toISOString(),
+      });
+    }
 
     return {
       attemptId: token.attemptId,
-      nextWakeAt: readRunnerNextAlarmAt(record),
+      nextWakeAt: null,
       ok: true,
     };
   }

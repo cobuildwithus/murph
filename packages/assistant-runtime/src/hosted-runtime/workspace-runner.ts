@@ -134,6 +134,7 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
     redactedStatus?: HostedRuntimeRedactedJson | null;
+    runtimeWakePendingAtCheckpoint?: boolean;
   };
 
 export interface HostedWorkspaceRunnerCheckpointRequestInput
@@ -384,6 +385,9 @@ export function createHostedWorkspaceCheckpointRequestBuilder(
           : metadata.nextWakeReason ?? null,
         reason: input.reason,
         redactedStatus: cloneHostedRuntimeRedactedJson(input.redactedStatus ?? null),
+        ...(input.runtimeWakePendingAtCheckpoint === undefined
+          ? {}
+          : { runtimeWakePendingAtCheckpoint: input.runtimeWakePendingAtCheckpoint }),
         snapshotRef: metadata.snapshotRef,
       };
     },
@@ -484,6 +488,12 @@ function buildHostedWorkspaceSnapshotCheckpointRequest(input: {
       : input.metadata.nextWakeReason ?? null,
     reason: input.requestInput.reason,
     redactedStatus: cloneHostedRuntimeRedactedJson(input.requestInput.redactedStatus ?? null),
+    ...(input.requestInput.runtimeWakePendingAtCheckpoint === undefined
+      ? {}
+      : {
+          runtimeWakePendingAtCheckpoint:
+            input.requestInput.runtimeWakePendingAtCheckpoint,
+        }),
     snapshotRef: input.snapshot.snapshotRef,
   };
 }
@@ -990,13 +1000,15 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
             input.checkpointRequestBuilder.recordCheckpointResult(result);
           }
           markHostedMailboxImportDirtyIfNeeded(input.checkpointRequestBuilder, result);
-          await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
-            checkpointRequestBuilder: input.checkpointRequestBuilder,
-            input: input.input,
-            phase: "active_turn_input",
-            signal: outerSignal,
-          });
-          if (hasHostedMailboxImportForegroundConversationWork(result)) {
+          const hasForegroundConversationWork =
+            hasHostedMailboxImportForegroundConversationWork(result);
+          if (hasForegroundConversationWork) {
+            await runHostedMailboxPostCheckpointEffectsForPromptPreparationBestEffort({
+              checkpointRequestBuilder: input.checkpointRequestBuilder,
+              input: input.input,
+              phase: "active_turn_input",
+              signal: outerSignal,
+            });
             observeForegroundConversationWork();
           }
           await notifyHostedActiveTurnInputForMailboxImport({

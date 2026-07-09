@@ -1779,6 +1779,7 @@ export interface HostedWorkspaceCheckpointRequest {
   nextWakeReason?: string | null;
   reason: HostedWorkspaceCheckpointReason;
   redactedStatus?: HostedRuntimeRedactedJson | null;
+  runtimeWakePendingAtCheckpoint?: boolean;
   snapshotRef: HostedExecutionSnapshotRefState;
 }
 

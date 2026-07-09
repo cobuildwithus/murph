@@ -50,9 +50,6 @@ import type {
   DurableObjectStorageLike,
 } from "../src/user-runner/types.js";
 import {
-  RunnerAlarmCoordinator,
-} from "../src/user-runner/alarm-coordinator.js";
-import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.js";
 import {
@@ -532,7 +529,6 @@ async function createTransportFailureHarness(input: {
     runnerRuntimeEnvSource: {},
     runnerStoreCache: new TestRunnerStoreCache({}),
     stateStore,
-    alarmCoordinator: new RunnerAlarmCoordinator(durable.state),
   });
 
   const prepared: PreparedRuntimeInvocation = {
