@@ -464,6 +464,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(digestRecord?.instructions).toContain('still remember ten seconds after reading')
     expect(digestRecord?.instructions).toContain('New data alone is not substance')
     expect(digestRecord?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
+    expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
     expect(digestRecord?.instructions).toContain('what was probably noise')
     expect(digestRecord?.instructions).toContain('Never restate single-day metric values')
     expect(digestRecord?.instructions).toContain(
@@ -853,6 +854,54 @@ describe('applyMurphManagedAutomations', () => {
     expect(productUpdatesRecord?.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
     expect(productUpdatesRecord?.instructions).toContain('Do not append again and do not switch kinds')
     expect(productUpdatesRecord?.instructions).not.toContain('OLD weekly product updates instructions')
+  })
+
+  it('removes the legacy require-send tag from an existing active weekly digest', async () => {
+    const existingSchedule = { kind: 'cron', expression: '0 9 * * 1' } as const
+    managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      instructions: 'OLD weekly digest instructions with require-send behavior.',
+      route: defaultRoute,
+      schedule: existingSchedule,
+      slug: 'weekly-health-digest',
+      status: 'active',
+      summary: 'A weekly summary of your recent health data.',
+      tags: [
+        'assistant',
+        'scheduled',
+        'murph-managed',
+        'murph-managed:weekly-health-digest',
+        ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
+      ],
+      title: 'Weekly health digest',
+    })
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-20T12:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 3,
+      skipped: 0,
+      updated: 1,
+    })
+    const digestRecord = managedAutomationMocks.records.get(
+      MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+    )
+    expect(digestRecord?.schedule).toBe(existingSchedule)
+    expect(digestRecord?.tags).toEqual([
+      'assistant',
+      'scheduled',
+      'murph-managed',
+      'murph-managed:weekly-health-digest',
+    ])
+    expect(digestRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(digestRecord?.instructions).toContain('On this scheduled weekly run')
+    expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
+    expect(digestRecord?.instructions).not.toContain('OLD weekly digest instructions')
   })
 
   it('preserves an existing device activity cadence on managed reconciliation', async () => {
