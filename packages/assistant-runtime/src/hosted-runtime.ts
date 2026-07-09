@@ -1068,6 +1068,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     const imageCodexModelCatalogJson =
       process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
+    const imageHealthCommonsPackageRoot =
+      process.env["MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]?.trim();
     const baseRuntimeEnv = {
       ...projectHostedRuntimeTrustStoreEnv(process.env),
       ...guardedRuntime.forwardedEnv,
@@ -1075,6 +1077,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...hostedCliBridge.env,
       ...(imageCodexModelCatalogJson
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
+        : {}),
+      ...(imageHealthCommonsPackageRoot
+        ? { MURPH_HEALTH_COMMONS_PACKAGE_ROOT: imageHealthCommonsPackageRoot }
         : {}),
     };
     emitPhaseLog({
