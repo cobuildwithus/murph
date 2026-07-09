@@ -94,7 +94,6 @@ export interface HostedWorkspaceRuntimeRestoreResult
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
   materializedArtifactPaths: ReadonlySet<string>;
   mode: HostedWorkspaceRuntimeRestoreMode;
-  inboxSidecarNeedsRebuild: boolean;
   restoreWasCold: boolean;
   restoreTiming: HostedRuntimeWorkspaceSnapshotRestoreTimingDetails | null;
 }
@@ -153,7 +152,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
         ...warmRestored,
         mode: "snapshot",
         restoreWasCold: false,
-        inboxSidecarNeedsRebuild: true,
         restoreTiming: null,
       };
     }
@@ -192,7 +190,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       }),
       materializedArtifactPaths: restoredMaterializedArtifactPaths,
       mode: "snapshot",
-      inboxSidecarNeedsRebuild: true,
       restoreWasCold: true,
       restoreTiming: restoreTiming ?? null,
     };
@@ -215,7 +212,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       }),
       materializedArtifactPaths: restoredMaterializedArtifactPaths,
       mode: "null-bootstrap",
-      inboxSidecarNeedsRebuild: true,
       restoreWasCold: true,
       restoreTiming: null,
     };
@@ -326,7 +322,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     }),
     materializedArtifactPaths: restoredMaterializedArtifactPaths,
     mode: "snapshot",
-    inboxSidecarNeedsRebuild: restoreWasCold,
     restoreWasCold,
     restoreTiming: null,
   };

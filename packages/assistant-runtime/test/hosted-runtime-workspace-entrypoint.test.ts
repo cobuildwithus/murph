@@ -177,8 +177,6 @@ import type {
 } from "../src/hosted-runtime/runtime-wake.ts";
 import {
   ensureHostedInboxSidecarReady,
-  isHostedInboxSidecarReady,
-  prepareHostedInboxProjectionRuntime,
 } from "../src/hosted-runtime/context.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
@@ -437,8 +435,6 @@ describe("hosted workspace runtime entrypoint", () => {
         ["codex.prepare", "done"],
         ["mailbox.import.initial", "start"],
         ["mailbox.import.initial", "done"],
-        ["inbox.sidecar", "start"],
-        ["inbox.sidecar", "done"],
         ["foreground.pass", "start"],
         ["foreground.pass", "done"],
         ["runtime.return", "done"],
@@ -4606,17 +4602,7 @@ describe("hosted workspace runtime entrypoint", () => {
     runtimeWakeSignal.notify(1_777_000_000_075);
 
     try {
-      const ensureHostedInboxSidecarReadyImpl =
-        mocks.ensureHostedInboxSidecarReady.getMockImplementation();
-      assert.ok(ensureHostedInboxSidecarReadyImpl);
-      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
-        events.push("sidecar.ready");
-        assert.equal(input.bestEffort, true);
-        assert.equal(input.rebuild, true);
-        assert.equal(input.requestId, "hosted-workspace-invocation:attempt_synthetic_workspace_entrypoint");
-        assert.equal(input.vaultRoot, path.resolve(vaultRoot));
-        return await ensureHostedInboxSidecarReadyImpl(input);
-      });
+      mocks.ensureHostedInboxSidecarReady.mockClear();
 
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const result = await runHostedWorkspaceRuntimeJobInProcess(
@@ -4685,10 +4671,10 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "import:mailbox_item_entrypoint_001",
-        "sidecar.ready",
         "snapshot:1",
         "workspace.checkpoint",
       ]);
+      expect(mocks.ensureHostedInboxSidecarReady).not.toHaveBeenCalled();
       assert.deepEqual(imported, [
         {
           id: "mailbox_item_entrypoint_001",
@@ -4887,12 +4873,6 @@ describe("hosted workspace runtime entrypoint", () => {
     });
 
     try {
-      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
-        events.push("sidecar.ready");
-        assert.equal(input.rebuild, true);
-        return true;
-      });
-
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -16387,7 +16367,7 @@ describe("hosted workspace runtime entrypoint", () => {
     assert.deepEqual(artifactGetCalls, []);
   });
 
-  test("restores existing workspace snapshot before mailbox import", async () => {
+  test("restores a workspace before incremental current-message projection", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-source-"));
     const events: string[] = [];
@@ -16440,13 +16420,18 @@ describe("hosted workspace runtime entrypoint", () => {
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await ensureHostedInboxSidecarReady({
-        bestEffort: false,
-        rebuild: false,
-        requestId: "request_mark_sidecar_ready_before_cold_restore",
-        vaultRoot,
+      mocks.ensureHostedInboxSidecarReady.mockClear();
+      const ensureHostedInboxSidecarReadyImpl =
+        mocks.ensureHostedInboxSidecarReady.getMockImplementation();
+      assert.ok(ensureHostedInboxSidecarReadyImpl);
+      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
+        events.push("sidecar.ready");
+        assert.equal(input.bestEffort, false);
+        assert.equal(input.rebuild, false);
+        assert.equal(input.requestId, "request_projection_after_cold_restore");
+        assert.equal(input.vaultRoot, path.resolve(vaultRoot));
+        return await ensureHostedInboxSidecarReadyImpl(input);
       });
-      assert.equal(isHostedInboxSidecarReady(vaultRoot), true);
 
       await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -16467,13 +16452,12 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             imported.push(item.item.laneSeq);
-            assert.equal(isHostedInboxSidecarReady(vaultRoot), false);
-            await prepareHostedInboxProjectionRuntime(
+            await ensureHostedInboxSidecarReady({
+              bestEffort: false,
+              rebuild: false,
+              requestId: "request_projection_after_cold_restore",
               vaultRoot,
-              "request_projection_after_cold_restore",
-            );
-            assert.equal(isHostedInboxSidecarReady(vaultRoot), true);
-            events.push("projection.ready");
+            });
             return { status: "imported" };
           },
           platform: createPlatform({
@@ -16529,10 +16513,11 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.equal(readConversationImportedSeq(fetchRequests[0]), "3");
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "4");
+      assert.equal(mocks.ensureHostedInboxSidecarReady.mock.calls.length, 1);
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "projection.ready",
+        "sidecar.ready",
         "mailbox.fetch",
         "snapshot:4",
         "workspace.checkpoint",
@@ -17972,14 +17957,6 @@ describe("hosted workspace runtime entrypoint", () => {
         stageSamples,
         workspacePort,
       });
-      const ensureHostedInboxSidecarReadyImpl =
-        mocks.ensureHostedInboxSidecarReady.getMockImplementation();
-      assert.ok(ensureHostedInboxSidecarReadyImpl);
-      mocks.ensureHostedInboxSidecarReady.mockImplementationOnce(async (input) => {
-        events.push("sidecar.ready");
-        return await ensureHostedInboxSidecarReadyImpl(input);
-      });
-
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
@@ -18050,7 +18027,6 @@ describe("hosted workspace runtime entrypoint", () => {
       const firstArtifactFetchIndex = requireEventIndex(events, "artifact.get:workspace-bundle");
       const importedEvents = events.filter((event) => event.startsWith("import:"));
       const mailboxImportedLogIndex = requireEventIndex(events, "runtime.log:mailbox.imported");
-      const sidecarIndex = requireEventIndex(events, "sidecar.ready");
       const mailboxImportedLog = logRequests
         .flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "mailbox.imported");
@@ -18070,8 +18046,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(importedSeqs, mailboxItems.map((item) => item.laneSeq));
       assert.equal(artifactPutCalls.length, 1);
       assert.ok(mailboxFetchIndex < mailboxImportedLogIndex);
-      assert.ok(mailboxImportedLogIndex < sidecarIndex);
-      assert.ok(sidecarIndex < requireEventIndex(events, `snapshot.create:${mailboxItemCount}`));
+      assert.ok(mailboxImportedLogIndex < requireEventIndex(events, `snapshot.create:${mailboxItemCount}`));
       assert.equal(stageSummary["workspace.read"]?.count, 1);
       assert.equal(stageSummary["artifact.get"]?.count, 1);
       assert.equal(stageSummary["mailbox.fetch"]?.count, 1);

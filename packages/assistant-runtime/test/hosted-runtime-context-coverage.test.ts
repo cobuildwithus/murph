@@ -78,8 +78,6 @@ vi.mock("@murphai/operator-config/operator-config", async () => {
 import {
   applyHostedMemberPreferences,
   ensureHostedInboxSidecarReady,
-  invalidateHostedInboxSidecarReady,
-  isHostedInboxSidecarReady,
   prepareHostedWakeContext,
   prepareHostedInboxProjectionRuntime,
   readHostedAssistantRuntimeState,
@@ -786,7 +784,7 @@ describe("hosted runtime context coverage", () => {
     }
   });
 
-  it("initializes hosted inbox sidecar with rebuild and makes later projection init cheap", async () => {
+  it("keeps current-message projection incremental after an explicit sidecar rebuild", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
     try {
@@ -814,10 +812,6 @@ describe("hosted runtime context coverage", () => {
         requestId: "req_projection_sidecar",
         vault: vaultRoot,
       });
-      expect(isHostedInboxSidecarReady(vaultRoot)).toBe(true);
-      expect(isHostedInboxSidecarReady(path.join(vaultRoot, "..", path.basename(vaultRoot)))).toBe(true);
-      invalidateHostedInboxSidecarReady(path.join(vaultRoot, "..", path.basename(vaultRoot)));
-      expect(isHostedInboxSidecarReady(vaultRoot)).toBe(false);
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           component: "hosted.inbox",
@@ -836,14 +830,14 @@ describe("hosted runtime context coverage", () => {
     }
   });
 
-  it("uses rebuild for projection init when startup sidecar bootstrap was skipped", async () => {
+  it("initializes cold current-message projection without a historical rebuild", async () => {
     const { cleanup, vaultRoot } = await createWorkspace();
 
     try {
       await prepareHostedInboxProjectionRuntime(vaultRoot, "req_projection_without_startup");
 
       expect(mocks.inboxInit).toHaveBeenCalledWith({
-        rebuild: true,
+        rebuild: false,
         rebuildParserJobs: false,
         requestId: "req_projection_without_startup",
         vault: vaultRoot,

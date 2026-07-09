@@ -1731,6 +1731,7 @@ describe("hosted mailbox conversation import adapter", () => {
       },
     });
     const loadCalls: unknown[] = [];
+    const projectionOrder: string[] = [];
     await writeVaultFile(
       vaultRoot,
       "raw/inbox/linq/cap_synthetic_evidence_001/attachments/01__voice-note.m4a",
@@ -1740,6 +1741,7 @@ describe("hosted mailbox conversation import adapter", () => {
     const outcome = await importHostedConversationMailboxItem({
       decodePayload: createDecodedPayloadDecoder(decodedWake),
       async importConversationWake() {
+        projectionOrder.push("current-message-projection");
         return {
           captureId: "cap_synthetic_evidence_001",
           metrics: {
@@ -1749,6 +1751,7 @@ describe("hosted mailbox conversation import adapter", () => {
         };
       },
       async loadAttachmentEvidenceCapture(input) {
+        projectionOrder.push("attachment-evidence");
         loadCalls.push(input);
         return {
           captureId: input.captureId,
@@ -1772,7 +1775,9 @@ describe("hosted mailbox conversation import adapter", () => {
           ],
         };
       },
-      async prepareWakeContext() {},
+      async prepareWakeContext() {
+        projectionOrder.push("incremental-sidecar-init");
+      },
       item: createResolvedConversationMailboxItem({
         dedupeKey: decodedWake.eventId,
         id: "mailbox_item_evidence_001",
@@ -1782,6 +1787,11 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     assert.equal(outcome.status, "imported");
+    assert.deepEqual(projectionOrder, [
+      "incremental-sidecar-init",
+      "current-message-projection",
+      "attachment-evidence",
+    ]);
 
     assert.deepEqual(loadCalls, [
       {

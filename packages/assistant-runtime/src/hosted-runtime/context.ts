@@ -102,15 +102,6 @@ const EMPTY_HOSTED_AUTO_REPLY_CHANNEL_STATE: HostedAssistantAutoReplyChannelStat
   telegramAutoReplyEnabled: false,
 };
 const DEFAULT_HOSTED_MEMBER_TIME_ZONE = "America/New_York";
-const hostedInboxSidecarReadyByVaultRoot = new Map<string, boolean>();
-
-export function isHostedInboxSidecarReady(vaultRoot: string): boolean {
-  return hostedInboxSidecarReadyByVaultRoot.get(path.resolve(vaultRoot)) === true;
-}
-
-export function invalidateHostedInboxSidecarReady(vaultRoot: string): void {
-  hostedInboxSidecarReadyByVaultRoot.set(path.resolve(vaultRoot), false);
-}
 
 export async function prepareHostedWakeContext(
   vaultRoot: string,
@@ -787,7 +778,6 @@ export async function ensureHostedInboxSidecarReady(input: {
       requestId: input.requestId,
       vault: vaultRoot,
     });
-    hostedInboxSidecarReadyByVaultRoot.set(vaultRoot, true);
     emitHostedExecutionStructuredLog({
       component: "hosted.inbox",
       details: {
@@ -802,7 +792,6 @@ export async function ensureHostedInboxSidecarReady(input: {
     });
     return true;
   } catch (error) {
-    hostedInboxSidecarReadyByVaultRoot.set(vaultRoot, false);
     if (!input.bestEffort) {
       throw error;
     }
@@ -835,7 +824,7 @@ export async function prepareHostedInboxProjectionRuntime(
   const normalizedVaultRoot = path.resolve(vaultRoot);
   await ensureHostedInboxSidecarReady({
     bestEffort: false,
-    rebuild: !isHostedInboxSidecarReady(normalizedVaultRoot),
+    rebuild: false,
     requestId,
     vaultRoot: normalizedVaultRoot,
   });
