@@ -156,6 +156,9 @@ const HOSTED_RUNTIME_FORWARDED_ENV_DENYLIST = new Set<string>(
     // producer, not just the Cloudflare runner-secret policy.
     MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
     MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+    // Health Commons owns this env-name contract from @murphai/health-commons/runtime.
+    // Keep it literal here so assistant-runtime does not gain that dependency edge.
+    "MURPH_HEALTH_COMMONS_PACKAGE_ROOT",
     "CODEX_HOME",
     "DYLD_INSERT_LIBRARIES",
     "DYLD_LIBRARY_PATH",
@@ -198,6 +201,9 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST = new Set<string>(
     // deny list note above.
     MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
     MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+    // Health Commons owns this env-name contract from @murphai/health-commons/runtime.
+    // Keep it literal here so assistant-runtime does not gain that dependency edge.
+    "MURPH_HEALTH_COMMONS_PACKAGE_ROOT",
     "CODEX_HOME",
     "DYLD_INSERT_LIBRARIES",
     "DYLD_LIBRARY_PATH",

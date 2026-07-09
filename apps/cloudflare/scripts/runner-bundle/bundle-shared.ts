@@ -15,16 +15,16 @@
 // - sharp/zxing-wasm: native binaries and WASM assets resolved relative to
 //   their own package directories; bundling their JS would detach it from
 //   those assets.
-// - @murphai/health-commons/@murphai/exercise-library: their runtimes load
-//   generated JSON artifacts via `new URL("../generated/...", import.meta.url)`;
-//   inlining the JS moves import.meta.url into the bundle directory and the
-//   assets stop resolving (June 2026 deploy smoke failure: ENOENT on
-//   @murphai/murph/generated/protocol-index.json).
+// - @murphai/exercise-library: its runtime loads generated JSON artifacts via
+//   `new URL("../generated/...", import.meta.url)`; inlining the JS moves
+//   import.meta.url into the bundle directory and the assets stop resolving.
+//   @murphai/health-commons used to share that constraint, but its generated
+//   asset root is now image-pinned by Dockerfile ENV
+//   MURPH_HEALTH_COMMONS_PACKAGE_ROOT and assembly probes set the same pin, so
+//   its JS can inline while the installed package still carries generated/.
 export const RUNNER_BUNDLE_SHARED_EXTERNALS = [
   "@murphai/exercise-library",
   "@murphai/exercise-library/*",
-  "@murphai/health-commons",
-  "@murphai/health-commons/*",
   "ink",
   "react",
   "react/*",
@@ -39,7 +39,6 @@ export const RUNNER_BUNDLE_SHARED_EXTERNALS = [
 // shipping a duplicate runtime copy.
 export const RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS = [
   "/@murphai/exercise-library/",
-  "/@murphai/health-commons/",
   "/ink/",
   "/react/",
   "/react-devtools-core/",
