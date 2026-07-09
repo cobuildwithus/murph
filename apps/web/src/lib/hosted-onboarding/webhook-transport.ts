@@ -13,12 +13,12 @@ import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
-  hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
-  hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
+  hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   recordHostedLinqDeliveryAttemptTx,
+  resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "./linq-delivery-store";
 import {
@@ -322,6 +322,15 @@ type HostedLinqNoticeClaimStatus =
   | "claimed"
   | "in_flight";
 
+type HostedLinqNoticeClaim =
+  | {
+    effectId?: string;
+    status: "claimed";
+  }
+  | {
+    status: Exclude<HostedLinqNoticeClaimStatus, "claimed">;
+  };
+
 export type HostedLinqSideEffectDrainResult = {
   sentCount: number;
   skipped: readonly {
@@ -364,9 +373,15 @@ export async function drainHostedLinqSideEffectsDirect(
       });
       continue;
     }
+    const deliveryEffect = noticeClaim.effectId && noticeClaim.effectId !== effect.effectId
+      ? {
+          ...effect,
+          effectId: noticeClaim.effectId,
+        }
+      : effect;
 
     try {
-      const result = await sendHostedLinqSideEffect(effect, {
+      const result = await sendHostedLinqSideEffect(deliveryEffect, {
         currentInboundReply: input.currentInboundReply ?? null,
         prisma: input.prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
@@ -374,23 +389,23 @@ export async function drainHostedLinqSideEffectsDirect(
       });
 
       if (result.status === "skipped") {
-        await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
+        await releaseHostedLinqNoticeClaimForSideEffect(deliveryEffect, input.prisma);
         skipped.push({
-          effectId: effect.effectId,
+          effectId: deliveryEffect.effectId,
           reason: "delivery_skipped",
-          template: effect.payload.template,
+          template: deliveryEffect.payload.template,
         });
         continue;
       }
     } catch (error) {
-      await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
+      await releaseHostedLinqNoticeClaimForSideEffect(deliveryEffect, input.prisma);
       throw error;
     }
 
-    await markHostedAiUsageLimitNoticeSentForSideEffectBestEffort(effect, input.prisma);
-    if (isHostedInviteLinqMessagePayload(effect.payload)) {
-      await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
-      await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
+    await markHostedAiUsageLimitNoticeSentForSideEffectBestEffort(deliveryEffect, input.prisma);
+    if (isHostedInviteLinqMessagePayload(deliveryEffect.payload)) {
+      await markHostedLinqNoticeSentForSideEffect(deliveryEffect, input.prisma);
+      await markHostedInviteSentBestEffort(deliveryEffect.payload.inviteId, input.prisma);
     }
     sentCount += 1;
   }
@@ -1081,7 +1096,7 @@ function buildHostedLinqAiUsageQuotaPayload(
 async function claimHostedLinqNoticeForSideEffect(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
-): Promise<{ status: HostedLinqNoticeClaimStatus }> {
+): Promise<HostedLinqNoticeClaim> {
   switch (effect.payload.template) {
     case "invite_signup_fallback":
     case "invite_signup": {
@@ -1110,46 +1125,32 @@ async function claimHostedLinqNoticeForSideEffect(
         memberId: effect.payload.memberId,
         periodStart: effect.payload.claimToken.periodStart,
       });
-      const legacyDeliverySentNotice =
-        await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
-          idempotencyKeys: legacyIdempotencyKeys,
-          prisma,
-        });
-      if (legacyDeliverySentNotice) {
-        return { status: "already_claimed" };
-      }
-      const legacyDeliveryInFlight =
-        await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
+      const deliveryClaim =
+        await resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx({
           attemptedAt,
-          idempotencyKeys: legacyIdempotencyKeys,
+          currentIdempotencyKey: effect.effectId,
+          legacyIdempotencyKeys,
           prisma,
+          source: "hosted_webhook_side_effect",
         });
-      if (legacyDeliveryInFlight) {
-        return { status: "in_flight" };
-      }
-      const currentDeliverySentNotice =
-        await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
-          idempotencyKeys: [effect.effectId],
-          prisma,
-        });
-      if (currentDeliverySentNotice) {
-        return { status: "already_claimed" };
+      if (deliveryClaim.status !== "claimable") {
+        return { status: deliveryClaim.status };
       }
       const claim = await claimHostedLinqDeliveryProviderDispatchTx({
-        idempotencyKey: effect.effectId,
+        idempotencyKey: deliveryClaim.idempotencyKey,
         linqChatId: target.linqChatId,
         phoneNumber: target.phoneNumber,
         prisma,
         reclaimStalePreProviderAttempt: true,
         source: "hosted_webhook_side_effect",
-        sourceRef: effect.effectId,
+        sourceRef: deliveryClaim.idempotencyKey,
         targetKind: target.targetKind,
         template: effect.payload.template,
       });
       if (!claim.claimed) {
         const claimedCurrentDeliverySentNotice =
           await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
-            idempotencyKeys: [effect.effectId],
+            idempotencyKeys: [deliveryClaim.idempotencyKey],
             prisma,
           });
         if (claimedCurrentDeliverySentNotice) {
@@ -1157,14 +1158,17 @@ async function claimHostedLinqNoticeForSideEffect(
         }
         const claimedCurrentDeliveryTerminalFailure =
           await hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx({
-            idempotencyKeys: [effect.effectId],
+            idempotencyKeys: [deliveryClaim.idempotencyKey],
             prisma,
           });
         return claimedCurrentDeliveryTerminalFailure
           ? { status: "already_claimed" }
           : { status: "in_flight" };
       }
-      return { status: "claimed" };
+      return {
+        effectId: deliveryClaim.idempotencyKey,
+        status: "claimed",
+      };
     }
     case "daily_quota":
       return (await claimHostedLinqQuotaReplyNotice({

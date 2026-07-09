@@ -63,14 +63,18 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
     }),
     hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx:
       vi.fn().mockResolvedValue(false),
-    hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx:
-      vi.fn().mockResolvedValue(false),
     hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx:
       vi.fn().mockResolvedValue(false),
     markHostedLinqDeliveryAcceptedTx: vi.fn().mockResolvedValue({
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     }),
+    resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx: vi.fn(
+      async (input: { currentIdempotencyKey: string }) => ({
+        idempotencyKey: input.currentIdempotencyKey,
+        status: "claimable",
+      }),
+    ),
     resolveHostedLinqInviteSignupDispatchEffectIdTx: vi.fn(
       async (input: { effectId: string }) => input.effectId,
     ),
@@ -116,8 +120,8 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
-  hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
+  resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
@@ -145,14 +149,17 @@ describe("hosted Linq webhook transport", () => {
     });
     vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
       .mockResolvedValue(false);
-    vi.mocked(hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx)
-      .mockResolvedValue(false);
     vi.mocked(hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx)
       .mockResolvedValue(false);
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValue({
       reopenOnboardingLink: null,
       restoreOnboardingLink: null,
     });
+    vi.mocked(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx)
+      .mockImplementation(async (input) => ({
+        idempotencyKey: input.currentIdempotencyKey,
+        status: "claimable",
+      }));
     vi.mocked(markHostedAiUsageLimitNoticeSent).mockResolvedValue(true);
   });
 
@@ -647,10 +654,68 @@ describe("hosted Linq webhook transport", () => {
     expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
   });
 
+  it("sends claimable legacy AI usage quota replies with the legacy delivery key", async () => {
+    const legacyIdempotencyKey = "ai-usage-gate:legacy-notice-code-key";
+    vi.mocked(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx)
+      .mockResolvedValueOnce({
+        idempotencyKey: legacyIdempotencyKey,
+        status: "claimable",
+      });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+      },
+      memberId: "member-1",
+      message: "usage-limit",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage",
+      template: "ai_usage_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        collectResult: true,
+        currentInboundReply,
+        prisma: {} as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toEqual({
+      sentCount: 1,
+      skipped: [],
+    });
+
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: legacyIdempotencyKey,
+        reclaimStalePreProviderAttempt: true,
+        sourceRef: legacyIdempotencyKey,
+      }),
+    );
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: legacyIdempotencyKey,
+      }),
+    );
+    expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: legacyIdempotencyKey,
+      }),
+    );
+    expect(markHostedAiUsageLimitNoticeSent).toHaveBeenCalledWith({
+      memberId: "member-1",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      prisma: {},
+      sentAt: "2026-03-26T12:00:01.000Z",
+    });
+  });
+
   it("skips already-claimed AI usage quota replies before provider dispatch", async () => {
-    vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+    vi.mocked(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx)
+      .mockResolvedValueOnce({ status: "already_claimed" });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
@@ -787,8 +852,8 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("skips AI usage quota replies already delivered under a legacy notice-code key", async () => {
-    vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
-      .mockResolvedValueOnce(true);
+    vi.mocked(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx)
+      .mockResolvedValueOnce({ status: "already_claimed" });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
@@ -822,10 +887,13 @@ describe("hosted Linq webhook transport", () => {
       ],
     });
 
-    expect(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
+    expect(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx)
       .toHaveBeenCalledWith({
-        idempotencyKeys: expect.any(Array),
+        attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        currentIdempotencyKey: effect.effectId,
+        legacyIdempotencyKeys: expect.any(Array),
         prisma: {},
+        source: "hosted_webhook_side_effect",
       });
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -833,9 +901,8 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("skips AI usage quota replies already delivered under the current delivery key before reading old period claims", async () => {
-    vi.mocked(hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx)
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+    vi.mocked(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx)
+      .mockResolvedValueOnce({ status: "already_claimed" });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {

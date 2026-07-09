@@ -47,11 +47,11 @@ import {
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx,
-  hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx,
   hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliveryProviderDispatchStartedTx,
   markHostedLinqDeliverySendFailedTx,
+  resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx,
 } from "../hosted-onboarding/linq-delivery-store";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
@@ -445,42 +445,28 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       memberId: input.userId,
       periodStart: decision.periodStart,
     });
-    const legacyDeliverySentNotice =
-      await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
-        idempotencyKeys: legacyIdempotencyKeys,
-        prisma: input.prisma,
-    });
-    if (legacyDeliverySentNotice) {
-      return { status: "already_notified" };
-    }
-    const legacyDeliveryInFlight =
-      await hasHostedLinqProviderCorrelatedOrFreshDeliveryForIdempotencyKeysTx({
+    const deliveryClaim =
+      await resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx({
         attemptedAt: sentAt,
-        idempotencyKeys: legacyIdempotencyKeys,
+        currentIdempotencyKey: idempotencyKey,
+        legacyIdempotencyKeys,
         prisma: input.prisma,
-    });
-    if (legacyDeliveryInFlight) {
-      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
-    }
-    const currentDeliverySentNotice =
-      await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
-        idempotencyKeys: [idempotencyKey],
-        prisma: input.prisma,
+        source: "hosted_runtime_ai_usage_limit_notice",
       });
-    if (currentDeliverySentNotice) {
+    if (deliveryClaim.status === "already_claimed") {
       return { status: "already_notified" };
     }
-    const currentDeliveryTerminalFailure =
-      await hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx({
-        idempotencyKeys: [idempotencyKey],
-        prisma: input.prisma,
-      });
-    if (currentDeliveryTerminalFailure) {
-      return { status: "already_notified" };
+    if (deliveryClaim.status === "in_flight") {
+      return deliveryClaim.retryAt
+        ? {
+            retryAt: deliveryClaim.retryAt.toISOString(),
+            status: "in_flight",
+          }
+        : buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
     const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: sentAt,
-      idempotencyKey,
+      idempotencyKey: deliveryClaim.idempotencyKey,
       prisma: input.prisma,
       reclaimStalePreProviderAttempt: true,
       source: "hosted_runtime_ai_usage_limit_notice",
@@ -491,7 +477,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     if (!claimed.claimed) {
       const claimedCurrentDeliverySentNotice =
         await hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx({
-          idempotencyKeys: [idempotencyKey],
+          idempotencyKeys: [deliveryClaim.idempotencyKey],
           prisma: input.prisma,
         });
       if (claimedCurrentDeliverySentNotice) {
@@ -499,7 +485,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       }
       const claimedCurrentDeliveryTerminalFailure =
         await hasHostedLinqTerminalTelegramUsageLimitFailureForIdempotencyKeysTx({
-          idempotencyKeys: [idempotencyKey],
+          idempotencyKeys: [deliveryClaim.idempotencyKey],
           prisma: input.prisma,
         });
       if (claimed.retryAt) {
@@ -515,7 +501,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
 
     const dispatchStarted =
       await markHostedLinqDeliveryProviderDispatchStartedTx({
-        idempotencyKey,
+        idempotencyKey: deliveryClaim.idempotencyKey,
         prisma: input.prisma,
         startedAt: sentAt,
       });
@@ -538,7 +524,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
           failedAt: sentAt,
           failureCode: error.name,
           failureReason: error.message,
-          idempotencyKey,
+          idempotencyKey: deliveryClaim.idempotencyKey,
           nextAttemptAt: retryAt,
           prisma: input.prisma,
         });
@@ -552,7 +538,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
           failedAt: sentAt,
           failureCode: error.name,
           failureReason: error.message,
-          idempotencyKey,
+          idempotencyKey: deliveryClaim.idempotencyKey,
           prisma: input.prisma,
         });
         return { status: "already_notified" };
@@ -562,7 +548,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
           failedAt: sentAt,
           failureCode: error.name,
           failureReason: error.message,
-          idempotencyKey,
+          idempotencyKey: deliveryClaim.idempotencyKey,
           prisma: input.prisma,
         });
         return { status: "already_notified" };
@@ -571,7 +557,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     }
     await markHostedLinqDeliveryAcceptedTx({
       acceptedAt: sentAt,
-      idempotencyKey,
+      idempotencyKey: deliveryClaim.idempotencyKey,
       prisma: input.prisma,
     });
     await markHostedAiUsageLimitNoticeSent({

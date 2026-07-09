@@ -14,6 +14,7 @@ import {
   markHostedLinqDeliverySkippedTx,
   recordHostedLinqDeliveryAttemptTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
+  resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -1580,6 +1581,7 @@ describe("hosted Linq observability stores", () => {
       {
         failedAt: new Date("2026-03-26T12:00:01.000Z"),
         failureCode: "HostedRuntimeTelegramUsageLimitNoticeRejectedError",
+        source: "hosted_runtime_ai_usage_limit_notice",
         status: "failed",
       },
     ]);
@@ -1593,6 +1595,7 @@ describe("hosted Linq observability stores", () => {
       select: {
         failedAt: true,
         failureCode: true,
+        source: true,
         status: true,
       },
       where: {
@@ -1771,6 +1774,101 @@ describe("hosted Linq observability stores", () => {
       ],
       prisma: fixture.prisma as never,
     })).resolves.toBe(false);
+  });
+
+  it("resolves stale same-source legacy AI usage rows as claimable legacy keys", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const legacyIdempotencyKey = "ai-usage-gate:legacy-notice-code";
+    const currentIdempotencyKey = "ai-usage-gate:current-period";
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        id: "hld_stale_legacy_usage_notice",
+        idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(legacyIdempotencyKey),
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        skippedAt: null,
+        source: "hosted_webhook_side_effect",
+        status: "attempted",
+      },
+    ]);
+
+    await expect(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      currentIdempotencyKey,
+      legacyIdempotencyKeys: [legacyIdempotencyKey],
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+    })).resolves.toEqual({
+      idempotencyKey: legacyIdempotencyKey,
+      status: "claimable",
+    });
+
+    expect(fixture.hostedLinqDeliveryFindMany).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        idempotencyKey: true,
+      }),
+      where: {
+        idempotencyKey: {
+          in: [
+            createHostedLinqDeliveryIdempotencyLookupKey(legacyIdempotencyKey),
+            createHostedLinqDeliveryIdempotencyLookupKey(currentIdempotencyKey),
+          ],
+        },
+      },
+    });
+  });
+
+  it("treats stale legacy Linq AI usage rows as owning Telegram runtime notices", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        id: "hld_stale_linq_legacy_usage_notice",
+        idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(
+          "ai-usage-gate:legacy-notice-code",
+        ),
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        skippedAt: null,
+        source: "hosted_webhook_side_effect",
+        status: "attempted",
+      },
+    ]);
+
+    await expect(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      currentIdempotencyKey: "ai-usage-gate:current-period",
+      legacyIdempotencyKeys: ["ai-usage-gate:legacy-notice-code"],
+      prisma: fixture.prisma as never,
+      source: "hosted_runtime_ai_usage_limit_notice",
+    })).resolves.toEqual({ status: "already_claimed" });
+  });
+
+  it("resolves AI usage delivery claims to the current key when no legacy row owns it", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([]);
+
+    await expect(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      currentIdempotencyKey: "ai-usage-gate:current-period",
+      legacyIdempotencyKeys: ["ai-usage-gate:legacy-notice-code"],
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+    })).resolves.toEqual({
+      idempotencyKey: "ai-usage-gate:current-period",
+      status: "claimable",
+    });
   });
 
   it("reclaims stale pre-provider delivery rows for a later provider dispatch retry", async () => {
