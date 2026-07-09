@@ -221,8 +221,20 @@ function buildRetellDynamicVariables(
 }
 
 function renderOpeningLine(brief: HostedPhoneCallBrief): string {
-  const target = brief.to.label?.trim() || "there";
-  return `Hi, this is Murph, an AI assistant calling on the user's behalf. I'm calling ${target} to ${brief.goal}`;
+  const goal = formatOpeningGoal(brief.goal);
+  const callerName = brief.callerName?.trim();
+  if (callerName) {
+    return `Hey, this is Murph, I'm a personal assistant calling on behalf of ${callerName}. I'm calling to ${goal}`;
+  }
+  return `Hey, this is Murph. I'm a personal assistant calling for the person who asked me to call. I'm calling to ${goal}`;
+}
+
+function formatOpeningGoal(goal: string): string {
+  const trimmed = goal.trim();
+  if (/^[A-Z][a-z]/u.test(trimmed)) {
+    return `${trimmed[0]!.toLowerCase()}${trimmed.slice(1)}`;
+  }
+  return trimmed;
 }
 
 function requireEnv(name: string): string {

@@ -11,6 +11,7 @@ const VALID_BRIEF = {
     phoneNumber: "+12125550123",
     label: "Eye doctor's office",
   },
+  callerName: "Alex",
   timeZone: "America/New_York",
   goal: "Schedule a routine eye examination for Friday, June 26, 2026.",
   shareableFacts: {
@@ -41,6 +42,7 @@ describe("hosted phone call contracts", () => {
     });
 
     expect(parsed.allowTransferToUser).toBe(false);
+    expect(parsed.callerName).toBeUndefined();
     expect(parsed.instructions).toEqual([]);
     expect(parsed.shareableFacts).toEqual({});
   });

@@ -21,6 +21,7 @@ import type {
 
 const BASE_BRIEF: HostedPhoneCallBrief = {
   allowTransferToUser: true,
+  callerName: "Alex",
   goal: "Schedule a routine eye examination for Friday, June 26, 2026.",
   instructions: [
     "Only accept an appointment on Friday, June 26, 2026.",
@@ -57,6 +58,9 @@ describe("assistant phone calls", () => {
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
       "Set allowTransferToUser=false for info-only calls",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "Set callerName only to a user-approved name",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
       "Murph resolves verified transfer numbers server-side",
@@ -117,6 +121,13 @@ describe("assistant phone calls", () => {
       },
       scope: BASE_SCOPE,
     });
+    const differentCallerName = createPhoneCallRequestKey({
+      brief: {
+        ...BASE_BRIEF,
+        callerName: "Jordan",
+      },
+      scope: BASE_SCOPE,
+    });
     const differentInput = createPhoneCallRequestKey({
       brief: BASE_BRIEF,
       scope: {
@@ -138,6 +149,7 @@ describe("assistant phone calls", () => {
     expect(first).toMatch(/^phone_call_[a-f0-9]{64}$/u);
     expect(reworded).not.toBe(first);
     expect(differentDisclosure).not.toBe(first);
+    expect(differentCallerName).not.toBe(first);
     expect(differentInput).not.toBe(first);
     expect(createPhoneCallRequestKey({
       brief: BASE_BRIEF,
