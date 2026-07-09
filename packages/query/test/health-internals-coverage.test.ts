@@ -18,6 +18,11 @@ import {
   collectCanonicalEntities,
 } from "../src/health/canonical-collector.ts";
 import {
+  listHabitatAspects,
+  readHabitatAspect,
+  showHabitatAspect,
+} from "../src/health/habitat.ts";
+import {
   compareByOccurredAtDescThenId,
   compareByRecordedOrImportedAtDescThenId,
 } from "../src/health/comparators.ts";
@@ -909,6 +914,43 @@ test("health library and canonical collector use fallback node metadata and tole
   );
   assert.equal(strictCollectionAsync.goals.length, 1);
   assert.equal(strictCollectionSync.goals.length, 1);
+});
+
+test("canonical collector omits habitat records stored outside their aspect path", async () => {
+  const vaultRoot = await createVaultRoot("murph-query-habitat-path-");
+
+  await writeVaultFile(
+    vaultRoot,
+    "bank/habitat/zzz.md",
+    [
+      "---",
+      "schemaVersion: murph.frontmatter.habitat.v1",
+      "docType: habitat",
+      "habitatId: hab_01JNV422Y2M5ZBV64ZP4N1DRB1",
+      "slug: sleep-environment",
+      "title: Bedroom & sleep",
+      "status: active",
+      "domain: environment",
+      "aspect: sleep-environment",
+      "indicators:",
+      "  night_temp_c: 19",
+      "indicatorRecordedAt:",
+      "  night_temp_c: 2026-07-01",
+      "---",
+      "# Bedroom & sleep",
+      "",
+    ].join("\n"),
+  );
+
+  const collection = await collectCanonicalEntities(vaultRoot, {
+    mode: "tolerant-async",
+  });
+
+  assert.equal(collection.habitatAspects.length, 0);
+  assert.equal(collection.entities.some((entity) => entity.family === "habitat"), false);
+  assert.equal((await listHabitatAspects(vaultRoot)).length, 0);
+  assert.equal(await readHabitatAspect(vaultRoot, "hab_01JNV422Y2M5ZBV64ZP4N1DRB1"), null);
+  assert.equal(await showHabitatAspect(vaultRoot, "sleep-environment"), null);
 });
 
 test("supplement queries aggregate active compounds and support flexible lookup paths", async () => {

@@ -424,7 +424,7 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.143.0");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.144.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -888,7 +888,13 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain('"vault-show-default"');
     expect(hostedRunnerSmokeChild).toContain('"vault-show-explicit"');
     expect(hostedRunnerSmokeChild).toContain('"measurement-add"');
+    expect(hostedRunnerSmokeChild).toContain("measurement-add.eventId");
+    expect(hostedRunnerSmokeChild).toContain('"--occurred-at"');
+    expect(hostedRunnerSmokeChild).toContain('"measurement-list"');
+    expect(hostedRunnerSmokeChild).toContain('"--from"');
+    expect(hostedRunnerSmokeChild).toContain('"--to"');
     expect(hostedRunnerSmokeChild).toContain('"scheduled-log-save"');
+    expect(hostedRunnerSmokeChild).toContain('"scheduled-log-list"');
     expect(hostedRunnerSmokeChild).toContain("codexHostedCliVaultCommandProofCount");
     expect(hostedRunnerSmokeChild).toContain("codexHostedCliVaultWriteProofCount");
     expect(hostedRunnerSmokeChild).toContain("codexHostedShellPythonVersion");

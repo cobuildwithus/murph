@@ -14,9 +14,12 @@ type StoredAutomationRecord = {
   instructions: string
   route: {
     channel: string
+    currentRouteSnapshot?: boolean | null
+    deliverySource?: { kind: 'linq'; fromPhoneNumber: string } | null
     deliveryTarget: string | null
     identityId: string | null
     participantId: string | null
+    threadIsDirect?: boolean | null
     threadId: string | null
   }
   schedule:
@@ -127,6 +130,17 @@ const defaultRoute = {
   identityId: null,
   participantId: null,
   threadId: null,
+}
+
+const groupChatRoute = {
+  channel: 'linq',
+  currentRouteSnapshot: true,
+  deliverySource: null,
+  deliveryTarget: 'linq-group-chat',
+  identityId: 'linq-identity',
+  participantId: 'linq-participant',
+  threadId: 'linq-group-thread',
+  threadIsDirect: false,
 }
 
 const EXPECTED_MANAGED_SPREAD_CRONS = {
@@ -819,6 +833,102 @@ describe('applyMurphManagedAutomations', () => {
     expect(memoryRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',
     )
+  })
+
+  it('does not create personal managed automations for Linq group chat routes', async () => {
+    const result = await applyMurphManagedAutomations({
+      defaultRoute: groupChatRoute,
+      now: new Date('2026-07-09T14:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+        EXA_API_KEY: 'fixture-exa-key',
+      },
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 0,
+      skipped: 6,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.records.size).toBe(0)
+  })
+
+  it('creates caller-supplied group automations for Linq group chat routes', async () => {
+    const groupSeed: MurphManagedAutomationSeed = {
+      automationId: 'automation_01KGROUPNEWSLETTER0000000000',
+      continuityPolicy: 'fresh',
+      instructions: 'Create the explicit group newsletter.',
+      schedule: { kind: 'cron', expression: '0 9 * * 1' },
+      slug: 'group-health-newsletter-test',
+      summary: 'Weekly group health newsletter.',
+      tags: ['group-newsletter'],
+      title: 'Group health newsletter',
+    }
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute: groupChatRoute,
+      now: new Date('2026-07-09T14:00:00.000Z'),
+      seeds: [groupSeed],
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    })
+    expect(managedAutomationMocks.patchAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.records.get(groupSeed.automationId))
+      .toMatchObject({
+        automationId: groupSeed.automationId,
+        instructions: groupSeed.instructions,
+        route: groupChatRoute,
+        schedule: groupSeed.schedule,
+        slug: groupSeed.slug,
+        status: 'active',
+        summary: groupSeed.summary,
+        title: groupSeed.title,
+      })
+    expect(
+      managedAutomationMocks.records.get(groupSeed.automationId)?.tags,
+    ).toContain('group-newsletter')
+  })
+
+  it('archives existing personal managed automations that are bound to Linq group chat routes', async () => {
+    managedAutomationMocks.records.set(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      instructions: 'OLD weekly product updates instructions.',
+      route: groupChatRoute,
+      schedule: EXPECTED_MANAGED_SPREAD_CRONS.productUpdates,
+      slug: 'weekly-product-updates',
+      status: 'active',
+      summary: 'Old weekly product updates.',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:weekly-product-updates'],
+      title: 'Murph product notes',
+    })
+
+    const result = await applyMurphManagedAutomations({
+      now: new Date('2026-07-09T14:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 0,
+      skipped: 4,
+      updated: 1,
+    })
+    expect(managedAutomationMocks.patchAutomation).toHaveBeenCalledWith({
+      lookup: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      now: new Date('2026-07-09T14:00:00.000Z'),
+      status: 'archived',
+      vaultRoot,
+    })
+    expect(
+      managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.status,
+    ).toBe('archived')
   })
 
   it('updates existing research-oriented automations without rewriting their cadence', async () => {

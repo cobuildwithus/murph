@@ -60,6 +60,7 @@ export function resolveCanonicalRecordClass(
     case "food":
     case "genetics":
     case "goal":
+    case "habitat":
     case "protocol":
     case "provider":
     case "regimen":
