@@ -751,7 +751,12 @@ function normalizeOptionalJunctionResourceList(
     );
   }
 
-  return [...new Set(normalized.filter((entry) => allowedResourceSet.has(entry)))];
+  const enabledResources = normalized.filter((entry) => allowedResourceSet.has(entry));
+  if (value !== undefined && value.length > 0 && enabledResources.length === 0) {
+    return [...new Set(defaults)];
+  }
+
+  return [...new Set(enabledResources)];
 }
 
 function booleanJobField(
