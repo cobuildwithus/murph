@@ -45,8 +45,34 @@ describe("Call Circle matching and time windows", () => {
     })).toEqual([{
       memberAId: "member_alice",
       memberBId: "member_bob",
-      windowEndAt: new Date("2026-07-06T16:00:00.000Z"),
+      windowEndAt: new Date("2026-07-06T15:15:00.000Z"),
       windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+    }]);
+  });
+
+  it("narrows broad availability blocks to the authorized call window", () => {
+    const now = new Date("2026-07-06T07:00:00.000Z");
+
+    expect(proposeCallCircleMatches({
+      now,
+      participants: [
+        participant("member_alice", {
+          dayOfWeek: 1,
+          endLocalTime: "17:00",
+          startLocalTime: "09:00",
+        }),
+        participant("member_bob", {
+          dayOfWeek: 1,
+          endLocalTime: "17:00",
+          startLocalTime: "09:00",
+        }),
+      ],
+      recentMatches: [],
+    })).toEqual([{
+      memberAId: "member_alice",
+      memberBId: "member_bob",
+      windowEndAt: new Date("2026-07-06T09:15:00.000Z"),
+      windowStartAt: new Date("2026-07-06T09:00:00.000Z"),
     }]);
   });
 
@@ -99,13 +125,13 @@ describe("Call Circle matching and time windows", () => {
       {
         memberAId: "member_alice",
         memberBId: "member_cara",
-        windowEndAt: new Date("2026-07-06T16:00:00.000Z"),
+        windowEndAt: new Date("2026-07-06T14:15:00.000Z"),
         windowStartAt: new Date("2026-07-06T14:00:00.000Z"),
       },
       {
         memberAId: "member_bob",
         memberBId: "member_dan",
-        windowEndAt: new Date("2026-07-06T16:00:00.000Z"),
+        windowEndAt: new Date("2026-07-06T14:15:00.000Z"),
         windowStartAt: new Date("2026-07-06T14:00:00.000Z"),
       },
     ]);
@@ -132,7 +158,7 @@ describe("Call Circle matching and time windows", () => {
     })).toEqual([{
       memberAId: "member_alice",
       memberBId: "member_bob",
-      windowEndAt: new Date("2026-07-06T09:00:00.000Z"),
+      windowEndAt: new Date("2026-07-06T08:45:00.000Z"),
       windowStartAt: new Date("2026-07-06T08:30:00.000Z"),
     }]);
   });

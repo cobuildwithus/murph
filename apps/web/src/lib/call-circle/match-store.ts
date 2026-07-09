@@ -14,6 +14,9 @@ import { getPrisma } from "../prisma";
 import {
   canUseActiveCallCircleParticipantPair,
 } from "./participant-store";
+import {
+  readCallCircleBridgeWindowStartCutoff,
+} from "./time";
 import type {
   CallCircleMatchRow,
   CallCirclePrismaClient,
@@ -591,7 +594,10 @@ export async function claimCallCircleMatchForConnector(input: {
       id: input.matchId,
       status: "both_confirmed",
       windowEndAt: { gt: input.now },
-      windowStartAt: { lte: input.now },
+      windowStartAt: {
+        gt: readCallCircleBridgeWindowStartCutoff(input.now),
+        lte: input.now,
+      },
     },
   });
   return result.count > 0;

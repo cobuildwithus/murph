@@ -538,7 +538,51 @@ describe("Call Circle conditional mutations", () => {
         id: "hccm_123",
         status: "both_confirmed",
         windowEndAt: { gt: now },
-        windowStartAt: { lte: now },
+        windowStartAt: {
+          gt: new Date("2026-07-06T14:45:00.000Z"),
+          lte: now,
+        },
+      },
+    });
+  });
+
+  it("does not claim a broad stored window after the narrow bridge deadline", async () => {
+    updateMany.mockResolvedValueOnce({ count: 0 });
+    const prisma = {
+      hostedCallCircleMatch: { updateMany },
+      hostedCallCircleParticipant: {
+        count: vi.fn(async () => 2),
+      },
+      hostedGroupMember: {
+        count: vi.fn(async () => 2),
+      },
+    };
+    const now = new Date("2026-07-06T12:00:00.000Z");
+
+    await expect(claimMatchForConnector({
+      groupId: "hgrp_123",
+      matchId: "hccm_123",
+      memberAId: "member_a",
+      memberBId: "member_b",
+      now,
+      prisma: prisma as never,
+    })).resolves.toBe(false);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        claimedAt: now,
+        status: "bridging",
+      },
+      where: {
+        claimedAt: null,
+        finalAskedAt: { not: null },
+        id: "hccm_123",
+        status: "both_confirmed",
+        windowEndAt: { gt: now },
+        windowStartAt: {
+          gt: new Date("2026-07-06T11:45:00.000Z"),
+          lte: now,
+        },
       },
     });
   });

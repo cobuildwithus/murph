@@ -315,7 +315,10 @@ describe("startCallCircleConnectorCall", () => {
             memberBId: "member_b",
             status: "bridging",
             windowEndAt: { gt: now },
-            windowStartAt: { lte: now },
+            windowStartAt: {
+              gt: new Date("2026-07-06T14:45:00.000Z"),
+              lte: now,
+            },
           }),
         },
       },
@@ -386,10 +389,33 @@ describe("startCallCircleConnectorCall", () => {
         phoneCallId: "hpc_existing",
         status: "bridging",
         windowEndAt: { gt: now },
-        windowStartAt: { lte: now },
+        windowStartAt: {
+          gt: new Date("2026-07-06T14:45:00.000Z"),
+          lte: now,
+        },
       },
     });
     expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
+  });
+
+  it("does not start after a broad stored window has missed the narrow bridge deadline", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const prisma = createPrisma({
+      finalAskedAt: new Date("2026-07-06T08:45:00.000Z"),
+      phoneCallId: null,
+      status: "both_confirmed",
+      windowEndAt: new Date("2026-07-06T17:00:00.000Z"),
+      windowStartAt: new Date("2026-07-06T09:00:00.000Z"),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(startCallCircleConnectorCall({
+      matchId: "hccm_123",
+      now,
+    })).resolves.toEqual({ status: "ignored" });
+
+    expect(mocks.claimCallCircleMatchForConnector).not.toHaveBeenCalled();
+    expect(mocks.createHostedPhoneCall).not.toHaveBeenCalled();
   });
 
   it("ignores an attached bridge after provider start was attempted", async () => {

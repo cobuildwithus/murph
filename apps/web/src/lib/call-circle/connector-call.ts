@@ -24,6 +24,10 @@ import {
   isUnstartedCallCircleBridgePhoneCall,
 } from "./phone-call-state";
 import {
+  isWithinCallCircleBridgeWindow,
+  readCallCircleBridgeWindowStartCutoff,
+} from "./time";
+import {
   activeHostedMemberAccessWithParticipantsWhere,
 } from "../hosted-onboarding/member-access";
 import {
@@ -87,8 +91,11 @@ export async function startCallCircleConnectorCall(input: {
   }
   if (
     match.finalAskedAt === null
-    || now < match.windowStartAt
-    || now >= match.windowEndAt
+    || !isWithinCallCircleBridgeWindow({
+      now,
+      windowEndAt: match.windowEndAt,
+      windowStartAt: match.windowStartAt,
+    })
   ) {
     return { status: "ignored" };
   }
@@ -336,7 +343,10 @@ function buildCallCircleProviderStartGuardWhere(input: {
         memberBId: input.memberBId,
         status: "bridging",
         windowEndAt: { gt: input.now },
-        windowStartAt: { lte: input.now },
+        windowStartAt: {
+          gt: readCallCircleBridgeWindowStartCutoff(input.now),
+          lte: input.now,
+        },
       },
     },
   };
@@ -361,7 +371,10 @@ async function canStartAttachedCallCircleBridge(input: {
       phoneCallId: input.phoneCallId,
       status: "bridging",
       windowEndAt: { gt: input.now },
-      windowStartAt: { lte: input.now },
+      windowStartAt: {
+        gt: readCallCircleBridgeWindowStartCutoff(input.now),
+        lte: input.now,
+      },
     },
   });
   return count === 1;

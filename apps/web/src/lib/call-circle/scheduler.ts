@@ -50,6 +50,8 @@ import {
 } from "./notifications";
 import {
   CALL_CIRCLE_FINAL_ASK_LEAD_MS,
+  hasCallCircleBridgeWindowElapsed,
+  isWithinCallCircleBridgeWindow,
   isSameCallCircleLocalDate,
   isWithinCallCircleQuietHours,
 } from "./time";
@@ -188,13 +190,34 @@ export async function runCallCircleScheduler(input: {
       }
 
       if (
+        match.status === "both_confirmed"
+        && match.finalAskedAt !== null
+        && hasCallCircleBridgeWindowElapsed({
+          now,
+          windowEndAt: match.windowEndAt,
+          windowStartAt: match.windowStartAt,
+        })
+      ) {
+        const handedOff = await appendCallCircleBridgeHandoffs({
+          match,
+          now,
+          prisma,
+        });
+        if (handedOff) result.handoffs += 1;
+        continue;
+      }
+
+      if (
         (
           match.status === "both_confirmed"
           || (match.status === "bridging" && isRecoverableCallCircleBridgePhoneCall(match.phoneCall))
         )
         && match.finalAskedAt !== null
-        && now >= match.windowStartAt
-        && now < match.windowEndAt
+        && isWithinCallCircleBridgeWindow({
+          now,
+          windowEndAt: match.windowEndAt,
+          windowStartAt: match.windowStartAt,
+        })
       ) {
         if (!await cancelCallCircleMatchIfParticipantsInactive({
           match,
@@ -212,7 +235,11 @@ export async function runCallCircleScheduler(input: {
       if (
         match.status === "bridging"
         && isRecoverableCallCircleBridgePhoneCall(match.phoneCall)
-        && now >= match.windowEndAt
+        && hasCallCircleBridgeWindowElapsed({
+          now,
+          windowEndAt: match.windowEndAt,
+          windowStartAt: match.windowStartAt,
+        })
       ) {
         const handedOff = await appendCallCircleBridgeHandoffs({
           match,
@@ -243,7 +270,11 @@ export async function runCallCircleScheduler(input: {
           now,
           phoneCall: match.phoneCall,
         })
-        && now >= match.windowEndAt
+        && hasCallCircleBridgeWindowElapsed({
+          now,
+          windowEndAt: match.windowEndAt,
+          windowStartAt: match.windowStartAt,
+        })
       ) {
         const handedOff = await appendCallCircleBridgeHandoffs({
           match,

@@ -884,6 +884,36 @@ describe("handleCallCircleRespond", () => {
     });
   });
 
+  it("rejects final confirmations after the narrow bridge deadline even when a broad stored window remains open", async () => {
+    const prisma = createResponsePrisma({
+      match: callCircleMatch({
+        amAskedAt: new Date("2026-07-06T08:00:00.000Z"),
+        finalAskedAt: new Date("2026-07-06T08:45:00.000Z"),
+        status: "asking",
+        windowEndAt: new Date("2026-07-06T17:00:00.000Z"),
+        windowStartAt: new Date("2026-07-06T09:00:00.000Z"),
+      }),
+      participantStatus: "enrolled",
+      replyOccurredAt: FRESH_CALL_CIRCLE_REPLY_OCCURRED_AT,
+    });
+
+    await expect(handleCallCircleRespond({
+      context: FRESH_CALL_CIRCLE_REPLY_CONTEXT,
+      memberId: "member_123",
+      now: FRESH_CALL_CIRCLE_REPLY_OCCURRED_AT,
+      prisma: prisma as never,
+      request: {
+        kind: "confirm",
+        matchId: "hccm_123",
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    });
+
+    expect(mocks.confirmCallCircleMatchSide).not.toHaveBeenCalled();
+  });
+
   it("rejects stale confirmations after an immediate counter reask", async () => {
     const prisma = createResponsePrisma({
       match: callCircleMatch({

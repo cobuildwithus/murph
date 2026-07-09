@@ -14,6 +14,7 @@ export const CALL_CIRCLE_FINAL_ASK_LEAD_MS = 20 * 60 * 1000;
 
 const DEFAULT_TIME_ZONE = "UTC";
 const CALL_CIRCLE_MINIMUM_WINDOW_MS = 15 * 60 * 1000;
+export const CALL_CIRCLE_BRIDGE_WINDOW_MS = CALL_CIRCLE_MINIMUM_WINDOW_MS;
 const CALL_CIRCLE_MORNING_TO_FINAL_MIN_MS = 10 * 60 * 1000;
 const CALL_CIRCLE_WINDOW_SCAN_STEP_MS = 60 * 1000;
 
@@ -115,7 +116,7 @@ export function findCallCircleFinalAskableWindow(input: {
       windowStartAt: startAt,
     })) {
       return {
-        endAt: input.window.endAt,
+        endAt: new Date(startAt.getTime() + minimumDurationMs),
         startAt,
       };
     }
@@ -169,6 +170,37 @@ export function canScheduleCallCircleFinalAsk(input: {
     now: askAt,
     timeZone: input.memberBTimeZone,
   });
+}
+
+export function readCallCircleBridgeWindowStartCutoff(now: Date): Date {
+  return new Date(now.getTime() - CALL_CIRCLE_BRIDGE_WINDOW_MS);
+}
+
+export function readCallCircleBridgeDeadlineAt(input: {
+  windowEndAt: Date;
+  windowStartAt: Date;
+}): Date {
+  return new Date(Math.min(
+    input.windowEndAt.getTime(),
+    input.windowStartAt.getTime() + CALL_CIRCLE_BRIDGE_WINDOW_MS,
+  ));
+}
+
+export function isWithinCallCircleBridgeWindow(input: {
+  now: Date;
+  windowEndAt: Date;
+  windowStartAt: Date;
+}): boolean {
+  return input.now >= input.windowStartAt
+    && input.now < readCallCircleBridgeDeadlineAt(input);
+}
+
+export function hasCallCircleBridgeWindowElapsed(input: {
+  now: Date;
+  windowEndAt: Date;
+  windowStartAt: Date;
+}): boolean {
+  return input.now >= readCallCircleBridgeDeadlineAt(input);
 }
 
 function readCallCircleFinalAskAt(windowStartAt: Date): Date {

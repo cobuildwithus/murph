@@ -991,6 +991,45 @@ describe("runCallCircleScheduler", () => {
     });
   });
 
+  it("hands off a broad stored window after the narrow bridge deadline", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const tx = {};
+    const prisma = createSchedulerPrisma({
+      dueMatches: [schedulerMatch({
+        finalAskedAt: new Date("2026-07-06T08:45:00.000Z"),
+        status: "both_confirmed",
+        windowEndAt: new Date("2026-07-06T17:00:00.000Z"),
+        windowStartAt: new Date("2026-07-06T09:00:00.000Z"),
+      })],
+      groups: [],
+      tx,
+    });
+    const connectorStarter = vi.fn(async () => ({
+      phoneCallId: "hpc_123",
+      status: "calling" as const,
+    }));
+
+    await expect(runCallCircleScheduler({
+      connectorStarter,
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      bridgeAttempts: 0,
+      handoffs: 1,
+    });
+
+    expect(connectorStarter).not.toHaveBeenCalled();
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      now,
+      outcome: "text_handoff",
+      phoneCallId: null,
+      prisma: tx,
+      status: "dropped",
+    });
+    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
+  });
+
   it("retries an attached unstarted bridge during the call window", async () => {
     const now = new Date("2026-07-06T15:00:00.000Z");
     const prisma = createSchedulerPrisma({

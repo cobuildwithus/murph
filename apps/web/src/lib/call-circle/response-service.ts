@@ -26,6 +26,7 @@ import {
 } from "./participant-store";
 import {
   canScheduleCallCircleConfirmationFlow,
+  hasCallCircleBridgeWindowElapsed,
 } from "./time";
 import {
   readActiveHostedMemberAccess,
@@ -268,6 +269,8 @@ type ResolvedCallCircleResponseMatch = {
   memberBTimeZone: string;
   side: "A" | "B";
   status: string;
+  windowEndAt: Date;
+  windowStartAt: Date;
 };
 
 async function resolveCallCircleResponseTarget(input: {
@@ -556,7 +559,10 @@ async function resolveCallCircleResponseMatch(input: {
   if (!timeZones) return null;
   return {
     amAskedAt: match.amAskedAt,
-    expired: match.windowEndAt.getTime() <= input.now.getTime(),
+    expired: hasCallCircleResponseWindowExpired({
+      match,
+      now: input.now,
+    }),
     finalAskedAt: match.finalAskedAt,
     groupId: match.groupId,
     id: match.id,
@@ -566,7 +572,27 @@ async function resolveCallCircleResponseMatch(input: {
     memberBTimeZone: timeZones.memberBTimeZone,
     side,
     status: match.status,
+    windowEndAt: match.windowEndAt,
+    windowStartAt: match.windowStartAt,
   };
+}
+
+function hasCallCircleResponseWindowExpired(input: {
+  match: {
+    finalAskedAt: Date | null;
+    windowEndAt: Date;
+    windowStartAt: Date;
+  };
+  now: Date;
+}): boolean {
+  if (input.match.finalAskedAt) {
+    return hasCallCircleBridgeWindowElapsed({
+      now: input.now,
+      windowEndAt: input.match.windowEndAt,
+      windowStartAt: input.match.windowStartAt,
+    });
+  }
+  return input.match.windowEndAt.getTime() <= input.now.getTime();
 }
 
 async function resolveCallCircleConfirmMatchIdFromReplyContext(input: {

@@ -346,6 +346,32 @@ Focused follow-up verification:
 - `git diff --check`
 - `pnpm no-js`
 
+## ReviewGPT Follow-Up 35 2026-07-09
+
+Accepted finding from the Phlebas PR-head rerun:
+
+- Final Call Circle confirmations described a concrete call start, but broad
+  availability intersections could persist `windowEndAt` hours after that
+  start. Scheduler, connector, match claim, and provider-start guards now
+  derive a narrow bridge authorization deadline from `windowStartAt`, and new
+  proposals persist the same narrow window. Stale final replies also expire at
+  that bridge deadline, so a late yes cannot authorize or place a call hours
+  after the agreed start.
+
+Rejected finding:
+
+- The broad "collapse all attached phone-call terminal ownership into the
+  phone-call result owner" suggestion was not landed in this patch. It would
+  be a larger lifecycle-owner rewrite and would need a dedicated proof matrix
+  before replacing the current scheduler crash-recovery paths. The narrow
+  authority fix above removes the late-call bug without adding state or a new
+  lifecycle abstraction.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/phone-calls-call-circle-result.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+
 ## ReviewGPT Follow-Up 23 2026-07-08
 
 Accepted findings from the Phlebas PR-head rerun:
