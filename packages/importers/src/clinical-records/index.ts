@@ -408,6 +408,7 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   const components = readFhirArray(context.resource.component);
   const emittedVitalFacets = new Set<string>();
   const vitalMeasurements: VitalMeasurementInput[] = [];
+  let hasUnmatchedVitalComponent = false;
 
   for (const component of components) {
     const vitalDecision = vitalDecisionForCodeableConcept(component.code);
@@ -418,13 +419,14 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
     if (!vital && codeableConceptHasCodeWithUnexpectedSystem(component.code, FHIR_SYSTEM_LOINC, VITAL_LOINC_CODES)) {
       return unsupportedOnly(context, "vital coding system is not importable");
     }
+    if (!vital) {
+      hasUnmatchedVitalComponent = true;
+      continue;
+    }
 
     const value = readQuantityValue(component.valueQuantity);
-    if (vital && !value) {
+    if (!value) {
       return unsupportedOnly(context, "vital quantity is not importable");
-    }
-    if (!vital || !value) {
-      continue;
     }
 
     if (!occurredAt) {
@@ -450,6 +452,9 @@ function mapObservation(context: FhirResourceContext<Observation>): MappedFhirRe
   }
 
   if (vitalMeasurements.length > 0) {
+    if (hasUnmatchedVitalComponent) {
+      return unsupportedOnly(context, "vital component code is not importable");
+    }
     if (!occurredAt) {
       return unsupportedOnly(context, "clinical timestamp is missing");
     }

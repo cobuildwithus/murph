@@ -315,6 +315,51 @@ describe("buildClinicalImportPlan", () => {
     ]);
   });
 
+  it("rejects mixed vital panels instead of dropping unsupported components", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 1,
+      }],
+      pages: {
+        "Observation/page-1.json": [{
+          resourceType: "Observation",
+          id: "mixed-vital-panel",
+          status: "final",
+          effectiveDateTime: "2026-07-01T12:00:00.000Z",
+          code: {
+            coding: [{ system: "http://loinc.org", code: "85354-9", display: "Blood pressure panel" }],
+          },
+          component: [
+            {
+              code: {
+                coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+              },
+              valueQuantity: { value: 128, unit: "mmHg" },
+            },
+            {
+              code: {
+                coding: [{ system: "http://loinc.org", code: "8302-2", display: "Body height" }],
+              },
+              valueQuantity: { value: 170, unit: "cm" },
+            },
+          ],
+        }],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toEqual([
+      expect.objectContaining({
+        resourceId: "mixed-vital-panel",
+        reason: "vital component code is not importable",
+      }),
+    ]);
+  });
+
   it("requires trusted lab category and result status coding systems", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
