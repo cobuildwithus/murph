@@ -185,6 +185,19 @@ describe('assistant capability-offers prompt contract', () => {
       ).toBe(true)
     }
   })
+
+  it('guides phone-call briefs toward natural caller identity and appointment preflight facts', () => {
+    const section = getPromptSection(
+      buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
+        .stableRouteCapabilityPrompt,
+      PHONE_CALLS_HEADER,
+    )
+
+    expect(section).toContain('collect likely required booking identity before calling')
+    expect(section).toContain('Use the user\'s first name in `callerName`')
+    expect(section).toContain('patient name, date of birth')
+    expect(section).toContain('Put those facts in `shareableFacts` only when the user approved disclosing them')
+  })
 })
 
 function getPromptSection(prompt: string, heading: string): string {

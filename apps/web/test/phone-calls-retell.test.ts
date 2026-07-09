@@ -103,7 +103,7 @@ describe("Retell phone-call runtime", () => {
       retell_llm_dynamic_variables: {
         call_brief: JSON.stringify(VALID_BRIEF),
         murph_timezone: "America/New_York",
-        opening_line: "Hey, this is Murph, I'm a personal assistant calling on behalf of Alex. I'm calling to schedule a routine eye examination for Friday, June 26, 2026.",
+        opening_line: "Hi, this is Murph. I'm calling for Alex to schedule a routine eye examination for Friday, June 26, 2026.",
         transfer_number: "+12125550000",
       },
       to_number: "+12125550123",
@@ -189,7 +189,7 @@ describe("Retell phone-call runtime", () => {
 
     const body = JSON.parse(String(fetchCalls[0]!.init?.body));
     expect(body.retell_llm_dynamic_variables.opening_line).toBe(
-      "Hey, this is Murph. I'm a personal assistant calling for the person who asked me to call. I'm calling to schedule a routine eye examination for Friday, June 26, 2026.",
+      "Hi, this is Murph. I'm calling to schedule a routine eye examination for Friday, June 26, 2026.",
     );
   });
 

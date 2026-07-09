@@ -224,9 +224,9 @@ function renderOpeningLine(brief: HostedPhoneCallBrief): string {
   const goal = formatOpeningGoal(brief.goal);
   const callerName = brief.callerName?.trim();
   if (callerName) {
-    return `Hey, this is Murph, I'm a personal assistant calling on behalf of ${callerName}. I'm calling to ${goal}`;
+    return `Hi, this is Murph. I'm calling for ${callerName} to ${goal}`;
   }
-  return `Hey, this is Murph. I'm a personal assistant calling for the person who asked me to call. I'm calling to ${goal}`;
+  return `Hi, this is Murph. I'm calling to ${goal}`;
 }
 
 function formatOpeningGoal(goal: string): string {

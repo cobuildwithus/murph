@@ -60,7 +60,10 @@ describe("assistant phone calls", () => {
       "Set allowTransferToUser=false for info-only calls",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "Set callerName only to a user-approved name",
+      "Set callerName to the user-approved first name",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "likely required booking facts such as patient name or date of birth",
     );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
       "Murph resolves verified transfer numbers server-side",
