@@ -91,13 +91,19 @@ describe('applyMurphManagedAutomations core integration', () => {
       status: 'active',
       title: 'Weekly health digest',
     })
-    expect(record?.instructions).toContain('A digest with no substance is worse than no message at all')
+    expect(record?.tags).toContain('murph-managed:weekly-health-digest')
+    expect(record?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(record?.instructions).toContain('still remember ten seconds after reading')
     expect(record?.instructions).toContain('vault-cli device account list')
     expect(record?.instructions).toContain('vault-cli wearables sources list')
     expect(record?.instructions).toContain('Wearable connected but not delivering')
     expect(record?.instructions).toContain('vault-cli device connect <provider>')
-    expect(record?.instructions).toContain('No substance and no live wearable')
-    expect(record?.instructions).toContain('Suppress the scheduled message')
+    expect(record?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
+    expect(record?.instructions).toContain('what was probably noise')
+    expect(record?.instructions).toContain('Never restate single-day metric values')
+    expect(record?.instructions).toContain(
+      '{"kind":"skip","privateSummary":"No weekly digest cleared the memorability bar."}',
+    )
 
     const insightRecord = await showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
@@ -234,13 +240,24 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
     expect(researchScoutRecord?.instructions).toContain('lowercase non-identifying category tags')
     expect(researchScoutRecord?.instructions).toContain('vault-cli research scout-batch-payload-schema --format json')
+    expect(researchScoutRecord?.instructions).toContain('If none exists, suppress the scheduled message without calling `vault-cli research scout-batch`')
     expect(researchScoutRecord?.instructions).toContain('do not use a generic `tags` field')
+    expect(researchScoutRecord?.instructions).toContain('late meals and glucose')
+    expect(researchScoutRecord?.instructions).toContain('zone 2 training and resting heart rate')
+    expect(researchScoutRecord?.instructions).toContain('device and measurement meta-commentary')
+    expect(researchScoutRecord?.instructions).toContain('a trend in their own wearable data')
+    expect(researchScoutRecord?.instructions).toContain('ignore a metric their own data shows is noisy for them')
+    expect(researchScoutRecord?.instructions).not.toContain('wearable hrv reliability')
+    expect(researchScoutRecord?.instructions).not.toContain('wearable tracking')
     expect(researchScoutRecord?.instructions).toContain('YYYY-MM-DD dates or full ISO timestamps are accepted')
     expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
     expect(researchScoutRecord?.instructions).toContain('The unit of value is the insight, not the paper')
     expect(researchScoutRecord?.instructions).toContain('The scout-batch call is the retrieval budget')
     expect(researchScoutRecord?.instructions).toContain('Recent conversation and automation/regimen changes are veto context')
     expect(researchScoutRecord?.instructions).toContain('incremental value beyond known basics')
+    expect(researchScoutRecord?.instructions).toContain('still remember the point ten seconds after reading')
+    expect(researchScoutRecord?.instructions).toContain('Hard provenance gate: if the note could have been written without this run\'s retrieved sources')
+    expect(researchScoutRecord?.instructions).toContain('Skipping is the expected outcome')
     expect(researchScoutRecord?.instructions).toContain('Do not reuse the provider candidate\'s `actionOrQuestion` as advice')
 
     const productUpdatesRecord = await showAutomation({
