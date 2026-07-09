@@ -727,7 +727,7 @@ function mapAllergyIntolerance(context: FhirResourceContext<AllergyIntolerance>)
     return unsupportedOnly(context, "allergy status is not importable");
   }
 
-  if (context.hasAllergyConflictEvidence) {
+  if (!isImportableGlobalNoKnownAllergyAssertion(context.resource) || context.hasAllergyConflictEvidence) {
     return unsupportedOnly(context, "no-known allergy conflicts with allergy evidence");
   }
   if (context.hasIncompleteAllergyEvidence) {
@@ -975,6 +975,14 @@ function isNoKnownAllergy(resource: AllergyIntolerance): boolean {
   return hasTrustedNoKnownAllergyCode(resource) && isUnambiguousNoKnownAllergy(resource);
 }
 
+function isImportableGlobalNoKnownAllergyAssertion(resource: AllergyIntolerance): boolean {
+  return (
+    isNoKnownAllergy(resource)
+    && hasImportableAllergyStatus(resource)
+    && !hasScopedOrContradictoryAllergyDetail(resource)
+  );
+}
+
 function hasTrustedNoKnownAllergyCode(resource: AllergyIntolerance): boolean {
   return codeableConceptHasSystemCode(resource.code, FHIR_SYSTEM_SNOMED_CT, NO_KNOWN_ALLERGY_CODES);
 }
@@ -994,7 +1002,7 @@ function isUnambiguousNoKnownAllergy(resource: AllergyIntolerance): boolean {
 }
 
 function isAllergyConflictEvidence(resource: Resource): boolean {
-  return isAllergyIntolerance(resource) && (!isNoKnownAllergy(resource) || !isUnambiguousNoKnownAllergy(resource));
+  return isAllergyIntolerance(resource) && !isImportableGlobalNoKnownAllergyAssertion(resource);
 }
 
 function isNoKnownAllergyConceptText(value: string | undefined): boolean {
@@ -1018,6 +1026,10 @@ function hasImportableAllergyStatus(resource: AllergyIntolerance): boolean {
       IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES,
     )
   );
+}
+
+function hasScopedOrContradictoryAllergyDetail(resource: AllergyIntolerance): boolean {
+  return readFhirArray(resource.category).length > 0 || readFhirArray(resource.reaction).length > 0;
 }
 
 function hasImportableStatus(value: unknown, importableStatuses: ReadonlySet<string>): boolean {

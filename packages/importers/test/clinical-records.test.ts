@@ -1997,6 +1997,103 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
+  it("does not import global no-known allergies when unsafe no-known allergy evidence is present", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-1.json",
+          count: 3,
+        },
+      ],
+      pages: {
+        "AllergyIntolerance/page-1.json": [
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-negative-safe",
+            recordedDate: "2026-07-02T09:00:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+          },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-negative-refuted",
+            recordedDate: "2026-07-02T09:05:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "refuted",
+              }],
+            },
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+          },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-negative-with-reaction",
+            recordedDate: "2026-07-02T09:10:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
+            category: ["medication"],
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+            reaction: [{
+              manifestation: [{
+                text: "Hives",
+                coding: [{ system: "http://snomed.info/sct", code: "247472004", display: "Hives" }],
+              }],
+            }],
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: "allergy-negative-safe",
+          reason: "no-known allergy conflicts with allergy evidence",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-negative-refuted",
+          reason: "allergy status is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-negative-with-reaction",
+          reason: "no-known allergy conflicts with allergy evidence",
+        }),
+      ]),
+    );
+  });
+
   it("namespaces FHIR external refs by source base and patient", async () => {
     const resourceFiles = [
       {
