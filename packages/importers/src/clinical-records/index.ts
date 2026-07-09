@@ -6,6 +6,7 @@ import type {
   Bundle,
   CodeableConcept,
   Coding,
+  Condition,
   DiagnosticReport,
   DocumentReference,
   Narrative,
@@ -90,6 +91,8 @@ const CANONICAL_BASE64_TEXT = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za
 const DOCUMENT_REFERENCE_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 const NO_KNOWN_ALLERGY_CODES = new Set(["716186003"]);
+const ALLERGY_CONDITION_SNOMED_CODES = new Set(["91936005"]);
+const ALLERGY_CONDITION_TEXT_PATTERN = /\b(?:allerg(?:y|ies|ic)|hypersensitiv(?:ity|e))\b/iu;
 const NO_KNOWN_ALLERGY_TEXTS = new Set([
   "no known allergy",
   "no known allergy situation",
@@ -115,6 +118,19 @@ const FHIR_VITAL_UNIT_ALIASES_BY_FACET = new Map<string, ReadonlyMap<string, str
   ["body-weight", new Map([["[lb_av]", "lb"], ["lb", "lb"]])],
   ["bp-diastolic", new Map([["mm[hg]", "mmHg"], ["mmhg", "mmHg"]])],
   ["bp-systolic", new Map([["mm[hg]", "mmHg"], ["mmhg", "mmHg"]])],
+  ["heart-rate", new Map([
+    ["/min", "bpm"],
+    ["beats per minute", "bpm"],
+    ["beats/min", "bpm"],
+    ["beats/minute", "bpm"],
+    ["bpm", "bpm"],
+  ])],
+  ["respiratory-rate", new Map([
+    ["/min", "breaths/min"],
+    ["breaths per minute", "breaths/min"],
+    ["breaths/min", "breaths/min"],
+    ["breaths/minute", "breaths/min"],
+  ])],
   ["spo2", new Map([["%", "percent"], ["percent", "percent"]])],
   ["temperature", new Map([["cel", "Cel"]])],
 ]);
@@ -1020,7 +1036,20 @@ function isUnambiguousNoKnownAllergy(resource: AllergyIntolerance): boolean {
 }
 
 function isAllergyConflictEvidence(resource: Resource): boolean {
-  return isAllergyIntolerance(resource) && !isImportableGlobalNoKnownAllergyAssertion(resource);
+  if (isAllergyIntolerance(resource)) {
+    return !isImportableGlobalNoKnownAllergyAssertion(resource);
+  }
+  if (!isCondition(resource)) {
+    return false;
+  }
+  if (codeableConceptHasSystemCode(resource.code, FHIR_SYSTEM_SNOMED_CT, ALLERGY_CONDITION_SNOMED_CODES)) {
+    return true;
+  }
+
+  return [
+    readString(resource.code?.text),
+    ...codingsForCodeableConcept(resource.code).map((coding) => coding.display),
+  ].some((value) => value !== undefined && ALLERGY_CONDITION_TEXT_PATTERN.test(value));
 }
 
 function isNoKnownAllergyConceptText(value: string | undefined): boolean {
@@ -1361,6 +1390,10 @@ function textFromNarrative(value: Narrative | undefined): string | null {
 
 function isObservation(resource: Resource): resource is Observation {
   return resource.resourceType === "Observation";
+}
+
+function isCondition(resource: Resource): resource is Condition {
+  return resource.resourceType === "Condition";
 }
 
 function isDiagnosticReport(resource: Resource): resource is DiagnosticReport {

@@ -220,6 +220,70 @@ describe("buildClinicalImportPlan", () => {
     ]);
   });
 
+  it("accepts UCUM per-minute codes for supported rate vitals", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [{
+        resourceType: "Observation",
+        relativePath: "Observation/page-1.json",
+        count: 2,
+      }],
+      pages: {
+        "Observation/page-1.json": [
+          {
+            resourceType: "Observation",
+            id: "heart-rate-ucum-per-minute",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:00:00.000Z",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+            },
+            valueQuantity: {
+              value: 72,
+              system: "http://unitsofmeasure.org",
+              code: "/min",
+              unit: "beats/minute",
+            },
+          },
+          {
+            resourceType: "Observation",
+            id: "respiratory-rate-ucum-per-minute",
+            status: "final",
+            effectiveDateTime: "2026-07-01T12:05:00.000Z",
+            code: {
+              coding: [{ system: "http://loinc.org", code: "9279-1", display: "Respiratory rate" }],
+            },
+            valueQuantity: {
+              value: 16,
+              system: "http://unitsofmeasure.org",
+              code: "/min",
+              unit: "breaths/minute",
+            },
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+    const vitals = plan.candidates.filter(
+      (candidate): candidate is ClinicalImportCandidateOfKind<"vitals"> => candidate.kind === "vitals",
+    );
+
+    expect(plan.unsupported).toEqual([]);
+    expect(vitals.map((candidate) => ({
+      measurements: candidate.payload.measurements,
+      resourceId: candidate.resource.resourceId,
+    }))).toEqual([
+      {
+        measurements: [{ metric: "heart-rate", unit: "bpm", value: 72 }],
+        resourceId: "heart-rate-ucum-per-minute",
+      },
+      {
+        measurements: [{ metric: "respiratory-rate", unit: "breaths/min", value: 16 }],
+        resourceId: "respiratory-rate-ucum-per-minute",
+      },
+    ]);
+  });
+
   it("keeps bounded blood pressure panels under the import-plan candidate cap", async () => {
     const resourceCount = Math.floor(CLINICAL_IMPORT_PLAN_MAX_CANDIDATES / 2) + 1;
     expect(resourceCount).toBeLessThanOrEqual(CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES);
@@ -2311,6 +2375,65 @@ describe("buildClinicalImportPlan", () => {
         }),
       ]),
     );
+  });
+
+  it("blocks no-known allergies when a raw Condition contains allergy evidence", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-1.json",
+          count: 1,
+        },
+        {
+          resourceType: "Condition",
+          relativePath: "Condition/page-1.json",
+          count: 1,
+        },
+      ],
+      pages: {
+        "AllergyIntolerance/page-1.json": [{
+          resourceType: "AllergyIntolerance",
+          id: "allergy-negative-with-condition-conflict",
+          recordedDate: "2026-07-02T09:00:00.000Z",
+          clinicalStatus: {
+            coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+          },
+          verificationStatus: {
+            coding: [{
+              system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+              code: "confirmed",
+            }],
+          },
+          code: {
+            text: "No known allergies",
+            coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+          },
+        }],
+        "Condition/page-1.json": [{
+          resourceType: "Condition",
+          id: "penicillin-allergy-condition",
+          code: {
+            text: "Penicillin allergy",
+            coding: [{ system: "http://snomed.info/sct", code: "91936005", display: "Penicillin allergy" }],
+          },
+        }],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        resourceId: "allergy-negative-with-condition-conflict",
+        reason: "no-known allergy conflicts with allergy evidence",
+      }),
+      expect.objectContaining({
+        resourceId: "penicillin-allergy-condition",
+        reason: "condition registry import not implemented",
+      }),
+    ]));
   });
 
   it("does not import global no-known allergies when unsafe no-known allergy evidence is present", async () => {
