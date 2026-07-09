@@ -192,6 +192,7 @@ const HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES = new Set([
 ]);
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 const HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS = 30_000;
+const HOSTED_ASSISTANT_CRON_STATUS_YIELD_POLL_MS = 100;
 const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS = 30_000;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
@@ -981,19 +982,13 @@ export async function runHostedWorkspaceAssistantPhase(
     const providerCleanupOwnedByPostCheckpointDelivery =
       postCheckpointDeliveryResultOwnsProviderCleanup(continuingSystemMailboxResult);
     if (foregroundAssistantPass) {
-      const assistantCronWakeAfterPass =
-        shouldResolveHostedAssistantCronWakeAfterAssistantPass({
-          assistantMetrics,
-          input,
-        })
-          ? await resolveHostedAssistantCronWakeStateBestEffort(input)
+      const foregroundCronReconciliationWake =
+        assistantMetrics.assistantAutomationCronStatusDeferred === true
+          ? createHostedRuntimeWakeCandidate(
+              new Date(resolveHostedAssistantPhaseNowMs(input)).toISOString(),
+              HOSTED_ASSISTANT_WAKE_REASON,
+            )
           : null;
-      const assistantCronWakeAfterPassCandidate = assistantCronWakeAfterPass
-        ? resolveHostedAssistantCronWakeCandidate({
-            phaseInput: input,
-            state: assistantCronWakeAfterPass,
-          })
-        : null;
       writeHostedAssistantTurnTimingRuntimeLog({
         currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
         elapsedMs: elapsedSince(assistantPhaseStartedAt),
@@ -1014,8 +1009,8 @@ export async function runHostedWorkspaceAssistantPhase(
       };
       const foregroundAssistantResult = await runForegroundAssistantReplyPhase({
         assistantMetrics,
-        assistantCronWakeAfterPass: assistantCronWakeAfterPassCandidate,
         currentTurnDeliveryIntentIds,
+        foregroundCronReconciliationWake,
         foregroundWorkspaceWake: createFutureExistingHostedAssistantWorkspaceWakeCandidate(input),
         input,
         linqDeliveryContexts: initialLinqDeliveryContexts,
@@ -1542,7 +1537,9 @@ async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
   }
 
   const assistantCronWake =
-    await resolveHostedAssistantCronWakeStateBestEffort(input.input);
+    await resolveHostedAssistantCronWakeStateBestEffort(input.input, {
+      interruptOnBackgroundYield: true,
+    });
   const cronNextWakeAt = assistantCronWake.available
     ? assistantCronWake.wake?.at ?? null
     : new Date(
@@ -2166,6 +2163,14 @@ interface HostedAssistantCronWakeState {
   wake: HostedRuntimeWakeCandidate | null;
 }
 
+function createUnavailableHostedAssistantCronWakeState(): HostedAssistantCronWakeState {
+  return {
+    available: false,
+    dueNow: false,
+    wake: null,
+  };
+}
+
 function isBrowserVaultReplicaRefreshSystemMailboxPreparation(
   systemMailboxPreparation: HostedSystemMailboxPreparation,
 ): boolean {
@@ -2241,19 +2246,61 @@ function resolveHostedAssistantCronWakeState(
 // and a transient status-read failure must not break unrelated maintenance.
 async function resolveHostedAssistantCronWakeStateBestEffort(
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
+  options: { interruptOnBackgroundYield?: boolean } = {},
 ): Promise<HostedAssistantCronWakeState> {
+  const shouldInterruptOnYield = options.interruptOnBackgroundYield === true
+    && typeof phaseInput.shouldYieldBackgroundMaintenance === "function";
+  if (
+    shouldInterruptOnYield
+    && phaseInput.shouldYieldBackgroundMaintenance?.() === true
+  ) {
+    return createUnavailableHostedAssistantCronWakeState();
+  }
+
+  const statusPromise = getAssistantCronStatus(
+    phaseInput.restored.vaultRoot,
+    buildHostedAssistantCronStatusOptions(phaseInput),
+  )
+    .then((cronStatus) => resolveHostedAssistantCronWakeState(phaseInput, cronStatus))
+    .catch(() => createUnavailableHostedAssistantCronWakeState());
+  if (!shouldInterruptOnYield) {
+    return await statusPromise;
+  }
+
   try {
-    const cronStatus = await getAssistantCronStatus(
-      phaseInput.restored.vaultRoot,
-      buildHostedAssistantCronStatusOptions(phaseInput),
-    );
-    return resolveHostedAssistantCronWakeState(phaseInput, cronStatus);
+    return await resolveHostedAssistantCronWakeStateOrYield({
+      phaseInput,
+      statusPromise,
+    });
   } catch {
-    return {
-      available: false,
-      dueNow: false,
-      wake: null,
-    };
+    return createUnavailableHostedAssistantCronWakeState();
+  }
+}
+
+async function resolveHostedAssistantCronWakeStateOrYield(input: {
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  statusPromise: Promise<HostedAssistantCronWakeState>;
+}): Promise<HostedAssistantCronWakeState> {
+  let yieldTimer: ReturnType<typeof setInterval> | null = null;
+  try {
+    const yieldPromise = new Promise<HostedAssistantCronWakeState>((resolve) => {
+      const resolveIfYielded = () => {
+        if (input.phaseInput.shouldYieldBackgroundMaintenance?.() === true) {
+          resolve(createUnavailableHostedAssistantCronWakeState());
+        }
+      };
+      resolveIfYielded();
+      yieldTimer = setInterval(
+        resolveIfYielded,
+        HOSTED_ASSISTANT_CRON_STATUS_YIELD_POLL_MS,
+      );
+      yieldTimer.unref?.();
+    });
+    return await Promise.race([input.statusPromise, yieldPromise]);
+  } finally {
+    if (yieldTimer) {
+      clearInterval(yieldTimer);
+    }
   }
 }
 
@@ -3754,8 +3801,8 @@ async function collectForegroundDeliveryEffects(input: {
 
 async function runForegroundAssistantReplyPhase(input: {
   assistantMetrics: HostedAssistantMetrics;
-  assistantCronWakeAfterPass: HostedRuntimeWakeCandidate | null;
   currentTurnDeliveryIntentIds: readonly string[];
+  foregroundCronReconciliationWake: HostedRuntimeWakeCandidate | null;
   foregroundWorkspaceWake: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   providerCleanupPlan: HostedProviderCleanupPlan;
@@ -3789,15 +3836,11 @@ async function runForegroundAssistantReplyPhase(input: {
       systemMailboxWake: input.systemMailboxWake,
       systemMailboxWakeAt: input.systemMailboxWakeAt,
     });
-    const fastDispatchNextWake = selectHostedRuntimeWakeCandidate([
-      fastDispatchBaseNextWake,
-      input.assistantCronWakeAfterPass,
-    ]);
     const postDelivery = await drainHostedPostCheckpointDelivery({
       assistantMetrics: input.assistantMetrics,
       assistantDeliveryEffects: deliveryEffects,
       assistantDeliveryPreparation: preparedDeliveryEffects.preparation,
-      baseNextWake: fastDispatchNextWake,
+      baseNextWake: fastDispatchBaseNextWake,
       checkpointReason: "outbox_receipt",
       canConsumeWorkspaceAssistantWake: true,
       input: input.input,
@@ -3881,7 +3924,7 @@ async function runForegroundAssistantReplyPhase(input: {
   });
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
-    input.assistantCronWakeAfterPass,
+    input.foregroundCronReconciliationWake,
     input.foregroundWorkspaceWake,
     input.skippedDeviceSyncWake,
     createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
@@ -3945,7 +3988,6 @@ async function runForegroundAssistantReplyPhase(input: {
             assertHostedAssistantPhaseLiveness(input.input.signal);
             const baseNextWake = selectHostedRuntimeWakeCandidate([
               createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
-              input.assistantCronWakeAfterPass,
               input.foregroundWorkspaceWake,
               input.skippedDeviceSyncWake,
               input.systemMailboxWake,
@@ -4211,7 +4253,9 @@ async function drainHostedPostCheckpointDelivery(input: {
     vaultRoot: input.input.restored.vaultRoot,
   });
   const postAssistantCronWake =
-    await resolveHostedAssistantCronWakeStateBestEffort(input.input);
+    await resolveHostedAssistantCronWakeStateBestEffort(input.input, {
+      interruptOnBackgroundYield: input.assistantDeliveryEffects.length > 0,
+    });
   const dropConsumedWorkspaceAssistantWake = (
     candidate: HostedRuntimeWakeCandidate | null,
   ): HostedRuntimeWakeCandidate | null =>
