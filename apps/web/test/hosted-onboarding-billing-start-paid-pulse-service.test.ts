@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedOnboardingPublicBaseUrl: vi.fn(),
   requireHostedStripeBillingPlanConfig: vi.fn(),
+  withHostedMemberStripeMutationLock: vi.fn(),
   stripe: {
     billingPortal: {
       sessions: {
@@ -48,6 +49,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+  withHostedMemberStripeMutationLock: mocks.withHostedMemberStripeMutationLock,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -78,6 +80,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef());
+    mocks.withHostedMemberStripeMutationLock.mockImplementation(
+      async (input: { run: () => Promise<unknown> }) => input.run(),
+    );
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
       billingPlanCode: "launch_monthly",
@@ -127,6 +132,11 @@ describe("startHostedPulseTrialPaidPlan", () => {
         idempotencyKey: buildExpectedStartPaidPulseIdempotencyKey(),
       },
     );
+    expect(mocks.withHostedMemberStripeMutationLock).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+      run: expect.any(Function),
+    });
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
   });

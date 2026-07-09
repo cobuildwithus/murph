@@ -78,6 +78,17 @@ export interface HostedMemberStripeBillingRefWriteInput {
   tx: Prisma.TransactionClient;
 }
 
+export async function withHostedMemberStripeMutationLock<TResult>(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  run: () => Promise<TResult>;
+}): Promise<TResult> {
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    return input.run();
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
 export async function lookupHostedMemberStripeBillingRefByStripeCustomerId(input: {
   prisma: HostedOnboardingReadClient;
   stripeCustomerId: string;

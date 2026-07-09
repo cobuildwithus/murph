@@ -23,6 +23,11 @@ const OPS_TOOLS = [
     label: "Growth",
   },
   {
+    description: "Preview and apply the one-time seven-day Pulse Trial beta extension.",
+    href: "/ops/pulse-trial-extension",
+    label: "Pulse Trial extension",
+  },
+  {
     description: "Wake checkpointed hosted workspaces and run runtime support diagnostics.",
     href: "/ops/runtime-maintenance",
     label: "Runtime maintenance",
@@ -49,7 +54,7 @@ export default async function HostedOpsPage() {
             Ops
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Internal controls for hosted runtime maintenance and latency.
+            Internal tools for hosted operations: growth, billing, and runtime maintenance.
           </p>
         </div>
       </header>

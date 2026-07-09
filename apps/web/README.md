@@ -834,3 +834,13 @@ Current hosted billing assumptions:
   `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
 - Card-based Pulse Trial checkout fallback is gated by
   `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`.
+- The protected `/ops/pulse-trial-extension` page owns the fixed
+  `pulse-beta-extension-2026-07` beta campaign. It previews aggregate counts,
+  extends each Stripe-authoritative current trial from its existing end by
+  exactly seven days, then reconciles only the matching local billing and
+  usage-period end timestamps. Trial extension and “Start paid Pulse” serialize
+  their Stripe mutations under the same member lock so paid conversion always
+  wins rather than restoring a stale trial. A Stripe metadata marker makes
+  Apply safe to retry without resetting the original trial start or recorded
+  usage. Remove the campaign page, route, service, and focused tests after
+  production Apply reports no pending extensions or reconciliations.
