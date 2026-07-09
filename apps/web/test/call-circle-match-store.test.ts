@@ -305,6 +305,7 @@ describe("Call Circle conditional mutations", () => {
     const create = vi.fn();
     const participantUpdateMany = vi.fn();
     const prisma = {
+      $queryRaw: vi.fn(),
       hostedCallCircleMatch: { create },
       hostedCallCircleParticipant: {
         count: vi.fn(async () => 2),
@@ -338,7 +339,11 @@ describe("Call Circle conditional mutations", () => {
     }));
     const participantUpdateMany = vi.fn(async () => ({ count: 2 }));
     const tx = {
-      hostedCallCircleMatch: { create },
+      $queryRaw: vi.fn(),
+      hostedCallCircleMatch: {
+        create,
+        findFirst: vi.fn(async () => null),
+      },
       hostedCallCircleParticipant: {
         count: vi.fn(async () => 2),
         updateMany: participantUpdateMany,
@@ -382,6 +387,25 @@ describe("Call Circle conditional mutations", () => {
         status: "enrolled",
       },
     });
+    expect(tx.hostedCallCircleMatch.findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        createdAt: {
+          gte: new Date("2026-06-29T15:00:00.000Z"),
+        },
+        OR: [
+          { memberAId: { in: ["member_a", "member_b"] } },
+          { memberBId: { in: ["member_a", "member_b"] } },
+        ],
+        NOT: [
+          { status: "canceled" },
+          {
+            outcome: "notification_blocked",
+            status: "dropped",
+          },
+        ],
+      },
+    });
     expect(create).toHaveBeenCalledWith({
       data: {
         createdAt: now,
@@ -402,7 +426,11 @@ describe("Call Circle conditional mutations", () => {
   it("does not create a proposal when another scheduler already claimed one participant", async () => {
     const create = vi.fn();
     const tx = {
-      hostedCallCircleMatch: { create },
+      $queryRaw: vi.fn(),
+      hostedCallCircleMatch: {
+        create,
+        findFirst: vi.fn(async () => null),
+      },
       hostedCallCircleParticipant: {
         count: vi.fn(async () => 2),
         updateMany: vi.fn(async () => ({ count: 1 })),
@@ -428,6 +456,45 @@ describe("Call Circle conditional mutations", () => {
       prisma: prisma as never,
     })).resolves.toBeNull();
 
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("does not create a proposal when either member already has a recent match in another group", async () => {
+    const create = vi.fn();
+    const participantUpdateMany = vi.fn();
+    const tx = {
+      $queryRaw: vi.fn(),
+      hostedCallCircleMatch: {
+        create,
+        findFirst: vi.fn(async () => ({ id: "hccm_recent_other_group" })),
+      },
+      hostedCallCircleParticipant: {
+        count: vi.fn(async () => 2),
+        updateMany: participantUpdateMany,
+      },
+      hostedGroupMember: {
+        count: vi.fn(async () => 2),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (transaction: unknown) => Promise<unknown>) =>
+        callback(tx)),
+    };
+
+    await expect(createCallCircleMatchProposal({
+      proposal: {
+        groupId: "hgrp_123",
+        memberAId: "member_a",
+        memberBId: "member_b",
+        now: new Date("2026-07-06T15:00:00.000Z"),
+        windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+      },
+      prisma: prisma as never,
+    })).resolves.toBeNull();
+
+    expect(tx.hostedCallCircleMatch.findFirst).toHaveBeenCalled();
+    expect(participantUpdateMany).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
   });
 

@@ -8,6 +8,7 @@ import {
 
 import {
   generateHostedCallCircleMatchId,
+  lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 import {
@@ -103,6 +104,16 @@ async function createCallCircleMatchProposalTx(input: {
   })) {
     return null;
   }
+  for (const memberId of [memberAId, memberBId]) {
+    await lockHostedMemberRow(prisma as Prisma.TransactionClient, memberId);
+  }
+  if (await hasRecentCallCircleMatchForMembers({
+    memberIds: [memberAId, memberBId],
+    now: input.proposal.now,
+    prisma,
+  })) {
+    return null;
+  }
 
   const claim = await prisma.hostedCallCircleParticipant.updateMany({
     data: { lastMatchedAt: input.proposal.now },
@@ -138,6 +149,28 @@ async function createCallCircleMatchProposalTx(input: {
       windowStartAt: input.proposal.windowStartAt,
     },
   });
+}
+
+async function hasRecentCallCircleMatchForMembers(input: {
+  memberIds: readonly string[];
+  now: Date;
+  prisma: CallCirclePrismaClient;
+}): Promise<boolean> {
+  const memberIds = Array.from(input.memberIds);
+  const match = await input.prisma.hostedCallCircleMatch.findFirst({
+    select: { id: true },
+    where: {
+      createdAt: {
+        gte: new Date(input.now.getTime() - CALL_CIRCLE_MATCH_LOOKBACK_MS),
+      },
+      OR: [
+        { memberAId: { in: memberIds } },
+        { memberBId: { in: memberIds } },
+      ],
+      ...CALL_CIRCLE_BLOCKING_RECENT_MATCH_WHERE,
+    },
+  });
+  return match !== null;
 }
 
 class CallCircleProposalClaimMissedError extends Error {

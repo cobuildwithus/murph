@@ -384,6 +384,29 @@ Focused follow-up verification:
 
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-scheduler.test.ts apps/web/test/hosted-group-tool.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts apps/web/test/hosted-onboarding-linq-http.test.ts`
 
+## ReviewGPT Follow-Up 27 2026-07-08
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- Counter responses no longer append immediate confirmation re-asks from the
+  response route. The response path only records the counter mutation; the
+  scheduler-owned confirmation path remains the single owner for calendar
+  availability, quiet-hour/line preflight, ask stamping, and notification
+  append.
+- Weekly Call Circle proposal caps are now enforced at the match-store claim
+  boundary across all groups. The store locks both hosted-member rows in
+  stable order, rejects any blocking recent match containing either member,
+  and then updates per-group `lastMatchedAt` fairness metadata.
+- Response target resolution no longer treats model-supplied `groupId` or
+  `matchId` as authority without a durable notification anchor. Unanchored
+  setup responses use only a singleton active participant group; unanchored
+  match responses use only a singleton pending match, while model ids can only
+  fail closed on exact-anchor conflicts.
+
+Focused follow-up verification:
+
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-match-store.test.ts`
+
 ## ReviewGPT Follow-Up 24 2026-07-08
 
 Accepted findings from the Phlebas PR-head rerun:

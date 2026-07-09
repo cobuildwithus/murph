@@ -15,7 +15,6 @@ import {
   counterCallCircleMatchSide,
   declineCallCircleMatchSide,
   confirmCallCircleMatchSide,
-  markCallCircleMatchAmAsked,
   markCallCircleMatchOutcome,
 } from "./match-store";
 import {
@@ -26,15 +25,7 @@ import {
   writeCallCirclePreferences,
 } from "./participant-store";
 import {
-  appendCallCircleConfirmNotificationTx,
-  type CallCircleNotificationSignal,
-  readCallCircleNotificationSignal,
-  readCallCircleNotificationPreflightTx,
-  signalCallCircleNotificationRuntimesBestEffort,
-} from "./notifications";
-import {
   canScheduleCallCircleConfirmationFlow,
-  isWithinCallCircleQuietHours,
 } from "./time";
 import {
   readActiveHostedMemberAccess,
@@ -48,11 +39,6 @@ const CALL_CIRCLE_SETUP_NOTIFICATION_DEDUPE_PREFIX =
   "assistant.notification.requested:call-circle:setup:";
 const CALL_CIRCLE_REPLY_CONTEXT_MAILBOX_ITEM_LIMIT = 20;
 
-type CallCircleNotificationPreflightOk = Extract<
-  Awaited<ReturnType<typeof readCallCircleNotificationPreflightTx>>,
-  { status: "ok" }
->;
-
 export async function handleCallCircleRespond(input: {
   context?: HostedCallCircleRespondContext | null;
   memberId: string;
@@ -62,9 +48,8 @@ export async function handleCallCircleRespond(input: {
 }): Promise<HostedCallCircleRespondResponse> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  let counterReaskSignal: CallCircleNotificationSignal | null = null;
 
-  const response = await prisma.$transaction<HostedCallCircleRespondResponse>(async (tx) => {
+  return await prisma.$transaction<HostedCallCircleRespondResponse>(async (tx) => {
     const target = await resolveCallCircleResponseTarget({
       memberId: input.memberId,
       now,
@@ -243,16 +228,6 @@ export async function handleCallCircleRespond(input: {
         })) {
           return { status: "unavailable", unavailableReason: "counter_window_invalid" };
         }
-        const reaskMemberId = target.match.side === "A"
-          ? target.match.memberBId
-          : target.match.memberAId;
-        const reaskTimeZone = target.match.side === "A"
-          ? target.match.memberBTimeZone
-          : target.match.memberATimeZone;
-        const shouldSendReaskNow = isWithinCallCircleQuietHours({
-          now,
-          timeZone: reaskTimeZone,
-        });
         const result = await counterCallCircleMatchSide({
           groupId: target.groupId,
           matchId: target.match.id,
@@ -264,37 +239,10 @@ export async function handleCallCircleRespond(input: {
           windowStartAt: counterWindow.startAt,
         });
         if (!result.changed) return { status: "ignored" };
-        if (shouldSendReaskNow) {
-          const reaskPreflight = await readCallCircleNotificationPreflightTx({
-            memberId: reaskMemberId,
-            now,
-            timeZone: reaskTimeZone,
-            tx,
-          });
-          if (reaskPreflight.status !== "ok") {
-            await markCallCircleMatchOutcome({
-              matchId: target.match.id,
-              now,
-              outcome: "notification_blocked",
-              prisma: tx,
-              status: "dropped",
-            });
-            return { status: "unavailable", unavailableReason: "counter_reask_unavailable" };
-          }
-          counterReaskSignal = await appendCounterReaskTx({
-            matchId: target.match.id,
-            now,
-            preflight: reaskPreflight,
-            side: target.match.side,
-            tx,
-          });
-        }
         return { status: "ok" };
       }
     }
   });
-  await signalCallCircleNotificationRuntimesBestEffort([counterReaskSignal]);
-  return response;
 }
 
 type ResolvedCallCircleResponseTarget =
@@ -361,11 +309,10 @@ async function resolveCallCircleResponseTarget(input: {
     return { groupId: setupContext.groupId, match: null, status: "ok" };
   }
 
-  const groupId = input.request.groupId
-    ?? await resolveSingleCallCircleParticipantGroupId({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
+  const groupId = await resolveSingleCallCircleParticipantGroupId({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   if (!groupId) {
     return {
       status: "unavailable",
@@ -499,17 +446,20 @@ async function resolveCallCircleResponseMatch(input: {
     return null;
   }
 
-  const matchId = confirmContext.status === "exact"
-    ? confirmContext.anchor.matchId
-    : input.request.matchId;
-  const match = matchId
+  const match = confirmContext.status === "exact"
     ? await input.prisma.hostedCallCircleMatch.findUnique({
       select: callCircleResponseMatchSelect,
-      where: { id: matchId },
+      where: { id: confirmContext.anchor.matchId },
     })
     : await resolveSinglePendingCallCircleResponseMatch(input);
   if (!match) return null;
-  if (input.request.groupId && input.request.groupId !== match.groupId) return null;
+  if (
+    confirmContext.status === "exact"
+    && input.request.groupId
+    && input.request.groupId !== match.groupId
+  ) {
+    return null;
+  }
   const side = match.memberAId === input.memberId
     ? "A"
     : match.memberBId === input.memberId
@@ -668,7 +618,6 @@ async function resolveSinglePendingCallCircleResponseMatch(input: {
     select: callCircleResponseMatchSelect,
     take: 2,
     where: {
-      ...(input.request.groupId ? { groupId: input.request.groupId } : {}),
       OR: [
         {
           memberAId: input.memberId,
@@ -813,69 +762,6 @@ function readActiveCallCircleUnavailableReason(
   return null;
 }
 
-async function appendCounterReaskTx(input: {
-  matchId: string;
-  now: Date;
-  preflight?: CallCircleNotificationPreflightOk;
-  side: "A" | "B";
-  tx: Prisma.TransactionClient;
-}): Promise<CallCircleNotificationSignal | null> {
-  const match = await input.tx.hostedCallCircleMatch.findUnique({
-    where: { id: input.matchId },
-  });
-  if (!match) return null;
-  if (!await canUseActiveCallCircleParticipantPair({
-    groupId: match.groupId,
-    memberAId: match.memberAId,
-    memberBId: match.memberBId,
-    prisma: input.tx,
-  })) {
-    await markCallCircleMatchOutcome({
-      matchId: match.id,
-      now: input.now,
-      outcome: "participant_unavailable",
-      prisma: input.tx,
-      status: "canceled",
-    });
-    return null;
-  }
-  const reaskMemberId = input.side === "A" ? match.memberBId : match.memberAId;
-  const timeZones = await readCallCircleMatchParticipantTimeZones({
-    groupId: match.groupId,
-    memberAId: match.memberAId,
-    memberBId: match.memberBId,
-    prisma: input.tx,
-  });
-  if (!timeZones) return null;
-  const reaskTimeZone = input.side === "A"
-    ? timeZones.memberBTimeZone
-    : timeZones.memberATimeZone;
-  const marked = await markCallCircleMatchAmAsked({
-    matchId: match.id,
-    now: input.now,
-    prisma: input.tx,
-  });
-  if (!marked) return null;
-  const notification = await appendCallCircleConfirmNotificationTx({
-    matchId: match.id,
-    memberId: reaskMemberId,
-    now: input.now,
-    otherMemberLabel: null,
-    preflight: input.preflight,
-    stage: "am",
-    tx: input.tx,
-    windowLabel: formatCounterWindowLabel({
-      startAt: match.windowStartAt,
-      timeZone: reaskTimeZone,
-    }),
-    windowStartAt: match.windowStartAt,
-  });
-  return readCallCircleNotificationSignal({
-    memberId: reaskMemberId,
-    notification,
-  });
-}
-
 function isValidCounterWindow(input: {
   endAt: Date;
   now: Date;
@@ -886,16 +772,4 @@ function isValidCounterWindow(input: {
     && input.startAt > input.now
     && input.endAt > input.startAt
     && input.endAt.getTime() <= input.now.getTime() + CALL_CIRCLE_COUNTER_WINDOW_MAX_MS;
-}
-
-function formatCounterWindowLabel(input: {
-  startAt: Date;
-  timeZone: string;
-}): string {
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: input.timeZone,
-    weekday: "short",
-  }).format(input.startAt);
 }

@@ -109,7 +109,7 @@ describe("handleCallCircleRespond", () => {
       },
     })).resolves.toEqual({
       status: "unavailable",
-      unavailableReason: "call_circle_not_enrolled",
+      unavailableReason: "call_circle_context_unavailable",
     });
 
     expect(mocks.writeCallCirclePreferences).not.toHaveBeenCalled();
@@ -233,6 +233,33 @@ describe("handleCallCircleRespond", () => {
       memberId: "member_123",
       prisma: prisma as never,
       request: {
+        kind: "preferences",
+        timeZone: "America/Los_Angeles",
+        windows: [{
+          dayOfWeek: 4,
+          endLocalTime: "12:30",
+          startLocalTime: "12:00",
+        }],
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_context_unavailable",
+    });
+
+    expect(mocks.writeCallCirclePreferences).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for model-selected group preferences across multiple groups without setup context", async () => {
+    const prisma = createResponsePrisma({
+      participantGroups: ["hgrp_old", "hgrp_new"],
+      participantStatus: "enrolled",
+    });
+
+    await expect(handleCallCircleRespond({
+      memberId: "member_123",
+      prisma: prisma as never,
+      request: {
+        groupId: "hgrp_new",
         kind: "preferences",
         timeZone: "America/Los_Angeles",
         windows: [{
@@ -536,6 +563,43 @@ describe("handleCallCircleRespond", () => {
       prisma: expect.any(Object),
       side: "B",
     });
+  });
+
+  it("fails closed when a model matchId selects among multiple pending matches without an anchor", async () => {
+    const firstMatch = callCircleMatch({
+      groupId: "hgrp_first",
+      id: "hccm_first",
+      memberAId: "member_other",
+      memberBId: "member_123",
+    });
+    const secondMatch = callCircleMatch({
+      groupId: "hgrp_second",
+      id: "hccm_second",
+      memberAId: "member_other_2",
+      memberBId: "member_123",
+    });
+    const prisma = createResponsePrisma({
+      matches: [firstMatch, secondMatch],
+      participantGroups: ["hgrp_first", "hgrp_second"],
+      participantStatus: "enrolled",
+    });
+
+    await expect(handleCallCircleRespond({
+      context: FRESH_CALL_CIRCLE_REPLY_CONTEXT,
+      memberId: "member_123",
+      now: new Date("2026-07-06T15:00:00.000Z"),
+      prisma: prisma as never,
+      request: {
+        kind: "confirm",
+        matchId: "hccm_second",
+      },
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "call_circle_match_unavailable",
+    });
+
+    expect(prisma.tx.hostedCallCircleMatch.findUnique).not.toHaveBeenCalled();
+    expect(mocks.confirmCallCircleMatchSide).not.toHaveBeenCalled();
   });
 
   it("does not treat confirmation notification anchors as fresh user replies", async () => {
@@ -856,10 +920,7 @@ describe("handleCallCircleRespond", () => {
     expect(mocks.confirmCallCircleMatchSide).not.toHaveBeenCalled();
   });
 
-  it("does not reask an inactive counterpart after a counter mutation", async () => {
-    mocks.canUseActiveCallCircleParticipantPair
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+  it("records a counter without sending an immediate counterpart reask", async () => {
     const prisma = createResponsePrisma({
       match: callCircleMatch({ amAskedAt: new Date("2026-07-06T14:00:00.000Z") }),
       participantStatus: "enrolled",
@@ -883,17 +944,13 @@ describe("handleCallCircleRespond", () => {
     })).resolves.toEqual({ status: "ok" });
 
     expect(mocks.counterCallCircleMatchSide).toHaveBeenCalled();
-    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
-      matchId: "hccm_123",
-      now,
-      outcome: "participant_unavailable",
-      prisma: expect.any(Object),
-      status: "canceled",
-    });
+    expect(mocks.readCallCircleNotificationPreflightTx).not.toHaveBeenCalled();
+    expect(mocks.markCallCircleMatchAmAsked).not.toHaveBeenCalled();
+    expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
     expect(mocks.appendCallCircleConfirmNotificationTx).not.toHaveBeenCalled();
   });
 
-  it("drops a counter after the conditional mutation when the counterpart reask is blocked", async () => {
+  it("does not drop a counter when the old immediate reask preflight would be blocked", async () => {
     mocks.readCallCircleNotificationPreflightTx.mockResolvedValueOnce({
       reason: "missing_recent_inbound",
       status: "blocked",
@@ -918,10 +975,7 @@ describe("handleCallCircleRespond", () => {
         kind: "counter",
         matchId: "hccm_123",
       },
-    })).resolves.toEqual({
-      status: "unavailable",
-      unavailableReason: "counter_reask_unavailable",
-    });
+    })).resolves.toEqual({ status: "ok" });
 
     expect(mocks.counterCallCircleMatchSide).toHaveBeenCalledWith({
       groupId: "hgrp_123",
@@ -933,18 +987,8 @@ describe("handleCallCircleRespond", () => {
       windowEndAt: new Date("2026-07-06T16:30:00.000Z"),
       windowStartAt: new Date("2026-07-06T16:00:00.000Z"),
     });
-    expect(
-      mocks.counterCallCircleMatchSide.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.readCallCircleNotificationPreflightTx.mock.invocationCallOrder[0],
-    );
-    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
-      matchId: "hccm_123",
-      now,
-      outcome: "notification_blocked",
-      prisma: expect.any(Object),
-      status: "dropped",
-    });
+    expect(mocks.readCallCircleNotificationPreflightTx).not.toHaveBeenCalled();
+    expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
     expect(mocks.appendCallCircleConfirmNotificationTx).not.toHaveBeenCalled();
   });
 
@@ -1012,7 +1056,7 @@ describe("handleCallCircleRespond", () => {
     expect(mocks.counterCallCircleMatchSide).not.toHaveBeenCalled();
   });
 
-  it("defers a counter reask outside the counterpart's quiet hours", async () => {
+  it("records a counter outside the counterpart's quiet hours without sending immediately", async () => {
     const prisma = createResponsePrisma({
       match: callCircleMatch({
         amAskedAt: new Date("2026-07-07T00:00:00.000Z"),
@@ -1048,7 +1092,7 @@ describe("handleCallCircleRespond", () => {
     expect(mocks.appendCallCircleConfirmNotificationTx).not.toHaveBeenCalled();
   });
 
-  it("marks a counter ask when sending the immediate counterpart reask", async () => {
+  it("leaves counter asks for the scheduler instead of sending immediately", async () => {
     const prisma = createResponsePrisma({
       match: callCircleMatch({ amAskedAt: new Date("2026-07-06T14:00:00.000Z") }),
       participantStatus: "enrolled",
@@ -1071,22 +1115,9 @@ describe("handleCallCircleRespond", () => {
       },
     })).resolves.toEqual({ status: "ok" });
 
-    expect(mocks.markCallCircleMatchAmAsked).toHaveBeenCalledWith({
-      matchId: "hccm_123",
-      now,
-      prisma: expect.any(Object),
-    });
-    expect(mocks.appendCallCircleConfirmNotificationTx).toHaveBeenCalledWith(
-      expect.objectContaining({
-        memberId: "member_other",
-        stage: "am",
-        windowStartAt: new Date("2026-07-06T16:00:00.000Z"),
-      }),
-    );
-    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).toHaveBeenCalledWith([{
-      mailboxItemId: "mailbox_confirm",
-      memberId: "member_other",
-    }]);
+    expect(mocks.markCallCircleMatchAmAsked).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleConfirmNotificationTx).not.toHaveBeenCalled();
+    expect(mocks.signalCallCircleNotificationRuntimesBestEffort).not.toHaveBeenCalled();
   });
 
   it("rejects counter windows that cannot receive the final ask during quiet hours", async () => {
