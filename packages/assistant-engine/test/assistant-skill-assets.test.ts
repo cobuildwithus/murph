@@ -199,12 +199,38 @@ describe('assistant skill assets', () => {
       expect(skill.triggerHint.length).toBeGreaterThan(0)
       const raw = await readSkillFile(skill)
       expect(raw).toContain('Use this as Murph operating guidance')
-      expect(raw).toContain('## Research Guidance')
+      expect(raw).toContain('## Owns')
+      expect(raw).toContain('## Hand Off')
+      expect(raw).toContain('## Data First')
+      expect(raw).toContain('## Answer Shape')
       expect(raw).not.toContain('MODEL_CONFIRMATION')
       expect(raw).not.toContain('RESEARCH_COMPLETE')
+      expect(raw).not.toMatch(/^Skill \d+:/mu)
+      expect(raw).not.toMatch(/^\+\d+\s*$/mu)
     }
 
-    expect(registeredSkillSlugs.has('red-light-therapy')).toBe(false)
+    expect(registeredSkillSlugs.has('red-light-therapy')).toBe(true)
+    expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
+    )
+  })
+
+  it('routes red light dose ownership to the dedicated red-light skill', async () => {
+    const recoverySkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'recovery-modalities',
+    )
+    expect(recoverySkill).toBeTruthy()
+    if (!recoverySkill) {
+      return
+    }
+
+    expect(recoverySkill.triggerHint).toContain('Use red-light-therapy')
+    expect(recoverySkill.triggerHint).not.toContain('device dosing')
+
+    const recoveryText = await readSkillFile(recoverySkill)
+    expect(recoveryText).toContain('Use red-light-therapy for red/NIR photobiomodulation dose')
+    expect(recoveryText).toContain('does not own PBM device-dose math')
+    expect(recoveryText).not.toContain('device-seeds.json')
   })
 
   it('keeps group newsletter setup and opt-out behavior in the group-chat skill', async () => {
@@ -503,19 +529,28 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('.codex-hosted')
   })
 
-  it('keeps recovery modality red light device seeds parseable and manufacturer-claim scoped', async () => {
-    const recoverySkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'recovery-modalities',
+  it('keeps red light therapy registered with dose math and device seeds', async () => {
+    const redLightSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'red-light-therapy',
     )
-    expect(recoverySkill).toBeTruthy()
-    if (!recoverySkill) {
+    expect(redLightSkill).toBeTruthy()
+    if (!redLightSkill) {
       return
     }
+
+    const skillText = await readSkillFile(redLightSkill)
+    expect(redLightSkill.triggerHint).toContain('device irradiance')
+    expect(skillText).toContain('seconds = target dose J/cm2 * 1000 / irradiance mW/cm2')
+    expect(skillText).toContain('manufacturer-claim duration estimate')
+    expect(skillText).toContain('matches the user\'s distance or contact setting')
+    expect(skillText).toContain('activeModeLabel')
+    expect(skillText).toContain('vault-cli commons protocol explore "red light therapy" --format json')
+    expect(skillText).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md')
 
     const raw = await readFile(
       path.join(
         resolveAssistantSkillsRoot(),
-        recoverySkill.slug,
+        redLightSkill.slug,
         'device-seeds.json',
       ),
       'utf8',
