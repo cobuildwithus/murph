@@ -12,15 +12,12 @@ import {
 } from "../shared.ts";
 
 export interface PipelineContext {
-  captureLookupScope: CaptureLookupScope;
   vaultRoot: string;
   runtime: InboxRuntimeStore;
   ids: {
     event(): string;
   };
 }
-
-export type CaptureLookupScope = "all-history" | "expected-shard";
 
 export interface InboxPipeline {
   readonly runtime: InboxRuntimeStore;
@@ -29,20 +26,18 @@ export interface InboxPipeline {
 }
 
 export interface CreateInboxPipelineInput {
-  captureLookupScope?: CaptureLookupScope;
   vaultRoot: string;
   runtime: InboxRuntimeStore;
   ids?: PipelineContext["ids"];
 }
 
 export async function createInboxPipeline({
-  captureLookupScope = "all-history",
   vaultRoot,
   runtime,
   ids = defaultIds(),
 }: CreateInboxPipelineInput): Promise<InboxPipeline> {
   await ensureInboxVault(vaultRoot);
-  const context: PipelineContext = { captureLookupScope, vaultRoot, runtime, ids };
+  const context: PipelineContext = { vaultRoot, runtime, ids };
 
   return {
     runtime,
@@ -55,13 +50,12 @@ export async function processCapture(
   input: InboundCapture,
   context: PipelineContext,
 ): Promise<PersistedCapture> {
-  const { captureLookupScope, ids, runtime, vaultRoot } = context;
+  const { ids, runtime, vaultRoot } = context;
   const captureId = createDeterministicInboxCaptureId(input);
   const storedEnvelope = await findStoredCaptureEnvelope({
     vaultRoot,
     inbound: input,
     captureId,
-    lookupScope: captureLookupScope,
   });
 
   if (storedEnvelope) {

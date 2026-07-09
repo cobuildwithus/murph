@@ -534,29 +534,17 @@ export async function findStoredCaptureEnvelope(input: {
   vaultRoot: string;
   inbound: InboundCapture;
   captureId?: string;
-  lookupScope?: "all-history" | "expected-shard";
 }): Promise<StoredCaptureEnvelope | null> {
   const captureId = input.captureId ?? createDeterministicInboxCaptureId(input.inbound);
-  const lookupScope = input.lookupScope ?? "all-history";
   const storedRecord = await findStoredInboxCaptureRecord({
     vaultRoot: input.vaultRoot,
     inbound: input.inbound,
     captureId,
-    lookupScope,
   });
 
   if (storedRecord) {
-    // A canonical retention tombstone remains authoritative even if a crash
-    // left the raw bytes on disk. This scan only runs for replayed captures;
-    // fresh expected-shard imports take the bounded miss path below.
     const retainedAttachments = await readRetainedAttachmentMap(input.vaultRoot);
     const envelope = inboxCaptureRecordToStoredCaptureEnvelope(storedRecord, retainedAttachments);
-    if (lookupScope === "expected-shard") {
-      return await hydrateExpectedShardStoredCaptureEnvelope({
-        envelope,
-        vaultRoot: input.vaultRoot,
-      });
-    }
     return {
       ...envelope,
       stored: await hydrateAttachmentParserProjections({
@@ -565,20 +553,6 @@ export async function findStoredCaptureEnvelope(input: {
         vaultRoot: input.vaultRoot,
       }),
     };
-  }
-
-  if (lookupScope === "expected-shard") {
-    const envelope = await readExpectedStoredCaptureEnvelope({
-      captureId,
-      inbound: input.inbound,
-      vaultRoot: input.vaultRoot,
-    });
-    return envelope
-      ? await hydrateExpectedShardStoredCaptureEnvelope({
-          envelope,
-          vaultRoot: input.vaultRoot,
-        })
-      : null;
   }
 
   const recoverableOperations = await listRecoverableInboxCaptureOperations(input.vaultRoot);
@@ -703,54 +677,6 @@ async function readRetainedAttachmentMap(
     (await listInboxAttachmentRetentionRecords(vaultRoot))
       .map((record) => [record.attachmentId, record]),
   );
-}
-
-async function hydrateExpectedShardStoredCaptureEnvelope(input: {
-  envelope: StoredCaptureEnvelope;
-  vaultRoot: string;
-}): Promise<StoredCaptureEnvelope> {
-  const stored = await clearMissingExpectedShardAttachmentPaths({
-    stored: input.envelope.stored,
-    vaultRoot: input.vaultRoot,
-  });
-  return {
-    ...input.envelope,
-    stored: await hydrateAttachmentParserProjections({
-      retainedAttachments: new Map(),
-      stored,
-      vaultRoot: input.vaultRoot,
-    }),
-  };
-}
-
-async function clearMissingExpectedShardAttachmentPaths(input: {
-  stored: StoredCapture;
-  vaultRoot: string;
-}): Promise<StoredCapture> {
-  const attachments = await Promise.all(input.stored.attachments.map(async (attachment) => {
-    if (!attachment.storedPath) {
-      return attachment;
-    }
-
-    try {
-      await stat(await resolveVaultPath(input.vaultRoot, attachment.storedPath));
-      return attachment;
-    } catch (error) {
-      if (!isMissingFileError(error)) {
-        throw error;
-      }
-      return {
-        ...attachment,
-        contentStatus: null,
-        storedPath: null,
-      };
-    }
-  }));
-
-  return {
-    ...input.stored,
-    attachments,
-  };
 }
 
 async function hydrateAttachmentParserProjections(input: {
@@ -910,33 +836,6 @@ async function readStoredCaptureEnvelope(input: {
 
     throw error;
   }
-}
-
-async function readExpectedStoredCaptureEnvelope(input: {
-  captureId: string;
-  inbound: InboundCapture;
-  vaultRoot: string;
-}): Promise<StoredCaptureEnvelope | null> {
-  const relativePath = buildInboxEnvelopePath(input.inbound, input.captureId);
-  const envelope = await readStoredCaptureEnvelope({
-    vaultRoot: input.vaultRoot,
-    relativePath,
-  });
-  if (!envelope) {
-    return null;
-  }
-
-  if (
-    envelope.captureId !== input.captureId
-    || createInboxCaptureIdentityKey(envelope.input)
-      !== createInboxCaptureIdentityKey(input.inbound)
-  ) {
-    throw new TypeError(
-      `Stored inbox envelope at ${relativePath} does not match the requested capture identity.`,
-    );
-  }
-
-  return envelope;
 }
 
 function normalizeStoredCaptureEnvelope(
@@ -1290,7 +1189,6 @@ async function findStoredInboxCaptureRecord(input: {
   vaultRoot: string;
   inbound: InboundCapture;
   captureId: string;
-  lookupScope: "all-history" | "expected-shard";
 }): Promise<CanonicalInboxCaptureRecord | null> {
   const identityKey = createInboxCaptureIdentityKey(input.inbound);
   const expectedPath = buildInboxCaptureLedgerPathForOccurredAt(input.inbound.occurredAt);
@@ -1302,10 +1200,6 @@ async function findStoredInboxCaptureRecord(input: {
 
   if (expectedMatch) {
     return expectedMatch;
-  }
-
-  if (input.lookupScope === "expected-shard") {
-    return null;
   }
 
   const relativePaths = await walkVaultFiles(input.vaultRoot, INBOX_CAPTURE_LEDGER_DIRECTORY, {

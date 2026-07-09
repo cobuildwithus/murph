@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { performance } from "node:perf_hooks";
 import path from "node:path";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
@@ -766,7 +765,6 @@ export async function prepareHostedInboxProjectionRuntime(
   vaultRoot: string,
   requestId: string,
 ): Promise<void> {
-  const startedAt = performance.now();
   const normalizedVaultRoot = path.resolve(vaultRoot);
   const inboxServices = createIntegratedInboxServices();
   await inboxServices.init({
@@ -774,17 +772,5 @@ export async function prepareHostedInboxProjectionRuntime(
     rebuildParserJobs: false,
     requestId,
     vault: normalizedVaultRoot,
-  });
-  emitHostedExecutionStructuredLog({
-    component: "hosted.inbox",
-    details: {
-      elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
-      ready: true,
-      rebuild: false,
-      requestId,
-    },
-    level: "info",
-    message: "Hosted inbox projection runtime initialized.",
-    phase: "wake.running",
   });
 }

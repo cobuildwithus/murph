@@ -795,19 +795,7 @@ describe("hosted runtime context coverage", () => {
         requestId: "req_projection_without_startup",
         vault: vaultRoot,
       });
-      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-        expect.objectContaining({
-          component: "hosted.inbox",
-          details: expect.objectContaining({
-            ready: true,
-            rebuild: false,
-            requestId: "req_projection_without_startup",
-            elapsedMs: expect.any(Number),
-          }),
-          level: "info",
-          message: "Hosted inbox projection runtime initialized.",
-        }),
-      );
+      expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
     } finally {
       await cleanup();
     }
