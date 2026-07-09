@@ -537,6 +537,14 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     });
     expect(mocks.openInboxRuntime.mock.calls.length).toBeGreaterThanOrEqual(4);
     expect(mocks.createInboxPipeline).toHaveBeenCalledTimes(4);
+    expect(
+      mocks.createInboxPipeline.mock.calls.map(([input]) => input.captureLookupScope),
+    ).toEqual([
+      "expected-shard",
+      "expected-shard",
+      "expected-shard",
+      "expected-shard",
+    ]);
     expect(processCapture).toHaveBeenNthCalledWith(1, linqCapture);
     expect(processCapture).toHaveBeenNthCalledWith(2, telegramCapture);
     expect(processCapture).toHaveBeenNthCalledWith(3, emailCapture);

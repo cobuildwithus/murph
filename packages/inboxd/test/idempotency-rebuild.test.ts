@@ -161,7 +161,7 @@ async function markInboxCapturePersistOperationInterrupted(input: {
   await fs.writeFile(operationAbsolutePath, `${JSON.stringify(rawOperation, null, 2)}\n`, "utf8");
 }
 
-test("processCapture recovers from a crash after raw inbox evidence is written but before the canonical ledger append", async () => {
+test("expected-shard processCapture recovers its exact raw envelope after the ledger append is interrupted", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-idempotent-vault");
   const sourceRoot = await makeTempDirectory("murph-inbox-idempotent-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
@@ -200,7 +200,11 @@ test("processCapture recovers from a crash after raw inbox evidence is written b
   assert.equal(runtime.findByExternalId(inbound.source, inbound.accountId, inbound.externalId), null);
   assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-03.jsonl")).length, 0);
 
-  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+  const pipeline = await createInboxPipeline({
+    captureLookupScope: "expected-shard",
+    runtime,
+    vaultRoot,
+  });
   const replayed = await pipeline.processCapture(inbound);
 
   assert.equal(replayed.deduped, true);

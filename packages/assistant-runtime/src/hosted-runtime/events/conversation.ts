@@ -93,6 +93,7 @@ export async function importHostedConversationMessageWakeIntoLocalInbox(input: {
 
   try {
     pipeline = await createInboxPipeline({
+      captureLookupScope: "expected-shard",
       runtime,
       vaultRoot: input.vaultRoot,
     });
