@@ -233,6 +233,18 @@ export async function resolveCompanionHealthMetadataConnection(input: {
       && connection.status === "active",
   );
 
+  if (activeConnections.length === 0) {
+    throw deviceSyncError({
+      code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
+      message: "Connect Apple Health in the companion before syncing supplemental metadata.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+  if (activeConnections.length === 1) {
+    return activeConnections[0]!;
+  }
+
   const appleHealthConnections: typeof activeConnections = [];
   for (const connection of activeConnections) {
     const sources = await input.store.listConnectionSources(connection.id);
@@ -250,12 +262,8 @@ export async function resolveCompanionHealthMetadataConnection(input: {
   }
 
   throw deviceSyncError({
-    code: appleHealthConnections.length === 0
-      ? "COMPANION_HEALTH_CONNECTION_REQUIRED"
-      : "COMPANION_HEALTH_CONNECTION_AMBIGUOUS",
-    message: appleHealthConnections.length === 0
-      ? "Connect Apple Health in the companion before syncing supplemental metadata."
-      : "The companion could not identify one active Apple Health connection. Reconnect Apple Health and retry.",
+    code: "COMPANION_HEALTH_CONNECTION_AMBIGUOUS",
+    message: "The companion could not identify one active Apple Health connection. Reconnect Apple Health and retry.",
     retryable: false,
     httpStatus: 409,
   });

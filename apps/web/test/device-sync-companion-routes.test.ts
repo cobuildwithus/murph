@@ -576,16 +576,12 @@ describe("device sync companion routes", () => {
       expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
     });
 
-    it("stages a closed, normalized batch on the active Junction connection", async () => {
+    it("stages on the sole active Junction connection before source projection", async () => {
       mockVerifiedPrivyUser();
       mocks.listConnectionsForUser.mockResolvedValue([{
         id: "dsc_1",
         provider: "junction",
         status: "active",
-      }]);
-      mocks.listConnectionSources.mockResolvedValue([{
-        sourceProviderSlug: "apple_health_kit",
-        status: "connected",
       }]);
       const secondRecord = healthMetadataRecord({
         endAt: "2026-07-08T14:00:00.000Z",
@@ -632,6 +628,7 @@ describe("device sync companion routes", () => {
         resource: "companion_health_metadata",
         sourceProviderSlug: "apple-health-kit",
       });
+      expect(mocks.listConnectionSources).not.toHaveBeenCalled();
     });
 
     it("keeps durable batch identity stable across receipt-time retries", async () => {
@@ -640,10 +637,6 @@ describe("device sync companion routes", () => {
         id: "dsc_1",
         provider: "junction",
         status: "active",
-      }]);
-      mocks.listConnectionSources.mockResolvedValue([{
-        sourceProviderSlug: "apple_health_kit",
-        status: "connected",
       }]);
       const body = {
         records: [healthMetadataRecord()],
@@ -671,10 +664,6 @@ describe("device sync companion routes", () => {
         id: "dsc_1",
         provider: "junction",
         status: "active",
-      }]);
-      mocks.listConnectionSources.mockResolvedValue([{
-        sourceProviderSlug: "apple_health_kit",
-        status: "connected",
       }]);
       const receivedAt = new Date("2026-07-09T12:00:00.000Z");
 
@@ -788,7 +777,7 @@ describe("device sync companion routes", () => {
       expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
     });
 
-    it("requires exactly one usable active companion connection", async () => {
+    it("uses source projection to disambiguate multiple active Junction connections", async () => {
       mockVerifiedPrivyUser();
       mocks.listConnectionsForUser.mockResolvedValue([
         { id: "dsc_1", provider: "junction", status: "active" },
@@ -809,6 +798,25 @@ describe("device sync companion routes", () => {
       expect(mocks.persistHostedDeviceSyncCompanionMetadata).toHaveBeenCalledWith(
         expect.objectContaining({ connectionId: "dsc_2" }),
       );
+    });
+
+    it("rejects ambiguous active Junction connections without source projection", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([
+        { id: "dsc_1", provider: "junction", status: "active" },
+        { id: "dsc_2", provider: "junction", status: "active" },
+      ]);
+
+      const response = await healthMetadataRoute.POST(healthMetadataRequest({
+        records: [healthMetadataRecord()],
+        schemaVersion: 1,
+      }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { code: "COMPANION_HEALTH_CONNECTION_AMBIGUOUS" },
+      });
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
     });
 
     it("rejects uploads when Apple Health has no active runtime lane", async () => {

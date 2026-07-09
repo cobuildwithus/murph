@@ -5,7 +5,6 @@ import {
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
-  JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
 } from "@murphai/device-syncd/junction-resources";
 import type {
   DeviceSyncIngressWebhook,
@@ -477,20 +476,6 @@ export async function persistHostedDeviceSyncCompanionMetadata(input: {
         tx,
       );
       if (!connection || connection.provider !== "junction" || connection.status !== "active") {
-        throw deviceSyncError({
-          code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
-          message: "Connect Apple Health in the companion before syncing supplemental metadata.",
-          retryable: false,
-          httpStatus: 409,
-        });
-      }
-      const sources = await input.store.listConnectionSources(connection.id, tx);
-      const hasConnectedAppleHealthSource = sources.some((source) =>
-        source.status === "connected"
-        && normalizeJunctionProviderSlug(source.sourceProviderSlug)
-          === normalizeJunctionProviderSlug(JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER)
-      );
-      if (!hasConnectedAppleHealthSource) {
         throw deviceSyncError({
           code: "COMPANION_HEALTH_CONNECTION_REQUIRED",
           message: "Connect Apple Health in the companion before syncing supplemental metadata.",

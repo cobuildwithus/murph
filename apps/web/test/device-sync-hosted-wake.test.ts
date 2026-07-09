@@ -662,10 +662,6 @@ describe("hosted device-sync wakes", () => {
       provider: "junction",
     });
     mocks.getConnectionForUser.mockResolvedValue(connection);
-    mocks.listConnectionSources.mockResolvedValue([{
-      sourceProviderSlug: "apple_health_kit",
-      status: "connected",
-    }]);
     mocks.upsertDirtyConnection.mockResolvedValue({
       dirty,
       shouldRequestWake: true,
@@ -713,6 +709,7 @@ describe("hosted device-sync wakes", () => {
       connection.id,
       expect.any(Function),
     );
+    expect(mocks.listConnectionSources).not.toHaveBeenCalled();
     expect(mocks.prismaTx.deviceSyncDirtyPayload.count).toHaveBeenCalledWith({
       where: {
         connectionId: connection.id,
@@ -864,16 +861,16 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("rejects companion metadata if the Apple Health source disconnected before staging", async () => {
-    const connection = buildHostedConnection({ provider: "junction" });
+  it.each([
+    ["missing", null],
+    ["inactive", buildHostedConnection({ provider: "junction", status: "disconnected" })],
+    ["non-Junction", buildHostedConnection({ provider: "oura" })],
+  ])("rejects companion metadata when the selected runtime lane is %s", async (_case, connection) => {
     mocks.getConnectionForUser.mockResolvedValue(connection);
-    mocks.listConnectionSources.mockResolvedValue([{
-      sourceProviderSlug: "apple_health_kit",
-      status: "disconnected",
-    }]);
+    const connectionId = connection?.id ?? "dsc_missing";
 
     await expect(persistHostedDeviceSyncCompanionMetadata({
-      connectionId: connection.id,
+      connectionId,
       occurredAt: "2026-07-09T12:00:00.000Z",
       resource: {
         count: 1,

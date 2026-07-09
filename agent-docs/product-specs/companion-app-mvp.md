@@ -199,8 +199,11 @@ verification (existing `@privy-io/node`):
    record identities, and only `recovery_score` / `workout_strain`. It
    validates finite ranges and timestamps against a 366-day history horizon
    and 24-hour future-clock allowance, then stores one bounded encrypted dirty
-   payload on the member's active Junction runtime lane. At most 16 payloads
-   may remain queued per connection; a full backlog returns retryable `429`.
+   payload on the member's active Junction runtime lane. That active
+   member-owned connection is the ingestion authority; projected source rows
+   are optional evidence used only to disambiguate multiple active Junction
+   lanes, never a prerequisite for the fresh SDK-created lane. At most 16
+   payloads may remain queued per connection; a full backlog returns retryable `429`.
    The mailbox wake contains no health values. `device-syncd` maps the closed
    batch to Junction sleep/activity summaries under Apple HealthKit provenance
    with an unverified WHOOP-metadata source hint, and `packages/importers` plus
