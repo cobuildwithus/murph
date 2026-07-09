@@ -2289,6 +2289,24 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBe("session token expired");
   });
 
+  it("redacts whole authorization header values for any scheme", () => {
+    expect(
+      sanitizeHostedRuntimeErrorText(
+        'Proxy-Authorization: Digest username="user", response="token" rejected',
+      ),
+    ).toBe("Proxy-Authorization: [redacted] rejected");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "Privy request failed: Authorization: Basic dXNlcjpwYXNz",
+      ),
+    ).toBe("Privy request failed: Authorization: [redacted]");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        'Privy request failed: Proxy-Authorization: Digest username="user", response="token" rejected',
+      ),
+    ).toBe("Privy request failed:");
+  });
+
   it("keeps plain bracketed prose and truncates validation suffixes", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("Provider returned [timeout] while checking sleep_cycle"),

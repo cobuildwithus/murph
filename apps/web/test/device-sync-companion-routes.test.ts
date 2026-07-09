@@ -332,6 +332,32 @@ describe("device sync companion routes", () => {
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("tenant123456.auth.example.com");
     });
 
+    it("redacts non-Bearer authorization header values", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        errorKind: "network",
+        method: "email",
+        providerMessage:
+          'Privy request failed. Authorization: Basic dXNlcjpwYXNz Proxy-Authorization: Digest username="user", response="short"',
+        stage: "send_code",
+      }, { headers: { "x-vercel-forwarded-for": "203.0.113.24" } }));
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({
+          redactedProviderMessage: expect.stringContaining("Authorization: [redacted]"),
+        }),
+      );
+      const logged = JSON.stringify(warnSpy.mock.calls);
+      expect(logged).not.toContain("Basic");
+      expect(logged).not.toContain("Digest");
+      expect(logged).not.toContain("dXNlcjpwYXNz");
+      expect(logged).not.toContain("response");
+      expect(logged).not.toContain("short");
+    });
+
     it("redacts base64 and base64url opaque secrets", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const secrets = [
