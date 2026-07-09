@@ -25,6 +25,7 @@ import type {
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
 import {
+  compareHostedSystemMailboxPendingItemMailboxSequence,
   findNextHostedSystemMailboxQueueItem,
   mergeHostedSystemMailboxRollbackItems,
   readHostedSystemMailboxState,
@@ -117,6 +118,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
     lastErrorCode: null,
     lastErrorMessage: null,
     mailboxDedupeKey: input.item.item.dedupeKey,
+    mailboxLaneSeq: input.item.item.laneSeq,
     nextAttemptAt: null,
     occurredAt: input.item.item.occurredAt,
     postCheckpointRecord: null,
@@ -272,6 +274,7 @@ function upsertHostedSystemMailboxPendingItem(
     nextItem.routeAction === "apply-member-preferences";
   const next: HostedSystemMailboxPendingItem[] = [];
   let inserted = false;
+  let shouldInsertNext = true;
 
   for (const item of pending) {
     if (item.itemId === nextItem.itemId) {
@@ -284,12 +287,18 @@ function upsertHostedSystemMailboxPendingItem(
       && item.status === "pending"
       && item.routeAction === "apply-member-preferences"
     ) {
+      const order = compareHostedSystemMailboxPendingItemMailboxSequence(nextItem, item);
+      if (order >= 0) {
+        continue;
+      }
+      shouldInsertNext = false;
+      next.push(item);
       continue;
     }
     next.push(item);
   }
 
-  if (!inserted) {
+  if (!inserted && shouldInsertNext) {
     next.push(nextItem);
   }
   return next;

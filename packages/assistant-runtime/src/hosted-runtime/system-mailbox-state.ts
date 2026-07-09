@@ -58,6 +58,7 @@ export interface HostedSystemMailboxPendingItem {
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   mailboxDedupeKey: string;
+  mailboxLaneSeq: string | null;
   nextAttemptAt: string | null;
   occurredAt: string;
   postCheckpointRecord: HostedSystemMailboxPostCheckpointRecord | null;
@@ -184,6 +185,7 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
     lastErrorCode: null,
     lastErrorMessage: null,
     mailboxDedupeKey: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY,
+    mailboxLaneSeq: null,
     nextAttemptAt: input.nextWakeAt,
     occurredAt,
     postCheckpointRecord: null,
@@ -385,6 +387,10 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
     mailboxDedupeKey: readRequiredString(
       record.mailboxDedupeKey,
       "hosted system mailbox mailboxDedupeKey",
+    ),
+    mailboxLaneSeq: readOptionalPositiveIntegerString(
+      record.mailboxLaneSeq,
+      "hosted system mailbox mailboxLaneSeq",
     ),
     nextAttemptAt: record.nextAttemptAt === null || record.nextAttemptAt === undefined
       ? null
@@ -595,31 +601,36 @@ function findLatestPendingHostedMemberPreferencesItem(
     ) {
       continue;
     }
-    if (!latest || compareHostedSystemMailboxPendingItemRecency(item, latest) > 0) {
+    if (!latest || compareHostedSystemMailboxPendingItemMailboxSequence(item, latest) > 0) {
       latest = item;
     }
   }
   return latest;
 }
 
-function compareHostedSystemMailboxPendingItemRecency(
+export function compareHostedSystemMailboxPendingItemMailboxSequence(
   left: HostedSystemMailboxPendingItem,
   right: HostedSystemMailboxPendingItem,
 ): number {
-  const occurredAtComparison = compareIsoTimestampStrings(left.occurredAt, right.occurredAt);
-  if (occurredAtComparison !== 0) {
-    return occurredAtComparison;
+  if (left.mailboxLaneSeq && right.mailboxLaneSeq) {
+    return comparePositiveIntegerStrings(left.mailboxLaneSeq, right.mailboxLaneSeq);
   }
-  return left.itemId.localeCompare(right.itemId);
+  if (left.mailboxLaneSeq) {
+    return 1;
+  }
+  if (right.mailboxLaneSeq) {
+    return -1;
+  }
+  return 0;
 }
 
-function compareIsoTimestampStrings(left: string, right: string): number {
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-  if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) {
-    return leftMs < rightMs ? -1 : 1;
+function comparePositiveIntegerStrings(left: string, right: string): number {
+  const leftValue = BigInt(left);
+  const rightValue = BigInt(right);
+  if (leftValue === rightValue) {
+    return 0;
   }
-  return left.localeCompare(right);
+  return leftValue < rightValue ? -1 : 1;
 }
 
 function systemMailboxItemIsDue(
@@ -666,6 +677,7 @@ function hostedSystemMailboxPendingItemsMatch(
     && left.attemptCount === right.attemptCount
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey
+    && left.mailboxLaneSeq === right.mailboxLaneSeq
     && left.nextAttemptAt === right.nextAttemptAt
     && left.occurredAt === right.occurredAt
     && left.requestId === right.requestId
@@ -678,6 +690,17 @@ function readRequiredString(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a non-empty string.`);
   }
   return value;
+}
+
+function readOptionalPositiveIntegerString(value: unknown, label: string): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const seq = readRequiredString(value, label);
+  if (!/^[1-9]\d*$/u.test(seq)) {
+    throw new TypeError(`${label} must be a positive decimal string.`);
+  }
+  return seq;
 }
 
 function readOptionalStringArray(value: unknown, label: string): string[] | undefined {

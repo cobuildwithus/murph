@@ -12391,6 +12391,7 @@ function createSystemMailboxItem() {
     lastErrorCode: null,
     lastErrorMessage: null,
     mailboxDedupeKey: "dedupe_system_mailbox_item_processed",
+    mailboxLaneSeq: null,
     nextAttemptAt: null,
     occurredAt: "2026-04-27T00:00:00.000Z",
     postCheckpointRecord: null,
