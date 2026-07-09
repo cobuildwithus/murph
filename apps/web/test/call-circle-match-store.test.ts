@@ -19,9 +19,12 @@ import {
   createCallCircleMatchProposal,
   declineCallCircleMatchSide as declineMatchSide,
   dropCallCircleFinalMatchForCalendarBusy,
+  dropCallCircleFinalMatchForNotificationBlocked,
   dropCallCircleMorningMatchForCalendarBusy,
+  dropCallCircleMorningMatchForNotificationBlocked,
   expirePastCallCircleMatches,
   listRecentCallCircleMatches,
+  markCallCircleMatchAmAsked,
   markCallCircleMatchFinalAsked,
   markCallCircleMatchOutcome,
   readLastCallCirclePartnerMemberIds,
@@ -183,16 +186,63 @@ describe("Call Circle conditional mutations", () => {
     });
   });
 
+  it("marks a morning ask only while the same staged window is still current", async () => {
+    const prisma = {
+      hostedCallCircleMatch: { updateMany },
+    };
+    const now = new Date("2026-07-06T09:30:00.000Z");
+    const windowStartAt = new Date("2026-07-06T15:00:00.000Z");
+    const windowEndAt = new Date("2026-07-06T15:30:00.000Z");
+
+    await expect(markCallCircleMatchAmAsked({
+      groupId: "hgrp_123",
+      matchId: "hccm_123",
+      now,
+      prisma: prisma as never,
+      sideAResponse: "countered",
+      sideBResponse: "pending",
+      windowEndAt,
+      windowStartAt,
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        amAskedAt: now,
+        status: "asking",
+      },
+      where: {
+        amAskedAt: null,
+        claimedAt: null,
+        finalAskedAt: null,
+        groupId: "hgrp_123",
+        id: "hccm_123",
+        phoneCallId: null,
+        sideAResponse: "countered",
+        sideBResponse: "pending",
+        status: { in: ["proposed", "asking"] },
+        windowEndAt,
+        windowStartAt,
+      },
+    });
+  });
+
   it("resets side responses when sending the final confirmation ask", async () => {
     const prisma = {
       hostedCallCircleMatch: { updateMany },
     };
     const now = new Date("2026-07-06T14:45:00.000Z");
+    const windowStartAt = new Date("2026-07-06T15:00:00.000Z");
+    const windowEndAt = new Date("2026-07-06T15:30:00.000Z");
 
     await expect(markCallCircleMatchFinalAsked({
+      groupId: "hgrp_123",
       matchId: "hccm_123",
       now,
       prisma: prisma as never,
+      sideAResponse: "confirmed",
+      sideBResponse: "countered",
+      windowEndAt,
+      windowStartAt,
     })).resolves.toBe(true);
 
     expect(updateMany).toHaveBeenCalledWith({
@@ -203,9 +253,17 @@ describe("Call Circle conditional mutations", () => {
         status: "asking",
       },
       where: {
+        amAskedAt: { not: null },
+        claimedAt: null,
         finalAskedAt: null,
+        groupId: "hgrp_123",
         id: "hccm_123",
+        phoneCallId: null,
+        sideAResponse: "confirmed",
+        sideBResponse: "countered",
         status: "both_confirmed",
+        windowEndAt,
+        windowStartAt,
       },
     });
   });
@@ -306,6 +364,7 @@ describe("Call Circle conditional mutations", () => {
         status: "dropped",
       },
       where: {
+        amAskedAt: { not: null },
         claimedAt: null,
         finalAskedAt: null,
         groupId: "hgrp_123",
@@ -313,6 +372,88 @@ describe("Call Circle conditional mutations", () => {
         phoneCallId: null,
         sideAResponse: "confirmed",
         sideBResponse: "countered",
+        status: "both_confirmed",
+        windowEndAt,
+        windowStartAt,
+      },
+    });
+  });
+
+  it("drops a notification-blocked morning ask only while the same stage is still pending", async () => {
+    const prisma = {
+      hostedCallCircleMatch: { updateMany },
+    };
+    const now = new Date("2026-07-06T09:30:00.000Z");
+    const windowStartAt = new Date("2026-07-06T15:00:00.000Z");
+    const windowEndAt = new Date("2026-07-06T15:30:00.000Z");
+
+    await expect(dropCallCircleMorningMatchForNotificationBlocked({
+      groupId: "hgrp_123",
+      matchId: "hccm_123",
+      now,
+      prisma: prisma as never,
+      sideAResponse: "pending",
+      sideBResponse: "countered",
+      windowEndAt,
+      windowStartAt,
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        endedAt: now,
+        outcome: "notification_blocked",
+        status: "dropped",
+      },
+      where: {
+        amAskedAt: null,
+        claimedAt: null,
+        finalAskedAt: null,
+        groupId: "hgrp_123",
+        id: "hccm_123",
+        phoneCallId: null,
+        sideAResponse: "pending",
+        sideBResponse: "countered",
+        status: { in: ["proposed", "asking"] },
+        windowEndAt,
+        windowStartAt,
+      },
+    });
+  });
+
+  it("drops a notification-blocked final ask only before the final stage is marked", async () => {
+    const prisma = {
+      hostedCallCircleMatch: { updateMany },
+    };
+    const now = new Date("2026-07-06T14:45:00.000Z");
+    const windowStartAt = new Date("2026-07-06T15:00:00.000Z");
+    const windowEndAt = new Date("2026-07-06T15:30:00.000Z");
+
+    await expect(dropCallCircleFinalMatchForNotificationBlocked({
+      groupId: "hgrp_123",
+      matchId: "hccm_123",
+      now,
+      prisma: prisma as never,
+      sideAResponse: "confirmed",
+      sideBResponse: "confirmed",
+      windowEndAt,
+      windowStartAt,
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        endedAt: now,
+        outcome: "notification_blocked",
+        status: "dropped",
+      },
+      where: {
+        amAskedAt: { not: null },
+        claimedAt: null,
+        finalAskedAt: null,
+        groupId: "hgrp_123",
+        id: "hccm_123",
+        phoneCallId: null,
+        sideAResponse: "confirmed",
+        sideBResponse: "confirmed",
         status: "both_confirmed",
         windowEndAt,
         windowStartAt,

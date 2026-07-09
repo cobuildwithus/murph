@@ -445,6 +445,25 @@ Focused follow-up verification:
 - `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-match-store.test.ts`
 - `pnpm --filter @murphai/hosted-web typecheck`
 
+## ReviewGPT Follow-Up 30 2026-07-09
+
+Accepted finding from the Phlebas PR-head rerun:
+
+- Scheduler ask/drop transitions still used stale match snapshots after
+  notification and calendar preflight. Morning and final ask markers now pass
+  the exact staged group/window/side-response tuple plus ask/claim/call
+  guards into the match-store conditional update; notification-blocked drops
+  now use stage-scoped store mutations instead of the broad outcome writer.
+  If the fenced update loses a race, the scheduler appends no confirmation
+  notifications.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-match-store.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+- `git diff --check`
+- `pnpm no-js`
+
 ## ReviewGPT Follow-Up 24 2026-07-08
 
 Accepted findings from the Phlebas PR-head rerun:

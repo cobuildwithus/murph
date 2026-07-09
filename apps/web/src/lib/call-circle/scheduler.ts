@@ -17,7 +17,9 @@ import {
 import {
   createCallCircleMatchProposal,
   dropCallCircleFinalMatchForCalendarBusy,
+  dropCallCircleFinalMatchForNotificationBlocked,
   dropCallCircleMorningMatchForCalendarBusy,
+  dropCallCircleMorningMatchForNotificationBlocked,
   expirePastCallCircleMatches,
   listRecentCallCircleMatches,
   markCallCircleMatchAmAsked,
@@ -917,9 +919,14 @@ async function askCallCircleMorningConfirmations(input: {
     });
     if (!pendingNotifications) return { asked: false, signals: [] };
     const marked = await markCallCircleMatchAmAsked({
+      groupId: input.match.groupId,
       matchId: input.match.id,
       now: input.now,
       prisma: tx,
+      sideAResponse: input.match.sideAResponse,
+      sideBResponse: input.match.sideBResponse,
+      windowEndAt: input.match.windowEndAt,
+      windowStartAt: input.match.windowStartAt,
     });
     if (!marked) return { asked: false, signals: [] };
     const notifications = await Promise.all(pendingNotifications.map((notification) =>
@@ -1011,12 +1018,15 @@ async function preflightCallCircleMorningNotificationsTx(input: {
     })
   ));
   if (preflights.some((preflight) => preflight.status !== "ok")) {
-    await markCallCircleMatchOutcome({
+    await dropCallCircleMorningMatchForNotificationBlocked({
+      groupId: input.match.groupId,
       matchId: input.match.id,
       now: input.now,
-      outcome: "notification_blocked",
       prisma: input.tx,
-      status: "dropped",
+      sideAResponse: input.match.sideAResponse,
+      sideBResponse: input.match.sideBResponse,
+      windowEndAt: input.match.windowEndAt,
+      windowStartAt: input.match.windowStartAt,
     });
     return null;
   }
@@ -1081,9 +1091,14 @@ async function askCallCircleFinalConfirmations(input: {
     });
     if (!pendingNotifications) return { asked: false, signals: [] };
     const marked = await markCallCircleMatchFinalAsked({
+      groupId: input.match.groupId,
       matchId: input.match.id,
       now: input.now,
       prisma: tx,
+      sideAResponse: input.match.sideAResponse,
+      sideBResponse: input.match.sideBResponse,
+      windowEndAt: input.match.windowEndAt,
+      windowStartAt: input.match.windowStartAt,
     });
     if (!marked) return { asked: false, signals: [] };
     const notifications = await Promise.all(pendingNotifications.map((notification) =>
@@ -1167,12 +1182,15 @@ async function preflightCallCircleFinalNotificationsTx(input: {
     })
   ));
   if (preflights.some((preflight) => preflight.status !== "ok")) {
-    await markCallCircleMatchOutcome({
+    await dropCallCircleFinalMatchForNotificationBlocked({
+      groupId: input.match.groupId,
       matchId: input.match.id,
       now: input.now,
-      outcome: "notification_blocked",
       prisma: input.tx,
-      status: "dropped",
+      sideAResponse: input.match.sideAResponse,
+      sideBResponse: input.match.sideBResponse,
+      windowEndAt: input.match.windowEndAt,
+      windowStartAt: input.match.windowStartAt,
     });
     return null;
   }

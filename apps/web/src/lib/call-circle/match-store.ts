@@ -392,9 +392,14 @@ export async function markCallCircleMatchBothConfirmedIfReady(input: {
 }
 
 export async function markCallCircleMatchAmAsked(input: {
+  groupId: string;
   matchId: string;
   now: Date;
   prisma?: CallCirclePrismaClient;
+  sideAResponse: HostedCallCircleMatchResponse;
+  sideBResponse: HostedCallCircleMatchResponse;
+  windowEndAt: Date;
+  windowStartAt: Date;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
   const result = await prisma.hostedCallCircleMatch.updateMany({
@@ -404,17 +409,30 @@ export async function markCallCircleMatchAmAsked(input: {
     },
     where: {
       amAskedAt: null,
+      claimedAt: null,
+      finalAskedAt: null,
+      groupId: input.groupId,
       id: input.matchId,
+      phoneCallId: null,
+      sideAResponse: input.sideAResponse,
+      sideBResponse: input.sideBResponse,
       status: { in: ["proposed", "asking"] },
+      windowEndAt: input.windowEndAt,
+      windowStartAt: input.windowStartAt,
     },
   });
   return result.count > 0;
 }
 
 export async function markCallCircleMatchFinalAsked(input: {
+  groupId: string;
   matchId: string;
   now: Date;
   prisma?: CallCirclePrismaClient;
+  sideAResponse: HostedCallCircleMatchResponse;
+  sideBResponse: HostedCallCircleMatchResponse;
+  windowEndAt: Date;
+  windowStartAt: Date;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
   const result = await prisma.hostedCallCircleMatch.updateMany({
@@ -425,29 +443,44 @@ export async function markCallCircleMatchFinalAsked(input: {
       status: "asking",
     },
     where: {
+      amAskedAt: { not: null },
+      claimedAt: null,
       finalAskedAt: null,
+      groupId: input.groupId,
       id: input.matchId,
+      phoneCallId: null,
+      sideAResponse: input.sideAResponse,
+      sideBResponse: input.sideBResponse,
       status: "both_confirmed",
+      windowEndAt: input.windowEndAt,
+      windowStartAt: input.windowStartAt,
     },
   });
   return result.count > 0;
 }
 
-export async function dropCallCircleMorningMatchForCalendarBusy(input: {
+type CallCircleStageBlockedOutcome = "calendar_busy" | "notification_blocked";
+
+type CallCircleStageDropInput = {
   groupId: string;
   matchId: string;
   now: Date;
+  outcome: CallCircleStageBlockedOutcome;
   prisma?: CallCirclePrismaClient;
   sideAResponse: HostedCallCircleMatchResponse;
   sideBResponse: HostedCallCircleMatchResponse;
   windowEndAt: Date;
   windowStartAt: Date;
-}): Promise<boolean> {
+};
+
+async function dropCallCircleMorningMatchAtCurrentStage(
+  input: CallCircleStageDropInput,
+): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
   const result = await prisma.hostedCallCircleMatch.updateMany({
     data: {
       endedAt: input.now,
-      outcome: "calendar_busy",
+      outcome: input.outcome,
       status: "dropped",
     },
     where: {
@@ -467,24 +500,18 @@ export async function dropCallCircleMorningMatchForCalendarBusy(input: {
   return result.count > 0;
 }
 
-export async function dropCallCircleFinalMatchForCalendarBusy(input: {
-  groupId: string;
-  matchId: string;
-  now: Date;
-  prisma?: CallCirclePrismaClient;
-  sideAResponse: HostedCallCircleMatchResponse;
-  sideBResponse: HostedCallCircleMatchResponse;
-  windowEndAt: Date;
-  windowStartAt: Date;
-}): Promise<boolean> {
+async function dropCallCircleFinalMatchAtCurrentStage(
+  input: CallCircleStageDropInput,
+): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
   const result = await prisma.hostedCallCircleMatch.updateMany({
     data: {
       endedAt: input.now,
-      outcome: "calendar_busy",
+      outcome: input.outcome,
       status: "dropped",
     },
     where: {
+      amAskedAt: { not: null },
       claimedAt: null,
       finalAskedAt: null,
       groupId: input.groupId,
@@ -498,6 +525,42 @@ export async function dropCallCircleFinalMatchForCalendarBusy(input: {
     },
   });
   return result.count > 0;
+}
+
+export async function dropCallCircleMorningMatchForCalendarBusy(
+  input: Omit<CallCircleStageDropInput, "outcome">,
+): Promise<boolean> {
+  return dropCallCircleMorningMatchAtCurrentStage({
+    ...input,
+    outcome: "calendar_busy",
+  });
+}
+
+export async function dropCallCircleFinalMatchForCalendarBusy(
+  input: Omit<CallCircleStageDropInput, "outcome">,
+): Promise<boolean> {
+  return dropCallCircleFinalMatchAtCurrentStage({
+    ...input,
+    outcome: "calendar_busy",
+  });
+}
+
+export async function dropCallCircleMorningMatchForNotificationBlocked(
+  input: Omit<CallCircleStageDropInput, "outcome">,
+): Promise<boolean> {
+  return dropCallCircleMorningMatchAtCurrentStage({
+    ...input,
+    outcome: "notification_blocked",
+  });
+}
+
+export async function dropCallCircleFinalMatchForNotificationBlocked(
+  input: Omit<CallCircleStageDropInput, "outcome">,
+): Promise<boolean> {
+  return dropCallCircleFinalMatchAtCurrentStage({
+    ...input,
+    outcome: "notification_blocked",
+  });
 }
 
 export async function claimCallCircleMatchForConnector(input: {
