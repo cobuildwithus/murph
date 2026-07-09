@@ -4476,7 +4476,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
   });
 
-  it("injects reconnect-required hosted device sync status as dynamic context for due cron lanes", async () => {
+  it("injects active hosted device connection status as dynamic context for due cron lanes", async () => {
     const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
@@ -4492,14 +4492,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       async fetchSnapshot(request) {
         fetchSnapshotRequests.push(request);
-        if (request?.sourceProviderSlug !== "whoop_v2") {
-          return {
-            connections: [],
-            generatedAt: "2026-04-29T00:00:00.000Z",
-            userId: "member_synthetic_phase",
-          };
-        }
-
         return {
           connections: [
             {
@@ -4533,12 +4525,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 {
                   displayName: null,
                   firstSeenAt: "2026-04-22T00:00:00.000Z",
-                  lastErrorCode: "TOKEN_REFRESH_FAILED",
-                  lastErrorMessage: "refresh failed",
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
                   lastSeenAt: "2026-04-29T00:00:00.000Z",
                   resourceCount: 0,
                   sourceProviderSlug: "whoop_v2",
-                  status: "error",
+                  status: "connected",
                 },
               ],
             },
@@ -4576,33 +4568,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(fetchSnapshotRequests).toEqual([]);
     const dynamicContextPrompt =
       await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
-    expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
-      "fitbit",
-      "garmin",
-      "oura",
-      "withings",
-      "whoop_v2",
+    expect(fetchSnapshotRequests).toEqual([
+      expect.objectContaining({
+        includeCredentialMaterial: false,
+        signal: expect.any(AbortSignal),
+      }),
     ]);
-    expect(fetchSnapshotRequests).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          includeCredentialMaterial: false,
-          limit: 4,
-          signal: expect.any(AbortSignal),
-          sourceProviderSlug: "whoop_v2",
-        }),
-      ]),
-    );
     expect(assistantLaneCall?.signal).toBeUndefined();
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
       .toBeUndefined();
-    expect(dynamicContextPrompt).toContain("WHOOP currently needs reconnect");
-    expect(dynamicContextPrompt).toContain("source `whoop_v2`");
-    expect(dynamicContextPrompt).toContain("`TOKEN_REFRESH_FAILED`");
+    expect(dynamicContextPrompt).toContain("WHOOP has an active connection");
     expect(dynamicContextPrompt).toContain(
-      "vault-cli device connect whoop --format json",
+      "Do not offer initial wearable connection",
     );
+    expect(dynamicContextPrompt).not.toContain("needs reconnect");
     expect(dynamicContextPrompt).not.toContain("synthetic-external-account");
     expect(dynamicContextPrompt).not.toContain("refresh failed");
   });
@@ -4620,15 +4600,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async createConnectLink() {
         throw new Error("createConnectLink should not be called.");
       },
-      async fetchSnapshot(request) {
-        if (request?.sourceProviderSlug !== "oura") {
-          return {
-            connections: [],
-            generatedAt: "2026-04-29T00:00:00.000Z",
-            userId: "member_synthetic_phase",
-          };
-        }
-
+      async fetchSnapshot() {
         return {
           connections: [
             {
@@ -4887,7 +4859,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const prompt = await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
     expect(fetchSnapshotCalls).toBe(1);
     expect(fetchSnapshotSignal).toBeInstanceOf(AbortSignal);
-    expect(prompt).toBeNull();
+    expect(prompt).toContain(
+      "No active or reconnect-required wearable connection is present",
+    );
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
   });
 

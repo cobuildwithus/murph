@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-07
+Last verified: 2026-07-09
 
 ## Decision
 
@@ -467,6 +467,14 @@ checkpointed local device-sync job store, not that upstream provider sync
 succeeded. Connection-established and disconnect lifecycle commands may still
 use coarse device-sync mailbox wakes because they are explicit lifecycle events,
 not high-cardinality freshness hints.
+
+Before due background assistant automation, the runtime may read the existing
+web-owned device snapshot once and project current wearable connection state as
+bounded dynamic context. That projection contains only product labels and
+coarse active, reconnect-required, or absent state; it excludes connection and
+account identifiers, credential material, provider payloads, raw health values,
+and diagnostic text. A failed or preempted snapshot read produces no device
+context and must not be interpreted as proof that the user has no connection.
 
 Hosted Stripe webhook routes keep raw request bodies and Stripe signatures in
 the route/service verification path only. After verification, web stores the
