@@ -107,10 +107,6 @@ interface IntegrationIngestRowSource {
   sourcePath: string;
 }
 
-interface ReadIntegrationIngestEntriesByIdOptions {
-  skipUnmatchedMalformedRows?: boolean;
-}
-
 interface ZipCentralDirectoryEntry {
   centralDirectoryOffset: number;
   compressedSize: number;
@@ -328,7 +324,6 @@ async function readIntegrationIngestEntriesByIdFromSources(
   vaultRoot: string,
   sources: readonly IntegrationIngestRowSource[],
   ids: ReadonlySet<string>,
-  options: ReadIntegrationIngestEntriesByIdOptions = {},
 ): Promise<StoredIntegrationIngestEntry[]> {
   if (ids.size === 0) return [];
   const entries: StoredIntegrationIngestEntry[] = [];
@@ -336,16 +331,13 @@ async function readIntegrationIngestEntriesByIdFromSources(
 
   for await (const { raw, relativePath, sourcePath, lineNumber } of readIntegrationIngestJsonlRows(vaultRoot, sources)) {
     if (!isRecord(raw) || typeof raw.id !== "string") {
-      if (options.skipUnmatchedMalformedRows) {
-        continue;
-      }
       throw new VaultError(
         "INTEGRATION_INGEST_INVALID",
         `Integration ingest record in "${sourcePath}" is missing id or importedAt.`,
         { relativePath: sourcePath, lineNumber },
       );
     }
-    if (!options.skipUnmatchedMalformedRows && typeof raw.importedAt !== "string") {
+    if (typeof raw.importedAt !== "string") {
       throw new VaultError(
         "INTEGRATION_INGEST_INVALID",
         `Integration ingest record in "${sourcePath}" is missing id or importedAt.`,
@@ -354,13 +346,6 @@ async function readIntegrationIngestEntriesByIdFromSources(
     }
     if (!ids.has(raw.id)) {
       continue;
-    }
-    if (typeof raw.importedAt !== "string") {
-      throw new VaultError(
-        "INTEGRATION_INGEST_INVALID",
-        `Integration ingest record in "${sourcePath}" is missing id or importedAt.`,
-        { relativePath: sourcePath, lineNumber },
-      );
     }
     assertIntegrationIngestShard(raw.id, raw.importedAt, relativePath);
     const record = parseIntegrationIngestRecord(raw, sourcePath);
@@ -387,23 +372,13 @@ export async function buildIntegrationIngestAppendPlan(
       .filter((source) => source.kind !== "jsonl")
       .map((source) => source.logicalPath),
   );
-  // Keep target shard validation strict, but use non-target sources only to protect global id uniqueness.
   const targetExistingEntries = await readIntegrationIngestEntriesByIdFromSources(
     vaultRoot,
     targetSources,
     requestedIds,
   );
-  const targetShardPathSet = new Set(targetShardPaths);
-  const nonTargetExistingEntries = await readIntegrationIngestEntriesByIdFromSources(
-    vaultRoot,
-    (await listIntegrationIngestRowSources(vaultRoot)).filter(
-      (source) => !targetShardPathSet.has(source.logicalPath),
-    ),
-    requestedIds,
-    { skipUnmatchedMalformedRows: true },
-  );
   const existingById = new Map(
-    [...targetExistingEntries, ...nonTargetExistingEntries].map((entry) =>
+    targetExistingEntries.map((entry) =>
       [entry.record.id, entry.record] as const,
     ),
   );
@@ -575,6 +550,7 @@ export async function appendArchivedIntegrationIngestShard({
     );
   }
 
+  validateIntegrationIngestArchiveBaseContent(source, baseContent);
   const appendPlan = await buildIntegrationIngestAppendPlan(vaultRoot, records, {
     allowArchivedShardAmendments: true,
   });
@@ -590,6 +566,43 @@ export async function appendArchivedIntegrationIngestShard({
   return {
     originalSize,
   };
+}
+
+function validateIntegrationIngestArchiveBaseContent(
+  source: IntegrationIngestRowSource,
+  baseContent: string,
+): void {
+  const seen = new Map<string, string>();
+  const lines = baseContent.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.length === 0) {
+      continue;
+    }
+    const lineNumber = index + 1;
+    const lineBytes = Buffer.byteLength(line, "utf8");
+    if (lineBytes > MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ROW_TOO_LARGE",
+        `Integration ingest row in "${source.sourcePath}" exceeds the ${MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES}-byte journal limit.`,
+        { lineNumber, relativePath: source.sourcePath, rowPayloadBytes: lineBytes },
+      );
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(line);
+    } catch (error) {
+      throw new VaultError("VAULT_INVALID_JSONL", `Invalid JSON on line ${lineNumber}.`, {
+        relativePath: source.sourcePath,
+        lineNumber,
+        cause: error instanceof Error ? error.message : String(error),
+      });
+    }
+    const record = parseIntegrationIngestRecord(raw, source.sourcePath);
+    assertIntegrationIngestShard(record.id, record.importedAt, source.logicalPath);
+    assertIntegrationIngestRecordIntegrity(record);
+    assertUniqueIntegrationIngestId(seen, record.id, source.logicalPath);
+  }
 }
 
 export async function truncateArchivedIntegrationIngestShard({

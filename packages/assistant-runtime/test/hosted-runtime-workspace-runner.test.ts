@@ -2279,6 +2279,211 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("snapshots dirty runtime state when checkpointing canonical write receipts", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Runner Dirty Receipt Snapshot Test Vault",
+      vaultRoot,
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeCheckpointInputs: HostedWorkspaceRunnerRuntimeStatusCheckpointInput[] = [];
+    const snapshotInputs: Array<{ reason: string }> = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const workspacePort = createWorkspacePort({ checkpointRequests });
+    const dirtyReceiptSnapshotRef = createBundleRef({
+      hash: "hash_synthetic_dirty_receipt_snapshot",
+      key: "snapshots/synthetic-dirty-receipt-snapshot.tar.zst",
+      size: 512,
+    });
+    const checkpointRequestBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: (snapshotInput) => {
+        snapshotInputs.push(snapshotInput);
+        return {
+          snapshotRef: dirtyReceiptSnapshotRef,
+        };
+      },
+      metadata: {
+        attemptId: "attempt_synthetic_runner_dirty_receipt_snapshot",
+        expectedWorkspaceVersion: "0",
+        leaseGeneration: "1",
+      },
+    });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRuntimeRedactedStatus: async (checkpointInput) => {
+          runtimeCheckpointInputs.push(checkpointInput);
+          assert.equal(checkpointInput.checkpointSnapshot, true);
+          assert.equal(checkpointInput.reason, "canonical_runtime_commit");
+          return await checkpointRequestBuilder.checkpoint!(
+            {
+              nextWakeAt: checkpointInput.workspace?.nextWakeAt ?? null,
+              nextWakeReason: checkpointInput.workspace?.nextWakeReason ?? null,
+              reason: "canonical_runtime_commit",
+              redactedStatus: checkpointInput.redactedStatus,
+            },
+            workspacePort,
+          );
+        },
+        checkpointRequestBuilder,
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Initial mailbox import was already provided.");
+        },
+        initialMailboxImport: createDeferredMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort,
+        }),
+        requestId: "request_synthetic_runner_dirty_receipt_snapshot",
+        async runAssistantPhase() {
+          await applyCanonicalWriteBatch({
+            audit: {
+              action: "experiment_update",
+              commandName: "test.dirtyReceiptSnapshot",
+              summary: "Synthetic canonical write on dirty runtime state.",
+            },
+            operationType: "dirty_receipt_snapshot_test",
+            summary: "Synthetic canonical write on dirty runtime state",
+            textWrites: [
+              {
+                content: "Synthetic dirty receipt snapshot\n",
+                overwrite: true,
+                relativePath: "bank/dirty-receipt-snapshot.md",
+              },
+            ],
+            vaultRoot,
+          });
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: createBundleRef({
+            hash: "hash_synthetic_stale_workspace_snapshot",
+            key: "snapshots/synthetic-stale-workspace.tar.zst",
+            size: 128,
+          }),
+          version: "0",
+        }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.latestWorkspace?.version, "1");
+      assert.deepEqual(runtimeCheckpointInputs.map((input) => input.reason), [
+        "canonical_runtime_commit",
+      ]);
+      assert.deepEqual(snapshotInputs.map((input) => input.reason), [
+        "canonical_runtime_commit",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
+      ]);
+      assert.deepEqual(checkpointRequests[0]?.snapshotRef, dirtyReceiptSnapshotRef);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("does not publish receipt-log status when a post-checkpoint canonical receipt checkpoint fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Runner Failed Receipt Checkpoint Test Vault",
+      vaultRoot,
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    let checkpointAttempted = false;
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRuntimeRedactedStatus: async () => {
+          checkpointAttempted = true;
+          throw new Error("Synthetic canonical receipt checkpoint failure.");
+        },
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_failed_receipt_checkpoint",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Initial mailbox import was already provided.");
+        },
+        initialMailboxImport: createCheckpointedMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_failed_receipt_checkpoint",
+        async runAssistantPhase() {
+          return {
+            afterCheckpoint: async () => {
+              await applyCanonicalWriteBatch({
+                audit: {
+                  action: "experiment_update",
+                  commandName: "test.failedReceiptCheckpoint",
+                  summary: "Synthetic canonical write with failed receipt checkpoint.",
+                },
+                operationType: "failed_receipt_checkpoint_test",
+                summary: "Synthetic canonical write with failed receipt checkpoint",
+                textWrites: [
+                  {
+                    content: "Synthetic failed receipt checkpoint\n",
+                    overwrite: true,
+                    relativePath: "bank/failed-receipt-checkpoint.md",
+                  },
+                ],
+                vaultRoot,
+              });
+              return {
+                checkpointReason: "canonical_runtime_commit",
+              };
+            },
+            checkpointReason: "assistant_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(checkpointAttempted, true);
+      assert.equal(
+        result.runtimeRedactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        undefined,
+      );
+      assert.equal(
+        result.runtimeRedactedStatus?.hostedCanonicalWriteReceiptLogByteSize,
+        undefined,
+      );
+      assert.equal(
+        result.runtimeRedactedStatus?.hostedCanonicalWriteReceiptLogEntryCount,
+        undefined,
+      );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("requests an immediate idle wake after assistant context snapshot source writes", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({

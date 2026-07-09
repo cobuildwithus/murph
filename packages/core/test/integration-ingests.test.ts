@@ -782,7 +782,7 @@ test("integration ingest append plans require opt-in before amending archived mo
   );
 });
 
-test("integration ingest append plans reject live id conflicts outside target months", async () => {
+test("integration ingest append plans do not scan live id conflicts outside target months", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-cross-shard-id");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
 
@@ -799,17 +799,14 @@ test("integration ingest append plans reject live id conflicts outside target mo
     eventId: "evt_CrossShardDuplicate2",
     importedAt: "2025-12-12T09:00:00.000Z",
   });
-  await assert.rejects(
-    buildIntegrationIngestAppendPlan(vaultRoot, [incomingRecord]),
-    (error) => {
-      assert.equal(error instanceof VaultError, true);
-      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ID_CONFLICT");
-      return true;
-    },
-  );
+  const plan = await buildIntegrationIngestAppendPlan(vaultRoot, [incomingRecord]);
+  assert.deepEqual(plan.appendedIds, ["xfm_CrossShardDuplicate1"]);
+  assert.deepEqual([...plan.payloads.keys()], [
+    "ledger/integration-ingests/2025/2025-12.jsonl",
+  ]);
 });
 
-test("integration ingest append plans reject archived id conflicts outside target months", async () => {
+test("integration ingest append plans do not scan archived id conflicts outside target months", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-cross-shard-archive-id");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
 
@@ -826,14 +823,11 @@ test("integration ingest append plans reject archived id conflicts outside targe
     eventId: "evt_CrossShardArchiveDuplicate2",
     importedAt: "2025-12-12T09:00:00.000Z",
   });
-  await assert.rejects(
-    buildIntegrationIngestAppendPlan(vaultRoot, [incomingRecord]),
-    (error) => {
-      assert.equal(error instanceof VaultError, true);
-      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ID_CONFLICT");
-      return true;
-    },
-  );
+  const plan = await buildIntegrationIngestAppendPlan(vaultRoot, [incomingRecord]);
+  assert.deepEqual(plan.appendedIds, ["xfm_CrossShardArchiveDuplicate1"]);
+  assert.deepEqual([...plan.payloads.keys()], [
+    "ledger/integration-ingests/2025/2025-12.jsonl",
+  ]);
 });
 
 test("generic JSONL append paths refuse archived integration ingest shards", async () => {
@@ -957,6 +951,53 @@ test("integration ingest archive amendments roll back with canonical write batch
     ["xfm_RollbackArchivedAppend1"],
   );
   assert.equal(await fs.readFile(path.join(vaultRoot, conflictPath), "utf8"), "existing\n");
+});
+
+test("integration ingest archive amendments validate existing archived base rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-archive-base-validation");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const logicalPath = "ledger/integration-ingests/2025/2025-01.jsonl";
+  const archivedRecord = makeIntegrationIngestRecord({
+    id: "xfm_ArchiveBaseValidationExisting1",
+    eventId: "evt_ArchiveBaseValidationExisting1",
+    importedAt: "2025-01-12T09:00:00.000Z",
+  });
+  const corruptedRecord = {
+    ...archivedRecord,
+    parts: archivedRecord.parts.map((part) => ({
+      ...part,
+      sha256: "0".repeat(64),
+    })),
+  } satisfies IntegrationIngestRecord;
+  await writeIntegrationIngestZipArchive(vaultRoot, logicalPath, [corruptedRecord]);
+
+  const newRecord = makeIntegrationIngestRecord({
+    id: "xfm_ArchiveBaseValidationNew1",
+    eventId: "evt_ArchiveBaseValidationNew1",
+    importedAt: "2025-01-13T09:00:00.000Z",
+  });
+  const amendmentPlan = await buildIntegrationIngestAppendPlan(
+    vaultRoot,
+    [newRecord],
+    { allowArchivedShardAmendments: true },
+  );
+
+  await assert.rejects(
+    runCanonicalWrite({
+      vaultRoot,
+      operationType: "integration_ingest_archive_base_validation",
+      summary: "reject archived integration ingest amendment with invalid base",
+      mutate: async ({ batch }) => {
+        await stageIntegrationIngestAppendPlan(batch, amendmentPlan);
+      },
+    }),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_EVIDENCE_INTEGRITY_INVALID");
+      return true;
+    },
+  );
 });
 
 test("hosted JSONL receipt replay refuses archived integration ingest shards", async () => {

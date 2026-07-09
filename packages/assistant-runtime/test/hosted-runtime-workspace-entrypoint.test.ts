@@ -15835,7 +15835,10 @@ describe("hosted workspace runtime entrypoint", () => {
       }), {
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}`);
-          assert.equal(snapshotInput.reason, "idle_shutdown");
+          assert.equal(
+            ["canonical_runtime_commit", "idle_shutdown"].includes(snapshotInput.reason),
+            true,
+          );
           const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
           const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
           artifactBytesByHash.set(hotHash, hotSnapshot.bundle);
@@ -15888,6 +15891,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(assistantPhaseCalls, 2);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_canonical_pre_checkpoint_002",
+      ]);
+      assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
+        "snapshot:canonical_runtime_commit",
+        "snapshot:idle_shutdown",
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",

@@ -125,9 +125,14 @@ type HostedWorkspaceSnapshotCheckpointMailboxInput =
     reason: Exclude<HostedWorkspaceCheckpointReason, "idle_shutdown">;
   };
 
+interface HostedWorkspaceSnapshotCheckpointCanonicalRuntimeInput {
+  reason: "canonical_runtime_commit";
+}
+
 export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
   (
     | HostedWorkspaceSnapshotCheckpointMailboxInput
+    | HostedWorkspaceSnapshotCheckpointCanonicalRuntimeInput
     | {
       reason: "idle_shutdown";
     }
@@ -293,6 +298,7 @@ export interface HostedWorkspaceRunnerDeferredUsageCapture {
 }
 
 export interface HostedWorkspaceRunnerRuntimeStatusCheckpointInput {
+  checkpointSnapshot?: boolean;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
   reason: Exclude<HostedWorkspaceCheckpointReason, "idle_shutdown">;
@@ -1921,17 +1927,21 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           input.readPreviousRedactedStatus(),
           receiptLogStatus,
         ) ?? receiptLogStatus;
-      input.recordRedactedStatus(receiptLogStatus);
       if (!input.input.checkpointRuntimeRedactedStatus) {
         throw new TypeError("Hosted canonical write receipt checkpoint requires runtime status checkpoint support.");
       }
+      const checkpointSnapshot = input.checkpointRequestBuilder.hasRuntimeStateDirty();
       const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
+        checkpointSnapshot,
         reason: "canonical_runtime_commit",
         redactedStatus: checkpointRedactedStatus,
         workspace: input.checkpointRequestBuilder.latestWorkspace() ?? input.input.workspace,
       });
       input.checkpointRequestBuilder.recordWorkspaceCheckpoint(checkpoint);
-      input.checkpointRequestBuilder.markRuntimeStateDirty();
+      input.recordRedactedStatus(receiptLogStatus);
+      if (!checkpointSnapshot) {
+        input.checkpointRequestBuilder.markRuntimeStateDirty();
+      }
       const snapshotDirtyDomains =
         listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(
           writeInput.receipt,
@@ -1942,6 +1952,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
             domains: snapshotDirtyDomains,
             vaultRoot: input.input.vaultRoot,
           });
+          input.checkpointRequestBuilder.markRuntimeStateDirty();
           input.onAssistantContextSnapshotDirty?.();
         } catch (error) {
           warnAssistantBestEffortFailure({

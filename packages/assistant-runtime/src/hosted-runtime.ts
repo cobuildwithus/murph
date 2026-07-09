@@ -112,6 +112,7 @@ import {
 import type {
   HostedWorkspaceCheckpointRequestBuilder,
   HostedWorkspaceSnapshotCheckpointBuilder,
+  HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
   createHostedWorkspaceCheckpointRequestBuilder,
@@ -1020,22 +1021,48 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
       assertRuntimeNotAborted();
       const workspace = checkpointInput.workspace;
+      const checkpointNextWakeAt = Object.hasOwn(checkpointInput, "nextWakeAt")
+        ? checkpointInput.nextWakeAt ?? null
+        : workspace?.nextWakeAt ?? null;
+      const checkpointNextWakeReason = Object.hasOwn(checkpointInput, "nextWakeReason")
+        ? checkpointInput.nextWakeReason ?? null
+        : workspace?.nextWakeReason ?? null;
+      if (
+        checkpointInput.checkpointSnapshot
+        && checkpointInput.reason !== "canonical_runtime_commit"
+      ) {
+        throw new TypeError("Hosted runtime snapshot status checkpoints are only supported for canonical runtime commits.");
+      }
+      const canonicalRuntimeCheckpointRequestInput: HostedWorkspaceSnapshotCheckpointRequestBuilderInput = {
+        nextWakeAt: checkpointNextWakeAt,
+        nextWakeReason: checkpointNextWakeReason,
+        reason: "canonical_runtime_commit",
+        redactedStatus: checkpointInput.redactedStatus,
+      };
       const checkpoint = await raceHostedRuntimeCancellation(
-        foregroundWorkspacePort.checkpoint({
-          attemptId: checkpointMetadata.attemptId,
-          expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
-          inboxMediaRetentionWakeAt: workspace?.inboxMediaRetentionWakeAt ?? null,
-          leaseGeneration: checkpointMetadata.leaseGeneration,
-          nextWakeAt: Object.hasOwn(checkpointInput, "nextWakeAt")
-            ? checkpointInput.nextWakeAt ?? null
-            : workspace?.nextWakeAt ?? null,
-          nextWakeReason: Object.hasOwn(checkpointInput, "nextWakeReason")
-            ? checkpointInput.nextWakeReason ?? null
-            : workspace?.nextWakeReason ?? null,
-          reason: checkpointInput.reason,
-          redactedStatus: checkpointInput.redactedStatus,
-          snapshotRef: workspace?.snapshotRef ?? null,
-        }),
+        checkpointInput.checkpointSnapshot
+          ? (
+              checkpointRequestBuilder.checkpoint
+                ? Promise.resolve(checkpointRequestBuilder.checkpoint(
+                    canonicalRuntimeCheckpointRequestInput,
+                    foregroundWorkspacePort,
+                  ))
+                : Promise.resolve(checkpointRequestBuilder.createRequest(
+                    canonicalRuntimeCheckpointRequestInput,
+                  ))
+                    .then((request) => foregroundWorkspacePort.checkpoint(request))
+            )
+          : foregroundWorkspacePort.checkpoint({
+              attemptId: checkpointMetadata.attemptId,
+              expectedWorkspaceVersion: checkpointMetadata.expectedWorkspaceVersion,
+              inboxMediaRetentionWakeAt: workspace?.inboxMediaRetentionWakeAt ?? null,
+              leaseGeneration: checkpointMetadata.leaseGeneration,
+              nextWakeAt: checkpointNextWakeAt,
+              nextWakeReason: checkpointNextWakeReason,
+              reason: checkpointInput.reason,
+              redactedStatus: checkpointInput.redactedStatus,
+              snapshotRef: workspace?.snapshotRef ?? null,
+            }),
         runtimeAbortController.signal,
       );
       assertRuntimeNotAborted();
