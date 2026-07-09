@@ -46,6 +46,7 @@ const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY =
 export type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
   | "apply-member-channels-update"
+  | "apply-member-preferences"
   | "dispatch-assistant-notification"
   | "run-device-sync-wake"
   | "apply-runtime-control-request";
@@ -57,6 +58,7 @@ export interface HostedSystemMailboxPendingItem {
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   mailboxDedupeKey: string;
+  mailboxLaneSeq: string | null;
   nextAttemptAt: string | null;
   occurredAt: string;
   postCheckpointRecord: HostedSystemMailboxPostCheckpointRecord | null;
@@ -183,6 +185,7 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
     lastErrorCode: null,
     lastErrorMessage: null,
     mailboxDedupeKey: HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY,
+    mailboxLaneSeq: null,
     nextAttemptAt: input.nextWakeAt,
     occurredAt,
     postCheckpointRecord: null,
@@ -260,6 +263,11 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
   if (input.allowedRouteActions) {
+    if (systemMailboxAllowedRouteActionsOnlyMemberPreferences(input.allowedRouteActions)) {
+      const item = findLatestPendingHostedMemberPreferencesItem(input.state);
+      return item && systemMailboxItemIsDue(item, input.now) ? item : null;
+    }
+
     const item = input.state.pending.find((pending) =>
       systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
     ) ?? null;
@@ -380,6 +388,10 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
       record.mailboxDedupeKey,
       "hosted system mailbox mailboxDedupeKey",
     ),
+    mailboxLaneSeq: readOptionalPositiveIntegerString(
+      record.mailboxLaneSeq,
+      "hosted system mailbox mailboxLaneSeq",
+    ),
     nextAttemptAt: record.nextAttemptAt === null || record.nextAttemptAt === undefined
       ? null
       : readRequiredString(record.nextAttemptAt, "hosted system mailbox nextAttemptAt"),
@@ -403,6 +415,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
   if (
     value === "apply-member-activation"
     || value === "apply-member-channels-update"
+    || value === "apply-member-preferences"
     || value === "dispatch-assistant-notification"
     || value === "run-device-sync-wake"
     || value === "apply-runtime-control-request"
@@ -540,6 +553,11 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem[] {
   if (input.allowedRouteActions) {
+    if (systemMailboxAllowedRouteActionsOnlyMemberPreferences(input.allowedRouteActions)) {
+      const item = findLatestPendingHostedMemberPreferencesItem(input.state);
+      return item ? [item] : [];
+    }
+
     const item = input.state.pending.find((pending) =>
       systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
     ) ?? null;
@@ -563,6 +581,56 @@ function systemMailboxItemRouteActionAllowed(
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null,
 ): boolean {
   return !allowedRouteActions || allowedRouteActions.includes(item.routeAction);
+}
+
+function systemMailboxAllowedRouteActionsOnlyMemberPreferences(
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[],
+): boolean {
+  return allowedRouteActions.length === 1
+    && allowedRouteActions[0] === "apply-member-preferences";
+}
+
+function findLatestPendingHostedMemberPreferencesItem(
+  state: HostedSystemMailboxState,
+): HostedSystemMailboxPendingItem | null {
+  let latest: HostedSystemMailboxPendingItem | null = null;
+  for (const item of state.pending) {
+    if (
+      item.status !== "pending"
+      || item.routeAction !== "apply-member-preferences"
+    ) {
+      continue;
+    }
+    if (!latest || compareHostedSystemMailboxPendingItemMailboxSequence(item, latest) > 0) {
+      latest = item;
+    }
+  }
+  return latest;
+}
+
+export function compareHostedSystemMailboxPendingItemMailboxSequence(
+  left: HostedSystemMailboxPendingItem,
+  right: HostedSystemMailboxPendingItem,
+): number {
+  if (left.mailboxLaneSeq && right.mailboxLaneSeq) {
+    return comparePositiveIntegerStrings(left.mailboxLaneSeq, right.mailboxLaneSeq);
+  }
+  if (left.mailboxLaneSeq) {
+    return 1;
+  }
+  if (right.mailboxLaneSeq) {
+    return -1;
+  }
+  return 0;
+}
+
+function comparePositiveIntegerStrings(left: string, right: string): number {
+  const leftValue = BigInt(left);
+  const rightValue = BigInt(right);
+  if (leftValue === rightValue) {
+    return 0;
+  }
+  return leftValue < rightValue ? -1 : 1;
 }
 
 function systemMailboxItemIsDue(
@@ -609,6 +677,7 @@ function hostedSystemMailboxPendingItemsMatch(
     && left.attemptCount === right.attemptCount
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey
+    && left.mailboxLaneSeq === right.mailboxLaneSeq
     && left.nextAttemptAt === right.nextAttemptAt
     && left.occurredAt === right.occurredAt
     && left.requestId === right.requestId
@@ -621,6 +690,17 @@ function readRequiredString(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a non-empty string.`);
   }
   return value;
+}
+
+function readOptionalPositiveIntegerString(value: unknown, label: string): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const seq = readRequiredString(value, label);
+  if (!/^[1-9]\d*$/u.test(seq)) {
+    throw new TypeError(`${label} must be a positive decimal string.`);
+  }
+  return seq;
 }
 
 function readOptionalStringArray(value: unknown, label: string): string[] | undefined {

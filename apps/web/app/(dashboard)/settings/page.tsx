@@ -38,6 +38,7 @@ export const metadata: Metadata = createMurphPageMetadata({
 
 type SettingsSearchParams = {
   addEmail?: string | string[] | undefined;
+  voice?: string | string[] | undefined;
 };
 
 export default async function SettingsPage({
@@ -48,6 +49,8 @@ export default async function SettingsPage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const openEmailLink =
     readFirstSearchParamValue(resolvedSearchParams.addEmail) === "true";
+  const openVoiceLink =
+    readFirstSearchParamValue(resolvedSearchParams.voice) === "true";
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
 
@@ -179,6 +182,7 @@ export default async function SettingsPage({
             account={accountWithPrivyDisplay}
             murphPhoneNumber={routing?.linqRecipientPhone ?? routing?.pendingLinqRecipientPhone ?? null}
             openEmailLink={openEmailLink}
+            openVoiceLink={openVoiceLink}
           />
         ) : null}
       </section>

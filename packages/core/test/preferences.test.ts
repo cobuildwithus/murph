@@ -10,6 +10,7 @@ import {
   readJsonlRecords,
   readPreferencesDocument,
   resolvePreferencesDocumentPath,
+  updateAssistantPreferences,
   updateWearablePreferences,
   updateWorkoutUnitPreferences,
   validateVault,
@@ -288,6 +289,81 @@ test("reads and writes canonical wearable preferences from the singleton prefere
   assert.equal(noChange.created, false);
   assert.equal(noChange.updated, false);
   assert.equal(noChange.document.updatedAt, "2026-04-08T10:00:00.000Z");
+});
+
+test("reads and writes canonical assistant preferences from the singleton preferences owner", async () => {
+  const vaultRoot = await createTempVault();
+
+  const updated = await updateAssistantPreferences({
+    vaultRoot,
+    updatedAt: "2026-07-08T10:00:00.000Z",
+    preferences: {
+      tone: "formal",
+      voice: "deep-calm",
+    },
+  });
+  assert.equal(updated.created, true);
+  assert.equal(updated.updated, true);
+  assert.deepEqual(updated.document.assistant, {
+    tone: "formal",
+    voice: "deep-calm",
+  });
+
+  const serialized = await readFile(path.join(vaultRoot, "bank/preferences.json"), "utf8");
+  assert.match(serialized, /"assistant": \{/u);
+  assert.match(serialized, /"tone": "formal"/u);
+  assert.match(serialized, /"voice": "deep-calm"/u);
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: resolveAuditShardPath("2026-07-08T10:00:00.000Z"),
+  });
+  assert.ok(
+    auditRecords.some((record) => {
+      const audit = asAuditLikeRecord(record);
+      return (
+        audit.action === "preferences_update" &&
+        audit.commandName === "core.updateAssistantPreferences" &&
+        audit.changes?.[0]?.path === "bank/preferences.json"
+      );
+    }),
+  );
+
+  const noChange = await updateAssistantPreferences({
+    vaultRoot,
+    preferences: {
+      tone: "formal",
+    },
+  });
+  assert.equal(noChange.created, false);
+  assert.equal(noChange.updated, false);
+  assert.equal(noChange.document.updatedAt, "2026-07-08T10:00:00.000Z");
+
+  await updateWorkoutUnitPreferences({
+    vaultRoot,
+    updatedAt: "2026-07-08T10:05:00.000Z",
+    preferences: {
+      weight: "kg",
+    },
+  });
+  await updateWearablePreferences({
+    vaultRoot,
+    updatedAt: "2026-07-08T10:06:00.000Z",
+    preferences: {
+      desiredProviders: ["oura"],
+    },
+  });
+
+  const document = await readPreferencesDocument(vaultRoot);
+  assert.deepEqual(document.assistant, {
+    tone: "formal",
+    voice: "deep-calm",
+  });
+  assert.deepEqual(document.workoutUnitPreferences, {
+    weight: "kg",
+  });
+  assert.deepEqual(document.wearablePreferences, {
+    desiredProviders: ["oura"],
+  });
 });
 
 test("rejects legacy preference documents without wearable preferences", async () => {

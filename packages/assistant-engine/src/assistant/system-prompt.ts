@@ -8,7 +8,10 @@ import {
   ASSISTANT_SKILLS,
   buildAssistantSkillFileRef,
 } from "../assistant-skill-assets.js";
-import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
+import {
+  MURPH_PRODUCT_ORIGIN,
+  type AssistantTonePreference,
+} from "@murphai/contracts";
 import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
@@ -36,6 +39,7 @@ export interface AssistantSystemPromptInput {
   assistantKnowledgeToolsAvailable?: boolean;
   assistantSupportedExperimentProtocols?: readonly AssistantSupportedExperimentProtocol[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
+  assistantTone?: AssistantTonePreference | null;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
   currentLocalDate: string;
@@ -58,6 +62,7 @@ export interface AssistantNotificationDecisionSystemPromptInput {
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
+  assistantTone?: AssistantTonePreference | null;
   channel: string | null;
   currentLocalDate: string;
   currentTimeZone: string;
@@ -115,6 +120,35 @@ function normalizeAssistantDynamicContextPrompts(
   return (prompts ?? [])
     .map((prompt) => prompt.trim())
     .filter((prompt) => prompt.length > 0);
+}
+
+const ASSISTANT_STYLE_SETTINGS_TARGET_PATTERN =
+  /\b(?:murph|you|your|assistant)\b/iu;
+const ASSISTANT_STYLE_SETTINGS_CHANGE_PATTERN =
+  /\b(?:adjust|be|change|choose|customize|make|pick|prefer|preference|set|speak|switch|talk|text|tweak|update|write)\b/iu;
+const ASSISTANT_STYLE_SETTINGS_STYLE_PATTERN =
+  /\b(?:casual|direct|formal|sound|sounds|speak|speaks|style|talk|talks|texting|tone|voice|warmer|write|writes|writing)\b/iu;
+
+export function buildAssistantStyleSettingsDynamicPrompt(
+  currentUserPrompt: string | null | undefined,
+): string | null {
+  const prompt = currentUserPrompt?.trim() ?? "";
+  if (!prompt) {
+    return null;
+  }
+
+  if (
+    !ASSISTANT_STYLE_SETTINGS_TARGET_PATTERN.test(prompt)
+    || !ASSISTANT_STYLE_SETTINGS_CHANGE_PATTERN.test(prompt)
+    || !ASSISTANT_STYLE_SETTINGS_STYLE_PATTERN.test(prompt)
+  ) {
+    return null;
+  }
+
+  return [
+    "Assistant style settings:",
+    "- The member is asking about changing Murph's voice, tone, or texting style. Casually mention once that they can change it at `/settings?voice=true` if useful. Do not push the setting beyond answering this request.",
+  ].join("\n");
 }
 
 function renderAssistantToolNameAliases(
@@ -366,12 +400,32 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
       currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
       currentTimeZone: input.currentTimeZone,
     }),
+    buildAssistantTonePreferenceText(input.assistantTone ?? null),
     buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantOnboardingGuidanceText({
       enabled: input.onboardingGuidance,
     }),
     buildAssistantUserFacingLinkSelfCheckText()
   );
+}
+
+function buildAssistantTonePreferenceText(
+  tone: AssistantTonePreference | null,
+): string | null {
+  switch (tone) {
+    case "casual":
+      return [
+        "Assistant tone preference:",
+        "- The user chose casual. Keep replies relaxed and conversational; lowercase is okay when natural, and light slang is okay when it fits. Stay clear, respectful, and health-safe.",
+      ].join("\n");
+    case "formal":
+      return [
+        "Assistant tone preference:",
+        "- The user chose formal. Use complete sentences, standard capitalization, and no slang. Stay warm and direct.",
+      ].join("\n");
+    default:
+      return null;
+  }
 }
 
 function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): string {
@@ -453,6 +507,7 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
         input.assistantDynamicContextPrompts
       ),
       input.assistantContextSnapshotPrompt ?? null,
+      buildAssistantTonePreferenceText(input.assistantTone ?? null),
       buildAssistantNotificationDecisionGuidanceText(input.channel),
       buildAssistantUserFacingLinkSelfCheckText()
     ),

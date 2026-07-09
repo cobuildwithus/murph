@@ -1,6 +1,6 @@
 # Murph Contact Card Picker
 
-Last verified: 2026-07-03
+Last verified: 2026-07-08
 Status: Implemented (picker on `/design?tab=components`, vCard route, initialVisit + signup-success placement); persisted avatar choice not started
 
 ## Why
@@ -11,7 +11,7 @@ Murph's contact card ships with one canonical headshot (the hooded character). S
 
 Right after signup, adding Murph as a contact is the first thing the member sees:
 
-1. `/home?initialVisit=true` (`apps/web/app/(dashboard)/home/initial-visit-dialog-client.tsx`) is a two-stage sequence: members whose primary contact channel is a text line see the contact-card picker first; on Add, Skip, or dismiss they land on the existing welcome dialog ("Text Murph" / "Start exploring"). Members without a text line (Telegram or email only) skip straight to the welcome dialog.
+1. `/home?initialVisit=true` (`apps/web/app/(dashboard)/home/initial-visit-dialog-client.tsx`) is a three-stage sequence: members whose primary contact channel is a text line see the contact-card picker first; on Add, Skip, or dismiss they enter the assistant tone and voice picker before the existing welcome dialog ("Text Murph" / "Start exploring"). Members without a text line (Telegram, email only, or no channel yet) start at the tone and voice picker because there is no phone contact card to save.
 2. The website signup success stage (`join-invite-stage-server.tsx`) renders `MurphAddToContactsButton`, which opens the same picker. This replaced the old inline `data:` URI vCard that had no photo and no backup line.
 
 Both surfaces reuse one component: `MurphContactCardPicker` in `apps/web/src/components/murph/murph-contact-card-picker.tsx` (drawer under 768px, dialog above, via `useIsMobile`).
@@ -35,7 +35,7 @@ Target range is five to ten options. Option ids are stable identifiers; never re
 ## Invariants and non-goals
 
 - Do not write member avatar choices to Linq per-line contact cards. Lines are pooled across members and the contact-card cron (`reconcileHostedLinqContactCards`) keeps the provider card shared and name/phone-only; a per-member choice written there would fight the reconciler and leak one member's pick to others on the same line.
-- No persona or behavior change. The assistant prompt, name, and voice are untouched; only the card image varies.
+- Contact-card choices do not change assistant behavior. Tone and voice preferences are owned separately by `agent-docs/product-specs/murph-tone-and-voice.md`.
 - v1 keeps no server state for the choice. Optional follow-up: persist the chosen avatar id on the hosted member so the group contact-card share tool and future re-sends use it.
 
 ## Current state

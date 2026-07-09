@@ -6,11 +6,12 @@ import {
   resolveAssistantModelBehaviorProfile,
 } from '../src/assistant/model-behavior.js'
 import {
-  buildAssistantNotificationDecisionSystemPromptLayers,
-  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
+  buildAssistantStyleSettingsDynamicPrompt,
   buildAssistantSystemPrompt,
   buildAssistantSystemPromptLayers,
   buildAssistantSystemPromptWithCacheMetadata,
+  buildAssistantNotificationDecisionSystemPromptLayers,
+  buildAssistantNotificationDecisionSystemPromptWithCacheMetadata,
   resolveAssistantMurphProductBaseUrl,
   type AssistantNotificationDecisionSystemPromptInput,
   type AssistantSystemPromptInput,
@@ -107,6 +108,86 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain(
       "Work and life context may still be relevant when it affects the user's health, schedule, stress, travel, or routines.",
     )
+  })
+
+  it('adds assistant tone preference only when a saved tone exists', () => {
+    const defaultLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+    expect(defaultLayers.threadContextPrompt).not.toContain(
+      'Assistant tone preference:',
+    )
+
+    const casualLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantTone: 'casual',
+      }),
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'Assistant tone preference:',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'relaxed and conversational',
+    )
+    expect(casualLayers.threadContextPrompt).toContain(
+      'lowercase is okay',
+    )
+
+    const formalLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantTone: 'formal',
+      }),
+    )
+    expect(formalLayers.threadContextPrompt).toContain(
+      'Assistant tone preference:',
+    )
+    expect(formalLayers.threadContextPrompt).toContain(
+      'complete sentences',
+    )
+    expect(formalLayers.threadContextPrompt).toContain('no slang')
+  })
+
+  it('keeps the settings voice deep link out of the default stable prompt', () => {
+    const layers = buildAssistantSystemPromptLayers(createCommonCodexPromptInput())
+
+    expect(layers.prompt).not.toContain('/settings?voice=true')
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      '/settings?voice=true',
+    )
+    expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
+  })
+
+  it('mentions the settings voice deep link through dynamic context for current style-change asks', () => {
+    const stylePrompt = buildAssistantStyleSettingsDynamicPrompt(
+      'Can you change your voice?',
+    )
+    if (!stylePrompt) {
+      throw new Error('Expected assistant style settings prompt.')
+    }
+
+    expect(stylePrompt).toContain('/settings?voice=true')
+    expect(
+      buildAssistantStyleSettingsDynamicPrompt('What happened to my HRV?'),
+    ).toBeNull()
+
+    const baseline = buildAssistantSystemPromptWithCacheMetadata(
+      createCommonCodexPromptInput(),
+    )
+    const withStylePrompt = buildAssistantSystemPromptWithCacheMetadata(
+      createCommonCodexPromptInput({
+        assistantDynamicContextPrompts: [stylePrompt],
+      }),
+    )
+
+    expect(withStylePrompt.layers.dynamicTurnContextPrompt).toContain(
+      '/settings?voice=true',
+    )
+    expect(withStylePrompt.layers.stableRouteCapabilityPrompt).not.toContain(
+      '/settings?voice=true',
+    )
+    expect(
+      withStylePrompt.cacheMetadata.stableRouteCapabilityPromptHash,
+    ).toBe(baseline.cacheMetadata.stableRouteCapabilityPromptHash)
   })
 
   it('requires pending vault-file approvals to include the returned handoff link and approved sends to avoid stock queue copy', () => {
@@ -1116,6 +1197,33 @@ Execution context:
         layers.dynamicTurnContextPrompt,
       ].join('\n\n'),
     )
+  })
+
+  it('applies assistant tone preference to notification decision prompts', () => {
+    const prompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({
+          assistantTone: 'casual',
+        }),
+      ).prompt
+
+    expect(prompt).toContain('Assistant tone preference:')
+    expect(prompt).toContain('The user chose casual.')
+
+    const defaultPrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput(),
+      ).prompt
+    expect(defaultPrompt).not.toContain('Assistant tone preference:')
+
+    const maintenancePrompt =
+      buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
+        createCommonNotificationPromptInput({
+          assistantTone: 'formal',
+          maintenanceTurn: true,
+        }),
+      ).prompt
+    expect(maintenancePrompt).not.toContain('Assistant tone preference:')
   })
 
   it('renders current date context with natural user-facing date guidance', () => {

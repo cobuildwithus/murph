@@ -5514,7 +5514,7 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "1"]);
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), ["0", "1"]);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_001",
         "mailbox.importItem:mailbox_item_entrypoint_002",
@@ -10613,7 +10613,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       const result = await resultPromise;
 
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "1"]);
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), ["0", "1"]);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_checkpoint_wake_001",
         "mailbox.importItem:mailbox_item_entrypoint_checkpoint_wake_002",
@@ -10863,7 +10863,7 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "1"]);
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), ["0", "1"]);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_checkpoint_foreground_pending_001",
         "mailbox.importItem:mailbox_item_entrypoint_checkpoint_foreground_pending_002",
@@ -11266,7 +11266,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "snapshot:1:idle_shutdown",
         "snapshot:2:idle_shutdown",
       ]);
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "1"]);
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), ["0", "1"]);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_snapshot_wake_001",
         "mailbox.importItem:mailbox_item_entrypoint_snapshot_wake_002",
@@ -11977,7 +11977,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "snapshot:1:idle_shutdown",
         "snapshot:2:idle_shutdown",
       ]);
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "1"]);
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), ["0", "1"]);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_stale_checkpoint_001",
         "mailbox.importItem:mailbox_item_entrypoint_stale_checkpoint_002",
@@ -12093,7 +12093,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       const result = await resultPromise;
 
-      assert.deepEqual(fetchRequests.map(readConversationImportedSeq), ["0", "1"]);
+      assert.deepEqual(readConversationImportedSeqs(fetchRequests), ["0", "1"]);
       assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
         "mailbox.importItem:mailbox_item_entrypoint_checkpoint_timer_001",
         "mailbox.importItem:mailbox_item_entrypoint_checkpoint_timer_002",
@@ -16512,7 +16512,15 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.deepEqual(artifactGetCalls, [bundleHash]);
       assert.deepEqual(imported, ["4"]);
-      assert.equal(fetchRequests.length, 1);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "3", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+      ]);
+      assert.equal(readConversationImportedSeqs(fetchRequests).length, 1);
       assert.deepEqual(fetchRequests[0]?.lanes, [
         { importedSeq: "3", lane: "conversation" },
       ]);
@@ -16522,6 +16530,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "workspace.read",
         "mailbox.fetch",
         "sidecar.ready",
+        "mailbox.fetch",
         "snapshot:4",
         "workspace.checkpoint",
       ]);
@@ -20228,6 +20237,15 @@ function requireEventIndex(events: readonly string[], event: string): number {
 
 function readConversationImportedSeq(request: HostedMailboxFetchRequest | undefined): string | null {
   return request?.lanes.find((lane) => lane.lane === "conversation")?.importedSeq ?? null;
+}
+
+function readConversationImportedSeqs(
+  requests: readonly HostedMailboxFetchRequest[],
+): string[] {
+  return requests.flatMap((request) => {
+    const seq = readConversationImportedSeq(request);
+    return seq === null ? [] : [seq];
+  });
 }
 
 function createMailboxImportStateBundle(input: HostedMailboxImportState): {

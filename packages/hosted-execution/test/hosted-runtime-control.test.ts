@@ -106,6 +106,7 @@ describe("hosted runtime control contracts", () => {
       "conversation.message",
       "member.activated",
       "member.channels.updated",
+      "member.preferences.updated",
       "assistant.notification.requested",
       "device-sync.wake",
       "group-newsletter.email-needed",

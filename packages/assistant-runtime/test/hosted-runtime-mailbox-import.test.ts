@@ -1533,7 +1533,7 @@ describe("hosted mailbox import loop", () => {
     assert.equal(serialized.includes("source_cursor"), false);
   });
 
-  test("quarantines unknown future mailbox kinds and advances the lane", async () => {
+  test("defers unknown future mailbox kinds without advancing the lane", async () => {
     const item = createMailboxItem({
       id: "mailbox_item_system_future_kind",
       kind: "future.mailbox.kind" as HostedMailboxItem["kind"],
@@ -1561,11 +1561,12 @@ describe("hosted mailbox import loop", () => {
         itemId: "mailbox_item_system_future_kind",
         lane: "system",
         reasonCode: "route.unsupported_kind",
-        retryable: false,
+        retryable: true,
         seq: "1",
       },
     ]);
-    assert.equal(result.state.watermarks.system, "1");
+    assert.equal(result.nextRetryAt, "2026-04-26T00:00:15.000Z");
+    assert.equal(result.state.watermarks.system, "0");
   });
 
   test("quarantines invalid sequence metadata instead of throwing from prefix checks", async () => {
