@@ -72,6 +72,9 @@ const HOSTED_RUNTIME_BASE_PROCESS_ENV_NAMES = [
   "LC_ALL",
   "LC_CTYPE",
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+  // Image-owned Health Commons package root. Keep the name literal so
+  // assistant-runtime does not depend on @murphai/health-commons.
+  "MURPH_HEALTH_COMMONS_PACKAGE_ROOT",
   "NODE_ENV",
   "NODE_EXTRA_CA_CERTS",
   "PATH",
