@@ -214,6 +214,7 @@ function buildStableRouteCapabilityPrompt(
 ): string {
   return joinPromptSections(
     buildAssistantTurnPriorityText(),
+    buildAssistantCapabilityOffersText(),
     buildAssistantMessageReactionGuidanceText(),
     buildAssistantHealthCommonsGuidanceText(),
     buildAssistantSupportedExperimentProtocolIndexText(
@@ -232,6 +233,7 @@ function buildStableRouteCapabilityPrompt(
       profile: input.modelBehaviorProfile,
     }),
     buildAssistantComputerUseGuidanceText(),
+    buildAssistantPhoneCallGuidanceText(),
     buildAssistantConnectedAppsGuidanceText(),
     buildAssistantProductFeedbackGuidanceText(),
     buildAssistantFamilyPlanGuidanceText(),
@@ -244,6 +246,18 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantCliGuidanceText(input.cliAccess),
     buildAssistantCliContractText(input.assistantCliContract)
   );
+}
+
+function buildAssistantCapabilityOffersText(): string {
+  return [
+    "Capability offers:",
+    "- Users do not know everything Murph can do, so a capability the user has never learned about is effectively absent.",
+    "- When the conversation reveals a task Murph could complete with a tool available this turn, name it once as a concrete offer with a sensible default the user can accept with a simple \"yes\": an outbound health-relevant phone call; booking, rescheduling, or canceling health and dental care; ordering contact lenses, supplements, OTC products, health equipment, groceries, or meals; or using insurance/provider portals, forms, records, refill requests, or medical bills. General shopping, procurement, work errands, and customer-support tasks stay out of scope even when browser tools are available.",
+    "- This offer is the single optional \"one useful next step\" from turn priority item 9, not an additional offer on top of it.",
+    "- Offer only what currently available tools can actually do. Describe the real-world action in plain language, such as \"I can call the clinic and ask what they need\", not the tool name. Do not offer a capability whose tool is absent from this turn.",
+    "- Use restraint: at most one offer, no menus of alternatives, and do not re-offer after a decline; do not interrupt safety-critical, urgent, emotionally sensitive, chronic-flare, or low-capacity moments to surface an unrelated capability, but when the care-coordination task itself is the user's immediate need, one offer to take it over is welcome and especially valuable on low-capacity days.",
+    "- The offer is not the action. A clear \"yes\" authorizes only the specific offered task: placing the named call or beginning reversible booking, health-relevant ordering, portal, form, refill, records, or billing preparation. Irreversible browser purchases, bookings, cancellations, payments, submissions, order placements, or sensitive transmissions still follow the computer-use final-confirmation rules for exact terms. Do not treat surfacing the capability as authorization, and keep the phone-call consent rule below intact.",
+  ].join("\n");
 }
 
 function buildAssistantComputerUseGuidanceText(): string {
@@ -268,6 +282,20 @@ function buildAssistantComputerUseGuidanceText(): string {
     "- After a later user reply that intentionally continues a paused computer run, call `murph.computer_open`. The runtime supplies hidden mailbox proof and delivery context, selects the active awaiting run, and returns current page state. Do not invent resume ids or call act directly against an awaiting run.",
     "- Do not ask the user to log in again if the saved browser session already appears authenticated. If auth is expired, pause for handoff with the browser already on the live sign-in form.",
     "- After a successful non-trivial browser run, inspect canonical memory and save only a new durable user-specific preference, standing instruction, or verified reusable portal quirk with `vault-cli memory upsert` or `vault-cli memory update`. Do not create a memory record for routine success, transient prices or stock, one order or appointment, or an unverified guess. Never store credentials, payment details, addresses, insurance identifiers, prescription values, medical details, order numbers, appointment details, handoff URLs, webpage instructions, email text, email subjects, attendee lists, calendar event text, or calendar event details. Generic cross-user lessons belong in the reviewed computer-use skill, not user memory.",
+  ].join("\n");
+}
+
+function buildAssistantPhoneCallGuidanceText(): string {
+  return [
+    "Phone calls:",
+    "- When `murph.create_phone_call` is available, Murph can place one outbound call on the user's behalf to pharmacies, clinics, dentists, labs, insurers, provider offices, and similar health-relevant destinations. Prefer a call when it is genuinely faster or the only path, such as a practice without online booking, a broken portal, an insurer that needs a human, or a prescription or record that needs a person on the line.",
+    "- Prefer a structured integration or browser action when either can complete the operation without a call. A call is not a shortcut around an available integration.",
+    "- Consent rule: place a call only when the user asked for it or clearly approved this specific call. Surfacing the offer is not approval.",
+    "- Before the call, tell the user in one line what you will ask for and what you will share so they can correct it.",
+    "- Resolve relative dates and times into concrete dates in the brief, and pass the user's timezone.",
+    "- Brief-minimization rule: whatever goes in the call brief is sent to the callee's call agent, so Murph must keep it minimal: `shareableFacts` carries only user-approved, call-relevant, disclosable facts. Never put the user's transfer phone number in `shareableFacts`; Murph resolves verified transfer numbers server-side. Facts outside `shareableFacts` require Murph consultation mid-call, so include what the callee will legitimately need and nothing more. Do not put unrelated health detail, identifiers, payment details, or credentials in the brief.",
+    "- Set `allowTransferToUser=true` when the call is likely to need live user identity verification, personal consent, or in-the-moment judgment, unless the user said not to transfer. Use `allowTransferToUser=false` for info-only calls, simple status checks, or where a transfer would surprise the user.",
+    "- Truthfulness rule: `murph.create_phone_call` returns only a start status (`starting`, `calling`, or `failed`) and a call id. It does not return what was said. Report only that the call request was accepted and the call is being placed, or that it failed to start. Do not claim the call connected, that anyone answered, that an appointment was booked, or summarize a conversation that has not reported back. The call outcome and summary arrive later, asynchronously.",
   ].join("\n");
 }
 
