@@ -10450,6 +10450,80 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("applies member preference mailbox work before background notification work", async () => {
+    const callOrder: string[] = [];
+    let preferenceWakeChecks = 0;
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async (input) => {
+      if (
+        input?.allowedRouteActions?.length === 1
+        && input.allowedRouteActions[0] === "apply-member-preferences"
+      ) {
+        preferenceWakeChecks += 1;
+        return preferenceWakeChecks === 1
+          ? {
+              at: "2026-04-27T00:00:00.000Z",
+              reason: "assistant",
+            }
+          : {
+              at: null,
+              reason: null,
+            };
+      }
+
+      return {
+        at: null,
+        reason: null,
+      };
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(async (input) => {
+      if (
+        input.allowedRouteActions?.length === 1
+        && input.allowedRouteActions[0] === "apply-member-preferences"
+      ) {
+        callOrder.push("member-preferences");
+        return {
+          item: createMemberPreferencesSystemMailboxItem(),
+          itemId: "system_mailbox_item_member_preferences",
+          metrics: {
+            bootstrapResult: null,
+            conversationMetrics: null,
+            mailboxLane: "member-preferences-updated",
+            redactedLogEntries: [],
+          },
+          status: "processed",
+        };
+      }
+
+      callOrder.push("assistant-notification");
+      expect(input.allowedRouteActions).toBeUndefined();
+      return {
+        item: createSystemMailboxItem(),
+        itemId: "system_mailbox_item_notification",
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(callOrder).toEqual(["member-preferences", "assistant-notification"]);
+    expect(result).toEqual(expect.objectContaining({
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedMemberPreferencesPrePlanningProcessed: 1,
+        hostedSystemMailboxPrepared: 1,
+      }),
+    }));
+  });
+
   it("continues fresh conversation planning while member preferences are waiting to retry", async () => {
     mocks.resolveHostedSystemMailboxNextWakeCandidate.mockResolvedValueOnce({
       at: "2026-04-27T00:01:00.000Z",

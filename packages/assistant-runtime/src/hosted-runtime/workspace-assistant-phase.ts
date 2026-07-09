@@ -702,11 +702,15 @@ export async function runHostedWorkspaceAssistantPhase(
       );
 
     const memberPreferencesPrePlanning =
-      await runPrePlanningMemberPreferencesMailboxPhase({
-        executionContext,
-        hasFreshConversationInput,
-        input,
-      });
+      hasFreshConversationInput
+        ? await runPrePlanningMemberPreferencesMailboxPhase({
+          executionContext,
+          input,
+        })
+        : {
+            continueAssistantLane: true,
+            result: null,
+          };
     if (memberPreferencesPrePlanning.result) {
       if (!memberPreferencesPrePlanning.continueAssistantLane) {
         return mergeContinuingSystemMailboxResult(memberPreferencesPrePlanning.result);
@@ -2803,19 +2807,11 @@ function buildPreAutomationLaneSkippedAssistantWakeResult(input: {
 
 async function runPrePlanningMemberPreferencesMailboxPhase(input: {
   executionContext: AssistantExecutionContext;
-  hasFreshConversationInput: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): Promise<{
   continueAssistantLane: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
-  if (!input.hasFreshConversationInput) {
-    return {
-      continueAssistantLane: true,
-      result: null,
-    };
-  }
-
   let result: HostedWorkspaceRunnerAssistantPhaseResult | null = null;
   let processed = 0;
   const maxItems = HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS;
@@ -3114,6 +3110,32 @@ async function runSystemMailboxMaintenancePhase(input: {
     }
   }
 
+  const memberPreferencesPrePlanning =
+    await runPrePlanningMemberPreferencesMailboxPhase({
+      executionContext: input.executionContext,
+      input: phaseInput,
+    });
+  const mergeMemberPreferencesPrePlanningResult = (
+    result: HostedWorkspaceRunnerAssistantPhaseResult | null,
+  ): HostedWorkspaceRunnerAssistantPhaseResult | null =>
+    mergeHostedAssistantPhaseResults(
+      memberPreferencesPrePlanning.result,
+      result,
+    );
+  if (
+    memberPreferencesPrePlanning.result
+    && !memberPreferencesPrePlanning.continueAssistantLane
+  ) {
+    return {
+      backgroundMaintenanceYielded: false,
+      continueAssistantLane: false,
+      deviceSyncMaintenanceRan: false,
+      initialProviderCleanupCheckpoint,
+      pendingAssistantInputWakeAt,
+      result: memberPreferencesPrePlanning.result,
+    };
+  }
+
   const systemMailboxPreparation = await prepareHostedSystemMailboxItemForCheckpoint({
     executionContext: input.executionContext,
     operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
@@ -3159,7 +3181,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
         pendingAssistantInputWakeAt,
-        result: null,
+        result: mergeMemberPreferencesPrePlanningResult(null),
       };
     }
     if (dirtyDeviceSyncMetrics) {
@@ -3180,14 +3202,16 @@ async function runSystemMailboxMaintenancePhase(input: {
         deviceSyncMaintenanceRan: !dirtyDeviceSyncMetrics.deviceSyncSkipped,
         initialProviderCleanupCheckpoint,
         pendingAssistantInputWakeAt,
-        result: buildIdleDeviceSyncOnlyAssistantPhaseResult({
-          assistantCronWake,
-          backgroundWake,
-          deviceActivityAutomation: dirtyDeviceActivityAutomation,
-          dirtyDeviceSyncMetrics,
-          input: phaseInput,
-          pendingAssistantInputWakeAt,
-        }),
+        result: mergeMemberPreferencesPrePlanningResult(
+          buildIdleDeviceSyncOnlyAssistantPhaseResult({
+            assistantCronWake,
+            backgroundWake,
+            deviceActivityAutomation: dirtyDeviceActivityAutomation,
+            dirtyDeviceSyncMetrics,
+            input: phaseInput,
+            pendingAssistantInputWakeAt,
+          }),
+        ),
       };
     }
     const contextSnapshotRefresh =
@@ -3211,10 +3235,12 @@ async function runSystemMailboxMaintenancePhase(input: {
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
         pendingAssistantInputWakeAt,
-        result: withHostedRuntimeWakeCandidate({
-          wake: backgroundWake,
-          result: contextSnapshotRefresh,
-        }),
+        result: mergeMemberPreferencesPrePlanningResult(
+          withHostedRuntimeWakeCandidate({
+            wake: backgroundWake,
+            result: contextSnapshotRefresh,
+          }),
+        ),
       };
     }
 
@@ -3224,7 +3250,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint,
       pendingAssistantInputWakeAt,
-      result: null,
+      result: mergeMemberPreferencesPrePlanningResult(null),
     };
   }
   const systemMailboxDeliveryEffects =
@@ -3362,7 +3388,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation),
     initialProviderCleanupCheckpoint,
     pendingAssistantInputWakeAt,
-    result: {
+    result: mergeMemberPreferencesPrePlanningResult({
       ...(browserVaultReplicaRefreshRequested
         ? { browserVaultReplicaRefreshRequested: true }
         : {}),
@@ -3424,7 +3450,7 @@ async function runSystemMailboxMaintenancePhase(input: {
           dirtyDeviceSyncMetrics?.stagedDirtyAcks,
         ),
       ),
-    },
+    }),
     deviceSyncMaintenanceRan,
   };
 }
