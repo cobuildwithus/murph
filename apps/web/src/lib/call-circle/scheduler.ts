@@ -57,6 +57,10 @@ import {
   startCallCircleConnectorCall,
   type CallCircleConnectorStarter,
 } from "./connector-call";
+import {
+  isPreProviderFailedCallCircleBridgePhoneCall,
+  isUnstartedCallCircleBridgePhoneCall,
+} from "./phone-call-state";
 import { getPrisma } from "../prisma";
 
 export interface RunCallCircleSchedulerResult {
@@ -209,6 +213,20 @@ export async function runCallCircleScheduler(input: {
         match.status === "bridging"
         && isRecoverableCallCircleBridgePhoneCall(match.phoneCall)
         && now >= match.windowEndAt
+      ) {
+        const handedOff = await appendCallCircleBridgeHandoffs({
+          match,
+          now,
+          prisma,
+        });
+        if (handedOff) result.handoffs += 1;
+        continue;
+      }
+
+      if (
+        match.status === "bridging"
+        && isPreProviderFailedCallCircleBridgePhoneCall(match.phoneCall)
+        && now >= match.windowStartAt
       ) {
         const handedOff = await appendCallCircleBridgeHandoffs({
           match,
@@ -1301,13 +1319,7 @@ async function cancelCallCircleMatchIfParticipantsInactive(input: {
 function isRecoverableCallCircleBridgePhoneCall(
   phoneCall: SchedulerMatch["phoneCall"],
 ): boolean {
-  return !phoneCall
-    || (
-      phoneCall.analyzedAt === null
-      && phoneCall.providerCallId === null
-      && phoneCall.providerStartAttemptedAt === null
-      && phoneCall.status === "starting"
-    );
+  return !phoneCall || isUnstartedCallCircleBridgePhoneCall(phoneCall);
 }
 
 function hasTimedOutCallCircleBridgeAnalysis(input: {

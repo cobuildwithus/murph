@@ -38,7 +38,15 @@ describe("Call Circle notifications", () => {
     });
     mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(true);
     mocks.resolveHostedAssistantNotificationRouteTx.mockResolvedValue({
+      actorId: "+15550002222",
       channel: "linq",
+      delivery: {
+        kind: "thread",
+        target: "chat_123",
+      },
+      identityId: "hbidx:phone:v1:test",
+      threadId: "chat_123",
+      threadIsDirect: true,
     });
   });
 
@@ -118,6 +126,40 @@ describe("Call Circle notifications", () => {
       reason: "missing_recent_inbound",
       status: "blocked",
     });
+  });
+
+  it("blocks Linq participant routes that runtime egress cannot send for Call Circle", async () => {
+    mocks.resolveHostedAssistantNotificationRouteTx.mockResolvedValue({
+      actorId: "+15550001111",
+      channel: "linq",
+      delivery: {
+        kind: "participant",
+        source: {
+          fromPhoneNumber: "+15550002222",
+          kind: "linq",
+        },
+        target: "+15550001111",
+      },
+      identityId: "hbidx:phone:v1:test",
+      threadId: null,
+      threadIsDirect: true,
+    });
+    const tx = createNotificationTx({
+      memberTimeZone: "America/New_York",
+      now: new Date("2026-07-06T15:30:00.000Z"),
+    });
+
+    await expect(readCallCircleNotificationPreflightTx({
+      memberId: "member_a",
+      now: new Date("2026-07-06T15:30:00.000Z"),
+      tx: tx as never,
+    })).resolves.toEqual({
+      reason: "missing_route",
+      status: "blocked",
+    });
+
+    expect(mocks.hasHostedLinqInboundWithinDays).not.toHaveBeenCalled();
+    expect(tx.hostedLinqLine.count).not.toHaveBeenCalled();
   });
 
   it("keeps completed-call notifications informational without a renewal yes/no prompt", async () => {

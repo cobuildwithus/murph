@@ -324,6 +324,28 @@ Focused follow-up verification:
 
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-matcher.test.ts apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/hosted-group-join-offer-reaction.test.ts`
 
+## ReviewGPT Follow-Up 34 2026-07-09
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- Call Circle notification preflight accepted Linq participant routes that
+  runtime egress rejects for assistant notifications. Preflight now treats
+  participant delivery as a missing supported route for Call Circle, so only
+  already-established Linq threads can persist sendable Call Circle mailbox
+  notifications.
+- A crash after an attached connector phone call was marked `failed` before
+  provider start could strand a claimed `bridging` match. The scheduler now
+  uses the same shared pre-provider failed phone-call predicate as the
+  connector handoff path and text-hands off the match once the call window has
+  started.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-notifications.test.ts apps/web/test/call-circle-scheduler.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+- `git diff --check`
+- `pnpm no-js`
+
 ## ReviewGPT Follow-Up 23 2026-07-08
 
 Accepted findings from the Phlebas PR-head rerun:

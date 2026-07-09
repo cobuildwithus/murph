@@ -1519,6 +1519,45 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
   });
 
+  it("hands off an attached failed bridge when provider start never reached runtime", async () => {
+    const now = new Date("2026-07-06T15:45:00.000Z");
+    const tx = {};
+    const prisma = createSchedulerPrisma({
+      dueMatches: [schedulerMatch({
+        finalAskedAt: new Date("2026-07-06T14:45:00.000Z"),
+        phoneCall: {
+          analyzedAt: null,
+          endedAt: null,
+          id: "hpc_failed_before_provider",
+          providerCallId: null,
+          status: "failed",
+        },
+        status: "bridging",
+        windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+      })],
+      groups: [],
+      tx,
+    });
+
+    await expect(runCallCircleScheduler({
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      handoffs: 1,
+    });
+
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      now,
+      outcome: "text_handoff",
+      phoneCallId: "hpc_failed_before_provider",
+      prisma: tx,
+      status: "dropped",
+    });
+    expect(mocks.appendCallCircleHandoffNotificationTx).toHaveBeenCalledTimes(2);
+  });
+
   it("leaves an attached provider-attempted bridge pending after the window", async () => {
     const now = new Date("2026-07-06T15:45:00.000Z");
     const phoneCallUpdateMany = vi.fn(async () => ({ count: 1 }));

@@ -20,6 +20,10 @@ import {
   readCallCircleMatchParticipantTimeZones,
 } from "./participant-store";
 import {
+  isPreProviderFailedCallCircleBridgePhoneCall,
+  isUnstartedCallCircleBridgePhoneCall,
+} from "./phone-call-state";
+import {
   activeHostedMemberAccessWithParticipantsWhere,
 } from "../hosted-onboarding/member-access";
 import {
@@ -73,7 +77,7 @@ export async function startCallCircleConnectorCall(input: {
   const isRecoverableAttachedBridge =
     match.status === "bridging"
     && match.phoneCallId !== null
-    && isUnstartedAttachedCallCirclePhoneCall(match.phoneCall);
+    && isUnstartedCallCircleBridgePhoneCall(match.phoneCall);
   if (
     match.status !== "both_confirmed"
     && !isRecoverableClaimedBridge
@@ -363,21 +367,6 @@ async function canStartAttachedCallCircleBridge(input: {
   return count === 1;
 }
 
-function isUnstartedAttachedCallCirclePhoneCall(
-  phoneCall: {
-    analyzedAt: Date | null;
-    providerCallId: string | null;
-    providerStartAttemptedAt: Date | null;
-    status: string;
-  } | null,
-): boolean {
-  return phoneCall !== null
-    && phoneCall.analyzedAt === null
-    && phoneCall.providerCallId === null
-    && phoneCall.providerStartAttemptedAt === null
-    && phoneCall.status === "starting";
-}
-
 export function buildCallCircleConnectorRequestKey(matchId: string): string {
   return `${CALL_CIRCLE_CONNECTOR_REQUEST_KEY_PREFIX}${matchId}`;
 }
@@ -458,7 +447,7 @@ async function markCallCircleConnectorHandoff(input: {
       !current
       || (
         current.phoneCallId !== null
-        && !isPreProviderFailedCallCirclePhoneCall(current.phoneCall)
+        && !isPreProviderFailedCallCircleBridgePhoneCall(current.phoneCall)
       )
       || !["both_confirmed", "bridging"].includes(current.status)
     ) {
@@ -520,20 +509,6 @@ async function markCallCircleConnectorHandoff(input: {
   });
   await signalCallCircleNotificationRuntimesBestEffort(transaction.signals);
   return transaction.handedOff;
-}
-
-function isPreProviderFailedCallCirclePhoneCall(phoneCall: {
-  analyzedAt: Date | null;
-  endedAt: Date | null;
-  providerCallId: string | null;
-  providerStartAttemptedAt: Date | null;
-  status: string;
-} | null): boolean {
-  return phoneCall !== null
-    && phoneCall.analyzedAt === null
-    && phoneCall.endedAt === null
-    && phoneCall.providerCallId === null
-    && phoneCall.status === "failed";
 }
 
 async function appendConnectorHandoffNotificationIfReachableTx(input: {

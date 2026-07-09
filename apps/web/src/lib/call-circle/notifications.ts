@@ -258,6 +258,9 @@ export async function readCallCircleNotificationPreflightTx(input: {
   if (!route) {
     return { reason: "missing_route", status: "blocked" };
   }
+  if (route.channel === "linq" && route.delivery.kind === "participant") {
+    return { reason: "missing_route", status: "blocked" };
+  }
   let timeZone = normalizeCallCircleTimeZone(input.timeZone);
   if (!input.timeZone) {
     const member = await input.tx.hostedMember.findUnique({
