@@ -521,6 +521,24 @@ test("hosted runtime process env projects image-owned Codex model catalog path f
   });
 });
 
+test("hosted runtime process env projects image-owned Health Commons package root from ambient env", () => {
+  const childEnv = projectHostedRuntimeProcessEnv({
+    ambientEnv: {
+      MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/app/node_modules/@murphai/health-commons",
+    },
+    forwardedEnv: {
+      MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/tmp/spoofed-health-commons",
+      NODE_ENV: "production",
+    },
+  });
+
+  assert.deepEqual(childEnv, {
+    MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "/app/node_modules/@murphai/health-commons",
+    NODE_ENV: "production",
+    PATH: HOSTED_RUNNER_EXECUTABLE_PATH,
+  });
+});
+
 test("hosted runner executable PATH prepends the image contract and preserves absolute ambient extras", () => {
   assert.equal(
     buildHostedRunnerExecutablePath("/custom/bin:/usr/bin:.:relative/bin:/opt/tools:/bin"),
