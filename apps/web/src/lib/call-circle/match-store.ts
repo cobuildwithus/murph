@@ -12,6 +12,7 @@ import {
 } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 import {
+  activeCallCircleParticipantPairMatchWhere,
   canUseActiveCallCircleParticipantPair,
 } from "./participant-store";
 import {
@@ -575,20 +576,17 @@ export async function claimCallCircleMatchForConnector(input: {
   prisma?: CallCirclePrismaClient;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
-  if (!await canUseActiveCallCircleParticipantPair({
-    groupId: input.groupId,
-    memberAId: input.memberAId,
-    memberBId: input.memberBId,
-    prisma,
-  })) {
-    return false;
-  }
   const result = await prisma.hostedCallCircleMatch.updateMany({
     data: {
       claimedAt: input.now,
       status: "bridging",
     },
     where: {
+      ...activeCallCircleParticipantPairMatchWhere({
+        groupId: input.groupId,
+        memberAId: input.memberAId,
+        memberBId: input.memberBId,
+      }),
       claimedAt: null,
       finalAskedAt: { not: null },
       id: input.matchId,

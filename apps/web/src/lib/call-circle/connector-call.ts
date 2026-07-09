@@ -16,6 +16,7 @@ import {
   signalCallCircleNotificationRuntimesBestEffort,
 } from "./notifications";
 import {
+  activeCallCircleParticipantPairMatchWhere,
   canUseActiveCallCircleParticipantPair,
   readCallCircleMatchParticipantTimeZones,
 } from "./participant-store";
@@ -27,9 +28,6 @@ import {
   isWithinCallCircleBridgeWindow,
   readCallCircleBridgeWindowStartCutoff,
 } from "./time";
-import {
-  activeHostedMemberAccessWithParticipantsWhere,
-} from "../hosted-onboarding/member-access";
 import {
   createHostedPhoneCall,
 } from "../phone-calls/service";
@@ -100,22 +98,6 @@ export async function startCallCircleConnectorCall(input: {
     return { status: "ignored" };
   }
 
-  if (!await canUseActiveCallCircleParticipantPair({
-    groupId: match.groupId,
-    memberAId: match.memberAId,
-    memberBId: match.memberBId,
-    prisma,
-  })) {
-    await markCallCircleMatchOutcome({
-      matchId: match.id,
-      now,
-      outcome: "participant_unavailable",
-      prisma,
-      status: "canceled",
-    });
-    return { status: "ignored" };
-  }
-
   const connectorConfig = readCallCircleConnectorConfig();
   if (!connectorConfig) {
     const handedOff = await markCallCircleConnectorHandoff({
@@ -138,36 +120,6 @@ export async function startCallCircleConnectorCall(input: {
       prisma,
     }));
   if (!claimed) {
-    if (!await canUseActiveCallCircleParticipantPair({
-      groupId: match.groupId,
-      memberAId: match.memberAId,
-      memberBId: match.memberBId,
-      prisma,
-    })) {
-      await markCallCircleMatchOutcome({
-        matchId: match.id,
-        now,
-        outcome: "participant_unavailable",
-        prisma,
-        status: "canceled",
-      });
-    }
-    return { status: "ignored" };
-  }
-
-  if (!await canUseActiveCallCircleParticipantPair({
-    groupId: match.groupId,
-    memberAId: match.memberAId,
-    memberBId: match.memberBId,
-    prisma,
-  })) {
-    await markCallCircleMatchOutcome({
-      matchId: match.id,
-      now,
-      outcome: "participant_unavailable",
-      prisma,
-      status: "canceled",
-    });
     return { status: "ignored" };
   }
 
@@ -294,53 +246,13 @@ function buildCallCircleProviderStartGuardWhere(input: {
   return {
     callCircleMatches: {
       some: {
-        AND: [
-          {
-            group: {
-              callCircleParticipants: {
-                some: {
-                  memberId: input.memberAId,
-                  status: "enrolled",
-                },
-              },
-            },
-          },
-          {
-            group: {
-              callCircleParticipants: {
-                some: {
-                  memberId: input.memberBId,
-                  status: "enrolled",
-                },
-              },
-            },
-          },
-          {
-            group: {
-              members: {
-                some: {
-                  memberId: input.memberAId,
-                },
-              },
-            },
-          },
-          {
-            group: {
-              members: {
-                some: {
-                  memberId: input.memberBId,
-                },
-              },
-            },
-          },
-        ],
+        ...activeCallCircleParticipantPairMatchWhere({
+          groupId: input.groupId,
+          memberAId: input.memberAId,
+          memberBId: input.memberBId,
+        }),
         finalAskedAt: { not: null },
-        groupId: input.groupId,
         id: input.matchId,
-        memberA: activeHostedMemberAccessWithParticipantsWhere(),
-        memberAId: input.memberAId,
-        memberB: activeHostedMemberAccessWithParticipantsWhere(),
-        memberBId: input.memberBId,
         status: "bridging",
         windowEndAt: { gt: input.now },
         windowStartAt: {
@@ -363,11 +275,13 @@ async function canStartAttachedCallCircleBridge(input: {
 }): Promise<boolean> {
   const count = await input.prisma.hostedCallCircleMatch.count({
     where: {
+      ...activeCallCircleParticipantPairMatchWhere({
+        groupId: input.groupId,
+        memberAId: input.memberAId,
+        memberBId: input.memberBId,
+      }),
       finalAskedAt: { not: null },
-      groupId: input.groupId,
       id: input.matchId,
-      memberAId: input.memberAId,
-      memberBId: input.memberBId,
       phoneCallId: input.phoneCallId,
       status: "bridging",
       windowEndAt: { gt: input.now },

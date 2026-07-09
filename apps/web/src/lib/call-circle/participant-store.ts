@@ -13,6 +13,7 @@ import {
   generateHostedCallCircleParticipantId,
 } from "../hosted-onboarding/shared";
 import {
+  activeHostedMemberAccessWithParticipantsWhere,
   readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -379,6 +380,60 @@ export async function canUseActiveCallCircleParticipantPair(input: {
     && memberBHasAccess
     && membershipCount === 2
     && participantCount === 2;
+}
+
+export function activeCallCircleParticipantPairMatchWhere(input: {
+  groupId: string;
+  memberAId: string;
+  memberBId: string;
+}): Prisma.HostedCallCircleMatchWhereInput {
+  return {
+    AND: [
+      {
+        group: {
+          callCircleParticipants: {
+            some: {
+              memberId: input.memberAId,
+              status: "enrolled",
+            },
+          },
+        },
+      },
+      {
+        group: {
+          callCircleParticipants: {
+            some: {
+              memberId: input.memberBId,
+              status: "enrolled",
+            },
+          },
+        },
+      },
+      {
+        group: {
+          members: {
+            some: {
+              memberId: input.memberAId,
+            },
+          },
+        },
+      },
+      {
+        group: {
+          members: {
+            some: {
+              memberId: input.memberBId,
+            },
+          },
+        },
+      },
+    ],
+    groupId: input.groupId,
+    memberA: activeHostedMemberAccessWithParticipantsWhere(),
+    memberAId: input.memberAId,
+    memberB: activeHostedMemberAccessWithParticipantsWhere(),
+    memberBId: input.memberBId,
+  };
 }
 
 export async function canUseActiveCallCircleParticipant(input: {

@@ -28,6 +28,57 @@ vi.mock("@/src/lib/call-circle/match-store", () => ({
 }));
 
 vi.mock("@/src/lib/call-circle/participant-store", () => ({
+  activeCallCircleParticipantPairMatchWhere: ({
+    groupId,
+    memberAId,
+    memberBId,
+  }: {
+    groupId: string;
+    memberAId: string;
+    memberBId: string;
+  }) => ({
+    AND: [
+      {
+        group: {
+          callCircleParticipants: {
+            some: {
+              memberId: memberAId,
+              status: "enrolled",
+            },
+          },
+        },
+      },
+      {
+        group: {
+          callCircleParticipants: {
+            some: {
+              memberId: memberBId,
+              status: "enrolled",
+            },
+          },
+        },
+      },
+      {
+        group: {
+          members: {
+            some: { memberId: memberAId },
+          },
+        },
+      },
+      {
+        group: {
+          members: {
+            some: { memberId: memberBId },
+          },
+        },
+      },
+    ],
+    groupId,
+    memberA: { suspendedAt: null },
+    memberAId,
+    memberB: { suspendedAt: null },
+    memberBId,
+  }),
   canUseActiveCallCircleParticipantPair: mocks.canUseActiveCallCircleParticipantPair,
   readCallCircleMatchParticipantTimeZones: mocks.readCallCircleMatchParticipantTimeZones,
 }));
@@ -196,7 +247,8 @@ describe("startCallCircleConnectorCall", () => {
       matchId: "hccm_123",
       now,
       outcome: "participant_unavailable",
-      prisma,
+      phoneCallId: null,
+      prisma: expect.any(Object),
       status: "canceled",
     });
     expect(mocks.appendCallCircleHandoffNotificationTx).not.toHaveBeenCalled();
@@ -215,9 +267,7 @@ describe("startCallCircleConnectorCall", () => {
       windowStartAt: now,
     }, tx);
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.canUseActiveCallCircleParticipantPair
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+    mocks.canUseActiveCallCircleParticipantPair.mockResolvedValueOnce(false);
 
     await expect(startCallCircleConnectorCall({
       matchId: "hccm_123",
@@ -279,8 +329,6 @@ describe("startCallCircleConnectorCall", () => {
     });
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.canUseActiveCallCircleParticipantPair
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(false);
     mocks.createHostedPhoneCall.mockImplementationOnce(async (input) => {
@@ -381,10 +429,48 @@ describe("startCallCircleConnectorCall", () => {
     expect(mocks.attachCallCirclePhoneCall).not.toHaveBeenCalled();
     expect(prisma.hostedCallCircleMatch.count).toHaveBeenCalledWith({
       where: {
+        AND: [
+          {
+            group: {
+              callCircleParticipants: {
+                some: {
+                  memberId: "member_a",
+                  status: "enrolled",
+                },
+              },
+            },
+          },
+          {
+            group: {
+              callCircleParticipants: {
+                some: {
+                  memberId: "member_b",
+                  status: "enrolled",
+                },
+              },
+            },
+          },
+          {
+            group: {
+              members: {
+                some: { memberId: "member_a" },
+              },
+            },
+          },
+          {
+            group: {
+              members: {
+                some: { memberId: "member_b" },
+              },
+            },
+          },
+        ],
         finalAskedAt: { not: null },
         groupId: "hgrp_123",
         id: "hccm_123",
+        memberA: { suspendedAt: null },
         memberAId: "member_a",
+        memberB: { suspendedAt: null },
         memberBId: "member_b",
         phoneCallId: "hpc_existing",
         status: "bridging",

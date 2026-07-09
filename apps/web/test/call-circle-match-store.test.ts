@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  activeHostedMemberAccessWithParticipantsWhere: () => ({ suspendedAt: null }),
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
@@ -506,15 +507,9 @@ describe("Call Circle conditional mutations", () => {
     });
   });
 
-  it("claims connector work only after the pair is still active", async () => {
+  it("claims connector work with the active pair predicate on the durable update", async () => {
     const prisma = {
       hostedCallCircleMatch: { updateMany },
-      hostedCallCircleParticipant: {
-        count: vi.fn(async () => 2),
-      },
-      hostedGroupMember: {
-        count: vi.fn(async () => 2),
-      },
     };
     const now = new Date("2026-07-06T15:00:00.000Z");
 
@@ -533,6 +528,7 @@ describe("Call Circle conditional mutations", () => {
         status: "bridging",
       },
       where: {
+        ...activePairMatchWhere(),
         claimedAt: null,
         finalAskedAt: { not: null },
         id: "hccm_123",
@@ -550,12 +546,6 @@ describe("Call Circle conditional mutations", () => {
     updateMany.mockResolvedValueOnce({ count: 0 });
     const prisma = {
       hostedCallCircleMatch: { updateMany },
-      hostedCallCircleParticipant: {
-        count: vi.fn(async () => 2),
-      },
-      hostedGroupMember: {
-        count: vi.fn(async () => 2),
-      },
     };
     const now = new Date("2026-07-06T12:00:00.000Z");
 
@@ -574,6 +564,7 @@ describe("Call Circle conditional mutations", () => {
         status: "bridging",
       },
       where: {
+        ...activePairMatchWhere(),
         claimedAt: null,
         finalAskedAt: { not: null },
         id: "hccm_123",
@@ -876,27 +867,31 @@ describe("Call Circle conditional mutations", () => {
     }));
   });
 
-  it("does not claim connector work after a pair becomes inactive", async () => {
+  it("does not claim connector work when the durable active pair predicate misses", async () => {
+    updateMany.mockResolvedValueOnce({ count: 0 });
     const prisma = {
       hostedCallCircleMatch: { updateMany },
-      hostedCallCircleParticipant: {
-        count: vi.fn(async () => 1),
-      },
-      hostedGroupMember: {
-        count: vi.fn(async () => 2),
-      },
     };
+    const now = new Date("2026-07-06T15:00:00.000Z");
 
     await expect(claimMatchForConnector({
       groupId: "hgrp_123",
       matchId: "hccm_123",
       memberAId: "member_a",
       memberBId: "member_b",
-      now: new Date("2026-07-06T15:00:00.000Z"),
+      now,
       prisma: prisma as never,
     })).resolves.toBe(false);
 
-    expect(updateMany).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        groupId: "hgrp_123",
+        memberA: { suspendedAt: null },
+        memberAId: "member_a",
+        memberB: { suspendedAt: null },
+        memberBId: "member_b",
+      }),
+    }));
   });
 
   it("cancels open matches for a paused participant in the current group", async () => {
@@ -1395,3 +1390,49 @@ describe("Call Circle conditional mutations", () => {
     })).resolves.toBe(false);
   });
 });
+
+function activePairMatchWhere() {
+  return {
+    AND: [
+      {
+        group: {
+          callCircleParticipants: {
+            some: {
+              memberId: "member_a",
+              status: "enrolled",
+            },
+          },
+        },
+      },
+      {
+        group: {
+          callCircleParticipants: {
+            some: {
+              memberId: "member_b",
+              status: "enrolled",
+            },
+          },
+        },
+      },
+      {
+        group: {
+          members: {
+            some: { memberId: "member_a" },
+          },
+        },
+      },
+      {
+        group: {
+          members: {
+            some: { memberId: "member_b" },
+          },
+        },
+      },
+    ],
+    groupId: "hgrp_123",
+    memberA: { suspendedAt: null },
+    memberAId: "member_a",
+    memberB: { suspendedAt: null },
+    memberBId: "member_b",
+  };
+}

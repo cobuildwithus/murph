@@ -386,6 +386,29 @@ Focused follow-up verification:
 - `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-cron-route.test.ts apps/web/test/production-migration-guard.test.ts`
 - `pnpm --filter @murphai/hosted-web typecheck`
 
+## ReviewGPT Follow-Up 37 2026-07-09
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- The scheduler no longer marks an ended provider-started bridge as
+  `text_handoff` just because Retell analysis is late. Provider-started
+  bridges now stay owned by the hosted phone-call result path until analysis
+  supplies the durable completed or handoff outcome; scheduler handoff remains
+  for unstarted/pre-provider failures and analyzed failed/needs-user results.
+- Connector call-start authority now lives in one conditional match update
+  predicate. The active enrollment, group membership, and active member-access
+  relation filters are exposed as a participant-store where fragment and shared
+  by the connector claim, attached-bridge start gate, and provider-start guard.
+  Redundant active-pair reads around the claim were removed; terminalization
+  paths still cancel inactive pairs before user-visible handoff copy.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-connector-call.test.ts apps/web/test/call-circle-match-store.test.ts apps/web/test/phone-calls-call-circle-result.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+- `pnpm --filter @murphai/hosted-web product-labels:env-check`
+- `pnpm --filter @murphai/hosted-web build`
+
 ## ReviewGPT Follow-Up 23 2026-07-08
 
 Accepted findings from the Phlebas PR-head rerun:

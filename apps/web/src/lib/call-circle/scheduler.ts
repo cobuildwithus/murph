@@ -88,7 +88,6 @@ const EMPTY_RESULT: RunCallCircleSchedulerResult = {
 };
 
 const CALL_CIRCLE_STRANDED_BRIDGE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
-const CALL_CIRCLE_BRIDGE_ANALYSIS_GRACE_MS = 10 * 60 * 1_000;
 const CALL_CIRCLE_SCHEDULER_PAGE_SIZE = 100;
 const CALL_CIRCLE_HANDOFF_OUTCOMES = [
   "connector_agent_unconfigured",
@@ -254,27 +253,6 @@ export async function runCallCircleScheduler(input: {
         match.status === "bridging"
         && isPreProviderFailedCallCircleBridgePhoneCall(match.phoneCall)
         && now >= match.windowStartAt
-      ) {
-        const handedOff = await appendCallCircleBridgeHandoffs({
-          match,
-          now,
-          prisma,
-        });
-        if (handedOff) result.handoffs += 1;
-        continue;
-      }
-
-      if (
-        match.status === "bridging"
-        && hasTimedOutCallCircleBridgeAnalysis({
-          now,
-          phoneCall: match.phoneCall,
-        })
-        && hasCallCircleBridgeWindowElapsed({
-          now,
-          windowEndAt: match.windowEndAt,
-          windowStartAt: match.windowStartAt,
-        })
       ) {
         const handedOff = await appendCallCircleBridgeHandoffs({
           match,
@@ -1351,19 +1329,6 @@ function isRecoverableCallCircleBridgePhoneCall(
   phoneCall: SchedulerMatch["phoneCall"],
 ): boolean {
   return !phoneCall || isUnstartedCallCircleBridgePhoneCall(phoneCall);
-}
-
-function hasTimedOutCallCircleBridgeAnalysis(input: {
-  now: Date;
-  phoneCall: SchedulerMatch["phoneCall"];
-}): boolean {
-  return Boolean(
-    input.phoneCall
-    && input.phoneCall.endedAt
-    && input.phoneCall.analyzedAt === null
-    && input.now.getTime() - input.phoneCall.endedAt.getTime()
-      >= CALL_CIRCLE_BRIDGE_ANALYSIS_GRACE_MS,
-  );
 }
 
 interface SchedulerMatch {
