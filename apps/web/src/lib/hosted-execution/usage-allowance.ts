@@ -1409,7 +1409,6 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
       billingPlanCode: true,
       blockedAt: true,
       lastUsageAt: true,
-      limitNoticeSentAt: true,
       limitUsdMicros: true,
       periodEnd: true,
       periodStart: true,
@@ -1425,18 +1424,14 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     current.periodEnd.getTime() === resolved.periodEnd.getTime();
 
   if (periodMatches) {
-    const metadata = buildHostedAiUsageAllowancePeriodMetadata({
+    const blockedAt = resolveHostedAiUsageAllowanceBlockedAt({
       blockedAt: current.blockedAt,
-      limitNoticeSentAt: current.limitNoticeSentAt,
       limitUsdMicros: current.limitUsdMicros,
       now: input.now,
       spentUsdMicros: current.spentUsdMicros,
     });
 
-    if (
-      !sameNullableTime(current.blockedAt, metadata.blockedAt) ||
-      !sameNullableTime(current.limitNoticeSentAt, metadata.limitNoticeSentAt)
-    ) {
+    if (!sameNullableTime(current.blockedAt, blockedAt)) {
       await input.tx.hostedAiUsagePeriod.update({
         where: {
           memberId_periodStart: {
@@ -1445,8 +1440,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
           },
         },
         data: {
-          blockedAt: metadata.blockedAt,
-          limitNoticeSentAt: metadata.limitNoticeSentAt,
+          blockedAt,
           updatedAt: input.now,
         },
       });
@@ -1464,9 +1458,8 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     };
   }
 
-  const metadata = buildHostedAiUsageAllowancePeriodMetadata({
+  const blockedAt = resolveHostedAiUsageAllowanceBlockedAt({
     blockedAt: current.blockedAt,
-    limitNoticeSentAt: current.limitNoticeSentAt,
     limitUsdMicros: resolved.limitUsdMicros,
     now: input.now,
     spentUsdMicros: current.spentUsdMicros,
@@ -1480,9 +1473,8 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     },
     data: {
       billingPlanCode: resolved.billingPlanCode,
-      blockedAt: metadata.blockedAt,
+      blockedAt,
       limitUsdMicros: resolved.limitUsdMicros,
-      limitNoticeSentAt: metadata.limitNoticeSentAt,
       periodEnd: resolved.periodEnd,
       updatedAt: input.now,
     },
@@ -1867,27 +1859,17 @@ function buildHostedPulseTrialPendingBillingDeniedPeriod(input: {
   };
 }
 
-function buildHostedAiUsageAllowancePeriodMetadata(input: {
+function resolveHostedAiUsageAllowanceBlockedAt(input: {
   blockedAt: Date | null;
-  limitNoticeSentAt: Date | null;
   limitUsdMicros: bigint;
   now: Date;
   spentUsdMicros: bigint;
-}): {
-  blockedAt: Date | null;
-  limitNoticeSentAt: Date | null;
-} {
+}): Date | null {
   if (input.spentUsdMicros < input.limitUsdMicros) {
-    return {
-      blockedAt: null,
-      limitNoticeSentAt: input.limitNoticeSentAt,
-    };
+    return null;
   }
 
-  return {
-    blockedAt: input.blockedAt ?? input.now,
-    limitNoticeSentAt: input.limitNoticeSentAt,
-  };
+  return input.blockedAt ?? input.now;
 }
 
 function sameNullableTime(left: Date | null, right: Date | null): boolean {

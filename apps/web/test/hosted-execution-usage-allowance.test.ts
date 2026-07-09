@@ -2047,12 +2047,12 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
-        limitNoticeSentAt: priorNoticeSentAt,
         limitUsdMicros: 25_000_000n,
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
+    expect(updateData).not.toHaveProperty("limitNoticeSentAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
 
@@ -2168,11 +2168,11 @@ describe("resolveHostedAiUsageGate", () => {
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         blockedAt: null,
-        limitNoticeSentAt: new Date("2026-04-20T12:01:00.000Z"),
       }),
     }));
     const updateData = (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
       ?.data;
+    expect(updateData).not.toHaveProperty("limitNoticeSentAt");
     expect(updateData).not.toHaveProperty("lastUsageAt");
     expect(updateData).not.toHaveProperty("spentUsdMicros");
   });
