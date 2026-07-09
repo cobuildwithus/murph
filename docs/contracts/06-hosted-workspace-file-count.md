@@ -162,3 +162,12 @@ landing; record the chosen posture here so the decision is reviewable.
   snapshot-bridge pruning guard once production vaults have all written the
   marker. The steady-state file bound for the provider-cleanup family is
   asserted by the provider-cleanup unit tests.
+
+- `bank/habitat/*.md` (`murph.habitat-frontmatter.v1`) is canonical product
+  truth included in hosted workspace snapshots. It stores one optional Markdown
+  document per versioned habitat catalog aspect, and a habitat save creates at
+  most one aspect file before later saves overwrite that same document. File
+  count is bounded by the catalog rather than user actions, messages, retries,
+  or provider history. No separate retention or compaction is planned while the
+  aspect catalog is additive; any future catalog deprecation must define the
+  delete/archive posture in the same change.
