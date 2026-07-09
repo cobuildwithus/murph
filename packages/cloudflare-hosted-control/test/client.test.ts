@@ -253,9 +253,12 @@ describe("createCloudflareHostedControlClient", () => {
 
     await expect(client.sendTelegramUsageLimitNotice({
       authority,
+      onRequestAttempted: () => {
+        events.push("attempt");
+      },
     })).resolves.toEqual(result);
 
-    expect(events).toEqual(["token", "fetch"]);
+    expect(events).toEqual(["token", "attempt", "fetch"]);
     const request = requireObservedRequest(observedRequest);
     expect(request.url).toBe(
       "https://runner.example.test/root/internal/users/user_123/telegram/usage-limit-notice",
@@ -279,11 +282,14 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
     const authority = await createSignedTelegramUsageLimitNoticeAuthority();
+    const onRequestAttempted = vi.fn();
 
     await expect(client.sendTelegramUsageLimitNotice({
       authority,
+      onRequestAttempted,
     })).rejects.toThrow("token unavailable");
 
+    expect(onRequestAttempted).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
