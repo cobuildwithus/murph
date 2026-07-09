@@ -115,7 +115,7 @@ afterEach(async () => {
 });
 
 describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
-  it("rejects every non-idle checkpoint reason before snapshot side effects", async () => {
+  it("rejects every non-snapshot checkpoint reason before snapshot side effects", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
     await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
@@ -146,10 +146,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     for (const reason of HOSTED_WORKSPACE_CHECKPOINT_REASONS.filter((reason) =>
-      reason !== "idle_shutdown"
+      reason !== "idle_shutdown" && reason !== "canonical_runtime_commit"
     )) {
       await expect(createOptions().createCheckpointSnapshot(createCheckpointInput(reason)))
-        .rejects.toThrow("Hosted workspace snapshot construction is idle-shutdown only.");
+        .rejects.toThrow(
+          "Hosted workspace snapshot construction is idle-shutdown or canonical runtime commit only.",
+        );
     }
 
     expect(readWorkspace).not.toHaveBeenCalled();
@@ -2893,7 +2895,7 @@ function createPlatform(input: {
         expectedWorkspaceVersion: string;
         nextWakeAt?: string | null;
         nextWakeReason?: string | null;
-        reason: "idle_shutdown";
+        reason: "canonical_runtime_commit" | "idle_shutdown";
       }) => {
         const snapshotId = `snapshot_test_${++workspaceSnapshotStartOrdinal}`;
         const objectKey = await hostedWorkspaceSnapshotObjectKey({

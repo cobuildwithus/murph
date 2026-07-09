@@ -652,15 +652,18 @@ abort, and data-key unwrap metadata, stores a short-lived upload session without
 the URL or data key, verifies the object by `HEAD` on completion, and never
 receives the snapshot body. The v2 format is a greenfield zstd hard cut, so
 gzip v2 refs are intentionally unsupported; legacy restore compatibility stays
-limited to pre-v2 workspace refs. The bridge no longer writes foreground working
-commits. Mailbox import, active-turn acceptance, `canonical_runtime_commit`,
-assistant-runtime commits, provider cleanup, system-mailbox receipts, and
-pre-delivery outbox state must not enter workspace snapshot construction; the
-foreground caller tripwire fails those paths before the bridge. Bootstrap or
-live foreground paths must not fall back to broad foreground full snapshots,
-path-scoped working deltas, legacy hot
-producers, Worker-body snapshot uploads, or artifact-sidecar v2 producers.
-`idle_shutdown` is the only new checkpoint snapshot producer.
+limited to pre-v2 workspace refs. The bridge no longer writes foreground
+working commits. Mailbox import, active-turn acceptance, assistant-runtime
+commits, provider cleanup, system-mailbox receipts, and pre-delivery outbox
+state must not enter workspace snapshot construction; the foreground caller
+tripwire fails those paths before the bridge. The only foreground snapshot
+exception is `canonical_runtime_commit` when it carries newly staged canonical
+write receipts that must become durable before the runtime publishes receipt
+status. Bootstrap or live foreground paths must not fall back to broad
+foreground full snapshots, path-scoped working deltas, legacy hot producers,
+Worker-body snapshot uploads, or artifact-sidecar v2 producers. `idle_shutdown`
+and receipt-bearing `canonical_runtime_commit` are the only new checkpoint
+snapshot producers.
 `idle_shutdown` is the snapshot boundary for warm-runner wind-down: it maps to
 a direct-R2 v2 snapshot from the effective restored state, runs through the
 ordinary invocation lease shortly before container sleep, and checks the lease
@@ -685,14 +688,16 @@ root. For legacy refs, restore clears local roots and legacy cache markers, then
 applies the base bundle when present and either the working delta or legacy hot
 bundle according to the snapshot ref shape. Legacy working `{base, delta}` and
 layered `{base, hot}` refs remain
-restorable during migration, but new bridge snapshots are idle-shutdown direct
-R2 v2 refs only.
+restorable during migration, but new bridge snapshots are idle-shutdown or
+receipt-bearing canonical-runtime-commit direct R2 v2 refs only.
 
 Foreground assistant turns do not publish a separate Codex continuity artifact
-or workspace pointer. Provider-native continuity remains a workspace snapshot
-concern: if a container dies before the next idle-shutdown direct-R2 v2 snapshot,
-restore must still be correct from durable mailbox, transcript, and assistant
-runtime state even if provider-native resume optimization is unavailable.
+or workspace pointer outside receipt-bearing canonical-runtime-commit
+snapshots. Provider-native continuity remains a workspace snapshot concern: if
+a container dies before the next idle-shutdown or receipt-bearing
+canonical-runtime-commit direct-R2 v2 snapshot, restore must still be correct
+from durable mailbox, transcript, and assistant runtime state even if
+provider-native resume optimization is unavailable.
 Fresh-thread starts and stale native-resume fallback may include bounded recent
 committed transcript history; primary native-resume attempts do not replay that
 history into the provider prompt. Active-turn input is not serialized as
@@ -709,8 +714,9 @@ replica, but they must mark it stale and request refresh after the HTTP response
 Web represents that request as ordinary low-priority runtime work only when its
 freshness policy explicitly asks for it; normal nudges do not become browser-vault
 refresh sweeps just because a workspace has no replica yet. Foreground work may
-schedule refresh as ordinary runtime work, but `idle_shutdown` v2 checkpoints write only
-the workspace snapshot ref; they do not publish browser-vault replicas.
+schedule refresh as ordinary runtime work, but workspace snapshot checkpoints
+write only the workspace snapshot ref; they do not publish browser-vault
+replicas.
 Browser-vault replica writes require the active runtime write fence and publish
 the latest replica ref separately, without changing the workspace checkpoint
 version.

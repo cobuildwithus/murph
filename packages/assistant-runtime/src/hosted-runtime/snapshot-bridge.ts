@@ -92,8 +92,10 @@ export type HostedRuntimeBridgeReadCurrentLease = () =>
   | HostedRuntimeBridgeCheckpointLease
   | null
   | Promise<HostedRuntimeBridgeCheckpointLease | null>;
-type HostedWorkspaceIdleCheckpointRequest =
-  HostedWorkspaceCheckpointRequest & { reason: "idle_shutdown" };
+type HostedWorkspaceSnapshotCheckpointRequest =
+  HostedWorkspaceCheckpointRequest & {
+    reason: "canonical_runtime_commit" | "idle_shutdown";
+  };
 
 const HOSTED_WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_PATTERN = /^[a-f0-9]{64}$/u;
 
@@ -230,7 +232,7 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   checkpoint?: HostedWorkspaceCheckpointResponse;
   snapshotRef: HostedExecutionSnapshotRef;
 }> {
-  const request = requireHostedWorkspaceBridgeIdleCheckpointRequest(input.request);
+  const request = requireHostedWorkspaceBridgeSnapshotCheckpointRequest(input.request);
   const legacyMaterialization = await prepareLegacyWorkspaceRefsForV2SnapshotMaterialization({
     artifactStore: input.platform.artifactStore,
     platform: input.platform,
@@ -256,16 +258,19 @@ async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
   });
 }
 
-function requireHostedWorkspaceBridgeIdleCheckpointRequest(
+function requireHostedWorkspaceBridgeSnapshotCheckpointRequest(
   request: HostedWorkspaceCheckpointRequest,
-): HostedWorkspaceIdleCheckpointRequest {
-  if (request.reason !== "idle_shutdown") {
-    throw new Error("Hosted workspace snapshot construction is idle-shutdown only.");
+): HostedWorkspaceSnapshotCheckpointRequest {
+  const reason = request.reason;
+  if (reason !== "idle_shutdown" && reason !== "canonical_runtime_commit") {
+    throw new Error(
+      "Hosted workspace snapshot construction is idle-shutdown or canonical runtime commit only.",
+    );
   }
 
   return {
     ...request,
-    reason: "idle_shutdown",
+    reason,
   };
 }
 
@@ -285,7 +290,7 @@ interface HostedWorkspaceBridgeV2SnapshotInput {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
-  request: HostedWorkspaceIdleCheckpointRequest;
+  request: HostedWorkspaceSnapshotCheckpointRequest;
   snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder;
   snapshotDiagnosticsHashSecret: string | null;
   userId: string;
@@ -352,7 +357,7 @@ async function createHostedWorkspaceV2Snapshot(
       inboxMediaRetentionWakeAt: input.request.inboxMediaRetentionWakeAt,
       nextWakeAt: input.request.nextWakeAt,
       nextWakeReason: input.request.nextWakeReason,
-      reason: "idle_shutdown",
+      reason: input.request.reason,
     });
     const activeSnapshotSession = snapshotSession;
     ({ prunedRuntimeSymlinkCount } = await pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks({
@@ -800,7 +805,7 @@ async function writeHostedCheckpointSnapshotLifecycleLog(input: {
   eventCode: HostedRuntimeLogEventCode;
   level: "error" | "info" | "warn";
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  request: HostedWorkspaceIdleCheckpointRequest;
+  request: HostedWorkspaceSnapshotCheckpointRequest;
 }): Promise<void> {
   if (!input.platform.logPort) {
     return;
@@ -1021,7 +1026,7 @@ async function writeHostedCheckpointSnapshotMetricLog(input: {
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   prunedRuntimeSymlinkCount: number;
   terminalWriteOperationPruneResult: PruneTerminalWriteOperationRecordsResult | null;
-  request: HostedWorkspaceIdleCheckpointRequest;
+  request: HostedWorkspaceSnapshotCheckpointRequest;
   snapshotElapsedMs: number;
   snapshotMode: typeof HOSTED_WORKSPACE_V2_SNAPSHOT_MODE;
   sizeDiagnostics: HostedWorkspaceSnapshotSizeDiagnostics | null;

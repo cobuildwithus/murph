@@ -244,7 +244,7 @@ function createPlatform(input: {
       },
       startSnapshotSession: async (request: {
         expectedWorkspaceVersion: string;
-        reason: "idle_shutdown";
+        reason: "canonical_runtime_commit" | "idle_shutdown";
       }) => {
         const snapshotId = `snapshot_baseline_${++uploadOrdinal}`;
         const objectKey = await hostedWorkspaceSnapshotObjectKey({

@@ -72,7 +72,30 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     })).toThrow("Hosted mailbox payload decoder is required for this invocation.");
   });
 
-  it("rejects non-idle checkpoints before opening a snapshot session", async () => {
+  it("allows canonical runtime commit snapshots through the bridge snapshot path", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const options = createBridgeOptions({
+      platform,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("canonical_runtime_commit"));
+
+    expect(calls.startSnapshotSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "canonical_runtime_commit",
+      }),
+    );
+    const checkpointRequest =
+      calls.completeSnapshotSession.mock.calls[0]?.[0].checkpointRequest;
+    expect(checkpointRequest?.reason).toBe("canonical_runtime_commit");
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-snapshot checkpoints before opening a snapshot session", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
     const options = createBridgeOptions({
@@ -81,8 +104,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     await expect(options.createCheckpointSnapshot(
-      createCheckpointInput("canonical_runtime_commit"),
-    )).rejects.toThrow("Hosted workspace snapshot construction is idle-shutdown only.");
+      createCheckpointInput("import"),
+    )).rejects.toThrow(
+      "Hosted workspace snapshot construction is idle-shutdown or canonical runtime commit only.",
+    );
 
     expect(calls.startSnapshotSession).not.toHaveBeenCalled();
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
@@ -707,7 +732,7 @@ function createLease(
 }
 
 function createCheckpointInput(
-  reason: "canonical_runtime_commit" | "idle_shutdown" = "idle_shutdown",
+  reason: HostedWorkspaceCheckpointRequest["reason"] = "idle_shutdown",
 ) {
   const state = {
     recentStatuses: [],

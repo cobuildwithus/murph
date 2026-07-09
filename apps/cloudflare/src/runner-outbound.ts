@@ -116,6 +116,10 @@ const HOSTED_RUNNER_DIAGNOSTIC_FINGERPRINT_BYTES = 12;
 const hostedRunnerDiagnosticTextEncoder = new TextEncoder();
 type HostedExecutionSnapshotRefValue = NonNullable<HostedExecutionSnapshotRef>;
 
+function isHostedWorkspaceSnapshotCheckpointReason(reason: string): boolean {
+  return reason === "idle_shutdown" || reason === "canonical_runtime_commit";
+}
+
 export async function handleRunnerOutboundRequest(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
@@ -509,8 +513,11 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
     limitBytes: 16 * 1024,
   });
   const reason = requireSnapshotDataKeyString(body.reason, "reason");
-  if (reason !== "idle_shutdown") {
-    return jsonError("Hosted workspace snapshot start reason must be idle_shutdown.", 400);
+  if (!isHostedWorkspaceSnapshotCheckpointReason(reason)) {
+    return jsonError(
+      "Hosted workspace snapshot start reason must be idle_shutdown or canonical_runtime_commit.",
+      400,
+    );
   }
   const expectedWorkspaceVersion = requireSnapshotDataKeyString(
     body.expectedWorkspaceVersion,
@@ -1428,7 +1435,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     ...readWorkspaceSnapshotCompleteCheckpointRequest(body.checkpointRequest),
     snapshotRef,
   });
-  if (checkpointRequest.reason !== "idle_shutdown") {
+  if (!isHostedWorkspaceSnapshotCheckpointReason(checkpointRequest.reason)) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
       deleteObject: true,
@@ -1437,7 +1444,10 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
       snapshotId: input.snapshotId,
       userId: input.userId,
     });
-    return jsonError("Hosted workspace snapshot checkpoint reason must be idle_shutdown.", 400);
+    return jsonError(
+      "Hosted workspace snapshot checkpoint reason must be idle_shutdown or canonical_runtime_commit.",
+      400,
+    );
   }
   if (
     checkpointRequest.attemptId !== writeFence.attemptId
