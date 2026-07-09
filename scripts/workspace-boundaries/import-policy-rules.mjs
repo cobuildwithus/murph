@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -13,9 +13,7 @@ import {
 } from "./scanner.mjs";
 
 export async function verifyTsconfigPathMappings(failures) {
-  const tsconfigPaths = await findFiles([".", "packages", "apps"], (filePath) =>
-    /^tsconfig(\.[^.]+)?\.json$/u.test(path.basename(filePath)),
-  );
+  const tsconfigPaths = await findGovernedTsconfigPaths();
 
   for (const tsconfigPath of tsconfigPaths) {
     const tsconfig = JSON.parse(await readFile(tsconfigPath, "utf8"));
@@ -84,6 +82,18 @@ export async function verifyTsconfigPathMappings(failures) {
       }
     }
   }
+}
+
+export async function findGovernedTsconfigPaths() {
+  const isTsconfig = (filePath) =>
+    /^tsconfig(\.[^.]+)?\.json$/u.test(path.basename(filePath));
+  const rootEntries = await readdir(repoRoot, { withFileTypes: true });
+  const rootTsconfigPaths = rootEntries
+    .filter((entry) => entry.isFile() && isTsconfig(entry.name))
+    .map((entry) => path.join(repoRoot, entry.name));
+  const workspaceTsconfigPaths = await findFiles(["packages", "apps"], isTsconfig);
+
+  return [...rootTsconfigPaths, ...workspaceTsconfigPaths].sort();
 }
 
 export async function verifyWorkspaceImports(failures) {

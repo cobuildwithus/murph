@@ -55,7 +55,7 @@ Apply only modifiers that change the plan:
 - `references/safety.md` — pain, symptoms, health uncertainty, maximal or high-skill work, special populations, competition, or body-composition risk
 - `references/evidence.md` — source-level justification, disputed claims, confidence calibration, or maintenance of defaults
 
-When a visual would materially improve exercise understanding, use Murph's available response-media or image support only if the current runtime exposes it. Otherwise give compact form cues in text rather than inventing a separate image workflow.
+When presenting a named exercise, unfamiliar variation, or movement walkthrough, read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` and follow its list/show, image-media, progressive-disclosure, and catalog-gap rules. This skill still owns exercise choice, programming, dose, progression, substitutions, and safety. If catalog media is unavailable, give compact form cues rather than inventing an image workflow.
 
 The boundaries below apply even when no reference is loaded.
 
