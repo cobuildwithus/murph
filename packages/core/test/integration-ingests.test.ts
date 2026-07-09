@@ -731,6 +731,60 @@ test("integration ingest append plans require opt-in before amending archived mo
   );
 });
 
+test("integration ingest append plans reject live id conflicts outside target months", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-cross-shard-id");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const historicalPath = "ledger/integration-ingests/2025/2025-11.jsonl";
+  const historicalRecord = makeIntegrationIngestRecord({
+    id: "xfm_CrossShardDuplicate1",
+    eventId: "evt_CrossShardDuplicate1",
+    importedAt: "2025-11-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestJsonl(vaultRoot, historicalPath, [historicalRecord]);
+
+  const incomingRecord = makeIntegrationIngestRecord({
+    id: "xfm_CrossShardDuplicate1",
+    eventId: "evt_CrossShardDuplicate2",
+    importedAt: "2025-12-12T09:00:00.000Z",
+  });
+  await assert.rejects(
+    buildIntegrationIngestAppendPlan(vaultRoot, [incomingRecord]),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ID_CONFLICT");
+      return true;
+    },
+  );
+});
+
+test("integration ingest append plans reject archived id conflicts outside target months", async () => {
+  const vaultRoot = await makeTempDirectory("murph-integration-ingest-cross-shard-archive-id");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+
+  const historicalPath = "ledger/integration-ingests/2025/2025-10.jsonl";
+  const historicalRecord = makeIntegrationIngestRecord({
+    id: "xfm_CrossShardArchiveDuplicate1",
+    eventId: "evt_CrossShardArchiveDuplicate1",
+    importedAt: "2025-10-12T09:00:00.000Z",
+  });
+  await writeIntegrationIngestZipArchive(vaultRoot, historicalPath, [historicalRecord]);
+
+  const incomingRecord = makeIntegrationIngestRecord({
+    id: "xfm_CrossShardArchiveDuplicate1",
+    eventId: "evt_CrossShardArchiveDuplicate2",
+    importedAt: "2025-12-12T09:00:00.000Z",
+  });
+  await assert.rejects(
+    buildIntegrationIngestAppendPlan(vaultRoot, [incomingRecord]),
+    (error) => {
+      assert.equal(error instanceof VaultError, true);
+      assert.equal((error as VaultError).code, "INTEGRATION_INGEST_ID_CONFLICT");
+      return true;
+    },
+  );
+});
+
 test("generic JSONL append paths refuse archived integration ingest shards", async () => {
   const vaultRoot = await makeTempDirectory("murph-integration-ingest-generic-append-archive");
   await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });

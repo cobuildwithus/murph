@@ -15514,7 +15514,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
       });
 
-      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
         async createCheckpointSnapshot(snapshotInput) {
           events.push(`snapshot:${snapshotInput.reason}`);
           assert.equal(snapshotInput.reason, "idle_shutdown");
@@ -15576,6 +15576,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogEntryCount, undefined);
       assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogSha256, undefined);
       assert.equal(checkpointRedactedStatus.hostedCanonicalWriteReceiptLogByteSize, undefined);
+      assert.equal(result.redactedStatus?.hostedCanonicalWriteReceiptLogEntryCount, undefined);
+      assert.equal(result.redactedStatus?.hostedCanonicalWriteReceiptLogSha256, undefined);
+      assert.equal(result.redactedStatus?.hostedCanonicalWriteReceiptLogByteSize, undefined);
       const receiptLogs = listHostedCanonicalWriteReceiptLogArtifacts(artifactBytesByHash);
       assert.equal(receiptLogs.length, 1);
       assert.equal(receiptLogs[0]?.entries.length, 1);

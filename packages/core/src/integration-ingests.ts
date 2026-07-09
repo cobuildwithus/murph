@@ -107,6 +107,10 @@ interface IntegrationIngestRowSource {
   sourcePath: string;
 }
 
+interface ReadIntegrationIngestEntriesByIdOptions {
+  skipUnmatchedMalformedRows?: boolean;
+}
+
 interface ZipCentralDirectoryEntry {
   centralDirectoryOffset: number;
   compressedSize: number;
@@ -324,13 +328,34 @@ async function readIntegrationIngestEntriesByIdFromSources(
   vaultRoot: string,
   sources: readonly IntegrationIngestRowSource[],
   ids: ReadonlySet<string>,
+  options: ReadIntegrationIngestEntriesByIdOptions = {},
 ): Promise<StoredIntegrationIngestEntry[]> {
   if (ids.size === 0) return [];
   const entries: StoredIntegrationIngestEntry[] = [];
   const seen = new Map<string, string>();
 
   for await (const { raw, relativePath, sourcePath, lineNumber } of readIntegrationIngestJsonlRows(vaultRoot, sources)) {
-    if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.importedAt !== "string") {
+    if (!isRecord(raw) || typeof raw.id !== "string") {
+      if (options.skipUnmatchedMalformedRows) {
+        continue;
+      }
+      throw new VaultError(
+        "INTEGRATION_INGEST_INVALID",
+        `Integration ingest record in "${sourcePath}" is missing id or importedAt.`,
+        { relativePath: sourcePath, lineNumber },
+      );
+    }
+    if (!options.skipUnmatchedMalformedRows && typeof raw.importedAt !== "string") {
+      throw new VaultError(
+        "INTEGRATION_INGEST_INVALID",
+        `Integration ingest record in "${sourcePath}" is missing id or importedAt.`,
+        { relativePath: sourcePath, lineNumber },
+      );
+    }
+    if (!ids.has(raw.id)) {
+      continue;
+    }
+    if (typeof raw.importedAt !== "string") {
       throw new VaultError(
         "INTEGRATION_INGEST_INVALID",
         `Integration ingest record in "${sourcePath}" is missing id or importedAt.`,
@@ -338,9 +363,6 @@ async function readIntegrationIngestEntriesByIdFromSources(
       );
     }
     assertIntegrationIngestShard(raw.id, raw.importedAt, relativePath);
-    if (!ids.has(raw.id)) {
-      continue;
-    }
     const record = parseIntegrationIngestRecord(raw, sourcePath);
     assertIntegrationIngestRecordIntegrity(record);
     assertUniqueIntegrationIngestId(seen, record.id, relativePath);
@@ -365,8 +387,23 @@ export async function buildIntegrationIngestAppendPlan(
       .filter((source) => source.kind !== "jsonl")
       .map((source) => source.logicalPath),
   );
+  // Keep target shard validation strict, but use non-target sources only to protect global id uniqueness.
+  const targetExistingEntries = await readIntegrationIngestEntriesByIdFromSources(
+    vaultRoot,
+    targetSources,
+    requestedIds,
+  );
+  const targetShardPathSet = new Set(targetShardPaths);
+  const nonTargetExistingEntries = await readIntegrationIngestEntriesByIdFromSources(
+    vaultRoot,
+    (await listIntegrationIngestRowSources(vaultRoot)).filter(
+      (source) => !targetShardPathSet.has(source.logicalPath),
+    ),
+    requestedIds,
+    { skipUnmatchedMalformedRows: true },
+  );
   const existingById = new Map(
-    (await readIntegrationIngestEntriesByIdFromSources(vaultRoot, targetSources, requestedIds)).map((entry) =>
+    [...targetExistingEntries, ...nonTargetExistingEntries].map((entry) =>
       [entry.record.id, entry.record] as const,
     ),
   );

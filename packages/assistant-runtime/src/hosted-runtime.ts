@@ -1710,7 +1710,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nextWakeAt: workspace.nextWakeAt ?? null,
         nextWakeReason: workspace.nextWakeReason ?? null,
       };
-      redactedStatus = workspace.redactedStatus ?? redactedStatus;
+      redactedStatus = workspace.redactedStatus
+        ?? omitHostedCanonicalWriteReceiptLogStatusFields(redactedStatus)
+        ?? {};
       invocationStatus = resolveHostedWorkspaceInvocationStatus({
         mailboxBudgetExhausted: mailboxBudgetExhausted(),
         nextWakeAt: pendingWake.nextWakeAt,
