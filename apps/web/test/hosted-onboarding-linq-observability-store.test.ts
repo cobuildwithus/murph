@@ -1165,161 +1165,6 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("atomically reserves legacy AI usage notice keys with the current period key", async () => {
-    const fixture = createObservabilityPrismaFixture();
-    const transaction = vi.fn(<T,>(
-      operation: (transactionPrisma: typeof fixture.prisma) => Promise<T>,
-    ) => operation(fixture.prisma));
-    Object.assign(fixture.prisma, { $transaction: transaction });
-    const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
-    const currentKey = "ai-usage-gate:member_123:2026-03";
-    const legacyKey = "ai-usage-gate:member_123:2026-03:edge_usage_limit_reached";
-    const currentLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(currentKey);
-    const legacyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(legacyKey);
-
-    await expect(claimHostedLinqDeliveryProviderDispatchTx({
-      attemptedAt,
-      guardIdempotencyKeys: [legacyKey, currentKey, legacyKey],
-      idempotencyKey: currentKey,
-      linqChatId: "chat_123",
-      prisma: fixture.prisma as never,
-      reclaimStalePreProviderAttempt: true,
-      source: "hosted_webhook_side_effect",
-      sourceRef: currentKey,
-      targetKind: "thread",
-      template: "ai_usage_quota",
-    })).resolves.toEqual({
-      claimed: true,
-      id: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
-    });
-
-    expect(transaction).toHaveBeenCalledOnce();
-    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenNthCalledWith(1, {
-      select: expect.objectContaining({
-        attemptedAt: true,
-      }),
-      where: {
-        idempotencyKey: currentLookupKey,
-      },
-    });
-    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenNthCalledWith(2, {
-      select: expect.objectContaining({
-        attemptedAt: true,
-      }),
-      where: {
-        idempotencyKey: currentLookupKey,
-      },
-    });
-    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenNthCalledWith(3, {
-      select: expect.objectContaining({
-        attemptedAt: true,
-      }),
-      where: {
-        idempotencyKey: legacyLookupKey,
-      },
-    });
-    expect(fixture.hostedLinqDeliveryCreate).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenNthCalledWith(
-      1,
-      {
-        data: [expect.objectContaining({
-          attemptedAt,
-          idempotencyKey: legacyLookupKey,
-          sourceRef: createHostedLinqDeliverySourceRefLookupKey(currentKey),
-          status: "attempted",
-          template: "ai_usage_quota",
-        })],
-        skipDuplicates: true,
-      },
-    );
-    expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenNthCalledWith(
-      2,
-      {
-        data: [expect.objectContaining({
-          attemptedAt,
-          idempotencyKey: currentLookupKey,
-          status: "attempted",
-          template: "ai_usage_quota",
-        })],
-        skipDuplicates: true,
-      },
-    );
-  });
-
-  it("does not claim the current AI usage notice while a legacy guard row is in flight", async () => {
-    const fixture = createObservabilityPrismaFixture();
-    const currentKey = "ai-usage-gate:member_123:2026-03";
-    const legacyKey = "ai-usage-gate:member_123:2026-03:edge_usage_limit_reached";
-    const legacyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(legacyKey);
-    fixture.hostedLinqDeliveryFindUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        acceptedAt: null,
-        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
-        deliveredAt: null,
-        failedAt: null,
-        id: "hld_legacy_in_flight",
-        lastReceiptAt: null,
-        messageLookupKey: null,
-        phoneNumberLookupKey: null,
-        retryAfterAt: null,
-        skippedAt: null,
-        source: "hosted_webhook_side_effect",
-        status: "attempted",
-      });
-    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
-
-    await expect(claimHostedLinqDeliveryProviderDispatchTx({
-      attemptedAt: new Date("2026-03-26T12:00:30.000Z"),
-      guardIdempotencyKeys: [legacyKey],
-      idempotencyKey: currentKey,
-      linqChatId: "chat_123",
-      prisma: fixture.prisma as never,
-      reclaimStalePreProviderAttempt: true,
-      source: "hosted_webhook_side_effect",
-      sourceRef: currentKey,
-      targetKind: "thread",
-      template: "ai_usage_quota",
-    })).resolves.toEqual({
-      claimed: false,
-      id: "hld_legacy_in_flight",
-    });
-
-    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
-      select: expect.objectContaining({
-        attemptedAt: true,
-      }),
-      where: {
-        idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(currentKey),
-      },
-    });
-    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
-      select: expect.objectContaining({
-        attemptedAt: true,
-      }),
-      where: {
-        idempotencyKey: legacyLookupKey,
-      },
-    });
-    expect(fixture.hostedLinqDeliveryCreate).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          id: "hld_legacy_in_flight",
-          OR: expect.arrayContaining([
-            expect.objectContaining({
-              attemptedAt: {
-                lte: new Date("2026-03-26T11:45:30.000Z"),
-              },
-              status: "attempted",
-            }),
-          ]),
-        }),
-      }),
-    );
-  });
-
   it("does not claim provider dispatch while the same idempotency row is already in flight", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
@@ -1352,7 +1197,6 @@ describe("hosted Linq observability stores", () => {
     });
 
     expect(fixture.hostedLinqDeliveryCreate).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -1465,11 +1309,10 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("terminalizes an existing stale current Telegram usage notice before inspecting legacy guard rows", async () => {
+  it("terminalizes an existing stale current Telegram usage notice before retrying", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
     const currentKey = "ai-usage-gate:member_123:2026-03";
-    const legacyKey = "ai-usage-gate:member_123:2026-03:edge_usage_limit_reached";
     const currentLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(currentKey);
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
       acceptedAt: null,
@@ -1489,7 +1332,6 @@ describe("hosted Linq observability stores", () => {
 
     await expect(claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt,
-      guardIdempotencyKeys: [legacyKey],
       idempotencyKey: currentKey,
       prisma: fixture.prisma as never,
       reclaimStalePreProviderAttempt: true,
@@ -3381,7 +3223,6 @@ function createObservabilityPrismaFixture() {
   const hostedLinqAlertCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDailyStateUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryCreate = vi.fn().mockResolvedValue({ id: "hld_random" });
-  const hostedLinqDeliveryCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryFindFirst = vi.fn().mockResolvedValue(null);
   const hostedLinqDeliveryFindMany = vi.fn().mockResolvedValue([]);
   const hostedLinqDeliveryFindUnique = vi.fn().mockResolvedValue(null);
@@ -3413,7 +3254,6 @@ function createObservabilityPrismaFixture() {
     },
     hostedLinqDelivery: {
       create: hostedLinqDeliveryCreate,
-      createMany: hostedLinqDeliveryCreateMany,
       findFirst: hostedLinqDeliveryFindFirst,
       findMany: hostedLinqDeliveryFindMany,
       findUnique: hostedLinqDeliveryFindUnique,
@@ -3443,7 +3283,6 @@ function createObservabilityPrismaFixture() {
     hostedLinqAlertCreateMany,
     hostedLinqDailyStateUpdateMany,
     hostedLinqDeliveryCreate,
-    hostedLinqDeliveryCreateMany,
     hostedLinqDeliveryFindFirst,
     hostedLinqDeliveryFindMany,
     hostedLinqDeliveryFindUnique,

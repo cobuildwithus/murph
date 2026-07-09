@@ -2648,12 +2648,15 @@ function buildHostedAiUsageGateLimitNotice(input: {
     };
   }
 
-  const base = "Hey, you've reached your usage limit for the month.";
-
   if (input.allowanceSource === "family_sponsored_pulse") {
     return {
       code: "family_usage_limit_reached",
-      message: `${base} Murph will resume when your Family usage resets.`,
+      message: renderHostedAiUsageGateLimitNoticeMessage({
+        key: "linq.ai_usage.family_limit_reached",
+        memberId: input.memberId,
+        noticeCode: "family_usage_limit_reached",
+        periodStart: input.periodStart,
+      }),
     };
   }
 
@@ -2683,6 +2686,7 @@ function buildHostedAiUsageGateLimitNotice(input: {
 function renderHostedAiUsageGateLimitNoticeMessage(input: {
   key:
     | "linq.ai_usage.edge_limit_reached"
+    | "linq.ai_usage.family_limit_reached"
     | "linq.ai_usage.pulse_upgrade_edge"
     | "linq.ai_usage.trial_limit_reached";
   memberId: string;

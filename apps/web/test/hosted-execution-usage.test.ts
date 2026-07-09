@@ -306,8 +306,7 @@ describe("recordHostedAiUsageRecords", () => {
     allowanceMocks.accountHostedAiUsageForAllowanceTx.mockResolvedValue(
       buildUsageLimitNoticeCandidate({
         noticeCode: "family_usage_limit_reached",
-        noticeMessage:
-          "Hey, you've reached your usage limit for the month. Murph will resume when your Family usage resets.",
+        noticeMessage: "family usage limit notice",
       }),
     );
 
@@ -322,8 +321,7 @@ describe("recordHostedAiUsageRecords", () => {
 
     expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledWith(
       expect.objectContaining({
-        message:
-          "Hey, you've reached your usage limit for the month. Murph will resume when your Family usage resets.",
+        message: "family usage limit notice",
         noticeCode: "family_usage_limit_reached",
       }),
     );

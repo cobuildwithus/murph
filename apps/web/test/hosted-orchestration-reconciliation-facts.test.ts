@@ -3,7 +3,6 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
 } from "@/src/lib/hosted-execution/usage-allowance";
 
@@ -924,14 +923,8 @@ describe("hosted orchestration reconciliation facts", () => {
       memberId: MEMBER_ID,
       periodStart: deniedDecision.periodStart,
     });
-    const expectedLegacyIdempotencyKeys =
-      buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
-        memberId: MEMBER_ID,
-        periodStart: deniedDecision.periodStart,
-      });
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith({
       attemptedAt: new Date(FIXED_NOW),
-      guardIdempotencyKeys: expectedLegacyIdempotencyKeys,
       idempotencyKey: expectedIdempotencyKey,
       prisma: expect.objectContaining({ kind: "prisma" }),
       reclaimStalePreProviderAttempt: true,
@@ -1975,14 +1968,8 @@ describe("hosted orchestration reconciliation facts", () => {
       memberId: MEMBER_ID,
       periodStart: deniedDecision.periodStart,
     });
-    const expectedLegacyIdempotencyKeys =
-      buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
-        memberId: MEMBER_ID,
-        periodStart: deniedDecision.periodStart,
-      });
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith({
       attemptedAt: new Date(FIXED_NOW),
-      guardIdempotencyKeys: expectedLegacyIdempotencyKeys,
       idempotencyKey: expectedIdempotencyKey,
       prisma: expect.objectContaining({ kind: "prisma" }),
       reclaimStalePreProviderAttempt: true,

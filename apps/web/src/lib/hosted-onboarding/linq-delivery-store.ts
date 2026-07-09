@@ -263,7 +263,6 @@ export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
 
 export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   attemptedAt?: Date;
-  guardIdempotencyKeys?: readonly string[];
   idempotencyKey?: string | null;
   linqChatId?: string | null;
   phoneNumber?: string | null;
@@ -316,10 +315,6 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
     id: buildHostedLinqDeliveryId(idempotencyKey),
     idempotencyKey,
   };
-  const guardIdempotencyKeys = normalizeHostedLinqDeliveryGuardIdempotencyKeys({
-    guardIdempotencyKeys: input.guardIdempotencyKeys,
-    primaryIdempotencyKey: idempotencyKey,
-  });
   const existing = await input.prisma.hostedLinqDelivery.findUnique({
     where: { idempotencyKey },
     select: hostedLinqDeliveryLifecycleSelect,
@@ -329,19 +324,6 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       attemptedAt,
       data,
       delivery: existing,
-      prisma: input.prisma,
-      reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
-      source: input.source,
-    });
-  }
-
-  if (guardIdempotencyKeys.length > 0) {
-    return claimNewHostedLinqDeliveryProviderDispatchWithGuardsTx({
-      attemptedAt,
-      createData,
-      data,
-      guardIdempotencyKeys,
-      idempotencyKey,
       prisma: input.prisma,
       reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
       source: input.source,
@@ -377,157 +359,6 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       source: input.source,
     });
   }
-}
-
-async function claimNewHostedLinqDeliveryProviderDispatchWithGuardsTx(input: {
-  attemptedAt: Date;
-  createData: Prisma.HostedLinqDeliveryCreateManyInput;
-  data: HostedLinqDeliveryProviderDispatchData;
-  guardIdempotencyKeys: readonly string[];
-  idempotencyKey: string;
-  prisma: HostedLinqDeliveryClient;
-  reclaimStalePreProviderAttempt?: boolean;
-  source: string;
-}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
-  return runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
-    const existing = await prisma.hostedLinqDelivery.findUnique({
-      where: { idempotencyKey: input.idempotencyKey },
-      select: hostedLinqDeliveryLifecycleSelect,
-    });
-    if (existing) {
-      return claimExistingHostedLinqDeliveryProviderDispatchTx({
-        attemptedAt: input.attemptedAt,
-        data: input.data,
-        delivery: existing,
-        prisma,
-        reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
-        source: input.source,
-      });
-    }
-
-    const guardClaim = await reserveHostedLinqDeliveryGuardRowsTx({
-      attemptedAt: input.attemptedAt,
-      data: input.data,
-      guardIdempotencyKeys: input.guardIdempotencyKeys,
-      prisma,
-      reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
-      source: input.source,
-    });
-    if (guardClaim) {
-      return guardClaim;
-    }
-
-    const created = await createHostedLinqDeliveryIfAbsentTx({
-      data: input.createData,
-      prisma,
-    });
-    if (created) {
-      return {
-        claimed: true,
-        id: input.createData.id ?? null,
-      };
-    }
-
-    const concurrent = await prisma.hostedLinqDelivery.findUnique({
-      where: { idempotencyKey: input.idempotencyKey },
-      select: hostedLinqDeliveryLifecycleSelect,
-    });
-    if (!concurrent) {
-      throw new Error("Hosted Linq delivery claim disappeared after duplicate-safe create.");
-    }
-    return claimExistingHostedLinqDeliveryProviderDispatchTx({
-      attemptedAt: input.attemptedAt,
-      data: input.data,
-      delivery: concurrent,
-      prisma,
-      reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
-      source: input.source,
-    });
-  });
-}
-
-async function reserveHostedLinqDeliveryGuardRowsTx(input: {
-  attemptedAt: Date;
-  data: HostedLinqDeliveryProviderDispatchData;
-  guardIdempotencyKeys: readonly string[];
-  prisma: HostedLinqDeliveryClient;
-  reclaimStalePreProviderAttempt?: boolean;
-  source: string;
-}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date } | null> {
-  for (const idempotencyKey of input.guardIdempotencyKeys) {
-    const existing = await input.prisma.hostedLinqDelivery.findUnique({
-      where: { idempotencyKey },
-      select: hostedLinqDeliveryLifecycleSelect,
-    });
-    if (existing) {
-      const claim = await claimExistingHostedLinqDeliveryProviderDispatchTx({
-        attemptedAt: input.attemptedAt,
-        data: input.data,
-        delivery: existing,
-        prisma: input.prisma,
-        reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
-        source: input.source,
-      });
-      if (!claim.claimed) {
-        return claim;
-      }
-      continue;
-    }
-
-    const created = await createHostedLinqDeliveryIfAbsentTx({
-      data: {
-        ...input.data,
-        id: buildHostedLinqDeliveryId(idempotencyKey),
-        idempotencyKey,
-      },
-      prisma: input.prisma,
-    });
-    if (!created) {
-      const concurrent = await input.prisma.hostedLinqDelivery.findUnique({
-        where: { idempotencyKey },
-        select: hostedLinqDeliveryLifecycleSelect,
-      });
-      if (!concurrent) {
-        throw new Error("Hosted Linq guard claim disappeared after duplicate-safe create.");
-      }
-      const claim = await claimExistingHostedLinqDeliveryProviderDispatchTx({
-        attemptedAt: input.attemptedAt,
-        data: input.data,
-        delivery: concurrent,
-        prisma: input.prisma,
-        reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
-        source: input.source,
-      });
-      if (!claim.claimed) {
-        return claim;
-      }
-    }
-  }
-  return null;
-}
-
-function normalizeHostedLinqDeliveryGuardIdempotencyKeys(input: {
-  guardIdempotencyKeys?: readonly string[];
-  primaryIdempotencyKey: string;
-}): string[] {
-  return [
-    ...new Set((input.guardIdempotencyKeys ?? [])
-      .map((key) => createHostedLinqDeliveryIdempotencyLookupKey(key))
-      .filter((key): key is string =>
-        Boolean(key) && key !== input.primaryIdempotencyKey
-      )),
-  ];
-}
-
-async function createHostedLinqDeliveryIfAbsentTx(input: {
-  data: Prisma.HostedLinqDeliveryCreateManyInput;
-  prisma: HostedLinqDeliveryClient;
-}): Promise<boolean> {
-  const created = await input.prisma.hostedLinqDelivery.createMany({
-    data: [input.data],
-    skipDuplicates: true,
-  });
-  return created.count === 1;
 }
 
 export async function hasHostedLinqProviderCorrelatedDeliveryForIdempotencyKeysTx(input: {

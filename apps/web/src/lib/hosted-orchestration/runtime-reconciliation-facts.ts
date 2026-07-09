@@ -475,7 +475,6 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     }
     const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
       attemptedAt: sentAt,
-      guardIdempotencyKeys: legacyIdempotencyKeys,
       idempotencyKey: deliveryClaim.idempotencyKey,
       prisma: input.prisma,
       reclaimStalePreProviderAttempt: true,

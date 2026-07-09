@@ -93,7 +93,6 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
 });
 
 import {
-  buildHostedAiUsageGateLegacyNoticeIdempotencyKeys,
   buildHostedAiUsageGateNoticeIdempotencyKey,
   markHostedAiUsageLimitNoticeSent,
 } from "@/src/lib/hosted-execution/usage-allowance";
@@ -600,11 +599,6 @@ describe("hosted Linq webhook transport", () => {
       memberId: "member-1",
       periodStart: "2026-03-01T00:00:00.000Z",
     });
-    const expectedLegacyIdempotencyKeys =
-      buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
-        memberId: "member-1",
-        periodStart: "2026-03-01T00:00:00.000Z",
-      });
 
     expect(effect.effectId).toBe(expectedIdempotencyKey);
     expect(effect.payload).toMatchObject({
@@ -629,7 +623,6 @@ describe("hosted Linq webhook transport", () => {
       }),
     );
     expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith({
-      guardIdempotencyKeys: expectedLegacyIdempotencyKeys,
       idempotencyKey: expectedIdempotencyKey,
       linqChatId: "chat-1",
       phoneNumber: undefined,
@@ -679,11 +672,6 @@ describe("hosted Linq webhook transport", () => {
 
   it("sends claimable legacy AI usage quota replies with the legacy delivery key", async () => {
     const legacyIdempotencyKey = "ai-usage-gate:legacy-notice-code-key";
-    const expectedLegacyIdempotencyKeys =
-      buildHostedAiUsageGateLegacyNoticeIdempotencyKeys({
-        memberId: "member-1",
-        periodStart: "2026-03-01T00:00:00.000Z",
-      });
     vi.mocked(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx)
       .mockResolvedValueOnce({
         idempotencyKey: legacyIdempotencyKey,
@@ -718,7 +706,6 @@ describe("hosted Linq webhook transport", () => {
 
     expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
       expect.objectContaining({
-        guardIdempotencyKeys: expectedLegacyIdempotencyKeys,
         idempotencyKey: legacyIdempotencyKey,
         reclaimStalePreProviderAttempt: true,
         sourceRef: legacyIdempotencyKey,
