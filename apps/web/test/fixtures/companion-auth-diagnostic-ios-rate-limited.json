@@ -1,0 +1,9 @@
+{
+  "appVersion": "1.0.0",
+  "errorKind": "rate_limited",
+  "httpStatus": 429,
+  "method": "email",
+  "providerErrorCode": "too_many_requests",
+  "providerMessage": "Too many requests.",
+  "stage": "send_code"
+}

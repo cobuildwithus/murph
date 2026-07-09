@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
@@ -273,6 +275,32 @@ describe("device sync companion routes", () => {
           providerMessagePresent: true,
           providerMessageRejected: false,
           redactedProviderMessage: "Privy unavailable.",
+        }),
+      );
+    });
+
+    it("accepts the checked-in iOS OTP failure contract", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const contract = JSON.parse(await readFile(
+        new URL("./fixtures/companion-auth-diagnostic-ios-rate-limited.json", import.meta.url),
+        "utf8",
+      )) as unknown;
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest(
+        contract,
+        { headers: { "x-vercel-forwarded-for": "203.0.113.27" } },
+      ));
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({
+          errorKind: "rate_limited",
+          method: "email",
+          providerErrorCode: "too_many_requests",
+          providerMessageRejected: false,
+          redactedProviderMessage: "Too many requests.",
+          stage: "send_code",
         }),
       );
     });
