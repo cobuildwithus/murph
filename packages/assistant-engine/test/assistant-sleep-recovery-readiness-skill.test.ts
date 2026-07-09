@@ -35,93 +35,103 @@ async function readSkill(): Promise<string> {
 }
 
 describe('assistant sleep recovery readiness skill', () => {
-  it('routes sleep, readiness, deload, irregular-schedule, and wearable turns', () => {
+  it('routes only readiness and recovery-block decisions to the umbrella skill', () => {
     const prompt = buildPrompt()
+    const readinessLine = prompt
+      .split('\n')
+      .find((line) => line.includes('sleep-recovery-readiness:'))
 
-    expect(prompt).toContain(
-      'sleep-recovery-readiness: Use for sleep, recovery, or readiness questions',
+    expect(readinessLine).toContain(
+      'Use when the user needs an acute readiness decision',
     )
-    expect(prompt).toContain('whether to train hard, modify, rest, or deload')
-    expect(prompt).toContain('naps, shift work, travel or jet lag')
+    expect(readinessLine).toContain(
+      'whether to train hard, modify, train easy, rest, deload',
+    )
+    expect(readinessLine).toContain('Use sleep-improvement for sleep mechanics')
+    expect(readinessLine).toContain('circadian-rhythm for clock timing')
+    expect(readinessLine).toContain('hrv-resting-heart-rate for HRV/RHR interpretation')
+    expect(readinessLine).toContain('energy-fatigue for persistent tiredness')
+    expect(readinessLine).not.toContain('sleep routines')
+    expect(readinessLine).not.toContain('naps')
+    expect(readinessLine).not.toContain('shift work')
+    expect(readinessLine).not.toContain('travel or jet lag')
+    expect(readinessLine).not.toContain('wearable sleep')
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/sleep-recovery-readiness/SKILL.md',
     )
   })
 
-  it('keeps one compact decision layer instead of a parallel recovery system', async () => {
+  it('keeps one compact decision layer instead of a parallel sleep system', async () => {
     const skill = await readSkill()
 
+    expect(skill).toContain('Use this as Murph operating guidance')
+    expect(skill).toContain(
+      'It is not a parallel sleep coach, circadian coach, wearable-metric interpreter, or fatigue workup.',
+    )
     expect(skill).toContain(
       'Do not create a readiness score, point system, mandatory questionnaire, sleep store, recovery engine, protocol catalog, streak, or CLI family.',
     )
     expect(skill).toContain(
       'Do not use a signal count or point total. Judge magnitude, persistence, context, and consequence.',
     )
+    expect(skill).toContain('Ask at most one question per message')
+    expect(skill).toContain(
+      "Compose with the owning skill in one user-facing answer. Do not make the user coordinate Murph's internal handoffs.",
+    )
     expect(skill).not.toMatch(/two or more[^\n]*signals?/i)
+    expect(skill).not.toContain('### 2. Sleep routine improvement')
+    expect(skill).not.toContain('### 4. Wearable trend interpretation')
+  })
+
+  it('hands sleep, circadian, HRV/RHR, and persistent fatigue ownership to focused skills', async () => {
+    const skill = await readSkill()
+
     expect(skill).toContain(
-      'Ask at most one question per message.',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/sleep-improvement/SKILL.md',
     )
     expect(skill).toContain(
-      'For sleep improvement requests where vault and wearable evidence is thin, follow the understand-before-recommending core rules',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/circadian-rhythm/SKILL.md',
     )
     expect(skill).toContain(
-      'The active strength, cardio, or competition skill owns exact exercise selection',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/hrv-resting-heart-rate/SKILL.md',
     )
     expect(skill).toContain(
-      "Produce one integrated answer; do not make the user coordinate Murph's internal skills.",
+      '$MURPH_ASSISTANT_SKILLS_ROOT/energy-fatigue/SKILL.md',
+    )
+    expect(skill).toContain(
+      'When the user\'s main question is what the HRV/RHR, sleep-stage, sleep-score, or circadian signal means, hand off to the focused owner before recommending.',
     )
   })
 
   it('handles uncertainty with reversible decisions rather than thresholds', async () => {
     const skill = await readSkill()
 
-    expect(skill).toContain('leave ordinary variation alone')
-    expect(skill).toContain('sleepiness (could doze) or fatigue')
+    expect(skill).toContain(
+      'A single short or disrupted night raises uncertainty; it does not automatically cancel every session.',
+    )
+    expect(skill).toContain('sleepiness that could cause dozing or fatigue without dozing')
     expect(skill).toContain(
       'does not test every vigilance or judgment deficit and cannot clear dangerous drowsiness',
     )
-    expect(skill).toContain('when movement is useful and wanted')
-    expect(skill).toContain(
-      'Allow a wake-up margin before driving, precision work, or another safety-critical task.',
-    )
-    expect(skill).toContain(
-      'mistimed light can shift the clock the wrong way',
-    )
-    expect(skill).toContain(
-      'Personal baseline helps interpret change; it does not prove that chronic short sleep or persistent sleepiness is healthy.',
-    )
-    expect(skill).toContain(
-      'Treat common exposures as hypotheses, not moral rules',
-    )
-    expect(skill).toContain(
-      'Reflect what the data shows in plain language.',
-    )
-    expect(skill).toContain(
-      'discovery is the expected next step, not a checklist',
-    )
-    expect(skill).toContain(
-      'one question per message, and save the answers to the vault or memory as they arrive',
-    )
-    expect(skill).toContain(
-      "mode 2's bounded discovery loop counts as materially changing the lever",
-    )
-    expect(skill).toContain('do not impose one universal cutoff')
+    expect(skill).toContain('When the user is otherwise well and the activity can be safely probed')
+    expect(skill).toContain('Low motivation alone is weak evidence.')
   })
 
-  it('uses personal trends without treating wearables as an oracle', async () => {
+  it('uses personal wearable context without treating wearables as an oracle', async () => {
     const skill = await readSkill()
 
     expect(skill).toContain(
-      'Treat the device as a measurement layer, not the decision owner',
+      'Wearable data can inform a readiness call, but it does not own it.',
     )
     expect(skill).toContain(
-      'A green score never overrides clear symptoms or unsafe function. A red score alone does not mandate rest.',
+      'A green score never overrides clear symptoms or unsafe function.',
     )
+    expect(skill).toContain('A red score alone does not mandate rest.')
     expect(skill).toContain(
       'Do not directly compare HRV values across people, devices, or measurement methods.',
     )
     expect(skill).toContain(
-      'Sleep stages and proprietary composites are supporting, lower-confidence evidence',
+      'Treat sleep stages and proprietary composites as supporting, lower-confidence evidence.',
     )
   })
 
@@ -130,7 +140,7 @@ describe('assistant sleep recovery readiness skill', () => {
 
     expect(skill).toContain('Use `behavior-followthrough`')
     expect(skill).toContain(
-      'Sleep hygiene alone is not a complete treatment for chronic insomnia.',
+      'The active training skill owns the exact program.',
     )
     expect(skill).toContain(
       'Do not diagnose sleep apnea, insomnia, overtraining syndrome, or another disorder from chat',
@@ -141,16 +151,14 @@ describe('assistant sleep recovery readiness skill', () => {
     expect(skill).toContain('thoughts of self-harm, or inability to stay safe')
   })
 
-  it('exposes exactly the five reusable modes', async () => {
+  it('exposes only the focused readiness modes', async () => {
     const skill = await readSkill()
     const headings = skill.match(/^### \d+\.[^\n]+$/gm) ?? []
 
     expect(headings).toEqual([
-      '### 1. Acute readiness check',
-      '### 2. Sleep routine improvement',
-      '### 3. Deload or recovery-block decision',
-      '### 4. Wearable trend interpretation',
-      '### 5. Care-navigation escalation',
+      '### 1. Acute training readiness',
+      '### 2. Accumulated fatigue or deload',
+      '### 3. Safety or care escalation',
     ])
   })
 })

@@ -39,23 +39,38 @@ async function readSkills(): Promise<{
 }
 
 describe('assistant nutrition strategy skill', () => {
-  it('routes forward-looking strategy without stealing meal capture', () => {
+  it('routes meal execution without stealing meal capture, body composition, or digestion', () => {
     const prompt = buildPrompt()
+    const nutritionLine = prompt
+      .split('\n')
+      .find((line) => line.includes('nutrition-strategy:'))
 
-    expect(prompt).toContain(
-      'nutrition-strategy: Use for forward-looking nutrition decisions',
+    expect(nutritionLine).toContain(
+      'Use for forward-looking nutrition decisions about meal structure',
     )
+    expect(nutritionLine).toContain('training fuel and recovery eating')
+    expect(nutritionLine).toContain('real-life food-system execution')
+    expect(nutritionLine).toContain('Use food-journal for meal capture')
+    expect(nutritionLine).toContain('body-composition for fat loss/muscle gain/recomposition')
+    expect(nutritionLine).toContain('gut-digestion for digestive symptom strategy')
+    expect(nutritionLine).not.toContain('body composition, training fuel')
+    expect(nutritionLine).not.toContain('GI comfort')
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md',
     )
     expect(prompt).toContain(
-      'For forward-looking nutrition advice, including meal structure, protein, body-composition direction, training fuel, hydration, appetite or under-fueling, GI comfort, or realistic food-system changes, read `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md` before recommending what to eat or change.',
-    )
-    expect(prompt).toContain(
-      'Use food-journal for capture and retrospective observation; use experiment-onboarding only after the user chooses a bounded change to test.',
-    )
-    expect(prompt).toContain(
       'food-journal: Use when the user logs meals or asks Murph to notice patterns',
+    )
+  })
+
+  it('keeps prompt guidance focused on meal execution and focused-owner handoffs', () => {
+    const prompt = buildPrompt()
+
+    expect(prompt).toContain(
+      'For forward-looking nutrition advice about meal structure, protein, training fuel, recovery eating, hydration, appetite or under-fueling, or realistic food-system execution, read `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md` before recommending what to eat or change.',
+    )
+    expect(prompt).toContain(
+      'Use food-journal for capture and retrospective observation, body-composition for fat-loss, muscle-gain, recomposition, weight, waist, or plateau strategy, gut-digestion for digestive symptom strategy, and experiment-onboarding only after the user chooses a bounded change to test.',
     )
   })
 
@@ -66,6 +81,8 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).toContain(
       'Food-journal answers "what happened?" This skill answers "what should we do next?"',
     )
+    expect(nutrition).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/body-composition/SKILL.md')
+    expect(nutrition).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/gut-digestion/SKILL.md')
     expect(nutrition).toContain('Use `experiment-onboarding` after the user chooses')
     expect(nutrition).toContain('Use `behavior-followthrough` when reminders')
     expect(nutrition).toContain('Use `chronic-illness-support` and care navigation')
@@ -79,14 +96,13 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).not.toContain('.codex-hosted')
   })
 
-  it('uses silent reusable lanes and adaptive answer depth', async () => {
+  it('uses practical lanes without owning body-composition or digestion strategy', async () => {
     const { nutrition } = await readSkills()
 
     for (const lane of [
-      '### General healthy eating',
-      '### Low-friction meal structure',
+      '### Meal structure',
+      '### Protein',
       '### Performance fueling',
-      '### Body composition',
       '### Hydration',
       '### Under-fueling, low appetite, and recovery',
       '### Sensitive and escalation-aware handling',
@@ -94,14 +110,12 @@ describe('assistant nutrition strategy skill', () => {
       expect(nutrition).toContain(lane)
     }
 
-    expect(nutrition).toContain('The coaching lanes below are internal routing aids.')
-    expect(nutrition).toContain('do not force every reply into a template')
-    expect(nutrition).toContain('### Use a numbers ladder')
+    expect(nutrition).toContain('It is not the owner for body-composition strategy or digestive symptom strategy.')
+    expect(nutrition).toContain('The lowest useful tracking burden wins')
     expect(nutrition).toContain('Do not give unsolicited calorie, macro, or weight-loss estimates.')
-    expect(nutrition).toContain('Do not pathologize tracking that a user finds useful and non-distressing.')
-    expect(nutrition).toContain('include an exit or step-down point')
     expect(nutrition).toContain('Treat appetite cues as information')
-    expect(nutrition).toContain('treat estimated maintenance as a starting hypothesis')
+    expect(nutrition).not.toContain('### Body composition')
+    expect(nutrition).not.toContain('### GI comfort and performance')
   })
 
   it('keeps performance numbers bounded and qualified', async () => {
@@ -113,9 +127,7 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).toMatch(/0\.25-0\.4 g\/kg/)
     expect(nutrition).toMatch(/30-60 g carbohydrate per hour/)
     expect(nutrition).toMatch(/as much as 90 g carbohydrate per hour/)
-    expect(nutrition).toContain(
-      'do not blindly turn it into a target',
-    )
+    expect(nutrition).toContain('do not blindly turn it into a target')
     expect(nutrition).toContain('Sodium does not make overdrinking safe.')
     expect(nutrition).toContain('gain body mass during exercise')
   })
@@ -133,7 +145,7 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).toContain('A benign food question does not need a repetitive warning.')
     expect(nutrition).toContain('Recommend urgent medical assessment')
     expect(nutrition).toContain(
-      'Medical stability, adequate fueling, and eating-disorder recovery outrank body-composition optimization.',
+      'Medical stability, adequate fueling, and eating-disorder recovery outrank appearance, performance, and optimization.',
     )
   })
 })

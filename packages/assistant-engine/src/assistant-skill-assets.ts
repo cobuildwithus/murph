@@ -32,6 +32,96 @@ export const ASSISTANT_SKILLS = [
       'Use for red light therapy or photobiomodulation questions, including dosing, session duration, treatment distance, wavelengths, device irradiance, Bestqool lamps, safety boundaries, and whether to set up a bounded Health Commons PBM experiment.',
   },
   {
+    slug: 'sleep-improvement',
+    name: 'sleep-improvement',
+    triggerHint:
+      'Use for improving sleep duration, sleep efficiency, sleep onset, night awakenings, sleep environment, wind-down routines, wearable sleep stage or sleep score interpretation, and non-clinical melatonin framing. Use sleep-recovery-readiness for train-vs-rest decisions and circadian-rhythm for clock-shifting plans.',
+  },
+  {
+    slug: 'circadian-rhythm',
+    name: 'circadian-rhythm',
+    triggerHint:
+      'Use for body-clock timing, chronotype, delayed or advanced sleep schedule, morning/evening light, jet lag, shift work, social jet lag, and sleep schedule regularity. Use sleep-improvement when the main issue is insomnia mechanics rather than clock timing.',
+  },
+  {
+    slug: 'energy-fatigue',
+    name: 'energy-fatigue',
+    triggerHint:
+      'Use for persistent tiredness, daytime sleepiness, low energy, brain/body fatigue, post-illness fatigue patterns, and lifestyle-versus-clinician triage. Route to sleep-improvement, cardiometabolic-health, micronutrients-supplements, or clinician support when that owner is primary.',
+  },
+  {
+    slug: 'substance-load',
+    name: 'substance-load',
+    triggerHint:
+      'Use for caffeine, alcohol, nicotine, cannabis, and other common substance effects on sleep, HRV, resting heart rate, recovery, energy, appetite, and performance, including reduction experiments and honest same-night wearable interpretation.',
+  },
+  {
+    slug: 'cognitive-focus',
+    name: 'cognitive-focus',
+    triggerHint:
+      'Use for focus, attention, brain fog, deep work, distraction, procrastination, cognitive energy, and non-diagnostic support around stimulant timing or ADHD-adjacent questions. Route medication decisions, diagnosis, and unsafe impairment to clinician support.',
+  },
+  {
+    slug: 'hrv-resting-heart-rate',
+    name: 'hrv-resting-heart-rate',
+    triggerHint:
+      'Use for HRV, resting heart rate, autonomic readiness markers, personal baseline deviations, wearable noise versus signal, illness or overreaching warning signs, and chronic levers that move HRV/RHR. Use sleep-recovery-readiness for train-vs-rest decisions.',
+  },
+  {
+    slug: 'aerobic-fitness',
+    name: 'aerobic-fitness',
+    triggerHint:
+      'Use for VO2 max, cardio fitness estimates, aerobic capacity, zone interpretation, cardiorespiratory health framing, and wearable cardio marker trends. Use running-cardio or competition-training when the user wants a concrete training plan.',
+  },
+  {
+    slug: 'recovery-modalities',
+    name: 'recovery-modalities',
+    triggerHint:
+      'Use for sauna, cold plunge, contrast therapy, compression, massage, foam rolling, percussion guns, stretching-as-recovery, breathwork-as-recovery, and recovery modality tradeoffs. Use red-light-therapy for red/NIR photobiomodulation dose, duration, distance, wavelengths, device irradiance, or Bestqool questions.',
+  },
+  {
+    slug: 'daily-activity',
+    name: 'daily-activity',
+    triggerHint:
+      'Use for steps, NEAT, sedentary time, walking breaks, activity snacks, daily movement pattern interpretation, and practical movement targets outside formal training. Use running-cardio or strength-training for structured workouts.',
+  },
+  {
+    slug: 'mobility-posture',
+    name: 'mobility-posture',
+    triggerHint:
+      'Use for non-pain stiffness, mobility, posture, desk ergonomics, range-of-motion limitations, movement breaks, and movement quality. Use physical-therapy first for pain, injury, weakness, numbness, loss of function, or return-to-activity rehab.',
+  },
+  {
+    slug: 'cardiometabolic-health',
+    name: 'cardiometabolic-health',
+    triggerHint:
+      'Use for glucose, A1c, CGM, ApoB, LDL-C, triglycerides, HDL, blood pressure, home BP measurement, lab retest timing, and lifestyle levers for cardiometabolic markers. Keep medication decisions framed as clinician conversations.',
+  },
+  {
+    slug: 'micronutrients-supplements',
+    name: 'micronutrients-supplements',
+    triggerHint:
+      'Use for vitamin D, iron, ferritin, B12, magnesium, omega-3, creatine, supplement evidence tiers, dosing ranges, testing value, time-to-normal, toxicity ceilings, interactions, and general should-I-take-this questions.',
+  },
+  {
+    slug: 'body-composition',
+    name: 'body-composition',
+    triggerHint:
+      'Use for fat loss, muscle gain, recomposition, waist or weight trends, plateaus, calorie/protein tradeoffs, body composition measurement noise, and sustainable change. Route eating-disorder risk, aggressive cuts, or medication decisions to clinician support.',
+  },
+  {
+    slug: 'cycle-hormonal-health',
+    name: 'cycle-hormonal-health',
+    triggerHint:
+      'Use for menstrual cycle, PMS, cycle-aware training or recovery, period tracking, perimenopause, hormonal context, symptom patterns, and wearable cycle interpretation. Route diagnosis, contraception, fertility, pregnancy, and medication decisions to clinician support.',
+  },
+  {
+    slug: 'gut-digestion',
+    name: 'gut-digestion',
+    triggerHint:
+      'Use for bloating, reflux, constipation, diarrhea, IBS-style patterns, fiber changes, meal-timing experiments, elimination or reintroduction plans, and digestive symptom tracking. Route red flags or suspected disease to clinician support.',
+  },
+  {
     slug: 'behavior-followthrough',
     name: 'behavior-followthrough',
     triggerHint:
@@ -65,13 +155,13 @@ export const ASSISTANT_SKILLS = [
     slug: 'nutrition-strategy',
     name: 'nutrition-strategy',
     triggerHint:
-      'Use for forward-looking nutrition decisions about meal structure and protein, healthy eating, body composition, training fuel and recovery, hydration, appetite or under-fueling, GI comfort, and real-life constraints. Use food-journal for meal capture or retrospective pattern finding.',
+      'Use for forward-looking nutrition decisions about meal structure and protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, and real-life food-system execution. Use food-journal for meal capture, body-composition for fat loss/muscle gain/recomposition, and gut-digestion for digestive symptom strategy.',
   },
   {
     slug: 'sleep-recovery-readiness',
     name: 'sleep-recovery-readiness',
     triggerHint:
-      'Use for sleep, recovery, or readiness questions: whether to train hard, modify, rest, or deload; fatigue, soreness, or low motivation; sleep routines, naps, shift work, travel or jet lag; and wearable sleep, HRV, resting-heart-rate, or readiness trends. This is a reusable decision layer; pair it with the skill that owns programming, pain or illness, behavior, experiments, nutrition, or care.',
+      'Use when the user needs an acute readiness decision: whether to train hard, modify, train easy, rest, deload, or start a short recovery block based on recent sleep, fatigue, soreness, illness context, low motivation, load, function, or wearable context. Use sleep-improvement for sleep mechanics, circadian-rhythm for clock timing, hrv-resting-heart-rate for HRV/RHR interpretation, and energy-fatigue for persistent tiredness.',
   },
   {
     slug: 'computer-use',
