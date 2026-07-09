@@ -8,7 +8,11 @@ import {
   HABITAT_CATALOG,
   HABITAT_DECLINED_VALUE,
   HABITAT_DOMAIN_IDS,
+  type HabitatCoverageCounts,
+  type HabitatDomainCoverage,
+  type HabitatIndicatorDefinition,
   type HabitatIndicatorValue,
+  validateHabitatIndicatorValue,
 } from '@murphai/contracts'
 import {
   listHabitatAspects,
@@ -87,18 +91,57 @@ const habitatCatalogResultSchema = z.object({
   aspects: z.array(z.record(z.string(), z.unknown())),
 })
 
+function countKnownHabitatIndicators(
+  indicators: Readonly<Record<string, HabitatIndicatorValue>>,
+): number {
+  return Object.values(indicators).filter((value) =>
+    value !== null && value !== HABITAT_DECLINED_VALUE
+  ).length
+}
+
+function sumHabitatCoverageCounts(
+  domains: readonly Pick<HabitatDomainCoverage, 'counts'>[],
+): HabitatCoverageCounts {
+  const counts: HabitatCoverageCounts = {
+    known: 0,
+    stale: 0,
+    declined: 0,
+    unknown: 0,
+    total: 0,
+  }
+
+  for (const domain of domains) {
+    counts.known += domain.counts.known
+    counts.stale += domain.counts.stale
+    counts.declined += domain.counts.declined
+    counts.unknown += domain.counts.unknown
+    counts.total += domain.counts.total
+  }
+
+  return counts
+}
+
+function validatedCliIndicatorValue(
+  definition: HabitatIndicatorDefinition,
+  indicatorId: string,
+  value: HabitatIndicatorValue,
+): HabitatIndicatorValue {
+  const issue = validateHabitatIndicatorValue(definition, value)
+  if (issue) {
+    throw new VaultCliError(
+      'contract_invalid',
+      `Indicator "${indicatorId}" ${issue}`,
+    )
+  }
+
+  return value
+}
+
 function parseIndicatorValue(
   aspectId: string,
   indicatorId: string,
   raw: string,
 ): HabitatIndicatorValue {
-  if (raw === 'null') {
-    return null
-  }
-  if (raw === HABITAT_DECLINED_VALUE) {
-    return HABITAT_DECLINED_VALUE
-  }
-
   const definition = getHabitatIndicatorDefinition(aspectId, indicatorId)
   if (!definition) {
     throw new VaultCliError(
@@ -107,16 +150,24 @@ function parseIndicatorValue(
     )
   }
 
+  if (raw === 'null') {
+    return null
+  }
+  if (raw === HABITAT_DECLINED_VALUE) {
+    return HABITAT_DECLINED_VALUE
+  }
+
   switch (definition.valueType.kind) {
     case 'number': {
       const value = Number(raw)
-      if (raw.trim() === '' || Number.isNaN(value)) {
+      if (raw.trim() === '' || !Number.isFinite(value)) {
         throw new VaultCliError(
           'contract_invalid',
           `Indicator "${indicatorId}" expects a number, got "${raw}".`,
         )
       }
-      return value
+
+      return validatedCliIndicatorValue(definition, indicatorId, value)
     }
     case 'boolean': {
       if (raw !== 'true' && raw !== 'false') {
@@ -125,11 +176,11 @@ function parseIndicatorValue(
           `Indicator "${indicatorId}" expects true or false, got "${raw}".`,
         )
       }
-      return raw === 'true'
+      return validatedCliIndicatorValue(definition, indicatorId, raw === 'true')
     }
     case 'enum':
     case 'text':
-      return raw
+      return validatedCliIndicatorValue(definition, indicatorId, raw)
   }
 }
 
@@ -268,7 +319,7 @@ export function registerHabitatCommands(cli: Cli.Cli) {
           aspect: record.aspect,
           title: record.title,
           domain: record.domain,
-          knownIndicators: Object.keys(record.indicators).length,
+          knownIndicators: countKnownHabitatIndicators(record.indicators),
         })),
         count: records.length,
       }
@@ -300,7 +351,7 @@ export function registerHabitatCommands(cli: Cli.Cli) {
       return {
         vault: options.vault,
         catalogVersion: coverage.catalogVersion,
-        counts: { ...coverage.counts },
+        counts: { ...sumHabitatCoverageCounts(domains) },
         domains: domains.map((domain) => ({ ...domain })),
       }
     },

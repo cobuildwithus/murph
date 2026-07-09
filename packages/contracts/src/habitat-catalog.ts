@@ -577,7 +577,7 @@ export function validateHabitatIndicatorValue(
       }
       return null;
     case "number": {
-      if (typeof value !== "number" || Number.isNaN(value)) {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
         return "Expected a number.";
       }
       if (valueType.min !== undefined && value < valueType.min) {

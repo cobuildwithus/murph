@@ -2630,6 +2630,27 @@ export const habitatFrontmatterSchema = withContractMetadata(
           });
         }
       }
+
+      for (const indicatorId of Object.keys(value.indicatorRecordedAt ?? {})) {
+        const definition = getHabitatIndicatorDefinition(value.aspect, indicatorId);
+
+        if (!definition) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicatorRecordedAt", indicatorId],
+            message: `Indicator timestamp "${indicatorId}" is not part of habitat aspect "${value.aspect}".`,
+          });
+          continue;
+        }
+
+        if (!(indicatorId in value.indicators)) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicatorRecordedAt", indicatorId],
+            message: `Indicator timestamp "${indicatorId}" has no stored indicator value.`,
+          });
+        }
+      }
     }),
   "@murphai/contracts/frontmatter-habitat.schema.json",
   "Murph Habitat Frontmatter",

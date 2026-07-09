@@ -58,6 +58,9 @@ describe("habitat catalog", () => {
     expect(validateHabitatIndicatorValue(darkness!, "pitch-black")).toMatch(/Expected one of/);
     expect(validateHabitatIndicatorValue(nightTemp!, 19)).toBeNull();
     expect(validateHabitatIndicatorValue(nightTemp!, "warm")).toMatch(/Expected a number/);
+    expect(validateHabitatIndicatorValue(nightTemp!, Number.POSITIVE_INFINITY)).toMatch(
+      /Expected a number/,
+    );
     expect(validateHabitatIndicatorValue(nightTemp!, HABITAT_DECLINED_VALUE)).toBeNull();
     expect(validateHabitatIndicatorValue(nightTemp!, null)).toBeNull();
   });
@@ -87,6 +90,23 @@ describe("habitat frontmatter schema", () => {
       habitatFrontmatterSchema.safeParse({
         ...validFrontmatter,
         indicators: { ...validFrontmatter.indicators, darkness: "pitch-black" },
+      }).success,
+    ).toBe(false);
+    expect(
+      habitatFrontmatterSchema.safeParse({
+        ...validFrontmatter,
+        indicatorRecordedAt: {
+          ...validFrontmatter.indicatorRecordedAt,
+          standing_desk: "2026-07-01",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      habitatFrontmatterSchema.safeParse({
+        ...validFrontmatter,
+        indicatorRecordedAt: {
+          darkness: "2026-07-01",
+        },
       }).success,
     ).toBe(false);
   });

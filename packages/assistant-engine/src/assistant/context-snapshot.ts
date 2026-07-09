@@ -185,12 +185,13 @@ export async function refreshAssistantContextSnapshot(input: {
   }
 
   assertAssistantContextSnapshotCanContinue(input)
+  const attemptedAt = resolveSnapshotTimestamp(input.now)
   const built = await buildAssistantContextSnapshotPrompt({
+    currentDate: attemptedAt.slice(0, 10),
     shouldYield: input.shouldYield ?? null,
     signal: input.signal ?? null,
     vaultRoot: input.vaultRoot,
   })
-  const attemptedAt = resolveSnapshotTimestamp(input.now)
   const startedDirtySequence = startedRead.state?.dirtySequence ?? 0
 
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async () => {
@@ -362,6 +363,7 @@ async function readAssistantContextSnapshotStateStatus(input: {
 }
 
 async function buildAssistantContextSnapshotPrompt(input: {
+  currentDate: string
   shouldYield: (() => boolean) | null
   signal: AbortSignal | null
   vaultRoot: string
@@ -422,6 +424,7 @@ async function buildAssistantContextSnapshotPrompt(input: {
 }
 
 async function buildAssistantSnapshotCoverage(input: {
+  currentDate: string
   shouldYield: (() => boolean) | null
   signal: AbortSignal | null
   vaultRoot: string
@@ -619,7 +622,7 @@ async function buildAssistantSnapshotCoverage(input: {
       : null,
     conditionCount: conditions.length,
     goalCount: goals.length,
-    habitatLine: renderHabitatLine(habitatRead.records),
+    habitatLine: renderHabitatLine(habitatRead.records, input.currentDate),
     habitatRecordCount: habitatRead.records.length,
     healthContextLine: healthParts.length > 0
       ? `- Saved health context includes ${joinWithAnd(healthParts)}.`
@@ -1220,7 +1223,10 @@ function renderGoalWindow(goal: GoalFrontmatter): string | null {
   return targetAt ? `target ${targetAt}` : null
 }
 
-function renderHabitatLine(records: readonly HabitatFrontmatter[]): string | null {
+function renderHabitatLine(
+  records: readonly HabitatFrontmatter[],
+  currentDate: string,
+): string | null {
   if (records.length === 0) {
     return null
   }
@@ -1231,7 +1237,7 @@ function renderHabitatLine(records: readonly HabitatFrontmatter[]): string | nul
       indicators: record.indicators,
       indicatorRecordedAt: record.indicatorRecordedAt,
     })),
-    { now: new Date().toISOString().slice(0, 10) },
+    { now: currentDate },
   )
   const aspects = coverage.domains.flatMap((domain) => domain.aspects)
   const coveredAspectIds = aspects
@@ -1242,19 +1248,32 @@ function renderHabitatLine(records: readonly HabitatFrontmatter[]): string | nul
       aspect.topGaps.map((gap) => `${gap.label.toLowerCase()} (${aspect.aspectId})`),
     )
     .slice(0, 3)
+  const staleIndicators = aspects
+    .flatMap((aspect) =>
+      aspect.indicators
+        .filter((indicator) => indicator.status === 'stale')
+        .map((indicator) => `${indicator.label.toLowerCase()} (${aspect.aspectId})`),
+    )
+    .slice(0, 3)
   const declinedSuffix = coverage.counts.declined > 0
     ? `, ${coverage.counts.declined} declined`
+    : ''
+  const staleSuffix = coverage.counts.stale > 0
+    ? `, ${coverage.counts.stale} stale`
     : ''
   const gapsSuffix = topGaps.length > 0
     ? `; top open gaps: ${topGaps.join(', ')}`
     : ''
+  const staleDetailSuffix = staleIndicators.length > 0
+    ? `; stale values to re-check: ${staleIndicators.join(', ')}`
+    : ''
 
   return [
-    `- Habitat life-context: ${coverage.counts.known} of ${coverage.counts.total} catalog indicators known${declinedSuffix}`,
+    `- Habitat life-context: ${coverage.counts.known} of ${coverage.counts.total} catalog indicators known${declinedSuffix}${staleSuffix}`,
     coveredAspectIds.length > 0
       ? ` across ${coveredAspectIds.join(', ')}`
       : '',
-    `${gapsSuffix}. Read current values with \`vault-cli habitat show <aspect>\` / \`vault-cli habitat coverage\` before environment-specific advice; save member answers with \`vault-cli habitat save\`.`,
+    `${staleDetailSuffix}${gapsSuffix}. Read current values with \`vault-cli habitat show <aspect>\` / \`vault-cli habitat coverage\` before environment-specific advice; save member answers with \`vault-cli habitat save\`.`,
   ].join('')
 }
 

@@ -94,6 +94,8 @@ describe('assistant context snapshot', () => {
           '  night_temp_c: 19',
           '  window_at_night: open',
           '  co2_meter: declined',
+          'indicatorRecordedAt:',
+          '  night_temp_c: 2024-01-01',
           '---',
           '# Bedroom & sleep',
           '',
@@ -113,9 +115,11 @@ describe('assistant context snapshot', () => {
         vaultRoot,
       })
 
-      expect(prompt).toContain('Habitat life-context: 2 of')
+      expect(prompt).toContain('Habitat life-context: 1 of')
       expect(prompt).toContain('1 declined')
+      expect(prompt).toContain('1 stale')
       expect(prompt).toContain('across sleep-environment')
+      expect(prompt).toContain('stale values to re-check: night temperature (sleep-environment)')
       expect(prompt).toContain('top open gaps:')
       expect(prompt).toContain('vault-cli habitat save')
       const state = await readAssistantContextSnapshotState(vaultRoot)
