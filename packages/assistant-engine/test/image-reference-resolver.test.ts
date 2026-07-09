@@ -138,24 +138,67 @@ describe('image-reference-resolver', () => {
     })
   })
 
-  it('resolves package skill asset image references from the shared skills root', async () => {
-    await withTempVault(async (vaultRoot) => {
-      await withTempSkillsRoot(async (skillsRoot) => {
-        await writeSkillAssetFile(skillsRoot, 'murph-character-sheet-v1.png', PNG_BYTES)
+  it('resolves package skill asset image references without a vault root', async () => {
+    await withTempSkillsRoot(async (skillsRoot) => {
+      await writeSkillAssetFile(skillsRoot, 'murph-character-sheet-v1.png', PNG_BYTES)
 
-        const references = await resolveGenerateImageReferences({
-          refs: ['skill-assets/murph-character-sheet-v1.png'],
-          skillsRoot,
-          vaultRoot,
-        })
-
-        expect(references).toHaveLength(1)
-        expect(references[0]).toMatchObject({
-          filename: 'reference-image-1.png',
-          mediaType: 'image/png',
-          sourceRef: 'skill-assets/murph-character-sheet-v1.png',
-        })
+      const references = await resolveGenerateImageReferences({
+        refs: ['skill-assets/murph-character-sheet-v1.png'],
+        skillsRoot,
+        vaultRoot: '',
       })
+
+      expect(references).toHaveLength(1)
+      expect(references[0]).toMatchObject({
+        filename: 'reference-image-1.png',
+        mediaType: 'image/png',
+        sourceRef: 'skill-assets/murph-character-sheet-v1.png',
+      })
+    })
+  })
+
+  it('rejects mixed vault and skill asset refs when the vault root is unavailable', async () => {
+    await withTempSkillsRoot(async (skillsRoot) => {
+      await writeSkillAssetFile(skillsRoot, 'murph-character-sheet-v1.png', PNG_BYTES)
+
+      await expect(
+        resolveGenerateImageReferences({
+          refs: [
+            'skill-assets/murph-character-sheet-v1.png',
+            'raw/inbox/style.jpg',
+          ],
+          skillsRoot,
+          vaultRoot: '',
+        }),
+      ).rejects.toMatchObject({
+        code: 'ASSISTANT_IMAGE_REFERENCE_VAULT_UNAVAILABLE',
+      })
+    })
+  })
+
+  it('rejects skill asset symlinks that resolve outside the shared skills root', async () => {
+    await withTempSkillsRoot(async (skillsRoot) => {
+      const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-skill-asset-outside-'))
+      try {
+        await mkdir(path.join(skillsRoot, 'shared'), { recursive: true })
+        await writeFile(path.join(outsideRoot, 'outside.png'), PNG_BYTES)
+        await symlink(
+          path.join(outsideRoot, 'outside.png'),
+          path.join(skillsRoot, 'shared', 'linked.png'),
+        )
+
+        await expect(
+          resolveGenerateImageReferences({
+            refs: ['skill-assets/linked.png'],
+            skillsRoot,
+            vaultRoot: '',
+          }),
+        ).rejects.toMatchObject({
+          code: 'ASSISTANT_IMAGE_REFERENCE_SKILL_ASSET_OUTSIDE_ROOT',
+        })
+      } finally {
+        await rm(outsideRoot, { force: true, recursive: true })
+      }
     })
   })
 

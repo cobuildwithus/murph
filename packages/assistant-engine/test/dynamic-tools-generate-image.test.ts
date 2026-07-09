@@ -32,7 +32,7 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
   })
 
-  it('accepts up to four ordered reference image refs', () => {
+  it('accepts up to sixteen ordered reference image refs', () => {
     const request = readMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {

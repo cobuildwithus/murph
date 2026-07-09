@@ -77,6 +77,64 @@ describe('executeGenerateImageTool reference images', () => {
     })
   })
 
+  it('uses skill asset refs without vault authority and does not save a capture', async () => {
+    await withTempDir(async (root) => {
+      const codexHome = path.join(root, 'codex-home')
+      const skillsRoot = path.join(root, 'skills')
+      await mkdir(path.join(skillsRoot, 'shared'), { recursive: true })
+      await writeFile(
+        path.join(skillsRoot, 'shared', 'murph-character-sheet-v1.png'),
+        PNG_BYTES,
+      )
+
+      const originalSkillsRoot = process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]
+      let capturedUrl: string | null = null
+      let capturedBody: BodyInit | null | undefined
+      try {
+        process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV] = skillsRoot
+        const fetchImpl: typeof fetch = async (url, init) => {
+          capturedUrl = String(url)
+          capturedBody = init?.body
+          return openAiPngResponse()
+        }
+
+        const result = await executeGenerateImageTool({
+          args: {
+            alt: null,
+            outputFormat: 'png',
+            prompt: 'Use image 1 as the canonical Murph character reference.',
+            quality: 'medium',
+            referenceImageRefs: ['skill-assets/murph-character-sheet-v1.png'],
+            size: '1024x1024',
+          },
+          codexHome,
+          env: { OPENAI_API_KEY: 'test-key' },
+          fetchImpl,
+          providerRequestOrdinal: 2,
+        })
+
+        expect(result.rpcSuccess).toBe(true)
+        expect(capturedUrl).toBe('https://api.openai.com/v1/images/edits')
+        expect(capturedBody).toBeInstanceOf(FormData)
+        expect((capturedBody as FormData).getAll('image[]')).toHaveLength(1)
+        expect(result.savedCaptureId).toBeNull()
+        expect(result.savedImageRef).toBeNull()
+        expect(result.rpcText).toMatch(
+          /^generated image saved at CODEX_HOME\/generated_images\//u,
+        )
+        expect(result.usageDraft?.usage.usageExtractionSourcePath).toBe(
+          'openai.images.edit',
+        )
+      } finally {
+        if (originalSkillsRoot === undefined) {
+          delete process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]
+        } else {
+          process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV] = originalSkillsRoot
+        }
+      }
+    })
+  })
+
   it('resolves references before calling OpenAI edits and records reference metadata', async () => {
     await withTempDir(async (root) => {
       const vaultRoot = path.join(root, 'vault')

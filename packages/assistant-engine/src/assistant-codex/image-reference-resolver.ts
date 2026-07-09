@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import {
   RAW_CAPTURES_DIRECTORY,
@@ -70,14 +70,6 @@ export async function resolveGenerateImageReferences(input: {
   skillsRoot?: string | null
   vaultRoot: string
 }): Promise<ResolvedGenerateImageReference[]> {
-  const vaultRoot = input.vaultRoot.trim()
-  if (!vaultRoot) {
-    throw new VaultCliError(
-      'ASSISTANT_IMAGE_REFERENCE_VAULT_UNAVAILABLE',
-      'Image references require a vault root.',
-    )
-  }
-
   const refs = input.refs.map(normalizeGenerateImageReferenceRef)
   const skillsRoot = input.skillsRoot?.trim() ?? ''
   if (refs.length === 0) {
@@ -109,6 +101,14 @@ export async function resolveGenerateImageReferences(input: {
     )
   })
   const vaultRefs = refs.filter((ref) => isVaultReferenceImageRef(ref))
+  const vaultRoot = input.vaultRoot.trim()
+
+  if (vaultRefs.length > 0 && !vaultRoot) {
+    throw new VaultCliError(
+      'ASSISTANT_IMAGE_REFERENCE_VAULT_UNAVAILABLE',
+      'Image references require a vault root.',
+    )
+  }
 
   if (vaultRefs.length > 0) {
     const materialization = await input.materializeWorkspaceArtifacts?.(vaultRefs)
@@ -127,7 +127,7 @@ export async function resolveGenerateImageReferences(input: {
   let totalBytes = 0
   for (const [index, ref] of refs.entries()) {
     const absolutePath = refFamilies[index] === 'skill-asset'
-      ? resolveSkillAssetReferencePath(skillsRoot, ref)
+      ? await resolveSkillAssetReferencePath(skillsRoot, ref)
       : await resolveAssistantVaultPath(
           vaultRoot,
           ref,
@@ -185,7 +185,7 @@ export async function resolveGenerateImageReferences(input: {
   return resolved
 }
 
-function isVaultReferenceImageRef(ref: string): boolean {
+export function isVaultReferenceImageRef(ref: string): boolean {
   return AUTHORIZED_REFERENCE_IMAGE_PATH_PREFIXES.some(
     (prefix) => ref.startsWith(prefix),
   )
@@ -195,12 +195,43 @@ function isSkillAssetReferenceImageRef(ref: string): boolean {
   return ref.startsWith(SKILL_ASSET_REFERENCE_IMAGE_PATH_PREFIX)
 }
 
-function resolveSkillAssetReferencePath(skillsRoot: string, ref: string): string {
-  return path.join(
-    skillsRoot,
-    SKILL_ASSET_SHARED_DIRECTORY,
+async function resolveSkillAssetReferencePath(
+  skillsRoot: string,
+  ref: string,
+): Promise<string> {
+  const sharedRoot = path.resolve(skillsRoot, SKILL_ASSET_SHARED_DIRECTORY)
+  const absolutePath = path.resolve(
+    sharedRoot,
     ref.slice(SKILL_ASSET_REFERENCE_IMAGE_PATH_PREFIX.length),
   )
+  assertPathWithinSkillAssetSharedRoot(sharedRoot, absolutePath, ref)
+
+  const [canonicalSharedRoot, canonicalPath] = await Promise.all([
+    realpath(sharedRoot),
+    realpath(absolutePath),
+  ])
+  assertPathWithinSkillAssetSharedRoot(canonicalSharedRoot, canonicalPath, ref)
+
+  return canonicalPath
+}
+
+function assertPathWithinSkillAssetSharedRoot(
+  sharedRoot: string,
+  absolutePath: string,
+  ref: string,
+): void {
+  const relativeToSharedRoot = path.relative(sharedRoot, absolutePath)
+
+  if (
+    relativeToSharedRoot === '..' ||
+    relativeToSharedRoot.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeToSharedRoot)
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_IMAGE_REFERENCE_SKILL_ASSET_OUTSIDE_ROOT',
+      `Skill asset image reference "${ref}" resolves outside the assistant skills shared root.`,
+    )
+  }
 }
 
 export function normalizeGenerateImageReferenceRef(value: string): string {
