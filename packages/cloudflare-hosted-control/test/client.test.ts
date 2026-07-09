@@ -226,6 +226,7 @@ describe("createCloudflareHostedControlClient", () => {
 
   it("posts Telegram sends to the user route and parses sent responses", async () => {
     let observedRequest: ObservedRequest | null = null;
+    const events: string[] = [];
     const result = {
       cleanupMessages: [{ messageId: "7001", target: "telegram_thread:123" }],
       providerMessageId: "7001",
@@ -237,21 +238,27 @@ describe("createCloudflareHostedControlClient", () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
       fetchImpl: vi.fn(async (url, init) => {
+        events.push("fetch");
         observedRequest = { init, url: String(url) };
         return createJsonResponse(result);
       }) as typeof fetch,
-      getBearerToken: async () => "Bearer token-123",
+      getBearerToken: async () => {
+        events.push("token");
+        return "Bearer token-123";
+      },
       timeoutMs: 2_500,
     });
 
     await expect(client.sendTelegramMessage({
       idempotencyKey: "ai-usage-gate:member_123:2026-03",
       message: "quota reached",
+      onRequestStarted: () => events.push("started"),
       replyToMessageId: "7000",
       target: "telegram_thread:123",
       userId: "user_123",
     })).resolves.toEqual(result);
 
+    expect(events).toEqual(["token", "started", "fetch"]);
     const request = requireObservedRequest(observedRequest);
     expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/telegram/send");
     expect(request.init?.method).toBe("POST");
@@ -263,6 +270,29 @@ describe("createCloudflareHostedControlClient", () => {
       replyToMessageId: "7000",
       target: "telegram_thread:123",
     }));
+  });
+
+  it("does not mark Telegram send requests started when authorization fails before fetch", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({ status: "sent" })) as typeof fetch;
+    const onRequestStarted = vi.fn();
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl,
+      getBearerToken: async () => {
+        throw new Error("token unavailable");
+      },
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.sendTelegramMessage({
+      message: "quota reached",
+      onRequestStarted,
+      target: "telegram_thread:123",
+      userId: "user_123",
+    })).rejects.toThrow("token unavailable");
+
+    expect(onRequestStarted).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("parses retryable Telegram send failures as typed responses", async () => {

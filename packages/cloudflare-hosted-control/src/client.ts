@@ -112,6 +112,7 @@ export interface CloudflareHostedControlClient {
   sendTelegramMessage(input: {
     idempotencyKey?: string | null;
     message: string;
+    onRequestStarted?: () => void;
     replyToMessageId?: string | null;
     target: string;
     userId: string;
@@ -279,6 +280,7 @@ export function createCloudflareHostedControlClient(
         fetchImpl,
         getAuthorizationHeader,
         label: "Telegram send",
+        onRequestStarted: input.onRequestStarted,
         parse: parseCloudflareHostedControlTelegramSendResponse,
         path: buildCloudflareHostedControlTelegramSendPath(userId),
         request: {
@@ -918,6 +920,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   onRuntimeEnsureProcessingTiming?: (
     timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
   ) => void;
+  onRequestStarted?: () => void;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -972,6 +975,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     );
   }
 
+  input.onRequestStarted?.();
   const response = await input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),
     headers,

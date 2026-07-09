@@ -524,20 +524,27 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
 
+    let controlRequestStarted = false;
     let deliveryResult: Awaited<ReturnType<typeof controlClient.sendTelegramMessage>>;
     try {
       deliveryResult = await controlClient.sendTelegramMessage({
         idempotencyKey: deliveryClaim.idempotencyKey,
         message: decision.userNotice.message,
+        onRequestStarted: () => {
+          controlRequestStarted = true;
+        },
         replyToMessageId: wake.message.telegramMessage.messageId,
         target: wake.message.telegramMessage.threadId,
         userId: input.userId,
       });
     } catch (cause) {
       const routeUnavailable = isHostedTelegramControlRouteUnavailable(cause);
-      const error = routeUnavailable
+      const preProviderUnavailable = routeUnavailable || !controlRequestStarted;
+      const error = preProviderUnavailable
         ? new HostedRuntimeTelegramUsageLimitNoticeUnavailableError(
-            "Hosted Telegram usage-limit notice delivery route is unavailable through hosted control.",
+            routeUnavailable
+              ? "Hosted Telegram usage-limit notice delivery route is unavailable through hosted control."
+              : "Hosted Telegram usage-limit notice delivery could not start a hosted-control request.",
           )
         : new HostedRuntimeTelegramUsageLimitNoticeUnknownError();
       await markHostedLinqDeliverySendFailedTx({
@@ -547,7 +554,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         idempotencyKey: deliveryClaim.idempotencyKey,
         prisma: input.prisma,
       });
-      return routeUnavailable
+      return preProviderUnavailable
         ? buildHostedRuntimeAiUsageNoticeInFlightResult(input.now)
         : { status: "already_notified" };
     }
