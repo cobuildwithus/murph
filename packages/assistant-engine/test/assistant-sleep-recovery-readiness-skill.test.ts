@@ -59,7 +59,10 @@ describe('assistant sleep recovery readiness skill', () => {
     )
     expect(skill).not.toMatch(/two or more[^\n]*signals?/i)
     expect(skill).toContain(
-      'Ask at most one decision-changing question before recommending',
+      'Ask at most one question per message.',
+    )
+    expect(skill).toContain(
+      'For sleep improvement requests where vault and wearable evidence is thin, follow the understand-before-recommending core rules',
     )
     expect(skill).toContain(
       'The active strength, cardio, or competition skill owns exact exercise selection',
@@ -89,6 +92,18 @@ describe('assistant sleep recovery readiness skill', () => {
     )
     expect(skill).toContain(
       'Treat common exposures as hypotheses, not moral rules',
+    )
+    expect(skill).toContain(
+      'Reflect what the data shows in plain language.',
+    )
+    expect(skill).toContain(
+      'discovery is the expected next step, not a checklist',
+    )
+    expect(skill).toContain(
+      'one question per message, and save the answers to the vault or memory as they arrive',
+    )
+    expect(skill).toContain(
+      "mode 2's bounded discovery loop counts as materially changing the lever",
     )
     expect(skill).toContain('do not impose one universal cutoff')
   })

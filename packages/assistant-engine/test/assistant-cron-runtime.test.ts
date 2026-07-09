@@ -5617,6 +5617,48 @@ describe('assistant cron runtime orchestration', () => {
     expect(current.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
   })
 
+  it('skips managed weekly improvement coach cron before provider work while onboarding is open', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-managed-improvement-coach-onboarding-open-',
+    )
+    addManagedResearchAutomation({
+      tag: 'murph-managed:weekly-improvement-coach',
+      vaultRoot,
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('skipped')
+    expect(result.run.error).toBe(
+      'Assistant cron research-oriented managed automation skipped because assistant onboarding is open.',
+    )
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(
+      listAssistantCronRuns({
+        job: claimed.job.jobId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          status: 'skipped',
+        }),
+      ],
+    })
+    const current = await getAssistantCronJob(vaultRoot, claimed.job.jobId)
+    expect(current.state.runningAt).toBeNull()
+    expect(current.state.pendingDeliveryIntentId).toBeFalsy()
+    expect(current.state.nextRunAt).toBe('2026-04-09T10:00:00.000Z')
+  })
+
   it('fails closed before provider work when managed research onboarding state is unreadable', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
@@ -6849,7 +6891,10 @@ function addManagedResearchAutomation(input: {
   automationId?: string
   instructions?: string
   slug?: string
-  tag: 'murph-managed:weekly-health-insight' | 'murph-managed:weekly-health-research-scout'
+  tag:
+    | 'murph-managed:weekly-health-insight'
+    | 'murph-managed:weekly-improvement-coach'
+    | 'murph-managed:weekly-health-research-scout'
   title?: string
   vaultRoot: string
 }): void {
@@ -6857,7 +6902,9 @@ function addManagedResearchAutomation(input: {
     input.slug ??
     (input.tag === 'murph-managed:weekly-health-insight'
       ? 'weekly-health-insight'
-      : 'weekly-health-research-scout')
+      : input.tag === 'murph-managed:weekly-improvement-coach'
+        ? 'weekly-improvement-coach'
+        : 'weekly-health-research-scout')
   getVaultAutomationStore(input.vaultRoot).push({
     automationId: input.automationId ?? `automation-${slug}`,
     continuityPolicy: 'fresh',

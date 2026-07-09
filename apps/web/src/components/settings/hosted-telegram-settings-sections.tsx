@@ -1,6 +1,6 @@
 import { SendIcon } from "lucide-react";
 
-import { HostedInlineAuthButton } from "@/src/components/hosted-onboarding/hosted-inline-auth-button";
+import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import {
@@ -13,22 +13,35 @@ import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-hel
 
 export function HostedTelegramSettingsContent(props: {
   botLink: string | null;
+  clientAuthenticated: boolean;
+  clientReady: boolean;
   currentTelegram: HostedPrivyTelegramAccount | null;
   isBusy: boolean;
   isLinkingTelegram: boolean;
   onLinkTelegram: () => Promise<void>;
 }) {
-  const { botLink, currentTelegram, isBusy, isLinkingTelegram } = props;
+  const {
+    botLink,
+    clientAuthenticated,
+    clientReady,
+    currentTelegram,
+    isBusy,
+    isLinkingTelegram,
+  } = props;
 
   if (!currentTelegram) {
     return (
-      <HostedInlineAuthButton
-        disabled={isBusy}
-        icon={<SendIcon className="size-4" />}
+      <AuthButton
+        authSatisfied={clientAuthenticated}
+        disabled={isBusy || !clientReady}
+        size="lg"
+        variant="outline"
+        className="h-11 w-full justify-center gap-2 border-border bg-card font-semibold text-foreground hover:bg-muted"
         onClick={() => void props.onLinkTelegram()}
       >
+        <SendIcon className="size-4" />
         {isLinkingTelegram ? "Connecting..." : "Connect Telegram"}
-      </HostedInlineAuthButton>
+      </AuthButton>
     );
   }
 
@@ -44,16 +57,17 @@ export function HostedTelegramSettingsContent(props: {
           </span>
         </div>
         <div className="flex gap-2">
-          <Button
+          <AuthButton
+            authSatisfied={clientAuthenticated}
             type="button"
             onClick={() => void props.onLinkTelegram()}
-            disabled={isBusy}
+            disabled={isBusy || !clientReady}
             variant="ghost"
             size="sm"
             className="text-muted-foreground hover:text-foreground"
           >
             {isLinkingTelegram ? "Changing..." : "Change"}
-          </Button>
+          </AuthButton>
           {botLink ? (
             <Button
               render={<a href={botLink} target="_blank" rel="noreferrer" />}

@@ -31,7 +31,6 @@ const lazyRootCommands = [
   'medication',
   'measurement',
   'memory',
-  'profile',
   'protocol',
   'query',
   'regimen',

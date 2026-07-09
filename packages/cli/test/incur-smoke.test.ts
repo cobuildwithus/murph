@@ -1891,6 +1891,30 @@ test('memory upsert schema exposes create-only canonical memory fields', async (
   assert.deepEqual(schema.options.required, ['section'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
+test('memory set-name schema exposes the typed preferred-name command', async () => {
+  const schema = JSON.parse(
+    await runSourceCliRaw(['memory', 'set-name', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, {
+        description?: string
+      }>
+      required?: string[]
+    }
+    options: {
+      required?: string[]
+    }
+  }
+
+  assert.equal('displayName' in schema.args.properties, true)
+  assert.match(
+    String(schema.args.properties.displayName?.description ?? ''),
+    /Preferred display name/u,
+  )
+  assert.deepEqual(schema.args.required, ['displayName'])
+  assert.deepEqual(schema.options.required ?? [], [])
+}, INCUR_SCHEMA_TIMEOUT_MS)
+
 test('memory update schema requires a memory id and text, with an optional replacement section', async () => {
   const schema = JSON.parse(
     await runSourceCliRaw(['memory', 'update', '--schema', '--format', 'json']),

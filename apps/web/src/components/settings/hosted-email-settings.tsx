@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 
+import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import type { HostedEmailSyncResult } from "./hosted-email-settings-helpers";
 
 import { SettingsStatusLine } from "./connected-account-card";
@@ -17,12 +18,15 @@ export function HostedEmailSettings(props: {
   changeFlow?: boolean;
   initialEmail?: HostedEmailSettingsInitialEmail | null;
   murphEmailAddress?: string | null;
+  onClientAuthRequired?: () => void;
   onSynced?: (payload: HostedEmailSyncResult) => Promise<void> | void;
 }) {
+  const { openAuthDialog } = useAuth();
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const controller = useHostedEmailSettingsController({
     authenticated: props.authenticated,
     initialEmail: props.initialEmail ?? null,
+    onClientAuthRequired: props.onClientAuthRequired ?? openAuthDialog,
     onSynced: props.onSynced,
   });
 
@@ -45,6 +49,7 @@ export function HostedEmailSettings(props: {
   const statusMessage =
     controller.errorMessage ??
     controller.successMessage ??
+    controller.noticeMessage ??
     (controller.isSyncingEmailRoute ? "Saving your email…" : null);
 
   return (
@@ -57,6 +62,7 @@ export function HostedEmailSettings(props: {
         emailAddress={controller.emailAddress}
         emailInputRef={emailInputRef}
         murphEmailAddress={props.murphEmailAddress ?? null}
+        authSatisfied={controller.authenticated && controller.clientAuthenticated}
         canSendEmailUpdateCode={controller.canSendEmailUpdateCode}
         isBusy={controller.isBusy}
         isSendingCode={controller.isSendingCode}
@@ -65,6 +71,7 @@ export function HostedEmailSettings(props: {
         pendingEmailAddress={controller.pendingEmailAddress}
         onChangeCode={controller.setCode}
         onChangeEmailAddress={controller.setEmailAddress}
+        onAuthRequired={controller.handleClientAuthRequired}
         onResendCode={controller.handleResendCode}
         onSendCode={controller.handleSendCode}
         onSyncVerifiedEmail={controller.handleSyncVerifiedEmail}
@@ -75,7 +82,7 @@ export function HostedEmailSettings(props: {
       {statusMessage ? (
         <SettingsStatusLine
           message={statusMessage}
-          tone={statusTone === "neutral" && controller.isSyncingEmailRoute ? "neutral" : statusTone}
+          tone={statusTone}
         />
       ) : null}
     </div>
