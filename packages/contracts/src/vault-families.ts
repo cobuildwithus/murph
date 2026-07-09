@@ -9,6 +9,7 @@ import {
   foodBankEntityDefinition,
   geneticsBankEntityDefinition,
   goalBankEntityDefinition,
+  habitatBankEntityDefinition,
   providerBankEntityDefinition,
   regimenBankEntityDefinition,
   recipeBankEntityDefinition,
@@ -96,6 +97,7 @@ export const VAULT_FAMILY_IDS = Object.freeze({
   recipes: "recipes",
   providers: "providers",
   workoutFormats: "workoutFormats",
+  habitat: "habitat",
   healthLibrary: "healthLibrary",
   assessments: "assessments",
   events: "events",
@@ -485,6 +487,22 @@ const vaultFamilyDescriptors = [
       kind: "frontmatter",
       issueCode: "FRONTMATTER_INVALID",
       schema: workoutFormatBankEntityDefinition.registry.frontmatterSchema!,
+    },
+  },
+  {
+    id: VAULT_FAMILY_IDS.habitat,
+    description: "Habitat aspect registry markdown documents (member life-context).",
+    owner: "core",
+    storageKind: "markdown-directory",
+    naming: "slug",
+    directory: habitatBankEntityDefinition.registry.directory,
+    fileExtension: ".md",
+    querySource: "markdown-root",
+    requiredDirectory: false,
+    validation: {
+      kind: "frontmatter",
+      issueCode: "FRONTMATTER_INVALID",
+      schema: habitatBankEntityDefinition.registry.frontmatterSchema!,
     },
   },
   {
@@ -938,6 +956,7 @@ export const VAULT_LAYOUT = Object.freeze({
   foodsDirectory: foodBankEntityDefinition.registry.directory,
   geneticsDirectory: geneticsBankEntityDefinition.registry.directory,
   goalsDirectory: goalBankEntityDefinition.registry.directory,
+  habitatDirectory: habitatBankEntityDefinition.registry.directory,
   healthLibraryDirectory: HEALTH_LIBRARY_DIRECTORY,
   providersDirectory: providerBankEntityDefinition.registry.directory,
   recipesDirectory: recipeBankEntityDefinition.registry.directory,
@@ -969,6 +988,17 @@ export const VAULT_LAYOUT = Object.freeze({
   exportsDirectory: EXPORTS_DIRECTORY,
   exportPacksDirectory: EXPORT_PACKS_DIRECTORY,
 });
+
+export function expectedHabitatAspectRelativePath(aspect: string): string {
+  return `${VAULT_LAYOUT.habitatDirectory}/${aspect}.md`;
+}
+
+export function isExpectedHabitatAspectRelativePath(
+  aspect: string,
+  relativePath: string,
+): boolean {
+  return relativePath === expectedHabitatAspectRelativePath(aspect);
+}
 
 export const VAULT_SHARDS = Object.freeze({
   assessments: getVaultShardPattern(VAULT_FAMILY_IDS.assessments),

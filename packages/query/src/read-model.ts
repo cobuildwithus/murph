@@ -122,6 +122,7 @@ const VAULT_FAMILY_VIEW_SPECS = {
   audits: { family: "audit", mode: "many" },
   assessments: { family: "assessment", mode: "many" },
   goals: { family: "goal", mode: "many" },
+  habitatAspects: { family: "habitat", mode: "many" },
   conditions: { family: "condition", mode: "many" },
   allergies: { family: "allergy", mode: "many" },
   protocols: { family: "protocol", mode: "many" },

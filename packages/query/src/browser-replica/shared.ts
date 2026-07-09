@@ -39,6 +39,7 @@ export const INCLUDED_FAMILIES = [
   "family",
   "genetics",
   "goal",
+  "habitat",
   "journal",
   "protocol",
   "regimen",

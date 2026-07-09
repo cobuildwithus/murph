@@ -7,10 +7,14 @@ import {
   type AllergyFrontmatter,
   type ContractSchema,
   allergyFrontmatterSchema,
+  computeHabitatCoverage,
   conditionFrontmatterSchema,
+  isExpectedHabitatAspectRelativePath,
   type ConditionFrontmatter,
   goalFrontmatterSchema,
   type GoalFrontmatter,
+  habitatFrontmatterSchema,
+  type HabitatFrontmatter,
   regimenFrontmatterSchema,
   safeParseContract,
   type RegimenFrontmatter,
@@ -36,7 +40,7 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA =
   'murph.assistant-context-snapshot'
-export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 2
+export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 3
 export const ASSISTANT_CONTEXT_SNAPSHOT_FILE_NAME = 'context-snapshot.json'
 
 const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT = [
@@ -49,6 +53,7 @@ export const ASSISTANT_CONTEXT_SNAPSHOT_DIRTY_DOMAINS = [
   'experiments',
   'blood_tests',
   'health_context',
+  'habitat',
 ] as const
 
 export type AssistantContextSnapshotDirtyDomain =
@@ -65,6 +70,7 @@ export interface AssistantContextSnapshotCompleted {
 export interface AssistantContextSnapshotSectionPresence {
   activeExperiments: boolean
   bloodTests: boolean
+  habitat: boolean
   healthContext: boolean
 }
 
@@ -98,7 +104,7 @@ type PromptLookupRecord = Readonly<{
 }>
 
 const ASSISTANT_CONTEXT_SNAPSHOT_ALL_DOMAINS =
-  ['experiments', 'blood_tests', 'health_context'] as const
+  ['experiments', 'blood_tests', 'health_context', 'habitat'] as const
 
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES)
 const MAX_ASSISTANT_CONTEXT_ACTIVE_SAFETY_RECORDS = 5
@@ -180,12 +186,13 @@ export async function refreshAssistantContextSnapshot(input: {
   }
 
   assertAssistantContextSnapshotCanContinue(input)
+  const attemptedAt = resolveSnapshotTimestamp(input.now)
   const built = await buildAssistantContextSnapshotPrompt({
+    currentDate: attemptedAt.slice(0, 10),
     shouldYield: input.shouldYield ?? null,
     signal: input.signal ?? null,
     vaultRoot: input.vaultRoot,
   })
-  const attemptedAt = resolveSnapshotTimestamp(input.now)
   const startedDirtySequence = startedRead.state?.dirtySequence ?? 0
 
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async () => {
@@ -303,6 +310,10 @@ export function listAssistantContextSnapshotDirtyDomainsForPath(
     return ['blood_tests']
   }
 
+  if (isPathUnder(normalized, VAULT_LAYOUT.habitatDirectory)) {
+    return ['habitat']
+  }
+
   return []
 }
 
@@ -353,6 +364,7 @@ async function readAssistantContextSnapshotStateStatus(input: {
 }
 
 async function buildAssistantContextSnapshotPrompt(input: {
+  currentDate: string
   shouldYield: (() => boolean) | null
   signal: AbortSignal | null
   vaultRoot: string
@@ -385,6 +397,7 @@ async function buildAssistantContextSnapshotPrompt(input: {
     coverage.activeGoalsLine,
     coverage.regimensLine,
     coverage.activeHabitRegimensLine,
+    coverage.habitatLine,
     coverage.activeRecordReadLine,
   ].filter((line): line is string => Boolean(line))
 
@@ -401,6 +414,7 @@ async function buildAssistantContextSnapshotPrompt(input: {
     sectionPresence: {
       activeExperiments: activeExperimentContext !== null,
       bloodTests: coverage.bloodTestCount > 0,
+      habitat: coverage.habitatRecordCount > 0,
       healthContext:
         coverage.goalCount > 0
         || coverage.conditionCount > 0
@@ -411,6 +425,7 @@ async function buildAssistantContextSnapshotPrompt(input: {
 }
 
 async function buildAssistantSnapshotCoverage(input: {
+  currentDate: string
   shouldYield: (() => boolean) | null
   signal: AbortSignal | null
   vaultRoot: string
@@ -433,33 +448,45 @@ async function buildAssistantSnapshotCoverage(input: {
   bloodTestsLine: string | null
   conditionCount: number
   goalCount: number
+  habitatLine: string | null
+  habitatRecordCount: number
   healthContextLine: string | null
   regimenCount: number
   regimensLine: string | null
   safetyComplete: boolean
   supplementCount: number
 }> {
-  const eventCoverage = await collectAssistantSnapshotEventLedgerCoverage(input)
-  const goalRead = await listAssistantSnapshotFrontmatterRecords(
-    input,
-    VAULT_LAYOUT.goalsDirectory,
-    goalFrontmatterSchema,
-  )
-  const conditionRead = await listAssistantSnapshotFrontmatterRecords(
-    input,
-    VAULT_LAYOUT.conditionsDirectory,
-    conditionFrontmatterSchema,
-  )
-  const allergyRead = await listAssistantSnapshotFrontmatterRecords(
-    input,
-    VAULT_LAYOUT.allergiesDirectory,
-    allergyFrontmatterSchema,
-  )
-  const regimenRead = await listAssistantSnapshotFrontmatterRecords(
-    input,
-    VAULT_LAYOUT.regimensDirectory,
-    regimenFrontmatterSchema,
-  )
+  const [eventCoverage, goalRead, conditionRead, allergyRead, regimenRead, habitatRead] =
+    await Promise.all([
+      collectAssistantSnapshotEventLedgerCoverage(input),
+      listAssistantSnapshotFrontmatterRecords(
+        input,
+        VAULT_LAYOUT.goalsDirectory,
+        goalFrontmatterSchema,
+      ),
+      listAssistantSnapshotFrontmatterRecords(
+        input,
+        VAULT_LAYOUT.conditionsDirectory,
+        conditionFrontmatterSchema,
+      ),
+      listAssistantSnapshotFrontmatterRecords(
+        input,
+        VAULT_LAYOUT.allergiesDirectory,
+        allergyFrontmatterSchema,
+      ),
+      listAssistantSnapshotFrontmatterRecords(
+        input,
+        VAULT_LAYOUT.regimensDirectory,
+        regimenFrontmatterSchema,
+      ),
+      listAssistantSnapshotFrontmatterRecords(
+        input,
+        VAULT_LAYOUT.habitatDirectory,
+        habitatFrontmatterSchema,
+        (record, relativePath) =>
+          isExpectedHabitatAspectRelativePath(record.aspect, relativePath),
+      ),
+    ])
   const goals = goalRead.records
   const conditions = conditionRead.records
   const allergies = allergyRead.records
@@ -598,6 +625,8 @@ async function buildAssistantSnapshotCoverage(input: {
       : null,
     conditionCount: conditions.length,
     goalCount: goals.length,
+    habitatLine: renderHabitatLine(habitatRead.records, input.currentDate),
+    habitatRecordCount: habitatRead.records.length,
     healthContextLine: healthParts.length > 0
       ? `- Saved health context includes ${joinWithAnd(healthParts)}.`
       : null,
@@ -618,6 +647,7 @@ async function listAssistantSnapshotFrontmatterRecords<TRecord>(
   },
   relativeDirectory: string,
   schema: ContractSchema<TRecord>,
+  acceptRecord: ((record: TRecord, relativePath: string) => boolean) | null = null,
 ): Promise<{ complete: boolean; records: TRecord[] }> {
   assertAssistantContextSnapshotCanContinue(input)
   const { relativePaths } = await walkVaultFilesInterruptible(
@@ -648,7 +678,7 @@ async function listAssistantSnapshotFrontmatterRecords<TRecord>(
       )
       assertAssistantContextSnapshotCanContinue(input)
       const result = safeParseContract(schema, document.attributes)
-      if (result.success) {
+      if (result.success && (!acceptRecord || acceptRecord(result.data, relativePath))) {
         records.push(result.data)
       } else {
         parseFailed = true
@@ -851,6 +881,7 @@ function parseSectionPresence(
   return {
     activeExperiments: value.activeExperiments === true,
     bloodTests: value.bloodTests === true,
+    habitat: value.habitat === true,
     healthContext: value.healthContext === true,
   }
 }
@@ -1194,6 +1225,60 @@ function renderGoalWindow(goal: GoalFrontmatter): string | null {
     return `started ${startAt}`
   }
   return targetAt ? `target ${targetAt}` : null
+}
+
+function renderHabitatLine(
+  records: readonly HabitatFrontmatter[],
+  currentDate: string,
+): string | null {
+  if (records.length === 0) {
+    return null
+  }
+
+  const coverage = computeHabitatCoverage(
+    records.map((record) => ({
+      aspect: record.aspect,
+      indicators: record.indicators,
+      indicatorRecordedAt: record.indicatorRecordedAt,
+    })),
+    { now: currentDate },
+  )
+  const aspects = coverage.domains.flatMap((domain) => domain.aspects)
+  const coveredAspectIds = aspects
+    .filter((aspect) => aspect.counts.known + aspect.counts.declined > 0)
+    .map((aspect) => aspect.aspectId)
+  const topGaps = aspects
+    .flatMap((aspect) =>
+      aspect.topGaps.map((gap) => `${gap.label.toLowerCase()} (${aspect.aspectId})`),
+    )
+    .slice(0, 3)
+  const staleIndicators = aspects
+    .flatMap((aspect) =>
+      aspect.indicators
+        .filter((indicator) => indicator.status === 'stale')
+        .map((indicator) => `${indicator.label.toLowerCase()} (${aspect.aspectId})`),
+    )
+    .slice(0, 3)
+  const declinedSuffix = coverage.counts.declined > 0
+    ? `, ${coverage.counts.declined} declined`
+    : ''
+  const staleSuffix = coverage.counts.stale > 0
+    ? `, ${coverage.counts.stale} stale`
+    : ''
+  const gapsSuffix = topGaps.length > 0
+    ? `; top open gaps: ${topGaps.join(', ')}`
+    : ''
+  const staleDetailSuffix = staleIndicators.length > 0
+    ? `; stale values to re-check: ${staleIndicators.join(', ')}`
+    : ''
+
+  return [
+    `- Habitat life-context: ${coverage.counts.known} of ${coverage.counts.total} catalog indicators known${declinedSuffix}${staleSuffix}`,
+    coveredAspectIds.length > 0
+      ? ` across ${coveredAspectIds.join(', ')}`
+      : '',
+    `${staleDetailSuffix}${gapsSuffix}. Read current values with \`vault-cli habitat show <aspect>\` / \`vault-cli habitat coverage\` before environment-specific advice; save member answers with \`vault-cli habitat save\`.`,
+  ].join('')
 }
 
 function renderActiveHabitRegimensLine(

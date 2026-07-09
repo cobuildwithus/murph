@@ -30,6 +30,7 @@ import {
   foodRegistryDefinition,
   geneticsRegistryDefinition,
   goalRegistryDefinition,
+  habitatRegistryDefinition,
   regimenRegistryDefinition,
   providerRegistryDefinition,
   recipeRegistryDefinition,
@@ -49,6 +50,7 @@ type RegistryCollectionKey =
   | "familyMembers"
   | "geneticVariants"
   | "foods"
+  | "habitatAspects"
   | "recipes"
   | "providers"
   | "workoutFormats";
@@ -68,6 +70,7 @@ interface RegistryCollections {
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
   foods: CanonicalEntity[];
+  habitatAspects: CanonicalEntity[];
   recipes: CanonicalEntity[];
   providers: CanonicalEntity[];
   workoutFormats: CanonicalEntity[];
@@ -111,6 +114,7 @@ export interface CanonicalHealthEntityCollection {
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
   foods: CanonicalEntity[];
+  habitatAspects: CanonicalEntity[];
   recipes: CanonicalEntity[];
   providers: CanonicalEntity[];
   workoutFormats: CanonicalEntity[];
@@ -177,6 +181,12 @@ const REGISTRY_COLLECTORS = [
     "food",
     foodRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, foodRegistryDefinition),
+  ),
+  createRegistryCollectorConfig(
+    "habitatAspects",
+    "habitat",
+    habitatRegistryDefinition.registry.directory,
+    (document) => toRegistryRecord(document, habitatRegistryDefinition),
   ),
   createRegistryCollectorConfig(
     "recipes",
@@ -370,6 +380,7 @@ function buildCanonicalHealthCollection(input: {
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
   foods: CanonicalEntity[];
+  habitatAspects: CanonicalEntity[];
   recipes: CanonicalEntity[];
   providers: CanonicalEntity[];
   workoutFormats: CanonicalEntity[];
@@ -387,6 +398,7 @@ function buildCanonicalHealthCollection(input: {
       ...input.familyMembers,
       ...input.geneticVariants,
       ...input.foods,
+      ...input.habitatAspects,
       ...input.recipes,
       ...input.providers,
       ...input.workoutFormats,
@@ -403,6 +415,7 @@ function createEmptyRegistryCollections(): RegistryCollections {
     familyMembers: [],
     geneticVariants: [],
     foods: [],
+    habitatAspects: [],
     recipes: [],
     providers: [],
     workoutFormats: [],
