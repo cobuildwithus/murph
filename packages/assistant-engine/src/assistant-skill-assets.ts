@@ -155,13 +155,13 @@ export const ASSISTANT_SKILLS = [
     slug: 'nutrition-strategy',
     name: 'nutrition-strategy',
     triggerHint:
-      'Use for forward-looking nutrition decisions about meal structure and protein, healthy eating, body composition, training fuel and recovery, hydration, appetite or under-fueling, GI comfort, and real-life constraints. Use food-journal for meal capture or retrospective pattern finding.',
+      'Use for forward-looking nutrition decisions about meal structure and protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, and real-life food-system execution. Use food-journal for meal capture, body-composition for fat loss/muscle gain/recomposition, and gut-digestion for digestive symptom strategy.',
   },
   {
     slug: 'sleep-recovery-readiness',
     name: 'sleep-recovery-readiness',
     triggerHint:
-      'Use for sleep, recovery, or readiness questions: whether to train hard, modify, rest, or deload; fatigue, soreness, or low motivation; sleep routines, naps, shift work, travel or jet lag; and wearable sleep, HRV, resting-heart-rate, or readiness trends. This is a reusable decision layer; pair it with the skill that owns programming, pain or illness, behavior, experiments, nutrition, or care.',
+      'Use when the user needs an acute readiness decision: whether to train hard, modify, train easy, rest, deload, or start a short recovery block based on recent sleep, fatigue, soreness, illness context, low motivation, load, function, or wearable context. Use sleep-improvement for sleep mechanics, circadian-rhythm for clock timing, hrv-resting-heart-rate for HRV/RHR interpretation, and energy-fatigue for persistent tiredness.',
   },
   {
     slug: 'computer-use',
