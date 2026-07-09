@@ -501,11 +501,26 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('vault-cli memory upsert')
     expect(raw).toContain('Do not create a memory record for routine success')
     expect(raw).toContain('Finite-supply replenishment check-ins')
+    expect(raw).toMatch(
+      /Treat the browser task as complete only when the site or tool result verifies the\s+requested outcome\./u,
+    )
+    expect(raw).toMatch(
+      /After a verified appointment,\s+delivery, order, enrollment, or submission, offer at most one adjacent step/u,
+    )
     expect(raw).toContain('30-day supplement supply')
     expect(raw).toContain('vault-cli automation save')
     expect(raw).toContain('Do not auto-reorder.')
     expect(raw).toContain(
       'Treat this check-in as the one\nadjacent next step',
+    )
+    expect(raw).toMatch(
+      /vault-cli supplement save --started-on\s+<delivery-date>/u,
+    )
+    expect(raw).toContain(
+      'If the delivery date is not reliable, do not invent one',
+    )
+    expect(raw).toContain(
+      'Buying a supplement does not prove that it is effective, safe, or appropriate',
     )
     expect(raw).toContain(
       'Pause only when Murph is actually blocked: expired login, CAPTCHA',
@@ -794,7 +809,18 @@ describe('assistant skill assets', () => {
       'before scheduling recurring behavior support',
     )
 
-    const raw = await readSkillFile(behaviorSkill)
+    const stressSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'stress-regulation',
+    )
+    expect(stressSkill).toBeTruthy()
+    if (!stressSkill) {
+      return
+    }
+
+    const [raw, stressRaw] = await Promise.all([
+      readSkillFile(behaviorSkill),
+      readSkillFile(stressSkill),
+    ])
 
     expect(raw).toContain(
       'This skill is a lightweight policy layer over existing Murph surfaces.',
@@ -821,6 +847,18 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Use novelty deliberately.')
     expect(raw).toContain('Playful accountability cannot become humiliation')
     expect(raw).toContain('If the user is ambivalent, do not schedule repeated support yet.')
+    expect(raw).toContain(
+      'When acute stress, overload, trouble winding down, or symptom fear is the immediate bottleneck, read `stress-regulation` first',
+    )
+    expect(raw).toContain(
+      '`physical-therapy` owns the assessment and movement plan; this skill owns only the adherence/support layer around that plan.',
+    )
+    expect(stressRaw).toContain(
+      'Route recurring follow-through work to `behavior-followthrough`.',
+    )
+    expect(stressRaw).toContain(
+      'Hand off to `chronic-pain-support`, `chronic-illness-support`, `physical-therapy`, or appropriate medical care.',
+    )
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
   })
@@ -850,7 +888,10 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('references/safety.md')
     expect(raw).toContain('references/evidence.md')
     expect(raw).toContain(
-      "Murph's available response-media or image support only if the current runtime exposes it",
+      '$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md',
+    )
+    expect(raw).toContain(
+      'This skill still owns exercise choice, programming, dose, progression, substitutions, and safety.',
     )
     expect(raw).not.toContain('$murph-exercise-images')
     expect(raw).not.toContain('/tmp/')
@@ -877,6 +918,79 @@ describe('assistant skill assets', () => {
     )
     expect(referenceText).not.toContain('$murph-exercise-images')
     expect(referenceText).not.toContain('exercise-image skill')
+  })
+
+  it('keeps exercise lookup and presentation in one shared domain reference', async () => {
+    const skillBySlug = new Map(
+      ASSISTANT_SKILLS.map((skill) => [skill.slug, skill] as const),
+    )
+    const physicalTherapy = skillBySlug.get('physical-therapy')
+    const mobilityPosture = skillBySlug.get('mobility-posture')
+    const strengthTraining = skillBySlug.get('strength-training')
+    expect(physicalTherapy).toBeTruthy()
+    expect(mobilityPosture).toBeTruthy()
+    expect(strengthTraining).toBeTruthy()
+    if (!physicalTherapy || !mobilityPosture || !strengthTraining) {
+      return
+    }
+
+    const [catalog, physicalTherapyRaw, mobilityRaw, strengthRaw] =
+      await Promise.all([
+        readFile(
+          path.join(
+            resolveAssistantSkillsRoot(),
+            'shared',
+            'exercise-catalog-runtime.md',
+          ),
+          'utf8',
+        ),
+        readSkillFile(physicalTherapy),
+        readSkillFile(mobilityPosture),
+        readSkillFile(strengthTraining),
+      ])
+
+    const sharedReference =
+      '$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md'
+    expect(physicalTherapyRaw).toContain(sharedReference)
+    expect(mobilityRaw).toContain(sharedReference)
+    expect(strengthRaw).toContain(sharedReference)
+    expect(catalog).toContain('vault-cli exercise list ... --format json')
+    expect(catalog).toContain(
+      'vault-cli exercise show <id-or-slug>\n   --format json',
+    )
+    expect(catalog).toContain('normally two to four and rarely more than five')
+    expect(catalog).toContain('attach returned\n   `images[]`')
+    expect(catalog).toContain('"no\n   catalog image yet"')
+    expect(catalog).toContain(
+      'If acute pain or safety requires an immediate action, give the minimal plan\n   now',
+    )
+  })
+
+  it('keeps supplement label identity, persistence, and evidence limits in its skill', async () => {
+    const supplementSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'micronutrients-supplements',
+    )
+    expect(supplementSkill).toBeTruthy()
+    if (!supplementSkill) {
+      return
+    }
+
+    const raw = await readSkillFile(supplementSkill)
+
+    expect(raw).toContain('vault-cli supplement search-labels`')
+    expect(raw).toContain('vault-cli\nsupplement search-labels-batch`')
+    expect(raw).toContain('preserve the full active ingredient panel')
+    expect(raw).toContain('vault-cli supplement save --ingredient')
+    expect(raw).toContain('save the\nlabel serving with `--serving-size`')
+    expect(raw).toContain(
+      'Treat contaminant observations as exact-product lab context only.',
+    )
+    expect(raw).toContain(
+      'absence of an exact test is not proof that a product is clean or safe',
+    )
+    expect(raw).toContain(
+      'A purchase is not proof that a supplement is effective, safe, medically appropriate, or authorized to start or change dose.',
+    )
   })
 
   it('keeps Murph onboarding details in the skill file, not the prompt', async () => {
