@@ -4,7 +4,7 @@ import {
 import type {
   HostedRuntimeTelegramSendRequest,
   HostedRuntimeTelegramSendResponse,
-} from "@murphai/assistant-runtime/hosted-runtime/platform";
+} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -99,6 +99,7 @@ export async function handleTelegramSendRoute(
       env: asWorkerStringEnvironment(context.env) as NodeJS.ProcessEnv,
       fetchImplementation: normalizeCloudflareWorkerFetch(),
       signal: context.request.signal,
+      telegramMaxDeliveryAttempts: 1,
     });
     return json(readTelegramSendSuccessResponse(delivery));
   } catch (error) {

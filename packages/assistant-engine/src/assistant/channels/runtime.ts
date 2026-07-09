@@ -1102,12 +1102,16 @@ async function sendTelegramMessageDetailed(
 
   const renderedMessage = renderMarkdownMessageText(input.message)
   const chunks = splitDecoratedMessageText(renderedMessage, TELEGRAM_MAX_TEXT_LENGTH)
+  const maxDeliveryAttempts = requireTelegramMaxDeliveryAttempts(
+    dependencies.maxDeliveryAttempts,
+  )
   for (const chunk of chunks) {
     try {
       const delivered = await sendTelegramTextChunk({
         baseUrl,
         entities: buildTelegramMessageEntities(chunk.decorations),
         fetchImplementation,
+        maxDeliveryAttempts,
         replyToMessageId,
         signal: dependencies.signal,
         target,
@@ -1308,6 +1312,7 @@ async function sendTelegramTextChunk(input: {
   baseUrl: string
   entities: TelegramMessageEntity[]
   fetchImplementation: TelegramFetchImplementation
+  maxDeliveryAttempts: number
   replyToMessageId: string | null
   signal?: AbortSignal
   target: TelegramParsedTarget
@@ -1365,7 +1370,7 @@ async function sendTelegramTextChunk(input: {
 
     if (
       outcome.kind === 'failed' ||
-      retryCount >= TELEGRAM_MAX_DELIVERY_ATTEMPTS - 1
+      retryCount >= input.maxDeliveryAttempts - 1
     ) {
       throw outcome.failure
     }
@@ -1775,6 +1780,16 @@ function extractTelegramRetryAfter(value: Record<string, unknown>): number | nul
     : null
 }
 
+function requireTelegramMaxDeliveryAttempts(value: number | undefined): number {
+  if (value === undefined) {
+    return TELEGRAM_MAX_DELIVERY_ATTEMPTS
+  }
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError('Telegram maxDeliveryAttempts must be a positive integer.')
+  }
+  return Math.min(value, TELEGRAM_MAX_DELIVERY_ATTEMPTS)
+}
+
 async function waitForTelegramRetryDelay(
   attempt: number,
   retryAfterSeconds: number | null,
@@ -2098,6 +2113,7 @@ function resolveTelegramSendAttemptOutcome(input: {
     errorCode: errorContext.errorCode,
     migrateToChatId: errorContext.migrateToChatId,
     operation: input.operation,
+    retryAfterSeconds: errorContext.retryAfterSeconds,
     status: input.result.response.status,
     target: input.targetLabel,
   }

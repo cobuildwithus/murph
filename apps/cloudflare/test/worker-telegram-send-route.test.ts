@@ -80,6 +80,7 @@ describe("worker Telegram send route", () => {
           TELEGRAM_BOT_TOKEN: "telegram-token",
         }),
         fetchImplementation: expect.any(Function),
+        telegramMaxDeliveryAttempts: 1,
       }),
     );
   });

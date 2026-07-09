@@ -58,6 +58,40 @@ describe("hosted provider effects", () => {
     });
   });
 
+  it("can surface Telegram retry-after failures without waiting for runtime retries", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      description: "Too Many Requests",
+      error_code: 429,
+      ok: false,
+      parameters: {
+        retry_after: 42,
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 429,
+    }));
+
+    await expect(sendHostedProviderTelegramMessage({
+      message: "quota reached",
+      target: "12345",
+    }, {
+      env: {
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      fetchImplementation: fetchMock,
+      telegramMaxDeliveryAttempts: 1,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
+      context: {
+        retryAfterSeconds: 42,
+        status: 429,
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("fails closed instead of using ambient fetch when the hosted provider fetch dependency is missing", async () => {
     const rawGlobalFetch = vi.fn(async (
       ..._args: Parameters<typeof fetch>
