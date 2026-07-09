@@ -105,10 +105,7 @@ If the user gave only an outcome, propose a low-burden behavior and let them edi
 
 ### 3. Capture the reason
 
-For a new goal or behavior, get the user's reason in their own words by default. If it is already clear or self-evident, use it without asking. Otherwise ask one narrow question:
-- "What do you want this to unlock?"
-- "What would make this worth doing even when you're busy?"
-- "Is this mostly about energy, pain, sleep, mood, discipline, or proving the routine can stick?"
+For a new goal or behavior, get the user's reason in their own words by default. If it is already clear or self-evident, use it without asking. Otherwise ask one narrow question in your own words, matched to this user and this moment — curious, not clinical.
 
 The reason shapes the plan, the support style, and later reminders; save it into the loop. Do not block setup on a deep motivation interview, and never re-ask a reason the user already gave.
 
