@@ -4164,13 +4164,14 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("labels a queued runtime wake when it has no foreground work", async () => {
+  test("keeps idle-window trigger when a queued runtime wake has no foreground work", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     let queuedWakePending = false;
     let queuedWakeConsumed = false;
+    let wakeNotifiedAt = 0;
     const runtimeWakeSignal: RuntimeWakeSignal = {
       consumePending() {
         if (!queuedWakePending || queuedWakeConsumed) {
@@ -4208,15 +4209,15 @@ describe("hosted workspace runtime entrypoint", () => {
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
-          attemptId: "attempt_synthetic_phase_checkpoint_queued_wake_runtime_wake",
-          idleCheckpointDelayMs: 50,
+          attemptId: "attempt_synthetic_phase_checkpoint_queued_wake_idle_window",
+          idleCheckpointDelayMs: 200,
           leaseGeneration: "7",
           userId: TEST_USER_ID,
           workspaceVersion: "0",
         },
       }), {
         async createCheckpointSnapshot(snapshotInput) {
-          assert.equal(snapshotInput.idleCheckpointTrigger, "runtime_wake");
+          assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
           assert.equal(snapshotInput.runtimeWakePendingAtCheckpoint, true);
           return {
             snapshotRef: createBundleRef({
@@ -4242,6 +4243,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         runtimeWakeSignal,
         async runAssistantPhase() {
+          wakeNotifiedAt = Date.now();
           runtimeWakeSignal.notify();
           return {
             checkpointReason: "assistant_runtime_commit",
@@ -4252,7 +4254,7 @@ describe("hosted workspace runtime entrypoint", () => {
       });
 
       const phaseLogs = readCapturedRuntimePhaseLogs({
-        attemptId: "attempt_synthetic_phase_checkpoint_queued_wake_runtime_wake",
+        attemptId: "attempt_synthetic_phase_checkpoint_queued_wake_idle_window",
         spy: consoleInfo,
       });
       expect(
@@ -4261,10 +4263,12 @@ describe("hosted workspace runtime entrypoint", () => {
           && entry.details.runtimePhaseStatus === "start"
         )?.details,
       ).toEqual(expect.objectContaining({
-        idleCheckpointTrigger: "runtime_wake",
+        idleCheckpointTrigger: "idle_window",
         runtimeWakePendingAtCheckpoint: true,
       }));
-      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "runtime_wake");
+      assert.ok(wakeNotifiedAt > 0);
+      assert.ok(Date.now() - wakeNotifiedAt >= 150);
+      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(checkpointRequests[0]?.runtimeWakePendingAtCheckpoint, true);
       assert.equal(result.status, "idle");
     } finally {
@@ -4278,7 +4282,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("checkpoints an external runtime wake when it has no foreground work", async () => {
+  test("waits for the idle window when an external runtime wake has no foreground work", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -4336,7 +4340,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
-          attemptId: "attempt_synthetic_phase_checkpoint_external_wake_runtime_wake",
+          attemptId: "attempt_synthetic_phase_checkpoint_external_wake_idle_window",
           idleCheckpointDelayMs: 500,
           leaseGeneration: "7",
           userId: TEST_USER_ID,
@@ -4345,7 +4349,7 @@ describe("hosted workspace runtime entrypoint", () => {
       }), {
         async createCheckpointSnapshot(snapshotInput) {
           snapshotCount += 1;
-          assert.equal(snapshotInput.idleCheckpointTrigger, "runtime_wake");
+          assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
           assert.equal(snapshotInput.runtimeWakePendingAtCheckpoint, true);
           return {
             snapshotRef: createBundleRef({
@@ -4385,12 +4389,13 @@ describe("hosted workspace runtime entrypoint", () => {
         1_000,
         () => "Dirty checkpoint wait did not arm.",
       );
+      const wakeNotifiedAt = Date.now();
       runtimeWakeSignal.notify();
 
       const result = await resultPromise;
 
       const phaseLogs = readCapturedRuntimePhaseLogs({
-        attemptId: "attempt_synthetic_phase_checkpoint_external_wake_runtime_wake",
+        attemptId: "attempt_synthetic_phase_checkpoint_external_wake_idle_window",
         spy: consoleInfo,
       });
       expect(
@@ -4399,11 +4404,12 @@ describe("hosted workspace runtime entrypoint", () => {
           && entry.details.runtimePhaseStatus === "start"
         )?.details,
       ).toEqual(expect.objectContaining({
-        idleCheckpointTrigger: "runtime_wake",
+        idleCheckpointTrigger: "idle_window",
         runtimeWakePendingAtCheckpoint: true,
       }));
       assert.equal(snapshotCount, 1);
-      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "runtime_wake");
+      assert.ok(Date.now() - wakeNotifiedAt >= 450);
+      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(checkpointRequests[0]?.runtimeWakePendingAtCheckpoint, true);
       assert.equal(result.status, "idle");
     } finally {
@@ -21100,7 +21106,7 @@ describe("hosted runtime shutdown signal", () => {
     }
   }, 30_000);
 
-  test("a pre-shutdown no-work runtime wake checkpoints without servicing mailbox work", async () => {
+  test("a pre-shutdown no-work runtime wake waits for shutdown before checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -21108,10 +21114,12 @@ describe("hosted runtime shutdown signal", () => {
     const events: string[] = [];
     const mailboxItems: ReturnType<typeof createMailboxItem>[] = [];
     const firstDirtyWaitStarted = createDeferred<void>();
+    const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
     let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
     let assistantPhaseFinished = false;
     let assistantPhaseCalls = 0;
+    let dirtyWaitCount = 0;
     const runtimeWakeSignal: RuntimeWakeSignal = {
       consumePending() {
         return null;
@@ -21149,8 +21157,13 @@ describe("hosted runtime shutdown signal", () => {
             }
           };
           if (assistantPhaseFinished) {
+            dirtyWaitCount += 1;
             activeDirtyWake = resolveCurrent;
-            firstDirtyWaitStarted.resolve();
+            if (dirtyWaitCount === 1) {
+              firstDirtyWaitStarted.resolve();
+            } else if (dirtyWaitCount === 2) {
+              retainedDirtyWaitStarted.resolve();
+            }
           }
           signal?.addEventListener("abort", abort, { once: true });
         });
@@ -21173,8 +21186,7 @@ describe("hosted runtime shutdown signal", () => {
         }),
         {
           async createCheckpointSnapshot(snapshotInput) {
-            assert.equal(snapshotInput.idleCheckpointTrigger, "runtime_wake");
-            assert.equal(snapshotInput.runtimeWakePendingAtCheckpoint, true);
+            assert.equal(snapshotInput.idleCheckpointTrigger, "shutdown_signal");
             return {
               snapshotRef: createBundleRef({
                 hash: "f".repeat(64),
@@ -21226,6 +21238,15 @@ describe("hosted runtime shutdown signal", () => {
         () => "Dirty checkpoint wait did not arm.",
       );
       runtimeWakeSignal.notify(1_777_000_000_095);
+      await withRealTimeout(
+        retainedDirtyWaitStarted.promise,
+        1_000,
+        () => "Dirty checkpoint wait did not retain the no-work wake.",
+      );
+      assert.equal(checkpointRequests.length, 0);
+      shutdownController.abort(
+        new DOMException("Synthetic container SIGTERM.", "AbortError"),
+      );
 
       const result = await resultPromise;
 
@@ -21235,9 +21256,15 @@ describe("hosted runtime shutdown signal", () => {
         [],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "runtime_wake");
+      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "shutdown_signal");
       assert.equal(checkpointRequests[0]?.runtimeWakePendingAtCheckpoint, true);
-      assert.equal(result.status, "idle");
+      assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[1]?.idleCheckpointTrigger, "shutdown_signal");
+      assert.equal(checkpointRequests[1]?.runtimeWakePendingAtCheckpoint, false);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
+      assert.ok(checkpointRequests[1]?.nextWakeAt);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, checkpointRequests[1]?.nextWakeAt);
       const phaseLogs = readCapturedRuntimePhaseLogs({
         attemptId: "attempt_synthetic_shutdown_stale_runtime_wake",
         spy: consoleInfo,
@@ -21248,9 +21275,9 @@ describe("hosted runtime shutdown signal", () => {
           && entry.details.runtimePhaseStatus === "start"
       )?.details,
       ).toEqual(expect.objectContaining({
-        idleCheckpointTrigger: "runtime_wake",
+        idleCheckpointTrigger: "shutdown_signal",
         runtimeWakePendingAtCheckpoint: true,
-        shutdownSignalAbortedAtCheckpoint: false,
+        shutdownSignalAbortedAtCheckpoint: true,
       }));
     } finally {
       if (previousStdIoLogSetting === undefined) {
@@ -21264,7 +21291,7 @@ describe("hosted runtime shutdown signal", () => {
     }
   }, 30_000);
 
-  test("shutdown after a runtime-wake checkpoint trigger does not service a retained runtime wake", async () => {
+  test("shutdown after an idle-window checkpoint with a retained runtime wake does not service it", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -21345,7 +21372,7 @@ describe("hosted runtime shutdown signal", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             checkpointSnapshotTriggers.push(snapshotInput.idleCheckpointTrigger);
-            if (snapshotInput.idleCheckpointTrigger === "runtime_wake") {
+            if (snapshotInput.runtimeWakePendingAtCheckpoint) {
               mailboxItems.push(createMailboxItem({
                 id: "mailbox_item_shutdown_after_idle_window_trigger",
                 laneSeq: "1",
@@ -21418,14 +21445,14 @@ describe("hosted runtime shutdown signal", () => {
         [],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "runtime_wake");
+      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(checkpointRequests[0]?.runtimeWakePendingAtCheckpoint, true);
       assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[1]?.idleCheckpointTrigger, "shutdown_signal");
       assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
       assert.ok(checkpointRequests[1]?.nextWakeAt);
       assert.deepEqual(checkpointSnapshotTriggers, [
-        "runtime_wake",
+        "idle_window",
         "shutdown_signal",
       ]);
       assert.equal(result.status, "scheduled");
@@ -22187,7 +22214,7 @@ describe("hosted runtime shutdown signal", () => {
         ["mailbox.importItem:mailbox_item_shutdown_after_pre_checkpoint_import"],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "runtime_wake");
+      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(checkpointRequests[0]?.runtimeWakePendingAtCheckpoint, true);
       assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[1]?.idleCheckpointTrigger, "shutdown_signal");
@@ -22198,7 +22225,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
       assert.ok(checkpointRequests[1]?.nextWakeAt);
       assert.deepEqual(checkpointSnapshotTriggers, [
-        "runtime_wake",
+        "idle_window",
         "shutdown_signal",
       ]);
       assert.equal(result.status, "scheduled");
@@ -22362,7 +22389,7 @@ describe("hosted runtime shutdown signal", () => {
         ["mailbox.importItem:mailbox_item_shutdown_during_pre_checkpoint_pass"],
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "runtime_wake");
+      assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(checkpointRequests[0]?.runtimeWakePendingAtCheckpoint, true);
       assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[1]?.idleCheckpointTrigger, "shutdown_signal");
@@ -22373,7 +22400,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
       assert.ok(checkpointRequests[1]?.nextWakeAt);
       assert.deepEqual(checkpointSnapshotTriggers, [
-        "runtime_wake",
+        "idle_window",
         "shutdown_signal",
       ]);
       assert.equal(result.status, "scheduled");

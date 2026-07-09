@@ -32,7 +32,7 @@ declare module 'incur' {
       'assistant self-target list': { args: {}; options: { requestId?: string } }
       'assistant self-target set': { args: { channel: string }; options: { requestId?: string; identity?: string; participant?: string; thread?: string; deliveryTarget?: string } }
       'assistant self-target show': { args: { channel: string }; options: { requestId?: string } }
-      'assistant session list': { args: {}; options: { requestId?: string } }
+      'assistant session list': { args: {}; options: { requestId?: string; limit: number } }
       'assistant session show': { args: { sessionId: string }; options: { requestId?: string } }
       'assistant status': { args: {}; options: { requestId?: string; session?: string; limit: number } }
       'assistant stop': { args: {}; options: { requestId?: string } }

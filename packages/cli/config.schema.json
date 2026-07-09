@@ -783,8 +783,8 @@
                                   "maxLength": 128
                                 },
                                 "limit": {
-                                  "default": 10,
-                                  "description": "Maximum records to return per setup surface. Defaults to 10.",
+                                  "default": 3,
+                                  "description": "Maximum records to return per setup surface. Defaults to 3.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 50
@@ -863,6 +863,13 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 128
+                                },
+                                "limit": {
+                                  "default": 5,
+                                  "description": "Maximum number of recent assistant sessions to return. Defaults to 5.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 50
                                 }
                               }
                             }

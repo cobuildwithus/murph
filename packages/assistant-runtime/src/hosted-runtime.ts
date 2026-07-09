@@ -2256,7 +2256,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (await runPreCheckpointConversationWake(queuedWakeLatencySeed)) {
             continue;
           }
-          checkpointWakeLatencySeed = queuedWakeLatencySeed;
+          checkpointWakeLatencySeed ??= queuedWakeLatencySeed;
         }
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
           idleCheckpointStartByMs,
@@ -2271,11 +2271,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (await runPreCheckpointConversationWake(latencySeed)) {
             continue;
           }
-          checkpointWakeLatencySeed = latencySeed;
+          pendingCheckpointWakeLatencySeed ??= latencySeed;
+          continue;
         }
         const dirtyWindowCheckpointTrigger = resolveHostedRuntimeIdleCheckpointTrigger({
           dirtyWaitResult,
-          runtimeWakePendingAtCheckpoint: checkpointWakeLatencySeed !== null,
         });
         let idleCheckpointWake: {
           inboxMediaRetentionWakeAt: string | null;
@@ -2387,7 +2387,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const runtimeWakePendingAtCheckpoint = checkpointWakeLatencySeed !== null;
         const idleCheckpointTrigger = resolveHostedRuntimeIdleCheckpointTrigger({
           dirtyWaitResult,
-          runtimeWakePendingAtCheckpoint,
         });
         const idleCheckpointPhaseLogDetails =
           buildHostedRuntimeIdleCheckpointPhaseLogDetails({
@@ -3546,7 +3545,6 @@ function buildHostedRuntimeIdleCheckpointPhaseLogDetails(input: {
 
 function resolveHostedRuntimeIdleCheckpointTrigger(input: {
   dirtyWaitResult: HostedRuntimeDirtyWaitResult;
-  runtimeWakePendingAtCheckpoint: boolean;
 }): HostedRuntimeIdleCheckpointTrigger {
   if (
     input.dirtyWaitResult.kind === "idle_checkpoint"
@@ -3555,10 +3553,7 @@ function resolveHostedRuntimeIdleCheckpointTrigger(input: {
     return "shutdown_signal";
   }
 
-  if (
-    input.dirtyWaitResult.kind === "external_wake"
-    || input.runtimeWakePendingAtCheckpoint
-  ) {
+  if (input.dirtyWaitResult.kind === "external_wake") {
     return "runtime_wake";
   }
 
