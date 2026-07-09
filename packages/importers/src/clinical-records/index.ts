@@ -76,6 +76,10 @@ type VitalConceptDecision =
   | { status: "ambiguous" }
   | { status: "matched"; vital: VitalDefinition }
   | { status: "unmatched" };
+type DocumentReferenceTextDecision =
+  | { status: "ambiguous" }
+  | { status: "available"; text: string }
+  | { status: "unavailable" };
 
 const VITAL_LOINC_BY_CODE = new Map<string, VitalDefinition>([
   ["8480-6", { facet: "bp-systolic", metric: "systolic-blood-pressure", title: "Systolic blood pressure", unit: "mmHg" }],
@@ -182,7 +186,7 @@ export async function buildClinicalImportPlan(input: BuildClinicalImportPlanInpu
     manifestPath,
     vaultRoot: input.vaultRoot,
   });
-  const hasIncompleteAllergyEvidence = hasManifestAllergyRetrievalError(manifest);
+  const hasIncompleteAllergyEvidence = hasIncompleteManifestAllergyEvidence(manifest);
 
   for (const resourceFile of manifest.resourceFiles) {
     const { rawRef, resources } = await readClinicalResourcePage({
@@ -236,10 +240,14 @@ async function scanAllergyConflictEvidence(input: {
   return false;
 }
 
-function hasManifestAllergyRetrievalError(manifest: ClinicalRawManifest): boolean {
-  return manifest.errors?.some((error) =>
-    error.resourceType === undefined || ALLERGY_CONFLICT_RESOURCE_TYPES.has(error.resourceType)
-  ) ?? false;
+function hasIncompleteManifestAllergyEvidence(manifest: ClinicalRawManifest): boolean {
+  const retrievedResourceTypes = new Set(manifest.resourceFiles.map((resourceFile) => resourceFile.resourceType));
+  return (
+    [...ALLERGY_CONFLICT_RESOURCE_TYPES].some((resourceType) => !retrievedResourceTypes.has(resourceType))
+    || manifest.errors?.some((error) =>
+      error.resourceType === undefined || ALLERGY_CONFLICT_RESOURCE_TYPES.has(error.resourceType)
+    ) === true
+  );
 }
 
 async function assertRawResourceFileByteBounds(input: {
@@ -698,10 +706,14 @@ function mapDocumentReference(context: FhirResourceContext<DocumentReference>): 
     return unsupportedOnly(context, "document reference docStatus is not importable");
   }
 
-  const note = readDocumentReferenceText(context.resource);
-  if (!note) {
+  const noteDecision = decideDocumentReferenceText(context.resource);
+  if (noteDecision.status === "ambiguous") {
+    return unsupportedOnly(context, "document reference has multiple inline text attachments");
+  }
+  if (noteDecision.status === "unavailable") {
     return unsupportedOnly(context, "document reference text is not available in raw FHIR page");
   }
+  const note = noteDecision.text;
   if (note.length > CLINICAL_NOTE_MAX_LENGTH) {
     return unsupportedOnly(context, "document reference text exceeds candidate bounds");
   }
@@ -1342,22 +1354,23 @@ function codingsForCodeableConcept(value: CodeableConcept | undefined): Array<Pi
     }));
 }
 
-function readDocumentReferenceText(resource: DocumentReference): string | null {
+function decideDocumentReferenceText(resource: DocumentReference): DocumentReferenceTextDecision {
+  const textData: Array<string | undefined> = [];
   for (const content of readUnknownArray(resource.content)) {
     const attachment = isRecord(content) && isRecord(content.attachment) ? content.attachment : null;
     const contentType = readString(attachment?.contentType)?.toLowerCase() ?? "";
-    const data = readString(attachment?.data);
-    if (!data || !contentType.startsWith("text/")) {
-      continue;
-    }
-
-    const decoded = decodeDocumentReferenceTextData(data)?.trim();
-    if (decoded && decoded.length > 0) {
-      return decoded;
+    if (contentType.startsWith("text/")) {
+      textData.push(readString(attachment?.data));
     }
   }
 
-  return null;
+  if (textData.length > 1) {
+    return { status: "ambiguous" };
+  }
+
+  const data = textData[0];
+  const text = data ? decodeDocumentReferenceTextData(data)?.trim() : null;
+  return text ? { status: "available", text } : { status: "unavailable" };
 }
 
 function decodeDocumentReferenceTextData(value: string): string | null {

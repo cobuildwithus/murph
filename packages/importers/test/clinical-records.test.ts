@@ -640,6 +640,11 @@ describe("buildClinicalImportPlan", () => {
           relativePath: "AllergyIntolerance/page-1.json",
           count: 1,
         },
+        {
+          resourceType: "Condition",
+          relativePath: "Condition/page-1.json",
+          count: 0,
+        },
       ],
       pages: {
         "DocumentReference/page-1.json": {
@@ -655,6 +660,12 @@ describe("buildClinicalImportPlan", () => {
               attachment: {
                 contentType: "text/plain",
                 data: Buffer.from("Follow up in two weeks.").toString("base64"),
+              },
+            },
+            {
+              attachment: {
+                contentType: "application/pdf",
+                url: "https://example.invalid/discharge-instructions.pdf",
               },
             },
           ],
@@ -679,6 +690,7 @@ describe("buildClinicalImportPlan", () => {
             },
           },
         ],
+        "Condition/page-1.json": [],
       },
     });
 
@@ -709,35 +721,47 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
-  it("blocks no-known allergy assertions when manifest reports incomplete allergy retrieval", async () => {
-    const manifestErrorCases: Array<{
-      error: { code: string; message: string; resourceType?: string };
+  it("blocks no-known allergy assertions when allergy retrieval is incomplete", async () => {
+    const incompleteCases: Array<{
+      error?: { code: string; message: string; resourceType?: string };
+      includeConditionFile: boolean;
       label: string;
     }> = [
       {
+        label: "missing-condition",
+        includeConditionFile: false,
+      },
+      {
         label: "scoped",
+        includeConditionFile: true,
         error: { resourceType: "AllergyIntolerance", code: "fetch-failed", message: "Allergy page failed" },
       },
       {
         label: "condition",
+        includeConditionFile: true,
         error: { resourceType: "Condition", code: "fetch-failed", message: "Condition page failed" },
       },
       {
         label: "unscoped",
+        includeConditionFile: true,
         error: { code: "fetch-failed", message: "FHIR retrieval was incomplete" },
       },
     ];
 
-    for (const { error, label } of manifestErrorCases) {
+    for (const { error, includeConditionFile, label } of incompleteCases) {
       const resourceId = `allergy-negative-incomplete-${label}`;
+      const conditionPath = `Condition/${label}.json`;
       const vaultRoot = await writeClinicalFixture({
-        manifest: { errors: [error] },
+        manifest: error === undefined ? undefined : { errors: [error] },
         resourceFiles: [
           {
             resourceType: "AllergyIntolerance",
             relativePath: `AllergyIntolerance/${label}.json`,
             count: 1,
           },
+          ...(includeConditionFile
+            ? [{ resourceType: "Condition", relativePath: conditionPath, count: 0 }]
+            : []),
         ],
         pages: {
           [`AllergyIntolerance/${label}.json`]: [
@@ -760,6 +784,7 @@ describe("buildClinicalImportPlan", () => {
               },
             },
           ],
+          ...(includeConditionFile ? { [conditionPath]: [] } : {}),
         },
       });
 
@@ -776,13 +801,13 @@ describe("buildClinicalImportPlan", () => {
     }
   });
 
-  it("fails closed on malformed DocumentReference inline text data", async () => {
+  it("fails closed on ambiguous or malformed DocumentReference inline text data", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
           resourceType: "DocumentReference",
           relativePath: "DocumentReference/page-1.json",
-          count: 2,
+          count: 4,
         },
       ],
       pages: {
@@ -819,6 +844,50 @@ describe("buildClinicalImportPlan", () => {
               },
             ],
           },
+          {
+            resourceType: "DocumentReference",
+            id: "document-multiple-text",
+            status: "current",
+            docStatus: "final",
+            date: "2026-07-02T08:32:00.000Z",
+            description: "Multipart clinical note",
+            content: [
+              {
+                attachment: {
+                  contentType: "text/plain",
+                  data: Buffer.from("Discharge summary.").toString("base64"),
+                },
+              },
+              {
+                attachment: {
+                  contentType: "text/plain",
+                  data: Buffer.from("Addendum: stop medication.").toString("base64"),
+                },
+              },
+            ],
+          },
+          {
+            resourceType: "DocumentReference",
+            id: "document-valid-then-malformed",
+            status: "current",
+            docStatus: "final",
+            date: "2026-07-02T08:33:00.000Z",
+            description: "Partially malformed clinical note",
+            content: [
+              {
+                attachment: {
+                  contentType: "text/plain",
+                  data: Buffer.from("Discharge summary.").toString("base64"),
+                },
+              },
+              {
+                attachment: {
+                  contentType: "text/plain",
+                  data: "not-base64!!!!",
+                },
+              },
+            ],
+          },
         ],
       },
     });
@@ -826,7 +895,7 @@ describe("buildClinicalImportPlan", () => {
     const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
 
     expect(plan.candidates).toEqual([]);
-    expect(plan.unsupported).toHaveLength(2);
+    expect(plan.unsupported).toHaveLength(4);
     expect(plan.unsupported).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -836,6 +905,14 @@ describe("buildClinicalImportPlan", () => {
         expect.objectContaining({
           resourceId: "document-invalid-utf8",
           reason: "document reference text is not available in raw FHIR page",
+        }),
+        expect.objectContaining({
+          resourceId: "document-multiple-text",
+          reason: "document reference has multiple inline text attachments",
+        }),
+        expect.objectContaining({
+          resourceId: "document-valid-then-malformed",
+          reason: "document reference has multiple inline text attachments",
         }),
       ]),
     );
