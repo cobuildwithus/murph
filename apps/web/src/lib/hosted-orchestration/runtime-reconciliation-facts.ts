@@ -40,6 +40,9 @@ import {
   markHostedAiUsageLimitNoticeSent,
 } from "../hosted-execution/usage-allowance";
 import {
+  readHostedExecutionControlClientIfConfigured,
+} from "../hosted-execution/control";
+import {
   type HostedAiUsageLimitNoticeDeliveryResult,
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendHostedAiUsageNoticeToLinqChat,
@@ -91,12 +94,8 @@ type HostedRuntimeReconciliationDecisionSource = "workflow" | "status";
 const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
   "murph.hosted-runtime.reconciliation-facts.v1";
 const HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS = 15_000;
-const DEFAULT_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_SECONDS = Math.ceil(
-  HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS / 1000,
-);
 const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
   24 * 60 * 60 * 1000;
-const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 
 export async function readHostedRuntimeReconciliationFacts(
   input: HostedRuntimeReconciliationFactsRequest & {
@@ -429,8 +428,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     if (decision.reason !== "ai_usage_limit_exceeded") {
       return { status: "not_applicable" };
     }
-    const noticeTarget = parseTelegramThreadTarget(wake.message.telegramMessage.threadId);
-    if (!noticeTarget) {
+    if (!parseTelegramThreadTarget(wake.message.telegramMessage.threadId)) {
       return { status: "not_applicable" };
     }
 
@@ -497,26 +495,19 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         : buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
 
-    const noticeDelivery = prepareHostedRuntimeTelegramUsageLimitNotice({
-      target: noticeTarget,
-    });
-    if (!noticeDelivery) {
-      const retryAt = new Date(
-        sentAt.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
-      );
+    const controlClient = readHostedExecutionControlClientIfConfigured(
+      HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS,
+    );
+    if (!controlClient) {
       const error = new HostedRuntimeTelegramUsageLimitNoticeUnavailableError();
       await markHostedLinqDeliverySendFailedTx({
         failedAt: sentAt,
         failureCode: error.name,
         failureReason: error.message,
         idempotencyKey: deliveryClaim.idempotencyKey,
-        nextAttemptAt: retryAt,
         prisma: input.prisma,
       });
-      return {
-        retryAt: retryAt.toISOString(),
-        status: "in_flight",
-      };
+      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
 
     const dispatchStarted =
@@ -529,52 +520,51 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
 
+    let deliveryResult: Awaited<ReturnType<typeof controlClient.sendTelegramMessage>>;
     try {
-      await sendHostedRuntimeTelegramUsageLimitNotice({
-        delivery: noticeDelivery,
+      deliveryResult = await controlClient.sendTelegramMessage({
+        idempotencyKey: deliveryClaim.idempotencyKey,
         message: decision.userNotice.message,
         replyToMessageId: wake.message.telegramMessage.messageId,
+        target: wake.message.telegramMessage.threadId,
+        userId: input.userId,
       });
-    } catch (error) {
-      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRetryAfterError) {
-        const retryAt = new Date(
-          sentAt.getTime() + error.retryAfterSeconds * 1000,
+    } catch {
+      const error = new HostedRuntimeTelegramUsageLimitNoticeUnavailableError();
+      await markHostedLinqDeliverySendFailedTx({
+        failedAt: sentAt,
+        failureCode: error.name,
+        failureReason: error.message,
+        idempotencyKey: deliveryClaim.idempotencyKey,
+        prisma: input.prisma,
+      });
+      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
+    }
+
+    if (deliveryResult.status === "failed") {
+      if (deliveryResult.retryable) {
+        const error = new HostedRuntimeTelegramUsageLimitNoticeUnavailableError(
+          formatHostedRuntimeTelegramUsageLimitNoticeRetryableFailure(deliveryResult),
         );
         await markHostedLinqDeliverySendFailedTx({
           failedAt: sentAt,
           failureCode: error.name,
           failureReason: error.message,
           idempotencyKey: deliveryClaim.idempotencyKey,
-          nextAttemptAt: retryAt,
           prisma: input.prisma,
         });
-        return {
-          retryAt: retryAt.toISOString(),
-          status: "in_flight",
-        };
+        return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
       }
-      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeRejectedError) {
-        await markHostedLinqDeliverySendFailedTx({
-          failedAt: sentAt,
-          failureCode: error.name,
-          failureReason: error.message,
-          idempotencyKey: deliveryClaim.idempotencyKey,
-          prisma: input.prisma,
-        });
-        return { status: "already_notified" };
-      }
-      if (error instanceof HostedRuntimeTelegramUsageLimitNoticeUnknownError) {
-        await markHostedLinqDeliverySendFailedTx({
-          failedAt: sentAt,
-          failureCode: error.name,
-          failureReason: error.message,
-          idempotencyKey: deliveryClaim.idempotencyKey,
-          prisma: input.prisma,
-        });
-        return { status: "already_notified" };
-      }
-      throw error;
+      await markHostedLinqDeliverySendFailedTx({
+        failedAt: sentAt,
+        failureCode: deliveryResult.failureCode,
+        failureReason: deliveryResult.failureReason,
+        idempotencyKey: deliveryClaim.idempotencyKey,
+        prisma: input.prisma,
+      });
+      return { status: "already_notified" };
     }
+
     await markHostedLinqDeliveryAcceptedTx({
       acceptedAt: sentAt,
       idempotencyKey: deliveryClaim.idempotencyKey,
@@ -628,6 +618,17 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     sourceEventId: wake.eventId,
   });
   return mapHostedRuntimeAiUsageLinqNoticeResult(linqNoticeResult, input.now);
+}
+
+function formatHostedRuntimeTelegramUsageLimitNoticeRetryableFailure(input: {
+  failureCode: string;
+  failureReason: string;
+}): string {
+  const failureCode = input.failureCode.trim() || "unknown";
+  const failureReason = input.failureReason.trim();
+  return failureReason
+    ? `Hosted Telegram usage-limit notice delivery is retryable through hosted control (${failureCode}: ${failureReason}).`
+    : `Hosted Telegram usage-limit notice delivery is retryable through hosted control (${failureCode}).`;
 }
 
 function buildHostedRuntimeAiUsageNoticeInFlightResult(
@@ -708,254 +709,14 @@ function canSendHostedRuntimeUsageNoticeForConversationWake(input: {
   );
 }
 
-async function sendHostedRuntimeTelegramUsageLimitNotice(input: {
-  delivery: HostedRuntimeTelegramUsageLimitNoticeDelivery;
-  message: string;
-  replyToMessageId: string;
-}): Promise<void> {
-  const timeout = new AbortController();
-  const timeoutId = setTimeout(
-    () => timeout.abort(),
-    HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_TIMEOUT_MS,
-  );
-
-  try {
-    let response: Awaited<ReturnType<typeof input.delivery.fetchImplementation>>;
-    try {
-      response = await input.delivery.fetchImplementation(
-        `${input.delivery.baseUrl}/bot${input.delivery.token}/sendMessage`,
-        {
-          body: JSON.stringify({
-            business_connection_id: input.delivery.target.businessConnectionId ?? undefined,
-            chat_id: input.delivery.target.chatId,
-            direct_messages_topic_id: input.delivery.target.directMessagesTopicId ?? undefined,
-            message_thread_id: input.delivery.target.messageThreadId ?? undefined,
-            reply_to_message_id: parseHostedRuntimeTelegramMessageId(input.replyToMessageId),
-            text: input.message,
-          }),
-          headers: {
-            "content-type": "application/json",
-          },
-          method: "POST",
-          signal: timeout.signal,
-        },
-      );
-    } catch {
-      throw new HostedRuntimeTelegramUsageLimitNoticeUnknownError(
-        "Hosted Telegram usage-limit notice delivery could not be confirmed after calling the Bot API.",
-      );
-    }
-
-    const payload = await readHostedRuntimeTelegramJsonResponse(response);
-    if (response.ok && isHostedRuntimeTelegramSendMessageSuccessResponse(payload)) {
-      return;
-    }
-    if (response.ok) {
-      throw new HostedRuntimeTelegramUsageLimitNoticeUnknownError(
-        "Hosted Telegram usage-limit notice delivery returned success without a confirmed Bot API result.",
-      );
-    }
-
-    const errorContext = readHostedRuntimeTelegramErrorContext(payload);
-    const retryAfterSeconds = readHostedRuntimeTelegramRetryAfterSeconds(payload);
-    if (response.status === 429) {
-      throw new HostedRuntimeTelegramUsageLimitNoticeRetryAfterError(
-        retryAfterSeconds
-        ?? DEFAULT_TELEGRAM_USAGE_LIMIT_NOTICE_RETRY_AFTER_SECONDS,
-      );
-    }
-    if (
-      response.status >= 400
-      && response.status < 500
-      && (errorContext.errorCode !== null || errorContext.description !== null)
-    ) {
-      throw new HostedRuntimeTelegramUsageLimitNoticeRejectedError(
-        formatHostedRuntimeTelegramFailureMessage({
-          errorContext,
-          status: response.status,
-        }),
-      );
-    }
-
-    throw new HostedRuntimeTelegramUsageLimitNoticeUnknownError(
-      `Hosted Telegram usage-limit notice delivery returned ambiguous HTTP ${response.status}.`,
-    );
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-class HostedRuntimeTelegramUsageLimitNoticeRejectedError extends Error {
-  override name = "HostedRuntimeTelegramUsageLimitNoticeRejectedError";
-}
-
-class HostedRuntimeTelegramUsageLimitNoticeUnknownError extends Error {
-  override name = "HostedRuntimeTelegramUsageLimitNoticeUnknownError";
-}
-
-class HostedRuntimeTelegramUsageLimitNoticeRetryAfterError extends Error {
-  override name = "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError";
-
-  constructor(readonly retryAfterSeconds: number) {
-    super("Hosted Telegram usage-limit notice delivery was rate-limited by the Bot API.");
-  }
-}
-
 class HostedRuntimeTelegramUsageLimitNoticeUnavailableError extends Error {
   override name = "HostedRuntimeTelegramUsageLimitNoticeUnavailableError";
 
-  constructor() {
-    super("Hosted Telegram usage-limit notice delivery is unavailable in hosted web.");
-  }
-}
-
-type HostedRuntimeTelegramUsageLimitNoticeTarget =
-  NonNullable<ReturnType<typeof parseTelegramThreadTarget>>;
-
-type HostedRuntimeTelegramUsageLimitNoticeDelivery = {
-  baseUrl: string;
-  fetchImplementation: typeof fetch;
-  target: HostedRuntimeTelegramUsageLimitNoticeTarget;
-  token: string;
-};
-
-function prepareHostedRuntimeTelegramUsageLimitNotice(input: {
-  target: HostedRuntimeTelegramUsageLimitNoticeTarget;
-}): HostedRuntimeTelegramUsageLimitNoticeDelivery | null {
-  const token = readHostedRuntimeTelegramEnv("TELEGRAM_BOT_TOKEN");
-  const fetchImplementation = globalThis.fetch?.bind(globalThis);
-
-  if (!token || typeof fetchImplementation !== "function") {
-    return null;
-  }
-
-  return {
-    baseUrl: normalizeHostedRuntimeTelegramApiBaseUrl(
-      readHostedRuntimeTelegramEnv("TELEGRAM_API_BASE_URL"),
-    ),
-    fetchImplementation,
-    target: input.target,
-    token,
-  };
-}
-
-async function readHostedRuntimeTelegramJsonResponse(
-  response: Response,
-): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
-function isHostedRuntimeTelegramSendMessageSuccessResponse(value: unknown): boolean {
-  if (
-    !value
-    || typeof value !== "object"
-    || !("ok" in value)
-    || value.ok !== true
-    || !("result" in value)
-    || !value.result
-    || typeof value.result !== "object"
-    || !("message_id" in value.result)
+  constructor(
+    message = "Hosted Telegram usage-limit notice delivery is unavailable through hosted control.",
   ) {
-    return false;
+    super(message);
   }
-
-  return typeof value.result.message_id === "number"
-    && Number.isSafeInteger(value.result.message_id);
-}
-
-function readHostedRuntimeTelegramErrorContext(value: unknown): {
-  description: string | null;
-  errorCode: number | null;
-} {
-  if (!value || typeof value !== "object") {
-    return {
-      description: null,
-      errorCode: null,
-    };
-  }
-
-  const description =
-    "description" in value && typeof value.description === "string"
-      ? value.description.trim() || null
-      : null;
-  const errorCode =
-    "error_code" in value
-      && typeof value.error_code === "number"
-      && Number.isInteger(value.error_code)
-      ? value.error_code
-      : null;
-
-  return {
-    description,
-    errorCode,
-  };
-}
-
-function readHostedRuntimeTelegramRetryAfterSeconds(value: unknown): number | null {
-  if (
-    !value
-    || typeof value !== "object"
-    || !("parameters" in value)
-    || !value.parameters
-    || typeof value.parameters !== "object"
-    || !("retry_after" in value.parameters)
-    || typeof value.parameters.retry_after !== "number"
-    || !Number.isSafeInteger(value.parameters.retry_after)
-    || value.parameters.retry_after <= 0
-  ) {
-    return null;
-  }
-
-  return value.parameters.retry_after;
-}
-
-function formatHostedRuntimeTelegramFailureMessage(input: {
-  errorContext: {
-    description: string | null;
-    errorCode: number | null;
-  };
-  status: number;
-}): string {
-  const parts = [
-    `Hosted Telegram usage-limit notice delivery failed with HTTP ${input.status}`,
-  ];
-  if (input.errorContext.errorCode !== null) {
-    parts.push(`Telegram error_code ${input.errorContext.errorCode}`);
-  }
-  if (input.errorContext.description) {
-    parts.push(`description: ${input.errorContext.description}`);
-  }
-  const message = parts.join("; ");
-  return /[.!?]$/u.test(message) ? message : `${message}.`;
-}
-
-function parseHostedRuntimeTelegramMessageId(value: string): number | undefined {
-  const normalized = value.trim();
-  return /^\d+$/u.test(normalized) ? Number.parseInt(normalized, 10) : undefined;
-}
-
-function normalizeHostedRuntimeTelegramApiBaseUrl(value: string | null): string {
-  const candidate = value ?? DEFAULT_TELEGRAM_API_BASE_URL;
-  try {
-    const url = new URL(candidate);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return DEFAULT_TELEGRAM_API_BASE_URL;
-    }
-    return url.toString().replace(/\/$/u, "");
-  } catch {
-    return DEFAULT_TELEGRAM_API_BASE_URL;
-  }
-}
-
-function readHostedRuntimeTelegramEnv(name: string): string | null {
-  const value = process.env[name];
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null;
 }
 
 async function readHostedRuntimePendingConversationWake(input: {

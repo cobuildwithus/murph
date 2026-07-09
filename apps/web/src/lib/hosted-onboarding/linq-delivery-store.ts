@@ -967,7 +967,6 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
   failureCode?: string | null;
   failureReason?: string | null;
   idempotencyKey: string;
-  nextAttemptAt?: Date | null;
   prisma: HostedLinqDeliveryClient;
 }): Promise<void> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
@@ -983,7 +982,6 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
       messageLookupKey: null,
     },
     data: {
-      ...(input.nextAttemptAt ? { attemptedAt: input.nextAttemptAt } : {}),
       failedAt: input.failedAt ?? new Date(),
       failureCode: sanitizeHostedOnboardingPersistedErrorCode(
         normalizeNullable(input.failureCode),
@@ -1619,7 +1617,6 @@ function isHostedLinqDeliveryPreProvider(input: {
 }
 
 function readHostedLinqTelegramUsageLimitRetryAt(input: {
-  attemptedAt: Date;
   failedAt: Date | null;
   failureCode: string | null;
   source: string | null;
@@ -1629,7 +1626,7 @@ function readHostedLinqTelegramUsageLimitRetryAt(input: {
     && HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRYABLE_FAILURE_CODES.has(
       input.failureCode ?? "",
     )
-    ? input.attemptedAt
+    ? new Date(input.failedAt.getTime() + HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS)
     : null;
 }
 
@@ -1660,15 +1657,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     };
   }
 
-  const telegramRetryAfterAt =
-    input.delivery.source === HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE
-    && input.delivery.failedAt !== null
-    && input.delivery.failureCode
-    && HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_RETRYABLE_FAILURE_CODES.has(
-      input.delivery.failureCode,
-    )
-      ? input.delivery.attemptedAt
-      : null;
+  const telegramRetryAfterAt = readHostedLinqTelegramUsageLimitRetryAt(input.delivery);
   if (telegramRetryAfterAt && telegramRetryAfterAt > input.attemptedAt) {
     return {
       claimed: false,
@@ -1740,14 +1729,13 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       : canReclaimRetryAfterTelegramAttempt
         ? [
             {
-              attemptedAt: {
-                lte: input.attemptedAt,
+              failedAt: {
+                lte: staleAttemptBefore,
               },
-              failedAt: { not: null },
             },
             {
-              attemptedAt: {
-                lte: input.attemptedAt,
+              failedAt: {
+                lte: staleAttemptBefore,
               },
               status: "failed",
             },

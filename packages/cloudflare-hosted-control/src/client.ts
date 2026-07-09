@@ -30,6 +30,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
+  buildCloudflareHostedControlTelegramSendPath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
@@ -71,6 +72,29 @@ export interface CloudflareHostedControlUserDataDeletionResult {
   userId: string;
 }
 
+export interface CloudflareHostedControlTelegramCleanupMessage {
+  messageId: string;
+  target: string;
+}
+
+export type CloudflareHostedControlTelegramSendResponse =
+  | {
+    cleanupMessages?: CloudflareHostedControlTelegramCleanupMessage[] | null;
+    cleanupTargetAliases?: string[] | null;
+    providerMessageId?: string | null;
+    providerMessageIds?: string[] | null;
+    providerThreadId?: string | null;
+    status: "sent";
+    target?: string | null;
+    targetKind?: "explicit" | "participant" | "thread" | null;
+  }
+  | {
+    failureCode: string;
+    failureReason: string;
+    retryable: boolean;
+    status: "failed";
+  };
+
 export interface CloudflareHostedControlClient {
   createBrowserVaultSession(input: {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
@@ -84,6 +108,13 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
+  sendTelegramMessage(input: {
+    idempotencyKey?: string | null;
+    message: string;
+    replyToMessageId?: string | null;
+    target: string;
+    userId: string;
+  }): Promise<CloudflareHostedControlTelegramSendResponse>;
 }
 
 export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
@@ -231,6 +262,36 @@ export function createCloudflareHostedControlClient(
         parse: (value) => parseHostedRunnerStatusForExpectedUser(value, expectedUserId),
         path: buildCloudflareHostedControlUserStatusPath(expectedUserId),
         request: { method: "GET" },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+    sendTelegramMessage(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const message = requireString(input.message, "Cloudflare Telegram send message");
+      const target = requireString(input.target, "Cloudflare Telegram send target");
+      const idempotencyKey = normalizeOptionalString(input.idempotencyKey);
+      const replyToMessageId = normalizeOptionalString(input.replyToMessageId);
+
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "Telegram send",
+        parse: parseCloudflareHostedControlTelegramSendResponse,
+        path: buildCloudflareHostedControlTelegramSendPath(userId),
+        request: {
+          body: JSON.stringify({
+            ...(idempotencyKey === null ? {} : { idempotencyKey }),
+            message,
+            ...(replyToMessageId === null ? {} : { replyToMessageId }),
+            target,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
         timeoutMs: options.timeoutMs,
       });
     },
@@ -525,6 +586,133 @@ function parseCloudflareHostedControlRuntimeEnsureProcessingResponse(
   }
 
   return parseHostedRuntimeEnsureProcessingResponse(value);
+}
+
+function parseCloudflareHostedControlTelegramSendResponse(
+  value: unknown,
+): CloudflareHostedControlTelegramSendResponse {
+  const record = requireRecord(value, "Cloudflare Telegram send response");
+  const status = requireString(record.status, "Cloudflare Telegram send response status");
+
+  if (status === "failed") {
+    return {
+      failureCode: requireString(
+        record.failureCode,
+        "Cloudflare Telegram send response failureCode",
+      ),
+      failureReason: requireString(
+        record.failureReason,
+        "Cloudflare Telegram send response failureReason",
+      ),
+      retryable: requireBoolean(
+        record.retryable,
+        "Cloudflare Telegram send response retryable",
+      ),
+      status,
+    };
+  }
+
+  if (status !== "sent") {
+    throw new TypeError("Cloudflare Telegram send response status must be sent or failed.");
+  }
+
+  return {
+    ...readOptionalTelegramCleanupMessages(record.cleanupMessages),
+    ...readOptionalStringArrayField(record.cleanupTargetAliases, "cleanupTargetAliases"),
+    ...readOptionalStringField(record.providerMessageId, "providerMessageId"),
+    ...readOptionalStringArrayField(record.providerMessageIds, "providerMessageIds"),
+    ...readOptionalStringField(record.providerThreadId, "providerThreadId"),
+    status,
+    ...readOptionalStringField(record.target, "target"),
+    ...readOptionalTelegramTargetKind(record.targetKind),
+  };
+}
+
+function readOptionalTelegramCleanupMessages(
+  value: unknown,
+): Pick<
+  Extract<CloudflareHostedControlTelegramSendResponse, { status: "sent" }>,
+  "cleanupMessages"
+> {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  if (!Array.isArray(value)) {
+    throw new TypeError("Cloudflare Telegram send response cleanupMessages must be an array.");
+  }
+
+  return {
+    cleanupMessages: value.map((entry, index) => {
+      const record = requireRecord(
+        entry,
+        `Cloudflare Telegram send response cleanupMessages[${index}]`,
+      );
+      return {
+        messageId: requireString(
+          record.messageId,
+          `Cloudflare Telegram send response cleanupMessages[${index}].messageId`,
+        ),
+        target: requireString(
+          record.target,
+          `Cloudflare Telegram send response cleanupMessages[${index}].target`,
+        ),
+      };
+    }),
+  };
+}
+
+function readOptionalStringField<Key extends string>(
+  value: unknown,
+  key: Key,
+): { [K in Key]?: string | null } {
+  if (value === undefined) {
+    return {};
+  }
+  if (value === null) {
+    return { [key]: null } as { [K in Key]?: string | null };
+  }
+  return { [key]: requireString(value, `Cloudflare Telegram send response ${key}`) } as {
+    [K in Key]?: string | null;
+  };
+}
+
+function readOptionalStringArrayField<Key extends string>(
+  value: unknown,
+  key: Key,
+): { [K in Key]?: string[] | null } {
+  if (value === undefined) {
+    return {};
+  }
+  if (value === null) {
+    return { [key]: null } as { [K in Key]?: string[] | null };
+  }
+  if (!Array.isArray(value)) {
+    throw new TypeError(`Cloudflare Telegram send response ${key} must be an array.`);
+  }
+  return {
+    [key]: value.map((entry, index) =>
+      requireString(entry, `Cloudflare Telegram send response ${key}[${index}]`)
+    ),
+  } as { [K in Key]?: string[] | null };
+}
+
+function readOptionalTelegramTargetKind(value: unknown): Pick<
+  Extract<CloudflareHostedControlTelegramSendResponse, { status: "sent" }>,
+  "targetKind"
+> {
+  if (value === undefined) {
+    return {};
+  }
+  if (value === null) {
+    return { targetKind: null };
+  }
+  const targetKind = requireString(value, "Cloudflare Telegram send response targetKind");
+  if (targetKind !== "explicit" && targetKind !== "participant" && targetKind !== "thread") {
+    throw new TypeError(
+      "Cloudflare Telegram send response targetKind must be explicit, participant, or thread.",
+    );
+  }
+  return { targetKind };
 }
 
 function assertHostedBrowserVaultReplicaRefMatches(
@@ -834,6 +1022,12 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function normalizeOptionalString(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
 function requireBoolean(value: unknown, label: string): boolean {

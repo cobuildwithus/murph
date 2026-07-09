@@ -1496,14 +1496,15 @@ describe("hosted Linq observability stores", () => {
 
   it("does not reclaim retry-after failed Telegram usage notice rows before their not-before time", async () => {
     const fixture = createObservabilityPrismaFixture();
-    const attemptedAt = new Date("2026-03-26T12:00:30.000Z");
-    const retryAt = new Date("2026-03-26T12:01:00.000Z");
+    const attemptedAt = new Date("2026-03-26T12:14:30.000Z");
+    const failedAt = new Date("2026-03-26T12:00:01.000Z");
+    const retryAt = new Date("2026-03-26T12:15:01.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
       acceptedAt: null,
-      attemptedAt: retryAt,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       deliveredAt: null,
       failureCode: "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
-      failedAt: new Date("2026-03-26T12:00:01.000Z"),
+      failedAt,
       id: "hld_retry_after_telegram_notice",
       lastReceiptAt: null,
       messageLookupKey: null,
@@ -1533,14 +1534,15 @@ describe("hosted Linq observability stores", () => {
 
   it("does not reclaim unavailable failed Telegram usage notice rows before their not-before time", async () => {
     const fixture = createObservabilityPrismaFixture();
-    const attemptedAt = new Date("2026-03-26T12:00:30.000Z");
-    const retryAt = new Date("2026-03-26T12:01:00.000Z");
+    const attemptedAt = new Date("2026-03-26T12:14:30.000Z");
+    const failedAt = new Date("2026-03-26T12:00:01.000Z");
+    const retryAt = new Date("2026-03-26T12:15:01.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
       acceptedAt: null,
-      attemptedAt: retryAt,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       deliveredAt: null,
       failureCode: "HostedRuntimeTelegramUsageLimitNoticeUnavailableError",
-      failedAt: new Date("2026-03-26T12:00:01.000Z"),
+      failedAt,
       id: "hld_unavailable_telegram_notice",
       lastReceiptAt: null,
       messageLookupKey: null,
@@ -1570,10 +1572,10 @@ describe("hosted Linq observability stores", () => {
 
   it("reclaims retry-after failed Telegram usage notice rows after their not-before time", async () => {
     const fixture = createObservabilityPrismaFixture();
-    const attemptedAt = new Date("2026-03-26T12:01:00.000Z");
+    const attemptedAt = new Date("2026-03-26T12:15:01.000Z");
     fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
       acceptedAt: null,
-      attemptedAt: new Date("2026-03-26T12:01:00.000Z"),
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
       deliveredAt: null,
       failureCode: "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
       failedAt: new Date("2026-03-26T12:00:01.000Z"),
@@ -1612,14 +1614,13 @@ describe("hosted Linq observability stores", () => {
           id: "hld_retry_after_telegram_notice",
           OR: expect.arrayContaining([
             {
-              attemptedAt: {
-                lte: attemptedAt,
+              failedAt: {
+                lte: new Date("2026-03-26T12:00:01.000Z"),
               },
-              failedAt: { not: null },
             },
             {
-              attemptedAt: {
-                lte: attemptedAt,
+              failedAt: {
+                lte: new Date("2026-03-26T12:00:01.000Z"),
               },
               status: "failed",
             },
@@ -2867,27 +2868,26 @@ describe("hosted Linq observability stores", () => {
     expect(JSON.stringify(update)).not.toContain("private member text");
   });
 
-  it("records direct send-failure retry boundaries on the delivery attempted timestamp", async () => {
+  it("records direct send-failure state without rewriting the delivery attempted timestamp", async () => {
     const fixture = createObservabilityPrismaFixture();
-    const retryAt = new Date("2026-03-26T12:01:00.000Z");
 
     await markHostedLinqDeliverySendFailedTx({
       failureCode: "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
       failureReason: "Hosted Telegram usage-limit notice delivery was rate-limited by the Bot API.",
       idempotencyKey: "ai-usage-gate:member_123:2026-03",
-      nextAttemptAt: retryAt,
       prisma: fixture.prisma as never,
     });
 
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          attemptedAt: retryAt,
           failureCode: "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError",
           status: "failed",
         }),
       }),
     );
+    const updateData = fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0]?.data;
+    expect(updateData).not.toHaveProperty("attemptedAt");
   });
 });
 

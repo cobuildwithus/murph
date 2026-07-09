@@ -29,6 +29,7 @@ describe("createCloudflareHostedControlClient", () => {
       "deleteUserData",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
+      "sendTelegramMessage",
     ]);
   });
 
@@ -132,7 +133,7 @@ describe("createCloudflareHostedControlClient", () => {
   });
 
   it("rejects blank user identifiers for runtime ensure-processing before issuing requests", () => {
-    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const fetchImpl = vi.fn<typeof fetch>();
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test",
       fetchImpl,
@@ -201,6 +202,13 @@ describe("createCloudflareHostedControlClient", () => {
       "Cloudflare hosted control userId must not be blank.",
     );
     expect(() =>
+      client.sendTelegramMessage({
+        message: "quota reached",
+        target: "telegram_thread:123",
+        userId: "",
+      })
+    ).toThrow("Cloudflare hosted control userId must not be blank.");
+    expect(() =>
       client.createBrowserVaultSession({
         browserPublicKeyJwk: {
           crv: "P-256",
@@ -213,6 +221,73 @@ describe("createCloudflareHostedControlClient", () => {
       })
     ).toThrow("Cloudflare hosted control userId must not be blank.");
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("posts Telegram sends to the user route and parses sent responses", async () => {
+    let observedRequest: ObservedRequest | null = null;
+    const result = {
+      cleanupMessages: [{ messageId: "7001", target: "telegram_thread:123" }],
+      providerMessageId: "7001",
+      providerMessageIds: ["7001"],
+      status: "sent" as const,
+      target: "telegram_thread:123",
+      targetKind: "thread" as const,
+    };
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async (url, init) => {
+        observedRequest = { init, url: String(url) };
+        return createJsonResponse(result);
+      }) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.sendTelegramMessage({
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      message: "quota reached",
+      replyToMessageId: "7000",
+      target: "telegram_thread:123",
+      userId: "user_123",
+    })).resolves.toEqual(result);
+
+    const request = requireObservedRequest(observedRequest);
+    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/telegram/send");
+    expect(request.init?.method).toBe("POST");
+    expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
+    expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
+    expect(request.init?.body).toBe(JSON.stringify({
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      message: "quota reached",
+      replyToMessageId: "7000",
+      target: "telegram_thread:123",
+    }));
+  });
+
+  it("parses retryable Telegram send failures as typed responses", async () => {
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test/root/",
+      fetchImpl: vi.fn(async () =>
+        createJsonResponse({
+          failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
+          failureReason: "Telegram provider returned HTTP 429.",
+          retryable: true,
+          status: "failed",
+        })) as typeof fetch,
+      getBearerToken: async () => "Bearer token-123",
+      timeoutMs: 2_500,
+    });
+
+    await expect(client.sendTelegramMessage({
+      message: "quota reached",
+      target: "telegram_thread:123",
+      userId: "user_123",
+    })).resolves.toEqual({
+      failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
+      failureReason: "Telegram provider returned HTTP 429.",
+      retryable: true,
+      status: "failed",
+    });
   });
 
   it("does not echo HTTP response bodies in thrown errors", async () => {
