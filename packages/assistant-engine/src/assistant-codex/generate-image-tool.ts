@@ -10,6 +10,7 @@ import {
   deterministicContractId,
   findCaptureByLookup,
   ID_PREFIXES,
+  isVaultError,
 } from '@murphai/core'
 import type {
   AssistantResponseMedia,
@@ -262,11 +263,47 @@ export async function executeGenerateImageTool(input: {
           referenceImages,
           vaultRoot,
         })
-      } catch {
-        return {
-          rpcSuccess: false,
-          rpcText: 'image generated but vault save failed',
-          usageDraft,
+      } catch (error) {
+        if (
+          captureIdentity &&
+          isVaultError(error) &&
+          error.code === 'CAPTURE_LOOKUP_EXISTS'
+        ) {
+          try {
+            const resolvedCapture = await findExistingGeneratedImageCapture({
+              captureIdentity,
+              outputFormat: input.args.outputFormat,
+              vaultRoot,
+            })
+            if (resolvedCapture.status === 'live') {
+              generatedImageBytes = resolvedCapture.bytes
+              savedCapture = resolvedCapture.capture
+            } else if (resolvedCapture.status === 'deleted') {
+              return {
+                rpcSuccess: false,
+                rpcText: 'saved generated image was deleted; make a new image request',
+                usageDraft,
+              }
+            } else {
+              return {
+                rpcSuccess: false,
+                rpcText: 'image generated but vault save failed',
+                usageDraft,
+              }
+            }
+          } catch {
+            return {
+              rpcSuccess: false,
+              rpcText: 'image generated but vault save failed',
+              usageDraft,
+            }
+          }
+        } else {
+          return {
+            rpcSuccess: false,
+            rpcText: 'image generated but vault save failed',
+            usageDraft,
+          }
         }
       }
     }

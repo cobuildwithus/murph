@@ -302,6 +302,64 @@ describe('executeGenerateImageTool reference images', () => {
       expect(fetchCalls).toBe(1)
     })
   })
+
+  it('reuses the winning saved capture when same-key generated image saves overlap', async () => {
+    await withTempDir(async (root) => {
+      const vaultRoot = path.join(root, 'vault')
+      const codexHome = path.join(root, 'codex-home')
+      await initializeVault({ vaultRoot })
+
+      let fetchCalls = 0
+      let releaseFetches!: () => void
+      const bothFetchesStarted = new Promise<void>((resolve) => {
+        releaseFetches = resolve
+      })
+      const fetchImpl: typeof fetch = async () => {
+        fetchCalls += 1
+        if (fetchCalls === 2) {
+          releaseFetches()
+        }
+        await bothFetchesStarted
+        return openAiPngResponse()
+      }
+      const args = {
+        alt: null,
+        outputFormat: 'png' as const,
+        prompt: 'Draw a concurrently replayed generated image.',
+        quality: 'medium' as const,
+        size: '1024x1024' as const,
+      }
+
+      const results = await Promise.all([
+        executeGenerateImageTool({
+          args,
+          captureIdempotencyKey: 'turn-1:overlapping-tool-call',
+          codexHome,
+          env: { OPENAI_API_KEY: 'test-key' },
+          fetchImpl,
+          providerRequestOrdinal: 1,
+          vaultRoot,
+        }),
+        executeGenerateImageTool({
+          args,
+          captureIdempotencyKey: 'turn-1:overlapping-tool-call',
+          codexHome,
+          env: { OPENAI_API_KEY: 'test-key' },
+          fetchImpl,
+          providerRequestOrdinal: 2,
+          vaultRoot,
+        }),
+      ])
+
+      expect(fetchCalls).toBe(2)
+      expect(results).toEqual([
+        expect.objectContaining({ rpcSuccess: true }),
+        expect.objectContaining({ rpcSuccess: true }),
+      ])
+      expect(new Set(results.map((result) => result.savedCaptureId)).size).toBe(1)
+      expect(new Set(results.map((result) => result.savedImageRef)).size).toBe(1)
+    })
+  })
 })
 
 function openAiPngResponse(bytes: Uint8Array = PNG_BYTES): Response {
