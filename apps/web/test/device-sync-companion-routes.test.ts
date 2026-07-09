@@ -194,87 +194,53 @@ describe("device sync companion routes", () => {
   });
 
   describe("POST /api/device-sync/companion/auth-diagnostics", () => {
-    const initialNow = Date.now();
-    const throttleWindowStepMs = 61_000;
-    const testClock = { current: initialNow };
-
-    beforeEach(() => {
-      testClock.current += throttleWindowStepMs;
-      vi.spyOn(Date, "now").mockReturnValue(testClock.current);
-    });
-
-    it("records structured pre-login Privy auth diagnostics without logging unsafe provider prose", async () => {
+    it("records typed pre-login Privy auth diagnostics without raw provider prose", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
         appVersion: "1.0.0",
+        diagnosticCode: "privy_rate_limited",
         errorKind: "rate_limited",
         httpStatus: 429,
         method: "email",
-        providerErrorCode: "too_many_requests",
-        providerMessage:
-          "Privy failed for person@example.test user did:privy:user_123 (415) 555-2671 backup 4155552671 phone_4155552671 international +44 7911 123456 compact +447911123456 code 12345 invalid_code_123456 otp_654321 code123456 token=secret-token raw AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA https://auth.example.test/path auth.privy.io/path 192.0.2.55 ip_192.0.2.55 2001:db8::1 ip_2001:db8::1 host_auth.example.com",
+        retryable: true,
         stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.10" } }));
+      }));
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({ ok: true });
       expect(warnSpy).toHaveBeenCalledWith("Companion auth diagnostic.", expect.objectContaining({
         appVersion: "1.0.0",
+        diagnosticCode: "privy_rate_limited",
+        diagnosticDescription: "Privy rate limited the auth request.",
         errorKind: "rate_limited",
         httpStatus: 429,
         method: "email",
         platform: "ios",
         provider: "privy",
-        providerErrorCode: "too_many_requests",
-        providerErrorCodeRejected: false,
-        providerMessagePresent: true,
-        providerMessageRejected: true,
-        redactedProviderMessage: null,
+        retryable: true,
         stage: "send_code",
       }));
-      const logged = JSON.stringify(warnSpy.mock.calls);
-      expect(logged).not.toContain("Privy failed");
-      expect(logged).not.toContain("person@example");
-      expect(logged).not.toContain("did:privy:user_123");
-      expect(logged).not.toContain("555-2671");
-      expect(logged).not.toContain("4155552671");
-      expect(logged).not.toContain("phone_4155552671");
-      expect(logged).not.toContain("+44 7911 123456");
-      expect(logged).not.toContain("+447911123456");
-      expect(logged).not.toContain("12345");
-      expect(logged).not.toContain("invalid_code_123456");
-      expect(logged).not.toContain("otp_654321");
-      expect(logged).not.toContain("code123456");
-      expect(logged).not.toContain("secret-token");
-      expect(logged).not.toContain("auth.privy.io");
-      expect(logged).not.toContain("192.0.2.55");
-      expect(logged).not.toContain("ip_192.0.2.55");
-      expect(logged).not.toContain("2001:db8::1");
-      expect(logged).not.toContain("ip_2001:db8::1");
-      expect(logged).not.toContain("host_auth.example.com");
     });
 
-    it("logs allowlisted provider auth messages", async () => {
+    it("records native app configuration failures as typed diagnostics", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        errorKind: "unavailable",
+        diagnosticCode: "privy_invalid_native_app_id",
+        errorKind: "configuration",
         method: "email",
-        providerErrorCode: "service_unavailable",
-        providerMessage: "Privy unavailable.",
+        retryable: false,
         stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.25" } }));
+      }));
 
       expect(response.status).toBe(200);
       expect(warnSpy).toHaveBeenCalledWith(
         "Companion auth diagnostic.",
         expect.objectContaining({
-          providerErrorCode: "service_unavailable",
-          providerErrorCodeRejected: false,
-          providerMessagePresent: true,
-          providerMessageRejected: false,
-          redactedProviderMessage: "Privy unavailable.",
+          diagnosticCode: "privy_invalid_native_app_id",
+          diagnosticDescription: "Privy rejected the native app configuration.",
+          retryable: false,
         }),
       );
     });
@@ -295,11 +261,10 @@ describe("device sync companion routes", () => {
       expect(warnSpy).toHaveBeenCalledWith(
         "Companion auth diagnostic.",
         expect.objectContaining({
+          diagnosticCode: "privy_rate_limited",
           errorKind: "rate_limited",
           method: "email",
-          providerErrorCode: "too_many_requests",
-          providerMessageRejected: false,
-          redactedProviderMessage: "Too many requests.",
+          retryable: true,
           stage: "send_code",
         }),
       );
@@ -310,10 +275,12 @@ describe("device sync companion routes", () => {
 
       const response = await withProductionAuthDiagnosticsEnv(false, () =>
         authDiagnosticsRoute.POST(authDiagnosticsRequest({
+          diagnosticCode: "privy_unknown",
           errorKind: "provider",
           method: "email",
+          retryable: true,
           stage: "send_code",
-        }, { headers: { "x-vercel-forwarded-for": "203.0.113.21" } })),
+        })),
       );
 
       expect(response.status).toBe(404);
@@ -326,10 +293,12 @@ describe("device sync companion routes", () => {
 
       const response = await withProductionAuthDiagnosticsEnv(true, () =>
         authDiagnosticsRoute.POST(authDiagnosticsRequest({
+          diagnosticCode: "privy_unknown",
           errorKind: "provider",
           method: "email",
+          retryable: true,
           stage: "send_code",
-        }, { headers: { "x-vercel-forwarded-for": "203.0.113.22" } })),
+        })),
       );
 
       expect(response.status).toBe(200);
@@ -339,268 +308,37 @@ describe("device sync companion routes", () => {
       );
     });
 
-    it("rejects hosted member identifiers from provider diagnostics", async () => {
+    it.each([
+      ["authorization", "not-a-real-auth-header"],
+      ["email", "person@example.test"],
+      ["healthData", "blood glucose 280 mg/dL"],
+      ["memberId", "hbm_abc123xyz"],
+      ["phone", "+14155552671"],
+      ["provider", "privy"],
+      ["providerErrorCode", "invalid_native_app_id"],
+      ["providerMessage", "Privy failed for person@example.test code 123456"],
+      ["token", "secret-token"],
+    ])("rejects the unknown %s field without logging it", async (field, value) => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode: "privy_unknown",
         errorKind: "provider",
         method: "email",
-        providerErrorCode: "hbm_abc123xyz",
-        providerMessage:
-          "request rejected for user_id: hbm_abc123xyz upstream custom_metadata.murph_member_id=hbm_abc123xyz",
+        retryable: true,
         stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.23" } }));
-
-      expect(response.status).toBe(200);
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Companion auth diagnostic.",
-        expect.objectContaining({
-          providerErrorCode: null,
-          providerErrorCodeRejected: true,
-          providerMessageRejected: true,
-          redactedProviderMessage: null,
-        }),
-      );
-      const logged = JSON.stringify(warnSpy.mock.calls);
-      expect(logged).not.toContain("hbm_abc123xyz");
-      expect(logged).not.toContain("murph_member_id");
-    });
-
-    it("rejects secret-bearing provider messages before logging content", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const bearerScheme = ["Bear", "er"].join("");
-
-      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        errorKind: "provider",
-        method: "email",
-        providerMessage:
-          `${bearerScheme} abcdefghijklmnop123456qrstuvwxyzabcdef raw abcdefghijklmnop123456qrstuvwxyzabcdef jwt abcdefghijklmnop.1234567890abcdef.qrstuvwxyzABCDEF host tenant123456.auth.example.com`,
-        stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.16" } }));
-
-      expect(response.status).toBe(200);
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Companion auth diagnostic.",
-        expect.objectContaining({
-          providerMessagePresent: true,
-          providerMessageRejected: true,
-          redactedProviderMessage: null,
-        }),
-      );
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("Bearer");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("abcdefghijklmnop123456");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("1234567890abcdef");
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("tenant123456.auth.example.com");
-    });
-
-    it("rejects non-Bearer authorization header values before logging content", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const authorizationHeader = `${"Author"}ization:`;
-      const proxyAuthorizationHeader = `Proxy-${"Author"}ization:`;
-      const basicCredential = ["dXNl", "cjpw", "YXNz"].join("");
-      const digestScheme = ["Dig", "est"].join("");
-
-      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        errorKind: "network",
-        method: "email",
-        providerMessage:
-          `Privy request failed. ${authorizationHeader} Basic ${basicCredential} ${proxyAuthorizationHeader} ${digestScheme} username="user", response="short"`,
-        stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.24" } }));
-
-      expect(response.status).toBe(200);
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Companion auth diagnostic.",
-        expect.objectContaining({
-          providerMessagePresent: true,
-          providerMessageRejected: true,
-          redactedProviderMessage: null,
-        }),
-      );
-      const logged = JSON.stringify(warnSpy.mock.calls);
-      expect(logged).not.toContain("Authorization");
-      expect(logged).not.toContain("Basic");
-      expect(logged).not.toContain("Digest");
-      expect(logged).not.toContain("dXNlcjpwYXNz");
-      expect(logged).not.toContain("response");
-      expect(logged).not.toContain("short");
-    });
-
-    it("rejects base64 and base64url opaque provider messages", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const secrets = [
-        "abcdefghijklmnop+/123456qrstuvwxyzabcdef==",
-        "/abcdefghijklmnop123456qrstuvwxyzabcdef==",
-        "-abcdefghijklmnop123456qrstuvwxyzabcdef",
-        "abcdefghijklmnop123456qrstuvwxyzabcdef-",
-      ];
-
-      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        errorKind: "provider",
-        method: "email",
-        providerMessage: secrets.map((secret) => `raw ${secret}`).join(" "),
-        stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.17" } }));
-
-      expect(response.status).toBe(200);
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Companion auth diagnostic.",
-        expect.objectContaining({
-          providerMessageRejected: true,
-          redactedProviderMessage: null,
-        }),
-      );
-      const logged = JSON.stringify(warnSpy.mock.calls);
-      for (const secret of secrets) {
-        expect(logged).not.toContain(secret);
-      }
-    });
-
-    it("rejects contact-shaped provider messages", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        errorKind: "provider",
-        method: "sms",
-        providerMessage:
-          "short +12345678 compact 12345678901 formatted 12 345 678 email a@b.c punctuated foo,@bar.com unicode t\u00E9st@ex\u00E4mple.c",
-        stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.18" } }));
-
-      expect(response.status).toBe(200);
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Companion auth diagnostic.",
-        expect.objectContaining({
-          providerMessageRejected: true,
-          redactedProviderMessage: null,
-        }),
-      );
-      const logged = JSON.stringify(warnSpy.mock.calls);
-      expect(logged).not.toContain("+12345678");
-      expect(logged).not.toContain("12345678901");
-      expect(logged).not.toContain("a@b.c");
-      expect(logged).not.toContain("foo,@bar.com");
-      expect(logged).not.toContain("t\u00E9st@ex\u00E4mple.c");
-    });
-
-    it("rejects arbitrary health prose and provider codes", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        errorKind: "provider",
-        method: "email",
-        providerErrorCode: "HIV_POSITIVE",
-        providerMessage: "blood glucose 280 mg/dL for Jane Doe",
-        stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.26" } }));
-
-      expect(response.status).toBe(200);
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Companion auth diagnostic.",
-        expect.objectContaining({
-          providerErrorCode: null,
-          providerErrorCodeRejected: true,
-          providerMessageRejected: true,
-          redactedProviderMessage: null,
-        }),
-      );
-      const logged = JSON.stringify(warnSpy.mock.calls);
-      expect(logged).not.toContain("HIV");
-      expect(logged).not.toContain("blood");
-      expect(logged).not.toContain("glucose");
-      expect(logged).not.toContain("Jane");
-    });
-
-    it("rejects non-allowlisted provider message detail", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const providerMessage = `Privy service unavailable. ${"detail ".repeat(100)}`;
-
-      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        errorKind: "unavailable",
-        method: "email",
-        providerMessage,
-        stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.11" } }));
-
-      expect(response.status).toBe(200);
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Companion auth diagnostic.",
-        expect.objectContaining({
-          providerMessageRejected: true,
-          redactedProviderMessage: null,
-        }),
-      );
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("detail");
-    });
-
-    it("rejects an oversize provider message without logging its contents", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        errorKind: "provider",
-        method: "email",
-        providerMessage: "A".repeat(1001),
-        stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.19" } }));
+        [field]: value,
+      }));
 
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({
         error: { code: "COMPANION_REQUEST_INVALID" },
       });
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("A".repeat(100));
-    });
-
-    it.each([
-      ["OTP", "654321"],
-      ["embedded OTP", "invalid_code_123456"],
-      ["underscored OTP", "otp_654321"],
-      ["letter-prefixed OTP", "code123456"],
-      ["phone number", "4155552671"],
-      ["prefixed phone number", "phone_4155552671"],
-      ["prefixed IPv4 address", "ip_192.0.2.55"],
-      ["prefixed IPv6 address", "ip_2001:db8::1"],
-      ["prefixed host", "host_auth.example.com"],
-      ["Privy user DID", "did:privy:user_123"],
-      ["hosted member id", "hbm_abc123xyz"],
-      ["token", "A".repeat(32)],
-    ])("drops a %s-shaped provider error code", async (_label, providerErrorCode) => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        errorKind: "provider",
-        method: "email",
-        providerErrorCode,
-        stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.13" } }));
-
-      expect(response.status).toBe(200);
-      expect(warnSpy).toHaveBeenCalledWith("Companion auth diagnostic.", expect.objectContaining({
-        providerErrorCode: null,
-        providerErrorCodeRejected: true,
-      }));
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(providerErrorCode);
-    });
-
-    it("rejects a phone number crossing the log boundary before logging content", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const providerMessage = `${"note ".repeat(99)}4155552671`;
-
-      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
-        errorKind: "provider",
-        method: "sms",
-        providerMessage,
-        stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.14" } }));
-
-      expect(response.status).toBe(200);
-      expect(warnSpy).toHaveBeenCalledWith(
+      expect(warnSpy).not.toHaveBeenCalledWith(
         "Companion auth diagnostic.",
-        expect.objectContaining({
-          providerMessageRejected: true,
-          redactedProviderMessage: null,
-        }),
+        expect.anything(),
       );
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("41555");
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(value);
     });
 
     it("drops an unsafe app version without losing the diagnostic", async () => {
@@ -608,10 +346,12 @@ describe("device sync companion routes", () => {
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
         appVersion: "1.0 beta",
+        diagnosticCode: "privy_unknown",
         errorKind: "provider",
         method: "email",
+        retryable: true,
         stage: "send_code",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.15" } }));
+      }));
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({ ok: true });
@@ -626,7 +366,7 @@ describe("device sync companion routes", () => {
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
         padding: "x".repeat(9_000),
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.12" } }));
+      }));
 
       expect(response.status).toBe(413);
       await expect(response.json()).resolves.toMatchObject({
@@ -635,41 +375,29 @@ describe("device sync companion routes", () => {
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("x".repeat(100));
     });
 
-    it("uses the trusted Vercel client key when fallback headers rotate", async () => {
+    it("does not keep a process-local rate-limit owner after WAF admission", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const body = {
+        diagnosticCode: "privy_unknown",
         errorKind: "provider",
         method: "email",
+        retryable: true,
         stage: "send_code",
       };
 
-      for (let index = 0; index < 30; index += 1) {
+      for (let index = 0; index < 31; index += 1) {
         const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest(body, {
           headers: {
-            "x-forwarded-for": `203.0.113.${index}`,
-            "x-real-ip": `198.51.100.${index}`,
             "x-vercel-forwarded-for": "192.0.2.99",
           },
         }));
         expect(response.status).toBe(200);
       }
 
-      const throttled = await authDiagnosticsRoute.POST(authDiagnosticsRequest(body, {
-        headers: {
-          "x-forwarded-for": "203.0.113.200",
-          "x-real-ip": "198.51.100.200",
-          "x-vercel-forwarded-for": "192.0.2.99",
-        },
-      }));
-
-      expect(throttled.status).toBe(429);
-      await expect(throttled.json()).resolves.toMatchObject({
-        error: { code: "COMPANION_AUTH_DIAGNOSTIC_RATE_LIMITED" },
-      });
       expect(warnSpy.mock.calls.filter(([message]) => (
         message === "Companion auth diagnostic."
-      ))).toHaveLength(30);
-      expect(warnSpy.mock.calls).toHaveLength(30);
+      ))).toHaveLength(31);
+      expect(warnSpy.mock.calls).toHaveLength(31);
     });
 
     it("rejects malformed diagnostics without logging request body fields", async () => {
@@ -677,10 +405,12 @@ describe("device sync companion routes", () => {
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
         email: "person@example.test",
+        diagnosticCode: "privy_unknown",
         errorKind: "provider",
         method: "email",
+        retryable: true,
         stage: "send_magic_link",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.50" } }));
+      }));
 
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({
@@ -698,7 +428,6 @@ describe("device sync companion routes", () => {
           body: rawBody,
           headers: {
             "content-type": "application/json",
-            "x-vercel-forwarded-for": "203.0.113.52",
           },
           method: "POST",
         },
@@ -714,23 +443,16 @@ describe("device sync companion routes", () => {
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("abcdefghijklmnop+/123456");
     });
 
-    it.each([
-      "authorization",
-      "email",
-      "healthData",
-      "memberId",
-      "phone",
-      "provider",
-      "token",
-    ])("rejects the unknown %s field without logging it", async (field) => {
+    it("rejects unknown diagnostic codes without logging them", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode: "HIV_POSITIVE",
         errorKind: "provider",
         method: "email",
+        retryable: false,
         stage: "send_code",
-        [field]: "sensitive-value",
-      }, { headers: { "x-vercel-forwarded-for": "203.0.113.51" } }));
+      }));
 
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({
@@ -740,42 +462,7 @@ describe("device sync companion routes", () => {
         "Companion auth diagnostic.",
         expect.anything(),
       );
-      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("sensitive-value");
-    });
-
-    it("enforces the aggregate ceiling across rotating trusted Vercel keys", async () => {
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const body = {
-        errorKind: "provider",
-        method: "email",
-        stage: "send_code",
-      };
-      let throttled: Response | null = null;
-      let accepted = 0;
-
-      for (let index = 0; index < 310; index += 1) {
-        const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest(body, {
-          headers: {
-            "x-forwarded-for": `198.51.100.${index % 255}`,
-            "x-vercel-forwarded-for": `2001:db8:${index.toString(16)}::1`,
-          },
-        }));
-        if (response.status === 429) {
-          throttled = response;
-          break;
-        }
-        accepted += 1;
-      }
-
-      expect(throttled).not.toBeNull();
-      expect(accepted).toBe(300);
-      await expect(throttled?.json()).resolves.toMatchObject({
-        error: { code: "COMPANION_AUTH_DIAGNOSTIC_RATE_LIMITED" },
-      });
-      expect(warnSpy.mock.calls.filter(([message]) => (
-        message === "Companion auth diagnostic."
-      ))).toHaveLength(300);
-      expect(warnSpy.mock.calls).toHaveLength(300);
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("HIV");
     });
   });
 

@@ -12,9 +12,10 @@ export const COMPANION_AUTH_DIAGNOSTICS_WAF_RULE_ENV =
 
 const REQUIRED_RATE_LIMIT = 30;
 const REQUIRED_WINDOW_SECONDS = 60;
-const REQUIRED_STATUS = 429;
+const REQUIRED_ALGORITHM = "fixed_window";
+const REQUIRED_RATE_LIMIT_KEY = "ip";
 
-interface WafInspectCommand {
+interface WafOverviewCommand {
   args: string[];
   command: string;
   cwd: string;
@@ -22,65 +23,108 @@ interface WafInspectCommand {
 
 type JsonRecord = Record<string, unknown>;
 
-export function buildCompanionAuthDiagnosticsWafInspectCommand(
-  ruleRef: string,
+export function buildCompanionAuthDiagnosticsWafOverviewCommand(
   appDir = resolve(dirname(fileURLToPath(import.meta.url)), ".."),
-): WafInspectCommand {
+): WafOverviewCommand {
   return {
-    args: ["exec", "vercel", "firewall", "rules", "inspect", ruleRef, "--json"],
+    args: ["exec", "vercel", "firewall", "overview", "--json"],
     command: "pnpm",
     cwd: appDir,
   };
 }
 
-export function validateCompanionAuthDiagnosticsWafRule(rule: unknown): string[] {
+export function validateCompanionAuthDiagnosticsWafOverview(
+  overview: unknown,
+  ruleRef: string,
+): string[] {
   const issues: string[] = [];
-  if (!isRecord(rule)) {
-    return ["rule payload must be an object"];
+  if (!isRecord(overview)) {
+    return ["overview payload must be an object"];
   }
 
-  if (readBooleanProperty(rule, ["enabled", "active"]) === false) {
+  if (readBooleanProperty(overview, ["enabled", "firewallEnabled"]) === false) {
+    issues.push("firewall is disabled");
+  }
+
+  const active = readRecord(overview, "active");
+  if (active === null) {
+    return ["overview missing active firewall configuration"];
+  }
+
+  if (readBooleanProperty(active, ["enabled", "firewallEnabled"]) === false) {
+    issues.push("active firewall configuration is disabled");
+  }
+
+  const rule = findActiveRule(active, ruleRef);
+  if (rule === null) {
+    issues.push(`missing active rule ${ruleRef}`);
+    return issues;
+  }
+
+  if (readBooleanProperty(rule, ["enabled"]) === false) {
     issues.push("rule is disabled");
   }
-  if (readBooleanProperty(rule, ["draft", "unpublished"]) === true) {
-    issues.push("rule is not published");
+  if (readBooleanProperty(rule, ["valid"]) === false) {
+    issues.push("rule is invalid");
   }
-  if (readBooleanProperty(rule, ["published", "live"]) === false) {
-    issues.push("rule is not published");
+  if (!hasOnlyExactDiagnosticsPathCondition(rule)) {
+    issues.push(`rule must match only exact path ${COMPANION_AUTH_DIAGNOSTICS_PATH}`);
   }
-
-  const records = collectRecords(rule);
-  if (!records.some(isExactDiagnosticsPathCondition)) {
-    issues.push(`missing exact path ${COMPANION_AUTH_DIAGNOSTICS_PATH}`);
-  }
-  if (!records.some(isRequiredRateLimitAction)) {
+  if (!hasRequiredRateLimitAction(rule)) {
     issues.push(
-      `missing rate-limit action ${REQUIRED_RATE_LIMIT}/${REQUIRED_WINDOW_SECONDS}s with ${REQUIRED_STATUS}`,
+      `missing fixed-window IP rate-limit action ${REQUIRED_RATE_LIMIT}/${REQUIRED_WINDOW_SECONDS}s`,
     );
   }
 
   return issues;
 }
 
-function isExactDiagnosticsPathCondition(record: JsonRecord): boolean {
-  return hasPathField(record)
-    && hasExactOperator(record)
-    && readOwnValues(record).includes(COMPANION_AUTH_DIAGNOSTICS_PATH);
+function findActiveRule(active: JsonRecord, ruleRef: string): JsonRecord | null {
+  const rules = readRules(active);
+  return rules.find((rule) => (
+    readOwnStrings(rule, ["id", "name"]).includes(ruleRef)
+  )) ?? null;
 }
 
-function isRequiredRateLimitAction(record: JsonRecord): boolean {
-  if (!hasOwnRateLimitAction(record) || hasOwnLogOnlyAction(record)) {
-    return false;
-  }
+function readRules(active: JsonRecord): JsonRecord[] {
+  const rules = active.rules ?? active.customRules ?? active.firewallRules;
+  return Array.isArray(rules)
+    ? rules.filter(isRecord)
+    : [];
+}
 
-  return hasNestedKeyNumber(record, ["limit", "requests", "requestsPerWindow"], REQUIRED_RATE_LIMIT)
-    && hasRequiredWindow(record)
-    && hasNestedKeyNumber(record, ["status", "statusCode", "responseStatus"], REQUIRED_STATUS);
+function hasOnlyExactDiagnosticsPathCondition(rule: JsonRecord): boolean {
+  const conditions = readRuleConditions(rule);
+  return conditions.length === 1 && isExactDiagnosticsPathCondition(conditions[0]);
+}
+
+function readRuleConditions(rule: JsonRecord): JsonRecord[] {
+  const conditionGroup = readRecord(rule, "conditionGroup")
+    ?? readRecord(rule, "conditionsGroup")
+    ?? readRecord(rule, "condition_group");
+  const groupConditions = conditionGroup === null ? [] : readConditionArray(conditionGroup);
+  const directConditions = readConditionArray(rule);
+
+  return groupConditions.length > 0 ? groupConditions : directConditions;
+}
+
+function readConditionArray(record: JsonRecord): JsonRecord[] {
+  const conditions = record.conditions;
+  return Array.isArray(conditions)
+    ? conditions.filter(isRecord)
+    : [];
+}
+
+function isExactDiagnosticsPathCondition(record: JsonRecord): boolean {
+  return readBooleanProperty(record, ["negated", "negate", "not"]) !== true
+    && hasPathField(record)
+    && hasExactOperator(record)
+    && readOwnStrings(record, ["value", "values"]).includes(COMPANION_AUTH_DIAGNOSTICS_PATH);
 }
 
 function hasPathField(record: JsonRecord): boolean {
   return readOwnStrings(record, ["field", "key", "name", "source", "type"])
-    .some((value) => normalizeToken(value).includes("path"));
+    .some((value) => normalizeToken(value) === "path");
 }
 
 function hasExactOperator(record: JsonRecord): boolean {
@@ -88,50 +132,57 @@ function hasExactOperator(record: JsonRecord): boolean {
     .some((value) => ["eq", "equal", "equals", "exact", "is"].includes(normalizeToken(value)));
 }
 
-function hasOwnRateLimitAction(record: JsonRecord): boolean {
-  return readOwnStrings(record, ["action", "kind", "mode", "type"])
-    .some((value) => normalizeToken(value).includes("ratelimit"));
-}
-
-function hasOwnLogOnlyAction(record: JsonRecord): boolean {
-  return readOwnStrings(record, ["action", "kind", "mode", "type"])
-    .some((value) => normalizeToken(value) === "log");
-}
-
-function hasRequiredWindow(record: JsonRecord): boolean {
-  return hasNestedKeyNumber(record, ["duration", "period", "seconds", "value", "window"], REQUIRED_WINDOW_SECONDS)
-    || hasNestedString(record, "60s")
-    || hasNestedString(record, "1m");
-}
-
-function hasNestedKeyNumber(record: JsonRecord, keys: string[], expected: number): boolean {
-  for (const [key, value] of Object.entries(record)) {
-    if (keys.some((candidate) => normalizeToken(candidate) === normalizeToken(key))) {
-      if (value === expected || (typeof value === "string" && value.trim() === String(expected))) {
-        return true;
-      }
-    }
-    if (isRecord(value) && hasNestedKeyNumber(value, keys, expected)) {
-      return true;
-    }
-    if (Array.isArray(value) && value.some((entry) => isRecord(entry) && hasNestedKeyNumber(entry, keys, expected))) {
-      return true;
-    }
+function hasRequiredRateLimitAction(rule: JsonRecord): boolean {
+  const action = readRecord(rule, "action");
+  const mitigate = action === null ? null : readRecord(action, "mitigate");
+  const actionSource = mitigate ?? action;
+  if (actionSource === null) {
+    return false;
   }
 
-  return false;
+  const actionType = readOwnStrings(actionSource, ["action", "kind", "mode", "type"])
+    .some((value) => normalizeToken(value) === "ratelimit");
+  const rateLimit = readRecord(actionSource, "rateLimit")
+    ?? readRecord(actionSource, "rate_limit")
+    ?? readRecord(rule, "rateLimit")
+    ?? readRecord(rule, "rate_limit");
+
+  return actionType
+    && rateLimit !== null
+    && readNumber(rateLimit, ["limit", "requests", "requestsPerWindow"]) === REQUIRED_RATE_LIMIT
+    && readRateLimitWindowSeconds(rateLimit) === REQUIRED_WINDOW_SECONDS
+    && readOwnStrings(rateLimit, ["algo", "algorithm"]).some((value) =>
+      normalizeToken(value) === normalizeToken(REQUIRED_ALGORITHM)
+    )
+    && readOwnStrings(rateLimit, ["key", "keys"]).some((value) =>
+      normalizeToken(value) === REQUIRED_RATE_LIMIT_KEY
+    );
 }
 
-function hasNestedString(record: JsonRecord, expected: string): boolean {
-  return Object.values(record).some((value) => {
-    if (typeof value === "string") {
-      return value.trim().toLowerCase() === expected;
+function readRateLimitWindowSeconds(rateLimit: JsonRecord): number | null {
+  const direct = readNumber(rateLimit, ["window", "duration", "period", "seconds"]);
+  if (direct !== null) {
+    return direct;
+  }
+
+  const window = readRecord(rateLimit, "window");
+  return window === null ? null : readNumber(window, ["value", "seconds"]);
+}
+
+function readNumber(record: JsonRecord, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number") {
+      return value;
     }
-    if (isRecord(value)) {
-      return hasNestedString(value, expected);
+    if (typeof value === "string" && value.trim() !== "") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
     }
-    return Array.isArray(value) && value.some((entry) => isRecord(entry) && hasNestedString(entry, expected));
-  });
+  }
+  return null;
 }
 
 function readBooleanProperty(record: JsonRecord, keys: string[]): boolean | null {
@@ -144,12 +195,13 @@ function readBooleanProperty(record: JsonRecord, keys: string[]): boolean | null
   return null;
 }
 
-function readOwnStrings(record: JsonRecord, keys: string[]): string[] {
-  return keys.flatMap((key) => readOwnStringValues(record[key]));
+function readRecord(record: JsonRecord, key: string): JsonRecord | null {
+  const value = record[key];
+  return isRecord(value) ? value : null;
 }
 
-function readOwnValues(record: JsonRecord): string[] {
-  return Object.values(record).flatMap(readOwnStringValues);
+function readOwnStrings(record: JsonRecord, keys: string[]): string[] {
+  return keys.flatMap((key) => readOwnStringValues(record[key]));
 }
 
 function readOwnStringValues(value: unknown): string[] {
@@ -160,17 +212,6 @@ function readOwnStringValues(value: unknown): string[] {
     return value.filter((entry): entry is string => typeof entry === "string");
   }
   return [];
-}
-
-function collectRecords(value: unknown): JsonRecord[] {
-  if (Array.isArray(value)) {
-    return value.flatMap(collectRecords);
-  }
-  if (!isRecord(value)) {
-    return [];
-  }
-
-  return [value, ...Object.values(value).flatMap(collectRecords)];
 }
 
 function normalizeToken(value: string): string {
@@ -194,7 +235,7 @@ function main(): void {
     );
   }
 
-  const command = buildCompanionAuthDiagnosticsWafInspectCommand(ruleRef);
+  const command = buildCompanionAuthDiagnosticsWafOverviewCommand();
   const result = spawnSync(command.command, command.args, {
     cwd: command.cwd,
     encoding: "utf8",
@@ -208,10 +249,10 @@ function main(): void {
   }
 
   const parsed = JSON.parse(result.stdout) as unknown;
-  const issues = validateCompanionAuthDiagnosticsWafRule(parsed);
+  const issues = validateCompanionAuthDiagnosticsWafOverview(parsed, ruleRef);
   if (issues.length > 0) {
     throw new Error(
-      `Vercel WAF rule ${ruleRef} does not satisfy companion auth diagnostics requirements: ${issues.join("; ")}.`,
+      `Vercel WAF active configuration does not satisfy companion auth diagnostics requirements for ${ruleRef}: ${issues.join("; ")}.`,
     );
   }
 

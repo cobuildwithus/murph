@@ -2,11 +2,6 @@ import "server-only";
 
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
-  isHostedRuntimeIdShapedDiagnosticToken,
-  sanitizeHostedRuntimeDiagnosticText,
-  sanitizeHostedRuntimeErrorCode,
-} from "@murphai/device-syncd/hosted-runtime";
-import {
   normalizeJunctionResourceName,
   readJunctionWebhookResourceName,
 } from "@murphai/device-syncd/junction-resources";
@@ -19,52 +14,16 @@ export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";
 
 const COMPANION_METADATA_STRING_MAX_LENGTH = 200;
 const COMPANION_SDK_VERSION_MAX_ENTRIES = 10;
-const COMPANION_AUTH_DIAGNOSTIC_MESSAGE_MAX_LENGTH = 500;
-const COMPANION_AUTH_DIAGNOSTIC_SAFE_CODE_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/u;
 const COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN = /^[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}$/u;
 const COMPANION_AUTH_DIAGNOSTIC_ALLOWED_KEYS = new Set([
   "appVersion",
+  "diagnosticCode",
   "errorKind",
   "httpStatus",
   "method",
-  "providerErrorCode",
-  "providerMessage",
+  "retryable",
   "stage",
 ]);
-const COMPANION_AUTH_DIAGNOSTIC_ALLOWED_PROVIDER_ERROR_CODES = new Set([
-  "bad_email",
-  "bad_request",
-  "could_not_construct_request",
-  "decoding_error",
-  "expired_code",
-  "forbidden",
-  "invalid_code",
-  "invalid_email",
-  "invalid_phone",
-  "invalid_request",
-  "malformed_response",
-  "network_error",
-  "not_found",
-  "rate_limited",
-  "service_unavailable",
-  "timeout",
-  "too_many_requests",
-  "unauthorized",
-  "unavailable",
-  "unknown",
-]);
-const COMPANION_AUTH_DIAGNOSTIC_ALLOWED_PROVIDER_MESSAGE_PATTERNS = [
-  /^Bad email\.?$/iu,
-  /^Could not construct request\.?$/iu,
-  /^Decoding error\.?$/iu,
-  /^Invalid code(?: <redacted-(?:code|token)>)?(?: for <redacted-email>)?\.?$/iu,
-  /^Invalid phone number\.?$/iu,
-  /^Malformed response\.?$/iu,
-  /^Privy (?:service )?unavailable\.?$/iu,
-  /^Privy request failed\.?$/iu,
-  /^The (?:Internet connection appears to be offline|network connection was lost|request timed out)\.?$/iu,
-  /^Too many requests(?: for <redacted-email>)?(?: code <redacted-(?:code|token)>)?\.?$/iu,
-] as const;
 
 const COMPANION_AUTH_DIAGNOSTIC_STAGES = new Set([
   "confirm_code",
@@ -79,18 +38,41 @@ const COMPANION_AUTH_DIAGNOSTIC_ERROR_KINDS = new Set([
   "unavailable",
   "unknown",
 ]);
+const COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS = {
+  network_lost: "Network connection was lost.",
+  network_offline: "Network appears offline.",
+  network_timeout: "Network request timed out.",
+  network_unknown: "Network request failed.",
+  privy_bad_email: "Privy rejected the email address.",
+  privy_bad_request: "Privy rejected the auth request.",
+  privy_could_not_construct_request: "Privy request construction failed.",
+  privy_decoding_error: "Privy response decoding failed.",
+  privy_expired_code: "Privy OTP expired.",
+  privy_forbidden: "Privy rejected the request as forbidden.",
+  privy_invalid_code: "Privy rejected the OTP code.",
+  privy_invalid_email: "Privy rejected the email address.",
+  privy_invalid_native_app_id: "Privy rejected the native app configuration.",
+  privy_invalid_phone: "Privy rejected the phone number.",
+  privy_malformed_response: "Privy returned a malformed response.",
+  privy_network_error: "Privy request failed at the network layer.",
+  privy_not_found: "Privy resource was not found.",
+  privy_rate_limited: "Privy rate limited the auth request.",
+  privy_service_unavailable: "Privy service was unavailable.",
+  privy_timeout: "Privy request timed out.",
+  privy_unauthorized: "Privy rejected the request as unauthorized.",
+  privy_unknown: "Privy auth request failed.",
+} as const;
+type CompanionAuthDiagnosticCode = keyof typeof COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS;
 
 interface CompanionAuthDiagnosticLog {
+  diagnosticCode: string;
+  diagnosticDescription: string;
   errorKind: string;
   httpStatus: number | null;
   method: string;
   platform: "ios";
   provider: "privy";
-  providerErrorCode: string | null;
-  providerErrorCodeRejected: boolean;
-  providerMessagePresent: boolean;
-  providerMessageRejected: boolean;
-  redactedProviderMessage: string | null;
+  retryable: boolean;
   stage: string;
   appVersion: string | null;
 }
@@ -133,10 +115,9 @@ export function validateCompanionSignInRequestBody(body: Record<string, unknown>
 }
 
 /**
- * Validates pre-login companion auth diagnostics. The allowlisted envelope has
- * no contact, identity, credential, or health fields. A provider message may
- * contain sensitive text, so it is re-sanitized and logged only as
- * `redactedProviderMessage`.
+ * Validates pre-login companion auth diagnostics. The allowlisted envelope uses
+ * app-owned diagnostic codes only: raw provider prose, contacts, identifiers,
+ * credentials, and health fields never cross the server boundary.
  */
 export function validateCompanionAuthDiagnosticRequestBody(
   body: Record<string, unknown>,
@@ -150,20 +131,17 @@ export function validateCompanionAuthDiagnosticRequestBody(
     COMPANION_AUTH_DIAGNOSTIC_ERROR_KINDS,
   );
   const httpStatus = readOptionalHttpStatus(body, "httpStatus");
-  const providerErrorCode = readOptionalSafeAuthDiagnosticCode(body, "providerErrorCode");
-  const providerMessage = readOptionalSafeAuthDiagnosticProviderMessage(body);
+  const diagnosticCode = readRequiredAuthDiagnosticCode(body, "diagnosticCode");
 
   return {
+    diagnosticCode,
+    diagnosticDescription: COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS[diagnosticCode],
     errorKind,
     httpStatus,
     method,
     platform: "ios",
     provider: "privy",
-    providerErrorCode: providerErrorCode.value,
-    providerErrorCodeRejected: providerErrorCode.rejected,
-    providerMessagePresent: providerMessage.present,
-    providerMessageRejected: providerMessage.rejected,
-    redactedProviderMessage: providerMessage.value,
+    retryable: readRequiredBoolean(body, "retryable"),
     stage,
     appVersion: readOptionalAuthDiagnosticAppVersion(body),
   };
@@ -181,61 +159,6 @@ function readOptionalAuthDiagnosticAppVersion(body: Record<string, unknown>): st
   return typeof value === "string" && COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN.test(value)
     ? value
     : null;
-}
-
-function readOptionalSafeAuthDiagnosticCode(
-  body: Record<string, unknown>,
-  key: string,
-): { value: string | null; rejected: boolean } {
-  const value = readOptionalPatternString(
-    body,
-    key,
-    COMPANION_AUTH_DIAGNOSTIC_SAFE_CODE_PATTERN,
-  );
-
-  if (value === null) {
-    return { value: null, rejected: false };
-  }
-
-  const sanitizedCode = sanitizeHostedRuntimeErrorCode(value);
-  if (
-    sanitizedCode !== value
-    || isHostedRuntimeIdShapedDiagnosticToken(sanitizedCode)
-    || !COMPANION_AUTH_DIAGNOSTIC_ALLOWED_PROVIDER_ERROR_CODES.has(value)
-  ) {
-    return { value: null, rejected: true };
-  }
-
-  return { value, rejected: false };
-}
-
-function readOptionalSafeAuthDiagnosticProviderMessage(
-  body: Record<string, unknown>,
-): { value: string | null; present: boolean; rejected: boolean } {
-  const value = readOptionalBoundedString(
-    body,
-    "providerMessage",
-    COMPANION_AUTH_DIAGNOSTIC_MESSAGE_MAX_LENGTH * 2,
-  );
-
-  if (value === null) {
-    return { value: null, present: false, rejected: false };
-  }
-
-  const sanitizedMessage = sanitizeHostedRuntimeDiagnosticText(value)
-    ?.slice(0, COMPANION_AUTH_DIAGNOSTIC_MESSAGE_MAX_LENGTH)
-    ?? null;
-
-  if (
-    sanitizedMessage === null
-    || !COMPANION_AUTH_DIAGNOSTIC_ALLOWED_PROVIDER_MESSAGE_PATTERNS.some((pattern) =>
-      pattern.test(sanitizedMessage)
-    )
-  ) {
-    return { value: null, present: true, rejected: true };
-  }
-
-  return { value: sanitizedMessage, present: true, rejected: false };
 }
 
 export interface CompanionDeviceSyncResourceStatus {
@@ -385,6 +308,36 @@ function readRequiredEnum(
   return value;
 }
 
+function readRequiredAuthDiagnosticCode(
+  body: Record<string, unknown>,
+  key: string,
+): CompanionAuthDiagnosticCode {
+  const value = body[key];
+
+  if (typeof value !== "string" || !isCompanionAuthDiagnosticCode(value)) {
+    throw companionRequestInvalid(`${key} is invalid.`);
+  }
+
+  return value;
+}
+
+function isCompanionAuthDiagnosticCode(value: string): value is CompanionAuthDiagnosticCode {
+  return Object.prototype.hasOwnProperty.call(
+    COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS,
+    value,
+  );
+}
+
+function readRequiredBoolean(body: Record<string, unknown>, key: string): boolean {
+  const value = body[key];
+
+  if (typeof value !== "boolean") {
+    throw companionRequestInvalid(`${key} must be a boolean.`);
+  }
+
+  return value;
+}
+
 function readOptionalHttpStatus(body: Record<string, unknown>, key: string): number | null {
   const value = body[key];
 
@@ -394,24 +347,6 @@ function readOptionalHttpStatus(body: Record<string, unknown>, key: string): num
 
   if (typeof value !== "number" || !Number.isInteger(value) || value < 100 || value > 599) {
     throw companionRequestInvalid(`${key} must be a valid HTTP status.`);
-  }
-
-  return value;
-}
-
-function readOptionalPatternString(
-  body: Record<string, unknown>,
-  key: string,
-  pattern: RegExp,
-): string | null {
-  const value = readOptionalBoundedString(body, key);
-
-  if (value === null) {
-    return null;
-  }
-
-  if (!pattern.test(value)) {
-    throw companionRequestInvalid(`${key} is invalid.`);
   }
 
   return value;
