@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 
-import { readHostedIngressLatencyDashboard } from "@/src/lib/hosted-runtime-latency/store";
+import {
+  readHostedIngressLatencyDashboard,
+  type HostedIngressLatencyDistribution,
+} from "@/src/lib/hosted-runtime-latency/store";
 import {
   HOSTED_INGRESS_LATENCY_SOURCES,
   type HostedIngressLatencySource,
@@ -64,8 +67,9 @@ export default async function RuntimeLatencyOpsPage({
               Hosted runtime latency
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-              {dashboard.source} mailbox accepted to provider start, measured over the last{" "}
-              {dashboard.window.hours} hours.{" "}
+              {dashboard.source} mailbox accepted through provider start
+              {dashboard.source === "linq" ? " and reply delivery" : ""},
+              measured over the last {dashboard.window.hours} hours.{" "}
               {dashboard.truncated
                 ? `Metrics use the newest ${formatInteger(dashboard.readLimit)} accepted rows.`
                 : "Metrics use the complete window."}
@@ -136,6 +140,58 @@ export default async function RuntimeLatencyOpsPage({
         </div>
       </section>
 
+      {dashboard.source === "linq" ? (
+        <section aria-labelledby="runtime-latency-reply-title" className="flex flex-col gap-4">
+          <SectionHeading
+            title="Reply delivery"
+            description="P50 and p95 spans use one sample per accepted Linq delivery. Grouped inbound messages are deduplicated by delivery id."
+            id="runtime-latency-reply-title"
+          />
+          <div className="grid overflow-hidden rounded-xl border border-border/70 bg-card/90 md:grid-cols-2 xl:grid-cols-4">
+            <DistributionMetric
+              distribution={dashboard.replyLatencyMs.acceptedToLinqAccepted}
+              label={metricLabel("accepted to Linq accepted", metricScope)}
+            />
+            <DistributionMetric
+              distribution={dashboard.replyLatencyMs.coldAcceptedToLinqAccepted}
+              label={metricLabel("cold accepted to Linq accepted", metricScope)}
+            />
+            <DistributionMetric
+              distribution={dashboard.replyLatencyMs.warmAcceptedToLinqAccepted}
+              label={metricLabel("warm accepted to Linq accepted", metricScope)}
+            />
+            <DistributionMetric
+              distribution={dashboard.replyLatencyMs.providerStartToLinqAttempted}
+              label={metricLabel("provider start to Linq attempt", metricScope)}
+            />
+            <DistributionMetric
+              distribution={dashboard.replyLatencyMs.providerRequest}
+              label={metricLabel("provider request", metricScope)}
+            />
+            <DistributionMetric
+              distribution={dashboard.replyLatencyMs.providerResultToReplyIntent}
+              label={metricLabel("provider result to reply intent", metricScope)}
+            />
+            <DistributionMetric
+              distribution={dashboard.replyLatencyMs.replyIntentToLinqAttempted}
+              label={metricLabel("reply intent to Linq attempt", metricScope)}
+            />
+            <DistributionMetric
+              distribution={dashboard.replyLatencyMs.linqAttemptedToAccepted}
+              label={metricLabel("Linq attempt to accepted", metricScope)}
+            />
+            <DistributionMetric
+              distribution={dashboard.replyLatencyMs.linqAcceptedToDelivered}
+              label={metricLabel("Linq accepted to receipt", metricScope)}
+            />
+            <DistributionMetric
+              distribution={dashboard.replyLatencyMs.acceptedToLinqDelivered}
+              label={metricLabel("accepted to receipt", metricScope)}
+            />
+          </div>
+        </section>
+      ) : null}
+
       <section aria-labelledby="runtime-latency-quality-title" className="flex flex-col gap-4">
         <SectionHeading
           title="Trace quality"
@@ -164,6 +220,55 @@ export default async function RuntimeLatencyOpsPage({
             value={formatInteger(dashboard.invalidNegativeLatencyCount)}
           />
         </div>
+        {dashboard.source === "linq" ? (
+          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
+            <Metric
+              label={metricLabel("linked deliveries", metricScope)}
+              value={formatInteger(dashboard.replyTraceQuality.linkedDeliveryCount)}
+            />
+            <Metric
+              label={metricLabel("provider rows without accepted link", metricScope)}
+              value={formatInteger(
+                dashboard.replyTraceQuality.providerRowsWithoutAcceptedDeliveryLinkCount,
+              )}
+            />
+            <Metric
+              label={metricLabel("attempt mismatch", metricScope)}
+              tone={dashboard.replyTraceQuality.attemptMismatchCount > 0 ? "warning" : "default"}
+              value={formatInteger(dashboard.replyTraceQuality.attemptMismatchCount)}
+            />
+            <Metric
+              label={metricLabel("ambiguous timing", metricScope)}
+              tone={dashboard.replyTraceQuality.ambiguousTimingCount > 0 ? "warning" : "default"}
+              value={formatInteger(dashboard.replyTraceQuality.ambiguousTimingCount)}
+            />
+            <Metric
+              label={metricLabel("missing accepted", metricScope)}
+              tone={dashboard.replyTraceQuality.missingAcceptedDeliveryCount > 0 ? "warning" : "default"}
+              value={formatInteger(dashboard.replyTraceQuality.missingAcceptedDeliveryCount)}
+            />
+            <Metric
+              label={metricLabel("accepted missing receipt", metricScope)}
+              tone={dashboard.replyTraceQuality.acceptedMissingReceiptCount > 0 ? "warning" : "default"}
+              value={formatInteger(dashboard.replyTraceQuality.acceptedMissingReceiptCount)}
+            />
+            <Metric
+              label={metricLabel("unknown cold state", metricScope)}
+              tone={dashboard.replyTraceQuality.unknownColdStateCount > 0 ? "warning" : "default"}
+              value={formatInteger(dashboard.replyTraceQuality.unknownColdStateCount)}
+            />
+            <Metric
+              label={metricLabel("invalid delivery span", metricScope)}
+              tone={dashboard.replyTraceQuality.invalidNegativeLatencyCount > 0 ? "warning" : "default"}
+              value={formatInteger(dashboard.replyTraceQuality.invalidNegativeLatencyCount)}
+            />
+            <Metric
+              label={metricLabel("timing logs truncated", metricScope)}
+              tone={dashboard.replyTraceQuality.timingLogTruncated ? "warning" : "default"}
+              value={dashboard.replyTraceQuality.timingLogTruncated ? "yes" : "no"}
+            />
+          </div>
+        ) : null}
       </section>
 
       <section
@@ -311,6 +416,31 @@ function StageMetric(input: {
       </div>
       <div className="mt-3 font-serif text-2xl font-semibold leading-none tracking-tight tabular-nums text-foreground">
         {input.value}
+      </div>
+    </div>
+  );
+}
+
+function DistributionMetric(input: {
+  distribution: HostedIngressLatencyDistribution;
+  label: string;
+}) {
+  return (
+    <div className="min-w-0 border-b border-border/70 px-5 py-5 md:border-r xl:[&:nth-child(4n)]:border-r-0">
+      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        {input.label}
+      </div>
+      <div className="mt-3 flex items-baseline gap-3">
+        <span className="font-serif text-2xl font-semibold leading-none tracking-tight tabular-nums text-foreground">
+          {formatMs(input.distribution.p50)}
+        </span>
+        <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+          p50
+        </span>
+      </div>
+      <div className="mt-2 flex items-baseline gap-3 font-mono text-xs tabular-nums text-muted-foreground">
+        <span>{formatMs(input.distribution.p95)} p95</span>
+        <span>n={formatInteger(input.distribution.count)}</span>
       </div>
     </div>
   );

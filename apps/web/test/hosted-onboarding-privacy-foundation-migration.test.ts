@@ -531,6 +531,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedIngressLatencyDeliveryLinkMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260709120000_hosted_ingress_latency_delivery_link/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -616,6 +623,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260707170000_drop_stale_linq_recency_columns",
       "20260707180000_hosted_vault_share_projection_scopes",
       "20260708120000_hosted_member_assistant_preferences",
+      "20260709120000_hosted_ingress_latency_delivery_link",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -1068,6 +1076,27 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedLatencyMilestonesMigrationSql).toContain(
       'ADD COLUMN "mailbox_import_done_at" TIMESTAMP(3)',
+    );
+    expect(hostedIngressLatencyDeliveryLinkMigrationSql).toContain(
+      'ADD COLUMN "reply_runtime_attempt_id" TEXT',
+    );
+    expect(hostedIngressLatencyDeliveryLinkMigrationSql).toContain(
+      'ADD COLUMN "linq_delivery_id" TEXT',
+    );
+    expect(hostedIngressLatencyDeliveryLinkMigrationSql).toContain(
+      'REFERENCES "hosted_linq_delivery"("id")',
+    );
+    expect(hostedIngressLatencyDeliveryLinkMigrationSql).toContain(
+      'ON "hosted_runtime_log"("attempt_id", "event_code", "at")',
+    );
+    expect(hostedIngressLatencyDeliveryLinkMigrationSql).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_runtime_log_attempt_id_event_code_at_idx"',
+    );
+    expect(hostedIngressLatencyDeliveryLinkMigrationSql).toContain(
+      "ON DELETE SET NULL",
+    );
+    expect(hostedIngressLatencyDeliveryLinkMigrationSql).not.toMatch(
+      /(?:raw|body|payload|content|message_text)/iu,
     );
     expect(hostedAiUsageTokenPricingBasisMigrationSql).toContain(
       'ADD COLUMN "token_pricing_basis" TEXT NOT NULL DEFAULT \'standard\'',

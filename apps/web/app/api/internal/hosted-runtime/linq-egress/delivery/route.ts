@@ -4,10 +4,14 @@ import type {
 import {
   parseHostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution/parsers";
+import { after } from "next/server";
 
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "@/src/lib/hosted-execution/logging";
 import {
   createHostedLinqChatLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -24,10 +28,14 @@ import {
   jsonOk,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
+import {
+  linkHostedIngressLatencyTracesToAcceptedLinqDelivery,
+} from "@/src/lib/hosted-runtime-latency/delivery-link";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_LINQ_EGRESS_DELIVERY_BODY_LIMIT_BYTES = 8 * 1024;
+const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
 // Must stay >= the hosted mailbox run import limit so one grouped auto-reply
 // can stamp every answered conversation item.
 const HOSTED_LINQ_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
@@ -36,6 +44,7 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_LINQ_EGRESS_DELIVERY_BODY_LIMIT_BYTES,
   });
+  const runtimeAttemptId = request.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)?.trim() ?? "";
   const body = await readOptionalJsonObject(request);
   const prisma = getPrisma();
   const routeAuthority = parseHostedLinqDeliveryRouteAuthority(body.routeAuthority);
@@ -120,11 +129,55 @@ export const POST = withJsonError(async (request: Request) => {
     userId,
   });
 
+  if (
+    acceptedAt
+    && result.recorded
+    && result.deliveryId
+    && answeredMailboxItemIds.length > 0
+    && runtimeAttemptId
+  ) {
+    scheduleHostedIngressLatencyDeliveryLinkAfterResponse({
+      answeredMailboxItemIds,
+      authenticatedUserId: userId,
+      linqDeliveryId: result.deliveryId,
+      prisma,
+      replyRuntimeAttemptId: runtimeAttemptId,
+    });
+  }
+
   return jsonOk({
     ok: true,
     recorded: result.recorded,
   });
 });
+
+function scheduleHostedIngressLatencyDeliveryLinkAfterResponse(input: {
+  answeredMailboxItemIds: readonly string[];
+  authenticatedUserId: string;
+  linqDeliveryId: string;
+  prisma: ReturnType<typeof getPrisma>;
+  replyRuntimeAttemptId: string;
+}): void {
+  const task = async (): Promise<void> => {
+    try {
+      await linkHostedIngressLatencyTracesToAcceptedLinqDelivery(input);
+    } catch (error) {
+      const safeError = formatHostedExecutionSafeLogErrorDetails(error, {
+        code: "HOSTED_INGRESS_LATENCY_DELIVERY_LINK_FAILED",
+      });
+      console.error("Hosted ingress latency delivery link failed.", {
+        errorCode: safeError.errorCode,
+        errorType: safeError.errorType,
+      });
+    }
+  };
+
+  try {
+    after(task);
+  } catch {
+    void task();
+  }
+}
 
 async function readHostedLinqDeliveryRouteLineLookupKey(input: {
   memberId: string;

@@ -17,8 +17,17 @@ type LatencyWritePrisma = NonNullable<
 type LatencyDashboardRow = {
   acceptedAt: Date;
   assistantInputStagedAt: Date | null;
+  linqDelivery?: {
+    acceptedAt: Date | null;
+    attemptedAt: Date;
+    deliveredAt: Date | null;
+  } | null;
+  linqDeliveryId?: string | null;
   phaseBreakdownJson?: unknown;
+  providerRequestOrdinal?: number | null;
   providerStartAt: Date | null;
+  replyRuntimeAttemptId?: string | null;
+  runtimeAttemptId?: string | null;
   temporalSignalAcceptedAt: Date | null;
 };
 
@@ -29,6 +38,7 @@ describe("hosted runtime latency dashboard store", () => {
         acceptedAt: instant("2026-05-27T12:00:00.000Z"),
         assistantInputStagedAt: null,
         providerStartAt: instant("2026-05-27T12:00:04.000Z"),
+        providerRequestOrdinal: 0,
         temporalSignalAcceptedAt: null,
       },
     ]);
@@ -135,6 +145,225 @@ describe("hosted runtime latency dashboard store", () => {
       p50: 20,
       p95: 29,
     });
+  });
+
+  it("reports deduplicated cold and warm reply delivery spans", async () => {
+    const coldDelivery = {
+      acceptedAt: instant("2026-05-27T12:00:11.000Z"),
+      attemptedAt: instant("2026-05-27T12:00:10.000Z"),
+      deliveredAt: instant("2026-05-27T12:00:12.000Z"),
+    };
+    const prisma = createLatencyDashboardPrisma([
+      {
+        acceptedAt: instant("2026-05-27T12:00:01.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:00:02.000Z"),
+        linqDelivery: coldDelivery,
+        linqDeliveryId: "delivery_cold_grouped",
+        phaseBreakdownJson: {
+          schemaVersion: 1,
+          boot: { nodeStartupMs: 2_000, restoreWasCold: true },
+        },
+        providerStartAt: instant("2026-05-27T12:00:04.000Z"),
+        providerRequestOrdinal: 0,
+        replyRuntimeAttemptId: "attempt_cold",
+        runtimeAttemptId: "attempt_cold",
+        temporalSignalAcceptedAt: null,
+      },
+      {
+        acceptedAt: instant("2026-05-27T12:00:00.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:00:02.000Z"),
+        linqDelivery: coldDelivery,
+        linqDeliveryId: "delivery_cold_grouped",
+        phaseBreakdownJson: {
+          schemaVersion: 1,
+          boot: { nodeStartupMs: 2_000, restoreWasCold: true },
+        },
+        providerStartAt: instant("2026-05-27T12:00:04.000Z"),
+        replyRuntimeAttemptId: "attempt_cold",
+        runtimeAttemptId: "attempt_cold",
+        temporalSignalAcceptedAt: null,
+      },
+      {
+        acceptedAt: instant("2026-05-27T12:01:00.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:01:01.000Z"),
+        linqDelivery: {
+          acceptedAt: instant("2026-05-27T12:01:09.000Z"),
+          attemptedAt: instant("2026-05-27T12:01:08.000Z"),
+          deliveredAt: null,
+        },
+        linqDeliveryId: "delivery_warm",
+        phaseBreakdownJson: {
+          schemaVersion: 1,
+          boot: { restoreWasCold: false },
+        },
+        providerStartAt: instant("2026-05-27T12:01:05.000Z"),
+        providerRequestOrdinal: 0,
+        replyRuntimeAttemptId: "attempt_warm",
+        runtimeAttemptId: "attempt_warm",
+        temporalSignalAcceptedAt: null,
+      },
+      {
+        acceptedAt: instant("2026-05-27T12:02:00.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:02:01.000Z"),
+        linqDelivery: {
+          acceptedAt: instant("2026-05-27T12:02:05.000Z"),
+          attemptedAt: instant("2026-05-27T12:02:04.000Z"),
+          deliveredAt: instant("2026-05-27T12:02:06.000Z"),
+        },
+        linqDeliveryId: "delivery_unknown_cold_state",
+        phaseBreakdownJson: { schemaVersion: 1 },
+        providerStartAt: instant("2026-05-27T12:02:03.000Z"),
+        providerRequestOrdinal: 0,
+        replyRuntimeAttemptId: "attempt_unknown",
+        runtimeAttemptId: "attempt_unknown",
+        temporalSignalAcceptedAt: null,
+      },
+      {
+        acceptedAt: instant("2026-05-27T12:03:00.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:03:01.000Z"),
+        linqDelivery: {
+          acceptedAt: instant("2026-05-27T12:03:05.000Z"),
+          attemptedAt: instant("2026-05-27T12:03:04.000Z"),
+          deliveredAt: null,
+        },
+        linqDeliveryId: "delivery_attempt_mismatch",
+        providerStartAt: instant("2026-05-27T12:03:03.000Z"),
+        providerRequestOrdinal: 0,
+        replyRuntimeAttemptId: "attempt_other",
+        runtimeAttemptId: "attempt_staged",
+        temporalSignalAcceptedAt: null,
+      },
+      {
+        acceptedAt: instant("2026-05-27T12:04:00.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:04:01.000Z"),
+        providerStartAt: instant("2026-05-27T12:04:03.000Z"),
+        temporalSignalAcceptedAt: null,
+      },
+    ], [
+      ...createTurnTimingLogRows({
+        providerRequestElapsedMs: 4_000,
+        runtimeAttemptId: "attempt_cold",
+        sinceProviderResultMs: 1_000,
+      }),
+      ...createTurnTimingLogRows({
+        providerRequestElapsedMs: 2_000,
+        runtimeAttemptId: "attempt_warm",
+        sinceProviderResultMs: 1_000,
+      }),
+      ...createTurnTimingLogRows({
+        providerRequestElapsedMs: 1_000,
+        runtimeAttemptId: "attempt_unknown",
+        sinceProviderResultMs: 0,
+      }),
+    ]);
+
+    const dashboard = await readHostedIngressLatencyDashboard({
+      inFlightGraceMs: 0,
+      now: instant("2026-05-27T12:05:00.000Z"),
+      prisma,
+      source: "linq",
+      windowHours: 1,
+    });
+
+    expect(dashboard.replyLatencyMs.acceptedToLinqAccepted).toEqual({
+      count: 3,
+      p50: 9_000,
+      p95: 10_800,
+    });
+    expect(dashboard.replyLatencyMs.coldAcceptedToLinqAccepted).toEqual({
+      count: 1,
+      p50: 11_000,
+      p95: 11_000,
+    });
+    expect(dashboard.replyLatencyMs.warmAcceptedToLinqAccepted).toEqual({
+      count: 1,
+      p50: 9_000,
+      p95: 9_000,
+    });
+    expect(dashboard.replyLatencyMs.providerStartToLinqAttempted).toEqual({
+      count: 3,
+      p50: 3_000,
+      p95: 5_700,
+    });
+    expect(dashboard.replyLatencyMs.linqAttemptedToAccepted).toEqual({
+      count: 3,
+      p50: 1_000,
+      p95: 1_000,
+    });
+    expect(dashboard.replyLatencyMs.linqAcceptedToDelivered).toEqual({
+      count: 2,
+      p50: 1_000,
+      p95: 1_000,
+    });
+    expect(dashboard.replyLatencyMs.providerRequest).toEqual({
+      count: 3,
+      p50: 2_000,
+      p95: 3_800,
+    });
+    expect(dashboard.replyLatencyMs.providerResultToReplyIntent).toEqual({
+      count: 3,
+      p50: 1_000,
+      p95: 1_000,
+    });
+    expect(dashboard.replyLatencyMs.replyIntentToLinqAttempted).toEqual({
+      count: 3,
+      p50: 0,
+      p95: 900,
+    });
+    expect(dashboard.replyTraceQuality).toEqual({
+      acceptedMissingReceiptCount: 1,
+      ambiguousTimingCount: 0,
+      attemptMismatchCount: 1,
+      invalidNegativeLatencyCount: 0,
+      linkedDeliveryCount: 3,
+      missingAcceptedDeliveryCount: 0,
+      providerRowsWithoutAcceptedDeliveryLinkCount: 1,
+      timingLogTruncated: false,
+      unknownColdStateCount: 1,
+    });
+  });
+
+  it("keeps Linq reply delivery metrics out of Telegram dashboards", async () => {
+    const prisma = createLatencyDashboardPrisma([
+      {
+        acceptedAt: instant("2026-05-27T12:00:00.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:00:01.000Z"),
+        linqDelivery: {
+          acceptedAt: instant("2026-05-27T12:00:05.000Z"),
+          attemptedAt: instant("2026-05-27T12:00:04.000Z"),
+          deliveredAt: instant("2026-05-27T12:00:06.000Z"),
+        },
+        linqDeliveryId: "delivery_wrong_channel",
+        phaseBreakdownJson: {
+          schemaVersion: 1,
+          boot: { restoreWasCold: false },
+        },
+        providerRequestOrdinal: 0,
+        providerStartAt: instant("2026-05-27T12:00:03.000Z"),
+        replyRuntimeAttemptId: "attempt_telegram",
+        runtimeAttemptId: "attempt_telegram",
+        temporalSignalAcceptedAt: null,
+      },
+    ], createTurnTimingLogRows({
+      providerRequestElapsedMs: 500,
+      runtimeAttemptId: "attempt_telegram",
+      sinceProviderResultMs: 100,
+    }));
+
+    const dashboard = await readHostedIngressLatencyDashboard({
+      inFlightGraceMs: 0,
+      now: instant("2026-05-27T12:05:00.000Z"),
+      prisma,
+      source: "telegram",
+      windowHours: 1,
+    });
+
+    expect(dashboard.replyLatencyMs.acceptedToLinqAccepted.count).toBe(0);
+    expect(dashboard.replyLatencyMs.providerRequest.count).toBe(0);
+    expect(dashboard.replyTraceQuality.linkedDeliveryCount).toBe(0);
+    expect(
+      dashboard.replyTraceQuality.providerRowsWithoutAcceptedDeliveryLinkCount,
+    ).toBe(0);
   });
 
   it("stores mailbox accepted timestamps as real instants when DB-local wall time differs from UTC", async () => {
@@ -285,7 +514,7 @@ describe("hosted runtime latency dashboard store", () => {
     expect(prisma.readTraceInsertSql()).toContain("ON CONFLICT (mailbox_item_id) DO NOTHING");
   });
 
-  it("records provider start by assistant input even when a later runtime attempt handles it", async () => {
+  it("rejects provider start from a different runtime attempt", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:10:20.000Z")),
     });
@@ -311,13 +540,13 @@ describe("hosted runtime latency dashboard store", () => {
 
     const trace = prisma.readTrace();
     expect(result).toEqual({
-      matchedCount: 1,
-      recorded: true,
-      unmatchedCount: 0,
+      matchedCount: 0,
+      recorded: false,
+      unmatchedCount: 1,
     });
     expect(trace?.runtimeAttemptId).toBe("attempt_staged_1");
-    expect(trace?.providerStartAt?.toISOString()).toBe("2026-06-02T19:10:22.000Z");
-    expect(trace?.providerRequestOrdinal).toBe(0);
+    expect(trace?.providerStartAt).toBeNull();
+    expect(trace?.providerRequestOrdinal).toBeNull();
   });
 
   it("records runtime milestones only after the staged row owns the exact attempt", async () => {
@@ -801,18 +1030,58 @@ describe("hosted runtime latency dashboard store", () => {
   });
 });
 
-function createLatencyDashboardPrisma(rows: LatencyDashboardRow[]): LatencyDashboardPrisma {
+function createLatencyDashboardPrisma(
+  rows: LatencyDashboardRow[],
+  timingLogRows: readonly { attemptId: string | null; redactedJson: unknown }[] = [],
+): LatencyDashboardPrisma {
   return {
     hostedIngressLatencyTrace: {
       findMany: vi.fn(async () => rows),
     },
+    hostedRuntimeLog: {
+      findMany: vi.fn(async () => timingLogRows),
+    },
   } as unknown as LatencyDashboardPrisma;
+}
+
+function createTurnTimingLogRows(input: {
+  providerRequestElapsedMs: number;
+  runtimeAttemptId: string;
+  sinceProviderResultMs: number;
+}): Array<{ attemptId: string; redactedJson: Record<string, unknown> }> {
+  const base = {
+    providerRequestOrdinal: 0,
+    schema: "murph.assistant-turn-timing.v1",
+    type: "assistant.turn.timing",
+  };
+  return [
+    {
+      attemptId: input.runtimeAttemptId,
+      redactedJson: {
+        ...base,
+        providerOutcomeKind: "succeeded",
+        turnTimingProviderRequestElapsedMs: input.providerRequestElapsedMs,
+        turnTimingStage: "provider-result-returned",
+      },
+    },
+    {
+      attemptId: input.runtimeAttemptId,
+      redactedJson: {
+        ...base,
+        deliveryIntentPresent: true,
+        deliveryOutcomeKind: "queued",
+        finalReplySelected: true,
+        turnTimingSinceProviderResultMs: input.sinceProviderResultMs,
+        turnTimingStage: "reply-dispatched",
+      },
+    },
+  ];
 }
 
 function createLatencyWritePrisma(input: {
   beforeLatencyTraceLock?: (trace: MutableLatencyTrace) => void;
   mailboxAcceptedAtEpochMs: bigint | number | string;
-}): LatencyWritePrisma & {
+}): LatencyWritePrisma & LatencyDashboardPrisma & {
   readMailboxQuerySql: () => string;
   readMailboxQueryValues: () => readonly (readonly unknown[])[];
   readTrace: () => MutableLatencyTrace | null;
@@ -928,6 +1197,9 @@ function createLatencyWritePrisma(input: {
       update: typeof update;
       updateMany: typeof updateMany;
     };
+    hostedRuntimeLog: {
+      findMany: ReturnType<typeof vi.fn>;
+    };
     readMailboxQuerySql: () => string;
     readMailboxQueryValues: () => readonly (readonly unknown[])[];
     readTrace: () => MutableLatencyTrace | null;
@@ -943,6 +1215,9 @@ function createLatencyWritePrisma(input: {
       findMany,
       updateMany,
       update,
+    },
+    hostedRuntimeLog: {
+      findMany: vi.fn(async () => []),
     },
     readMailboxQuerySql: () => {
       if (!mailboxQueryTemplate) {
@@ -960,7 +1235,7 @@ function createLatencyWritePrisma(input: {
     },
   };
 
-  return prisma as unknown as LatencyWritePrisma & {
+  return prisma as unknown as LatencyWritePrisma & LatencyDashboardPrisma & {
     readMailboxQuerySql: () => string;
     readMailboxQueryValues: () => readonly (readonly unknown[])[];
     readTrace: () => MutableLatencyTrace | null;
