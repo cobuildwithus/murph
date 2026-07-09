@@ -30,12 +30,33 @@ async function withTempVault<T>(fn: (vaultRoot: string) => Promise<T>): Promise<
   }
 }
 
+async function withTempSkillsRoot<T>(
+  fn: (skillsRoot: string) => Promise<T>,
+): Promise<T> {
+  const skillsRoot = await mkdtemp(path.join(tmpdir(), 'murph-skill-assets-'))
+  try {
+    return await fn(skillsRoot)
+  } finally {
+    await rm(skillsRoot, { force: true, recursive: true })
+  }
+}
+
 async function writeVaultFile(
   vaultRoot: string,
   relativePath: string,
   bytes: Uint8Array,
 ): Promise<void> {
   const absolutePath = path.join(vaultRoot, relativePath)
+  await mkdir(path.dirname(absolutePath), { recursive: true })
+  await writeFile(absolutePath, bytes)
+}
+
+async function writeSkillAssetFile(
+  skillsRoot: string,
+  relativePath: string,
+  bytes: Uint8Array,
+): Promise<void> {
+  const absolutePath = path.join(skillsRoot, 'shared', relativePath)
   await mkdir(path.dirname(absolutePath), { recursive: true })
   await writeFile(absolutePath, bytes)
 }
@@ -62,6 +83,8 @@ describe('image-reference-resolver', () => {
       'https://example.com/photo.png',
       'C:/photo.png',
       'raw/.hidden/photo.png',
+      'skill-assets/../photo.png',
+      'skill-assets/.hidden/photo.png',
     ]) {
       expect(() => normalizeGenerateImageReferenceRef(ref)).toThrow(
         /normalized, non-hidden vault-relative paths/u,
@@ -115,6 +138,70 @@ describe('image-reference-resolver', () => {
     })
   })
 
+  it('resolves package skill asset image references without a vault root', async () => {
+    await withTempSkillsRoot(async (skillsRoot) => {
+      await writeSkillAssetFile(skillsRoot, 'murph-character-sheet-v1.png', PNG_BYTES)
+
+      const references = await resolveGenerateImageReferences({
+        refs: ['skill-assets/murph-character-sheet-v1.png'],
+        skillsRoot,
+        vaultRoot: '',
+      })
+
+      expect(references).toHaveLength(1)
+      expect(references[0]).toMatchObject({
+        filename: 'reference-image-1.png',
+        mediaType: 'image/png',
+        sourceRef: 'skill-assets/murph-character-sheet-v1.png',
+      })
+    })
+  })
+
+  it('rejects mixed vault and skill asset refs when the vault root is unavailable', async () => {
+    await withTempSkillsRoot(async (skillsRoot) => {
+      await writeSkillAssetFile(skillsRoot, 'murph-character-sheet-v1.png', PNG_BYTES)
+
+      await expect(
+        resolveGenerateImageReferences({
+          refs: [
+            'skill-assets/murph-character-sheet-v1.png',
+            'raw/inbox/style.jpg',
+          ],
+          skillsRoot,
+          vaultRoot: '',
+        }),
+      ).rejects.toMatchObject({
+        code: 'ASSISTANT_IMAGE_REFERENCE_VAULT_UNAVAILABLE',
+      })
+    })
+  })
+
+  it('rejects skill asset symlinks that resolve outside the shared skills root', async () => {
+    await withTempSkillsRoot(async (skillsRoot) => {
+      const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-skill-asset-outside-'))
+      try {
+        await mkdir(path.join(skillsRoot, 'shared'), { recursive: true })
+        await writeFile(path.join(outsideRoot, 'outside.png'), PNG_BYTES)
+        await symlink(
+          path.join(outsideRoot, 'outside.png'),
+          path.join(skillsRoot, 'shared', 'linked.png'),
+        )
+
+        await expect(
+          resolveGenerateImageReferences({
+            refs: ['skill-assets/linked.png'],
+            skillsRoot,
+            vaultRoot: '',
+          }),
+        ).rejects.toMatchObject({
+          code: 'ASSISTANT_IMAGE_REFERENCE_SKILL_ASSET_OUTSIDE_ROOT',
+        })
+      } finally {
+        await rm(outsideRoot, { force: true, recursive: true })
+      }
+    })
+  })
+
   it('rejects refs outside the pipeline-written media families', async () => {
     await withTempVault(async (vaultRoot) => {
       for (const ref of [
@@ -124,6 +211,8 @@ describe('image-reference-resolver', () => {
         'derived/knowledge/pages/page-image.png',
         'journal/2026-07-06/photo.png',
         'exports/photo.png',
+        'skill-asset/murph-character-sheet-v1.png',
+        'skill-assets2/murph-character-sheet-v1.png',
       ]) {
         await writeVaultFile(vaultRoot, ref, PNG_BYTES)
         await expect(
@@ -132,6 +221,19 @@ describe('image-reference-resolver', () => {
           code: 'ASSISTANT_IMAGE_REFERENCE_REF_UNAUTHORIZED',
         })
       }
+    })
+  })
+
+  it('requires an assistant skills root for skill asset references', async () => {
+    await withTempVault(async (vaultRoot) => {
+      await expect(
+        resolveGenerateImageReferences({
+          refs: ['skill-assets/murph-character-sheet-v1.png'],
+          vaultRoot,
+        }),
+      ).rejects.toMatchObject({
+        code: 'ASSISTANT_IMAGE_REFERENCE_SKILLS_ROOT_UNAVAILABLE',
+      })
     })
   })
 
@@ -153,6 +255,73 @@ describe('image-reference-resolver', () => {
       })
 
       expect(materializedPaths).toEqual(['raw/inbox/photo.png'])
+    })
+  })
+
+  it('does not materialize skill asset references while preserving mixed input order', async () => {
+    await withTempVault(async (vaultRoot) => {
+      await withTempSkillsRoot(async (skillsRoot) => {
+        await writeVaultFile(vaultRoot, 'raw/inbox/style.jpg', JPEG_BYTES)
+        await writeSkillAssetFile(skillsRoot, 'murph-character-sheet-v1.png', PNG_BYTES)
+        await writeSkillAssetFile(skillsRoot, 'pose.webp', WEBP_BYTES)
+        let materializedPaths: readonly string[] = []
+
+        const references = await resolveGenerateImageReferences({
+          materializeWorkspaceArtifacts: async (relativePaths) => {
+            materializedPaths = [...relativePaths]
+            return {
+              materializedArtifactPaths: new Set(relativePaths),
+              missingArtifactPaths: new Set<string>(),
+            }
+          },
+          refs: [
+            'skill-assets/murph-character-sheet-v1.png',
+            'raw/inbox/style.jpg',
+            'skill-assets/pose.webp',
+          ],
+          skillsRoot,
+          vaultRoot,
+        })
+
+        expect(materializedPaths).toEqual(['raw/inbox/style.jpg'])
+        expect(references.map((reference) => reference.filename)).toEqual([
+          'reference-image-1.png',
+          'reference-image-2.jpg',
+          'reference-image-3.webp',
+        ])
+        expect(references.map((reference) => reference.sourceRef)).toEqual([
+          'skill-assets/murph-character-sheet-v1.png',
+          'raw/inbox/style.jpg',
+          'skill-assets/pose.webp',
+        ])
+      })
+    })
+  })
+
+  it('resolves duplicate skill asset refs the same way duplicate vault refs resolve', async () => {
+    await withTempVault(async (vaultRoot) => {
+      await withTempSkillsRoot(async (skillsRoot) => {
+        await writeSkillAssetFile(skillsRoot, 'murph-character-sheet-v1.png', PNG_BYTES)
+
+        const references = await resolveGenerateImageReferences({
+          refs: [
+            'skill-assets/murph-character-sheet-v1.png',
+            'skill-assets/murph-character-sheet-v1.png',
+          ],
+          skillsRoot,
+          vaultRoot,
+        })
+
+        expect(references.map((reference) => reference.filename)).toEqual([
+          'reference-image-1.png',
+          'reference-image-2.png',
+        ])
+        expect(references.map((reference) => reference.sourceRef)).toEqual([
+          'skill-assets/murph-character-sheet-v1.png',
+          'skill-assets/murph-character-sheet-v1.png',
+        ])
+        expect(references[0]?.sha256).toBe(references[1]?.sha256)
+      })
     })
   })
 
@@ -234,15 +403,48 @@ describe('image-reference-resolver', () => {
   })
 
   it('keeps the Murph product contract capped at sixteen ordered references', async () => {
-    const seventeenRefs = Array.from(
-      { length: 17 },
-      (_value, index) => `raw/inbox/${index + 1}.png`,
-    )
+    const seventeenRefs = [
+      ...Array.from(
+        { length: 15 },
+        (_value, index) => `raw/inbox/${index + 1}.png`,
+      ),
+      'skill-assets/murph-character-sheet-v1.png',
+      'skill-assets/pose.webp',
+    ]
     await expect(
       resolveGenerateImageReferences({
         refs: seventeenRefs,
+        skillsRoot: '/',
         vaultRoot: '/',
       }),
     ).rejects.toMatchObject({ code: 'ASSISTANT_IMAGE_REFERENCE_COUNT_UNSUPPORTED' })
+  })
+
+  it('counts vault and skill asset bytes against the same aggregate budget', async () => {
+    await withTempVault(async (vaultRoot) => {
+      await withTempSkillsRoot(async (skillsRoot) => {
+        const nineMegabytePng = new Uint8Array(9 * 1024 * 1024)
+        nineMegabytePng.set(PNG_BYTES, 0)
+        await writeVaultFile(vaultRoot, 'raw/inbox/one.png', nineMegabytePng)
+        await writeVaultFile(vaultRoot, 'raw/inbox/two.png', nineMegabytePng)
+        await writeSkillAssetFile(skillsRoot, 'three.png', nineMegabytePng)
+        await writeSkillAssetFile(skillsRoot, 'four.png', nineMegabytePng)
+
+        await expect(
+          resolveGenerateImageReferences({
+            refs: [
+              'raw/inbox/one.png',
+              'skill-assets/three.png',
+              'raw/inbox/two.png',
+              'skill-assets/four.png',
+            ],
+            skillsRoot,
+            vaultRoot,
+          }),
+        ).rejects.toMatchObject({
+          code: 'ASSISTANT_IMAGE_REFERENCE_SIZE_UNSUPPORTED',
+        })
+      })
+    })
   })
 })
