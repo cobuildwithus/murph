@@ -2094,6 +2094,83 @@ describe("buildClinicalImportPlan", () => {
     );
   });
 
+  it("does not import global no-known allergies with contradictory canonical allergy statuses", async () => {
+    const vaultRoot = await writeClinicalFixture({
+      resourceFiles: [
+        {
+          resourceType: "AllergyIntolerance",
+          relativePath: "AllergyIntolerance/page-1.json",
+          count: 2,
+        },
+      ],
+      pages: {
+        "AllergyIntolerance/page-1.json": [
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-negative-confirmed-refuted",
+            recordedDate: "2026-07-02T09:00:00.000Z",
+            clinicalStatus: {
+              coding: [{ system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" }],
+            },
+            verificationStatus: {
+              coding: [
+                {
+                  system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                  code: "confirmed",
+                },
+                {
+                  system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                  code: "refuted",
+                },
+              ],
+            },
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+          },
+          {
+            resourceType: "AllergyIntolerance",
+            id: "allergy-negative-active-inactive",
+            recordedDate: "2026-07-02T09:05:00.000Z",
+            clinicalStatus: {
+              coding: [
+                { system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "active" },
+                { system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical", code: "inactive" },
+              ],
+            },
+            verificationStatus: {
+              coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+                code: "confirmed",
+              }],
+            },
+            code: {
+              text: "No known allergies",
+              coding: [{ system: "http://snomed.info/sct", code: "716186003", display: "No known allergies" }],
+            },
+          },
+        ],
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(plan.candidates).toEqual([]);
+    expect(plan.unsupported).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceId: "allergy-negative-confirmed-refuted",
+          reason: "allergy status is not importable",
+        }),
+        expect.objectContaining({
+          resourceId: "allergy-negative-active-inactive",
+          reason: "allergy status is not importable",
+        }),
+      ]),
+    );
+  });
+
   it("namespaces FHIR external refs by source base and patient", async () => {
     const resourceFiles = [
       {

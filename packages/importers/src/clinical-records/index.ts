@@ -1015,12 +1015,12 @@ function isNoKnownAllergyConceptText(value: string | undefined): boolean {
 
 function hasImportableAllergyStatus(resource: AllergyIntolerance): boolean {
   return (
-    codeableConceptHasSystemCode(
+    codeableConceptHasOnlyImportableSystemCodes(
       resource.clinicalStatus,
       FHIR_SYSTEM_ALLERGY_CLINICAL_STATUS,
       IMPORTABLE_ALLERGY_CLINICAL_STATUS_CODES,
     )
-    && codeableConceptHasSystemCode(
+    && codeableConceptHasOnlyImportableSystemCodes(
       resource.verificationStatus,
       FHIR_SYSTEM_ALLERGY_VERIFICATION_STATUS,
       IMPORTABLE_ALLERGY_VERIFICATION_STATUS_CODES,
@@ -1050,6 +1050,18 @@ function codeableConceptHasSystemCode(
   return codingsForCodeableConcept(value).some((coding) => {
     const code = coding.code?.toLowerCase();
     return coding.system === system && code !== undefined && codes.has(code);
+  });
+}
+
+function codeableConceptHasOnlyImportableSystemCodes(
+  value: CodeableConcept | undefined,
+  system: string,
+  codes: ReadonlySet<string>,
+): boolean {
+  const codings = codingsForCodeableConcept(value).filter((coding) => coding.system === system);
+  return codings.length > 0 && codings.every((coding) => {
+    const code = coding.code?.toLowerCase();
+    return code !== undefined && codes.has(code);
   });
 }
 
