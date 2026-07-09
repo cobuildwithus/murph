@@ -105,6 +105,9 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   // This Worker-owned HMAC key signs hosted provider egress credentials. It
   // must never be forwarded to hosted runtime/user env.
   "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
+  // This shared web/Worker HMAC key signs the narrow Telegram usage-limit
+  // notice authority. It must never be forwarded to hosted runtime/user env.
+  "HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET",
   // Platform-owned data API auth is injected by the Worker on matching hosted
   // web egress. The hosted container and member runner secrets must not carry it.
   "MURPH_DATA_API_KEY",

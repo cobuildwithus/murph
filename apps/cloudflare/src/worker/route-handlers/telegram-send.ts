@@ -2,7 +2,6 @@ import {
   sendHostedProviderTelegramMessage,
 } from "@murphai/assistant-runtime/hosted-provider-effects";
 import type {
-  HostedRuntimeTelegramSendRequest,
   HostedRuntimeTelegramSendResponse,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
@@ -13,6 +12,13 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   matchCloudflareHostedControlUserRoutePath,
 } from "@murphai/cloudflare-hosted-control/routes";
+import {
+  parseCloudflareHostedControlTelegramUsageLimitNoticeAuthority,
+  readCloudflareHostedControlTelegramUsageLimitNoticeAuthoritySecret,
+  readCloudflareHostedControlTelegramUsageLimitNoticeProviderRequest,
+  verifyCloudflareHostedControlTelegramUsageLimitNoticeAuthority,
+  type CloudflareHostedControlTelegramUsageLimitNoticeAuthority,
+} from "@murphai/cloudflare-hosted-control/client";
 
 import {
   json,
@@ -38,7 +44,6 @@ import {
 } from "../route-utils/log-details.ts";
 import {
   INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-  normalizeNonEmptyString,
   parseJsonValue,
   requireJsonRecord,
 } from "../route-utils/json-body.ts";
@@ -46,31 +51,32 @@ import {
   decodeRouteParam,
 } from "../route-utils/route-params.ts";
 
-export const telegramSendRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
+export const telegramUsageLimitNoticeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
     authorizeBeforeMethod: true,
     authorization: "vercel-oidc",
     beforeMethod(context, params) {
-      return requireBoundInternalRouteUser(context, params, "telegram-send");
+      return requireBoundInternalRouteUser(context, params, "telegram-usage-limit-notice");
     },
     async handle(context, params) {
-      return handleTelegramSendRoute(context, params.userId);
+      return handleTelegramUsageLimitNoticeRoute(context, params.userId);
     },
-    match: (pathname) => matchCloudflareHostedControlUserRoutePath("telegramSend", pathname),
-    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.telegramSend.method],
-    name: "telegram-send",
+    match: (pathname) =>
+      matchCloudflareHostedControlUserRoutePath("telegramUsageLimitNotice", pathname),
+    methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.telegramUsageLimitNotice.method],
+    name: "telegram-usage-limit-notice",
     wrongMethodResponse: "method-not-allowed",
   },
 ];
 
-export async function handleTelegramSendRoute(
+export async function handleTelegramUsageLimitNoticeRoute(
   context: WorkerRouteContext,
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  let request: HostedRuntimeTelegramSendRequest;
+  let authority: CloudflareHostedControlTelegramUsageLimitNoticeAuthority;
   try {
-    request = parseTelegramSendRequest(
+    authority = parseTelegramUsageLimitNoticeRequest(
       parseJsonValue(await readCachedRequestText(context, {
         limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
       })),
@@ -79,29 +85,97 @@ export async function handleTelegramSendRoute(
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: buildWorkerRouteLogDetails({
-        reason: "telegram-send-request-invalid",
-        routeName: "telegram-send",
+        reason: "telegram-usage-limit-notice-request-invalid",
+        routeName: "telegram-usage-limit-notice",
       }, context.request, userId),
       error,
       level: "warn",
-      message: "Hosted worker Telegram send route rejected an invalid request body.",
+      message: "Hosted worker Telegram usage-limit notice route rejected an invalid request body.",
       phase: "failed",
       userId,
     });
     return json({
       code: "invalid_request",
-      error: "Malformed Telegram send request.",
+      error: "Malformed Telegram usage-limit notice request.",
     }, 400);
   }
 
+  const workerEnv = asWorkerStringEnvironment(context.env);
+  const authoritySecret =
+    readCloudflareHostedControlTelegramUsageLimitNoticeAuthoritySecret(workerEnv);
+  if (!authoritySecret) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "telegram-usage-limit-notice-authority-secret-missing",
+        routeName: "telegram-usage-limit-notice",
+      }, context.request, userId),
+      level: "warn",
+      message: "Hosted worker Telegram usage-limit notice route cannot verify authority because signing is unavailable.",
+      phase: "failed",
+      userId,
+    });
+    return json({
+      code: "authority_unavailable",
+      error: "Telegram usage-limit notice authority verification is unavailable.",
+    }, 503);
+  }
+
+  let authorityVerified = false;
   try {
+    authorityVerified =
+      await verifyCloudflareHostedControlTelegramUsageLimitNoticeAuthority({
+        authority,
+        expectedUserId: userId,
+        secret: authoritySecret,
+      });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "telegram-usage-limit-notice-authority-verification-failed",
+        routeName: "telegram-usage-limit-notice",
+      }, context.request, userId),
+      error,
+      level: "warn",
+      message: "Hosted worker Telegram usage-limit notice route could not verify authority.",
+      phase: "failed",
+      userId,
+    });
+    return json({
+      code: "authority_unavailable",
+      error: "Telegram usage-limit notice authority verification failed.",
+    }, 503);
+  }
+
+  if (!authorityVerified) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "telegram-usage-limit-notice-authority-invalid",
+        routeName: "telegram-usage-limit-notice",
+      }, context.request, userId),
+      level: "warn",
+      message: "Hosted worker Telegram usage-limit notice route rejected invalid authority.",
+      phase: "failed",
+      userId,
+    });
+    return json({
+      code: "authority_invalid",
+      error: "Telegram usage-limit notice authority is invalid.",
+    }, 401);
+  }
+
+  try {
+    const request =
+      readCloudflareHostedControlTelegramUsageLimitNoticeProviderRequest(authority);
     const delivery = await sendHostedProviderTelegramMessage(request, {
-      env: asWorkerStringEnvironment(context.env) as NodeJS.ProcessEnv,
+      env: workerEnv as NodeJS.ProcessEnv,
       fetchImplementation: normalizeCloudflareWorkerFetch(),
       signal: context.request.signal,
       telegramMaxDeliveryAttempts: 1,
     });
-    return json(readTelegramSendSuccessResponse(delivery));
+    return json(readTelegramUsageLimitNoticeSuccessResponse(delivery));
   } catch (error) {
     const retryAfterSeconds = readTelegramProviderRetryAfterSeconds(error);
     const retryable = readTelegramProviderFailureRetryable(error);
@@ -109,8 +183,8 @@ export async function handleTelegramSendRoute(
       component: "worker",
       details: {
         ...buildWorkerRouteLogDetails({
-          reason: "telegram-send-provider-failed",
-          routeName: "telegram-send",
+          reason: "telegram-usage-limit-notice-provider-failed",
+          routeName: "telegram-usage-limit-notice",
         }, context.request, userId),
         failureCode: readTelegramProviderFailureCode(error),
         retryable,
@@ -118,7 +192,7 @@ export async function handleTelegramSendRoute(
       },
       error,
       level: "warn",
-      message: "Hosted worker Telegram send route returned a provider failure.",
+      message: "Hosted worker Telegram usage-limit notice route returned a provider failure.",
       phase: "failed",
       userId,
     });
@@ -132,38 +206,18 @@ export async function handleTelegramSendRoute(
   }
 }
 
-function parseTelegramSendRequest(value: unknown): HostedRuntimeTelegramSendRequest {
-  const record = requireJsonRecord(value, "Telegram send request");
-  const message = normalizeNonEmptyString(record.message);
-  const target = normalizeNonEmptyString(record.target);
-
-  if (!message) {
-    throw new TypeError("Telegram send request message must be a non-empty string.");
+function parseTelegramUsageLimitNoticeRequest(
+  value: unknown,
+): CloudflareHostedControlTelegramUsageLimitNoticeAuthority {
+  const record = requireJsonRecord(value, "Telegram usage-limit notice request");
+  const authority = record.authority;
+  if (!authority || typeof authority !== "object" || Array.isArray(authority)) {
+    throw new TypeError("Telegram usage-limit notice request authority must be an object.");
   }
-  if (!target) {
-    throw new TypeError("Telegram send request target must be a non-empty string.");
-  }
-
-  return {
-    ...readOptionalStringProperty(record, "idempotencyKey"),
-    message,
-    ...readOptionalStringProperty(record, "replyToMessageId"),
-    target,
-  };
+  return parseCloudflareHostedControlTelegramUsageLimitNoticeAuthority(authority);
 }
 
-function readOptionalStringProperty<Key extends "idempotencyKey" | "replyToMessageId">(
-  record: Record<string, unknown>,
-  key: Key,
-): { [K in Key]?: string | null } {
-  if (record[key] === undefined || record[key] === null) {
-    return {};
-  }
-  const value = normalizeNonEmptyString(record[key]);
-  return value ? { [key]: value } as { [K in Key]?: string | null } : {};
-}
-
-function readTelegramSendSuccessResponse(
+function readTelegramUsageLimitNoticeSuccessResponse(
   delivery: HostedRuntimeTelegramSendResponse,
 ): HostedRuntimeTelegramSendResponse & { status: "sent" } {
   return {

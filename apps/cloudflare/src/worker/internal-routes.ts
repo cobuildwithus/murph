@@ -12,14 +12,14 @@ import {
   userDataDeleteRoutes,
 } from "./route-handlers/user-data-delete.ts";
 import {
-  telegramSendRoutes,
+  telegramUsageLimitNoticeRoutes,
 } from "./route-handlers/telegram-send.ts";
 
 export const workerInternalRoutes = [
   ...deploySmokeRoutes,
   ...runtimeProcessingRoutes,
   ...userDataDeleteRoutes,
-  ...telegramSendRoutes,
+  ...telegramUsageLimitNoticeRoutes,
   ...browserVaultRoutes,
   ...userStatusRoutes,
 ] as const;

@@ -30,7 +30,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
-  buildCloudflareHostedControlTelegramSendPath,
+  buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
@@ -77,7 +77,39 @@ export interface CloudflareHostedControlTelegramCleanupMessage {
   target: string;
 }
 
-export type CloudflareHostedControlTelegramSendResponse =
+export type CloudflareHostedControlTelegramUsageLimitNoticeCode =
+  | "edge_usage_limit_reached"
+  | "family_usage_limit_reached"
+  | "pulse_upgrade_edge"
+  | "trial_usage_limit_reached";
+
+export interface CloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody {
+  expiresAt: string;
+  idempotencyKey: string;
+  issuedAt: string;
+  message: string;
+  noticeCode: CloudflareHostedControlTelegramUsageLimitNoticeCode;
+  periodStart: string;
+  purpose: typeof CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_PURPOSE;
+  replyToMessageId: string;
+  schema: typeof CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SCHEMA;
+  sourceEventId: string;
+  target: string;
+  userId: string;
+}
+
+export interface CloudflareHostedControlTelegramUsageLimitNoticeAuthoritySignature {
+  alg: typeof CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SIGNATURE_ALG;
+  keyId: string;
+  signature: string;
+}
+
+export interface CloudflareHostedControlTelegramUsageLimitNoticeAuthority
+  extends CloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody {
+  signature: CloudflareHostedControlTelegramUsageLimitNoticeAuthoritySignature;
+}
+
+export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
   | {
     cleanupMessages?: CloudflareHostedControlTelegramCleanupMessage[] | null;
     cleanupTargetAliases?: string[] | null;
@@ -96,6 +128,15 @@ export type CloudflareHostedControlTelegramSendResponse =
     status: "failed";
   };
 
+export const CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET_ENV =
+  "HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET";
+export const CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SCHEMA =
+  "murph.cloudflare-hosted-control.telegram-usage-limit-notice-authority.v1";
+export const CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_PURPOSE =
+  "hosted_runtime_ai_usage_limit_notice";
+export const CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SIGNATURE_ALG =
+  "HMAC-SHA256";
+
 export interface CloudflareHostedControlClient {
   createBrowserVaultSession(input: {
     browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
@@ -109,14 +150,9 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
-  sendTelegramMessage(input: {
-    idempotencyKey?: string | null;
-    message: string;
-    onRequestStarted?: () => void;
-    replyToMessageId?: string | null;
-    target: string;
-    userId: string;
-  }): Promise<CloudflareHostedControlTelegramSendResponse>;
+  sendTelegramUsageLimitNotice(input: {
+    authority: CloudflareHostedControlTelegramUsageLimitNoticeAuthority;
+  }): Promise<CloudflareHostedControlTelegramUsageLimitNoticeResponse>;
 }
 
 export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
@@ -144,6 +180,149 @@ export interface CloudflareHostedControlClientOptions {
 }
 
 const BROWSER_VAULT_REPLICA_NOT_FOUND_ERROR_MESSAGE = "Hosted execution browser vault replica was not found.";
+
+export function readCloudflareHostedControlTelegramUsageLimitNoticeAuthoritySecret(
+  source: Readonly<Record<string, string | undefined>>,
+): string | null {
+  return normalizeOptionalString(
+    source[CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET_ENV],
+  );
+}
+
+export function buildCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody(
+  input: {
+    expiresAt: Date | string;
+    idempotencyKey: string;
+    issuedAt: Date | string;
+    message: string;
+    noticeCode: CloudflareHostedControlTelegramUsageLimitNoticeCode;
+    periodStart: Date | string;
+    replyToMessageId: string;
+    sourceEventId: string;
+    target: string;
+    userId: string;
+  },
+): CloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody {
+  return {
+    expiresAt: normalizeAuthorityDate(input.expiresAt, "expiresAt"),
+    idempotencyKey: requireString(input.idempotencyKey, "Telegram usage-limit authority idempotencyKey"),
+    issuedAt: normalizeAuthorityDate(input.issuedAt, "issuedAt"),
+    message: requireString(input.message, "Telegram usage-limit authority message"),
+    noticeCode: requireTelegramUsageLimitNoticeCode(input.noticeCode),
+    periodStart: normalizeAuthorityDate(input.periodStart, "periodStart"),
+    purpose: CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_PURPOSE,
+    replyToMessageId: requireString(
+      input.replyToMessageId,
+      "Telegram usage-limit authority replyToMessageId",
+    ),
+    schema: CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SCHEMA,
+    sourceEventId: requireString(input.sourceEventId, "Telegram usage-limit authority sourceEventId"),
+    target: requireString(input.target, "Telegram usage-limit authority target"),
+    userId: requireCloudflareHostedControlUserId(input.userId),
+  };
+}
+
+export async function signCloudflareHostedControlTelegramUsageLimitNoticeAuthority(input: {
+  body: CloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody;
+  keyId?: string | null;
+  secret: string;
+}): Promise<CloudflareHostedControlTelegramUsageLimitNoticeAuthority> {
+  const body = parseCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody(
+    input.body,
+  );
+  const secret = normalizeOptionalString(input.secret);
+  if (!secret) {
+    throw new TypeError(
+      `${CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET_ENV} must be configured.`,
+    );
+  }
+  const keyId = normalizeOptionalString(input.keyId) ?? "v1";
+
+  return {
+    ...body,
+    signature: {
+      alg: CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SIGNATURE_ALG,
+      keyId,
+      signature: await signCloudflareHostedControlTelegramUsageLimitNoticeAuthorityPayload({
+        body,
+        secret,
+      }),
+    },
+  };
+}
+
+export function parseCloudflareHostedControlTelegramUsageLimitNoticeAuthority(
+  value: unknown,
+): CloudflareHostedControlTelegramUsageLimitNoticeAuthority {
+  const record = requireRecord(value, "Telegram usage-limit notice authority");
+  const signature = requireRecord(
+    record.signature,
+    "Telegram usage-limit notice authority signature",
+  );
+
+  return {
+    ...parseCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody(record),
+    signature: {
+      alg: requireTelegramUsageLimitNoticeSignatureAlg(signature.alg),
+      keyId: requireString(signature.keyId, "Telegram usage-limit notice authority signature.keyId"),
+      signature: requireString(
+        signature.signature,
+        "Telegram usage-limit notice authority signature.signature",
+      ),
+    },
+  };
+}
+
+export async function verifyCloudflareHostedControlTelegramUsageLimitNoticeAuthority(input: {
+  authority: CloudflareHostedControlTelegramUsageLimitNoticeAuthority;
+  expectedUserId: string;
+  now?: Date | string;
+  secret: string;
+}): Promise<boolean> {
+  const authority = parseCloudflareHostedControlTelegramUsageLimitNoticeAuthority(
+    input.authority,
+  );
+  const expectedUserId = requireCloudflareHostedControlUserId(input.expectedUserId);
+  if (authority.userId !== expectedUserId) {
+    return false;
+  }
+
+  const now = input.now === undefined
+    ? new Date()
+    : new Date(normalizeAuthorityDate(input.now, "now"));
+  if (new Date(authority.expiresAt).getTime() <= now.getTime()) {
+    return false;
+  }
+
+  const secret = normalizeOptionalString(input.secret);
+  if (!secret) {
+    throw new TypeError(
+      `${CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET_ENV} must be configured.`,
+    );
+  }
+  const expected = await signCloudflareHostedControlTelegramUsageLimitNoticeAuthorityPayload({
+    body: authority,
+    secret,
+  });
+  return constantTimeStringEqual(expected, authority.signature.signature);
+}
+
+export function readCloudflareHostedControlTelegramUsageLimitNoticeProviderRequest(
+  authority: CloudflareHostedControlTelegramUsageLimitNoticeAuthority,
+): {
+  idempotencyKey: string;
+  message: string;
+  replyToMessageId: string;
+  target: string;
+} {
+  const parsed = parseCloudflareHostedControlTelegramUsageLimitNoticeAuthority(authority);
+  return {
+    idempotencyKey: parsed.idempotencyKey,
+    message: parsed.message,
+    replyToMessageId: parsed.replyToMessageId,
+    target: parsed.target,
+  };
+}
 
 export function createCloudflareHostedControlClient(
   options: CloudflareHostedControlClientOptions,
@@ -267,28 +446,23 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    sendTelegramMessage(input) {
-      const userId = requireCloudflareHostedControlUserId(input.userId);
-      const message = requireString(input.message, "Cloudflare Telegram send message");
-      const target = requireString(input.target, "Cloudflare Telegram send target");
-      const idempotencyKey = normalizeOptionalString(input.idempotencyKey);
-      const replyToMessageId = normalizeOptionalString(input.replyToMessageId);
+    sendTelegramUsageLimitNotice(input) {
+      const authority = parseCloudflareHostedControlTelegramUsageLimitNoticeAuthority(
+        input.authority,
+      );
+      const userId = requireCloudflareHostedControlUserId(authority.userId);
 
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
         boundUserId: userId,
         fetchImpl,
         getAuthorizationHeader,
-        label: "Telegram send",
-        onRequestStarted: input.onRequestStarted,
-        parse: parseCloudflareHostedControlTelegramSendResponse,
-        path: buildCloudflareHostedControlTelegramSendPath(userId),
+        label: "Telegram usage-limit notice",
+        parse: parseCloudflareHostedControlTelegramUsageLimitNoticeResponse,
+        path: buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId),
         request: {
           body: JSON.stringify({
-            ...(idempotencyKey === null ? {} : { idempotencyKey }),
-            message,
-            ...(replyToMessageId === null ? {} : { replyToMessageId }),
-            target,
+            authority,
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -595,21 +769,161 @@ function parseCloudflareHostedControlRuntimeEnsureProcessingResponse(
   return parseHostedRuntimeEnsureProcessingResponse(value);
 }
 
-function parseCloudflareHostedControlTelegramSendResponse(
+function parseCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody(
   value: unknown,
-): CloudflareHostedControlTelegramSendResponse {
-  const record = requireRecord(value, "Cloudflare Telegram send response");
-  const status = requireString(record.status, "Cloudflare Telegram send response status");
+): CloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody {
+  const record = requireRecord(value, "Telegram usage-limit notice authority");
+  return {
+    expiresAt: requireAuthorityIsoDate(record.expiresAt, "expiresAt"),
+    idempotencyKey: requireString(
+      record.idempotencyKey,
+      "Telegram usage-limit notice authority idempotencyKey",
+    ),
+    issuedAt: requireAuthorityIsoDate(record.issuedAt, "issuedAt"),
+    message: requireString(record.message, "Telegram usage-limit notice authority message"),
+    noticeCode: requireTelegramUsageLimitNoticeCode(record.noticeCode),
+    periodStart: requireAuthorityIsoDate(record.periodStart, "periodStart"),
+    purpose: requireTelegramUsageLimitNoticePurpose(record.purpose),
+    replyToMessageId: requireString(
+      record.replyToMessageId,
+      "Telegram usage-limit notice authority replyToMessageId",
+    ),
+    schema: requireTelegramUsageLimitNoticeAuthoritySchema(record.schema),
+    sourceEventId: requireString(
+      record.sourceEventId,
+      "Telegram usage-limit notice authority sourceEventId",
+    ),
+    target: requireString(record.target, "Telegram usage-limit notice authority target"),
+    userId: requireCloudflareHostedControlUserId(
+      requireString(record.userId, "Telegram usage-limit notice authority userId"),
+    ),
+  };
+}
+
+async function signCloudflareHostedControlTelegramUsageLimitNoticeAuthorityPayload(input: {
+  body: CloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody;
+  secret: string;
+}): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    throw new TypeError("Web Crypto HMAC signing is unavailable.");
+  }
+  const key = await subtle.importKey(
+    "raw",
+    encodeUtf8(input.secret),
+    { hash: "SHA-256", name: "HMAC" },
+    false,
+    ["sign"],
+  );
+  const signature = await subtle.sign(
+    "HMAC",
+    key,
+    encodeUtf8(buildTelegramUsageLimitNoticeAuthoritySigningPayload(input.body)),
+  );
+  return encodeBase64Url(new Uint8Array(signature));
+}
+
+function buildTelegramUsageLimitNoticeAuthoritySigningPayload(
+  body: CloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody,
+): string {
+  return canonicalJson({
+    expiresAt: body.expiresAt,
+    idempotencyKey: body.idempotencyKey,
+    issuedAt: body.issuedAt,
+    message: body.message,
+    noticeCode: body.noticeCode,
+    periodStart: body.periodStart,
+    purpose: body.purpose,
+    replyToMessageId: body.replyToMessageId,
+    schema: body.schema,
+    sourceEventId: body.sourceEventId,
+    target: body.target,
+    userId: body.userId,
+  });
+}
+
+function normalizeAuthorityDate(value: Date | string, label: string): string {
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) {
+      throw new TypeError(`Telegram usage-limit notice authority ${label} must be a valid date.`);
+    }
+    return value.toISOString();
+  }
+  return new Date(requireAuthorityIsoDate(value, label)).toISOString();
+}
+
+function requireAuthorityIsoDate(value: unknown, label: string): string {
+  const text = requireString(value, `Telegram usage-limit notice authority ${label}`);
+  const time = Date.parse(text);
+  if (!Number.isFinite(time)) {
+    throw new TypeError(`Telegram usage-limit notice authority ${label} must be an ISO date.`);
+  }
+  return text;
+}
+
+function requireTelegramUsageLimitNoticeCode(
+  value: unknown,
+): CloudflareHostedControlTelegramUsageLimitNoticeCode {
+  const noticeCode = requireString(value, "Telegram usage-limit notice authority noticeCode");
+  if (
+    noticeCode === "edge_usage_limit_reached"
+    || noticeCode === "family_usage_limit_reached"
+    || noticeCode === "pulse_upgrade_edge"
+    || noticeCode === "trial_usage_limit_reached"
+  ) {
+    return noticeCode;
+  }
+  throw new TypeError("Telegram usage-limit notice authority noticeCode is unsupported.");
+}
+
+function requireTelegramUsageLimitNoticePurpose(
+  value: unknown,
+): typeof CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_PURPOSE {
+  const purpose = requireString(value, "Telegram usage-limit notice authority purpose");
+  if (purpose !== CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_PURPOSE) {
+    throw new TypeError("Telegram usage-limit notice authority purpose is unsupported.");
+  }
+  return purpose;
+}
+
+function requireTelegramUsageLimitNoticeAuthoritySchema(
+  value: unknown,
+): typeof CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SCHEMA {
+  const schema = requireString(value, "Telegram usage-limit notice authority schema");
+  if (schema !== CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SCHEMA) {
+    throw new TypeError("Telegram usage-limit notice authority schema is unsupported.");
+  }
+  return schema;
+}
+
+function requireTelegramUsageLimitNoticeSignatureAlg(
+  value: unknown,
+): typeof CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SIGNATURE_ALG {
+  const alg = requireString(value, "Telegram usage-limit notice authority signature.alg");
+  if (alg !== CLOUDFLARE_HOSTED_CONTROL_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SIGNATURE_ALG) {
+    throw new TypeError("Telegram usage-limit notice authority signature alg is unsupported.");
+  }
+  return alg;
+}
+
+function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(
+  value: unknown,
+): CloudflareHostedControlTelegramUsageLimitNoticeResponse {
+  const record = requireRecord(value, "Cloudflare Telegram usage-limit notice response");
+  const status = requireString(
+    record.status,
+    "Cloudflare Telegram usage-limit notice response status",
+  );
 
   if (status === "failed") {
     return {
       failureCode: requireString(
         record.failureCode,
-        "Cloudflare Telegram send response failureCode",
+        "Cloudflare Telegram usage-limit notice response failureCode",
       ),
       failureReason: requireString(
         record.failureReason,
-        "Cloudflare Telegram send response failureReason",
+        "Cloudflare Telegram usage-limit notice response failureReason",
       ),
       ...readOptionalPositiveIntegerField(
         record.retryAfterSeconds,
@@ -617,14 +931,16 @@ function parseCloudflareHostedControlTelegramSendResponse(
       ),
       retryable: requireBoolean(
         record.retryable,
-        "Cloudflare Telegram send response retryable",
+        "Cloudflare Telegram usage-limit notice response retryable",
       ),
       status,
     };
   }
 
   if (status !== "sent") {
-    throw new TypeError("Cloudflare Telegram send response status must be sent or failed.");
+    throw new TypeError(
+      "Cloudflare Telegram usage-limit notice response status must be sent or failed.",
+    );
   }
 
   return {
@@ -642,30 +958,32 @@ function parseCloudflareHostedControlTelegramSendResponse(
 function readOptionalTelegramCleanupMessages(
   value: unknown,
 ): Pick<
-  Extract<CloudflareHostedControlTelegramSendResponse, { status: "sent" }>,
+  Extract<CloudflareHostedControlTelegramUsageLimitNoticeResponse, { status: "sent" }>,
   "cleanupMessages"
 > {
   if (value === undefined || value === null) {
     return {};
   }
   if (!Array.isArray(value)) {
-    throw new TypeError("Cloudflare Telegram send response cleanupMessages must be an array.");
+    throw new TypeError(
+      "Cloudflare Telegram usage-limit notice response cleanupMessages must be an array.",
+    );
   }
 
   return {
     cleanupMessages: value.map((entry, index) => {
       const record = requireRecord(
         entry,
-        `Cloudflare Telegram send response cleanupMessages[${index}]`,
+        `Cloudflare Telegram usage-limit notice response cleanupMessages[${index}]`,
       );
       return {
         messageId: requireString(
           record.messageId,
-          `Cloudflare Telegram send response cleanupMessages[${index}].messageId`,
+          `Cloudflare Telegram usage-limit notice response cleanupMessages[${index}].messageId`,
         ),
         target: requireString(
           record.target,
-          `Cloudflare Telegram send response cleanupMessages[${index}].target`,
+          `Cloudflare Telegram usage-limit notice response cleanupMessages[${index}].target`,
         ),
       };
     }),
@@ -682,7 +1000,7 @@ function readOptionalStringField<Key extends string>(
   if (value === null) {
     return { [key]: null } as { [K in Key]?: string | null };
   }
-  return { [key]: requireString(value, `Cloudflare Telegram send response ${key}`) } as {
+  return { [key]: requireString(value, `Cloudflare Telegram usage-limit notice response ${key}`) } as {
     [K in Key]?: string | null;
   };
 }
@@ -698,7 +1016,9 @@ function readOptionalPositiveIntegerField<Key extends string>(
     return { [key]: null } as { [K in Key]?: number | null };
   }
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
-    throw new TypeError(`Cloudflare Telegram send response ${key} must be a positive integer.`);
+    throw new TypeError(
+      `Cloudflare Telegram usage-limit notice response ${key} must be a positive integer.`,
+    );
   }
   return { [key]: value } as { [K in Key]?: number | null };
 }
@@ -714,17 +1034,19 @@ function readOptionalStringArrayField<Key extends string>(
     return { [key]: null } as { [K in Key]?: string[] | null };
   }
   if (!Array.isArray(value)) {
-    throw new TypeError(`Cloudflare Telegram send response ${key} must be an array.`);
+    throw new TypeError(
+      `Cloudflare Telegram usage-limit notice response ${key} must be an array.`,
+    );
   }
   return {
     [key]: value.map((entry, index) =>
-      requireString(entry, `Cloudflare Telegram send response ${key}[${index}]`)
+      requireString(entry, `Cloudflare Telegram usage-limit notice response ${key}[${index}]`)
     ),
   } as { [K in Key]?: string[] | null };
 }
 
 function readOptionalTelegramTargetKind(value: unknown): Pick<
-  Extract<CloudflareHostedControlTelegramSendResponse, { status: "sent" }>,
+  Extract<CloudflareHostedControlTelegramUsageLimitNoticeResponse, { status: "sent" }>,
   "targetKind"
 > {
   if (value === undefined) {
@@ -733,10 +1055,13 @@ function readOptionalTelegramTargetKind(value: unknown): Pick<
   if (value === null) {
     return { targetKind: null };
   }
-  const targetKind = requireString(value, "Cloudflare Telegram send response targetKind");
+  const targetKind = requireString(
+    value,
+    "Cloudflare Telegram usage-limit notice response targetKind",
+  );
   if (targetKind !== "explicit" && targetKind !== "participant" && targetKind !== "thread") {
     throw new TypeError(
-      "Cloudflare Telegram send response targetKind must be explicit, participant, or thread.",
+      "Cloudflare Telegram usage-limit notice response targetKind must be explicit, participant, or thread.",
     );
   }
   return { targetKind };
@@ -862,6 +1187,51 @@ function sortJson(value: unknown): unknown {
   return value;
 }
 
+function encodeUtf8(value: string): ArrayBuffer {
+  const bytes = new TextEncoder().encode(value);
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
+function encodeBase64Url(bytes: Uint8Array): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let output = "";
+  let index = 0;
+  for (; index + 2 < bytes.length; index += 3) {
+    const chunk = (bytes[index] << 16) | (bytes[index + 1] << 8) | bytes[index + 2];
+    output += alphabet[(chunk >> 18) & 63];
+    output += alphabet[(chunk >> 12) & 63];
+    output += alphabet[(chunk >> 6) & 63];
+    output += alphabet[chunk & 63];
+  }
+
+  const remaining = bytes.length - index;
+  if (remaining === 1) {
+    const chunk = bytes[index] << 16;
+    output += alphabet[(chunk >> 18) & 63];
+    output += alphabet[(chunk >> 12) & 63];
+  } else if (remaining === 2) {
+    const chunk = (bytes[index] << 16) | (bytes[index + 1] << 8);
+    output += alphabet[(chunk >> 18) & 63];
+    output += alphabet[(chunk >> 12) & 63];
+    output += alphabet[(chunk >> 6) & 63];
+  }
+
+  return output.replace(/\+/gu, "-").replace(/\//gu, "_");
+}
+
+function constantTimeStringEqual(left: string, right: string): boolean {
+  let diff = left.length ^ right.length;
+  const maxLength = Math.max(left.length, right.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftCode = index < left.length ? left.charCodeAt(index) : 0;
+    const rightCode = index < right.length ? right.charCodeAt(index) : 0;
+    diff |= leftCode ^ rightCode;
+  }
+  return diff === 0;
+}
+
 function getHostedBrowserVaultReplicaStorageKeyId(
   replicaRef: HostedBrowserVaultReplicaRef,
 ): string {
@@ -920,7 +1290,6 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   onRuntimeEnsureProcessingTiming?: (
     timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
   ) => void;
-  onRequestStarted?: () => void;
   parse: (value: unknown) => TResponse;
   path: string;
   request: {
@@ -975,7 +1344,6 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     );
   }
 
-  input.onRequestStarted?.();
   const response = await input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),
     headers,

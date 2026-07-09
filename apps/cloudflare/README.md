@@ -144,6 +144,9 @@ Optional execution vars and secrets:
 - `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
   secret. It must not be forwarded into the hosted runtime env; usage
   attribution is added at the Worker/web-control boundary when configured.
+- `HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET` is shared by hosted web
+  and the Worker to sign and verify Telegram usage-limit notice authority before
+  Worker-owned Telegram egress. It must not be forwarded into hosted runtime env.
 - `HOSTED_EMAIL_DOMAIN`, `HOSTED_EMAIL_LOCAL_PART`, optional `HOSTED_EMAIL_FROM_ADDRESS`, `HOSTED_EMAIL_DEFAULT_SUBJECT`, and `HOSTED_EMAIL_SIGNING_SECRET` for hosted email routing
 - opt-in runtime integrations such as `EXA_API_KEY`, `LINQ_*`, `TELEGRAM_*`, `WHATSAPP_*`, and `MAPBOX_ACCESS_TOKEN`; provider credentials for intercepted integrations stay Worker-owned and are represented in the hosted runtime by sentinel placeholders, while native parser binaries are image-owned by the runner container and rebound from the image instead of being serialized through Worker runtime envelopes; hosted audio transcription has no in-image model and runs through the Worker-owned `AI` binding behind the fixed `murph-transcribe.worker` egress host
 

@@ -4,7 +4,11 @@ import {
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
+  buildCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody,
+  readCloudflareHostedControlTelegramUsageLimitNoticeAuthoritySecret,
   readCloudflareHostedControlHttpErrorStatus,
+  signCloudflareHostedControlTelegramUsageLimitNoticeAuthority,
+  type CloudflareHostedControlTelegramUsageLimitNoticeCode,
 } from "@murphai/cloudflare-hosted-control/client";
 import {
   parseTelegramThreadTarget,
@@ -434,6 +438,12 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
     if (!parseTelegramThreadTarget(wake.message.telegramMessage.threadId)) {
       return { status: "not_applicable" };
     }
+    const noticeCode = readHostedRuntimeTelegramUsageLimitNoticeCode(
+      decision.userNotice.code,
+    );
+    if (!noticeCode) {
+      return { status: "not_applicable" };
+    }
 
     const sentAt = input.now;
     const idempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
@@ -524,29 +534,43 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
 
-    let controlRequestStarted = false;
-    let deliveryResult: Awaited<ReturnType<typeof controlClient.sendTelegramMessage>>;
+    let deliveryResult: Awaited<ReturnType<typeof controlClient.sendTelegramUsageLimitNotice>>;
     try {
-      deliveryResult = await controlClient.sendTelegramMessage({
-        idempotencyKey: deliveryClaim.idempotencyKey,
-        message: decision.userNotice.message,
-        onRequestStarted: () => {
-          controlRequestStarted = true;
-        },
-        replyToMessageId: wake.message.telegramMessage.messageId,
-        target: wake.message.telegramMessage.threadId,
-        userId: input.userId,
+      const authoritySecret =
+        readCloudflareHostedControlTelegramUsageLimitNoticeAuthoritySecret(process.env);
+      if (!authoritySecret) {
+        throw new HostedRuntimeTelegramUsageLimitNoticeUnavailableError(
+          "Hosted Telegram usage-limit notice authority signing is not configured.",
+        );
+      }
+      deliveryResult = await controlClient.sendTelegramUsageLimitNotice({
+        authority: await signCloudflareHostedControlTelegramUsageLimitNoticeAuthority({
+          body: buildCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody({
+            expiresAt: new Date(
+              sentAt.getTime() + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+            ),
+            idempotencyKey: deliveryClaim.idempotencyKey,
+            issuedAt: sentAt,
+            message: decision.userNotice.message,
+            noticeCode,
+            periodStart: decision.periodStart,
+            replyToMessageId: wake.message.telegramMessage.messageId,
+            sourceEventId: wake.eventId,
+            target: wake.message.telegramMessage.threadId,
+            userId: input.userId,
+          }),
+          secret: authoritySecret,
+        }),
       });
     } catch (cause) {
       const routeUnavailable = isHostedTelegramControlRouteUnavailable(cause);
-      const preProviderUnavailable = routeUnavailable || !controlRequestStarted;
-      const error = preProviderUnavailable
-        ? new HostedRuntimeTelegramUsageLimitNoticeUnavailableError(
-            routeUnavailable
-              ? "Hosted Telegram usage-limit notice delivery route is unavailable through hosted control."
-              : "Hosted Telegram usage-limit notice delivery could not start a hosted-control request.",
-          )
-        : new HostedRuntimeTelegramUsageLimitNoticeUnknownError();
+      const error = cause instanceof HostedRuntimeTelegramUsageLimitNoticeUnavailableError
+        ? cause
+        : new HostedRuntimeTelegramUsageLimitNoticeUnavailableError(
+          routeUnavailable
+            ? "Hosted Telegram usage-limit notice delivery route is unavailable through hosted control."
+            : "Hosted Telegram usage-limit notice delivery could not complete through hosted control.",
+        );
       await markHostedLinqDeliverySendFailedTx({
         failedAt: sentAt,
         failureCode: error.name,
@@ -554,9 +578,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
         idempotencyKey: deliveryClaim.idempotencyKey,
         prisma: input.prisma,
       });
-      return preProviderUnavailable
-        ? buildHostedRuntimeAiUsageNoticeInFlightResult(input.now)
-        : { status: "already_notified" };
+      return buildHostedRuntimeAiUsageNoticeInFlightResult(input.now);
     }
 
     if (deliveryResult.status === "failed") {
@@ -677,6 +699,20 @@ function readHostedRuntimeTelegramUsageLimitNoticeRetryAfterAt(input: {
     : null;
 }
 
+function readHostedRuntimeTelegramUsageLimitNoticeCode(
+  value: string,
+): CloudflareHostedControlTelegramUsageLimitNoticeCode | null {
+  switch (value) {
+    case "edge_usage_limit_reached":
+    case "family_usage_limit_reached":
+    case "pulse_upgrade_edge":
+    case "trial_usage_limit_reached":
+      return value;
+    default:
+      return null;
+  }
+}
+
 function isHostedTelegramControlRouteUnavailable(error: unknown): boolean {
   return readCloudflareHostedControlHttpErrorStatus(error) === 404;
 }
@@ -771,16 +807,6 @@ class HostedRuntimeTelegramUsageLimitNoticeUnavailableError extends Error {
 
 class HostedRuntimeTelegramUsageLimitNoticeRetryAfterError extends Error {
   override name = "HostedRuntimeTelegramUsageLimitNoticeRetryAfterError";
-}
-
-class HostedRuntimeTelegramUsageLimitNoticeUnknownError extends Error {
-  override name = "HostedRuntimeTelegramUsageLimitNoticeUnknownError";
-
-  constructor(
-    message = "Hosted Telegram usage-limit notice delivery could not be confirmed after dispatch started.",
-  ) {
-    super(message);
-  }
 }
 
 async function readHostedRuntimePendingConversationWake(input: {

@@ -8,9 +8,12 @@ import {
 } from "@murphai/hosted-execution/contracts";
 
 import {
+  buildCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody,
   type CloudflareHostedControlClientOptions,
   createCloudflareHostedControlClient,
   readCloudflareHostedControlHttpErrorStatus,
+  signCloudflareHostedControlTelegramUsageLimitNoticeAuthority,
+  verifyCloudflareHostedControlTelegramUsageLimitNoticeAuthority,
 } from "../src/client.ts";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
@@ -30,7 +33,7 @@ describe("createCloudflareHostedControlClient", () => {
       "deleteUserData",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
-      "sendTelegramMessage",
+      "sendTelegramUsageLimitNotice",
     ]);
   });
 
@@ -203,10 +206,8 @@ describe("createCloudflareHostedControlClient", () => {
       "Cloudflare hosted control userId must not be blank.",
     );
     expect(() =>
-      client.sendTelegramMessage({
-        message: "quota reached",
-        target: "telegram_thread:123",
-        userId: "",
+      client.sendTelegramUsageLimitNotice({
+        authority: createUnsignedTelegramUsageLimitNoticeAuthority({ userId: "" }),
       })
     ).toThrow("Cloudflare hosted control userId must not be blank.");
     expect(() =>
@@ -224,7 +225,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("posts Telegram sends to the user route and parses sent responses", async () => {
+  it("posts Telegram usage-limit notice authority to the user route and parses sent responses", async () => {
     let observedRequest: ObservedRequest | null = null;
     const events: string[] = [];
     const result = {
@@ -248,33 +249,27 @@ describe("createCloudflareHostedControlClient", () => {
       },
       timeoutMs: 2_500,
     });
+    const authority = await createSignedTelegramUsageLimitNoticeAuthority();
 
-    await expect(client.sendTelegramMessage({
-      idempotencyKey: "ai-usage-gate:member_123:2026-03",
-      message: "quota reached",
-      onRequestStarted: () => events.push("started"),
-      replyToMessageId: "7000",
-      target: "telegram_thread:123",
-      userId: "user_123",
+    await expect(client.sendTelegramUsageLimitNotice({
+      authority,
     })).resolves.toEqual(result);
 
-    expect(events).toEqual(["token", "started", "fetch"]);
+    expect(events).toEqual(["token", "fetch"]);
     const request = requireObservedRequest(observedRequest);
-    expect(request.url).toBe("https://runner.example.test/root/internal/users/user_123/telegram/send");
+    expect(request.url).toBe(
+      "https://runner.example.test/root/internal/users/user_123/telegram/usage-limit-notice",
+    );
     expect(request.init?.method).toBe("POST");
     expect(new Headers(request.init?.headers).get("authorization")).toBe("Bearer token-123");
     expect(new Headers(request.init?.headers).get(HOSTED_EXECUTION_USER_ID_HEADER)).toBe("user_123");
     expect(request.init?.body).toBe(JSON.stringify({
-      idempotencyKey: "ai-usage-gate:member_123:2026-03",
-      message: "quota reached",
-      replyToMessageId: "7000",
-      target: "telegram_thread:123",
+      authority,
     }));
   });
 
-  it("does not mark Telegram send requests started when authorization fails before fetch", async () => {
+  it("does not issue Telegram usage-limit notice requests when authorization fails before fetch", async () => {
     const fetchImpl = vi.fn(async () => createJsonResponse({ status: "sent" })) as typeof fetch;
-    const onRequestStarted = vi.fn();
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",
       fetchImpl,
@@ -283,15 +278,12 @@ describe("createCloudflareHostedControlClient", () => {
       },
       timeoutMs: 2_500,
     });
+    const authority = await createSignedTelegramUsageLimitNoticeAuthority();
 
-    await expect(client.sendTelegramMessage({
-      message: "quota reached",
-      onRequestStarted,
-      target: "telegram_thread:123",
-      userId: "user_123",
+    await expect(client.sendTelegramUsageLimitNotice({
+      authority,
     })).rejects.toThrow("token unavailable");
 
-    expect(onRequestStarted).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -310,10 +302,8 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
 
-    await expect(client.sendTelegramMessage({
-      message: "quota reached",
-      target: "telegram_thread:123",
-      userId: "user_123",
+    await expect(client.sendTelegramUsageLimitNotice({
+      authority: await createSignedTelegramUsageLimitNoticeAuthority(),
     })).resolves.toEqual({
       failureCode: "ASSISTANT_TELEGRAM_DELIVERY_FAILED",
       failureReason: "Telegram provider returned HTTP 429.",
@@ -321,6 +311,26 @@ describe("createCloudflareHostedControlClient", () => {
       retryable: true,
       status: "failed",
     });
+  });
+
+  it("rejects tampered Telegram usage-limit notice authority signatures", async () => {
+    const authority = await createSignedTelegramUsageLimitNoticeAuthority();
+
+    await expect(verifyCloudflareHostedControlTelegramUsageLimitNoticeAuthority({
+      authority: {
+        ...authority,
+        target: "telegram_thread:attacker",
+      },
+      expectedUserId: "user_123",
+      now: "2026-05-20T12:05:00.000Z",
+      secret: "authority-secret",
+    })).resolves.toBe(false);
+    await expect(verifyCloudflareHostedControlTelegramUsageLimitNoticeAuthority({
+      authority,
+      expectedUserId: "user_123",
+      now: "2026-05-20T12:05:00.000Z",
+      secret: "authority-secret",
+    })).resolves.toBe(true);
   });
 
   it("does not echo HTTP response bodies in thrown errors", async () => {
@@ -810,6 +820,48 @@ function createJsonResponse(value: unknown, init: ResponseInit = {}): Response {
     ...init,
     headers,
     status: init.status ?? 200,
+  });
+}
+
+function createUnsignedTelegramUsageLimitNoticeAuthority(input: {
+  userId?: string;
+} = {}) {
+  return {
+    ...buildCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody({
+      expiresAt: "2026-05-20T12:15:00.000Z",
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      issuedAt: "2026-05-20T12:00:00.000Z",
+      message: "quota reached",
+      noticeCode: "edge_usage_limit_reached",
+      periodStart: "2026-05-01T00:00:00.000Z",
+      replyToMessageId: "7000",
+      sourceEventId: "telegram_event_123",
+      target: "telegram_thread:123",
+      userId: input.userId ?? "user_123",
+    }),
+    signature: {
+      alg: "HMAC-SHA256" as const,
+      keyId: "v1",
+      signature: "unsigned",
+    },
+  };
+}
+
+async function createSignedTelegramUsageLimitNoticeAuthority() {
+  return await signCloudflareHostedControlTelegramUsageLimitNoticeAuthority({
+    body: buildCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody({
+      expiresAt: "2026-05-20T12:15:00.000Z",
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      issuedAt: "2026-05-20T12:00:00.000Z",
+      message: "quota reached",
+      noticeCode: "edge_usage_limit_reached",
+      periodStart: "2026-05-01T00:00:00.000Z",
+      replyToMessageId: "7000",
+      sourceEventId: "telegram_event_123",
+      target: "telegram_thread:123",
+      userId: "user_123",
+    }),
+    secret: "authority-secret",
   });
 }
 

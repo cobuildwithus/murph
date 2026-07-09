@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  buildCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody,
+  signCloudflareHostedControlTelegramUsageLimitNoticeAuthority,
+} from "@murphai/cloudflare-hosted-control/client";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -21,19 +25,25 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
-  handleTelegramSendRoute,
+  handleTelegramUsageLimitNoticeRoute,
 } from "../src/worker/route-handlers/telegram-send.ts";
 
-function createRouteContext(body: unknown): Parameters<typeof handleTelegramSendRoute>[0] {
-  const request = new Request("https://runner.example.test/internal/users/member_123/telegram/send", {
-    body: typeof body === "string" ? body : JSON.stringify(body),
-    headers: {
-      "content-type": "application/json; charset=utf-8",
+function createRouteContext(
+  body: unknown,
+): Parameters<typeof handleTelegramUsageLimitNoticeRoute>[0] {
+  const request = new Request(
+    "https://runner.example.test/internal/users/member_123/telegram/usage-limit-notice",
+    {
+      body: typeof body === "string" ? body : JSON.stringify(body),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
     },
-    method: "POST",
-  });
+  );
   return {
     env: {
+      HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET: "authority-secret",
       TELEGRAM_BOT_TOKEN: "telegram-token",
     },
     request,
@@ -43,8 +53,14 @@ function createRouteContext(body: unknown): Parameters<typeof handleTelegramSend
 
 describe("worker Telegram send route", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-20T12:00:00.000Z"));
     mocks.emitHostedExecutionStructuredLog.mockReset();
     mocks.sendHostedProviderTelegramMessage.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("delegates valid Telegram sends to the Worker-owned provider effect", async () => {
@@ -54,11 +70,8 @@ describe("worker Telegram send route", () => {
       targetKind: "thread",
     });
 
-    const response = await handleTelegramSendRoute(createRouteContext({
-      idempotencyKey: "ai-usage-gate:member_123:2026-05",
-      message: "Usage limit reached.",
-      replyToMessageId: "7000",
-      target: "telegram_thread:runtime-denied",
+    const response = await handleTelegramUsageLimitNoticeRoute(createRouteContext({
+      authority: await createTelegramUsageLimitNoticeAuthority(),
     }), "member_123");
 
     expect(response.status).toBe(200);
@@ -95,9 +108,8 @@ describe("worker Telegram send route", () => {
     });
     mocks.sendHostedProviderTelegramMessage.mockRejectedValueOnce(failure);
 
-    const response = await handleTelegramSendRoute(createRouteContext({
-      message: "Usage limit reached.",
-      target: "telegram_thread:runtime-denied",
+    const response = await handleTelegramUsageLimitNoticeRoute(createRouteContext({
+      authority: await createTelegramUsageLimitNoticeAuthority(),
     }), "member_123");
 
     expect(response.status).toBe(200);
@@ -115,9 +127,9 @@ describe("worker Telegram send route", () => {
           failureCode: "ASSISTANT_TELEGRAM_RATE_LIMITED",
           retryAfterSeconds: 42,
           retryable: true,
-          routeName: "telegram-send",
+          routeName: "telegram-usage-limit-notice",
         }),
-        message: "Hosted worker Telegram send route returned a provider failure.",
+        message: "Hosted worker Telegram usage-limit notice route returned a provider failure.",
       }),
     );
   });
@@ -129,9 +141,8 @@ describe("worker Telegram send route", () => {
     });
     mocks.sendHostedProviderTelegramMessage.mockRejectedValueOnce(failure);
 
-    const response = await handleTelegramSendRoute(createRouteContext({
-      message: "Usage limit reached.",
-      target: "telegram_thread:runtime-denied",
+    const response = await handleTelegramUsageLimitNoticeRoute(createRouteContext({
+      authority: await createTelegramUsageLimitNoticeAuthority(),
     }), "member_123");
 
     expect(response.status).toBe(200);
@@ -144,15 +155,66 @@ describe("worker Telegram send route", () => {
   });
 
   it("rejects malformed Telegram send bodies", async () => {
-    const response = await handleTelegramSendRoute(createRouteContext({
+    const response = await handleTelegramUsageLimitNoticeRoute(createRouteContext({
       target: "telegram_thread:runtime-denied",
     }), "member_123");
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       code: "invalid_request",
-      error: "Malformed Telegram send request.",
+      error: "Malformed Telegram usage-limit notice request.",
+    });
+    expect(mocks.sendHostedProviderTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("rejects tampered Telegram usage-limit notice authority before provider egress", async () => {
+    const authority = await createTelegramUsageLimitNoticeAuthority();
+    const response = await handleTelegramUsageLimitNoticeRoute(createRouteContext({
+      authority: {
+        ...authority,
+        target: "telegram_thread:other",
+      },
+    }), "member_123");
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      code: "authority_invalid",
+      error: "Telegram usage-limit notice authority is invalid.",
+    });
+    expect(mocks.sendHostedProviderTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Telegram usage-limit authority verification is unavailable", async () => {
+    const context = createRouteContext({
+      authority: await createTelegramUsageLimitNoticeAuthority(),
+    });
+    context.env.HOSTED_TELEGRAM_USAGE_LIMIT_NOTICE_AUTHORITY_SECRET = undefined;
+
+    const response = await handleTelegramUsageLimitNoticeRoute(context, "member_123");
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      code: "authority_unavailable",
+      error: "Telegram usage-limit notice authority verification is unavailable.",
     });
     expect(mocks.sendHostedProviderTelegramMessage).not.toHaveBeenCalled();
   });
 });
+
+async function createTelegramUsageLimitNoticeAuthority() {
+  return await signCloudflareHostedControlTelegramUsageLimitNoticeAuthority({
+    body: buildCloudflareHostedControlTelegramUsageLimitNoticeAuthorityBody({
+      expiresAt: "2026-05-20T12:15:00.000Z",
+      idempotencyKey: "ai-usage-gate:member_123:2026-05",
+      issuedAt: "2026-05-20T12:00:00.000Z",
+      message: "Usage limit reached.",
+      noticeCode: "edge_usage_limit_reached",
+      periodStart: "2026-05-01T00:00:00.000Z",
+      replyToMessageId: "7000",
+      sourceEventId: "telegram_event_runtime_denied",
+      target: "telegram_thread:runtime-denied",
+      userId: "member_123",
+    }),
+    secret: "authority-secret",
+  });
+}

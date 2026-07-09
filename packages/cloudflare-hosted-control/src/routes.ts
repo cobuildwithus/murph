@@ -12,9 +12,9 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "runtime/ensure-processing",
   },
-  telegramSend: {
+  telegramUsageLimitNotice: {
     method: "POST",
-    suffix: "telegram/send",
+    suffix: "telegram/usage-limit-notice",
   },
   userDataDelete: {
     method: "POST",
@@ -39,8 +39,8 @@ export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: 
   return buildCloudflareHostedControlUserRoutePath("runtimeEnsureProcessing", userId);
 }
 
-export function buildCloudflareHostedControlTelegramSendPath(userId: string): string {
-  return buildCloudflareHostedControlUserRoutePath("telegramSend", userId);
+export function buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("telegramUsageLimitNotice", userId);
 }
 
 export function buildCloudflareHostedControlUserDataDeletionPath(userId: string): string {

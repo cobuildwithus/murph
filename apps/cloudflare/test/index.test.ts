@@ -326,7 +326,7 @@ describe("cloudflare worker routes", () => {
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "user-data-delete",
-      "telegram-send",
+      "telegram-usage-limit-notice",
       "browser-vault-session",
       "user-status",
     ]);
@@ -341,7 +341,7 @@ describe("cloudflare worker routes", () => {
       "deploy-container-smoke",
       "runtime-ensure-processing",
       "user-data-delete",
-      "telegram-send",
+      "telegram-usage-limit-notice",
       "browser-vault-session",
       "user-status",
     ]);

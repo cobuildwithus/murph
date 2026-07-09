@@ -8,7 +8,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   buildCloudflareHostedControlBrowserVaultSessionPath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
-  buildCloudflareHostedControlTelegramSendPath,
+  buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
   matchCloudflareHostedControlUserRoutePath,
@@ -25,8 +25,8 @@ describe("cloudflare hosted control routes", () => {
     expect(buildCloudflareHostedControlRuntimeEnsureProcessingPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/runtime/ensure-processing",
     );
-    expect(buildCloudflareHostedControlTelegramSendPath("user/a b")).toBe(
-      "/internal/users/user%2Fa%20b/telegram/send",
+    expect(buildCloudflareHostedControlTelegramUsageLimitNoticePath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/telegram/usage-limit-notice",
     );
     expect(buildCloudflareHostedControlUserDataDeletionPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/account-data/delete",
@@ -38,7 +38,7 @@ describe("cloudflare hosted control routes", () => {
       buildCloudflareHostedControlBrowserVaultSessionPath,
       buildCloudflareHostedControlUserDataDeletionPath,
       buildCloudflareHostedControlRuntimeEnsureProcessingPath,
-      buildCloudflareHostedControlTelegramSendPath,
+      buildCloudflareHostedControlTelegramUsageLimitNoticePath,
       buildCloudflareHostedControlUserStatusPath,
     ]) {
       expect(() => buildPath("  \t")).toThrow("Cloudflare hosted control userId must not be blank.");
@@ -63,8 +63,8 @@ describe("cloudflare hosted control routes", () => {
     ).toEqual({ userId: encodedUserId });
     expect(
       matchCloudflareHostedControlUserRoutePath(
-        "telegramSend",
-        buildCloudflareHostedControlTelegramSendPath(userId),
+        "telegramUsageLimitNotice",
+        buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId),
       ),
     ).toEqual({ userId: encodedUserId });
     expect(
@@ -89,7 +89,7 @@ describe("cloudflare hosted control routes", () => {
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
       status: { method: "GET", suffix: "status" },
-      telegramSend: { method: "POST", suffix: "telegram/send" },
+      telegramUsageLimitNotice: { method: "POST", suffix: "telegram/usage-limit-notice" },
       userDataDelete: { method: "POST", suffix: "account-data/delete" },
     });
     expect(Object.values(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS)).not.toContainEqual(
@@ -136,14 +136,14 @@ describe("cloudflare hosted control routes", () => {
       "CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS",
       "buildCloudflareHostedControlBrowserVaultSessionPath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",
-      "buildCloudflareHostedControlTelegramSendPath",
+      "buildCloudflareHostedControlTelegramUsageLimitNoticePath",
       "buildCloudflareHostedControlUserDataDeletionPath",
       "buildCloudflareHostedControlUserStatusPath",
       "matchCloudflareHostedControlUserRoutePath",
     ]);
     expect(routesModule).toMatchObject({
       buildCloudflareHostedControlBrowserVaultSessionPath: expect.any(Function),
-      buildCloudflareHostedControlTelegramSendPath: expect.any(Function),
+      buildCloudflareHostedControlTelegramUsageLimitNoticePath: expect.any(Function),
       buildCloudflareHostedControlUserDataDeletionPath: expect.any(Function),
       buildCloudflareHostedControlUserStatusPath: expect.any(Function),
       matchCloudflareHostedControlUserRoutePath: expect.any(Function),
