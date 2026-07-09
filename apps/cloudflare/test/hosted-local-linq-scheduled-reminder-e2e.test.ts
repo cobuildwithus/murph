@@ -139,6 +139,10 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(requireLinqStub().readObservedMessageText(setupReplySend)).toBe(setupReplyText);
     const setupStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(setupStatus.lastErrorCode ?? null).toBeNull();
+    await waitForHostedWorkspaceWakeNotLaterThan({
+      latestAllowedWakeAt: scheduledReminderTimes.dueAtIso,
+      userId,
+    });
     assertScheduledReminderRunway(scheduledReminderTimes.dueAtIso);
 
     requireScenario().queueAssistantResponses([
@@ -149,14 +153,18 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     ], {
       matchInputContains: scheduledReminderInstructions,
     });
-    const reminderSendBaselineCount = requireLinqStub().countObservedSends(reminderPath);
+    const reminderSendBaselineCount = countScheduledReminderSendsWithoutNudge({
+      expectedPath: reminderPath,
+      expectedText: reminderText,
+    });
     const reminderProviderRequestBaselineCount =
       requireScenario().assistantProviderRequests.length;
     const reminderCronUsageNotBeforeIso = new Date().toISOString();
     await sleepUntil(scheduledReminderTimes.dueAtIso);
-    const sendRequest = await waitForScheduledReminderSend({
+    const sendRequest = await waitForScheduledReminderSendWithoutNudge({
       baselineCount: reminderSendBaselineCount,
       expectedPath: reminderPath,
+      expectedText: reminderText,
       timeoutMs: scheduledReminderSendWaitMs,
       userId,
     });
@@ -209,6 +217,10 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(requireLinqStub().readObservedMessageText(overlapSetupSend)).toBe(setupReplyText);
     const overlapSetupStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(overlapSetupStatus.lastErrorCode ?? null).toBeNull();
+    await waitForHostedWorkspaceWakeNotLaterThan({
+      latestAllowedWakeAt: overlapSetupTimes.dueAtIso,
+      userId,
+    });
     assertScheduledReminderRunway(overlapSetupTimes.dueAtIso);
 
     const heldOverlapReminderResponse = createHeldAssistantProviderTextResponse(
@@ -637,9 +649,65 @@ function assertScheduledReminderRunway(dueAtIso: string): void {
   }
 }
 
-async function waitForScheduledReminderSend(input: {
+async function waitForHostedWorkspaceWakeNotLaterThan(input: {
+  latestAllowedWakeAt: string;
+  userId: string;
+}): Promise<string> {
+  const latestAllowedWakeAtMs = Date.parse(input.latestAllowedWakeAt);
+  if (!Number.isFinite(latestAllowedWakeAtMs)) {
+    throw new Error(`Invalid scheduled reminder due timestamp: ${input.latestAllowedWakeAt}`);
+  }
+
+  const startedAt = Date.now();
+  let latestNextWakeAt: string | null = null;
+  let latestNextAlarmAt: string | null = null;
+  let latestError: string | null = null;
+
+  while ((Date.now() - startedAt) < 120_000) {
+    let status: Awaited<ReturnType<HostedLocalFullStackScenario["harness"]["readUserStatus"]>>;
+    try {
+      status = await requireScenario().harness.readUserStatus(input.userId);
+    } catch (error) {
+      latestError = error instanceof Error ? error.message : String(error);
+      await sleep(1_000);
+      continue;
+    }
+
+    if (status.lastErrorCode) {
+      throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+        "Hosted runner reported an error before checkpointing the scheduled Linq reminder wake.",
+        `lastErrorCode: ${status.lastErrorCode}`,
+      ]));
+    }
+
+    latestNextWakeAt = status.workspace?.nextWakeAt ?? null;
+    latestNextAlarmAt = status.nextAlarmAt ?? null;
+    const latestNextWakeAtMs = latestNextWakeAt ? Date.parse(latestNextWakeAt) : NaN;
+    if (
+      latestNextWakeAt
+      && Number.isFinite(latestNextWakeAtMs)
+      && latestNextWakeAtMs > Date.now()
+      && latestNextWakeAtMs <= latestAllowedWakeAtMs
+    ) {
+      return latestNextWakeAt;
+    }
+
+    await sleep(1_000);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+    "Timed out waiting for the hosted workspace to arm a wake for the scheduled Linq reminder.",
+    `latestAllowedWakeAt: ${input.latestAllowedWakeAt}`,
+    `latestNextWakeAt: ${latestNextWakeAt ?? "null"}`,
+    `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
+    latestError ? `latest status read error: ${latestError}` : null,
+  ].filter((line): line is string => Boolean(line))));
+}
+
+async function waitForScheduledReminderSendWithoutNudge(input: {
   baselineCount: number;
   expectedPath: string;
+  expectedText: string;
   timeoutMs: number;
   userId: string;
 }): Promise<ObservedLinqRequest> {
@@ -647,6 +715,7 @@ async function waitForScheduledReminderSend(input: {
   while ((Date.now() - startedAt) < input.timeoutMs) {
     const matchingRequests = requireLinqStub().observedRequests.filter((request) =>
       request.method === "POST" && request.url === input.expectedPath
+      && requireLinqStub().readObservedMessageText(request) === input.expectedText
     );
     if (matchingRequests.length > input.baselineCount) {
       return matchingRequests.at(-1)!;
@@ -656,11 +725,23 @@ async function waitForScheduledReminderSend(input: {
   }
 
   throw new Error(await requireScenario().buildFailureMessage(input.userId, [
-    "Timed out waiting for the scheduled Linq reminder send after the due time.",
+    "Timed out waiting for the scheduled Linq reminder send without another inbound or runner nudge.",
     `expected path: ${input.expectedPath}`,
+    `expected text: ${input.expectedText}`,
     `baseline count: ${input.baselineCount}`,
     `observed requests: ${JSON.stringify(summarizeObservedLinqRequests())}`,
   ]));
+}
+
+function countScheduledReminderSendsWithoutNudge(input: {
+  expectedPath: string;
+  expectedText: string;
+}): number {
+  return requireLinqStub().observedRequests.filter((request) =>
+    request.method === "POST"
+    && request.url === input.expectedPath
+    && requireLinqStub().readObservedMessageText(request) === input.expectedText
+  ).length;
 }
 
 function summarizeObservedLinqRequests(): Array<{ method: string; url: string }> {
