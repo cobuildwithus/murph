@@ -1194,7 +1194,7 @@ describe("hosted Linq observability stores", () => {
         attemptedAt: true,
       }),
       where: {
-        idempotencyKey: legacyLookupKey,
+        idempotencyKey: currentLookupKey,
       },
     });
     expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenNthCalledWith(2, {
@@ -1202,7 +1202,7 @@ describe("hosted Linq observability stores", () => {
         attemptedAt: true,
       }),
       where: {
-        idempotencyKey: currentLookupKey,
+        idempotencyKey: legacyLookupKey,
       },
     });
     expect(fixture.hostedLinqDeliveryCreate).toHaveBeenNthCalledWith(
@@ -1235,20 +1235,22 @@ describe("hosted Linq observability stores", () => {
     const currentKey = "ai-usage-gate:member_123:2026-03";
     const legacyKey = "ai-usage-gate:member_123:2026-03:edge_usage_limit_reached";
     const legacyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(legacyKey);
-    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
-      acceptedAt: null,
-      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
-      deliveredAt: null,
-      failedAt: null,
-      id: "hld_legacy_in_flight",
-      lastReceiptAt: null,
-      messageLookupKey: null,
-      phoneNumberLookupKey: null,
-      retryAfterAt: null,
-      skippedAt: null,
-      source: "hosted_webhook_side_effect",
-      status: "attempted",
-    });
+    fixture.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        id: "hld_legacy_in_flight",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        retryAfterAt: null,
+        skippedAt: null,
+        source: "hosted_webhook_side_effect",
+        status: "attempted",
+      });
     fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
 
     await expect(claimHostedLinqDeliveryProviderDispatchTx({
@@ -1267,6 +1269,14 @@ describe("hosted Linq observability stores", () => {
       id: "hld_legacy_in_flight",
     });
 
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        attemptedAt: true,
+      }),
+      where: {
+        idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(currentKey),
+      },
+    });
     expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
       select: expect.objectContaining({
         attemptedAt: true,
@@ -1435,6 +1445,68 @@ describe("hosted Linq observability stores", () => {
         }),
       }),
     );
+  });
+
+  it("claims an existing current AI usage notice before inspecting legacy guard rows", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    const currentKey = "ai-usage-gate:member_123:2026-03";
+    const legacyKey = "ai-usage-gate:member_123:2026-03:edge_usage_limit_reached";
+    const currentLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(currentKey);
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_current_started_telegram_notice",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      status: "provider_dispatch_started",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      guardIdempotencyKeys: [legacyKey],
+      idempotencyKey: currentKey,
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_runtime_ai_usage_limit_notice",
+      sourceRef: "telegram_event_runtime_denied",
+      targetKind: "telegram_thread",
+      template: "ai_usage_quota",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_current_started_telegram_notice",
+    });
+
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledTimes(1);
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        attemptedAt: true,
+      }),
+      where: {
+        idempotencyKey: currentLookupKey,
+      },
+    });
+    expect(fixture.hostedLinqDeliveryCreate).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith({
+      data: {
+        failedAt: attemptedAt,
+        failureCode: "HostedRuntimeTelegramUsageLimitNoticeUnknownError",
+        failureReason: "[redacted]",
+        retryAfterAt: null,
+        status: "failed",
+      },
+      where: expect.objectContaining({
+        id: "hld_current_started_telegram_notice",
+        status: "provider_dispatch_started",
+      }),
+    });
   });
 
   it("does not let Telegram usage notices reclaim stale webhook dispatch-started rows", async () => {
@@ -1964,6 +2036,108 @@ describe("hosted Linq observability stores", () => {
           ],
         },
       },
+    });
+  });
+
+  it("resolves stale current AI usage rows before stale legacy guard rows", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const legacyIdempotencyKey = "ai-usage-gate:legacy-notice-code";
+    const currentIdempotencyKey = "ai-usage-gate:current-period";
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        id: "hld_stale_legacy_guard",
+        idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(legacyIdempotencyKey),
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        retryAfterAt: null,
+        skippedAt: null,
+        source: "hosted_webhook_side_effect",
+        status: "attempted",
+      },
+      {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        id: "hld_stale_current_started",
+        idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(currentIdempotencyKey),
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        retryAfterAt: null,
+        skippedAt: null,
+        source: "hosted_webhook_side_effect",
+        status: "provider_dispatch_started",
+      },
+    ]);
+
+    await expect(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      currentIdempotencyKey,
+      legacyIdempotencyKeys: [legacyIdempotencyKey],
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+    })).resolves.toEqual({
+      idempotencyKey: currentIdempotencyKey,
+      status: "claimable",
+    });
+  });
+
+  it("resolves stale current Telegram dispatch rows before stale legacy guard rows", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const legacyIdempotencyKey = "ai-usage-gate:legacy-notice-code";
+    const currentIdempotencyKey = "ai-usage-gate:current-period";
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        id: "hld_stale_telegram_legacy_guard",
+        idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(legacyIdempotencyKey),
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        retryAfterAt: null,
+        skippedAt: null,
+        source: "hosted_runtime_ai_usage_limit_notice",
+        status: "attempted",
+      },
+      {
+        acceptedAt: null,
+        attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        id: "hld_stale_telegram_current_started",
+        idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(currentIdempotencyKey),
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        retryAfterAt: null,
+        skippedAt: null,
+        source: "hosted_runtime_ai_usage_limit_notice",
+        status: "provider_dispatch_started",
+      },
+    ]);
+
+    await expect(resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      currentIdempotencyKey,
+      legacyIdempotencyKeys: [legacyIdempotencyKey],
+      prisma: fixture.prisma as never,
+      source: "hosted_runtime_ai_usage_limit_notice",
+    })).resolves.toEqual({
+      idempotencyKey: currentIdempotencyKey,
+      status: "claimable",
     });
   });
 

@@ -316,19 +316,6 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
     id: buildHostedLinqDeliveryId(idempotencyKey),
     idempotencyKey,
   };
-  const guardClaim = await reserveHostedLinqDeliveryGuardRowsTx({
-    attemptedAt,
-    data,
-    guardIdempotencyKeys: input.guardIdempotencyKeys,
-    primaryIdempotencyKey: idempotencyKey,
-    prisma: input.prisma,
-    reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
-    source: input.source,
-  });
-  if (guardClaim) {
-    return guardClaim;
-  }
-
   const existing = await input.prisma.hostedLinqDelivery.findUnique({
     where: { idempotencyKey },
     select: hostedLinqDeliveryLifecycleSelect,
@@ -342,6 +329,19 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
       reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
       source: input.source,
     });
+  }
+
+  const guardClaim = await reserveHostedLinqDeliveryGuardRowsTx({
+    attemptedAt,
+    data,
+    guardIdempotencyKeys: input.guardIdempotencyKeys,
+    primaryIdempotencyKey: idempotencyKey,
+    prisma: input.prisma,
+    reclaimStalePreProviderAttempt: input.reclaimStalePreProviderAttempt,
+    source: input.source,
+  });
+  if (guardClaim) {
+    return guardClaim;
   }
 
   try {
@@ -548,6 +548,31 @@ export async function resolveHostedLinqAiUsageLimitNoticeDeliveryClaimTx(input: 
       || isHostedLinqTerminalTelegramUsageLimitFailure(candidate.delivery)
     )
   ) {
+    return { status: "already_claimed" };
+  }
+
+  const currentCandidate = existingCandidates.find((candidate) => !candidate.legacy);
+  if (currentCandidate) {
+    const inFlight = resolveHostedLinqDeliveryInFlightState({
+      attemptedAt,
+      delivery: currentCandidate.delivery,
+    });
+    if (inFlight.inFlight) {
+      return inFlight.retryAt
+        ? { retryAt: inFlight.retryAt, status: "in_flight" }
+        : { status: "in_flight" };
+    }
+    if (
+      canClaimHostedLinqAiUsageLimitLegacyDelivery({
+        delivery: currentCandidate.delivery,
+        source: input.source,
+      })
+    ) {
+      return {
+        idempotencyKey: currentCandidate.idempotencyKey,
+        status: "claimable",
+      };
+    }
     return { status: "already_claimed" };
   }
 
