@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   canUseActiveCallCircleParticipant: vi.fn(),
   canUseActiveCallCircleParticipantPair: vi.fn(),
   createCallCircleMatchProposal: vi.fn(),
+  dropCallCircleFinalMatchForCalendarBusy: vi.fn(),
+  dropCallCircleMorningMatchForCalendarBusy: vi.fn(),
   expirePastCallCircleMatches: vi.fn(),
   listCallCircleEligibleParticipants: vi.fn(),
   listRecentCallCircleMatches: vi.fn(),
@@ -47,6 +49,8 @@ vi.mock("@/src/lib/call-circle/match-store", () => ({
     ],
   },
   createCallCircleMatchProposal: mocks.createCallCircleMatchProposal,
+  dropCallCircleFinalMatchForCalendarBusy: mocks.dropCallCircleFinalMatchForCalendarBusy,
+  dropCallCircleMorningMatchForCalendarBusy: mocks.dropCallCircleMorningMatchForCalendarBusy,
   expirePastCallCircleMatches: mocks.expirePastCallCircleMatches,
   listRecentCallCircleMatches: mocks.listRecentCallCircleMatches,
   markCallCircleMatchAmAsked: mocks.markCallCircleMatchAmAsked,
@@ -105,6 +109,8 @@ describe("runCallCircleScheduler", () => {
     mocks.canUseActiveCallCircleParticipant.mockResolvedValue(true);
     mocks.readLastCallCirclePartnerMemberIds.mockResolvedValue(new Map());
     mocks.createCallCircleMatchProposal.mockResolvedValue(null);
+    mocks.dropCallCircleFinalMatchForCalendarBusy.mockResolvedValue(true);
+    mocks.dropCallCircleMorningMatchForCalendarBusy.mockResolvedValue(true);
     mocks.markCallCircleMatchAmAsked.mockResolvedValue(true);
     mocks.markCallCircleMatchFinalAsked.mockResolvedValue(true);
     mocks.markCallCircleMatchOutcome.mockResolvedValue(true);
@@ -659,6 +665,8 @@ describe("runCallCircleScheduler", () => {
     const tx = {};
     const prisma = createSchedulerPrisma({
       dueMatches: [schedulerMatch({
+        sideAResponse: "confirmed",
+        sideBResponse: "confirmed",
         status: "both_confirmed",
         windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
         windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
@@ -691,6 +699,8 @@ describe("runCallCircleScheduler", () => {
     const tx = {};
     const prisma = createSchedulerPrisma({
       dueMatches: [schedulerMatch({
+        sideAResponse: "confirmed",
+        sideBResponse: "confirmed",
         status: "both_confirmed",
         windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
         windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
@@ -713,13 +723,17 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.readCallCircleCalendarAvailability).toHaveBeenCalledTimes(2);
     expect(mocks.readCallCircleNotificationPreflightTx.mock.invocationCallOrder[1])
       .toBeLessThan(mocks.readCallCircleCalendarAvailability.mock.invocationCallOrder[0]);
-    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+    expect(mocks.dropCallCircleFinalMatchForCalendarBusy).toHaveBeenCalledWith({
+      groupId: "hgrp_123",
       matchId: "hccm_123",
       now,
-      outcome: "calendar_busy",
-      prisma: tx,
-      status: "dropped",
+      prisma,
+      sideAResponse: "confirmed",
+      sideBResponse: "confirmed",
+      windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+      windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
     });
+    expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
     expect(mocks.markCallCircleMatchFinalAsked).not.toHaveBeenCalled();
     expect(mocks.appendCallCircleConfirmNotificationTx).not.toHaveBeenCalled();
   });
@@ -785,13 +799,17 @@ describe("runCallCircleScheduler", () => {
     expect(mocks.readCallCircleCalendarAvailability).toHaveBeenCalledTimes(2);
     expect(mocks.readCallCircleNotificationPreflightTx.mock.invocationCallOrder[1])
       .toBeLessThan(mocks.readCallCircleCalendarAvailability.mock.invocationCallOrder[0]);
-    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+    expect(mocks.dropCallCircleMorningMatchForCalendarBusy).toHaveBeenCalledWith({
+      groupId: "hgrp_123",
       matchId: "hccm_123",
       now,
-      outcome: "calendar_busy",
-      prisma: tx,
-      status: "dropped",
+      prisma,
+      sideAResponse: "pending",
+      sideBResponse: "pending",
+      windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+      windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
     });
+    expect(mocks.markCallCircleMatchOutcome).not.toHaveBeenCalled();
     expect(mocks.markCallCircleMatchAmAsked).not.toHaveBeenCalled();
     expect(mocks.appendCallCircleConfirmNotificationTx).not.toHaveBeenCalled();
   });

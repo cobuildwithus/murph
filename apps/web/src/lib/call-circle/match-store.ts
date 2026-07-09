@@ -433,6 +433,73 @@ export async function markCallCircleMatchFinalAsked(input: {
   return result.count > 0;
 }
 
+export async function dropCallCircleMorningMatchForCalendarBusy(input: {
+  groupId: string;
+  matchId: string;
+  now: Date;
+  prisma?: CallCirclePrismaClient;
+  sideAResponse: HostedCallCircleMatchResponse;
+  sideBResponse: HostedCallCircleMatchResponse;
+  windowEndAt: Date;
+  windowStartAt: Date;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const result = await prisma.hostedCallCircleMatch.updateMany({
+    data: {
+      endedAt: input.now,
+      outcome: "calendar_busy",
+      status: "dropped",
+    },
+    where: {
+      amAskedAt: null,
+      claimedAt: null,
+      finalAskedAt: null,
+      groupId: input.groupId,
+      id: input.matchId,
+      phoneCallId: null,
+      sideAResponse: input.sideAResponse,
+      sideBResponse: input.sideBResponse,
+      status: { in: ["proposed", "asking"] },
+      windowEndAt: input.windowEndAt,
+      windowStartAt: input.windowStartAt,
+    },
+  });
+  return result.count > 0;
+}
+
+export async function dropCallCircleFinalMatchForCalendarBusy(input: {
+  groupId: string;
+  matchId: string;
+  now: Date;
+  prisma?: CallCirclePrismaClient;
+  sideAResponse: HostedCallCircleMatchResponse;
+  sideBResponse: HostedCallCircleMatchResponse;
+  windowEndAt: Date;
+  windowStartAt: Date;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const result = await prisma.hostedCallCircleMatch.updateMany({
+    data: {
+      endedAt: input.now,
+      outcome: "calendar_busy",
+      status: "dropped",
+    },
+    where: {
+      claimedAt: null,
+      finalAskedAt: null,
+      groupId: input.groupId,
+      id: input.matchId,
+      phoneCallId: null,
+      sideAResponse: input.sideAResponse,
+      sideBResponse: input.sideBResponse,
+      status: "both_confirmed",
+      windowEndAt: input.windowEndAt,
+      windowStartAt: input.windowStartAt,
+    },
+  });
+  return result.count > 0;
+}
+
 export async function claimCallCircleMatchForConnector(input: {
   groupId: string;
   matchId: string;

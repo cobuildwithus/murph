@@ -1,6 +1,10 @@
 import "server-only";
 
-import { Prisma, type PrismaClient } from "@prisma/client";
+import {
+  Prisma,
+  type HostedCallCircleMatchResponse,
+  type PrismaClient,
+} from "@prisma/client";
 
 import {
   canAppendCallCircleSetupNotification,
@@ -12,6 +16,8 @@ import {
 } from "./participant-store";
 import {
   createCallCircleMatchProposal,
+  dropCallCircleFinalMatchForCalendarBusy,
+  dropCallCircleMorningMatchForCalendarBusy,
   expirePastCallCircleMatches,
   listRecentCallCircleMatches,
   markCallCircleMatchAmAsked,
@@ -885,10 +891,15 @@ async function askCallCircleMorningConfirmations(input: {
     })
   ));
   if (calendarAvailability.some((availability) => availability === "busy")) {
-    await dropCallCircleMatchForCalendarBusy({
-      match: input.match,
+    await dropCallCircleMorningMatchForCalendarBusy({
+      groupId: input.match.groupId,
+      matchId: input.match.id,
       now: input.now,
       prisma: input.prisma,
+      sideAResponse: input.match.sideAResponse,
+      sideBResponse: input.match.sideBResponse,
+      windowEndAt: input.match.windowEndAt,
+      windowStartAt: input.match.windowStartAt,
     });
     return false;
   }
@@ -1044,10 +1055,15 @@ async function askCallCircleFinalConfirmations(input: {
     })
   ));
   if (calendarAvailability.some((availability) => availability === "busy")) {
-    await dropCallCircleMatchForCalendarBusy({
-      match: input.match,
+    await dropCallCircleFinalMatchForCalendarBusy({
+      groupId: input.match.groupId,
+      matchId: input.match.id,
       now: input.now,
       prisma: input.prisma,
+      sideAResponse: input.match.sideAResponse,
+      sideBResponse: input.match.sideBResponse,
+      windowEndAt: input.match.windowEndAt,
+      windowStartAt: input.match.windowStartAt,
     });
     return false;
   }
@@ -1172,29 +1188,6 @@ async function preflightCallCircleFinalNotificationsTx(input: {
     });
   }
   return pendingNotifications;
-}
-
-async function dropCallCircleMatchForCalendarBusy(input: {
-  match: SchedulerMatch;
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<void> {
-  await input.prisma.$transaction(async (tx) => {
-    if (!await cancelCallCircleMatchIfParticipantsInactive({
-      match: input.match,
-      now: input.now,
-      prisma: tx,
-    })) {
-      return;
-    }
-    await markCallCircleMatchOutcome({
-      matchId: input.match.id,
-      now: input.now,
-      outcome: "calendar_busy",
-      prisma: tx,
-      status: "dropped",
-    });
-  });
 }
 
 async function appendCallCircleBridgeHandoffs(input: {
@@ -1327,8 +1320,8 @@ interface SchedulerMatch {
     providerStartAttemptedAt: Date | null;
     status: string;
   } | null;
-  sideAResponse: string;
-  sideBResponse: string;
+  sideAResponse: HostedCallCircleMatchResponse;
+  sideBResponse: HostedCallCircleMatchResponse;
   status: string;
   windowEndAt: Date;
   windowStartAt: Date;

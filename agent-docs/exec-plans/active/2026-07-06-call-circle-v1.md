@@ -429,6 +429,22 @@ Focused follow-up verification:
 - `git diff --check`
 - `pnpm no-js`
 
+## ReviewGPT Follow-Up 29 2026-07-09
+
+Accepted finding from the Phlebas PR-head rerun:
+
+- Calendar free/busy checks happen outside the DB transaction, so a stale busy
+  result must not use the broad outcome writer after another owner has marked
+  an ask, collected confirmations, claimed a bridge, or attached a phone call.
+  Calendar-busy drops now use two stage-scoped match-store mutations fenced by
+  the exact observed stage, group, window, side responses, `claimedAt: null`,
+  and `phoneCallId: null`; stale zero-row updates do nothing.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-scheduler.test.ts apps/web/test/call-circle-match-store.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+
 ## ReviewGPT Follow-Up 24 2026-07-08
 
 Accepted findings from the Phlebas PR-head rerun:

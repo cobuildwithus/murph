@@ -18,6 +18,8 @@ import {
   claimCallCircleMatchForConnector as claimMatchForConnector,
   createCallCircleMatchProposal,
   declineCallCircleMatchSide as declineMatchSide,
+  dropCallCircleFinalMatchForCalendarBusy,
+  dropCallCircleMorningMatchForCalendarBusy,
   expirePastCallCircleMatches,
   listRecentCallCircleMatches,
   markCallCircleMatchFinalAsked,
@@ -235,6 +237,105 @@ describe("Call Circle conditional mutations", () => {
         status: { in: ["proposed", "asking", "both_confirmed", "bridging"] },
       },
     });
+  });
+
+  it("drops a calendar-busy morning ask only while the same stage is still pending", async () => {
+    const prisma = {
+      hostedCallCircleMatch: { updateMany },
+    };
+    const now = new Date("2026-07-06T09:30:00.000Z");
+    const windowStartAt = new Date("2026-07-06T15:00:00.000Z");
+    const windowEndAt = new Date("2026-07-06T15:30:00.000Z");
+
+    await expect(dropCallCircleMorningMatchForCalendarBusy({
+      groupId: "hgrp_123",
+      matchId: "hccm_123",
+      now,
+      prisma: prisma as never,
+      sideAResponse: "countered",
+      sideBResponse: "pending",
+      windowEndAt,
+      windowStartAt,
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        endedAt: now,
+        outcome: "calendar_busy",
+        status: "dropped",
+      },
+      where: {
+        amAskedAt: null,
+        claimedAt: null,
+        finalAskedAt: null,
+        groupId: "hgrp_123",
+        id: "hccm_123",
+        phoneCallId: null,
+        sideAResponse: "countered",
+        sideBResponse: "pending",
+        status: { in: ["proposed", "asking"] },
+        windowEndAt,
+        windowStartAt,
+      },
+    });
+  });
+
+  it("drops a calendar-busy final ask only before the final stage is marked", async () => {
+    const prisma = {
+      hostedCallCircleMatch: { updateMany },
+    };
+    const now = new Date("2026-07-06T14:45:00.000Z");
+    const windowStartAt = new Date("2026-07-06T15:00:00.000Z");
+    const windowEndAt = new Date("2026-07-06T15:30:00.000Z");
+
+    await expect(dropCallCircleFinalMatchForCalendarBusy({
+      groupId: "hgrp_123",
+      matchId: "hccm_123",
+      now,
+      prisma: prisma as never,
+      sideAResponse: "confirmed",
+      sideBResponse: "countered",
+      windowEndAt,
+      windowStartAt,
+    })).resolves.toBe(true);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        endedAt: now,
+        outcome: "calendar_busy",
+        status: "dropped",
+      },
+      where: {
+        claimedAt: null,
+        finalAskedAt: null,
+        groupId: "hgrp_123",
+        id: "hccm_123",
+        phoneCallId: null,
+        sideAResponse: "confirmed",
+        sideBResponse: "countered",
+        status: "both_confirmed",
+        windowEndAt,
+        windowStartAt,
+      },
+    });
+  });
+
+  it("ignores stale calendar-busy drops after another owner advances the match", async () => {
+    const prisma = {
+      hostedCallCircleMatch: { updateMany },
+    };
+    updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(dropCallCircleFinalMatchForCalendarBusy({
+      groupId: "hgrp_123",
+      matchId: "hccm_123",
+      now: new Date("2026-07-06T14:45:00.000Z"),
+      prisma: prisma as never,
+      sideAResponse: "confirmed",
+      sideBResponse: "confirmed",
+      windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+      windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+    })).resolves.toBe(false);
   });
 
   it("leaves final-confirmed matches for scheduler handoff instead of generic expiry", async () => {
