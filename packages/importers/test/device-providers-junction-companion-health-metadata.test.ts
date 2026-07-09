@@ -16,7 +16,7 @@ const WORKOUT_STRAIN_RECORD_ID = "b".repeat(64);
 function buildSnapshot(input: {
   importedAt: string;
   recoveryScore: number;
-  syncVersion: number;
+  syncVersion?: number;
   workoutStrain: number;
 }) {
   return {
@@ -74,6 +74,7 @@ test("Junction companion health metadata normalizes into recovery and workout-st
   assert.equal(recovery?.dataOrigin?.sourceProviderSlug, "apple-health-kit");
   assert.equal(recovery?.dataOrigin?.sourceType, "companion-whoop-metadata-unverified");
   assert.equal(recovery?.externalRef?.resourceType, "junction-apple-health-kit-sleep");
+  assert.equal(recovery?.externalRef?.version, "1");
   assert.equal(workoutStrain?.fields?.value, 11.3);
   assert.equal(workoutStrain?.fields?.unit, "score");
   assert.equal(workoutStrain?.fields?.observationGrain, "summary");
@@ -81,6 +82,7 @@ test("Junction companion health metadata normalizes into recovery and workout-st
   assert.equal(workoutStrain?.dataOrigin?.sourceProviderSlug, "apple-health-kit");
   assert.equal(workoutStrain?.dataOrigin?.sourceType, "companion-whoop-metadata-unverified");
   assert.equal(workoutStrain?.externalRef?.resourceType, "junction-apple-health-kit-activity");
+  assert.equal(workoutStrain?.externalRef?.version, "1");
   assert.equal(workoutStrain?.externalRef?.facet, "workout-strain");
 });
 
@@ -132,7 +134,7 @@ test("Junction companion health metadata replays exactly and updates the same ca
     const importSnapshot = (input: {
       importedAt: string;
       recoveryScore: number;
-      syncVersion: number;
+      syncVersion?: number;
       workoutStrain: number;
     }) => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       {
@@ -161,6 +163,23 @@ test("Junction companion health metadata replays exactly and updates the same ca
       syncVersion: 2,
       workoutStrain: 12.1,
     });
+    const conflictingEqual = await importSnapshot({
+      importedAt: "2026-04-03T02:30:00.000Z",
+      recoveryScore: 77,
+      syncVersion: 2,
+      workoutStrain: 12,
+    });
+    const delayedOlder = await importSnapshot({
+      importedAt: "2026-04-03T03:00:00.000Z",
+      recoveryScore: 72,
+      syncVersion: 1,
+      workoutStrain: 11.3,
+    });
+    const delayedUnversioned = await importSnapshot({
+      importedAt: "2026-04-03T04:00:00.000Z",
+      recoveryScore: 69,
+      workoutStrain: 10.8,
+    });
 
     const findRecovery = (result: typeof first) => result.events.find((event) =>
       event.kind === "observation" && event.metric === "recovery-score"
@@ -174,6 +193,12 @@ test("Junction companion health metadata replays exactly and updates the same ca
     const replayWorkoutStrain = findWorkoutStrain(replay);
     const updatedRecovery = findRecovery(update);
     const updatedWorkoutStrain = findWorkoutStrain(update);
+    const conflictingEqualRecovery = findRecovery(conflictingEqual);
+    const conflictingEqualWorkoutStrain = findWorkoutStrain(conflictingEqual);
+    const delayedOlderRecovery = findRecovery(delayedOlder);
+    const delayedOlderWorkoutStrain = findWorkoutStrain(delayedOlder);
+    const delayedUnversionedRecovery = findRecovery(delayedUnversioned);
+    const delayedUnversionedWorkoutStrain = findWorkoutStrain(delayedUnversioned);
 
     assert.ok(firstRecovery);
     assert.ok(firstWorkoutStrain);
@@ -183,6 +208,12 @@ test("Junction companion health metadata replays exactly and updates the same ca
     assert.equal(updatedWorkoutStrain?.id, firstWorkoutStrain.id);
     assert.equal(updatedRecovery?.lifecycle?.revision, 2);
     assert.equal(updatedWorkoutStrain?.lifecycle?.revision, 2);
+    assert.equal(conflictingEqualRecovery?.lifecycle?.revision, 2);
+    assert.equal(conflictingEqualWorkoutStrain?.lifecycle?.revision, 2);
+    assert.equal(delayedOlderRecovery?.lifecycle?.revision, 2);
+    assert.equal(delayedOlderWorkoutStrain?.lifecycle?.revision, 2);
+    assert.equal(delayedUnversionedRecovery?.lifecycle?.revision, 2);
+    assert.equal(delayedUnversionedWorkoutStrain?.lifecycle?.revision, 2);
     assert.equal(
       updatedRecovery?.kind === "observation" ? updatedRecovery.value : undefined,
       78,
@@ -191,18 +222,53 @@ test("Junction companion health metadata replays exactly and updates the same ca
       updatedWorkoutStrain?.kind === "observation" ? updatedWorkoutStrain.value : undefined,
       12.1,
     );
+    assert.equal(
+      conflictingEqualRecovery?.kind === "observation" ? conflictingEqualRecovery.value : undefined,
+      78,
+    );
+    assert.equal(
+      conflictingEqualWorkoutStrain?.kind === "observation"
+        ? conflictingEqualWorkoutStrain.value
+        : undefined,
+      12.1,
+    );
+    assert.equal(
+      delayedOlderRecovery?.kind === "observation" ? delayedOlderRecovery.value : undefined,
+      78,
+    );
+    assert.equal(
+      delayedOlderWorkoutStrain?.kind === "observation" ? delayedOlderWorkoutStrain.value : undefined,
+      12.1,
+    );
+    assert.equal(
+      delayedUnversionedRecovery?.kind === "observation" ? delayedUnversionedRecovery.value : undefined,
+      78,
+    );
+    assert.equal(
+      delayedUnversionedWorkoutStrain?.kind === "observation"
+        ? delayedUnversionedWorkoutStrain.value
+        : undefined,
+      12.1,
+    );
 
     const eventPaths = [...new Set([
       ...first.eventShardPaths,
       ...replay.eventShardPaths,
       ...update.eventShardPaths,
+      ...conflictingEqual.eventShardPaths,
+      ...delayedOlder.eventShardPaths,
+      ...delayedUnversioned.eventShardPaths,
     ])];
     const storedEvents = (
       await Promise.all(eventPaths.map((relativePath) =>
         coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
       ))
     ).flat();
-    assert.equal(storedEvents.length, 4, "exact replay must append nothing; update adds two revisions");
+    assert.equal(
+      storedEvents.length,
+      4,
+      "exact, conflicting, stale, and unversioned replays append nothing; update adds two revisions",
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
