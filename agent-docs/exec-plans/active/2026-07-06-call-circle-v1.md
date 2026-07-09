@@ -407,6 +407,28 @@ Focused follow-up verification:
 
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-match-store.test.ts`
 
+## ReviewGPT Follow-Up 28 2026-07-09
+
+Accepted findings from the Phlebas PR-head rerun:
+
+- Multi-group lifecycle/off-ramp replies could fail closed when the user
+  replied to a Call Circle confirmation notification with a non-match action
+  such as `pause`. Non-match response target resolution now reuses the
+  existing confirmation notification anchor only when it is exact, current for
+  the match, and paired with a fresh user reply; model-provided ids remain
+  conflict checks only.
+- Final confirmation asks skipped the calendar free/busy preflight used by
+  morning asks. Final asks now preflight notification reachability, check both
+  member calendars before marking/sending, and drop the match as
+  `calendar_busy` without final notifications when either member is busy.
+
+Focused follow-up verification:
+
+- `pnpm --filter @murphai/hosted-web test:prepared -- apps/web/test/call-circle-response-service.test.ts apps/web/test/call-circle-scheduler.test.ts`
+- `pnpm --filter @murphai/hosted-web typecheck`
+- `git diff --check`
+- `pnpm no-js`
+
 ## ReviewGPT Follow-Up 24 2026-07-08
 
 Accepted findings from the Phlebas PR-head rerun:

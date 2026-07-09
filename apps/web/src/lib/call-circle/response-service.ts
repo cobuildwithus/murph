@@ -309,6 +309,27 @@ async function resolveCallCircleResponseTarget(input: {
     return { groupId: setupContext.groupId, match: null, status: "ok" };
   }
 
+  const confirmContext = await resolveCallCircleConfirmGroupIdFromReplyContext({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    replyContext: input.replyContext,
+  });
+  if (confirmContext.status === "ambiguous") {
+    return {
+      status: "unavailable",
+      unavailableReason: "call_circle_context_unavailable",
+    };
+  }
+  if (confirmContext.status === "exact") {
+    if (input.request.groupId && input.request.groupId !== confirmContext.groupId) {
+      return {
+        status: "unavailable",
+        unavailableReason: "call_circle_context_unavailable",
+      };
+    }
+    return { groupId: confirmContext.groupId, match: null, status: "ok" };
+  }
+
   const groupId = await resolveSingleCallCircleParticipantGroupId({
     memberId: input.memberId,
     prisma: input.prisma,
@@ -322,7 +343,7 @@ async function resolveCallCircleResponseTarget(input: {
   return { groupId, match: null, status: "ok" };
 }
 
-type CallCircleSetupContextResolution =
+type CallCircleGroupContextResolution =
   | { status: "none" }
   | { status: "ambiguous" }
   | { groupId: string; status: "exact" };
@@ -343,7 +364,7 @@ async function resolveCallCircleSetupGroupIdFromReplyContext(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
   replyContext: HostedCallCircleRespondContext | null;
-}): Promise<CallCircleSetupContextResolution> {
+}): Promise<CallCircleGroupContextResolution> {
   const mailboxItemIds = normalizeReplyContextMailboxItemIds(
     input.replyContext?.inboundMailboxItemIds,
   );
@@ -423,6 +444,40 @@ async function resolveSingleCallCircleParticipantGroupId(input: {
     where: { memberId: input.memberId },
   });
   return participants.length === 1 ? participants[0]?.groupId ?? null : null;
+}
+
+async function resolveCallCircleConfirmGroupIdFromReplyContext(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  replyContext: HostedCallCircleRespondContext | null;
+}): Promise<CallCircleGroupContextResolution> {
+  const confirmContext = await resolveCallCircleConfirmMatchIdFromReplyContext(input);
+  if (confirmContext.status !== "exact") return confirmContext;
+
+  const match = await input.prisma.hostedCallCircleMatch.findUnique({
+    select: callCircleResponseMatchSelect,
+    where: { id: confirmContext.anchor.matchId },
+  });
+  if (!match) return { status: "none" };
+  if (match.memberAId !== input.memberId && match.memberBId !== input.memberId) {
+    return { status: "none" };
+  }
+  if (!isCallCircleConfirmAnchorCurrentForMatch({
+    anchor: confirmContext.anchor,
+    match,
+  })) {
+    return { status: "none" };
+  }
+  const askAt = readCurrentCallCircleMatchAskAt(match);
+  if (!askAt || !await hasFreshCallCircleReplyContext({
+    askAt,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    replyContext: input.replyContext,
+  })) {
+    return { status: "none" };
+  }
+  return { groupId: match.groupId, status: "exact" };
 }
 
 async function resolveCallCircleResponseMatch(input: {

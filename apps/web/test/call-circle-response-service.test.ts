@@ -565,6 +565,61 @@ describe("handleCallCircleRespond", () => {
     });
   });
 
+  it("uses the confirmation notification anchor when pausing across multiple groups", async () => {
+    const anchoredMatch = callCircleMatch({
+      id: "hccm_anchor",
+      memberAId: "member_other",
+      memberBId: "member_123",
+    });
+    const otherMatch = callCircleMatch({
+      groupId: "hgrp_other",
+      id: "hccm_other",
+      memberAId: "member_other_2",
+      memberBId: "member_123",
+    });
+    const prisma = createResponsePrisma({
+      confirmNotificationItems: [{
+        id: "mailbox_confirm_anchor",
+        matchId: "hccm_anchor",
+        memberId: "member_123",
+        stage: "am",
+        windowStartAt: anchoredMatch.windowStartAt,
+      }],
+      matches: [anchoredMatch, otherMatch],
+      participantGroups: ["hgrp_123", "hgrp_other"],
+      participantStatus: "enrolled",
+    });
+    const now = new Date("2026-07-06T15:00:00.000Z");
+
+    await expect(handleCallCircleRespond({
+      context: {
+        inboundMailboxItemIds: ["mailbox_reply", "mailbox_confirm_anchor"],
+      },
+      memberId: "member_123",
+      now,
+      prisma: prisma as never,
+      request: {
+        kind: "pause",
+      },
+    })).resolves.toEqual({ status: "ok" });
+
+    expect(prisma.tx.hostedCallCircleMatch.findUnique).toHaveBeenCalledWith({
+      select: expect.any(Object),
+      where: { id: "hccm_anchor" },
+    });
+    expect(mocks.pauseCallCircleParticipant).toHaveBeenCalledWith({
+      groupId: "hgrp_123",
+      memberId: "member_123",
+      prisma: expect.any(Object),
+    });
+    expect(mocks.cancelOpenCallCircleMatchesForParticipant).toHaveBeenCalledWith({
+      groupId: "hgrp_123",
+      memberId: "member_123",
+      now,
+      prisma: expect.any(Object),
+    });
+  });
+
   it("fails closed when a model matchId selects among multiple pending matches without an anchor", async () => {
     const firstMatch = callCircleMatch({
       groupId: "hgrp_first",

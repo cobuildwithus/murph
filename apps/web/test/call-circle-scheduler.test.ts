@@ -686,6 +686,44 @@ describe("runCallCircleScheduler", () => {
     ]);
   });
 
+  it("drops a final confirmation after gated calendar busy without notifying", async () => {
+    const now = new Date("2026-07-06T14:45:00.000Z");
+    const tx = {};
+    const prisma = createSchedulerPrisma({
+      dueMatches: [schedulerMatch({
+        status: "both_confirmed",
+        windowEndAt: new Date("2026-07-06T15:30:00.000Z"),
+        windowStartAt: new Date("2026-07-06T15:00:00.000Z"),
+      })],
+      groups: [],
+      tx,
+    });
+    mocks.readCallCircleCalendarAvailability
+      .mockResolvedValueOnce("free")
+      .mockResolvedValueOnce("busy");
+
+    await expect(runCallCircleScheduler({
+      now,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      askedFinal: 0,
+    });
+
+    expect(mocks.readCallCircleNotificationPreflightTx).toHaveBeenCalledTimes(2);
+    expect(mocks.readCallCircleCalendarAvailability).toHaveBeenCalledTimes(2);
+    expect(mocks.readCallCircleNotificationPreflightTx.mock.invocationCallOrder[1])
+      .toBeLessThan(mocks.readCallCircleCalendarAvailability.mock.invocationCallOrder[0]);
+    expect(mocks.markCallCircleMatchOutcome).toHaveBeenCalledWith({
+      matchId: "hccm_123",
+      now,
+      outcome: "calendar_busy",
+      prisma: tx,
+      status: "dropped",
+    });
+    expect(mocks.markCallCircleMatchFinalAsked).not.toHaveBeenCalled();
+    expect(mocks.appendCallCircleConfirmNotificationTx).not.toHaveBeenCalled();
+  });
+
   it("cancels a pending match before asking when a participant is no longer active", async () => {
     const now = new Date("2026-07-06T09:30:00.000Z");
     const tx = {};
@@ -788,6 +826,7 @@ describe("runCallCircleScheduler", () => {
       prisma: tx,
       status: "dropped",
     });
+    expect(mocks.readCallCircleCalendarAvailability).not.toHaveBeenCalled();
     expect(mocks.markCallCircleMatchFinalAsked).not.toHaveBeenCalled();
     expect(mocks.appendCallCircleConfirmNotificationTx).not.toHaveBeenCalled();
   });
